@@ -1,0 +1,16 @@
+{
+  "name": "commander-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend build pipeline for the Commander dashboard (esbuild, no framework — issue #796).",
+  "scripts": {
+    "build": "esbuild apps/dashboard/static/src/index.js --bundle --format=iife --sourcemap --outfile=apps/dashboard/static/dist/bundle.js",
+    "watch": "esbuild apps/dashboard/static/src/index.js --bundle --format=iife --sourcemap --watch --outfile=apps/dashboard/static/dist/bundle.js",
+    "lint": "eslint apps/dashboard/static/src",
+    "test": "node --test tests/frontend/"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "eslint": "^9.0.0"
+  }
+}

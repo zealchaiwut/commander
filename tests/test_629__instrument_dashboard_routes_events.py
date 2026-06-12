@@ -209,10 +209,10 @@ def _sprint_create_patches(srv, project_root):
     """Common patches for sprint create tests (disables Neon, mocks GitHub)."""
     return (
         patch.object(srv.github_client, "list_sprints", return_value=[]),
-        patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+        patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+        patch.object(srv.github_client, "sprint_label_exists", return_value=True),
         patch.object(srv.github_client, "invalidate", return_value=None),
         patch("server._project_root_path", return_value=project_root),
-        patch("server._sprint_json_write", return_value=None),
         patch("server._plan_json_set_state", return_value=None),
     )
 
@@ -230,10 +230,13 @@ class TestSprintCreatedEvent:
 
         with (
             patch.object(srv.github_client, "list_sprints", return_value=[]),
-            patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+            # Verified create (issue #857) uses the strict label create + an
+            # existence check; let the real plan write run so step-3 verification
+            # passes. Assertions below are unchanged.
+            patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+            patch.object(srv.github_client, "sprint_label_exists", return_value=True),
             patch.object(srv.github_client, "invalidate", return_value=None),
             patch("server._project_root_path", return_value=project_root),
-            patch("server._sprint_json_write", return_value=None),
             patch("server._plan_json_set_state", return_value=None),
         ):
             client = TestClient(srv.app)
@@ -253,10 +256,13 @@ class TestSprintCreatedEvent:
 
         with (
             patch.object(srv.github_client, "list_sprints", return_value=[]),
-            patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+            # Verified create (issue #857) uses the strict label create + an
+            # existence check; let the real plan write run so step-3 verification
+            # passes. Assertions below are unchanged.
+            patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+            patch.object(srv.github_client, "sprint_label_exists", return_value=True),
             patch.object(srv.github_client, "invalidate", return_value=None),
             patch("server._project_root_path", return_value=project_root),
-            patch("server._sprint_json_write", return_value=None),
             patch("server._plan_json_set_state", return_value=None),
         ):
             client = TestClient(srv.app)
@@ -277,10 +283,13 @@ class TestSprintCreatedEvent:
 
         with (
             patch.object(srv.github_client, "list_sprints", return_value=[]),
-            patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+            # Verified create (issue #857) uses the strict label create + an
+            # existence check; let the real plan write run so step-3 verification
+            # passes. Assertions below are unchanged.
+            patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+            patch.object(srv.github_client, "sprint_label_exists", return_value=True),
             patch.object(srv.github_client, "invalidate", return_value=None),
             patch("server._project_root_path", return_value=project_root),
-            patch("server._sprint_json_write", return_value=None),
             patch("server._plan_json_set_state", return_value=None),
         ):
             client = TestClient(srv.app)
@@ -301,10 +310,13 @@ class TestSprintCreatedEvent:
 
         with (
             patch.object(srv.github_client, "list_sprints", return_value=[]),
-            patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+            # Verified create (issue #857) uses the strict label create + an
+            # existence check; let the real plan write run so step-3 verification
+            # passes. Assertions below are unchanged.
+            patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+            patch.object(srv.github_client, "sprint_label_exists", return_value=True),
             patch.object(srv.github_client, "invalidate", return_value=None),
             patch("server._project_root_path", return_value=project_root),
-            patch("server._sprint_json_write", return_value=None),
             patch("server._plan_json_set_state", return_value=None),
         ):
             client = TestClient(srv.app)
@@ -327,10 +339,13 @@ class TestSprintCreatedEvent:
 
         with (
             patch.object(srv.github_client, "list_sprints", return_value=[]),
-            patch.object(srv.github_client, "ensure_sprint_label", return_value=None),
+            # Verified create (issue #857) uses the strict label create + an
+            # existence check; let the real plan write run so step-3 verification
+            # passes. Assertions below are unchanged.
+            patch.object(srv.github_client, "create_sprint_label_strict", return_value=None),
+            patch.object(srv.github_client, "sprint_label_exists", return_value=True),
             patch.object(srv.github_client, "invalidate", return_value=None),
             patch("server._project_root_path", return_value=project_root),
-            patch("server._sprint_json_write", return_value=None),
             patch("server._plan_json_set_state", return_value=None),
         ):
             client = TestClient(srv.app)

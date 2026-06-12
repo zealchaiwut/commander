@@ -22,19 +22,20 @@ Commander is:
 - Python 3.12, FastAPI, Uvicorn
 - SQLite (`DB_PATH`, e.g. `dashboard.db`) for agent event history — tables `agents`, `events`, `token_usage`
 - Optional Neon/Postgres layer (`DATABASE_URL`, via `services/sprint_manager/sprint_repo.py`) that mirrors sprint metadata. It is **secondary** — the dashboard runs fully without it. Disable per-machine with `COMMANDER_DISABLE_NEON=1` (see below).
-- Plain HTML + vanilla JS (no React, no build step)
+- Plain HTML + vanilla JS with an **esbuild bundling step** (ES modules → `static/dist/bundle.js`; no React/Vue/Svelte framework yet — see `docs/architecture/2_app-dashboard-architecture.md` §2.3)
 - Server-Sent Events for live updates
 - GitHub CLI (`gh`) for issue management
 - Pytest + httpx for tests
 
 ## Dashboard deploy model — frontend vs backend
 
-The dashboard has no build step, so its two layers deploy differently:
+The dashboard has two deploy layers with different refresh rules:
 
-- **Frontend** (`apps/dashboard/static/*.html`, plus inline JS/CSS) is served from disk per request. Edits take effect on the **next page refresh** — no server restart needed. A running dashboard, including the unattended launchd instance, picks up static changes immediately.
+- **Frontend markup** (`apps/dashboard/static/*.html`, inline JS/CSS not yet extracted) is served from disk per request. Edits take effect on the **next page refresh** — no server restart needed.
+- **Frontend bundle** (`apps/dashboard/static/src/` → `npm run build` → `static/dist/bundle.js`) requires running **`npm run build`** (or `npm run watch`) after editing ES modules under `static/src/`. Commit the rebuilt `bundle.js` or run build in each clone (prd, coder, tester, uat).
 - **Backend** (`apps/dashboard/server.py`, `services/sprint_manager/*.py`, any Python) requires a **uvicorn restart / redeploy** to take effect.
 
-When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer frontend-only tickets — they go live without a redeploy.
+When sequencing work for a running instance you can't restart (e.g. a remote launchd dashboard), prefer HTML-only frontend tickets — they go live without a redeploy. Bundle changes need a build step in that clone.
 
 ## Neon/Postgres kill switch
 
@@ -77,7 +78,7 @@ separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 - Helper scripts in `scripts/` are pure Python, args via argparse
 - Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
 - No new Python dependencies without adding to requirements.txt
-- No new frontend frameworks — keep static HTML + JS minimal
+- Frontend: ES modules under `apps/dashboard/static/src/`, bundled via esbuild (`npm run build`). No React/Vue/Svelte — keep vanilla JS. Node/npm is a required dev dependency in every clone.
 
 ## MCP Servers (available in all sessions)
 
@@ -115,15 +116,20 @@ docs/
   tutorial.md        full walkthrough
   workflow.md        Bulk Create -> Run Sprint -> Finish/Rerun
   architecture.md    system map (documentor-owned AUTO region)
-  milestones.md      sprint history (documentor-owned AUTO region)
+  todo.md            sprint history (documentor-owned AUTO region) + hand TODO
+  milestones/        active milestone tracking (one .md per initiative)
   features/          one .md per subsystem
-  bulk-create/       saved bulk-create prompts and outputs
+  bulk-create/       saved bulk-create prompts (YYYY-MM-DD-N-<topic>.md; N =
+                     sequence within the day so batches file in order; BKK
+                     dates; never edit a file whose batch already ran)
   changelog/         dated per-sprint entries (uat/ and prd/)
 ```
 
-`architecture.md` and `milestones.md` each contain an `<!-- AUTO:... -->`
-region owned by the documentor — the whole file is auto-maintained; do not
-hand-edit inside the markers.
+`architecture.md` and `todo.md` (formerly `milestones.md`) each contain an
+`<!-- AUTO:... -->` region owned by the documentor — do not hand-edit inside
+the markers. `docs/milestones/` holds hand-maintained milestone tracking files
+(e.g. `sprint-lifecycle-redesign.md`, whose design contract is
+`docs/architecture/sprint-lifecycle.md`).
 
 **Enforce it with the scaffold script:**
 - New projects get this structure stamped into the initial commit by
@@ -367,3 +373,42 @@ bash scripts/start_prd.sh
 ```
 
 If port 8000 is still held after kill: `lsof -i :8000 -sTCP:LISTEN` → kill the orphan PID → then restart.
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
+- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
+- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
+- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview` + `list_communities`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+| ------ | ---------- |
+| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
+| `get_review_context` | Need source snippets for review — token-efficient |
+| `get_impact_radius` | Understanding blast radius of a change |
+| `get_affected_flows` | Finding which execution paths are impacted |
+| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes` | Finding functions/classes by name or keyword |
+| `get_architecture_overview` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes` for code review.
+3. Use `get_affected_flows` to understand impact.
+4. Use `query_graph` pattern="tests_for" to check coverage.

@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 try:
     import psycopg2
 except ImportError:
-    print("ERROR: psycopg2 is not installed — run: pip install psycopg2-binary")
+    sys.stdout.write(str("ERROR: psycopg2 is not installed — run: pip install psycopg2-binary") + "\n")
     sys.exit(1)
 
 
@@ -56,13 +56,13 @@ def main() -> None:
     url = os.environ.get(url_type)
 
     if not url:
-        print(f"ERROR: {url_type} not configured — set it in .env or the environment")
+        sys.stdout.write(str(f"ERROR: {url_type} not configured — set it in .env or the environment") + "\n")
         sys.exit(1)
 
     host, dbname = _parse_url(url)
-    print(f"Testing: {url_type}")
-    print(f"  host:     {host}")
-    print(f"  database: {dbname}")
+    sys.stdout.write(str(f"Testing: {url_type}") + "\n")
+    sys.stdout.write(str(f"  host:     {host}") + "\n")
+    sys.stdout.write(str(f"  database: {dbname}") + "\n")
 
     # Hard cap slightly above connect_timeout so psycopg2 fires first for normal cases.
     signal.signal(signal.SIGALRM, _timeout_handler)
@@ -79,28 +79,28 @@ def main() -> None:
         signal.alarm(0)
         elapsed_ms = round((time.monotonic() - start) * 1000)
 
-        print(f"\nSUCCESS")
-        print(f"  version:     {row[0]}")
-        print(f"  round-trip:  {elapsed_ms}ms")
+        sys.stdout.write(str(f"\nSUCCESS") + "\n")
+        sys.stdout.write(str(f"  version:     {row[0]}") + "\n")
+        sys.stdout.write(str(f"  round-trip:  {elapsed_ms}ms") + "\n")
         sys.exit(0)
 
     except TimeoutError as e:
         signal.alarm(0)
-        print(f"\nFAILURE: {e}")
+        sys.stdout.write(str(f"\nFAILURE: {e}") + "\n")
         sys.exit(1)
     except psycopg2.OperationalError as e:
         signal.alarm(0)
         err_str = str(e).strip()
-        print(f"\nFAILURE: OperationalError: {err_str}")
+        sys.stdout.write(str(f"\nFAILURE: OperationalError: {err_str}") + "\n")
         low = err_str.lower()
         if "password" in low or "authentication" in low:
-            print(f"Hint: Check your {url_type} password")
+            sys.stdout.write(str(f"Hint: Check your {url_type} password") + "\n")
         elif "timeout" in low or "timed out" in low:
-            print("Hint: Server unreachable — check host/port and firewall rules")
+            sys.stdout.write(str("Hint: Server unreachable — check host/port and firewall rules") + "\n")
         sys.exit(1)
     except Exception as e:
         signal.alarm(0)
-        print(f"\nFAILURE: {type(e).__name__}: {e}")
+        sys.stdout.write(str(f"\nFAILURE: {type(e).__name__}: {e}") + "\n")
         sys.exit(1)
 
 

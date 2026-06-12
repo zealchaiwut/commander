@@ -1,0 +1,221 @@
+"""Brief assembly endpoints (issue #839).
+
+Two read-only endpoints that assemble a deterministic brief payload from local
+DB tables — no LLM, no network. The per-project endpoint serves one project's
+sections; the home endpoint rolls up across all projects.
+
+The route handlers are thin; all assembly lives in ``brief_service``. This
+router is mounted onto an already-wired router (``sprints``) so no route is
+added to ``server.py`` (COMMANDER_GATE_MONOLITH, issue #761).
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from . import brief_artifact
+from . import brief_service
+from . import brief_summary
+
+router = APIRouter(tags=["brief"])
+
+
+# ── response models ───────────────────────────────────────────────────────────
+
+class CurrentTicket(BaseModel):
+    issue_number: Optional[int] = None
+    title: str = ""
+
+
+class Progress(BaseModel):
+    done: int = 0
+    total: int = 0
+    percent: int = 0
+
+
+class ShippedSprint(BaseModel):
+    label: Optional[str] = None
+    goal: str = ""
+    features: list[str] = []
+    done: int = 0
+    skipped: int = 0
+    duration: Optional[int] = None
+    pr_number: Optional[int] = None
+    summary_issue_number: Optional[int] = None
+
+
+class InProgress(BaseModel):
+    sprint_label: Optional[str] = None
+    current_ticket: Optional[CurrentTicket] = None
+    active_agent: Optional[str] = None
+    progress: Progress = Progress()
+    elapsed: Optional[int] = None
+
+
+class UpNext(BaseModel):
+    label: Optional[str] = None
+    ticket_count: int = 0
+    ready: bool = False
+
+
+class BlockedTicket(BaseModel):
+    issue_number: Optional[int] = None
+    title: str = ""
+    type: str
+
+
+class ProjectKpis(BaseModel):
+    sprints_shipped: int = 0
+    tickets_done: int = 0
+    in_progress: bool = False
+    in_progress_percent: int = 0
+    needs_you: int = 0
+
+
+class ActivityItem(BaseModel):
+    time: Optional[str] = None
+    source: Optional[str] = None
+    message: str = ""
+
+
+class ProjectBrief(BaseModel):
+    project: str
+    date: str
+    shipped: list[ShippedSprint] = []
+    in_progress: Optional[InProgress] = None
+    up_next: Optional[UpNext] = None
+    blocked: list[BlockedTicket] = []
+    kpis: ProjectKpis = ProjectKpis()
+    recent_activity: list[ActivityItem] = []
+
+
+class GlobalKpis(BaseModel):
+    sprints_shipped: int = 0
+    tickets_done: int = 0
+    in_progress: int = 0
+    needs_your_call: int = 0
+
+
+class Decision(BaseModel):
+    project: str
+    type: str
+    label: Optional[str] = None
+    suggested_action: str
+
+
+class HomeBrief(BaseModel):
+    date: str
+    global_kpis: GlobalKpis = GlobalKpis()
+    decisions: list[Decision] = []
+    projects: list[ProjectBrief] = []
+
+
+class ProjectSummary(BaseModel):
+    project: Optional[str] = None
+    date: str
+    summary: str
+    source: str  # "model" | "fallback"
+
+
+class HomeSummary(BaseModel):
+    date: str
+    summary: str
+    source: str  # "model" | "fallback"
+
+
+class DailyArtifact(BaseModel):
+    """A stored daily brief artifact (issue #841).
+
+    ``available`` is ``False`` for a date with no stored brief, in which case
+    ``brief``/``summary``/``generated_at`` are null and ``message`` carries the
+    empty-state text (never an error).
+    """
+    scope: Optional[str] = None
+    project: Optional[str] = None
+    date: str
+    available: bool
+    covering_since: Optional[str] = None
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    generated_at: Optional[str] = None
+    summary: Optional[str] = None
+    summary_source: Optional[str] = None
+    brief: Optional[dict] = None
+    message: Optional[str] = None
+
+
+# ── routes ────────────────────────────────────────────────────────────────────
+
+@router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
+def get_project_brief(slug: str, date: Optional[str] = None):
+    """Assemble one project's brief for the given (or today's) window."""
+    return brief_service.build_project_brief(slug, date=date)
+
+
+@router.get("/api/brief", response_model=HomeBrief)
+def get_home_brief(date: Optional[str] = None):
+    """Assemble the home roll-up across all tracked projects."""
+    return brief_service.build_home_brief(date=date)
+
+
+# ── LLM summary (issue #840) ──────────────────────────────────────────────────
+# Kept separate from the structured-brief routes above so brief assembly stays
+# LLM-free (#839 AC5). The summary path generates+caches a Haiku narrative and
+# always falls back to a deterministic templated string (never 5xx — AC6).
+
+@router.get("/api/projects/{slug}/brief/summary", response_model=ProjectSummary)
+def get_project_brief_summary(slug: str, date: Optional[str] = None):
+    """Return the cached (or freshly generated) summary for a project brief."""
+    return brief_summary.get_or_create_project_summary(slug, date=date)
+
+
+@router.post("/api/projects/{slug}/brief/summary/regenerate",
+             response_model=ProjectSummary)
+def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
+    """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
+    return brief_summary.get_or_create_project_summary(slug, date=date, force=True)
+
+
+@router.get("/api/brief/summary", response_model=HomeSummary)
+def get_home_brief_summary(date: Optional[str] = None):
+    """Return the cached (or freshly generated) one-line home recap (AC7)."""
+    return brief_summary.get_or_create_home_summary(date=date)
+
+
+@router.post("/api/brief/summary/regenerate", response_model=HomeSummary)
+def regenerate_home_brief_summary(date: Optional[str] = None):
+    """Clear the stored home recap and re-invoke the model (Regenerate)."""
+    return brief_summary.get_or_create_home_summary(date=date, force=True)
+
+
+# ── daily artifact store (issue #841) ─────────────────────────────────────────
+# Persist the full daily brief per (project, date) so it is generated once and
+# served instantly thereafter. The current day is lazily generated on first
+# load; past dates are served from the store, with a clear empty state when none
+# was ever stored (never a recompute, never a 5xx).
+
+@router.get("/api/projects/{slug}/brief/daily", response_model=DailyArtifact)
+def get_project_daily_brief(slug: str, date: Optional[str] = None):
+    """Return the stored (or lazily generated) daily brief for a project."""
+    return brief_artifact.get_or_create_project_artifact(slug, date=date)
+
+
+@router.post("/api/projects/{slug}/brief/daily/regenerate",
+             response_model=DailyArtifact)
+def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
+    """Rebuild and re-store the daily brief, advancing the timestamp (AC7)."""
+    return brief_artifact.get_or_create_project_artifact(slug, date=date, force=True)
+
+
+@router.get("/api/brief/daily", response_model=DailyArtifact)
+def get_home_daily_brief(date: Optional[str] = None):
+    """Return the stored (or lazily generated) daily home roll-up artifact."""
+    return brief_artifact.get_or_create_home_artifact(date=date)
+
+
+@router.post("/api/brief/daily/regenerate", response_model=DailyArtifact)
+def regenerate_home_daily_brief(date: Optional[str] = None):
+    """Rebuild and re-store the daily home roll-up, advancing the timestamp."""
+    return brief_artifact.get_or_create_home_artifact(date=date, force=True)

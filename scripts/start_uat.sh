@@ -21,11 +21,27 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
 
-UAT_REPO="$PROJECT_DIR/uat"
-UAT_DIR="$PROJECT_DIR/uat/apps/dashboard"
-VENV="$PROJECT_DIR/venv"
+# Nested layout: scripts may live in prd/scripts and target ../uat, or in the
+# uat clone itself when the Deploy card's working_dir is the uat checkout.
+if [ -d "$REPO_ROOT/../uat/apps/dashboard" ] && [ "$(basename "$REPO_ROOT")" = "prd" ]; then
+    PROJECT_DIR="$(cd "$REPO_ROOT/.." && pwd)"
+    UAT_REPO="$PROJECT_DIR/uat"
+    UAT_DIR="$UAT_REPO/apps/dashboard"
+else
+    UAT_REPO="$REPO_ROOT"
+    UAT_DIR="$REPO_ROOT/apps/dashboard"
+fi
+
+VENV=""
+for candidate in "$UAT_REPO/venv" "$UAT_DIR/venv" "$(cd "$REPO_ROOT/.." 2>/dev/null && pwd)/venv"; do
+    if [ -n "$candidate" ] && [ -f "$candidate/bin/uvicorn" ]; then
+        VENV="$candidate"
+        break
+    fi
+done
+VENV="${VENV:-$UAT_REPO/venv}"
+
 PID_FILE="$UAT_DIR/uat.pid"
 LOG_FILE="$UAT_DIR/uat.log"
 PORT="${PORT:-8001}"
@@ -59,6 +75,22 @@ fi
 # ── Sync pip requirements ─────────────────────────────────────────────────────
 echo "Syncing pip requirements…"
 "$VENV/bin/pip" install --quiet -r "$UAT_REPO/requirements.txt"
+
+# ── Ensure ENVIRONMENT=uat in .env ────────────────────────────────────────────
+UAT_ENV_FILE="$UAT_DIR/.env"
+if [ ! -f "$UAT_ENV_FILE" ]; then
+    echo "ENVIRONMENT=uat" > "$UAT_ENV_FILE"
+    echo "PORT=$PORT" >> "$UAT_ENV_FILE"
+else
+    if grep -q '^ENVIRONMENT=' "$UAT_ENV_FILE"; then
+        sed -i.bak 's/^ENVIRONMENT=.*/ENVIRONMENT=uat/' "$UAT_ENV_FILE" && rm -f "${UAT_ENV_FILE}.bak"
+    else
+        echo "ENVIRONMENT=uat" >> "$UAT_ENV_FILE"
+    fi
+    if ! grep -q '^PORT=' "$UAT_ENV_FILE"; then
+        echo "PORT=$PORT" >> "$UAT_ENV_FILE"
+    fi
+fi
 
 # ── Launch uvicorn in background ──────────────────────────────────────────────
 cd "$UAT_DIR"

@@ -183,6 +183,41 @@
     .btn-refresh:hover { background: var(--surface-2); }
     .btn-refresh:disabled { opacity: .5; cursor: not-allowed; }
 
+    /* ── Host doctor (issue #828) ── */
+    .doctor-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .doctor-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; flex-wrap: wrap;
+    }
+    .doctor-title { font-size: 14px; font-weight: 700; }
+    .doctor-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .doctor-results { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .doctor-results:empty { display: none; }
+    .doctor-row {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .doctor-row.is-pass { background: var(--green-bg); border-color: rgba(22,163,74,.25); }
+    .doctor-row.is-fail { background: var(--red-bg);   border-color: rgba(220,38,38,.25); }
+    .doctor-row-top { display: flex; align-items: center; gap: 8px; }
+    .doctor-badge {
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      letter-spacing: .03em; flex-shrink: 0;
+    }
+    .doctor-row.is-pass .doctor-badge { color: var(--green); }
+    .doctor-row.is-fail .doctor-badge { color: var(--red); }
+    .doctor-name { font-size: 13px; font-weight: 600; }
+    .doctor-detail { font-size: 12px; color: var(--text-muted); font-family: var(--mono); word-break: break-word; }
+    .doctor-fix { font-size: 12px; color: var(--text); word-break: break-word; }
+    .doctor-fix strong { color: var(--red); }
+
     /* Unreachable banner */
     .unreachable-banner {
       background: var(--surface-2);
@@ -473,6 +508,21 @@
       <div class="skel skel-line2"></div>
     </div>
   </div>
+
+  <!-- Host doctor (issue #828) -->
+  <section class="doctor-section" id="doctor-section" aria-labelledby="doctor-title">
+    <div class="doctor-head">
+      <div>
+        <div class="doctor-title" id="doctor-title">Host doctor</div>
+        <div class="doctor-sub">Pre-sprint host validation — same checks as <code>python scripts/doctor.py</code></div>
+      </div>
+      <button class="btn-refresh" id="doctor-btn" onclick="runDoctor()">
+        <i class="ti ti-stethoscope" id="doctor-btn-icon"></i>
+        Run doctor
+      </button>
+    </div>
+    <div class="doctor-results" id="doctor-results" role="status" aria-live="polite"></div>
+  </section>
 
   <!-- Debug section (collapsed by default) -->
   <div class="debug-section" id="debug-section">
@@ -897,6 +947,67 @@
         if (btn) btn.disabled = false;
       }, 1000);
     });
+  }
+
+  // ── Host doctor (issue #828) ──────────────────────────────────────────────
+  function _doctorRow(check) {
+    const row = document.createElement('div');
+    row.className = 'doctor-row ' + (check.ok ? 'is-pass' : 'is-fail');
+
+    const top = document.createElement('div');
+    top.className = 'doctor-row-top';
+    const badge = document.createElement('span');
+    badge.className = 'doctor-badge';
+    badge.textContent = check.ok ? '[PASS]' : '[FAIL]';
+    const name = document.createElement('span');
+    name.className = 'doctor-name';
+    name.textContent = check.name;
+    top.appendChild(badge);
+    top.appendChild(name);
+    row.appendChild(top);
+
+    if (check.detail) {
+      const detail = document.createElement('div');
+      detail.className = 'doctor-detail';
+      detail.textContent = check.detail;
+      row.appendChild(detail);
+    }
+    if (!check.ok && check.fix) {
+      const fix = document.createElement('div');
+      fix.className = 'doctor-fix';
+      const lbl = document.createElement('strong');
+      lbl.textContent = 'fix: ';
+      fix.appendChild(lbl);
+      fix.appendChild(document.createTextNode(check.fix));
+      row.appendChild(fix);
+    }
+    return row;
+  }
+
+  async function runDoctor() {
+    const btn     = document.getElementById('doctor-btn');
+    const results = document.getElementById('doctor-results');
+    btn.disabled = true;
+    results.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'doctor-detail';
+    loading.textContent = 'Running host checks…';
+    results.appendChild(loading);
+    try {
+      const resp = await fetch('/api/doctor');
+      const data = await resp.json();
+      results.replaceChildren();
+      (data.checks || []).forEach((c) => results.appendChild(_doctorRow(c)));
+    } catch (err) {
+      console.warn('Doctor fetch failed:', err);
+      results.replaceChildren();
+      const fail = document.createElement('div');
+      fail.className = 'doctor-detail';
+      fail.textContent = 'Unable to run doctor — is the dashboard running?';
+      results.appendChild(fail);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ── Auto-refresh ──────────────────────────────────────────────────────────

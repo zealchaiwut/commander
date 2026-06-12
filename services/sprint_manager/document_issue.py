@@ -162,8 +162,7 @@ def _invoke_agent(prompt: str) -> str:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=180)
         if r.returncode != 0:
-            print(f"  [documentor] claude exited {r.returncode}: {r.stderr.strip()[:500]}",
-                  file=sys.stderr)
+            sys.stderr.write(str(f"  [documentor] claude exited {r.returncode}: {r.stderr.strip()[:500]}") + "\n")
         return r.stdout.strip()
     except FileNotFoundError:
         sys.exit("claude CLI not found. Install Claude Code to use the documentor.")
@@ -235,7 +234,7 @@ def _apply_guide_changes(
     for rel_path, changes in guide_changes.items():
         guide_path = git_root / rel_path
         if not guide_path.exists():
-            print(f"  [documentor] WARNING: guide not found, skipping: {rel_path}")
+            sys.stdout.write(str(f"  [documentor] WARNING: guide not found, skipping: {rel_path}") + "\n")
             continue
         changed = _apply_doc_changes(changes, guide_path, rel_path)
         if changed:
@@ -260,13 +259,13 @@ def _append_changelog_entry(
 
     if not changelog.exists():
         changelog.write_text(f"# Changelog\n\n{entry_line}", encoding="utf-8")
-        print(f"  [documentor] created CHANGELOG.md with first entry for #{issue_num}")
+        sys.stdout.write(str(f"  [documentor] created CHANGELOG.md with first entry for #{issue_num}") + "\n")
         return True
 
     text = changelog.read_text(encoding="utf-8")
 
     if f"[#{issue_num}](" in text:
-        print(f"  [documentor] CHANGELOG.md already has entry for #{issue_num} — skipping")
+        sys.stdout.write(str(f"  [documentor] CHANGELOG.md already has entry for #{issue_num} — skipping") + "\n")
         return False
 
     lines = text.splitlines(keepends=True)
@@ -292,7 +291,7 @@ def _append_changelog_entry(
         lines.insert(content_start + 1, "\n")
 
     changelog.write_text("".join(lines), encoding="utf-8")
-    print(f"  [documentor] prepended CHANGELOG.md entry for #{issue_num}")
+    sys.stdout.write(str(f"  [documentor] prepended CHANGELOG.md entry for #{issue_num}") + "\n")
     return True
 
 
@@ -358,7 +357,7 @@ def _apply_change(file_path: Path, change: dict) -> bool:
         return False
 
     if not file_path.exists():
-        print(f"  [documentor] {file_path.name} not found — skipping change")
+        sys.stdout.write(str(f"  [documentor] {file_path.name} not found — skipping change") + "\n")
         return False
 
     text = file_path.read_text(encoding="utf-8")
@@ -373,7 +372,7 @@ def _apply_change(file_path: Path, change: dict) -> bool:
     if change_type == "add_section":
         # Append a new section at end of file
         if section and section.strip("#").strip() in text:
-            print(f"  [documentor] section '{section}' already exists in {file_path.name} — skipping")
+            sys.stdout.write(str(f"  [documentor] section '{section}' already exists in {file_path.name} — skipping") + "\n")
             return False
         new_text = text.rstrip("\n") + f"\n\n{content}\n"
         file_path.write_text(new_text, encoding="utf-8")
@@ -397,7 +396,7 @@ def _apply_change(file_path: Path, change: dict) -> bool:
 
     if sec_idx is None:
         # Section not found — append to end
-        print(f"  [documentor] section '{target}' not found in {file_path.name}; appending to end")
+        sys.stdout.write(str(f"  [documentor] section '{target}' not found in {file_path.name}; appending to end") + "\n")
         new_text = text.rstrip("\n") + f"\n\n{target}\n\n{content}\n"
         file_path.write_text(new_text, encoding="utf-8")
         return True
@@ -431,7 +430,7 @@ def _apply_doc_changes(
     modified = False
     for change in changes:
         if _apply_change(file_path, change):
-            print(f"  [documentor] applied change to {label}: {change.get('content', '')[:80]}")
+            sys.stdout.write(str(f"  [documentor] applied change to {label}: {change.get('content', '')[:80]}") + "\n")
             modified = True
     return modified
 
@@ -460,18 +459,18 @@ def _commit_doc_changes(issue_num: int, cwd: Path, extra_files: Optional[list[Pa
                 staged.append(rel)
 
     if not staged:
-        print("  [documentor] no doc changes to commit")
+        sys.stdout.write(str("  [documentor] no doc changes to commit") + "\n")
         return
 
     _run("git", "add", *staged, cwd=cwd)
     _run("git", "commit", "-m", f"docs: update for issue #{issue_num}", cwd=cwd)
-    print(f"  [documentor] committed: docs: update for issue #{issue_num}")
+    sys.stdout.write(str(f"  [documentor] committed: docs: update for issue #{issue_num}") + "\n")
 
 
 def _post_uat_comment(issue_num: int, repo: str, markdown: str) -> None:
     """Post the UAT comment to the GitHub issue."""
     if not markdown.strip():
-        print("  [documentor] uat_comment_markdown is empty — skipping comment")
+        sys.stdout.write(str("  [documentor] uat_comment_markdown is empty — skipping comment") + "\n")
         return
 
     # Ensure the comment starts with the required prefix
@@ -480,9 +479,9 @@ def _post_uat_comment(issue_num: int, repo: str, markdown: str) -> None:
 
     try:
         github_client.add_comment(issue_num, markdown, repo_name=repo)
-        print(f"  [documentor] UAT comment posted to issue #{issue_num}")
+        sys.stdout.write(str(f"  [documentor] UAT comment posted to issue #{issue_num}") + "\n")
     except Exception as e:
-        print(f"  [documentor] failed to post UAT comment: {e}", file=sys.stderr)
+        sys.stderr.write(str(f"  [documentor] failed to post UAT comment: {e}") + "\n")
 
 
 def run_documentor(
@@ -508,10 +507,10 @@ def run_documentor(
         except subprocess.CalledProcessError:
             sys.exit("Not in a git repository and --git-root not specified.")
 
-    print(f"  [documentor] issue #{issue_num}, repo={repo}, mode={mode}, root={git_root}")
+    sys.stdout.write(str(f"  [documentor] issue #{issue_num}, repo={repo}, mode={mode}, root={git_root}") + "\n")
 
     # Fetch issue
-    print(f"  [documentor] fetching issue #{issue_num} from {repo} ...")
+    sys.stdout.write(str(f"  [documentor] fetching issue #{issue_num} from {repo} ...") + "\n")
     issue   = _get_issue(issue_num, repo)
     title   = issue.get("title", "")
     body    = issue.get("body", "") or ""
@@ -519,7 +518,7 @@ def run_documentor(
     # Find feature branch
     feature_branch = _find_feature_branch(issue_num, cwd=git_root)
     if not feature_branch:
-        print(f"  [documentor] no feature branch found for issue #{issue_num} — using HEAD diff")
+        sys.stdout.write(str(f"  [documentor] no feature branch found for issue #{issue_num} — using HEAD diff") + "\n")
         feature_branch = "HEAD"
 
     # Get diff
@@ -533,15 +532,15 @@ def run_documentor(
     guide_files = _discover_guide_files(git_root, guide_glob)
     guide_contexts: dict[str, str] = {}
     if guide_files:
-        print(f"  [documentor] discovered {len(guide_files)} guide file(s): "
-              f"{[str(g.relative_to(git_root)) for g in guide_files]}")
+        sys.stdout.write(str(f"  [documentor] discovered {len(guide_files)} guide file(s): "
+              f"{[str(g.relative_to(git_root)) for g in guide_files]}") + "\n")
         for gf in guide_files:
             rel = str(gf.relative_to(git_root))
             guide_contexts[rel] = _read_head(gf, 100)
 
     # Adjust mode based on skip flags
     if skip_readme and skip_uat_comment:
-        print("  [documentor] both --skip-readme and --skip-uat-comment set — nothing to do")
+        sys.stdout.write(str("  [documentor] both --skip-readme and --skip-uat-comment set — nothing to do") + "\n")
         return {"readme_changes": [], "claude_md_changes": [], "uat_comment_markdown": ""}
     if skip_readme:
         mode = "uat"
@@ -554,22 +553,22 @@ def run_documentor(
         issue_num, title, body, diff, readme_head, claude_md_head, mode,
         guide_contexts=prompt_guides,
     )
-    print(f"  [documentor] invoking agent (model: claude-haiku-4-5) ...")
+    sys.stdout.write(str(f"  [documentor] invoking agent (model: claude-haiku-4-5) ...") + "\n")
     raw_output = _invoke_agent(prompt)
 
     # Parse output
     try:
         result = _parse_json_output(raw_output)
     except (ValueError, json.JSONDecodeError) as e:
-        print(f"  [documentor] failed to parse agent JSON: {e}", file=sys.stderr)
-        print(f"  [documentor] raw output (first 500 chars):\n{raw_output[:500]}", file=sys.stderr)
+        sys.stderr.write(str(f"  [documentor] failed to parse agent JSON: {e}") + "\n")
+        sys.stderr.write(str(f"  [documentor] raw output (first 500 chars):\n{raw_output[:500]}") + "\n")
         result = {"readme_changes": [], "claude_md_changes": [], "uat_comment_markdown": ""}
 
     # Cache output
     commander_root = _discover_commander_root(git_root) or git_root
     cache_path = _docs_cache_path(issue_num, commander_root)
     cache_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"  [documentor] output cached to {cache_path}")
+    sys.stdout.write(str(f"  [documentor] output cached to {cache_path}") + "\n")
 
     # Apply README / CLAUDE.md changes
     readme_modified = False
@@ -668,12 +667,10 @@ def main() -> None:
     readme_count  = len(result.get("readme_changes", []))
     claude_count  = len(result.get("claude_md_changes", []))
     has_uat       = bool(result.get("uat_comment_markdown", "").strip())
-    print(
-        f"\n[documentor] done — "
+    sys.stdout.write(str(f"\n[documentor] done — "
         f"readme_changes={readme_count}, "
         f"claude_md_changes={claude_count}, "
-        f"uat_comment={'yes' if has_uat else 'no'}"
-    )
+        f"uat_comment={'yes' if has_uat else 'no'}") + "\n")
 
 
 if __name__ == "__main__":

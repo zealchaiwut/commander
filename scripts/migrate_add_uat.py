@@ -57,11 +57,11 @@ def _try_run(*cmd, cwd: Optional[Path] = None) -> tuple[bool, str, str]:
 
 
 def info(msg: str) -> None:
-    print(f"  {msg}")
+    sys.stdout.write(str(f"  {msg}") + "\n")
 
 
 def warn(msg: str) -> None:
-    print(f"  WARNING: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  WARNING: {msg}") + "\n")
 
 
 # ── Port detection ────────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ def migrate(
     """Add UAT clone to an existing project."""
     repo_dir = projects_dir / repo_name
     if not repo_dir.exists():
-        print(f"ERROR: Project directory not found: {repo_dir}", file=sys.stderr)
+        sys.stderr.write(str(f"ERROR: Project directory not found: {repo_dir}") + "\n")
         sys.exit(1)
 
     full_repo = f"{owner}/{repo_name}"
@@ -201,7 +201,7 @@ def migrate(
     db_filename = f"{repo_name}-uat.db"
 
     # ── Step 1: Clone UAT ─────────────────────────────────────────────────────
-    print(f"[1/3] Cloning UAT into {uat_dir} ...")
+    sys.stdout.write(str(f"[1/3] Cloning UAT into {uat_dir} ...") + "\n")
     if uat_dir.exists():
         info(f"{uat_dir} already exists — skipping clone")
     else:
@@ -213,7 +213,7 @@ def migrate(
         info(f"cloned and checked out develop")
 
     # ── Step 2: Write .env ────────────────────────────────────────────────────
-    print(f"[2/3] Writing UAT .env ...")
+    sys.stdout.write(str(f"[2/3] Writing UAT .env ...") + "\n")
     uat_dashboard = uat_dir / "dashboard"
     if uat_dashboard.exists():
         env_path = uat_dashboard / ".env"
@@ -232,21 +232,21 @@ def migrate(
         info(f"wrote {env_path} (port={uat_port}, db={db_filename})")
 
     # ── Step 3: Update sprint.yaml ────────────────────────────────────────────
-    print(f"[3/3] Updating .commander/sprint.yaml ...")
+    sys.stdout.write(str(f"[3/3] Updating .commander/sprint.yaml ...") + "\n")
     sprint_yaml_path = repo_dir / ".commander" / "sprint.yaml"
     _update_sprint_yaml(sprint_yaml_path, db_filename, uat_port)
 
-    print()
-    print("=" * 60)
-    print(f"  UAT migration complete for '{repo_name}'!")
-    print(f"  UAT clone: {uat_dir}")
-    print(f"  Branch:    develop")
-    print(f"  Port:      {uat_port}")
-    print(f"  Database:  {db_filename} (separate from PRD)")
-    print()
-    print("  Next steps:")
-    print(f"    bash dashboard/scripts/start_uat.sh")
-    print("=" * 60)
+    sys.stdout.write("\n")
+    sys.stdout.write(str("=" * 60) + "\n")
+    sys.stdout.write(str(f"  UAT migration complete for '{repo_name}'!") + "\n")
+    sys.stdout.write(str(f"  UAT clone: {uat_dir}") + "\n")
+    sys.stdout.write(str(f"  Branch:    develop") + "\n")
+    sys.stdout.write(str(f"  Port:      {uat_port}") + "\n")
+    sys.stdout.write(str(f"  Database:  {db_filename} (separate from PRD)") + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("  Next steps:") + "\n")
+    sys.stdout.write(str(f"    bash dashboard/scripts/start_uat.sh") + "\n")
+    sys.stdout.write(str("=" * 60) + "\n")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -277,10 +277,7 @@ def main() -> None:
     cfg = _load_machine_config()
     owner = args.owner or cfg.get("default_owner")
     if not owner:
-        print(
-            "ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)",
-            file=sys.stderr,
-        )
+        sys.stderr.write(str("ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)") + "\n")
         sys.exit(1)
 
     projects_dir = Path(args.projects_dir).expanduser()

@@ -98,15 +98,15 @@ def _try_run(*cmd, cwd: Optional[Path] = None) -> tuple[bool, str, str]:
 
 def step(n: int, total: int, msg: str) -> None:
     """Print a step prefix."""
-    print(f"[{n}/{total}] {msg}")
+    sys.stdout.write(str(f"[{n}/{total}] {msg}") + "\n")
 
 
 def warn(msg: str) -> None:
-    print(f"  WARNING: {msg}", file=sys.stderr)
+    sys.stderr.write(str(f"  WARNING: {msg}") + "\n")
 
 
 def info(msg: str) -> None:
-    print(f"  {msg}")
+    sys.stdout.write(str(f"  {msg}") + "\n")
 
 
 # ── Port detection ────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ def _bootstrap_machine_config(commander_home: Path, api_url: str = "http://local
         f"api_url: {api_url}\n"
     )
     MACHINE_CONFIG_PATH.write_text(content)
-    print(f"Created ~/.commander/config.yaml — review and adjust if needed")
+    sys.stdout.write(str(f"Created ~/.commander/config.yaml — review and adjust if needed") + "\n")
 
 
 # ── projects.json helpers ──────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ def preflight(owner: str, repo_name: str, projects_dir: Path, nested: bool = Fal
 
     if errors:
         for e in errors:
-            print(f"ERROR: {e}", file=sys.stderr)
+            sys.stderr.write(str(f"ERROR: {e}") + "\n")
         sys.exit(1)
 
 
@@ -744,30 +744,30 @@ def step10_summary(
     if tester_dir is None:
         tester_dir = projects_dir / f"{repo_name}-tester"
 
-    print()
-    print("=" * 60)
-    print(f"  Project '{repo_name}' is ready!")
-    print(f"  GitHub:  https://github.com/{full_repo}")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("=" * 60) + "\n")
+    sys.stdout.write(str(f"  Project '{repo_name}' is ready!") + "\n")
+    sys.stdout.write(str(f"  GitHub:  https://github.com/{full_repo}") + "\n")
     if nested:
         project_root = projects_dir / repo_name
-        print(f"  Layout:  nested ({project_root}/)")
-        print(f"  Main:    {repo_dir}")
-    print(f"  Coder:   {coder_dir}")
-    print(f"  Tester:  {tester_dir}")
+        sys.stdout.write(str(f"  Layout:  nested ({project_root}/)") + "\n")
+        sys.stdout.write(str(f"  Main:    {repo_dir}") + "\n")
+    sys.stdout.write(str(f"  Coder:   {coder_dir}") + "\n")
+    sys.stdout.write(str(f"  Tester:  {tester_dir}") + "\n")
     if skip_uat:
-        print(f"  UAT:     skipped (--skip-uat)")
+        sys.stdout.write(str(f"  UAT:     skipped (--skip-uat)") + "\n")
     else:
-        print(f"  UAT:     {uat_dir}  (port {uat_port}, branch: develop)")
+        sys.stdout.write(str(f"  UAT:     {uat_dir}  (port {uat_port}, branch: develop)") + "\n")
     if nested:
-        print(f"  Config:  {projects_dir / repo_name / '.commander' / 'sprint.yaml'}")
-    print()
-    print("  Next steps:")
-    print(f"    1. cd {repo_dir} && open CLAUDE.md (add your conventions)")
-    print(f"    2. python3 dashboard/scripts/sprint_init.py --repo {full_repo}")
-    print(f"    3. Open dashboard at http://localhost:8000 to see the project card")
+        sys.stdout.write(str(f"  Config:  {projects_dir / repo_name / '.commander' / 'sprint.yaml'}") + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("  Next steps:") + "\n")
+    sys.stdout.write(str(f"    1. cd {repo_dir} && open CLAUDE.md (add your conventions)") + "\n")
+    sys.stdout.write(str(f"    2. python3 dashboard/scripts/sprint_init.py --repo {full_repo}") + "\n")
+    sys.stdout.write(str(f"    3. Open dashboard at http://localhost:8000 to see the project card") + "\n")
     if not skip_uat:
-        print(f"    4. Start UAT with: bash dashboard/scripts/start_uat.sh")
-    print("=" * 60)
+        sys.stdout.write(str(f"    4. Start UAT with: bash dashboard/scripts/start_uat.sh") + "\n")
+    sys.stdout.write(str("=" * 60) + "\n")
 
 
 # ── Rollback ───────────────────────────────────────────────────────────────────
@@ -790,27 +790,27 @@ def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: boo
         if project_root.exists():
             shutil.rmtree(project_root)
             removed.append(str(project_root))
-            print(f"  Removed {project_root} (nested layout)")
+            sys.stdout.write(str(f"  Removed {project_root} (nested layout)") + "\n")
         else:
-            print(f"  {project_root} does not exist — skipping")
+            sys.stdout.write(str(f"  {project_root} does not exist — skipping") + "\n")
     else:
         # Flat layout: also remove <project>/uat/ nested inside the project root
         uat_dir = project_root / "uat"
         if uat_dir.exists():
             shutil.rmtree(uat_dir)
             removed.append(str(uat_dir))
-            print(f"  Removed {uat_dir}")
+            sys.stdout.write(str(f"  Removed {uat_dir}") + "\n")
         else:
-            print(f"  {uat_dir} does not exist — skipping")
+            sys.stdout.write(str(f"  {uat_dir} does not exist — skipping") + "\n")
 
         for suffix in ("", "-coder", "-tester"):
             d = projects_dir / f"{repo_name}{suffix}"
             if d.exists():
                 shutil.rmtree(d)
                 removed.append(str(d))
-                print(f"  Removed {d}")
+                sys.stdout.write(str(f"  Removed {d}") + "\n")
             else:
-                print(f"  {d} does not exist — skipping")
+                sys.stdout.write(str(f"  {d} does not exist — skipping") + "\n")
 
     # Remove from all projects.json files
     for path in _find_all_projects_jsons():
@@ -819,23 +819,23 @@ def rollback(owner: str, repo_name: str, projects_dir: Path, confirm_delete: boo
         if len(new_projects) < len(projects):
             path.write_text(json.dumps(new_projects, indent=2) + "\n")
             removed.append(f"projects.json entry ({path})")
-            print(f"  Removed {full_repo} from {path}")
+            sys.stdout.write(str(f"  Removed {full_repo} from {path}") + "\n")
         else:
-            print(f"  {full_repo} not found in {path} — skipping")
+            sys.stdout.write(str(f"  {full_repo} not found in {path} — skipping") + "\n")
 
     # Optionally delete GitHub repo
     if confirm_delete:
         ok, _, err = _try_run("gh", "repo", "delete", full_repo, "--yes")
         if ok:
             removed.append(f"GitHub repo {full_repo}")
-            print(f"  Deleted GitHub repo {full_repo}")
+            sys.stdout.write(str(f"  Deleted GitHub repo {full_repo}") + "\n")
         else:
             warn(f"Failed to delete GitHub repo: {err}")
 
-    print()
-    print("Rollback summary:")
+    sys.stdout.write("\n")
+    sys.stdout.write(str("Rollback summary:") + "\n")
     for item in removed:
-        print(f"  - {item}")
+        sys.stdout.write(str(f"  - {item}") + "\n")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -900,10 +900,10 @@ def main() -> None:
         cfg = _load_machine_config()
         owner = args.owner or cfg.get("default_owner")
         if not owner:
-            print("ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)", file=sys.stderr)
+            sys.stderr.write(str("ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)") + "\n")
             sys.exit(1)
 
-        print(f"Rolling back project '{repo_name}' for owner '{owner}'...")
+        sys.stdout.write(str(f"Rolling back project '{repo_name}' for owner '{owner}'...") + "\n")
         rollback(owner, repo_name, projects_dir, args.confirm_delete)
         return
 
@@ -926,16 +926,10 @@ def main() -> None:
     owner = args.owner or cfg.get("default_owner")
     if not owner:
         if MACHINE_CONFIG_PATH.exists() and "default_owner" not in cfg:
-            print(
-                "ERROR: ~/.commander/config.yaml exists but lacks 'default_owner'. "
-                "Pass --owner explicitly.",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str("ERROR: ~/.commander/config.yaml exists but lacks 'default_owner'. "
+                "Pass --owner explicitly.") + "\n")
         else:
-            print(
-                "ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str("ERROR: --owner is required (or set default_owner in ~/.commander/config.yaml)") + "\n")
         sys.exit(1)
 
     # ── AC14: Color cycling ────────────────────────────────────────────────────
@@ -956,19 +950,19 @@ def main() -> None:
     TOTAL_STEPS = 11
     nested = args.nested
 
-    print(f"Onboarding '{owner}/{repo_name}' onto Commander...")
-    print(f"  Layout:    {'nested (--nested)' if nested else 'flat (default)'}")
+    sys.stdout.write(str(f"Onboarding '{owner}/{repo_name}' onto Commander...") + "\n")
+    sys.stdout.write(str(f"  Layout:    {'nested (--nested)' if nested else 'flat (default)'}") + "\n")
     if not args.skip_uat:
-        print(f"  UAT clone: enabled (port {uat_port})")
+        sys.stdout.write(str(f"  UAT clone: enabled (port {uat_port})") + "\n")
     else:
-        print(f"  UAT clone: skipped (--skip-uat)")
-    print()
+        sys.stdout.write(str(f"  UAT clone: skipped (--skip-uat)") + "\n")
+    sys.stdout.write("\n")
 
     # ── Pre-flight validation ─────────────────────────────────────────────────
-    print("[pre-flight] Validating environment...")
+    sys.stdout.write(str("[pre-flight] Validating environment...") + "\n")
     preflight(owner, repo_name, projects_dir, nested=nested)
     info("pre-flight passed")
-    print()
+    sys.stdout.write("\n")
 
     # ── Step 1: Create local repo + GitHub ────────────────────────────────────
     step(1, TOTAL_STEPS, f"Creating local repo and GitHub repo for {owner}/{repo_name}...")

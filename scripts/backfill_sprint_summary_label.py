@@ -32,7 +32,7 @@ def list_open_issues(repo: str) -> list[dict]:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"  [warn] gh issue list failed for {repo}: {result.stderr.strip()}", file=sys.stderr)
+        sys.stderr.write(str(f"  [warn] gh issue list failed for {repo}: {result.stderr.strip()}") + "\n")
         return []
     return json.loads(result.stdout or "[]")
 
@@ -45,7 +45,7 @@ def add_label(repo: str, issue_num: int, dry_run: bool) -> bool:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"  [error] failed to add label to #{issue_num}: {result.stderr.strip()}", file=sys.stderr)
+        sys.stderr.write(str(f"  [error] failed to add label to #{issue_num}: {result.stderr.strip()}") + "\n")
         return False
     return True
 
@@ -57,11 +57,11 @@ def main():
     dry_run = not args.apply
 
     if dry_run:
-        print("DRY RUN — no labels will be changed. Pass --apply to mutate.")
-        print()
+        sys.stdout.write(str("DRY RUN — no labels will be changed. Pass --apply to mutate.") + "\n")
+        sys.stdout.write("\n")
 
     if not PROJECTS_FILE.exists():
-        print(f"projects.json not found at {PROJECTS_FILE}", file=sys.stderr)
+        sys.stderr.write(str(f"projects.json not found at {PROJECTS_FILE}") + "\n")
         sys.exit(1)
 
     projects = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
@@ -83,30 +83,28 @@ def main():
                 missing.append(iss)
 
         if not missing:
-            print(f"{repo}: no issues missing the label")
+            sys.stdout.write(str(f"{repo}: no issues missing the label") + "\n")
             continue
 
         repos_affected += 1
         total_missing += len(missing)
-        print(f"{repo}: {len(missing)} issue(s) missing '{LABEL}':")
+        sys.stdout.write(str(f"{repo}: {len(missing)} issue(s) missing '{LABEL}':") + "\n")
         for iss in missing:
             action = "  [would add]" if dry_run else "  [adding]"
-            print(f"  {action} #{iss['number']}: {iss['title']}")
+            sys.stdout.write(str(f"  {action} #{iss['number']}: {iss['title']}") + "\n")
             if not dry_run:
                 ok = add_label(repo, iss["number"], dry_run=False)
                 if ok:
-                    print(f"    -> label added")
+                    sys.stdout.write(str(f"    -> label added") + "\n")
 
-    print()
+    sys.stdout.write("\n")
     if dry_run:
-        print(
-            f"Found {total_missing} summary issue(s) missing the label "
-            f"across {repos_affected} project(s)."
-        )
+        sys.stdout.write(str(f"Found {total_missing} summary issue(s) missing the label "
+            f"across {repos_affected} project(s).") + "\n")
         if total_missing > 0:
-            print("Run with --apply to add the label.")
+            sys.stdout.write(str("Run with --apply to add the label.") + "\n")
     else:
-        print(f"Done. Processed {total_missing} issue(s) across {repos_affected} project(s).")
+        sys.stdout.write(str(f"Done. Processed {total_missing} issue(s) across {repos_affected} project(s).") + "\n")
 
 
 if __name__ == "__main__":

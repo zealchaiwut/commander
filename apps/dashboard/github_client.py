@@ -287,6 +287,28 @@ def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -
     return _cached(key, fetch)
 
 
+def cached_open_issues_with_body(repo_name: str | None = None) -> list[dict] | None:
+    """Cache-only read of open issues with body — never triggers a GitHub call.
+
+    Returns the DB mirror (local, no GitHub quota) when present, else the
+    in-memory cache populated by ``list_open_issues_with_body`` (even if past
+    its TTL — serving slightly stale data is fine for a read-only preview and
+    is preferable to spending a GitHub API call). Returns ``None`` when no
+    cached data exists yet, so the caller can degrade gracefully.
+
+    Used by read-only preview surfaces that must add zero GitHub API calls
+    (issue #809).
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None and all("body" in i for i in mirror):
+        return [i for i in mirror if i.get("state") == "open"]
+    entry = _cache.get(f"open_issues_body:{r}")
+    if entry is None:
+        return None
+    return entry[1]  # type: ignore[return-value]
+
+
 def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     """Fetch a single issue by number including body."""
     r = _r(repo_name)
@@ -311,6 +333,34 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
         pass
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+
+
+def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) -> None:
+    """Create sprint-N label, raising on any failure (no swallow).
+
+    Unlike ``ensure_sprint_label``, this does not treat errors as "already
+    exists" — the verified New Sprint flow (issue #857) needs real failures
+    (rate limit, network) to propagate so it can retry and roll back.
+    """
+    r = _r(repo_name)
+    label_name = f"sprint-{sprint_num}"
+    _run("label", "create", label_name, "--repo", r,
+         "--color", "0075ca", "--description", f"Sprint {sprint_num} issues")
+    invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"labels:{r}")
+
+
+def sprint_label_exists(sprint_num: int, repo_name: str | None = None) -> bool:
+    """Return True if sprint-N exists on the repo (fresh, uncached check).
+
+    Used to verify label creation actually landed (issue #857) rather than
+    trusting a clean gh exit code.
+    """
+    r = _r(repo_name)
+    label_name = f"sprint-{sprint_num}"
+    labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "300")
+    return any(lbl.get("name") == label_name for lbl in labels)
 
 
 def delete_label(label_name: str, repo_name: str | None = None) -> None:

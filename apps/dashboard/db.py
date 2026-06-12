@@ -156,6 +156,7 @@ def init_db():
         _create_issues_table(conn)
         _create_sync_state_table(conn)
         _create_sprint_lifecycle_tables(conn)
+        _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
         conn.commit()
 
@@ -230,15 +231,239 @@ def _create_sync_state_table(conn: sqlite3.Connection) -> None:
     """)
 
 
+# ── Brief summary cache (issue #840) ──────────────────────────────────────────
+#
+# Per-(scope, project, date) cache of the LLM-generated brief summary so the
+# model is invoked at most once per key. `scope` is 'project' (keyed by slug) or
+# 'home' (project=''). Only model-generated summaries are persisted here; the
+# deterministic templated fallback is recomputed on the fly so a transient model
+# failure never poisons the cache.
+
+def _create_brief_summaries_table(conn: sqlite3.Connection) -> None:
+    """Create the brief_summaries cache table (issue #840)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS brief_summaries (
+            scope      TEXT NOT NULL,
+            project    TEXT NOT NULL DEFAULT '',
+            date       TEXT NOT NULL,
+            summary    TEXT NOT NULL,
+            source     TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (scope, project, date)
+        )
+    """)
+
+
+def get_brief_summary(scope: str, project: str, date: str) -> dict | None:
+    """Return the cached summary for (scope, project, date), or None."""
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        row = conn.execute(
+            "SELECT summary, source, created_at FROM brief_summaries "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"summary": row["summary"], "source": row["source"],
+            "created_at": row["created_at"]}
+
+
+def set_brief_summary(scope: str, project: str, date: str, summary: str,
+                      source: str, created_at: str | None = None) -> None:
+    """Upsert the cached summary for (scope, project, date)."""
+    ts = created_at or _now_iso()
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_summaries "
+            "(scope, project, date, summary, source, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (scope, project or "", date, summary, source, ts),
+        )
+        conn.commit()
+
+
+def delete_brief_summary(scope: str, project: str, date: str) -> None:
+    """Clear the cached summary for (scope, project, date) — used by Regenerate."""
+    with get_conn() as conn:
+        _create_brief_summaries_table(conn)
+        conn.execute(
+            "DELETE FROM brief_summaries "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        )
+        conn.commit()
+
+
+# ── Daily brief artifact store (issue #841) ───────────────────────────────────
+#
+# Persists the full daily brief as an artifact keyed by (scope, project, date) so
+# a given day's brief is generated once and served instantly thereafter. `scope`
+# is 'project' (keyed by slug) or 'home' (project=''). The `payload` column holds
+# the complete brief object (window metadata + structured brief + summary) as
+# JSON; `generated_at` records when it was last (re)generated, which the
+# Regenerate action advances.
+
+def _create_brief_artifacts_table(conn: sqlite3.Connection) -> None:
+    """Create the brief_artifacts store table (issue #841)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS brief_artifacts (
+            scope        TEXT NOT NULL,
+            project      TEXT NOT NULL DEFAULT '',
+            date         TEXT NOT NULL,
+            payload      TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            PRIMARY KEY (scope, project, date)
+        )
+    """)
+
+
+def get_brief_artifact(scope: str, project: str, date: str) -> dict | None:
+    """Return the stored artifact for (scope, project, date), or None.
+
+    The returned dict is ``{"payload": <decoded dict>, "generated_at": <iso>}``.
+    """
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        row = conn.execute(
+            "SELECT payload, generated_at FROM brief_artifacts "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except (ValueError, TypeError):
+        payload = None
+    return {"payload": payload, "generated_at": row["generated_at"]}
+
+
+def set_brief_artifact(scope: str, project: str, date: str, payload: dict,
+                       generated_at: str | None = None) -> str:
+    """Upsert the stored artifact for (scope, project, date).
+
+    Returns the ``generated_at`` timestamp written (a fresh one is stamped when
+    not supplied), so the caller can surface the new generation time.
+    """
+    ts = generated_at or _now_iso()
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_artifacts "
+            "(scope, project, date, payload, generated_at) VALUES (?, ?, ?, ?, ?)",
+            (scope, project or "", date, json.dumps(payload), ts),
+        )
+        conn.commit()
+    return ts
+
+
+def delete_brief_artifact(scope: str, project: str, date: str) -> None:
+    """Clear the stored artifact for (scope, project, date)."""
+    with get_conn() as conn:
+        _create_brief_artifacts_table(conn)
+        conn.execute(
+            "DELETE FROM brief_artifacts "
+            "WHERE scope = ? AND project = ? AND date = ?",
+            (scope, project or "", date),
+        )
+        conn.commit()
+
+
 # ── Sprint lifecycle + ticket order (issue #757) ──────────────────────────────
 #
 # The durable home for sprint lifecycle state and ticket execution order. These
 # tables replace the ephemeral `{label}-plan.json` / `{label}-pid` files as the
 # source of truth, while those files continue to be written as a deprecated
-# cache (dual-write) until a later sprint removes them.  `state='failed'` is a
-# valid value reserved for the future watchdog recovery sprint (no writer yet).
+# cache (dual-write) until a later sprint removes them.
+#
+# Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
+# draft / planned / running / ready_to_merge / needs_rework / completed.
+# `planning`, `cancelled`, and `failed` are legacy values kept readable for
+# pre-redesign rows (forward-only migration, no rewrite) — they are never
+# written anew and render through `canonical_lifecycle()`.
 
-_SPRINT_STATES = ("planning", "running", "completed", "cancelled", "failed")
+_SPRINT_STATES = (
+    # unified lifecycle
+    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    # legacy, read-only
+    "planning", "cancelled", "failed",
+)
+
+# Canonical lifecycle states exposed to the UI. `partial_finished` is derived
+# at read time from children's states and never stored; `deleted` lives in the
+# sprint_history snapshot table, not in `sprints`.
+LIFECYCLE_STATES = (
+    "draft", "planned", "running", "ready_to_merge", "needs_rework",
+    "partial_finished", "completed", "deleted",
+)
+
+# Display mapping for legacy state vocabularies (plan.json, DB rows, summary
+# files). Forward-only migration: old rows keep their stored value and render
+# through this map. Legacy `completed` stays `completed` (the pre-redesign
+# flow auto-merged at end of run, so those sprints are past ready_to_merge).
+_LEGACY_LIFECYCLE_MAP = {
+    "planning": "draft",
+    "complete": "completed",
+    "finished": "completed",
+    "cancelled": "needs_rework",
+    "canceled": "needs_rework",
+    "failed": "needs_rework",
+    "has_rework": "needs_rework",
+    "stopped": "needs_rework",
+}
+
+
+def canonical_lifecycle(raw: str | None) -> str:
+    """Map any stored sprint state (current or legacy) to the unified enum."""
+    s = (raw or "").strip().lower()
+    if s in LIFECYCLE_STATES:
+        return s
+    return _LEGACY_LIFECYCLE_MAP.get(s, s or "unknown")
+
+
+_SPRINTS_TABLE_DDL = """
+        CREATE TABLE IF NOT EXISTS sprints (
+            label        TEXT PRIMARY KEY,
+            project      TEXT NOT NULL DEFAULT '',
+            state        TEXT NOT NULL DEFAULT 'draft'
+                         CHECK(state IN (
+                             'draft', 'planned', 'running', 'ready_to_merge',
+                             'needs_rework', 'completed',
+                             'planning', 'cancelled', 'failed'
+                         )),
+            created_at   TEXT,
+            started_at   TEXT,
+            ended_at     TEXT,
+            end_reason   TEXT,
+            parent_label TEXT
+        )
+"""
+
+
+def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
+    """Rebuild the sprints table when its CHECK predates the unified lifecycle.
+
+    SQLite cannot alter a CHECK constraint in place. Existing rows are copied
+    verbatim (forward-only migration — legacy state values stay readable).
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None or "needs_rework" in (row[0] or ""):
+        return
+    conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_check")
+    conn.execute(_SPRINTS_TABLE_DDL)
+    conn.execute(
+        """
+        INSERT INTO sprints
+        SELECT label, project, state, created_at, started_at, ended_at,
+               end_reason, parent_label
+        FROM sprints_legacy_check
+        """
+    )
+    conn.execute("DROP TABLE sprints_legacy_check")
 
 
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
@@ -247,23 +472,9 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     Kept in its own helper so the lifecycle writers can ensure the tables exist
     without running the full init_db() migration first.
     """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sprints (
-            label        TEXT PRIMARY KEY,
-            project      TEXT NOT NULL DEFAULT '',
-            state        TEXT NOT NULL DEFAULT 'planning'
-                         CHECK(state IN (
-                             'planning', 'running', 'completed', 'cancelled', 'failed'
-                         )),
-            created_at   TEXT,
-            started_at   TEXT,
-            ended_at     TEXT,
-            end_reason   TEXT,
-            parent_label TEXT
-        )
-        """
-    )
+    _migrate_sprints_state_check(conn)
+    conn.execute(_SPRINTS_TABLE_DDL)
+    _migrate_sprints_run_artifacts(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -278,6 +489,215 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_sprint_ticket_order_label_pos "
         "ON sprint_ticket_order (label, position)"
     )
+
+
+_RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("issues_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("tokens", "INTEGER"),
+    ("wall_clock_secs", "INTEGER"),
+    ("reconciliation_json", "TEXT"),
+    ("summary_issue_url", "TEXT"),
+    ("summary_path", "TEXT"),
+    ("pr_number", "INTEGER"),
+    ("post_sprint_json", "TEXT"),
+    ("estimate_accuracy", "REAL"),
+    ("run_ingested_at", "TEXT"),
+)
+
+
+def _migrate_sprints_run_artifacts(conn: sqlite3.Connection) -> None:
+    """Add end-of-run artifact columns to sprints (lifecycle P3)."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(sprints)").fetchall()}
+    for col, typedef in _RUN_ARTIFACT_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE sprints ADD COLUMN {col} {typedef}")
+
+
+def ingest_sprint_run_artifact(
+    label: str,
+    state: dict,
+    *,
+    project: str = "",
+    summary_path: str | None = None,
+) -> None:
+    """Persist end-of-run state into the sprints row (lifecycle P3)."""
+    from routers import sprint_artifact_service  # noqa: PLC0415
+
+    fields = sprint_artifact_service.artifact_fields_from_state(
+        state, summary_path=summary_path,
+    )
+    ingested_at = _now_iso()
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        existing = conn.execute(
+            "SELECT label FROM sprints WHERE label = ?", (label,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE sprints SET
+                    issues_json = ?,
+                    tokens = ?,
+                    wall_clock_secs = ?,
+                    reconciliation_json = ?,
+                    summary_issue_url = ?,
+                    summary_path = ?,
+                    pr_number = ?,
+                    post_sprint_json = ?,
+                    estimate_accuracy = ?,
+                    run_ingested_at = ?
+                WHERE label = ?
+                """,
+                (
+                    fields["issues_json"],
+                    fields["tokens"],
+                    fields["wall_clock_secs"],
+                    fields["reconciliation_json"],
+                    fields["summary_issue_url"],
+                    fields["summary_path"],
+                    fields["pr_number"],
+                    fields["post_sprint_json"],
+                    fields["estimate_accuracy"],
+                    ingested_at,
+                    label,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO sprints (label, project, state, created_at, run_ingested_at,
+                                     issues_json, tokens, wall_clock_secs,
+                                     reconciliation_json, summary_issue_url, summary_path,
+                                     pr_number, post_sprint_json, estimate_accuracy)
+                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    label,
+                    project,
+                    ingested_at,
+                    ingested_at,
+                    fields["issues_json"],
+                    fields["tokens"],
+                    fields["wall_clock_secs"],
+                    fields["reconciliation_json"],
+                    fields["summary_issue_url"],
+                    fields["summary_path"],
+                    fields["pr_number"],
+                    fields["post_sprint_json"],
+                    fields["estimate_accuracy"],
+                ),
+            )
+        conn.commit()
+
+
+def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
+    """Refresh the ingested reconciliation block after a background reconcile."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
+            (json.dumps(reconciliation), label),
+        )
+        conn.commit()
+
+
+# ── Sprint history records (issue #805) ───────────────────────────────────────
+#
+# A queryable, append-only ledger of terminal sprint events for the history
+# feed (GET /api/sprints/history). The `sprints` lifecycle table cannot hold a
+# `deleted` state — its CHECK constraint forbids it, and the row is meant to be
+# gone once the label is stripped. So sprint deletion writes a self-contained
+# snapshot here (state='deleted', end_reason, full ticket list) BEFORE label
+# stripping, keeping deleted sprints visible in the feed. `issues_json` is a
+# JSON array of {ticket_id, state, time_spent, pr_number} captured at write time.
+
+
+def _create_sprint_history_table(conn: sqlite3.Connection) -> None:
+    """Create the sprint_history ledger table (issue #805).
+
+    Kept in its own helper so the delete path can ensure the table exists
+    without running the full init_db() migration first.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sprint_history (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            label             TEXT NOT NULL,
+            project           TEXT NOT NULL DEFAULT '',
+            lifecycle_state   TEXT NOT NULL,
+            end_reason        TEXT,
+            duration          INTEGER,
+            tokens            INTEGER,
+            estimate_accuracy REAL,
+            pr_number         INTEGER,
+            summary_path      TEXT,
+            issues_json       TEXT NOT NULL DEFAULT '[]',
+            created_at        TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_sprint_history_created "
+        "ON sprint_history (created_at DESC)"
+    )
+
+
+def record_sprint_history(
+    label: str,
+    project: str = "",
+    lifecycle_state: str = "deleted",
+    end_reason: str | None = None,
+    duration: int | None = None,
+    tokens: int | None = None,
+    estimate_accuracy: float | None = None,
+    pr_number: int | None = None,
+    summary_path: str | None = None,
+    issues: list[dict] | None = None,
+    created_at: str | None = None,
+) -> None:
+    """Append one sprint-history snapshot row (issue #805).
+
+    `issues` is serialized to JSON. Best-effort callers (the delete path) should
+    wrap this in try/except so a ledger write never blocks the deletion itself.
+    """
+    created_at = created_at or _now_iso()
+    issues_json = json.dumps(issues or [])
+    with get_conn() as conn:
+        _create_sprint_history_table(conn)
+        conn.execute(
+            """
+            INSERT INTO sprint_history
+                (label, project, lifecycle_state, end_reason, duration, tokens,
+                 estimate_accuracy, pr_number, summary_path, issues_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (label, project, lifecycle_state, end_reason, duration, tokens,
+             estimate_accuracy, pr_number, summary_path, issues_json, created_at),
+        )
+        conn.commit()
+
+
+def list_sprint_history() -> list[dict]:
+    """Return all sprint_history rows, newest first, with issues_json parsed (issue #805)."""
+    with get_conn() as conn:
+        _create_sprint_history_table(conn)
+        rows = conn.execute(
+            "SELECT * FROM sprint_history ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        rec = dict(r)
+        try:
+            rec["issues"] = json.loads(rec.pop("issues_json") or "[]")
+        except (ValueError, TypeError):
+            rec["issues"] = []
+        out.append(rec)
+    return out
 
 
 # ── Per-agent run durations (issue #764) ──────────────────────────────────────
@@ -298,6 +718,8 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     its own helper so the recorder can ensure the table exists without running
     the full init_db() migration. Mirrors the Alembic migration
     0009_add_agent_runs so the schema is identical on SQLite and Postgres.
+    `risk_tier` and `model_used` added by issue #790 (alembic 0010).
+    `attempt_kind` added by issue #787 (initial/fix_round/hang_continue).
     """
     conn.execute(
         """
@@ -310,7 +732,14 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             finished_at      TEXT,
             duration_seconds INTEGER,
             outcome          TEXT,
-            total_tokens     INTEGER
+            total_tokens     INTEGER,
+            risk_tier        TEXT,
+            model_used       TEXT,
+            routing_reason   TEXT,
+            worktree_sha     TEXT,
+            base_sha         TEXT,
+            attempt_kind     TEXT,
+            log_path         TEXT
         )
         """
     )
@@ -322,6 +751,20 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783.
+    for col, typedef in (
+        ("risk_tier", "TEXT"),
+        ("model_used", "TEXT"),
+        ("routing_reason", "TEXT"),
+        ("worktree_sha", "TEXT"),
+        ("base_sha", "TEXT"),
+        ("attempt_kind", "TEXT"),
+        ("log_path", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
@@ -341,21 +784,35 @@ def record_agent_start(
     sprint_label: str,
     agent: str,
     started_at: str | None = None,
+    risk_tier: str | None = None,
+    model_used: str | None = None,
+    routing_reason: str | None = None,
+    worktree_sha: str | None = None,
+    base_sha: str | None = None,
+    attempt_kind: str | None = None,
+    log_path: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
     `finished_at`/`duration_seconds`/`outcome` are left NULL until
-    record_agent_finish() closes the run. Returns the new row id (used to close
-    the exact run) or None on failure — callers treat this as best-effort.
+    record_agent_finish() closes the run. `risk_tier` and `model_used` are
+    optional for tester risk-tier routing (issue #790). `routing_reason` is
+    optional for coder size-tier routing (issue #789). `worktree_sha` and
+    `base_sha` are optional forensic fields from worktree hygiene (issue #788).
+    `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
+    `log_path` is the absolute path to the issue log file (issue #783).
+    Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
     with get_conn() as conn:
         _create_agent_runs_table(conn)
         cur = conn.execute(
             "INSERT INTO agent_runs "
-            "(issue_number, sprint_label, agent, started_at) "
-            "VALUES (?, ?, ?, ?)",
-            (int(issue_number), sprint_label, agent, started_at),
+            "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
+            "worktree_sha, base_sha, attempt_kind, log_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
+             worktree_sha, base_sha, attempt_kind, log_path),
         )
         conn.commit()
         return cur.lastrowid
@@ -430,6 +887,28 @@ def agent_runs_for_issue(issue_number: int, sprint_label: str | None = None) -> 
     return [dict(r) for r in rows]
 
 
+def update_worktree_shas(
+    issue_number: int,
+    sprint_label: str,
+    agent: str,
+    worktree_sha: "str | None",
+    base_sha: "str | None",
+) -> None:
+    """Update the most recent open agent_runs row with worktree forensic SHAs (issue #788).
+
+    Best-effort: silently returns if no matching open row is found.
+    """
+    with get_conn() as conn:
+        _create_agent_runs_table(conn)
+        conn.execute(
+            "UPDATE agent_runs SET worktree_sha = ?, base_sha = ? "
+            "WHERE id = (SELECT MAX(id) FROM agent_runs "
+            "WHERE issue_number = ? AND sprint_label = ? AND agent = ? AND finished_at IS NULL)",
+            (worktree_sha, base_sha, int(issue_number), sprint_label, agent),
+        )
+        conn.commit()
+
+
 def agent_runs_for_sprint(sprint_label: str) -> list[dict]:
     """Return all agent_runs rows for a sprint, ordered by issue then start (#764)."""
     with get_conn() as conn:
@@ -483,10 +962,33 @@ def record_sprint_finish(label: str, ended_at: str | None = None,
     _set_sprint_terminal(label, "completed", end_reason, ended_at)
 
 
-def record_sprint_cancel(label: str, end_reason: str = "cancelled",
+def record_sprint_needs_rework(label: str, end_reason: str | None = None,
+                               ended_at: str | None = None) -> None:
+    """Move a sprints row to `needs_rework` with a reason.
+
+    Unified-lifecycle terminal for every bad ending: ticket failure, crash,
+    orphan PID, or user cancel. The distinction lives in `end_reason`
+    ("stopped by user", "process lost", "ticket-failures", …).
+    """
+    _set_sprint_terminal(label, "needs_rework", end_reason, ended_at)
+
+
+def record_sprint_ready_to_merge(label: str, end_reason: str | None = None,
+                                 ended_at: str | None = None) -> None:
+    """Move a sprints row to `ready_to_merge` (run ended, all tickets passed)."""
+    _set_sprint_terminal(label, "ready_to_merge", end_reason, ended_at)
+
+
+def record_sprint_cancel(label: str, end_reason: str = "stopped by user",
                          ended_at: str | None = None) -> None:
-    """Move a sprints row to `cancelled` with a reason (issue #757)."""
-    _set_sprint_terminal(label, "cancelled", end_reason, ended_at)
+    """Deprecated alias — `cancelled` no longer exists; writes `needs_rework`."""
+    record_sprint_needs_rework(label, end_reason=end_reason, ended_at=ended_at)
+
+
+def record_sprint_fail(label: str, end_reason: str | None = None,
+                       ended_at: str | None = None) -> None:
+    """Deprecated alias — writes `needs_rework` under the unified lifecycle."""
+    record_sprint_needs_rework(label, end_reason=end_reason, ended_at=ended_at)
 
 
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
@@ -537,6 +1039,14 @@ def get_sprint(label: str) -> dict | None:
             "SELECT * FROM sprints WHERE label = ?", (label,)
         ).fetchone()
     return dict(row) if row else None
+
+
+def list_sprints_lifecycle() -> list[dict]:
+    """Return all rows of the `sprints` lifecycle table as dicts (issue #805)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute("SELECT * FROM sprints").fetchall()
+    return [dict(r) for r in rows]
 
 
 def is_sprint_running(label: str, pid_alive: bool) -> bool:
@@ -923,6 +1433,25 @@ def record_token_usage(
             (session_id, project, input_tokens, output_tokens, now, agent_role, model_name),
         )
         conn.commit()
+
+
+def sum_token_usage_window(agent_role: str, since_utc: str, until_utc: str) -> tuple[int, int]:
+    """Return (input_sum, output_sum) for one agent role within a UTC window.
+
+    Used by sprint_manager to attribute a dispatch's token spend: rows are
+    written by the PostToolUse hook with the CLAUDE_AGENT_ROLE tag, so scoping
+    by role + the dispatch's start/finish window yields that dispatch's usage
+    (correct while at most one agent per role runs at a time).
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(input_tokens), 0)  AS tin,
+                      COALESCE(SUM(output_tokens), 0) AS tout
+               FROM token_usage
+               WHERE agent_role = ? AND recorded_at >= ? AND recorded_at <= ?""",
+            (agent_role, since_utc, until_utc),
+        ).fetchone()
+    return (int(row["tin"]), int(row["tout"])) if row else (0, 0)
 
 
 def get_earliest_token_row_after(after_utc: str | None = None) -> str | None:

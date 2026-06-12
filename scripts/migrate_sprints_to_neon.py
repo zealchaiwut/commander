@@ -90,18 +90,18 @@ def main() -> None:
         try:
             import services.sprint_manager.sprint_repo as sprint_repo  # type: ignore[assignment]
         except ImportError as exc:
-            print(f"Error: could not import sprint_repo: {exc}", file=sys.stderr)
+            sys.stderr.write(str(f"Error: could not import sprint_repo: {exc}") + "\n")
             sys.exit(1)
 
     try:
         sprints_dir = _find_sprints_dir()
     except FileNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        sys.stderr.write(str(f"Error: {exc}") + "\n")
         sys.exit(1)
 
     json_files = sorted(sprints_dir.glob("*.json"))
     if not json_files:
-        print(f"No JSON files found in {sprints_dir}")
+        sys.stdout.write(str(f"No JSON files found in {sprints_dir}") + "\n")
         sys.exit(0)
 
     created = 0
@@ -112,7 +112,7 @@ def main() -> None:
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"  ERROR  {json_path.name}: {exc}")
+            sys.stdout.write(str(f"  ERROR  {json_path.name}: {exc}") + "\n")
             errored += 1
             continue
 
@@ -132,9 +132,7 @@ def main() -> None:
         issues = data.get("issues") or []
 
         if args.dry_run:
-            print(
-                f"  WOULD CREATE  {sprint_label} ({len(issues)} tickets) [{project}]"
-            )
+            sys.stdout.write(str(f"  WOULD CREATE  {sprint_label} ({len(issues)} tickets) [{project}]") + "\n")
             continue
 
         goal = _read_goal(sprints_dir, sprint_label)
@@ -143,12 +141,12 @@ def main() -> None:
         try:
             existing = sprint_repo.get_sprint_by_label(sprint_label)  # type: ignore[union-attr]
         except Exception as exc:
-            print(f"  ERROR  {sprint_label}: DB error checking existence: {exc}")
+            sys.stdout.write(str(f"  ERROR  {sprint_label}: DB error checking existence: {exc}") + "\n")
             errored += 1
             continue
 
         if existing is not None:
-            print(f"  SKIP   {sprint_label} ({len(issues)} tickets) — already in Neon")
+            sys.stdout.write(str(f"  SKIP   {sprint_label} ({len(issues)} tickets) — already in Neon") + "\n")
             skipped += 1
             continue
 
@@ -163,16 +161,14 @@ def main() -> None:
                     issue_number=issue_number,
                     position=position,
                 )
-            print(f"  CREATE {sprint_label} ({len(issues)} tickets) [{project}]")
+            sys.stdout.write(str(f"  CREATE {sprint_label} ({len(issues)} tickets) [{project}]") + "\n")
             created += 1
         except Exception as exc:
-            print(f"  ERROR  {sprint_label}: {exc}")
+            sys.stdout.write(str(f"  ERROR  {sprint_label}: {exc}") + "\n")
             errored += 1
 
-    print()
-    print(
-        f"{created} created, {skipped} skipped (already in Neon), {errored} errored"
-    )
+    sys.stdout.write("\n")
+    sys.stdout.write(str(f"{created} created, {skipped} skipped (already in Neon), {errored} errored") + "\n")
 
 
 if __name__ == "__main__":

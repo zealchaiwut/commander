@@ -25,6 +25,27 @@ or `--restore-db <source>` to rehydrate config/DB from a backup, or `--doctor`
 to run the checks alone. For launchd service issues it points you at
 `scripts/install_launchd.sh`.
 
+For a deeper, standalone pre-sprint host check, run the install-time **doctor**
+directly (issue #828):
+
+```bash
+python scripts/doctor.py          # human-readable PASS/FAIL report
+python scripts/doctor.py --json   # machine-readable JSON report
+```
+
+It validates that the host is correctly provisioned — tools on PATH, auth, git
+identity, venv imports, a writable DB, and the launchd plist environment — with a
+named `[PASS]`/`[FAIL]` line and the exact remediation for each failure, exiting
+nonzero if any check fails. The same report is available from the dashboard via
+`GET /api/doctor` and the **Diagnostics** button, so a remote/iPad operator can
+run it without a shell. This install-time doctor complements the dispatch-time
+auth probe in `sprint_manager.py` (issue #789): install-time asks "is this
+machine set up?"; dispatch-time asks "is auth still live right now?".
+
+For the full step-by-step onboarding runbook — including failure signatures and
+their fixes — see [docs/machine-onboarding.md](docs/machine-onboarding.md)
+(issue #829).
+
 ---
 
 ## Quick Start
@@ -68,6 +89,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
 | **Pipeline mode** | Opt-in two-stage dispatch (`pipeline_mode` setting, default off): the coder works the next ticket while the tester validates the previous one, roughly halving wall-clock per dispatch level. One coder + one tester run concurrently; a hard level barrier holds the next level until the current one fully merges; rejected tickets jump to the front of the coder queue (3-attempt cap → `needs-rework`). Label transitions and develop merges are serialized; the board shows dual active-agent cards with per-level progress | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint file archive** | Reversible cleanup of stale per-sprint runtime files (plan/placeholder/state) for finished sprints into `.commander/sprints/archive/`; status/estimate/summary files are never touched and nothing is deleted. CLI `scripts/clean_sprint_files.py` or `POST /api/maintenance/sprints/cleanup` (dry-run preview + confirm in the UI) | [SCHEMA.md](SCHEMA.md) |
+| **Sprint Workspace** | The Sprint tab is split into **Board / Running / History** sub-views (issue #798). **Board:** filtered multi-select backlog panel with a what-if delta preview, a capacity budget bar driven by `sprint_budget_minutes` (default 180), and an execution-preview mini-rail backed by `GET /api/sprints/{label}/preview-dag` (predicted dispatch levels, file conflicts, cycles, unestimated tickets). **Running:** a level-rail node board with a running-metrics strip (from the extended live snapshot) and a per-node inspector with per-issue log tabs (`GET /logs/tail`). **History:** a sprint ledger (`GET /api/sprints/history`) with run-stats blocks and gantt timelines (`GET /api/sprints/{label}/run-stats`), a post-sprint reconciliation checklist surfacing loose ends — missing summary issue, unmerged PR, stale status labels (issue #856) — configurable folding via `history_fold_size` (default 10), deleted-sprint persistence (`sprint_history` table), and stale-branch scan/cleanup (`GET /scan-stale-branches`, `POST /cleanup-stale-branches`). New Sprint creation runs as a verified, ordered sequence (label → ticket labels → plan file) with retry + rollback and loud in-dialog failure surfacing (issue #857). All local-only — zero GitHub API calls | [SCHEMA.md](SCHEMA.md) |
 | **Settings** | Global and per-project key-value config store backed by Neon; REST API at `GET/PUT /api/settings` and `GET/PUT /api/projects/{slug}/settings` | [SCHEMA.md](SCHEMA.md) |
 | **Global Settings screen** | Gear icon in the dashboard header opens a settings panel for global config (model defaults, estimation params) | — |
 | **Project Settings tab** | "More" menu on project cards exposes a Settings tab for per-project overrides | — |
@@ -78,11 +100,21 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Project events log** | Structured audit log of project-level actions (settings changes, env path updates) recorded in the `project_events` SQLite table | [SCHEMA.md](SCHEMA.md) |
 | **Neon DB** | Optional Postgres export target for sprint and project state with Alembic migrations; populated on demand via `scripts/export_to_neon.py` (not a live dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
-| **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
-| **Global Notes** | Always-available notes pane in the dashboard left sidebar, debounced autosave to `.commander/notes.json` via `GET/PUT /api/notes` | — |
+| **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; Metrics, Status, and Trends (tokens-per-sprint sourced from `agent_runs`) are wired to real local data rather than placeholders (issue #859); all metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Live Browser UAT** | agent-browser drives browser UAT steps automatically instead of MANUAL; BA tags testable steps `[agent-test]` and step screenshots attach to the UAT test report | — |
 | **Impeccable design wiring** | BA and coder agents receive impeccable design contracts; visual targets tracked against an `impeccable detect` baseline | — |
 | **Activity log linking** | Activity-log agent rows render `<role> <action> #<issue>` with clickable GitHub issue links; label transitions and sprint lifecycle (started/finished/rerun) emit scoped activity events | — |
+| **Run Browser** | Forensic log viewer at `/run-browser` listing all past sprints and tickets; paginated log content with colorized output; deep-linkable via `?sprint=<label>`; zero GitHub API calls — all data from SQLite + disk. APIs at `GET /runs`, `GET /runs/{sprint}/{issue}/{agent}/log`, `GET /runs/{sprint}/{issue}/{agent}/log/tail` | [SCHEMA.md](SCHEMA.md) |
+| **Cross-run log search** | Full-text search across all run log files via `GET /api/logs/search`; filter by project, sprint, issue, agent, event_type, log level, or time range (24h/7d/30d); powered by ripgrep with DB-indexed pre-filtering; integrated into the Run Browser UI | [SCHEMA.md](SCHEMA.md) |
+| **Logs-tab ticket strip** | Per-ticket timing/token/failure strip on Logs-tab run rows: coder/tester durations, combined token total, and the failure class + message for failed tickets. Aggregated locally from `agent_runs` via `GET /api/logs/runs/{sprint_label}/ticket-stats`; zero GitHub calls (issue #858) | [SCHEMA.md](SCHEMA.md) |
+| **Cost tab** | Analytics sub-tab showing token usage broken down by sprint, ticket, agent, and model; blended $/token rate applied to produce cost estimates; sourced from local `token_usage` table. API at `GET /api/projects/{slug}/analytics/cost` | [SCHEMA.md](SCHEMA.md) |
+| **Hung agent redispatch** | Sprint manager detects idle/hung agents via sidecar log-tail and redispatches with full continuation context instead of idle-killing; configurable via `COMMANDER_DISABLE_HANG_REDISPATCH=1`; second consecutive hang escalates to failure; ntfy notification on escalation | — |
+| **Worktree freshness** | Before each coder dispatch the sprint manager verifies the worktree is on the correct base branch and applies a stale-worktree reset if drift is detected; `worktree_sha` and `base_sha` recorded on each `agent_runs` row for audit | [SCHEMA.md](SCHEMA.md) |
+| **Model routing** | Coder model selected by ticket size (S/M → Sonnet, L/XL → Opus) with a pre-dispatch doctor check; tester model selected by risk tier (standard → Haiku, elevated/critical → Sonnet); `model_used`, `routing_reason`, and `risk_tier` recorded per agent run | [SCHEMA.md](SCHEMA.md) |
+| **Per-area AGENTS.md** | Hierarchical context files (`AGENTS.md`) placed in key subdirectories (`apps/dashboard/`, `apps/dashboard/routers/`, `apps/dashboard/static/`, `scripts/`, `services/sprint_manager/`) so coder agents receive scoped context without reading the entire codebase | — |
+| **Unified structured logging** | `EventType` enum in `services/logging.py` for all lifecycle events; `emit()` method writes structured records with full correlation context; `envelope_subprocess_line()` wraps agent subprocess output in JSON-Lines envelopes; `run_id` present on every log record. Schema documented in `docs/logging-schema.md` | [docs/logging-schema.md](docs/logging-schema.md) |
+| **Daily Brief** | Per-project and home-roll-up "what happened / what's next" brief assembled from local sprint, ticket, and `agent_runs` data (zero GitHub calls). Three layers: LLM-free structured assembly (`GET /api/projects/{slug}/brief`, `GET /api/brief`); a cached Haiku summary with deterministic templated fallback that never 5xxes (`GET .../brief/summary` + `.../regenerate`); and a daily artifact persisted per `(project, date)`, generated once then served instantly (`GET .../brief/daily` + `.../regenerate`). The home page renders the roll-up plus a block per tracked project | [SCHEMA.md](SCHEMA.md) |
+| **Project To-Dos** | Lightweight, durable per-project to-do scratchpad living outside the ticket backlog — no labels, assignees, or due dates. Project-scoped CRUD at `GET/POST /api/projects/{project}/todos` and `PATCH/DELETE .../todos/{id}` (toggle done, edit text, reorder); panel UI on the home and project views. Backed by the `project_todos` table (Neon) with a local JSON fallback when Neon is disabled | [SCHEMA.md](SCHEMA.md) |
 | **API** | REST API consumed by the dashboard and agent hooks | [docs/features/api.md](docs/features/api.md) |
 
 ---
@@ -159,10 +191,27 @@ bash scripts/install_launchd.sh
 
 The script will:
 1. Check for a port-8000 conflict (prints a warning and exits if one is found).
-2. Substitute the repo root, venv path, and home directory into the plist template.
-3. Copy `scripts/com.commander.dashboard.plist` to `~/Library/LaunchAgents/` with `644` permissions.
-4. Load the service with `launchctl load`.
-5. Verify with `launchctl list | grep commander` and print success or failure.
+2. Resolve `claude`, `gh`, and the project venv `bin/` to their real on-disk
+   directories with `command -v` and build the plist `PATH` from them, plus the
+   standard system dirs (de-duplicated). A launchd service is detached from the
+   login shell, so hardcoded paths broke on machines where the binaries live
+   outside the standard locations (e.g. `~/.local/bin`); install aborts if
+   `claude` or `gh` is missing (issue #826).
+3. Inject headless auth tokens into the plist `EnvironmentVariables` block so the
+   detached `claude` and `gh` subprocesses can authenticate without keychain /
+   shell-rc access: `CLAUDE_CODE_OAUTH_TOKEN` (`--claude-token` or
+   `$CLAUDE_CODE_OAUTH_TOKEN`; mint with `claude setup-token`) and `GH_TOKEN`
+   (`--gh-token` / `$GH_TOKEN` / `$GITHUB_TOKEN`; mint with `gh auth token`).
+   Missing tokens are prompted for with echo off when run interactively, or
+   warned about by name otherwise (issue #827).
+4. Render the plist to `~/Library/LaunchAgents/` with `600` permissions (created
+   under a `077` umask) so the embedded token values are never world/group
+   readable at rest (issue #827).
+5. Load the service with `launchctl load`.
+6. Verify with `launchctl list | grep commander` and print success or failure.
+
+> Tokens are written only to the per-user plist (chmod `600`) and, for
+> `GH_TOKEN`, the agent `.env` — never echoed to stdout/stderr or committed.
 
 Logs are written to:
 - `~/Library/Logs/commander-dashboard.out.log` (stdout / uvicorn output)
@@ -252,18 +301,21 @@ tail -f ~/Library/Logs/commander-dashboard.out.log
 commander/
 ├── apps/
 │   └── dashboard/          # FastAPI app — PRD server
-│       ├── server.py        # API routes
+│       ├── server.py        # App wiring + remaining inline routes
+│       ├── routers/         # Extracted route clusters + *_service.py logic
 │       ├── projects.py      # GitHub data layer
 │       ├── sprint_manager/  # Sprint orchestration engine
-│       └── static/          # Frontend (index.html + app.js)
+│       └── static/          # Frontend (HTML; src/ esbuild → dist/bundle.js)
 ├── scripts/                 # CLI tools (create_ticket.py, init_project.py, …)
 ├── hooks/                   # Claude Code hooks (agent_finished, tool_used, …)
 ├── services/                # Background services
+├── package.json             # Frontend build (esbuild + eslint, no framework)
 ├── docs/                    # Documentation (standard layout, all projects)
 │   ├── quickstart.md        # 5-minute install and first run
 │   ├── tutorial.md          # Full walkthrough
 │   ├── workflow.md          # Bulk Create → Run → Finish/Rerun
-│   ├── milestones.md        # Auto-maintained sprint history
+│   ├── todo.md              # Auto-maintained sprint history + hand TODO
+│   ├── milestones/          # Active milestone tracking (per initiative)
 │   ├── features/            # Per-feature guides
 │   ├── bulk-create/         # Saved bulk-create prompts and outputs
 │   ├── changelog/
@@ -274,6 +326,28 @@ commander/
 ├── .commander/              # Sprint manager config (sprint.yaml, logs, sprints)
 └── CLAUDE.md                # Agent instructions (read by all agents)
 ```
+
+---
+
+## Frontend build
+
+The dashboard frontend is moving from inline `<script>` blocks to ES modules
+under `apps/dashboard/static/src/`, bundled by [esbuild](https://esbuild.github.io)
+into a single `apps/dashboard/static/dist/bundle.js` (issue #796).
+
+```bash
+npm install        # install esbuild + eslint
+npm run build      # bundle static/src/index.js → static/dist/bundle.js (+ .map)
+npm run watch      # rebuild on every source edit
+npm run lint       # eslint over static/src
+```
+
+Production serves static files straight from disk, so the **committed bundle
+already works with no build step** — you only need Node/npm to rebuild after
+editing `static/src/`. `setup_machine.sh` runs `npm install && npm run build`
+automatically when npm is present (skip with `SETUP_MACHINE_SKIP_NPM=1`); its
+doctor reports npm as informational, never a hard fail. CI rebuilds the bundle
+and runs a design gate over `static/src/` on every push.
 
 ---
 
@@ -449,9 +523,12 @@ python -c "from services.sprint_manager.neon_db import get_engine; print(get_eng
 - [Quick start](docs/quickstart.md) — install and first run in 5 minutes
 - [Tutorial](docs/tutorial.md) — full walkthrough and multi-clone setup
 - [Workflow](docs/workflow.md) — Bulk Create → Run Sprint → Finish/Rerun
-- [Milestones](docs/milestones.md) — what each sprint shipped
+- [TODO + sprint history](docs/todo.md) — what each sprint shipped, forward TODO
+- [Milestones](docs/milestones/) — active milestone tracking (e.g. [sprint lifecycle redesign](docs/milestones/sprint-lifecycle-redesign.md))
 
 **Reference**
+- [Architecture boundary map](docs/architecture/boundaries.md) — router clusters, layer rules, repos
+- [Frontend map](docs/architecture/frontend-map.md) — static pages, modules, API call sites
 - [Dashboard](docs/features/dashboard.md)
 - [Sprint Manager](docs/features/sprint-manager.md)
 - [API reference](docs/features/api.md)

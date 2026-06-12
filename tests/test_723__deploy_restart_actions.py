@@ -112,6 +112,37 @@ def test_require_restart_target_rejects_partial_scripts():
         da.require_restart_target({"stop_script": "/s/stop.sh"})
 
 
+def test_check_deploy_readiness_blocks_with_message_and_missing_script(tmp_path):
+    wd = tmp_path / "uat"
+    wd.mkdir()
+    entry = {
+        "host": "local",
+        "working_dir": str(wd),
+        "start_script": "bash scripts/deploy-start.sh",
+        "stop_script": "bash scripts/deploy-stop.sh",
+        "deploy_not_ready_message": "Deploy lifecycle is not ready in vector-search-demo yet.",
+    }
+    ready, errors = da.check_deploy_readiness(entry)
+    assert ready is False
+    assert any("not ready" in e.lower() for e in errors)
+    assert any("not found" in e for e in errors)
+
+
+def test_deploy_not_ready_message_does_not_block_stop_when_launchd():
+    """Stop/Restart stay available when only Deploy is gated by deploy_not_ready_message."""
+    entry = {
+        "host": "local",
+        "launchd_label": "com.example.uat",
+        "deploy_not_ready_message": "Deploy lifecycle is not ready yet.",
+    }
+    deploy_ready, _ = da.check_deploy_readiness(entry)
+    restart_ready, _ = da.check_restart_readiness(entry)
+    stop_ready, _ = da.check_stop_readiness(entry)
+    assert deploy_ready is False
+    assert restart_ready is True
+    assert stop_ready is True
+
+
 def test_is_self_restart_true_for_dashboard_label():
     """AC10: the dashboard's own label routes to the self-restart path."""
     assert da.is_self_restart({"launchd_label": da.DASHBOARD_LAUNCHD_LABEL}) is True
@@ -303,22 +334,51 @@ def test_restart_falls_back_to_scripts_without_label(client_ctx):
     calls = []
 
     def fake_run(cmd, *a, **kw):
-        calls.append(cmd)
+        calls.append((cmd, kw.get("cwd")))
         return _completed(cmd, stdout="")
 
     with patch.object(srv.subprocess, "run", side_effect=fake_run):
         resp = client.post("/api/projects/commander/environments/uat/restart")
 
     assert resp.status_code == 200, resp.text
-    flat = " ".join(" ".join(c) for c in calls)
+    flat = " ".join(" ".join(c[0]) for c in calls)
     assert "/srv/stop.sh" in flat
     assert "/srv/start.sh" in flat
     # stop must run before start
-    stop_idx = next(i for i, c in enumerate(calls) if "/srv/stop.sh" in " ".join(c))
-    start_idx = next(i for i, c in enumerate(calls) if "/srv/start.sh" in " ".join(c))
+    stop_idx = next(i for i, c in enumerate(calls) if "/srv/stop.sh" in " ".join(c[0]))
+    start_idx = next(i for i, c in enumerate(calls) if "/srv/start.sh" in " ".join(c[0]))
     assert stop_idx < start_idx
     # AC8: no launchctl involved
-    assert not any(c and c[0] == "launchctl" for c in calls)
+    assert not any(c and c[0][0] == "launchctl" for c, _ in calls)
+
+
+def test_restart_scripts_use_working_dir_as_cwd(client_ctx):
+    """Relative stop/start scripts run with cwd=working_dir when it exists."""
+    client, srv, settings_repo = client_ctx
+    wd = str(REPO_ROOT)
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": wd,
+            "branch": "develop",
+            "stop_script": "bash scripts/stop_all.sh uat",
+            "start_script": "bash scripts/start_uat.sh",
+        },
+    })
+
+    calls = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(kw.get("cwd"))
+        return _completed(cmd, stdout="")
+
+    with patch.object(srv.subprocess, "run", side_effect=fake_run):
+        with patch.object(srv.subprocess, "Popen", MagicMock()):
+            resp = client.post("/api/projects/commander/environments/uat/restart")
+
+    assert resp.status_code == 200, resp.text
+    assert len(calls) == 2
+    assert all(cwd == wd for cwd in calls)
 
 
 def test_restart_rejects_when_nothing_configured(client_ctx):
@@ -362,10 +422,10 @@ def _project_html():
 
 
 def test_ui_has_deploy_and_restart_actions():
-    """AC12: project settings UI exposes Deploy and Restart actions."""
+    """AC12: Deploy tab exposes Deploy and Restart actions."""
     html = _project_html()
-    assert "envDeploy" in html
-    assert "envRestart" in html
+    assert "_deployExecDeploy" in html
+    assert "_deployExecRestart" in html
 
 
 def test_ui_calls_deploy_and_restart_endpoints():

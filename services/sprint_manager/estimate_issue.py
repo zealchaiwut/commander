@@ -184,6 +184,12 @@ Output ONLY the JSON object. No other text."""
     # "Credit balance is too low" — surfaced upstream as a bogus model_error.
     # Matches how the dashboard strips the key for coder/tester subprocesses.
     _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    # Tag hook-recorded token_usage rows with the model (and role, if the
+    # launcher didn't already set CLAUDE_AGENT_ROLE).
+    _agent_env["CLAUDE_MODEL"] = "claude-haiku-4-5-20251001"
+    _agent_env.setdefault("CLAUDE_AGENT_ROLE", "estimator")
+    if project:
+        _agent_env.setdefault("COMMANDER_PROJECT", project)
 
     # Total attempts = initial + _ESTIMATOR_MAX_RETRIES (e.g. 4 = 1 + 3).
     total_attempts = _ESTIMATOR_MAX_RETRIES + 1
@@ -207,7 +213,7 @@ Output ONLY the JSON object. No other text."""
                 timeout_secs=180,
             )
         except FileNotFoundError:
-            print("Error: claude CLI not found in PATH", file=sys.stderr)
+            sys.stderr.write(str("Error: claude CLI not found in PATH") + "\n")
             return None, "missing_claude"
 
         if error_type is None:
@@ -256,11 +262,8 @@ Output ONLY the JSON object. No other text."""
                 error_type=error_type,
                 delay_seconds=delay,
             )
-            print(
-                f"Warning: estimator failed for #{issue_num} (attempt {attempt}/{total_attempts},"
-                f" error_type={error_type}), retrying in {delay}s…",
-                file=sys.stderr,
-            )
+            sys.stderr.write(str(f"Warning: estimator failed for #{issue_num} (attempt {attempt}/{total_attempts},"
+                f" error_type={error_type}), retrying in {delay}s…") + "\n")
             time.sleep(delay)
         else:
             structured_log.error(
@@ -271,12 +274,9 @@ Output ONLY the JSON object. No other text."""
                 error_type=error_type,
             )
             if error_type == "model_error" and result.stderr:
-                print(result.stderr[:500], file=sys.stderr)
-            print(
-                f"Error: estimator failed for #{issue_num} after {_ESTIMATOR_MAX_RETRIES} retries"
-                f" (final error_type={error_type})",
-                file=sys.stderr,
-            )
+                sys.stderr.write(str(result.stderr[:500]) + "\n")
+            sys.stderr.write(str(f"Error: estimator failed for #{issue_num} after {_ESTIMATOR_MAX_RETRIES} retries"
+                f" (final error_type={error_type})") + "\n")
 
     return None, error_type
 
@@ -322,7 +322,7 @@ def post_comment(issue_num: int, repo: str, estimate: dict) -> None:
         ["gh", "issue", "comment", str(issue_num), "--repo", repo, "--body", body],
         check=True,
     )
-    print(f"  Posted estimate comment on #{issue_num}")
+    sys.stdout.write(str(f"  Posted estimate comment on #{issue_num}") + "\n")
 
 
 def apply_estimated_status(issue_num: int, repo: str) -> bool:
@@ -338,23 +338,17 @@ def apply_estimated_status(issue_num: int, repo: str) -> bool:
         capture_output=True, text=True,
     )
     if result.returncode == 0:
-        print(f"  Applied 'estimated' label to #{issue_num}")
+        sys.stdout.write(str(f"  Applied 'estimated' label to #{issue_num}") + "\n")
         return True
     if result.returncode == 2:
-        print(
-            f"Warning: update_ticket.py --status estimated exited with code 2 for "
+        sys.stderr.write(str(f"Warning: update_ticket.py --status estimated exited with code 2 for "
             f"#{issue_num} — label operations failed after all retries. "
-            f"A warning comment has been posted to the issue.",
-            file=sys.stderr,
-        )
+            f"A warning comment has been posted to the issue.") + "\n")
         return False
     # Unexpected non-zero exit
     stderr_text = result.stderr.strip()
-    print(
-        f"Warning: update_ticket.py --status estimated failed (exit {result.returncode})"
-        f" for #{issue_num}: {stderr_text}",
-        file=sys.stderr,
-    )
+    sys.stderr.write(str(f"Warning: update_ticket.py --status estimated failed (exit {result.returncode})"
+        f" for #{issue_num}: {stderr_text}") + "\n")
     return False
 
 
@@ -378,7 +372,7 @@ def apply_label(issue_num: int, repo: str, size: str) -> None:
         ["gh", "issue", "edit", str(issue_num), "--repo", repo, "--add-label", label],
         check=True,
     )
-    print(f"  Applied label '{label}' to #{issue_num}")
+    sys.stdout.write(str(f"  Applied label '{label}' to #{issue_num}") + "\n")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -395,17 +389,17 @@ def estimate_draft_file(draft_path: Path) -> None:
     try:
         draft = json.loads(draft_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        print(f"Error: could not read draft file {draft_path}: {e}", file=sys.stderr)
+        sys.stderr.write(str(f"Error: could not read draft file {draft_path}: {e}") + "\n")
         sys.exit(1)
 
     issue_data = {"title": draft.get("title", ""), "body": draft.get("body", "")}
     # issue_num=0 → used only for logging/body_hash; the estimate is text-based.
     estimate, err = run_estimator(0, issue_data)
     if not estimate:
-        print(f"Error: draft estimation failed ({err})", file=sys.stderr)
+        sys.stderr.write(str(f"Error: draft estimation failed ({err})") + "\n")
         sys.exit(1)
     estimate.pop("issue_number", None)  # no issue yet
-    print(json.dumps(estimate))
+    sys.stdout.write(str(json.dumps(estimate)) + "\n")
 
 
 def main() -> None:
@@ -446,13 +440,13 @@ def main() -> None:
             )
             repo = out.stdout.strip()
         except Exception:
-            print("Error: --repo not specified and auto-detection failed", file=sys.stderr)
+            sys.stderr.write(str("Error: --repo not specified and auto-detection failed") + "\n")
             sys.exit(1)
 
     # Find .commander dir
     commander_dir = find_commander_dir()
     if not commander_dir:
-        print("Error: could not find .commander/ directory (searched from CWD upward)", file=sys.stderr)
+        sys.stderr.write(str("Error: could not find .commander/ directory (searched from CWD upward)") + "\n")
         sys.exit(1)
 
     estimates_dir = commander_dir / "estimates"
@@ -464,28 +458,28 @@ def main() -> None:
     if args.calibration_sprint:
         _db_cal_records = db_calibration_records(args.calibration_sprint, estimates_dir)
         if _db_cal_records:
-            print(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}")
+            sys.stdout.write(str(f"Calibration (DB): {len(_db_cal_records)} records from sprint {args.calibration_sprint!r}") + "\n")
     # Neon-independent fallback (issue #766): when no sprint-state records are
     # available (e.g. DATABASE_URL unset), read samples from the local SQLite
     # store instead of silently falling through to generic defaults.
     if not _db_cal_records:
         _db_cal_records = sqlite_calibration_records()
         if _db_cal_records:
-            print(f"Calibration (SQLite): {len(_db_cal_records)} records from local store")
+            sys.stdout.write(str(f"Calibration (SQLite): {len(_db_cal_records)} records from local store") + "\n")
     calibration = load_calibration(commander_dir, db_records=_db_cal_records or None)
     for w in calibration.warnings:
-        print(f"Warning [calibration]: {w}", file=sys.stderr)
+        sys.stderr.write(str(f"Warning [calibration]: {w}") + "\n")
     if calibration.calibration_path:
-        print(f"Calibration: {calibration.calibration_path} ({calibration.record_count} records)")
+        sys.stdout.write(str(f"Calibration: {calibration.calibration_path} ({calibration.record_count} records)") + "\n")
     else:
-        print("Calibration: none loaded — using generic defaults")
+        sys.stdout.write(str("Calibration: none loaded — using generic defaults") + "\n")
 
     # Return cached result unless --force
     if estimate_path.exists() and not args.force:
-        print(f"Cached: {estimate_path}")
-        print("  (pass --force to re-run)")
+        sys.stdout.write(str(f"Cached: {estimate_path}") + "\n")
+        sys.stdout.write(str("  (pass --force to re-run)") + "\n")
         estimate = json.loads(estimate_path.read_text())
-        print(json.dumps(estimate, indent=2))
+        sys.stdout.write(str(json.dumps(estimate, indent=2)) + "\n")
         if args.save_comment:
             post_comment(args.issue, repo, estimate)
         if args.save_label:
@@ -494,21 +488,21 @@ def main() -> None:
         return
 
     # Fetch issue and run estimator
-    print(f"Fetching issue #{args.issue} from {repo} ...")
+    sys.stdout.write(str(f"Fetching issue #{args.issue} from {repo} ...") + "\n")
     try:
         issue_data = fetch_issue(args.issue, repo)
     except subprocess.CalledProcessError as e:
-        print(f"Error: could not fetch issue #{args.issue}: {e}", file=sys.stderr)
+        sys.stderr.write(str(f"Error: could not fetch issue #{args.issue}: {e}") + "\n")
         sys.exit(1)
 
-    print(f"Running estimator (Haiku 4.5) for #{args.issue} ...")
+    sys.stdout.write(str(f"Running estimator (Haiku 4.5) for #{args.issue} ...") + "\n")
     estimate, _ = run_estimator(args.issue, issue_data, calibration=calibration)
     if not estimate:
         sys.exit(1)
 
     estimate_path.write_text(json.dumps(estimate, indent=2))
-    print(f"Saved: {estimate_path}")
-    print(json.dumps(estimate, indent=2))
+    sys.stdout.write(str(f"Saved: {estimate_path}") + "\n")
+    sys.stdout.write(str(json.dumps(estimate, indent=2)) + "\n")
 
     if args.save_comment:
         post_comment(args.issue, repo, estimate)

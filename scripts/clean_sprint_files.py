@@ -206,6 +206,19 @@ def run_cleanup(
         archive_dir.mkdir(parents=True, exist_ok=True)
     for src in plan:
         dst = archive_dir / src.name
+        if not src.exists():
+            if dst.exists():
+                archived.append(src.name)
+            continue
+        if dst.exists():
+            # Partial or repeat run: archive already holds this name — drop the
+            # live copy and treat the file as archived (idempotent, no 500).
+            try:
+                src.unlink()
+            except OSError:
+                raise
+            archived.append(src.name)
+            continue
         shutil.move(str(src), str(dst))
         archived.append(src.name)
 
@@ -271,7 +284,7 @@ def main(argv=None) -> int:
 
     sprints_dir = resolve_sprints_dir(args.project)
     if not sprints_dir.exists():
-        print(f"No sprints directory found at {sprints_dir}")
+        sys.stdout.write(str(f"No sprints directory found at {sprints_dir}") + "\n")
         return 1
 
     has_summary_issue = _github_summary_issue_checker(args.project)
@@ -283,13 +296,13 @@ def main(argv=None) -> int:
 
     verb = "Would archive" if args.dry_run else "Archived"
     if result["archived"]:
-        print(f"{verb} {len(result['archived'])} file(s) "
-              f"-> {sprints_dir / ARCHIVE_DIRNAME}:")
+        sys.stdout.write(str(f"{verb} {len(result['archived'])} file(s) "
+              f"-> {sprints_dir / ARCHIVE_DIRNAME}:") + "\n")
         for name in result["archived"]:
-            print(f"  {name}")
+            sys.stdout.write(str(f"  {name}") + "\n")
     else:
-        print(f"{verb} 0 files — nothing to do.")
-    print(f"Kept {result['kept_count']} sprint file(s) in place.")
+        sys.stdout.write(str(f"{verb} 0 files — nothing to do.") + "\n")
+    sys.stdout.write(str(f"Kept {result['kept_count']} sprint file(s) in place.") + "\n")
     return 0
 
 

@@ -11,6 +11,7 @@
 #   bash scripts/setup_machine.sh                 # full bootstrap + doctor
 #   bash scripts/setup_machine.sh --setup-only    # bootstrap steps, no doctor
 #   bash scripts/setup_machine.sh --doctor        # doctor checks only
+#   bash scripts/setup_machine.sh --resetup-machine   # reinstall caveman + CRG on all clones
 #   bash scripts/setup_machine.sh --restore-gist <id>   # restore config via backup.py
 #   bash scripts/setup_machine.sh --restore-db <source> # restore DB via backup.py
 #   bash scripts/setup_machine.sh --help
@@ -26,6 +27,11 @@
 # Behaviour flags:
 #   SETUP_MACHINE_DRY_RUN=1   echo side-effecting commands instead of running
 #   SETUP_MACHINE_SKIP_PIP=1  skip the pip install step
+#   SETUP_MACHINE_SKIP_NPM=1  skip the frontend build step (npm install / build)
+#
+# Frontend build (issue #796): the dashboard JS is bundled with esbuild from
+# apps/dashboard/static/src into apps/dashboard/static/dist/bundle.js. Bootstrap
+# runs `npm install` then `npm run build` when npm is available.
 
 set -euo pipefail
 
@@ -64,6 +70,7 @@ Usage:
   bash scripts/setup_machine.sh                 Full bootstrap, then doctor.
   bash scripts/setup_machine.sh --setup-only    Bootstrap steps only (no doctor).
   bash scripts/setup_machine.sh --doctor        Doctor checks only.
+  bash scripts/setup_machine.sh --resetup-machine   Reinstall caveman + code-review-graph on all clones.
   bash scripts/setup_machine.sh --restore-gist <id>    Restore config from gist via backup.py.
   bash scripts/setup_machine.sh --restore-db <source>  Restore DB from repo/path via backup.py.
   bash scripts/setup_machine.sh --help          Show this help.
@@ -96,6 +103,33 @@ setup_venv() {
         run_step "$VENV_DIR/bin/pip" install --quiet --upgrade pip
         run_step "$VENV_DIR/bin/pip" install --quiet -r "$REPO_ROOT/requirements.txt"
     fi
+}
+
+# ── 1b. frontend build (esbuild pipeline, issue #796) ─────────────────────────
+#
+# The dashboard JS source lives in apps/dashboard/static/src and is bundled to
+# apps/dashboard/static/dist/bundle.js by esbuild. Production serves static
+# files from disk with no build step, so the committed bundle already works —
+# but a fresh dev clone should install deps and rebuild so `npm run watch`
+# works and the bundle stays in sync with source edits.
+#
+#   npm install        # install esbuild + lint toolchain
+#   npm run build      # emit static/dist/bundle.js (+ .map)
+setup_frontend() {
+    if [ "${SETUP_MACHINE_SKIP_NPM:-}" = "1" ]; then
+        echo "[frontend] SETUP_MACHINE_SKIP_NPM=1 — skipping npm install/build."
+        return 0
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "[frontend] npm not found — install Node.js to build the dashboard"
+        echo "[frontend]   bundle. The committed static/dist/bundle.js still"
+        echo "[frontend]   works at runtime; rebuild later with: npm install && npm run build"
+        return 0
+    fi
+    echo "[frontend] Installing JS build deps (npm install) …"
+    run_step npm --prefix "$REPO_ROOT" install
+    echo "[frontend] Building dashboard bundle (npm run build) …"
+    run_step npm --prefix "$REPO_ROOT" run build
 }
 
 # ── 2. .env from .env.example (+ prompt for secret keys, never echoed) ────────
@@ -214,6 +248,17 @@ restore_db() {
     fi
 }
 
+# ── 4b. agent skills (caveman + code-review-graph) ───────────────────────────
+
+setup_agent_skills() {
+    local extra=()
+    if [ "${RESETUP_MACHINE:-}" = "1" ]; then
+        extra+=(--force)
+    fi
+    echo "[skills] Installing caveman + code-review-graph (install_agent_skills.sh) …"
+    run_step bash "$SCRIPT_DIR/install_agent_skills.sh" "${extra[@]}"
+}
+
 # ── 5. doctor ─────────────────────────────────────────────────────────────────
 
 _row() { printf '  %-6s %-22s %s\n' "[$1]" "$2" "$3"; }
@@ -275,6 +320,15 @@ run_doctor() {
         fails=$((fails + 1))
     fi
 
+    # Node/npm power the esbuild frontend pipeline (issue #796). Informational
+    # only — the committed static/dist/bundle.js runs without a build step, so a
+    # missing toolchain must not fail provisioning; it only blocks rebuilds.
+    if command -v npm >/dev/null 2>&1; then
+        _row PASS "npm present" "frontend: npm install && npm run build"
+    else
+        _row INFO "npm present" "optional; needed only to rebuild the dashboard bundle"
+    fi
+
     if [ "$fails" -gt 0 ]; then
         echo ""
         echo "$fails doctor check(s) FAILED."
@@ -288,9 +342,10 @@ run_doctor() {
 
 # ── argument parsing ──────────────────────────────────────────────────────────
 
-MODE="full"          # full | setup-only | doctor
+MODE="full"          # full | setup-only | doctor | resetup-machine
 RESTORE_GIST=""
 RESTORE_DB=""
+RESETUP_MACHINE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -300,6 +355,11 @@ while [ $# -gt 0 ]; do
             ;;
         --doctor|--doctor-only)
             MODE="doctor"
+            shift
+            ;;
+        --resetup-machine|--resetup)
+            MODE="resetup-machine"
+            RESETUP_MACHINE=1
             shift
             ;;
         --setup-only)
@@ -337,10 +397,25 @@ if [ "$MODE" = "doctor" ]; then
     exit "$DOCTOR_RC"
 fi
 
+if [ "$MODE" = "resetup-machine" ]; then
+    # Ensure at least one venv has code-review-graph (uat preferred).
+    if [ ! -x "$PROJECT_DIR/uat/venv/bin/code-review-graph" ] \
+        && [ ! -x "$VENV_DIR/bin/code-review-graph" ]; then
+        echo "[resetup] code-review-graph missing — running venv setup on $REPO_ROOT …"
+        setup_venv
+    fi
+    setup_agent_skills
+    echo ""
+    echo "=== Resetup complete (caveman + CRG on all clones) ==="
+    exit 0
+fi
+
 # Bootstrap steps (full + setup-only).
 setup_venv
+setup_frontend
 setup_env
 setup_layout
+setup_agent_skills
 
 if [ "$MODE" = "setup-only" ]; then
     echo ""

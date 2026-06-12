@@ -21,9 +21,16 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "reviewer_model": {"secret": False, "default": "claude-haiku-4-5"},
     "estimator_model": {"secret": False, "default": "claude-haiku-4-5-20251001"},
     "documentor_model": {"secret": False, "default": "claude-sonnet-4-6"},
+    # History tab fold size (issue #807) — number of most-recent sprints shown
+    # expanded; older sprints collapse into aggregate folds of this same size.
+    "history_fold_size": {"secret": False, "default": 10},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
+    # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
+    "sprint_budget_minutes": {"secret": False, "default": 180},
     "default_branch": {"secret": False, "default": "develop"},
+    "default_branch_uat": {"secret": False, "default": "develop"},
+    "default_branch_prd": {"secret": False, "default": "master"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},
     # Concurrent pipeline mode (issue #737) — opt-in, default serial
@@ -44,6 +51,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "tracked": {"secret": False, "default": True},
     # Per-project tester repo override (GITHUB_ISSUE_TEST_REPO equivalent)
     "tester_test_repo": {"secret": False, "default": ""},
+    # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
+    # Null default means "not configured" — Cost tab hides $ column when absent.
+    "price_map": {"secret": False, "default": None},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

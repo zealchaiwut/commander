@@ -72,7 +72,38 @@ gh issue view <N> --json number,title,body,labels
 
 Read the **What & Why**, **Acceptance Criteria**, and **UAT Test Steps** sections carefully. Implement exactly what the AC says — nothing more.
 
-### Step 4 — Understand the codebase
+### Step 4 — Read the AGENTS.md files for every implicated area
+
+Before touching any code, identify which directories the ticket touches (use
+the estimator's `files_touched` list if available, otherwise run a quick
+`codedb_search`). For **every implicated directory** that has an `AGENTS.md`,
+read it now:
+
+```bash
+cat <directory>/AGENTS.md
+```
+
+The five standard areas each have an `AGENTS.md`:
+
+| Area | File |
+|------|------|
+| Dashboard app | `apps/dashboard/AGENTS.md` |
+| Router modules | `apps/dashboard/routers/AGENTS.md` |
+| Sprint manager | `services/sprint_manager/AGENTS.md` |
+| Helper scripts | `scripts/AGENTS.md` |
+| Frontend static | `apps/dashboard/static/AGENTS.md` |
+
+**Log which files you loaded** by printing a line like:
+
+```
+[AGENTS.md] Loaded: apps/dashboard/AGENTS.md, services/sprint_manager/AGENTS.md
+```
+
+This confirms the relevant context was read before implementation begins (AC4
+of issue #791). Do not skip this step even if the ticket looks simple — the
+danger zones section prevents repeated mistakes.
+
+### Step 4b — Understand the codebase
 
 Use `codedb_search` and `codedb_tree` to find the relevant code before writing anything. Look at:
 - Which endpoints or modules the feature touches
@@ -144,13 +175,32 @@ When the ticket touches frontend/UI, before writing **any** UI code:
    run `npx impeccable detect <path>` locally and fix any anti-patterns before
    committing, so the design gate does not bounce the ticket back to SIT.
 
+## Sprint skills (always apply — headless dispatch does not auto-load skills)
+
+### caveman lite (status lines only)
+
+Use **caveman lite** for one-line progress updates (`Branch created.`, `Tests pass.`).
+Keep full prose for: commit messages, code comments, GitHub issue comments, and
+anything a human reads on GitHub. Do not use caveman for acceptance-criteria text.
+
+### code-review-graph (before reading code)
+
+Headless runs do not invoke slash skills — follow this workflow explicitly:
+
+1. `get_minimal_context(task="implement issue <N> …")` first.
+2. Then `semantic_search_nodes` / `query_graph` (callers_of, imports_of) for the
+   area you will touch.
+3. Fall back to `codedb_search` only when the graph lacks what you need.
+
+See `CLAUDE.md` § MCP Tools: code-review-graph.
+
 ## Rules
 
 - Work only on the feature branch — never commit directly to `develop` or `main`.
 - If the feature branch already exists, check it out and continue from where it left off.
 - If you encounter a failing test in the existing `tests/` suite that is unrelated to your feature, note it but do not fix it in this branch.
 - Keep commits atomic and well-described. The Tester reads the git log.
-- Use `codedb_search` aggressively — reading code is faster than guessing.
+- Prefer code-review-graph MCP, then `codedb_search` — reading code is faster than guessing.
 
 ## NO NEW ROUTES IN server.py (issue #761)
 

@@ -22,6 +22,7 @@ Storage rules:
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any, Optional
 
 # The settings key under which deploy config is stored (scope='project').
@@ -48,8 +49,19 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "host": "local",
             "launchd_label": "com.commander.dashboard",
             "branch": "master",
+            "port": 8000,
+            # Scripts live in each clone's scripts/; working_dir is the prd clone root.
+            "start_script": "bash scripts/start_prd.sh",
+            "stop_script": "bash scripts/stop_all.sh prd",
         },
-        "uat": {"host": "local", "branch": "develop"},
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "port": 8001,
+            # Scripts live in each clone's scripts/; working_dir is the uat clone root.
+            "start_script": "bash scripts/start_uat.sh",
+            "stop_script": "bash scripts/stop_all.sh uat",
+        },
     },
     "perf-coach": {
         "prd": {"host": "render"},
@@ -57,6 +69,32 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "host": "local",
             "branch": "develop",
             "launchd_label": "com.perfcoach.uat",
+        },
+    },
+    "vector-search-demo": {
+        "prd": {
+            "host": "local",
+            "branch": "master",
+            "port": 8011,
+            "start_script": "bash scripts/deploy-start.sh",
+            "stop_script": "bash scripts/deploy-stop.sh",
+            "deploy_not_ready_message": (
+                "Deploy lifecycle is not ready in vector-search-demo yet — "
+                "ship scripts/deploy-start.sh and scripts/deploy-stop.sh "
+                "(plus Milvus start/stop) on this branch before using Deploy."
+            ),
+        },
+        "uat": {
+            "host": "local",
+            "branch": "develop",
+            "port": 8010,
+            "start_script": "bash scripts/deploy-start.sh",
+            "stop_script": "bash scripts/deploy-stop.sh",
+            "deploy_not_ready_message": (
+                "Deploy lifecycle is not ready in vector-search-demo yet — "
+                "scripts/deploy-start.sh and scripts/deploy-stop.sh are missing "
+                "on develop; add them in the vector-search-demo repo first."
+            ),
         },
     },
 }
@@ -68,10 +106,10 @@ def seed_for(slug: str) -> dict[str, dict[str, Any]]:
 
 
 def known_deploy_slugs() -> tuple[str, ...]:
-    """Return the project slugs that ship seed deploy config (commander, perf-coach).
+    """Return the project slugs that ship seed deploy config.
 
-    The Deploy tab aggregates environments across these projects, so both are
-    always visible even when only one is listed in ``projects.json``.
+    The Deploy tab aggregates environments across these projects so each is
+    visible even when only one is listed in ``projects.json``.
     """
     return tuple(SEED_DEFAULTS.keys())
 
@@ -155,12 +193,47 @@ def mask_secret(value: Optional[str]) -> Optional[str]:
     return f"{s[:4]}...{s[-4:]}"
 
 
+_LEGACY_SCRIPT_PREFIX = re.compile(r"\.\./\.\./scripts/")
+_SCRIPT_KEYS = ("start_script", "stop_script", "start", "stop", "restart_script")
+
+
+def _repair_script_value(script: Any) -> Any:
+    """Rewrite legacy ``../../scripts/`` paths to ``scripts/`` (per-clone layout)."""
+    if not isinstance(script, str) or not script:
+        return script
+    return _LEGACY_SCRIPT_PREFIX.sub("scripts/", script)
+
+
+def repair_deploy_entry(
+    entry: dict[str, Any], seed_entry: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    """Normalize script paths and re-apply seed scripts when stored paths are legacy."""
+    e = dict(entry)
+    seed_entry = seed_entry or {}
+    for key in _SCRIPT_KEYS:
+        if key in e and e[key]:
+            e[key] = _repair_script_value(e[key])
+    seed_start = seed_entry.get("start_script")
+    seed_stop = seed_entry.get("stop_script")
+    if seed_start and seed_stop:
+        start = (e.get("start_script") or e.get("start") or "").strip()
+        stop = (e.get("stop_script") or e.get("stop") or "").strip()
+        if not start or "../../" in start:
+            e["start_script"] = seed_start
+            e.pop("start", None)
+        if not stop or "../../" in stop:
+            e["stop_script"] = seed_stop
+            e.pop("stop", None)
+    return e
+
+
 def merge_seed(
     seed: dict[str, dict[str, Any]], stored: dict[str, dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
     """Merge stored overrides over seed defaults, per environment.
 
     Stored fields win; environments present only in the seed are preserved.
+    Legacy ``../../scripts/`` paths in stored overrides are repaired on read.
     """
     out: dict[str, dict[str, Any]] = {
         env: dict(entry) for env, entry in seed.items()
@@ -168,7 +241,9 @@ def merge_seed(
     for env, entry in (stored or {}).items():
         base = dict(out.get(env, {}))
         base.update(entry)
-        out[env] = base
+        out[env] = repair_deploy_entry(base, out.get(env, {}))
+    for env, entry in out.items():
+        out[env] = repair_deploy_entry(entry, seed.get(env, {}))
     return out
 
 

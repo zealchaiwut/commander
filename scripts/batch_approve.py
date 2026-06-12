@@ -43,7 +43,7 @@ def main():
         sys.exit(f"Error fetching UAT issues: {e}")
 
     if not issues:
-        print("No open UAT issues found.")
+        sys.stdout.write(str("No open UAT issues found.") + "\n")
         sys.exit(0)
 
     for issue in issues:
@@ -53,7 +53,7 @@ def main():
         except Exception as e:
             sys.exit(f"Error approving issue #{num}: {e}")
         url = issue.get("url") or f"https://github.com/{args.repo}/issues/{num}"
-        print(f"#{num} {url}")
+        sys.stdout.write(str(f"#{num} {url}") + "\n")
 
 
 if __name__ == "__main__":

@@ -152,6 +152,14 @@ def test_get_settings_has_default_branch(client_ctx):
     )
 
 
+def test_get_settings_has_default_branch_uat_and_prd(client_ctx):
+    """GET /api/settings must include UAT and PRD default branch fields."""
+    client, *_ = client_ctx
+    data = client.get("/api/settings").json()
+    assert data.get("default_branch_uat") == "develop"
+    assert data.get("default_branch_prd") == "master"
+
+
 def test_get_settings_has_bulk_create_concurrency(client_ctx):
     """GET /api/settings must include bulk_create_concurrency."""
     client, *_ = client_ctx
@@ -185,6 +193,15 @@ def test_put_settings_persists_default_branch(client_ctx):
     client.put("/api/settings", json={"default_branch": "develop"})
     data = client.get("/api/settings").json()
     assert data["default_branch"] == "develop"
+
+
+def test_put_settings_persists_default_branch_uat_and_prd(client_ctx):
+    """PUT /api/settings with UAT/PRD branch fields must persist."""
+    client, *_ = client_ctx
+    client.put("/api/settings", json={"default_branch_uat": "feature/uat", "default_branch_prd": "main"})
+    data = client.get("/api/settings").json()
+    assert data["default_branch_uat"] == "feature/uat"
+    assert data["default_branch_prd"] == "main"
 
 
 def test_put_settings_persists_bulk_create_concurrency(client_ctx):
@@ -355,47 +372,64 @@ def test_project_settings_panel_has_global_settings_link():
 
 
 def test_project_html_settings_panel_no_model_dropdowns():
-    """Project settings panel must not offer its own agent model dropdowns.
+    """Project settings tab must not offer its own agent model dropdowns.
 
-    Model selection lives in the global settings screen. The project panel
-    may reference global settings but must NOT have a <select> element for
-    agent model choice inside the .settings-panel section.
+    Model selection lives in the global settings page.
     """
     html_path = DASHBOARD_DIR / "static" / "project.html"
     content = html_path.read_text(encoding="utf-8")
-    # Extract content of settings-panel div
-    start = content.find('<div class="settings-panel"')
+    start = content.find('id="pane-settings"')
     end = content.find('<!-- ── Ticket detail panel', start)
     if start == -1 or end == -1:
-        pytest.skip("settings-panel boundaries not found in project.html")
+        pytest.skip("pane-settings boundaries not found in project.html")
     panel_html = content[start:end]
     assert "sm-model-select" not in panel_html, (
-        "settings-panel must not contain sm-model-select (model dropdowns belong in global settings)"
+        "project settings tab must not contain sm-model-select (model dropdowns belong in global settings page)"
     )
 
 
-# ── AC1: Sidebar gear icon opens global settings screen ──────────────────────
+# ── AC1: Sidebar link opens global settings page ─────────────────────────────
 
-def test_sidebar_has_gear_icon_for_global_settings():
-    """Sidebar footer must have a gear icon button that triggers global settings."""
+def test_sidebar_has_global_settings_link():
+    """Sidebar must have a Global settings link that opens the full page."""
     html_path = DASHBOARD_DIR / "static" / "project.html"
     content = html_path.read_text(encoding="utf-8")
-    assert "openSettingsModal" in content, (
-        "project.html must have openSettingsModal function/call for global settings"
+    assert 'id="sb-global-settings-link"' in content, (
+        "project.html must have sb-global-settings-link in the sidebar"
+    )
+    assert "openGlobalSettingsPage" in content, (
+        "project.html must wire openGlobalSettingsPage for global settings navigation"
     )
     assert "ti-settings" in content, (
-        "project.html must have ti-settings icon for the global settings gear"
+        "project.html must have ti-settings icon for global settings"
     )
 
 
-def test_global_settings_screen_has_four_sections():
-    """Global settings screen HTML must contain all 4 required section headings."""
+def test_global_settings_is_full_page_not_modal():
+    """Global settings must be a tab pane page, not a modal overlay."""
     html_path = DASHBOARD_DIR / "static" / "project.html"
     content = html_path.read_text(encoding="utf-8")
-    # Find the global settings modal/screen
+    assert 'id="pane-global-settings"' in content, "Global settings must use pane-global-settings tab pane"
+    assert 'id="gss-page-body"' in content, "Global settings API cards must render in gss-page-body"
+    assert 'id="sm-modal"' not in content, "Global settings modal (sm-modal) must be removed"
+    assert 'id="gnotes-panel"' not in content, "Global notes panel must be removed"
+    assert 'id="sb-notes-link"' not in content, "Global notes sidebar link must be removed"
+    assert 'openNotesPanel' not in content, "Global notes panel handler must be removed"
+    assert 'id="settings-panel"' not in content, "Legacy settings-panel overlay must be removed"
+
+
+def test_global_settings_screen_has_required_sections():
+    """Global settings page must contain Agent Models, Defaults, and Secrets sections."""
+    html_path = DASHBOARD_DIR / "static" / "project.html"
+    content = html_path.read_text(encoding="utf-8")
     assert "Agent Models" in content, "Global settings must have Agent Models section"
-    assert "Estimation Defaults" in content, "Global settings must have Estimation Defaults section"
+    assert "UAT branch" in content, "Global settings Defaults must include UAT branch"
+    assert "PRD branch" in content, "Global settings Defaults must include PRD branch"
     assert "Secrets" in content, "Global settings must have Secrets section"
+    assert "Settings Sync" in content, "Global settings must have Settings Sync section"
+    assert "Sprint duration" not in content.split('gss-card-title">Defaults')[1].split('gss-card-title')[0], (
+        "Sprint duration must not appear in global Defaults card"
+    )
 
 
 def test_global_settings_screen_has_save_button():
@@ -408,9 +442,12 @@ def test_global_settings_screen_has_save_button():
 
 
 def test_global_settings_loads_from_api():
-    """Global settings JS must call GET /api/settings on mount."""
+    """Global settings JS must call GET /api/settings when the page opens."""
     html_path = DASHBOARD_DIR / "static" / "project.html"
     content = html_path.read_text(encoding="utf-8")
+    assert "globalSettingsLoad" in content, (
+        "project.html must define globalSettingsLoad for the global settings page"
+    )
     assert "/api/settings" in content, (
         "project.html must reference /api/settings for the global settings screen"
     )

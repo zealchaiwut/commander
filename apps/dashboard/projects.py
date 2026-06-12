@@ -281,6 +281,36 @@ def get_project_environments(repo: str) -> dict[str, str]:
     return dict(proj.get("environments") or {})
 
 
+def save_project_display_fields(
+    repo: str,
+    *,
+    name: Optional[str] = None,
+    icon: Optional[str] = None,
+    color: Optional[str] = None,
+    tracked: Optional[bool] = None,
+) -> None:
+    """Persist display identity fields to projects.json for *repo*."""
+    if not PROJECTS_FILE.exists():
+        return
+    projects = json.loads(PROJECTS_FILE.read_text())
+    updated = False
+    for proj in projects:
+        if proj.get("repo") != repo:
+            continue
+        if name is not None:
+            proj["name"] = name
+        if icon is not None:
+            proj["icon"] = icon
+        if color is not None:
+            proj["color"] = color
+        if tracked is not None:
+            proj["tracked"] = tracked
+        updated = True
+        break
+    if updated:
+        PROJECTS_FILE.write_text(json.dumps(projects, indent=2))
+
+
 def save_project_environments(repo: str, envs: dict[str, str]) -> None:
     """Persist the environments dict for the given repo to projects.json.
 

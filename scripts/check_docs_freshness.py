@@ -42,7 +42,7 @@ def _load_config(repo_path: Path) -> dict:
     if not config_path.exists():
         return {"mappings": DEFAULT_MAPPINGS}
     if not _YAML_AVAILABLE:
-        print("[warn] PyYAML not installed — falling back to defaults", file=sys.stderr)
+        sys.stderr.write(str("[warn] PyYAML not installed — falling back to defaults") + "\n")
         return {"mappings": DEFAULT_MAPPINGS}
     with open(config_path) as f:
         data = yaml.safe_load(f) or {}
@@ -131,7 +131,7 @@ def _post_to_dashboard(dashboard_url: str, payload: dict) -> bool:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status < 300
     except Exception as exc:
-        print(f"[warn] failed to post to dashboard: {exc}", file=sys.stderr)
+        sys.stderr.write(str(f"[warn] failed to post to dashboard: {exc}") + "\n")
         return False
 
 
@@ -183,24 +183,24 @@ def main():
     }
 
     if args.json:
-        print(json.dumps(payload, indent=2))
+        sys.stdout.write(str(json.dumps(payload, indent=2)) + "\n")
     else:
         if result["stale_docs"]:
-            print(f"[stale-docs] {len(result['stale_docs'])} stale doc(s) detected:")
+            sys.stdout.write(str(f"[stale-docs] {len(result['stale_docs'])} stale doc(s) detected:") + "\n")
             for doc in result["stale_docs"]:
-                print(f"  - {doc}")
+                sys.stdout.write(str(f"  - {doc}") + "\n")
         else:
-            print("[stale-docs] All docs are up to date.")
+            sys.stdout.write(str("[stale-docs] All docs are up to date.") + "\n")
         if result["cleared_docs"]:
-            print(f"[stale-docs] {len(result['cleared_docs'])} doc(s) cleared:")
+            sys.stdout.write(str(f"[stale-docs] {len(result['cleared_docs'])} doc(s) cleared:") + "\n")
             for doc in result["cleared_docs"]:
-                print(f"  + {doc}")
+                sys.stdout.write(str(f"  + {doc}") + "\n")
 
     if args.dashboard_url:
         ok = _post_to_dashboard(args.dashboard_url, payload)
         if not args.json:
             status = "posted" if ok else "failed to post"
-            print(f"[stale-docs] dashboard: {status}")
+            sys.stdout.write(str(f"[stale-docs] dashboard: {status}") + "\n")
 
     sys.exit(1 if result["stale_docs"] else 0)
 

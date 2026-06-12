@@ -129,7 +129,7 @@ def test_is_sprint_running_stale_pid_but_state_completed(tmp_path):
 
 
 def test_is_sprint_running_reconciles_dead_pid(tmp_path):
-    """plan.json=running but PID is dead → reconcile to cancelled."""
+    """plan.json=running but PID is dead → reconcile to needs_rework (P1)."""
     root, sprints = _make_project_root(tmp_path)
     server._plan_json_set_state(root, "sprint-5", "running")
     # Write a clearly dead PID (process 1 is init, not sprint_manager — but
@@ -138,8 +138,8 @@ def test_is_sprint_running_reconciles_dead_pid(tmp_path):
     result = server._is_sprint_running(root, "sprint-5")
     assert result is False
     reconciled = server._read_plan_json(root, "sprint-5")
-    assert reconciled["state"] == "cancelled"
-    assert reconciled["end_reason"] == "orphan-pid"
+    assert reconciled["state"] == "needs_rework"
+    assert reconciled["end_reason"] == "process lost"
 
 
 def test_is_sprint_running_no_plan_no_pid_creates_completed(tmp_path):

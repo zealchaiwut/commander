@@ -3714,6 +3714,48 @@
       background: var(--green);
     }
 
+    /* Board-top running banner — link to Running tab (hotfix 0612) */
+    .smgmt-board-running-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      background: var(--green-bg);
+      font-size: 13px;
+      color: var(--text);
+    }
+    .smgmt-board-running-banner-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    .smgmt-board-running-banner-text {
+      flex: 1;
+      min-width: 0;
+      font-weight: 500;
+    }
+    .smgmt-board-running-banner-link {
+      margin-left: auto;
+      flex-shrink: 0;
+      border: none;
+      background: none;
+      padding: 0;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .smgmt-board-running-banner-link:hover {
+      text-decoration: underline;
+    }
+
     /* "Running" badge — firm, not pulsing; only its dot signals live. */
     .smgmt-running-badge {
       display: inline-flex; align-items: center; gap: 5px;
@@ -12219,8 +12261,12 @@ function _smgmtMetricsUpdate(label, live) {
   el.innerHTML = hasData ? _smgmtMetricsHtml(live) : '';
 }
 
-/** Patch live stat strip + progress bar + ticket indicators in place (no full re-render). */
+/** Patch live stat strip + progress bar + ticket indicators in place (no full re-render).
+ *  Running sprints on the Board tab use the compact banner only (hotfix 0612). */
 function _smgmtLivePatch(label, live) {
+  if (typeof _smgmtBoardBannerPatch === 'function') {
+    _smgmtBoardBannerPatch(label, live);
+  }
   const card = document.getElementById(`smgmt-card-${label}`);
   if (!card || !card.classList.contains('smgmt-running')) return;
 
@@ -12434,10 +12480,8 @@ function _smgmtLivePollRestart() {
 
   if (_smgmtRunningLabels.size === 0) return;
 
-  // Poll every 2 seconds for stat/indicator updates
+  // Poll every 2 seconds for banner + Running-tab rail/metrics updates
   _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
-  // Poll every 5 seconds for live log panel (reads from cache populated by the 2s poll)
-  _smgmtLogPollId = setInterval(_smgmtLogPollTick, 5000);
   // Kick off immediately
   _smgmtLivePollTick();
 }

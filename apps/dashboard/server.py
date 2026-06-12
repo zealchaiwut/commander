@@ -6411,7 +6411,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label, "--skip-gates",
+            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label,
              "--alert-mode", _ALERT_MODES],
             env=stripped_env,
             cwd=str(coder_path),
@@ -9459,7 +9459,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     try:
         proc = subprocess.Popen(
             [sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
-             "--skip-gates", "--alert-mode", _ALERT_MODES],
+             "--alert-mode", _ALERT_MODES],
             env=stripped_env,
             cwd=str(coder_path),
             stdout=run_log_fh,

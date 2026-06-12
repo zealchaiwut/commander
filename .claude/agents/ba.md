@@ -219,3 +219,35 @@ This invokes the Issue Estimator (Haiku 4.5) and posts a sizing comment to the i
 ## Tools available
 
 Use the `codedb` MCP server tools (`codedb_tree`, `codedb_search`) to read existing code when you need to understand current behaviour before writing acceptance criteria.
+
+## Design contract (MANDATORY when a mock is attached to a UI ticket)
+
+A mock at references/issue-<N>/*.html means you MUST emit a machine-checkable
+contract BEFORE writing acceptance criteria. Describing the design in prose and
+calling it done is a defect — that prose is where fidelity is lost.
+
+Procedure:
+1. Open the attached mock. Scope to the element(s) named in the ticket's
+   "target" selector list (or the named view's root).
+2. For each target selector, read its resolved styles from the mock's <style>
+   (follow each CSS var to its :root value; record BOTH the var name and the
+   resolved value). Capture only design-bearing properties: color,
+   background-color, border, border-color, border-radius, font-family,
+   font-size, font-weight, padding, gap, box-shadow, animation/transition.
+   Skip incidental defaults.
+3. For every interactive or state-dependent element, write a behavior assertion
+   as navigate -> act -> observe, where "observe" is a concrete DOM fact: an
+   element COUNT, an ATTRIBUTE ([disabled], aria-*), a TEXT match, or a CLASS
+   presence. "Looks right" / "matches the mock" is forbidden.
+4. Emit references/issue-<N>/design-contract.json (schema below). Then write the
+   ticket's ACs as direct references to contract entry ids — never restate them.
+
+Rules (extends #713 no-generic-language to behavior):
+- Prefer var(--x) form; the resolved value exists only for the tester's
+  computed-style comparison.
+- Every visual AC maps to exactly one style_assertion id; every behavioral AC to
+  one behavior_assertion id. An AC mapping to no contract entry is malformed —
+  fix or delete it.
+- If a requirement cannot be expressed as a style or behavior assertion, it is
+  NOT acceptance criteria. Move it to the description.
+- A passing build must be impossible to achieve without satisfying every entry.

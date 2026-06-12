@@ -49,7 +49,8 @@ import {
   _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts, 
   _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml, 
   _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
-  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml, 
+  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
+  _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
 } from './board-render.js';
@@ -155,6 +156,9 @@ globalThis._smgmtRenderFinishCard = _smgmtRenderFinishCard;
 globalThis._smgmtFinishCardInnerHtml = _smgmtFinishCardInnerHtml;
 globalThis._smgmtCardHtml = _smgmtCardHtml;
 globalThis._smgmtRunningCardHtml = _smgmtRunningCardHtml;
+globalThis._smgmtRunningBoardBannerHtml = _smgmtRunningBoardBannerHtml;
+globalThis._smgmtBoardBannerPatch = _smgmtBoardBannerPatch;
+globalThis._smgmtRunningLevelText = _smgmtRunningLevelText;
 globalThis._smgmtRollupText = _smgmtRollupText;
 globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
 globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;

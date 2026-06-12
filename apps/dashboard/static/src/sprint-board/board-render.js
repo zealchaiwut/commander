@@ -144,24 +144,24 @@ export function _smgmtRender(data) {
     if ((bySprint[lbl] || []).length >= 1) { _smgmtNextUpLabel = lbl; break; }
   }
 
-  const cards = orderedLabels.map(label => {
-    const tickets = bySprint[label] || [];
-    const outcome = _smgmtOutcomeCache[label] || null;
-    const parent = _sprintParents[label] || null;
-    const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
-    return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
-           cardHtml + `</div>`;
-  }).join('');
+  const runningBanners = orderedLabels
+    .filter(label => _smgmtRunningLabels.has(label))
+    .map(label => _smgmtRunningBoardBannerHtml(label, bySprint[label] || []))
+    .join('');
 
-  listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
+  const cards = orderedLabels
+    .filter(label => !_smgmtRunningLabels.has(label))
+    .map(label => {
+      const tickets = bySprint[label] || [];
+      const outcome = _smgmtOutcomeCache[label] || null;
+      const parent = _sprintParents[label] || null;
+      const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
+      return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
+             cardHtml + `</div>`;
+    }).join('');
 
-  // Scroll live log streams to the latest line after initial render
-  requestAnimationFrame(() => {
-    _smgmtRunningLabels.forEach(lbl => {
-      const s = document.getElementById(`smgmt-live-log-stream-${lbl}`);
-      if (s) s.scrollTop = s.scrollHeight;
-    });
-  });
+  const body = runningBanners + cards;
+  listEl.innerHTML = body || '<div class="loading-msg">No sprints found.</div>';
 
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
@@ -653,9 +653,9 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   let isCollapsed = false;
   try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
-  // Running sprint gets special animated treatment (issue #277)
+  // Running sprints render as a board-top banner (hotfix 0612); full live UI is on Running tab.
   if (isRunning) {
-    return _smgmtRunningCardHtml(label, n, tickets);
+    return '';
   }
 
   const hasCompleted = _smgmtHasCompletedTickets(tickets);
@@ -818,6 +818,76 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
       </div>
       ${logHtml}
     </div>`;
+}
+
+/** Level summary for the board running banner, e.g. "level 2 of 3". */
+export function _smgmtRunningLevelText(live) {
+  const levels = (live && live.levels) || [];
+  if (levels.length > 1) {
+    const active = levels.find(l => l.state === 'active');
+    const cur = active ? active.level : levels[levels.length - 1].level;
+    return `level ${cur} of ${levels.length}`;
+  }
+  const issues = (live && live.issues) || [];
+  const levelNums = [...new Set(
+    issues.map(i => (i.dispatch_level || 0) || 1),
+  )].filter(l => l > 0).sort((a, b) => a - b);
+  if (levelNums.length <= 1) return null;
+  let current = levelNums[0];
+  for (const lvl of levelNums) {
+    const group = issues.filter(i => ((i.dispatch_level || 0) || 1) === lvl);
+    const allDone = group.length > 0 && group.every(i =>
+      i.status === 'done' || i.status === 'skipped' || i.agent_status === 'failed',
+    );
+    if (!allDone) { current = lvl; break; }
+    current = lvl;
+  }
+  return `level ${current} of ${levelNums.length}`;
+}
+
+/** Compact board banner with a link to the Running sub-view (hotfix 0612). */
+export function _smgmtRunningBoardBannerHtml(label, tickets) {
+  const live = _smgmtLiveCache[label] || null;
+  const doneCount = live ? (live.done_count || 0) : 0;
+  const failedCount = live ? (live.failed_count || 0) : 0;
+  const skippedCount = live ? (live.skipped_count || 0) : 0;
+  const totalCount = live ? (live.total_count || tickets.length) : tickets.length;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const timeSpentSec = live ? (live.time_spent_sec || 0) : 0;
+  const levelText = _smgmtRunningLevelText(live);
+  const parts = [
+    `${escHtml(sprintLabelDisplay(label))} is running`,
+    `${completeCount}/${totalCount} done`,
+    timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
+    levelText,
+  ].filter(Boolean);
+  const safeLabel = escHtml(label);
+  return `<div class="smgmt-board-running-banner" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
+    <span class="smgmt-board-running-banner-dot" aria-hidden="true"></span>
+    <span class="smgmt-board-running-banner-text" id="smgmt-board-banner-text-${safeLabel}">${parts.join(' · ')}</span>
+    <button type="button" class="smgmt-board-running-banner-link"
+            onclick="_smgmtShowSubView('running')">Watch in Running →</button>
+  </div>`;
+}
+
+/** Patch the board running banner in place (no full card re-render). */
+export function _smgmtBoardBannerPatch(label, live) {
+  const textEl = document.getElementById(`smgmt-board-banner-text-${label}`);
+  if (!textEl) return;
+  const doneCount = live.done_count || 0;
+  const failedCount = live.failed_count || 0;
+  const skippedCount = live.skipped_count || 0;
+  const totalCount = live.total_count || 0;
+  const completeCount = doneCount + failedCount + skippedCount;
+  const timeSpentSec = live.time_spent_sec || 0;
+  const levelText = _smgmtRunningLevelText(live);
+  const parts = [
+    `${sprintLabelDisplay(label)} is running`,
+    `${completeCount}/${totalCount} done`,
+    timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
+    levelText,
+  ].filter(Boolean);
+  textEl.textContent = parts.join(' · ');
 }
 
 export function _smgmtRunningCardHtml(label, n, tickets) {

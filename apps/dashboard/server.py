@@ -9920,12 +9920,132 @@ def delete_sprint(sprint_label: str, project: str):
     return result
 
 
-# ── Finish Sprint endpoints (issue #511) ─────────────────────────────────────
+# ── Finish Sprint / Merge Sprint endpoints (issue #511, lifecycle P2) ─────────
 
 _FINISH_SPRINT_STATUS_LABELS = frozenset({
     "backlog", "in-progress", "SIT", "UAT", "UAT-approved",
     "needs-rework", "need-rework", "blocked",
 })
+
+
+def _sprint_label_base(label: str) -> str:
+    m = re.match(r"^(sprint-\d+)", label)
+    return m.group(1) if m else label
+
+
+def _sprint_label_sub_index(label: str) -> float:
+    m = re.match(r"^sprint-\d+\.(\d+)$", label)
+    return float(m.group(1)) if m else 0.0
+
+
+def _is_child_sprint_label(label: str) -> bool:
+    return bool(re.match(r"^sprint-\d+\.\d+", label))
+
+
+def _sprint_branch_name(label: str) -> str:
+    return f"sprint/{label}"
+
+
+def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list[str]:
+    """Return child sprint labels under base_label, sorted by sub-index."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.is_dir():
+        return []
+    m = re.match(r"^sprint-(\d+)$", base_label)
+    if not m:
+        return []
+    n = m.group(1)
+    children: list[str] = []
+    for path in sprints_dir.glob(f"sprint-{n}.*-plan.json"):
+        lbl = path.name.replace("-plan.json", "")
+        if _is_child_sprint_label(lbl):
+            children.append(lbl)
+    return sorted(children, key=_sprint_label_sub_index)
+
+
+def _gh_branch_exists(repo: str, branch: str) -> bool:
+    try:
+        from urllib.parse import quote
+        ref = quote(branch, safe="")
+        res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches/{ref}", "--jq", ".name"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def _gh_merge_branch_via_pr(
+    repo: str,
+    head: str,
+    base: str,
+    title: str,
+    delete_branch: bool = True,
+) -> tuple[bool, str]:
+    """Create (or reuse) a PR head→base and merge it. Returns (ok, detail)."""
+    pr_url: Optional[str] = None
+    try:
+        pr_res = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", head, "--base", base,
+             "--state", "open", "--json", "url", "--limit", "1"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if pr_res.returncode == 0 and pr_res.stdout.strip():
+            prs = json.loads(pr_res.stdout)
+            if prs:
+                pr_url = prs[0].get("url")
+        if not pr_url:
+            create = subprocess.run(
+                ["gh", "pr", "create", "--repo", repo, "--base", base, "--head", head,
+                 "--title", title, "--body", f"Merge Sprint: `{head}` → `{base}`."],
+                capture_output=True, text=True, timeout=60,
+            )
+            if create.returncode != 0:
+                stderr = create.stderr.strip()
+                m = re.search(r"https://github\.com/\S+", stderr)
+                if m and ("already exists" in stderr or "already have" in stderr.lower()):
+                    pr_url = m.group(0)
+                else:
+                    return False, stderr or "PR create failed"
+            else:
+                pr_url = create.stdout.strip()
+        merge_args = ["gh", "pr", "merge", pr_url, "--repo", repo, "--merge"]
+        if delete_branch:
+            merge_args.append("--delete-branch")
+        merge_res = subprocess.run(merge_args, capture_output=True, text=True, timeout=120)
+        if merge_res.returncode != 0:
+            return False, merge_res.stderr.strip() or "PR merge failed"
+        return True, pr_url or f"{head} → {base}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
+    """Merge leftover child branches into base, then base → develop. Returns errors."""
+    errors: list[str] = []
+    base_branch = _sprint_branch_name(base_label)
+    child_labels = _child_sprint_labels_from_plans(_project_root_path(repo), base_label)
+    for child_label in child_labels:
+        child_branch = _sprint_branch_name(child_label)
+        if not _gh_branch_exists(repo, child_branch):
+            continue
+        ok, detail = _gh_merge_branch_via_pr(
+            repo, child_branch, base_branch,
+            title=f"Merge Sprint: {child_label} → {base_label}",
+            delete_branch=True,
+        )
+        if not ok:
+            errors.append(f"{child_branch} → {base_branch}: {detail}")
+    if _gh_branch_exists(repo, base_branch):
+        ok, detail = _gh_merge_branch_via_pr(
+            repo, base_branch, "develop",
+            title=f"Merge Sprint: {base_label} → develop",
+            delete_branch=False,
+        )
+        if not ok:
+            errors.append(f"{base_branch} → develop: {detail}")
+    return errors
 
 
 def _next_sprint_number(sprint_label: str) -> int:
@@ -9938,13 +10058,15 @@ def _next_sprint_number(sprint_label: str) -> int:
 
 @app.get("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview")
 def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
-    """Return preview data for the Finish Sprint dialog.
+    """Return preview data for the Merge Sprint dialog.
 
     Returns: {
-      all_tickets: [{number, title, category}],   # ALL tickets incl. sprint-summary
+      all_tickets: [{number, title, category}],
       uat_tickets: [{number, title}],
       non_uat_tickets: [{number, title, status}],
       sprint_pr: {url, number, title} | null,
+      merge_branches: [{head, base}],
+      base_label: str,
       next_sprint_label: str,
       next_sprint_exists: bool,
       conflict_error: str | null,
@@ -9954,8 +10076,10 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
 
     repo = f"{owner}/{repo_name}"
+    base_label = _sprint_label_base(label)
+    project_root = _project_root_path(repo)
 
-    next_num = _next_sprint_number(label)
+    next_num = _next_sprint_number(base_label)
     next_sprint_label = f"sprint-{next_num}"
 
     try:
@@ -9967,25 +10091,45 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     conflict_error: str | None = None
 
     try:
-        sprint_issues = _get_sprint_issues(repo, label)
+        sprint_issues = _get_sprint_issues(repo, base_label)
+        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+        for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+            try:
+                for iss in _get_sprint_issues(repo, child_label):
+                    if iss["number"] not in seen_nums:
+                        sprint_issues.append(iss)
+                        seen_nums.add(iss["number"])
+            except subprocess.CalledProcessError:
+                pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    # Look up open sprint PR (head = sprint/sprint-N branch)
+    # Open PRs for child sprint branches targeting the base branch
     sprint_pr: Optional[dict] = None
+    merge_branches: list[dict] = []
+    base_branch = _sprint_branch_name(base_label)
+    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+        child_branch = _sprint_branch_name(child_label)
+        if _gh_branch_exists(repo, child_branch):
+            merge_branches.append({"head": child_branch, "base": base_branch, "label": child_label})
+    if _gh_branch_exists(repo, base_branch):
+        merge_branches.append({"head": base_branch, "base": "develop", "label": base_label})
     try:
-        m_n = re.search(r"(\d+(?:\.\d+)*)", label)
-        branch_name = f"sprint/{label}" if m_n else None
-        if branch_name:
-            pr_res = subprocess.run(
-                ["gh", "pr", "list", "--repo", repo, "--head", branch_name,
-                 "--state", "open", "--json", "number,url,title", "--limit", "1"],
-                capture_output=True, text=True, timeout=4,
-            )
-            if pr_res.returncode == 0 and pr_res.stdout.strip():
-                prs = json.loads(pr_res.stdout)
-                if prs:
-                    sprint_pr = {"url": prs[0].get("url"), "number": prs[0].get("number"), "title": prs[0].get("title")}
+        branch_name = _sprint_branch_name(label)
+        pr_res = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", branch_name,
+             "--state", "open", "--json", "number,url,title,baseRefName", "--limit", "1"],
+            capture_output=True, text=True, timeout=4,
+        )
+        if pr_res.returncode == 0 and pr_res.stdout.strip():
+            prs = json.loads(pr_res.stdout)
+            if prs:
+                sprint_pr = {
+                    "url": prs[0].get("url"),
+                    "number": prs[0].get("number"),
+                    "title": prs[0].get("title"),
+                    "base": prs[0].get("baseRefName"),
+                }
     except Exception:
         pass
 
@@ -10016,6 +10160,8 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         "uat_tickets": uat_tickets,
         "non_uat_tickets": non_uat_tickets,
         "sprint_pr": sprint_pr,
+        "merge_branches": merge_branches,
+        "base_label": base_label,
         "next_sprint_label": next_sprint_label,
         "next_sprint_exists": next_sprint_exists,
         "conflict_error": conflict_error,
@@ -10032,11 +10178,9 @@ class FinishSprintBody(BaseModel):
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
 async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSprintBody):
-    """Finish a sprint: close UAT tickets as completed, move non-UAT tickets to next sprint.
+    """Merge Sprint: merge child branches → base → develop, close issues, keep labels.
 
-    Body: { confirmed: true, move_non_uat_to: "sprint-N+1" }
-
-    Returns: { closed, moved, errors, next_sprint_label }
+    Single human UAT sign-off — no per-ticket gate, no label stripping.
     """
     if not body.confirmed:
         raise HTTPException(400, detail="Request must have confirmed=true")
@@ -10044,44 +10188,41 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
 
-    next_sprint_label = body.move_non_uat_to or f"sprint-{_next_sprint_number(label)}"
-    if not _SPRINT_LABEL_RE.match(next_sprint_label):
-        raise HTTPException(400, detail=f"Invalid next sprint label: {next_sprint_label!r}")
-
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
+    base_label = _sprint_label_base(label)
+    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    all_labels = [base_label, *child_labels]
 
-    if _is_sprint_running(project_root, label):
-        raise HTTPException(409, detail=f"Sprint {label} is currently running — finish it after the run completes")
+    for lbl in all_labels:
+        if _is_sprint_running(project_root, lbl):
+            raise HTTPException(
+                409,
+                detail=f"Sprint {lbl} is currently running — merge after the run completes",
+            )
 
     try:
-        sprint_issues = _get_sprint_issues(repo, label)
+        sprint_issues = _get_sprint_issues(repo, base_label)
+        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+        for child_label in child_labels:
+            try:
+                for iss in _get_sprint_issues(repo, child_label):
+                    if iss["number"] not in seen_nums:
+                        sprint_issues.append(iss)
+                        seen_nums.add(iss["number"])
+            except subprocess.CalledProcessError:
+                pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
-
-    # Determine which tickets are selected by the user (empty list = all tickets)
-    selected_nums = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
-
-    _NON_WORK_LABELS_FS2 = {"sprint-summary", "docs", "documentation"}
-    to_close: list[dict] = []
-    to_move: list[dict] = []
-    for iss in sprint_issues:
-        num = iss["number"]
-        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
-        is_selected = selected_nums is None or num in selected_nums
-        is_summary = bool(_NON_WORK_LABELS_FS2 & label_names)
-        is_uat = "UAT" in label_names
-        if is_selected:
-            to_close.append(iss)
-        elif not is_selected and not is_uat and not is_summary:
-            # Unselected non-UAT non-summary → move to next sprint (original behavior)
-            to_move.append(iss)
 
     closed = 0
     moved = 0
     errors: list[str] = []
 
-    # Merge sprint PR first (if requested)
+    # 1. Merge leftover child branches → base → develop
+    errors.extend(_merge_sprint_branch_chain(repo, base_label))
+
+    # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)
     if body.merge_pr and body.sprint_pr_url:
         try:
             merge_res = subprocess.run(
@@ -10093,57 +10234,31 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         except Exception as exc:
             errors.append(f"PR merge error: {exc}")
 
-    # Ensure next sprint label exists when there are non-selected non-UAT tickets to move
-    if to_move:
-        m_next = re.match(r"^sprint-(\d+)$", next_sprint_label)
-        if m_next:
-            try:
-                github_client.ensure_sprint_label(int(m_next.group(1)), repo_name=repo)
-                github_client.invalidate("sprints:")
-            except Exception as exc:
-                errors.append(f"Failed to create label {next_sprint_label}: {exc}")
-        try:
-            if not _read_plan_json(project_root, next_sprint_label):
-                _plan_json_set_state(
-                    project_root, next_sprint_label, "draft",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                )
-        except Exception:
-            pass
+    _NON_WORK_LABELS_FS2 = {"sprint-summary", "docs", "documentation"}
 
-    # Move unselected non-UAT tickets to next sprint
-    for iss in to_move:
+    # 2. Close sprint issues — labels stay on for GitHub history queries
+    for iss in sprint_issues:
         issue_num = iss["number"]
-        try:
-            _sm_transition(issue_num, _TicketState.QUEUED, actor="finish_button", repo=repo)
-            github_client.update_labels(issue_num, add=[next_sprint_label], remove=[label], repo_name=repo)
-            moved += 1
-        except (_TransitionError, subprocess.CalledProcessError, Exception) as exc:
-            errors.append(f"#{issue_num}: {exc}")
-
-    # Close selected tickets and remove sprint label
-    for iss in to_close:
-        issue_num = iss["number"]
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        if _NON_WORK_LABELS_FS2 & label_names:
+            continue
         try:
             github_client.close_issue(issue_num, repo_name=repo, reason="completed")
-            try:
-                github_client.update_labels(issue_num, add=[], remove=[label], repo_name=repo)
-            except Exception:
-                pass  # label removal is best-effort
             closed += 1
         except subprocess.CalledProcessError as exc:
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
             errors.append(f"#{issue_num}: {err_msg}")
 
-    # Mark current sprint as completed in plan.json
-    try:
-        _plan_json_set_state(
-            project_root, label, "completed",
-            ended_at=datetime.now(timezone.utc).isoformat(),
-            end_reason="finish_button",
-        )
-    except Exception as exc:
-        errors.append(f"plan.json update failed: {exc}")
+    # 3. Mark base + all children completed in plan.json
+    for lbl in all_labels:
+        try:
+            _plan_json_set_state(
+                project_root, lbl, "completed",
+                ended_at=datetime.now(timezone.utc).isoformat(),
+                end_reason="merge_sprint",
+            )
+        except Exception as exc:
+            errors.append(f"plan.json update failed for {lbl}: {exc}")
 
     # Invalidate caches so board refreshes
     github_client.invalidate("open_issues_body:")
@@ -10155,23 +10270,28 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         "type": "update",
         "event": {
             "event_type": "sprint_finished",
-            "sprint_label": label,
+            "sprint_label": base_label,
         },
     })
 
-    # Scoped activity-log event for the sprint target (issue #721)
     _emit_dashboard_event(
         project=repo,
         type="sprint_finished",
-        target=label,
+        target=base_label,
         detail={
-            "sprint_id": label,
-            "summary_issue_url": _read_sprint_summary_url(project_root, label),
+            "sprint_id": base_label,
+            "summary_issue_url": _read_sprint_summary_url(project_root, base_label),
         },
         action_id=str(uuid.uuid4()),
     )
 
-    result: dict = {"closed": closed, "moved": moved, "errors": errors, "next_sprint_label": next_sprint_label}
+    result: dict = {
+        "closed": closed,
+        "moved": moved,
+        "errors": errors,
+        "next_sprint_label": f"sprint-{_next_sprint_number(base_label)}",
+        "base_label": base_label,
+    }
     status_code = 207 if errors else 200
     return JSONResponse(content=result, status_code=status_code)
 

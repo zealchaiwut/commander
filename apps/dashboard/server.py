@@ -4987,6 +4987,32 @@ def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
 
 _VALID_PLAN_STATES: frozenset[str] = frozenset({"planning", "running", "completed", "cancelled"})
 
+# Plan states from which a label may never be dispatched again (sprint-lifecycle
+# redesign P0, docs/milestones/sprint-lifecycle-redesign.md). One label = one
+# attempt: re-dispatching a terminal label is what produced multi-attempt
+# forensics under a single sprint label (sprint-68.6 ran three times).
+_TERMINAL_PLAN_STATES: frozenset[str] = frozenset({"completed", "cancelled"})
+
+
+def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
+    """Raise 409 when the label's plan already reached a terminal state.
+
+    Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
+    instead of re-dispatching the same label, so every label maps to exactly
+    one run in logs, agent_runs, and the History ledger.
+    """
+    plan = _read_plan_json(project_root, sprint_label)
+    state = (plan or {}).get("state")
+    if state in _TERMINAL_PLAN_STATES:
+        raise HTTPException(
+            409,
+            detail=(
+                f"Sprint {sprint_label} already ran (state={state}). "
+                "Same-label re-dispatch is disabled — use Re-run to create a "
+                "child sub-sprint instead."
+            ),
+        )
+
 
 def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:
     """Read plan.json; handles old list format (returns {"tickets":[...]}) and new dict format."""
@@ -6471,6 +6497,9 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         )
     coder_path   = _coder_clone_path(project_root)
     commander    = _commander_dir(project_root)
+
+    # One label = one attempt: terminal labels are never re-dispatched (P0).
+    _reject_terminal_label_redispatch(project_root, body.sprint_label)
 
     # Block empty runs before spawn — instant no-op sprints leave no live logs.
     from services.sprint_manager import sprint_manager as _sm_run

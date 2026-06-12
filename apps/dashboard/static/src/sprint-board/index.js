@@ -29,6 +29,7 @@ import {
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
 } from './run-controls.js';
 import {
+  computeDropPlan,
   _smgmtUpdateSelectionUI, _smgmtPopulateSelectionDropdown, 
   _smgmtPopulateMoveToMenu, _smgmtToggleMoveToMenu, _smgmtCloseMoveToMenu, 
   _smgmtClearSelection, _smgmtSetSelected, _smgmtToggleSelect, 
@@ -103,6 +104,9 @@ globalThis._pfRetry = _pfRetry;
 globalThis._pfConfirm = _pfConfirm;
 
 // Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
+// computeDropPlan is a DOM-free decision helper kept on the global (and thus in
+// the bundle) for the drag/drop smoke-test contract — see test_..__797.py.
+globalThis.computeDropPlan = computeDropPlan;
 globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI;
 globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
 globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;

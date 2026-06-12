@@ -1,6 +1,7 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** not started. Tracking file for the fixes agreed on 2026-06-12.
+> **Status:** P0 done; P1–P4 not started. Tracking file for the fixes agreed
+> on 2026-06-12.
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
 > discussion. Code evidence (file:line) below was audited against branch
@@ -17,19 +18,20 @@ same-label re-runs.
 
 ## P0 — Stop the bleeding
 
-- [ ] **Block same-label re-dispatch.**
-  - Board "Run Sprint" on a has-rework card currently re-dispatches the same
-    label (`static/src/sprint-board/board-render.js:735-745`) — route it to the
-    existing rerun flow (child sprint) instead.
-  - `POST /api/sprints/run` only guards "another sprint running"
-    (`apps/dashboard/server.py:6453-6630`) — reject labels whose plan state is
-    terminal.
-  - Reuse, don't rebuild: `GET /api/sprints/:label/rerun-preview`
-    (`server.py:9498`) already excludes summary tickets and pre-checks
-    non-UAT; `POST /api/sprints/:label/rerun` (`server.py:9541`) already
-    creates the child, moves tickets, and dispatches.
-- [ ] **Restart the dashboard** so the live history feed picks up the
+- [x] **Block same-label re-dispatch.** *Done 2026-06-12.*
+  - Board: has-rework cards (with or without tickets) now render the Re-run →
+    child button; same-label "Run Sprint" only exists for first attempts
+    (`static/src/sprint-board/board-render.js`, `_smgmtCardHtml`).
+  - Server: `POST /api/sprints/run` rejects labels whose plan state is
+    terminal with 409 (`_reject_terminal_label_redispatch`, plus
+    `_TERMINAL_PLAN_STATES = {completed, cancelled}` in
+    `apps/dashboard/server.py`).
+  - Re-runs reuse the existing child-sprint flow (`rerun-preview` / `rerun`
+    endpoints) — nothing rebuilt.
+  - Tests: `tests/test_lifecycle_p0__same_label_redispatch_guard.py`.
+- [x] **Restart the dashboard** so the live history feed picks up the
   agent-runs backfill (fixes the "0 tickets" card for 68.6 with zero code).
+  *Done 2026-06-12: history API now returns #894 for sprint-68.6.*
 
 ## P1 — Lifecycle enum (foundation)
 

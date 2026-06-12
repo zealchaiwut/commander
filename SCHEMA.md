@@ -315,13 +315,6 @@ Query params for calibration endpoint: `since` (ISO date), `until` (ISO date), `
 
 > **Note (issue #718):** Analytics metrics and calibration are sourced from local sprint state and estimate files under `.commander/`, not Neon. The analytics page works with the Neon kill switch enabled.
 
-### Notes
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/notes` | Return the global notes body (`{"body": "..."}`); empty string if none saved yet |
-| `PUT` | `/api/notes` | Persist the full global notes body (`{"body": "..."}`) to `.commander/notes.json` |
-
 ### Deploy (issues #722–#726)
 
 Per-environment deploy/restart for the `prd` and `uat` environments. Each environment declares a `host` of `local` (launchd / stop-start scripts, pull-only `git pull --ff-only`) or `render` (Render API). Config persists under the `deploy_config` settings key (scope `project`).

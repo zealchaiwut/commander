@@ -82,6 +82,18 @@ class TestArtifactService:
         (sprints / "sprint-68-state.json").write_text('{"sprint_label":"sprint-68.2"}')
         assert sas.resolve_state_path(sprints, "sprint-68.6") is None
 
+    def test_resolve_finds_archived_state_file(self, tmp_path):
+        from routers import sprint_artifact_service as sas
+
+        sprints = tmp_path / "sprints"
+        archive = sprints / "archive"
+        archive.mkdir(parents=True)
+        archived = archive / "sprint-68.6-state.json"
+        archived.write_text(
+            '{"sprint_label":"sprint-68.6","summary_issue_url":"https://github.com/o/r/issues/906"}'
+        )
+        assert sas.resolve_state_path(sprints, "sprint-68.6") == archived
+
 
 class TestDbIngest:
     def test_ingest_stores_artifacts(self, fresh_db):

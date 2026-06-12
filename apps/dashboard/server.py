@@ -1189,17 +1189,13 @@ async def broadcast(data: dict):
 @app.get("/")
 async def root(request: Request):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/", method="GET")
-    # The #842 daily-brief page is parked at /brief until its UX is settled
-    # (operator decision 2026-06-11: home shows the classic view + a
-    # coming-soon teaser for the brief).
-    return _serve_html(STATIC_DIR / "home-preview.html")
+    return _serve_html(STATIC_DIR / "home.html")
 
 
 @app.get("/brief")
-async def brief_page(request: Request):
-    """CEO daily-brief page (issue #842) — preview home for the brief feature."""
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/brief", method="GET")
-    return _serve_html(STATIC_DIR / "home.html")
+async def brief_redirect():
+    """Legacy /brief bookmarks → daily brief home at /."""
+    return RedirectResponse(url="/", status_code=301)
 
 
 @app.get("/home")
@@ -2056,7 +2052,6 @@ def get_running_sprint(project: str):
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
 import services.sprint_manager.settings_repo as _settings_repo
-import services.sprint_manager.notes_repo as _notes_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
     SECRET_FIELDS,
@@ -2476,11 +2471,17 @@ def _restart_environment(entry: dict) -> dict:
     # bind the configured port instead of a hardcoded default (issue #769).
     stop, start = _deploy_actions.stop_start_scripts(entry)
     restart_env = _deploy_actions.build_restart_env(entry)
+    script_cwd = _deploy_actions.script_working_dir(entry)
     steps = []
     for phase, script in (("stop", stop), ("start", start)):
-        result = subprocess.run(
-            ["sh", "-c", script], capture_output=True, text=True, env=restart_env
-        )
+        run_kw: dict = {
+            "capture_output": True,
+            "text": True,
+            "env": restart_env,
+        }
+        if script_cwd:
+            run_kw["cwd"] = script_cwd
+        result = subprocess.run(["sh", "-c", script], **run_kw)
         steps.append({
             "phase": phase,
             "script": script,
@@ -2622,9 +2623,11 @@ def _stop_environment(entry: dict) -> dict:
 
     stop, _start = _deploy_actions.stop_start_scripts(entry)
     restart_env = _deploy_actions.build_restart_env(entry)
-    result = subprocess.run(
-        ["sh", "-c", stop], capture_output=True, text=True, env=restart_env
-    )
+    script_cwd = _deploy_actions.script_working_dir(entry)
+    run_kw: dict = {"capture_output": True, "text": True, "env": restart_env}
+    if script_cwd:
+        run_kw["cwd"] = script_cwd
+    result = subprocess.run(["sh", "-c", stop], **run_kw)
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
@@ -2665,9 +2668,11 @@ def _start_environment(entry: dict) -> dict:
 
     _stop, start = _deploy_actions.stop_start_scripts(entry)
     restart_env = _deploy_actions.build_restart_env(entry)
-    result = subprocess.run(
-        ["sh", "-c", start], capture_output=True, text=True, env=restart_env
-    )
+    script_cwd = _deploy_actions.script_working_dir(entry)
+    run_kw: dict = {"capture_output": True, "text": True, "env": restart_env}
+    if script_cwd:
+        run_kw["cwd"] = script_cwd
+    result = subprocess.run(["sh", "-c", start], **run_kw)
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
@@ -3325,12 +3330,15 @@ def post_sprint_cleanup(body: _SprintCleanupBody):
     def _running_check(_dir: Path, n: int) -> bool:
         return _is_sprint_running(project_root, f"sprint-{n}")
 
-    result = _clean_sprint_files.run_cleanup(
-        sprints_dir,
-        dry_run=body.dry_run,
-        has_summary_issue=lambda n: n in finished_nums,
-        running_check=_running_check,
-    )
+    try:
+        result = _clean_sprint_files.run_cleanup(
+            sprints_dir,
+            dry_run=body.dry_run,
+            has_summary_issue=lambda n: n in finished_nums,
+            running_check=_running_check,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Archive failed: {exc}") from exc
     return {
         "archived": result["archived"],
         "kept_count": result["kept_count"],
@@ -10367,6 +10375,216 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     return JSONResponse(content=result, status_code=status_code)
 
 
+_NON_WORK_LABELS_BC = {"sprint-summary", "docs", "documentation"}
+
+
+def _summary_title_for_label(label: str) -> str:
+    m = re.match(r"^sprint-(.+)$", label)
+    if not m:
+        return ""
+    return f"Sprint {m.group(1)} Executive Summary"
+
+
+def _open_summary_issues_for_labels(repo: str, labels: list[str]) -> list[dict]:
+    """Return open sprint-summary issues whose title matches a lineage label."""
+    titles_wanted = {_summary_title_for_label(lbl) for lbl in labels}
+    titles_wanted.discard("")
+    if not titles_wanted:
+        return []
+    try:
+        issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
+    except Exception:
+        return []
+    result: list[dict] = []
+    seen: set[int] = set()
+    for iss in issues:
+        title = iss.get("title", "") or ""
+        if title not in titles_wanted:
+            continue
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        if not (_NON_WORK_LABELS_BC & label_names):
+            continue
+        num = iss.get("number")
+        if num is None or num in seen:
+            continue
+        seen.add(num)
+        sprint_lbl = next(
+            (lbl for lbl in labels if title == _summary_title_for_label(lbl)),
+            None,
+        )
+        result.append({
+            "number": num,
+            "title": title,
+            "labels": iss.get("labels", []),
+            "sprint_label": sprint_lbl,
+        })
+    return result
+
+
+def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str) -> tuple[list[str], list[dict]]:
+    if not re.match(r"^sprint-\d+$", base_label):
+        raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
+    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    if not child_labels:
+        raise HTTPException(400, detail=f"No child sprints found under {base_label}")
+    all_labels = [base_label, *child_labels]
+    sprint_issues: list[dict] = []
+    seen_nums: set[int] = set()
+    for lbl in all_labels:
+        try:
+            for iss in _get_sprint_issues(repo, lbl):
+                if iss["number"] not in seen_nums:
+                    sprint_issues.append(iss)
+                    seen_nums.add(iss["number"])
+        except subprocess.CalledProcessError:
+            pass
+    for iss in _open_summary_issues_for_labels(repo, all_labels):
+        if iss["number"] not in seen_nums:
+            sprint_issues.append(iss)
+            seen_nums.add(iss["number"])
+    return all_labels, sprint_issues
+
+
+def _bulk_complete_ticket_rows(issues: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for iss in issues:
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        number = iss["number"]
+        title = iss.get("title", "")
+        if _NON_WORK_LABELS_BC & label_names:
+            rows.append({"number": number, "title": title, "category": "sprint-summary"})
+            continue
+        if "UAT" in label_names:
+            rows.append({"number": number, "title": title, "category": "UAT"})
+            continue
+        status = next(
+            (lbl for lbl in sorted(label_names) if lbl in _FINISH_SPRINT_STATUS_LABELS and lbl != "UAT"),
+            "queued",
+        )
+        rows.append({"number": number, "title": title, "category": status})
+    return rows
+
+
+@app.get("/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete-preview")
+def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
+    """Preview tickets to close and member sprints to mark completed."""
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    base_label = _sprint_label_base(label)
+    project_root = _project_root_path(repo)
+
+    all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
+
+    return {
+        "all_tickets": _bulk_complete_ticket_rows(sprint_issues),
+        "member_labels": all_labels,
+        "base_label": base_label,
+        "child_count": len(all_labels) - 1,
+    }
+
+
+class BulkCompleteSprintBody(BaseModel):
+    confirmed: bool
+    selected_ticket_numbers: list[int] = []
+
+
+@app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete")
+async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: BulkCompleteSprintBody):
+    """Close UAT + summary issues across a lineage and mark every member completed."""
+    if not body.confirmed:
+        raise HTTPException(400, detail="Request must have confirmed=true")
+
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    project_root = _project_root_path(repo)
+    base_label = _sprint_label_base(label)
+    all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
+
+    for lbl in all_labels:
+        if _is_sprint_running(project_root, lbl):
+            raise HTTPException(
+                409,
+                detail=f"Sprint {lbl} is currently running — bulk complete after the run finishes",
+            )
+
+    selected = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
+    closed = 0
+    errors: list[str] = []
+
+    for iss in sprint_issues:
+        issue_num = iss["number"]
+        if selected is not None and issue_num not in selected:
+            continue
+        try:
+            github_client.close_issue(issue_num, repo_name=repo, reason="completed")
+            closed += 1
+        except subprocess.CalledProcessError as exc:
+            err_msg = exc.stderr.strip() if exc.stderr else str(exc)
+            errors.append(f"#{issue_num}: {err_msg}")
+
+    completed = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for lbl in all_labels:
+        plan = _read_plan_json(project_root, lbl)
+        if plan and (plan.get("state") or "").lower() == "deleted":
+            continue
+        try:
+            _plan_json_set_state(
+                project_root, lbl, "completed",
+                ended_at=now,
+                end_reason="bulk_complete",
+            )
+            _sprint_db_set_state(
+                lbl, repo, "completed",
+                ended_at=now,
+                end_reason="bulk_complete",
+            )
+            completed += 1
+        except Exception as exc:
+            errors.append(f"plan.json update failed for {lbl}: {exc}")
+
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
+    github_client.invalidate("recent_closed:")
+    github_client.invalidate("summary_issues:")
+
+    await broadcast({
+        "type": "update",
+        "event": {
+            "event_type": "sprint_bulk_completed",
+            "sprint_label": base_label,
+        },
+    })
+
+    _emit_dashboard_event(
+        project=repo,
+        type="sprint_bulk_completed",
+        target=base_label,
+        detail={
+            "sprint_id": base_label,
+            "member_labels": all_labels,
+            "closed": closed,
+            "completed": completed,
+        },
+        action_id=str(uuid.uuid4()),
+    )
+
+    result: dict = {
+        "closed": closed,
+        "completed": completed,
+        "errors": errors,
+        "base_label": base_label,
+        "member_labels": all_labels,
+    }
+    status_code = 207 if errors else 200
+    return JSONResponse(content=result, status_code=status_code)
+
+
 # ── Draft Ticket endpoints (issue #94) ───────────────────────────────────────
 
 _DRAFT_UPLOAD_DIR = Path(__file__).parent / "runtime" / "draft-uploads"
@@ -13676,25 +13894,6 @@ def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.content, encoding="utf-8")
     return {"ok": True, "mtime": path.stat().st_mtime}
-
-
-# ── Global notes (.commander/notes.json) — issue #717 ─────────────────────────
-
-class GlobalNotesBody(BaseModel):
-    body: str = ""
-
-
-@app.get("/api/notes")
-def get_global_notes():
-    """Return the global notes body, or empty string if none saved yet."""
-    return {"body": _notes_repo.get_notes()}
-
-
-@app.put("/api/notes")
-def put_global_notes(body: GlobalNotesBody):
-    """Persist the full global notes body to .commander/notes.json."""
-    _notes_repo.set_notes(body.body)
-    return {"body": body.body}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

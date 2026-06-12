@@ -69,50 +69,55 @@
     /* ===== per-project brief card ===== */
     .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
     .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
-    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:var(--blue-bg);color:var(--blue)}
-    .pbname{font-weight:700;font-size:16px}
+    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;color:#fff}
+    .pb-title-link{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:inherit;min-width:0}
+    .pb-title-link:hover .pbname{color:var(--blue)}
+    .pbname{font-weight:700;font-size:16px;transition:color .12s}
+    .pbname-go{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);background:var(--surface);flex-shrink:0;transition:color .12s,border-color .12s,background .12s}
+    .pb-title-link:hover .pbname-go{color:var(--blue);border-color:var(--blue);background:var(--blue-bg)}
     .pbstatus{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
     .pbstatus.run{background:var(--green-bg);color:var(--green)}
     .pbstatus.idle{background:var(--surface-2);color:var(--text-muted)}
     .pbstatus.blocked{background:var(--red-bg);color:var(--red)}
     .pbstatus.run .d{width:5px;height:5px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite}
     @keyframes glow{0%,100%{box-shadow:0 0 0 2px var(--green-bg)}50%{box-shadow:0 0 0 5px var(--green-bg)}}
-    .pb-toggle{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
-    .pb-toggle:hover{color:var(--text);background:var(--surface-hover)}
-    .pb-toggle .ti{transition:transform .15s}
-    .pbrief.collapsed .pb-toggle .ti{transform:rotate(180deg)}
-    .pb-toggle .lbl-hide{display:inline} .pb-toggle .lbl-show{display:none}
-    .pbrief.collapsed .pb-toggle .lbl-hide{display:none}
-    .pbrief.collapsed .pb-toggle .lbl-show{display:inline}
+    .pbstatus{margin-left:auto}
 
-    /* AC1: always-visible body splits into summary (left) + to-do panel (right) */
-    .pb-cols{display:grid;grid-template-columns:1.45fr 1fr;gap:0;align-items:stretch}
-    @media(max-width:740px){.pb-cols{grid-template-columns:1fr}}
-    .pb-main{border-right:1px solid var(--border)}
-    @media(max-width:740px){.pb-main{border-right:none;border-bottom:1px solid var(--border)}}
-    .pb-cols .todo{border-left:none}
+    /* 2×2 project grid: summary | to-do / shipped | activity */
+    .pb-grid{display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;align-items:stretch}
+    @media(max-width:740px){.pb-grid{grid-template-columns:1fr;grid-template-rows:auto}}
+    .pb-cell{display:flex;flex-direction:column;min-height:0;padding:14px 18px}
+    .pb-cell-summary{grid-column:1;grid-row:1;border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
+    .pb-cell-todo{grid-column:2;grid-row:1;border-bottom:1px solid var(--border)}
+    .pb-cell-shipped{grid-column:1;grid-row:2;border-right:1px solid var(--border)}
+    .pb-cell-activity{grid-column:2;grid-row:2}
+    @media(max-width:740px){
+      .pb-cell-summary,.pb-cell-shipped{border-right:none}
+      .pb-cell-summary,.pb-cell-todo,.pb-cell-shipped{border-bottom:1px solid var(--border)}
+    }
+    .pb-cell-todo .todo{padding:0;min-height:0;flex:1}
+    .pb-cell-todo .todo.compact{max-height:none}
 
     /* always-visible: summary + status line */
-    .pb-summary{padding:14px 18px;display:flex;gap:11px;align-items:flex-start}
+    .pb-summary{padding:0 0 10px;display:flex;gap:11px;align-items:flex-start}
     .pb-sum-ic{width:26px;height:26px;border-radius:7px;background:var(--blue-bg);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:1px}
     .pb-sum-body{flex:1}
     .pb-sum-tag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;background:var(--purple-bg);color:var(--purple);display:inline-flex;align-items:center;gap:3px;margin-bottom:5px}
     .pb-sum-text{font-size:14px;line-height:1.6}
     .pb-sum-text strong{font-weight:700}
+    .pb-sum-loading{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px}
+    .pb-sum-loading .ti{animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
 
-    .pb-statusline{margin:0 18px 14px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+    .pb-statusline{margin:0;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
     .pb-statusline .mono{font-family:var(--mono);font-size:12px;color:var(--text)}
     .pb-statusline.run{background:var(--green-bg);color:var(--text)}
     .pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite;flex-shrink:0}
     .agent-tag{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--purple-bg);color:var(--purple)}
     .pb-pct{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--green)}
 
-    /* collapsible details */
-    .pb-details{padding:0 18px 16px;background:var(--surface)}
-    .pbrief.collapsed .pb-details{display:none}
-    .drill-sec{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-sub);margin:6px 0 8px;display:flex;align-items:center;gap:6px}
-    .drill-cols{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;align-items:start}
-    @media(max-width:720px){.drill-cols{grid-template-columns:1fr}}
+    .drill-sec{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-sub);margin:0 0 8px;display:flex;align-items:center;gap:6px;flex-shrink:0}
+    .pb-cell-shipped .relbox,.pb-cell-activity .timeline{flex:1;min-height:0}
 
     .relbox{background:var(--surface-2);border-radius:8px;padding:11px 13px}
     .rel-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px}
@@ -128,7 +133,12 @@
     .tl-badge{font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;flex-shrink:0;background:var(--green-bg);color:var(--green)}
     .tl-badge.github{background:var(--purple-bg);color:var(--purple)}
     .tl-txt{flex:1;color:var(--text-muted)}.tl-txt .mono{font-size:11px}
-    .open-proj{margin-top:14px;display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 12px;cursor:pointer;text-decoration:none}
+    .tl-more{padding:6px 12px;font-size:11px;color:var(--text-sub);border-top:1px solid var(--border)}
+    .tl-foot{padding:6px 12px;border-top:1px solid var(--border);font-size:11px}
+    .tl-foot a{color:var(--text-muted);text-decoration:none;font-family:var(--mono)}
+    .tl-foot a:hover{color:var(--text)}
+    .pb-foot{display:flex;justify-content:flex-end;padding:10px 18px 14px;border-top:1px solid var(--border)}
+    .open-proj{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 12px;cursor:pointer;text-decoration:none}
     .open-proj:hover{color:var(--text);border-color:var(--text-muted)}
 
     /* add project */
@@ -167,7 +177,42 @@
   const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   let _repoBySlug = {};   // slug -> owner/repo, for action endpoints
+  let _projBySlug = {};   // slug -> { name, icon, color } from /api/home
   let _curDate = null;    // YYYY-MM-DD currently displayed
+
+  function colorHex(color){
+    const map = {
+      gray: '#6b7280', blue: '#3b82f6', green: '#16a34a', purple: '#7c3aed',
+      red: '#dc2626', orange: '#ea580c', yellow: '#ca8a04', pink: '#db2777',
+      cyan: '#0891b2', indigo: '#4f46e5', amber: '#d97706',
+    };
+    return map[color] || color || '#6b7280';
+  }
+
+  function _projectBadgeHtml(slug){
+    const proj = _projBySlug[slug] || {};
+    const bg = colorHex(proj.color || proj.icon_color || 'gray');
+    const icon = proj.icon || 'ti-folder';
+    return `<span class="pbic" style="background:${esc(bg)}"><i class="ti ${esc(icon)}"></i></span>`;
+  }
+
+  function _projectDisplayName(slug){
+    const proj = _projBySlug[slug] || {};
+    return proj.name || slug;
+  }
+
+  function _sprintMgmtHref(slug){
+    return '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
+  }
+
+  function _projectTitleLinkHtml(slug){
+    const name = _projectDisplayName(slug);
+    return `<a class="pb-title-link" href="${esc(_sprintMgmtHref(slug))}" title="Open sprint management">` +
+      _projectBadgeHtml(slug) +
+      `<span class="pbname">${esc(name)}</span>` +
+      `<span class="pbname-go" aria-hidden="true"><i class="ti ti-arrow-right"></i></span>` +
+      `</a>`;
+  }
 
   function toggleTheme(){
     const r = document.documentElement;
@@ -195,7 +240,15 @@
   async function init(){
     try {
       const home = await (await fetch('/api/home')).json();
-      (home.projects || []).forEach(p => { if (p.slug && p.repo) _repoBySlug[p.slug] = p.repo; });
+      (home.projects || []).forEach(p => {
+        if (!p.slug) return;
+        if (p.repo) _repoBySlug[p.slug] = p.repo;
+        _projBySlug[p.slug] = {
+          name: p.name || p.slug,
+          icon: p.icon || 'ti-folder',
+          color: p.color || p.icon_color || 'gray',
+        };
+      });
     } catch(_) { /* repo map is best-effort; actions degrade gracefully */ }
 
     const url = new URL(window.location.href);
@@ -207,10 +260,19 @@
     await loadBrief(d);
   }
 
+  function summaryLoadingHtml(){
+    return '<span class="pb-sum-loading"><i class="ti ti-loader-2" style="font-size:14px"></i> Loading summary…</span>';
+  }
+
   async function loadBrief(date){
     _curDate = date;
     const root = document.getElementById('home');
-    root.innerHTML = '<div class="empty-note" id="boot-note">Loading daily brief…</div>';
+    // Full-page boot spinner only on first paint; date changes keep the shell
+    // and show per-block summary loading instead.
+    const isBoot = root.querySelector('#boot-note') && root.children.length === 1;
+    if (isBoot) {
+      root.innerHTML = '<div class="empty-note" id="boot-note">Loading daily brief…</div>';
+    }
 
     let artifact;
     try {
@@ -357,9 +419,7 @@
       blocks += slugs.map(s => `
         <div class="pbrief collapsed">
           <div class="pbrief-head">
-            <span class="pbic"><i class="ti ti-terminal"></i></span>
-            <strong>${esc(s)}</strong>
-            <a class="open-proj" style="margin-left:auto" href="/project/${esc(s)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(s)}</a>
+            ${_projectTitleLinkHtml(s)}
           </div>
         </div>`).join('');
     } else {
@@ -436,62 +496,62 @@
       </div>`;
   }
 
+  const HOME_ACTIVITY_LIMIT = 5;
+
   function _timeline(p){
     const acts = p.recent_activity || [];
     if (!acts.length){
       return '<div class="timeline"><div class="tl-row"><span class="tl-txt muted">No recent activity.</span></div></div>';
     }
-    const rows = acts.map(a => {
+    const shown = acts.slice(0, HOME_ACTIVITY_LIMIT);
+    const hidden = acts.length - shown.length;
+    const rows = shown.map(a => {
       const src = String(a.source || '').toLowerCase();
       const badge = src === 'github' ? 'github' : 'agent';
       const lbl = (a.source || 'EVENT').toUpperCase();
       return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    // Foot link per the mock: full history lives on the project's Logs tab.
+    const more = hidden > 0
+      ? `<div class="tl-more">${hidden} more in <a href="/project/${esc(p.project)}/logs">Logs</a></div>`
+      : '';
     const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
-    return `<div class="timeline">${rows}${foot}</div>`;
+    return `<div class="timeline">${rows}${more}${foot}</div>`;
   }
 
   function renderProject(p){
     const slug = p.project;
     return `
-      <div class="pbrief collapsed" data-slug="${esc(slug)}">
+      <div class="pbrief" data-slug="${esc(slug)}">
         <div class="pbrief-head">
-          <span class="pbic"><i class="ti ti-terminal"></i></span>
-          <span class="pbname">${esc(slug)}</span>
+          ${_projectTitleLinkHtml(slug)}
           ${_statusPill(p)}
-          <button class="pb-toggle" onclick="toggleDetails(this)">
-            <span class="lbl-hide">Hide details</span><span class="lbl-show">Show details</span>
-            <i class="ti ti-chevron-up" style="font-size:13px"></i>
-          </button>
         </div>
 
-        <div class="pb-cols">
-          <div class="pb-main">
+        <div class="pb-grid">
+          <div class="pb-cell pb-cell-summary">
             <div class="pb-summary">
               <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
               <div class="pb-sum-body">
                 <span class="pb-sum-tag"><i class="ti ti-sparkles" style="font-size:9px"></i> AI summary</span>
-                <div class="pb-sum-text" id="sum-${esc(slug)}">Loading summary…</div>
+                <div class="pb-sum-text" id="sum-${esc(slug)}">${summaryLoadingHtml()}</div>
               </div>
             </div>
             ${_statusLine(p)}
           </div>
-          <!-- AC1/AC3: per-project to-do panel, mounted from the shared module -->
-          <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>
+          <div class="pb-cell pb-cell-todo">
+            <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>
+          </div>
+          <div class="pb-cell pb-cell-shipped">
+            <div class="drill-sec"><i class="ti ti-rocket" style="font-size:13px"></i> Shipped detail</div>
+            ${_shippedDetail(p)}
+          </div>
+          <div class="pb-cell pb-cell-activity">
+            <div class="drill-sec"><i class="ti ti-timeline-event" style="font-size:13px"></i> Recent activity</div>
+            ${_timeline(p)}
+          </div>
         </div>
 
-        <div class="pb-details">
-          <div class="drill-cols">
-            <div>
-              <div class="drill-sec"><i class="ti ti-rocket" style="font-size:13px"></i> Shipped detail</div>
-              ${_shippedDetail(p)}
-            </div>
-            <div>
-              <div class="drill-sec"><i class="ti ti-timeline-event" style="font-size:13px"></i> Recent activity</div>
-              ${_timeline(p)}
-            </div>
-          </div>
+        <div class="pb-foot">
           <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
         </div>
       </div>`;
@@ -501,6 +561,7 @@
   async function loadProjectSummary(slug, date){
     const el = document.getElementById('sum-' + slug);
     if (!el) return;
+    el.innerHTML = summaryLoadingHtml();
     try {
       const r = await fetch('/api/projects/' + encodeURIComponent(slug) +
                             '/brief/summary?date=' + encodeURIComponent(date));
@@ -509,11 +570,6 @@
     } catch(_) {
       el.textContent = 'Summary unavailable.';
     }
-  }
-
-  // AC10 / AC12: per-block, independent collapse toggle
-  function toggleDetails(btn){
-    btn.closest('.pbrief').classList.toggle('collapsed');
   }
 
   // ── AC2: date navigation ────────────────────────────────────────────────────

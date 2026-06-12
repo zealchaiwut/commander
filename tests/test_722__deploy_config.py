@@ -158,6 +158,19 @@ def test_merge_put_null_key_preserves_stored():
     assert merged["prd"]["render_api_key"] == "kept_secret"
 
 
+def test_merge_seed_repairs_legacy_script_paths():
+    seed = dcs.seed_for("commander")
+    stored = {
+        "uat": {
+            "start_script": "bash ../../scripts/start_uat.sh",
+            "stop_script": "bash ../../scripts/stop_all.sh uat",
+        }
+    }
+    merged = dcs.merge_seed(seed, stored)
+    assert merged["uat"]["start_script"] == "bash scripts/start_uat.sh"
+    assert merged["uat"]["stop_script"] == "bash scripts/stop_all.sh uat"
+
+
 # ── AC8: seed defaults — commander ────────────────────────────────────────────
 
 def test_get_commander_prd_seed_defaults(client_ctx):
@@ -168,6 +181,8 @@ def test_get_commander_prd_seed_defaults(client_ctx):
     assert data["prd"]["host"] == "local"
     assert data["prd"]["launchd_label"] == "com.commander.dashboard"
     assert data["prd"]["branch"] == "master"
+    assert data["prd"]["start_script"] == "bash scripts/start_prd.sh"
+    assert data["prd"]["stop_script"] == "bash scripts/stop_all.sh prd"
     # no cleartext key anywhere
     assert "render_api_key" not in data["prd"]
 
@@ -177,6 +192,23 @@ def test_get_commander_uat_seed_defaults(client_ctx):
     data = client.get("/api/projects/commander/deploy-config").json()
     assert data["uat"]["host"] == "local"
     assert data["uat"]["branch"] == "develop"
+
+
+def test_commander_uat_scripts_are_relative_to_working_dir():
+    """UAT deploy scripts must resolve inside the uat clone, not ../../scripts."""
+    from pathlib import Path
+
+    from services.sprint_manager import deploy_actions as da
+
+    seed = dcs.seed_for("commander")["uat"]
+    assert "../../" not in seed["start_script"]
+    assert seed["start_script"] == "bash scripts/start_uat.sh"
+    assert seed["stop_script"] == "bash scripts/stop_all.sh uat"
+
+    entry = dict(seed)
+    entry["working_dir"] = str(Path(__file__).resolve().parent.parent)
+    ready, errors = da.check_deploy_readiness(entry)
+    assert ready, errors
 
 
 # ── AC9: seed defaults — perf-coach ───────────────────────────────────────────

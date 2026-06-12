@@ -168,7 +168,7 @@ def test_844__panel_on_right_of_home_project_block(home_html):
     assert "CommanderTodo.mount" in home_html, \
         "home page must mount the shared to-do panel per project block"
     collapsed = _nows(home_html)
-    assert re.search(r"\.pb-cols\{[^}]*grid-template-columns", collapsed), \
+    assert re.search(r"\.pb-grid\{[^}]*grid-template-columns", collapsed), \
         "home block must use a 2-column grid placing the panel beside the summary"
 
 
@@ -259,15 +259,15 @@ def test_844__done_group_collapsible(todo_js):
     assert "done-collapsed" in todo_js, "Done group must have a collapsed state"
 
 
-# ── AC10: hover reveals delete + promote (up-right arrow) ─────────────────────
+# ── AC10: hover reveals delete + edit (pencil) ────────────────────────────────
 
-def test_844__hover_reveals_delete_and_promote(todo_js):
+def test_844__hover_reveals_delete_and_edit(todo_js):
     collapsed = _nows(todo_js)
     assert re.search(r"\.todo-actions\{[^}]*opacity:0", collapsed), \
         "actions must be hidden until hover"
     assert re.search(r"\.todo-item:hover\s*\.todo-actions\{[^}]*opacity:1", collapsed), \
         "actions must reveal on hover"
-    assert "ti-arrow-up-right" in todo_js, "promote up-right arrow icon missing"
+    assert "ti-pencil" in todo_js, "edit pencil icon missing"
     assert re.search(r"\bdel\b|delete", todo_js), "delete action missing"
 
 
@@ -306,19 +306,13 @@ def test_844__empty_state_present(todo_js):
     assert "todo-empty" in todo_js, "empty-state element missing"
 
 
-# ── AC16: promote shows "coming soon" only, no other action ──────────────────
+# ── AC16: paste screenshot creates a new to-do ───────────────────────────────
 
-def test_844__promote_is_coming_soon_only(todo_js):
-    assert re.search(r"coming soon|comingSoon|coming-soon", todo_js, re.IGNORECASE), \
-        "promote must show a 'coming soon' affordance"
-    m = re.search(r"function\s+promote\s*\([^)]*\)\s*\{(.*?)\n\s*\}", todo_js, re.DOTALL)
-    if not m:
-        m = re.search(r"promote\s*=\s*\([^)]*\)\s*=>\s*\{(.*?)\n\s*\}", todo_js, re.DOTALL)
-    assert m, "a dedicated promote handler must exist"
-    body = m.group(1)
-    for forbidden in ("fetch(", "window.location", "location.href", "POST", "PATCH", "DELETE"):
-        assert forbidden not in body, \
-            f"promote handler must not perform '{forbidden}' (coming-soon only)"
+def test_844__paste_creates_new_todo_from_screenshot(todo_js):
+    assert "addFromScreenshot" in todo_js
+    m = re.search(r"panel\.onpaste\s*=\s*function\s*\([^)]*\)\s*\{(.*?)\n\s*\};", todo_js, re.DOTALL)
+    assert m, "panel paste handler must exist"
+    assert "addFromScreenshot" in m.group(1)
 
 
 # ── Backing API: full CRUD round-trip the panel auto-saves through ────────────

@@ -184,6 +184,46 @@ def test_delete_unknown_todo_returns_404(client):
     assert r.status_code == 404
 
 
+def test_clear_done_removes_only_completed_todos(client):
+    proj = "p-clear-done"
+    active = client.post(f"/api/projects/{proj}/todos", json={"text": "keep"}).json()
+    done_a = client.post(f"/api/projects/{proj}/todos", json={"text": "gone A"}).json()
+    done_b = client.post(f"/api/projects/{proj}/todos", json={"text": "gone B"}).json()
+    client.patch(f"/api/projects/{proj}/todos/{done_a['id']}", json={"done": True})
+    client.patch(f"/api/projects/{proj}/todos/{done_b['id']}", json={"done": True})
+
+    r = client.delete(f"/api/projects/{proj}/todos/done")
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 2
+
+    listed = client.get(f"/api/projects/{proj}/todos").json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == active["id"]
+    assert listed[0]["done"] is False
+
+
+def test_clear_done_is_project_scoped(client):
+    done = client.post("/api/projects/mine/todos", json={"text": "mine"}).json()
+    client.patch(f"/api/projects/mine/todos/{done['id']}", json={"done": True})
+    other = client.post("/api/projects/other/todos", json={"text": "theirs"}).json()
+    client.patch(f"/api/projects/other/todos/{other['id']}", json={"done": True})
+
+    r = client.delete("/api/projects/mine/todos/done")
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 1
+
+    assert len(client.get("/api/projects/mine/todos").json()) == 0
+    assert len(client.get("/api/projects/other/todos").json()) == 1
+
+
+def test_clear_done_noop_when_none_completed(client):
+    client.post("/api/projects/p/todos", json={"text": "active only"})
+    r = client.delete("/api/projects/p/todos/done")
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 0
+    assert len(client.get("/api/projects/p/todos").json()) == 1
+
+
 # ── AC6 / UAT 6: project isolation ────────────────────────────────────────────
 
 def test_ac6_list_is_project_scoped(client):
@@ -249,7 +289,9 @@ def test_ac9_ac10_api_response_has_no_ticket_or_reserved_fields(client):
     body = client.post("/api/projects/p/todos", json={"text": "t"}).json()
     assert set(body.keys()) == {
         "id", "project", "text", "done", "position", "created_at", "updated_at",
+        "attachments",
     }
+    assert body["attachments"] == []
     for forbidden in ("labels", "label", "assignee", "assignees",
                       "due_date", "due", "promoted_issue_number"):
         assert forbidden not in body
@@ -272,3 +314,4 @@ def test_repo_helpers_in_sprint_manager_module():
     assert hasattr(todo_repo, "create_todo")
     assert hasattr(todo_repo, "update_todo")
     assert hasattr(todo_repo, "delete_todo")
+    assert hasattr(todo_repo, "clear_done_todos")

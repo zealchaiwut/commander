@@ -367,6 +367,94 @@ def test_has_rerun_child_flag_on_parent(client, fresh_db, tmp_path, monkeypatch)
     assert child["has_rerun_child"] is False
 
 
+def test_summary_issue_from_archived_state_file(client, fresh_db, tmp_path, monkeypatch):
+    sprints_dir = tmp_path / "sprints"
+    archive = sprints_dir / "archive"
+    archive.mkdir(parents=True)
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(
+        fresh_db, "sprint-68.6", "completed",
+        project="o/r", ended_at="2026-06-12T00:00:00",
+    )
+    (archive / "sprint-68.6-state.json").write_text(json.dumps({
+        "sprint_label": "sprint-68.6",
+        "summary_issue_url": "https://github.com/o/r/issues/906",
+        "issues": [{"number": 894, "status": "done"}],
+    }), encoding="utf-8")
+    s = _by_label(client.get("/api/sprints/history").json(), "sprint-68.6")
+    assert s["summary_issue_num"] == 906
+    assert s["summary_issue_url"] == "https://github.com/o/r/issues/906"
+
+
+def test_read_plan_prefers_commander_sprints_dir(tmp_path):
+    """Commander ``.commander/sprints`` plan files must be visible to history."""
+    dash = tmp_path / "dash_sprints"
+    dash.mkdir()
+    cmd = tmp_path / "commander" / ".commander" / "sprints"
+    cmd.mkdir(parents=True)
+    (cmd / "sprint-68-plan.json").write_text(json.dumps({
+        "state": "completed", "end_reason": "bulk_complete",
+    }))
+    (dash / "sprint-68-plan.json").write_text(json.dumps({"state": "needs_rework"}))
+    plan = svc._read_plan_file([cmd, dash], "sprint-68")
+    assert plan["state"] == "completed"
+    assert plan["end_reason"] == "bulk_complete"
+
+
+def test_parent_completed_when_ready_to_merge_child_settles(client, fresh_db, tmp_path, monkeypatch):
+    """Bottom-up partial_finished pass must not strand parents on ready_to_merge kids."""
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-68", "completed", project="o/r",
+                      ended_at="2026-06-12T00:00:00")
+    _insert_lifecycle(fresh_db, "sprint-68.4", "ready_to_merge", project="o/r",
+                      ended_at="2026-06-12T00:04:00")
+    _insert_lifecycle(fresh_db, "sprint-68.6", "completed", project="o/r",
+                      ended_at="2026-06-12T00:06:00")
+    fresh_db.record_sprint_history(
+        "sprint-68.5", "o/r", "deleted", issues=[], end_reason="deleted via dashboard",
+    )
+    parent = _by_label(client.get("/api/sprints/history").json(), "sprint-68")
+    assert parent["lifecycle_state"] == "completed"
+
+
+def test_history_honors_plan_bulk_complete_over_stale_db(client, fresh_db, tmp_path, monkeypatch):
+    """Bulk-complete writes plan.json first; history must not keep showing Partial."""
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-68", "needs_rework", project="o/r",
+                      ended_at="2026-06-12T00:00:00")
+    _insert_lifecycle(fresh_db, "sprint-68.1", "needs_rework", project="o/r",
+                      ended_at="2026-06-12T00:01:00")
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    (sprints_dir / "sprint-68-plan.json").write_text(json.dumps({
+        "state": "completed", "end_reason": "bulk_complete",
+    }), encoding="utf-8")
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({
+        "state": "completed", "end_reason": "bulk_complete",
+    }), encoding="utf-8")
+    body = client.get("/api/sprints/history").json()
+    parent = _by_label(body, "sprint-68")
+    child = _by_label(body, "sprint-68.1")
+    assert parent["lifecycle_state"] == "completed"
+    assert child["lifecycle_state"] == "completed"
+
+
+def test_child_inherits_parent_pr_number(client, fresh_db, tmp_path, monkeypatch):
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+    _insert_lifecycle(fresh_db, "sprint-68", "completed", project="o/r",
+                      ended_at="2026-06-12T00:00:00")
+    _insert_lifecycle(fresh_db, "sprint-68.1", "completed", project="o/r",
+                      ended_at="2026-06-12T00:01:00")
+    _write_state_file(sprints_dir, "sprint-68", {
+        **_state_payload("sprint-68", issues=[{"number": 1, "status": "done"}]),
+        "pr_number": 42,
+    })
+    child = _by_label(client.get("/api/sprints/history").json(), "sprint-68.1")
+    assert child["pr_number"] == 42
+
+
 def test_summary_issue_and_failure_reason_from_state_file(client, fresh_db, tmp_path, monkeypatch):
     sprints_dir = tmp_path / "sprints"
     monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)

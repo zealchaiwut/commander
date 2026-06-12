@@ -206,9 +206,6 @@ Global and per-project settings, deploy-config, env-vars, sprint goal/order, doc
 - [ ] `POST /api/sprints/order` (server.py:5871) — move to `settings.py`, delegate logic to service, keep handler HTTP-only
 - [ ] `GET /api/projects/notes` (server.py:13340) — move to `settings.py`, delegate logic to service, keep handler HTTP-only
 - [ ] `POST /api/projects/notes` (server.py:13355) — move to `settings.py`, delegate logic to service, keep handler HTTP-only
-- [ ] `GET /api/notes` (server.py:13382) — move to `settings.py`, delegate logic to service, keep handler HTTP-only
-- [ ] `PUT /api/notes` (server.py:13388) — move to `settings.py`, delegate logic to service, keep handler HTTP-only
-
 ### Cluster: `analytics`
 
 Metrics, calibration, estimate-vs-actual, outcome/finish-card, and mis-sizing analytics. Partially extracted already (analytics_router).

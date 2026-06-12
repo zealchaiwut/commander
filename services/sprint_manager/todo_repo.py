@@ -23,6 +23,7 @@ from sqlalchemy import func
 
 from services.sprint_manager.models import ProjectTodo
 from services.sprint_manager.neon_db import get_session as _neon_get_session
+from services.sprint_manager import todo_attachment_repo as _attach_repo
 
 # Sentinel for "field not supplied" so a PATCH can update done / text / position
 # independently — None is a legitimate value we must not confuse with "omitted".
@@ -54,7 +55,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _orm_to_dict(t: ProjectTodo) -> dict:
+def _orm_to_dict(t: ProjectTodo, attachments: list[dict] | None = None) -> dict:
     """Project an ORM row to the public API shape (no promoted_issue_number)."""
     return {
         "id": t.id,
@@ -64,6 +65,7 @@ def _orm_to_dict(t: ProjectTodo) -> dict:
         "position": t.position,
         "created_at": t.created_at,
         "updated_at": t.updated_at,
+        "attachments": attachments or [],
     }
 
 
@@ -101,7 +103,7 @@ def _fallback_write(data: dict) -> None:
         pass
 
 
-def _fallback_to_dict(rec: dict) -> dict:
+def _fallback_to_dict(rec: dict, attachments: list[dict] | None = None) -> dict:
     """Project a fallback record to the public API shape (drops reserved field)."""
     return {
         "id": rec["id"],
@@ -111,7 +113,12 @@ def _fallback_to_dict(rec: dict) -> dict:
         "position": rec["position"],
         "created_at": rec["created_at"],
         "updated_at": rec["updated_at"],
+        "attachments": attachments or [],
     }
+
+
+def _attach_map(project: str) -> dict[int, list[dict]]:
+    return _attach_repo.list_for_project(project)
 
 
 def _fallback_next_position(todos: list[dict], project: str) -> int:
@@ -123,13 +130,14 @@ def _fallback_next_position(todos: list[dict], project: str) -> int:
 
 def list_todos(project: str) -> list[dict]:
     """All todos for *project*, ascending by position (then id for stability)."""
+    attach_by_id = _attach_map(project)
     cm = _try_open_session()
     if cm is None:
         with _fallback_lock:
             data = _fallback_read()
         rows = [t for t in data["todos"] if t["project"] == project]
         rows.sort(key=lambda t: (t["position"], t["id"]))
-        return [_fallback_to_dict(t) for t in rows]
+        return [_fallback_to_dict(t, attach_by_id.get(t["id"], [])) for t in rows]
     with cm as session:
         rows = (
             session.query(ProjectTodo)
@@ -137,7 +145,7 @@ def list_todos(project: str) -> list[dict]:
             .order_by(ProjectTodo.position.asc(), ProjectTodo.id.asc())
             .all()
         )
-        return [_orm_to_dict(r) for r in rows]
+        return [_orm_to_dict(r, attach_by_id.get(r.id, [])) for r in rows]
 
 
 def create_todo(project: str, text: str) -> dict:
@@ -160,7 +168,7 @@ def create_todo(project: str, text: str) -> dict:
             data["todos"].append(rec)
             data["next_id"] += 1
             _fallback_write(data)
-        return _fallback_to_dict(rec)
+        return _fallback_to_dict(rec, [])
     with cm as session:
         max_pos = (
             session.query(func.max(ProjectTodo.position))
@@ -180,7 +188,7 @@ def create_todo(project: str, text: str) -> dict:
         session.add(todo)
         session.commit()
         session.refresh(todo)
-        return _orm_to_dict(todo)
+        return _orm_to_dict(todo, [])
 
 
 def update_todo(
@@ -217,7 +225,7 @@ def update_todo(
                 rec["position"] = position
             rec["updated_at"] = now
             _fallback_write(data)
-            return _fallback_to_dict(rec)
+            return _fallback_to_dict(rec, _attach_repo.list_for_todo(project, todo_id))
     with cm as session:
         todo = (
             session.query(ProjectTodo)
@@ -235,7 +243,38 @@ def update_todo(
         todo.updated_at = now
         session.commit()
         session.refresh(todo)
-        return _orm_to_dict(todo)
+        return _orm_to_dict(todo, _attach_repo.list_for_todo(project, todo_id))
+
+
+def clear_done_todos(project: str) -> int:
+    """Delete every done todo for *project*. Returns the number removed."""
+    cm = _try_open_session()
+    if cm is None:
+        with _fallback_lock:
+            data = _fallback_read()
+            before = len(data["todos"])
+            removed_ids = [
+                t["id"] for t in data["todos"]
+                if t["project"] == project and t["done"]
+            ]
+            data["todos"] = [
+                t for t in data["todos"]
+                if not (t["project"] == project and t["done"])
+            ]
+            removed = before - len(data["todos"])
+            if removed:
+                _fallback_write(data)
+                for tid in removed_ids:
+                    _attach_repo.delete_all_for_todo(project, tid)
+            return removed
+    with cm as session:
+        removed = (
+            session.query(ProjectTodo)
+            .filter_by(project=project, done=True)
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+        return removed
 
 
 def delete_todo(project: str, todo_id: int) -> bool:
@@ -255,6 +294,7 @@ def delete_todo(project: str, todo_id: int) -> bool:
             removed = len(data["todos"]) < before
             if removed:
                 _fallback_write(data)
+                _attach_repo.delete_all_for_todo(project, todo_id)
             return removed
     with cm as session:
         todo = (
@@ -266,4 +306,5 @@ def delete_todo(project: str, todo_id: int) -> bool:
             return False
         session.delete(todo)
         session.commit()
+        _attach_repo.delete_all_for_todo(project, todo_id)
         return True

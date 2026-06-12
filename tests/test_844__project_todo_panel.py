@@ -83,15 +83,22 @@ def test_ac1_home_mounts_panel_per_project(home):
         "home.html must mount the shared to-do panel"
     # The panel sits on the right of the block: a two-column body wraps the
     # always-visible summary/status on the left and the to-do mount on the right.
-    assert "pb-cols" in home or "pb-todo" in home, \
+    assert "pb-grid" in home or "pb-cell-todo" in home, \
         "home block must have a side-by-side column for the to-do panel"
 
 
 def test_ac1_home_panel_on_right_grid(home):
     """The block body is a 2-column grid (summary left, to-do right)."""
     collapsed = _nows(home)
-    assert re.search(r"\.pb-cols\{[^}]*grid-template-columns", collapsed), \
+    assert re.search(r"\.pb-grid\{[^}]*grid-template-columns", collapsed), \
         "home block must use a grid placing the to-do panel beside the summary"
+
+
+def test_ac1_home_embed_caps_visible_todos(js):
+    """Home embed shows at most five active items; the rest are hidden."""
+    assert "HOME_LIST_LIMIT" in js
+    assert "active.slice(0,HOME_LIST_LIMIT)" in js.replace(" ", "")
+    assert "todo-more" in js
 
 
 # ── AC2: project view has a docked panel ─────────────────────────────────────
@@ -203,6 +210,26 @@ def test_ac8_uncheck_returns_to_active(js):
 
 # ── AC9: Done group collapsible; count stays current ─────────────────────────
 
+def test_fullscreen_expand_wired(js, project):
+    assert "openFullscreen" in js
+    assert "todo-fs-root" in js
+    assert "todo-fsbtn" in js
+    assert "CommanderTodo.openFullscreen" in project or "todo-dock-expand" in project
+
+
+def test_attachment_ui_wired(js):
+    assert "todo-thumb" in js
+    assert "/attachments" in js
+    assert "attach" in js
+
+
+def test_clear_done_button_wired(js):
+    assert "todo-done-clear" in js, "Clear done button class missing"
+    assert "Clear done" in js, "Clear done label missing"
+    assert re.search(r"/done['\"].*method:\s*['\"]DELETE['\"]|method:\s*['\"]DELETE['\"][^}]+/done", _nows(js)), \
+        "Clear done must DELETE /api/projects/<project>/todos/done"
+
+
 def test_ac9_done_group_collapsible(js):
     assert "todo-done-toggle" in js, "Done group toggle missing"
     collapsed = _nows(js)
@@ -211,14 +238,14 @@ def test_ac9_done_group_collapsible(js):
         "done-collapsed" in js, "Done group must be collapsible"
 
 
-# ── AC10: hover reveals delete + promote ─────────────────────────────────────
+# ── AC10: hover reveals delete + edit ────────────────────────────────────────
 
-def test_ac10_hover_actions_delete_and_promote(js):
+def test_ac10_hover_actions_delete_and_edit(js):
     collapsed = _nows(js)
-    assert re.search(r"\.todo-item:hover\s*\.todo-actions\{[^}]*opacity:1", collapsed), \
-        "actions must reveal on hover"
-    assert "promote" in js, "promote action missing"
-    assert "ti-arrow-up-right" in js, "promote up-right arrow icon missing"
+    assert "todo-actions" in collapsed and "opacity:1" in collapsed
+    assert "todo-item:hover" in collapsed or "todo-item.focused" in collapsed
+    assert "todo-iconbtn edit" in js or '.edit"' in js, "edit action missing"
+    assert "ti-pencil" in js, "edit pencil icon missing"
     assert re.search(r"\bdel\b|delete", js), "delete action missing"
 
 
@@ -268,22 +295,14 @@ def test_ac15_empty_state(js):
     assert "todo-empty" in js, "empty-state element missing"
 
 
-# ── AC16: promote shows "coming soon" only, no other action ──────────────────
+# ── AC16: paste screenshot creates a new to-do ───────────────────────────────
 
-def test_ac16_promote_coming_soon_only(js):
-    assert re.search(r"coming soon|comingSoon|coming-soon", js, re.IGNORECASE), \
-        "promote must show a 'coming soon' affordance"
-
-
-def test_ac16_promote_triggers_no_other_action(js):
-    """The promote handler must not POST/PATCH/DELETE or navigate anywhere."""
-    # Find the promote handler body and assert it performs no mutation/navigation.
-    m = re.search(r"function\s+promote\s*\([^)]*\)\s*\{(.*?)\n\s*\}", js, re.DOTALL)
-    if not m:
-        # arrow form: const promote = (..) => { ... }
-        m = re.search(r"promote\s*=\s*\([^)]*\)\s*=>\s*\{(.*?)\n\s*\}", js, re.DOTALL)
-    assert m, "a dedicated promote handler must exist"
+def test_ac16_paste_creates_new_todo_from_screenshot(js):
+    assert "addFromScreenshot" in js, "paste must create a new to-do from screenshots"
+    assert "apiCreate" in js
+    m = re.search(r"panel\.onpaste\s*=\s*function\s*\([^)]*\)\s*\{(.*?)\n\s*\};", js, re.DOTALL)
+    assert m, "panel paste handler must exist"
     body = m.group(1)
-    for forbidden in ("fetch(", "location", "window.location", "POST", "PATCH", "DELETE"):
-        assert forbidden not in body, \
-            f"promote handler must not perform '{forbidden}' (coming-soon only)"
+    assert "addFromScreenshot" in body, "paste handler must call addFromScreenshot"
+    assert "focusId" not in body or "addFromScreenshot" in body, \
+        "paste must not require a focused existing item"

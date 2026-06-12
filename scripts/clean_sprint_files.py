@@ -206,6 +206,19 @@ def run_cleanup(
         archive_dir.mkdir(parents=True, exist_ok=True)
     for src in plan:
         dst = archive_dir / src.name
+        if not src.exists():
+            if dst.exists():
+                archived.append(src.name)
+            continue
+        if dst.exists():
+            # Partial or repeat run: archive already holds this name — drop the
+            # live copy and treat the file as archived (idempotent, no 500).
+            try:
+                src.unlink()
+            except OSError:
+                raise
+            archived.append(src.name)
+            continue
         shutil.move(str(src), str(dst))
         archived.append(src.name)
 

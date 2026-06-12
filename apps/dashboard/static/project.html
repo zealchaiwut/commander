@@ -1047,6 +1047,13 @@
     .ps-icon-opt:hover { color: var(--text); border-color: var(--text-sub); }
     .ps-icon-opt:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
     .ps-icon-opt[aria-checked="true"] { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+    .ps-icon-opt--hidden { display: none !important; }
+    .ps-icons-see-more {
+      align-self: flex-start; border: none; background: none; padding: 2px 0;
+      font-size: 12px; font-weight: 600; color: var(--text-sub); cursor: pointer;
+    }
+    .ps-icons-see-more:hover { color: var(--text); }
+    .ps-icons-see-more.hidden { display: none; }
     .ps-color-grid { display: flex; flex-wrap: wrap; gap: 8px; }
     .ps-color-opt {
       width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent;
@@ -1666,16 +1673,6 @@
     .smgmt-toolbar-actions {
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     }
-    /* Grouped button segment (Pre-flight + Compact) */
-    .smgmt-toolbar-group {
-      display: flex; align-items: stretch;
-      border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
-    }
-    .smgmt-toolbar-group .btn-ghost {
-      border-radius: 0; border: none; border-right: 1px solid var(--border);
-      margin: 0;
-    }
-    .smgmt-toolbar-group .btn-ghost:last-child { border-right: none; }
     /* Show-more toggle for label chips */
     .smgmt-lf-show-more {
       display: inline-flex; align-items: center; gap: 4px;
@@ -1721,9 +1718,6 @@
       font-family: var(--mono); font-weight: 600; margin-left: 4px;
     }
     .smgmt-summary-header-actions { display: flex; align-items: center; gap: 4px; }
-    /* Pre-flight checks toggle (off = muted) */
-    .smgmt-preflight-toggle.is-off { color: var(--text-muted); }
-    .smgmt-preflight-toggle.is-off .ti { opacity: .7; }
     .smgmt-archived-toggle {
       font-size: 11px; color: var(--text-muted);
       background: var(--surface-2); padding: 4px 9px;
@@ -1792,7 +1786,7 @@
     }
 
     /* ── Sprint history ledger (issue #806) ──────────────────────────────── */
-    .hist-ledger { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 18px; }
+    .hist-ledger { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 14px; }
     .hist-ledger-empty {
       padding: 28px 18px; text-align: center;
       color: var(--text-sub); font-size: 12.5px; font-style: italic;
@@ -1801,36 +1795,107 @@
     .hist-card {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; overflow: hidden;
-      transition: box-shadow .14s, border-color .14s;
+      transition: border-color .14s, background .14s;
     }
-    .hist-card.expanded { box-shadow: 0 0 0 3px var(--blue-bg), 0 1px 3px rgba(0,0,0,.05); border-color: var(--blue); }
+    .hist-card.expanded {
+      border-color: color-mix(in srgb, var(--blue) 28%, var(--border));
+      background: color-mix(in srgb, var(--blue-bg) 18%, var(--surface));
+    }
     .hist-card.locked {
-      opacity: .62; background: var(--surface-2); border-color: var(--border);
+      opacity: .68; background: var(--surface-2); border-color: var(--border);
     }
-    .hist-card.locked:hover { opacity: .82; }
-    .hist-card.locked.expanded { box-shadow: 0 0 0 3px var(--surface-2); border-color: var(--text-sub); }
-    .hist-card.child { margin-left: 26px; }
+    .hist-card.locked:hover { opacity: .85; }
+    .hist-card.locked.expanded {
+      border-color: var(--border);
+      background: var(--surface-2);
+    }
+    .hist-card.locked:not(.expanded) .hist-card-head {
+      align-items: center;
+    }
+    .hist-card.child { margin-left: 0; padding-left: 2px; }
     /* Re-run sub-sprints (.1, .2, …) nest under their base sprint row. */
-    .hist-sprint-group { display: flex; flex-direction: column; gap: 6px; }
+    .hist-sprint-group { display: flex; flex-direction: column; gap: 8px; }
     .hist-group-children {
       display: flex; flex-direction: column; gap: 6px;
-      margin-left: 18px; padding-left: 14px;
-      border-left: 2px solid var(--border);
+      margin: 2px 0 0 10px; padding: 6px 0 2px 12px;
+      border-left: 1px solid var(--border);
     }
-    .hist-group-children .hist-card.child { margin-left: 0; }
+    .hist-group-children .hist-card.child {
+      background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+      border-color: color-mix(in srgb, var(--border) 80%, transparent);
+    }
     .hist-card-head {
-      display: flex; align-items: center; gap: 9px;
-      padding: 12px 16px; cursor: pointer; user-select: none;
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      gap: 3px 10px; padding: 9px 12px;
+      cursor: pointer; user-select: none; align-items: start;
     }
     .hist-card-head:hover { background: var(--surface-hover); }
-    .hist-chev { font-size: 14px; color: var(--text-sub); flex: none; }
-    .hist-child-arrow { color: var(--text-sub); font-size: 13px; }
-    .hist-card-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
-    .hist-card-spacer { flex: 1; }
-    .hist-card-mini { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .hist-card-head-left {
+      grid-column: 1; display: flex; align-items: center; gap: 6px;
+      flex-wrap: wrap; min-width: 0;
+    }
+    .hist-card-head-mid {
+      grid-column: 1; display: flex; align-items: center; gap: 5px;
+      flex-wrap: wrap; min-width: 0;
+    }
+    .hist-card-body {
+      border-top: 1px solid var(--border);
+      padding: 4px 0 6px;
+    }
+    .hist-chev { font-size: 13px; color: var(--text-sub); flex: none; }
+    .hist-child-arrow { color: var(--text-sub); font-size: 12px; }
+    .hist-card-title { font-size: 13px; font-weight: 600; color: var(--text); flex: none; }
+    .hist-card-spacer { flex: 1; min-width: 8px; }
+    .hist-card-mini {
+      font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums; flex: none;
+    }
+    .hist-progress {
+      font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums; flex: none;
+    }
+    .hist-progress::before { content: '·'; margin-right: 5px; color: var(--text-muted); }
+    .hist-est-mini {
+      position: relative; width: 68px; height: 14px; flex: none;
+      background: var(--surface-2); border-radius: 4px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .hist-est-mini-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; opacity: .9; }
+    .hist-est-mini-lbl {
+      position: relative; z-index: 1; display: block; text-align: center;
+      font-size: 9px; font-weight: 700; line-height: 14px; color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .hist-head-actions {
+      display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: none;
+    }
+    .hist-head-btn {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      text-decoration: none; cursor: pointer; white-space: nowrap;
+      transition: background .12s, border-color .12s;
+    }
+    .hist-head-btn:hover { background: var(--surface-hover); }
+    .hist-head-btn.link-pr  { color: var(--purple); border-color: var(--purple-bg); }
+    .hist-head-btn.link-pr:hover  { background: var(--purple-bg); }
+    .hist-head-btn.link-sum { color: var(--blue); border-color: var(--blue-bg); }
+    .hist-head-btn.link-sum:hover { background: var(--blue-bg); }
+    .hist-head-btn--rerun  { color: var(--amber); border-color: var(--amber-bg); }
+    .hist-head-btn--rerun:hover  { background: var(--amber-bg); }
+    .hist-head-btn--finish { color: var(--blue); border-color: var(--blue-bg); }
+    .hist-head-btn--finish:hover { background: var(--blue-bg); }
+    .hist-head-btn--delete { color: var(--red); border-color: var(--red-bg); }
+    .hist-head-btn--delete:hover { background: var(--red-bg); }
+    .hist-head-btn--bulk { color: var(--green); border-color: var(--green-bg); }
+    .hist-head-btn--bulk:hover { background: var(--green-bg); }
+    .hist-card-head-right {
+      grid-column: 2; grid-row: 1;
+      display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+      justify-content: flex-end; flex: none; align-self: start; margin-left: auto;
+    }
+    .hist-card-head-right .hist-head-actions { flex-wrap: nowrap; }
     .hist-state {
-      font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
-      letter-spacing: .2px;
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+      letter-spacing: .01em; text-transform: none; flex: none;
     }
     .hist-state.completed { color: var(--steel);  background: var(--steel-bg); }
     .hist-state.partial   { color: var(--amber);  background: var(--amber-bg); }
@@ -1843,18 +1908,18 @@
     .hist-state.unknown   { color: var(--text-sub); background: var(--surface-2); }
     /* end_reason shown under a needs_rework badge (sprint-lifecycle.md) */
     .hist-state-reason {
-      font-size: 11px; color: var(--text-muted); margin-left: 6px;
-      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 10.5px; color: var(--text-muted); margin-left: 2px;
+      max-width: min(220px, 40vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
-    /* Metrics row */
+    /* Metrics row (legacy est bar — compact cards use header mini + stat chips) */
     .hist-metrics {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-      padding: 12px 16px 4px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+      padding: 4px 12px 2px;
     }
     .est-bar {
-      position: relative; flex: 1; min-width: 140px; height: 18px;
-      background: var(--surface-2); border-radius: 6px; overflow: hidden;
+      position: relative; flex: 1; min-width: 100px; height: 14px;
+      background: var(--surface-2); border-radius: 5px; overflow: hidden;
       display: flex; align-items: center;
     }
     .est-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; opacity: .85; }
@@ -1865,18 +1930,18 @@
     }
     .hist-badge {
       display: inline-flex; align-items: center; gap: 4px;
-      font-size: 11.5px; color: var(--text-muted);
-      background: var(--surface-2); padding: 3px 9px; border-radius: 6px;
-      font-variant-numeric: tabular-nums;
+      font-size: 10.5px; color: var(--text-muted);
+      background: var(--surface-2); padding: 2px 8px; border-radius: 999px;
+      font-variant-numeric: tabular-nums; border: 1px solid var(--border);
     }
     .hist-badge i { font-size: 12px; }
 
     /* Post-sprint reconciliation checklist (issue #856) */
-    .recon { padding: 8px 16px 4px; }
+    .recon { padding: 4px 12px 6px; }
     .recon-head {
-      display: flex; align-items: center; gap: 7px;
-      font-size: 11.5px; font-weight: 700; letter-spacing: .2px;
-      text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0;
+      text-transform: none; color: var(--text-muted); margin-bottom: 5px;
     }
     .recon-head .recon-summary { text-transform: none; letter-spacing: 0; font-weight: 600; }
     .recon-head.clear   { color: var(--green); }
@@ -1898,33 +1963,45 @@
 
     /* Compact all-clear / loose-ends chip in the card head */
     .recon-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
-      padding: 2px 8px; border-radius: 5px; flex: none;
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0;
+      padding: 1px 7px; border-radius: 999px; flex: none;
+      border: 1px solid transparent;
     }
-    .recon-chip.clear   { color: var(--green); background: var(--green-bg); }
-    .recon-chip.flagged { color: var(--red);   background: var(--red-bg); }
-    .recon-chip i { font-size: 12px; }
+    .recon-chip.clear   { color: var(--green); background: transparent; border-color: var(--green-bg); }
+    .recon-chip.flagged { color: var(--red);   background: var(--red-bg); border-color: transparent; }
+    .recon-chip i { font-size: 11px; }
 
     /* Per-sprint issue list */
-    .iss-list { display: flex; flex-direction: column; padding: 6px 16px 4px; }
-    .iss-list-empty { color: var(--text-sub); font-size: 12px; font-style: italic; padding: 8px 16px; }
+    .iss-list { display: flex; flex-direction: column; padding: 2px 12px 6px; }
+    .iss-list-empty { color: var(--text-sub); font-size: 11px; font-style: italic; padding: 6px 12px; }
     .iss-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 6px 0; font-size: 12.5px;
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 0; font-size: 11.5px;
     }
     .iss-row + .iss-row { border-top: 1px solid var(--border); }
-    .iss-id { color: var(--text); font-weight: 600; min-width: 64px; }
+    .iss-icon {
+      width: 14px; height: 14px; border-radius: 3px; flex: none;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 9px;
+    }
+    .iss-icon.ok   { background: var(--green-bg); color: var(--green); }
+    .iss-icon.fail { background: var(--red-bg); color: var(--red); }
+    .iss-icon.idle { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .iss-id { color: var(--text); font-weight: 600; min-width: 44px; flex: none; }
+    .iss-title {
+      flex: 1; min-width: 0; color: var(--text-muted); font-size: 11px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .iss-rerun { color: var(--text-sub); }
     .iss-chip {
-      font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
-      padding: 2px 8px; border-radius: 5px; flex: none;
+      font-size: 10px; font-weight: 700; letter-spacing: .2px;
+      padding: 1px 7px; border-radius: 999px; flex: none;
     }
-    .iss-chip.merged  { color: var(--green); background: var(--green-bg); }
-    .iss-chip.uat     { color: var(--blue);  background: var(--blue-bg); }
+    .iss-chip.merged  { color: var(--blue);  background: var(--blue-bg); }
+    .iss-chip.uat     { color: var(--amber); background: var(--amber-bg); }
     .iss-chip.crashed { color: var(--red);   background: var(--red-bg); }
-    .iss-chip.notrun  { color: var(--text-sub); background: var(--surface-2); }
-    .iss-time { margin-left: auto; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .iss-chip.notrun  { color: var(--amber); background: transparent; border: 1px solid var(--amber-bg); }
+    .iss-time { margin-left: auto; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
 
     /* Lock note on terminal sprints */
     .lock-note {
@@ -1945,7 +2022,7 @@
     }
     .hist-head-link:hover { background: var(--surface-hover); color: var(--text); }
     .hist-fail-block {
-      margin: 0 16px 10px; padding: 10px 12px; border-radius: 8px;
+      margin: 0 12px 6px; padding: 8px 10px; border-radius: 6px;
       border: 1px solid var(--red-bg); background: var(--red-bg); color: var(--red);
       font-size: 12px; line-height: 1.45;
     }
@@ -1983,9 +2060,9 @@
     .hist-post-sprint .ps-meta { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
     .hist-post-sprint .ps-skipped { color: var(--text-muted); font-style: italic; }
     .post-sprint-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-      border: 1px solid var(--purple-bg); background: var(--purple-bg); color: var(--purple);
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600;
+      border: 1px solid var(--purple-bg); background: transparent; color: var(--purple);
     }
     .hist-link {
       display: inline-flex; align-items: center; gap: 5px;
@@ -2021,28 +2098,23 @@
     .hist-verb--finish:hover { background: var(--blue-bg); }
     .hist-verb--delete { color: var(--red); border-color: var(--red-bg); }
     .hist-verb--delete:hover { background: var(--red-bg); }
+    .hist-verb--bulk { color: var(--green); border-color: var(--green-bg); }
+    .hist-verb--bulk:hover { background: var(--green-bg); }
 
     /* ── History folding (issue #807) ──────────────────────────────────────
        The N most-recent sprints render as normal cards; older sprints collapse
        into aggregate fold rows. Emphasis on an open fold is a full border + tint
        ring (never a side stripe), matching the card language above. */
-    .hist-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 2px 4px; flex-wrap: wrap; }
+    .hist-toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 0 2px 10px; margin-bottom: 2px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
     .hist-toolbar-note {
       display: inline-flex; align-items: center; gap: 7px;
-      font-size: 12px; color: var(--text-sub); line-height: 1.4;
+      font-size: 11.5px; color: var(--text-muted); line-height: 1.4;
     }
     .hist-toolbar-note i { font-size: 14px; color: var(--text-muted); flex: none; }
-    /* Stale-branch scan action (issue #808) */
-    .hist-scan-btn {
-      display: inline-flex; align-items: center; gap: 6px; flex: none;
-      font-size: 12px; font-weight: 600; cursor: pointer;
-      padding: 6px 12px; border-radius: 7px;
-      border: 1px solid var(--border); background: var(--surface); color: var(--text);
-      transition: background .12s, border-color .12s;
-    }
-    .hist-scan-btn:hover { background: var(--surface-hover); }
-    .hist-scan-btn:disabled { opacity: .55; cursor: progress; }
-    .hist-scan-btn i { font-size: 14px; }
     /* Amber per-row chip: "N stale branches · clean up" (issue #808) */
     .stale-chip {
       display: inline-flex; align-items: center; gap: 5px; flex: none;
@@ -2061,13 +2133,13 @@
        too — the lock suppresses actions, not read rendering (AC6) — and degrades
        to wall-time + token chips only when a sprint has no agent_runs rows (AC7).
        Coder is purple, tester amber, per the mock v5 design contract. */
-    .stats { display: flex; flex-direction: column; gap: 12px; padding: 8px 16px 4px; }
-    .stat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stats { display: flex; flex-direction: column; gap: 7px; padding: 6px 12px 4px; }
+    .stat-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .stat-chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-size: 11.5px; color: var(--text-muted);
-      background: var(--surface-2); border: 1px solid var(--border);
-      padding: 4px 10px; border-radius: 7px;
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; color: var(--text-muted);
+      background: transparent; border: 1px solid var(--border);
+      padding: 2px 7px; border-radius: 999px;
     }
     .stat-chip i { font-size: 13px; color: var(--text-sub); flex: none; }
     .stat-chip b {
@@ -2077,15 +2149,17 @@
     /* Fix-round chip reads as a warning when a sprint needed a re-run. */
     .stat-chip--fix { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
     .stat-chip--fix i, .stat-chip--fix b { color: var(--amber); }
+    .stat-chip--crash { color: var(--red); background: var(--red-bg); border-color: rgba(239,68,68,.25); }
+    .stat-chip--crash i, .stat-chip--crash b { color: var(--red); }
 
     .stats-section-label {
-      font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
-      color: var(--text-sub);
+      font-size: 10px; font-weight: 600; letter-spacing: .02em; text-transform: none;
+      color: var(--text-muted); margin-bottom: 1px;
     }
 
     /* Agent-time split-bar: width-proportional percentage segments summing to 100. */
     .split-bar {
-      display: flex; height: 22px; border-radius: 6px; overflow: hidden;
+      display: flex; height: 16px; border-radius: 5px; overflow: hidden;
       border: 1px solid var(--border);
     }
     .split-seg {
@@ -2099,7 +2173,7 @@
     .split-seg--documenter { background: var(--blue); }
     .split-seg--reviewer   { background: var(--green); }
     /* Legend gives each agent an accessible, full-contrast read of its share. */
-    .split-legend { display: flex; flex-wrap: wrap; gap: 12px; }
+    .split-legend { display: flex; flex-wrap: wrap; gap: 8px; }
     .split-legend-item {
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
@@ -2112,15 +2186,15 @@
 
     /* Per-ticket gantt timeline. Segments are absolutely positioned on a shared
        0–wall-seconds scale so parallel agents read as overlapping rows. */
-    .gantt { display: flex; flex-direction: column; gap: 6px; }
-    .g-row { display: flex; align-items: center; gap: 10px; }
+    .gantt { display: flex; flex-direction: column; gap: 3px; }
+    .g-row { display: flex; align-items: center; gap: 6px; }
     .g-label {
-      min-width: 64px; font-size: 11.5px; font-weight: 600; color: var(--text);
+      min-width: 44px; font-size: 10.5px; font-weight: 600; color: var(--text);
       font-variant-numeric: tabular-nums;
     }
     .g-track {
-      position: relative; flex: 1; height: 16px;
-      background: var(--surface-2); border-radius: 5px; overflow: hidden;
+      position: relative; flex: 1; height: 12px;
+      background: var(--surface-2); border-radius: 4px; overflow: hidden;
     }
     .g-seg { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; min-width: 3px; }
     .g-coder  { background: var(--purple); }
@@ -2141,7 +2215,10 @@
       border-radius: 10px; overflow: hidden;
       transition: box-shadow .14s, border-color .14s;
     }
-    .fold.expanded { box-shadow: 0 0 0 3px var(--blue-bg), 0 1px 3px rgba(0,0,0,.05); border-color: var(--blue); }
+    .fold.expanded {
+      border-color: color-mix(in srgb, var(--blue) 28%, var(--border));
+      background: color-mix(in srgb, var(--blue-bg) 18%, var(--surface-2));
+    }
     .fold-head {
       display: flex; align-items: center; gap: 10px;
       padding: 11px 16px; cursor: pointer; user-select: none;
@@ -3857,6 +3934,47 @@
     }
     .smgmt-sprint-card.smgmt-running .smgmt-sprint-header {
       background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
+    }
+
+    /* Post-run linger: frozen running snapshot, greyscaled for one hour. */
+    .smgmt-sprint-card.smgmt-linger,
+    .run-shell.linger {
+      filter: grayscale(1);
+      opacity: .78;
+    }
+    .smgmt-sprint-card.smgmt-linger {
+      border-color: var(--text-sub);
+      box-shadow: 0 0 0 3px var(--surface-2), 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .smgmt-sprint-card.smgmt-linger .smgmt-sprint-header {
+      background: linear-gradient(180deg, var(--surface-2) 0%, transparent 100%);
+    }
+    .smgmt-sprint-card.smgmt-linger .smgmt-running-stripe {
+      background: var(--text-sub);
+    }
+    .smgmt-sprint-card.smgmt-linger .smgmt-running-badge-dot,
+    .smgmt-board-running-banner.linger .smgmt-board-running-banner-dot {
+      animation: none;
+      background: var(--text-sub);
+    }
+    .run-shell.linger .run-head-badge {
+      background: var(--surface-2);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .run-shell.linger .run-head-badge-dot {
+      background: var(--text-sub);
+      animation: none;
+    }
+    #smgmt-running-dot.linger {
+      background: var(--text-sub);
+      animation: none;
+    }
+    .smgmt-linger-note {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+      padding: 4px 8px;
     }
 
     /* Solid top accent (no flowing animation, no hardcoded greens). */
@@ -6041,6 +6159,8 @@
     .lr-badge.agent  { background: var(--green-bg);  color: var(--green); }
     .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
     .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
+    .lr-badge.error  { background: #fee2e2; color: #ef4444; }
+    .lr-badge.sprint { background: #d1fae5; color: #065f46; }
     .lr-body {
       flex: 1; min-width: 0; display: flex; align-items: baseline;
       gap: 8px; flex-wrap: wrap;
@@ -6088,6 +6208,77 @@
     .lbl-uat     { background: var(--purple-bg); color: var(--purple); }
     .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
     .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    /* Activity log entity chips */
+    .evl-chip {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600; padding: 1px 8px;
+      border-radius: 99px; line-height: 1.45; vertical-align: 1px;
+    }
+    .evl-chip--issue {
+      background: #e0f2fe; color: #0369a1; text-decoration: none;
+    }
+    a.evl-chip--issue:hover { text-decoration: underline; }
+    .evl-chip--sprint { background: #d1fae5; color: #065f46; }
+    .evl-chip--branch {
+      font-family: var(--mono); font-size: 10px;
+      background: #f3f4f6; color: #111827; border: 1px solid var(--border);
+    }
+    .evl-chip--branch i { font-size: 10px; opacity: .65; }
+    .evl-chip--agent { text-transform: lowercase; }
+    .evl-meta { font-size: 12px; color: var(--text-muted); }
+    .evl-dur-pill {
+      flex-shrink: 0; align-self: center;
+      font-size: 11px; font-variant-numeric: tabular-nums;
+      padding: 2px 8px; border-radius: 99px;
+      background: var(--surface-2); color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .evl-dur-pill.warn { background: #fef3c7; color: #92400e; border-color: rgba(217,119,6,.25); }
+    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: rgba(37,99,235,.2); }
+
+    /* Error rows — red tint + expandable detail panel */
+    .evl-log-row.evl-row-error {
+      background: #fef2f2;
+      border-left: 3px solid #ef4444;
+      padding-left: 13px;
+      flex-wrap: wrap;
+    }
+    .evl-log-row.evl-row-error:hover { background: #fee2e2; }
+    .evl-error-panel {
+      flex: 1 1 100%;
+      margin: 6px 0 2px calc(54px + 62px + 11px);
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .evl-error-head {
+      font-weight: 700; color: #ef4444; margin-bottom: 4px;
+    }
+    .evl-error-loc {
+      color: var(--blue); font-family: var(--mono); font-size: 11px;
+    }
+    .evl-error-msg {
+      color: var(--text-muted); font-family: var(--mono); font-size: 11px;
+      margin-top: 4px; white-space: pre-wrap; word-break: break-word;
+    }
+    .evl-error-gate { color: var(--text-sub); font-size: 11px; margin-top: 6px; }
+    .evl-error-actions {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+    }
+    .evl-error-btn {
+      font-size: 11px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-muted); cursor: pointer; text-decoration: none;
+    }
+    .evl-error-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .evl-error-btn--action {
+      border-color: #d97706; color: #d97706; background: #fffbeb;
+    }
+    .evl-error-btn--action:hover { background: #fef3c7; }
 
     /* ── Branch cleanup controls (issue #634) ── */
     .evl-stale-banner-inner {
@@ -6230,34 +6421,6 @@
       color: var(--text); font-weight: 700;
     }
     .sb-settings-link .ti { font-size: 16px; }
-
-    /* ── Global notes panel (issue #717) ── */
-    .gnotes-content {
-      padding: 20px 28px 28px;
-      display: flex; flex-direction: column;
-      height: calc(100% - 65px); box-sizing: border-box;
-    }
-    .gnotes-hint {
-      font-size: 13px; color: var(--text-muted);
-      margin: 0 0 12px;
-    }
-    .gnotes-textarea {
-      flex: 1; width: 100%; box-sizing: border-box;
-      min-height: 320px; resize: none;
-      padding: 14px 16px;
-      border: 1px solid var(--border); border-radius: 8px;
-      background: var(--surface); color: var(--text);
-      font-family: "SF Mono", ui-monospace, monospace;
-      font-size: 13px; line-height: 1.6;
-    }
-    .gnotes-textarea:focus { outline: none; border-color: var(--blue); }
-    .gnotes-status {
-      font-size: 12px; color: var(--text-muted);
-      min-width: 60px; text-align: right;
-    }
-    .gnotes-status.saving { color: var(--text-muted); }
-    .gnotes-status.ok  { color: var(--color-success-fg); }
-    .gnotes-status.err { color: var(--color-error-fg); }
 
     /* ── Global settings page (issue #641) ── */
     .global-settings-wrap {
@@ -6779,6 +6942,9 @@
   <div class="todo-dock-bar" id="todo-dock-bar" role="button" tabindex="0"
        aria-expanded="false" onclick="toggleTodoDock()">
     <i class="ti ti-checklist"></i> To-do
+    <button type="button" class="todo-dock-expand" title="Open full screen"
+            onclick="event.stopPropagation();if(window.CommanderTodo)CommanderTodo.openFullscreen(_slug)"
+            aria-label="Open to-do full screen"><i class="ti ti-arrows-maximize"></i></button>
     <i class="ti ti-chevron-down" style="font-size:13px"></i>
   </div>
   <div class="todo-dock-body">
@@ -6809,13 +6975,6 @@
       <button class="sb-add-tile" onclick="openAddProjectModal()" title="Add a new project" aria-label="Add project">
         <i class="ti ti-plus"></i>
         <span>Add project</span>
-      </button>
-
-      <!-- Notes link (global — issue #717) -->
-      <button class="sb-settings-link" id="sb-notes-link"
-              onclick="openNotesPanel(event)" title="Global notes" aria-label="Notes">
-        <i class="ti ti-notes"></i>
-        <span>Notes</span>
       </button>
 
       <!-- Global settings (issue #641 — full page, sidebar nav) -->
@@ -6987,22 +7146,6 @@
                   <div class="smgmt-ar-menu-divider"></div>
                   <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
                 </div>
-              </div>
-              <!-- Pre-flight + Compact grouped -->
-              <div class="smgmt-toolbar-group">
-                <button class="btn-ghost smgmt-preflight-toggle" id="smgmt-preflight-toggle"
-                        onclick="_smgmtTogglePreflight()" aria-pressed="true"
-                        title="Pre-flight checks on — click to hide banners">
-                  <i class="ti ti-checklist"></i>
-                  <span id="smgmt-preflight-toggle-label">Pre-flight: on</span>
-                </button>
-                <button class="btn-ghost" id="smgmt-density-toggle"
-                        onclick="_smgmtDensityToggle()" aria-pressed="false"
-                        title="Compact view — click to toggle"
-                        aria-label="Compact view">
-                  <i class="ti ti-layout-list"></i>
-                  <span id="smgmt-density-label">Compact</span>
-                </button>
               </div>
             </div>
           </div>
@@ -8065,6 +8208,8 @@
                   <div class="ps-picker-group">
                     <div class="ps-picker-title" id="ps-icon-picker-label">Icon</div>
                     <div class="ps-icon-grid" id="ps-icon-grid" role="radiogroup" aria-labelledby="ps-icon-picker-label"></div>
+                    <button type="button" class="ps-icons-see-more hidden" id="ps-icons-see-more"
+                            onclick="_psToggleIconGrid()">See more</button>
                   </div>
                   <div class="ps-picker-group">
                     <div class="ps-picker-title" id="ps-color-picker-label">Color</div>
@@ -8176,6 +8321,9 @@
               <div class="ps-scaffold-actions">
                 <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
                   <i class="ti ti-search"></i> Preview cleanup
+                </button>
+                <button class="ps-btn" id="ps-stale-scan-btn" onclick="_histScanStale()" title="Scan remote for leftover feature branches and flag them on sprint history rows">
+                  <i class="ti ti-git-branch"></i> Scan stale branches
                 </button>
                 <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
               </div>
@@ -8290,27 +8438,6 @@
 
 </div>
 
-<!-- ── Global notes panel (issue #717) ── -->
-<div class="settings-panel" id="gnotes-panel" role="region" aria-label="Notes">
-  <div class="settings-header">
-    <span class="settings-title">
-      <i class="ti ti-notes" style="margin-right:8px;font-size:16px;vertical-align:-2px;"></i>Notes
-    </span>
-    <div style="display:flex;align-items:center;gap:12px;">
-      <span class="gnotes-status" id="gnotes-status" aria-live="polite"></span>
-      <button class="settings-close-btn" onclick="closeNotesPanel()" aria-label="Close notes">
-        <i class="ti ti-x"></i>
-      </button>
-    </div>
-  </div>
-  <div class="gnotes-content">
-    <p class="gnotes-hint">Global notes — shared across all projects. Changes save automatically.</p>
-    <textarea id="gnotes-textarea" class="gnotes-textarea"
-              placeholder="# Notes&#10;&#10;Write in Markdown — saved automatically…"
-              oninput="gnotesAutosave()" aria-label="Notes editor" spellcheck="true"></textarea>
-  </div>
-</div>
-
 <!-- ── Ticket detail panel (issue #432) ── -->
 <div class="tdp" id="tdp" role="complementary" aria-label="Ticket detail">
   <div class="tdp-header">
@@ -8369,81 +8496,12 @@ function _syncThemeIcon(theme) {
 // ── Global settings page (issue #641) ───────────────────────────────────────
 function openGlobalSettingsPage(e) {
   if (e) e.preventDefault();
-  closeNotesPanel();
   switchTab('global-settings');
 }
 
 function _globalSettingsLinkActive(active) {
   const link = document.getElementById('sb-global-settings-link');
   if (link) link.classList.toggle('active', !!active);
-}
-
-// ── Global notes panel (issue #717) ─────────────────────────────────────────
-let _gnotesTimer = null;
-let _gnotesLoaded = false;
-
-function openNotesPanel(e) {
-  if (e) e.preventDefault();
-  _globalSettingsLinkActive(false);
-  const panel = document.getElementById('gnotes-panel');
-  if (!panel) return;
-  panel.classList.add('open');
-  const link = document.getElementById('sb-notes-link');
-  if (link) link.classList.add('active');
-  gnotesLoad();
-}
-
-function closeNotesPanel() {
-  const panel = document.getElementById('gnotes-panel');
-  if (panel) panel.classList.remove('open');
-  const link = document.getElementById('sb-notes-link');
-  if (link) link.classList.remove('active');
-}
-
-function gnotesSetStatus(text, cls) {
-  const el = document.getElementById('gnotes-status');
-  if (!el) return;
-  el.textContent = text || '';
-  el.className = 'gnotes-status' + (cls ? ' ' + cls : '');
-}
-
-async function gnotesLoad() {
-  const ta = document.getElementById('gnotes-textarea');
-  if (!ta) return;
-  try {
-    const resp = await fetch('/api/notes');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    ta.value = (data && typeof data.body === 'string') ? data.body : '';
-    _gnotesLoaded = true;
-    gnotesSetStatus('', '');
-  } catch (e) {
-    gnotesSetStatus('Load failed', 'err');
-  }
-}
-
-// Debounced autosave — no manual save button required.
-function gnotesAutosave() {
-  if (!_gnotesLoaded) return;  // ignore programmatic value set during load
-  gnotesSetStatus('Saving…', 'saving');
-  if (_gnotesTimer) clearTimeout(_gnotesTimer);
-  _gnotesTimer = setTimeout(gnotesSaveNow, 800);
-}
-
-async function gnotesSaveNow() {
-  const ta = document.getElementById('gnotes-textarea');
-  if (!ta) return;
-  try {
-    const resp = await fetch('/api/notes', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: ta.value }),
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    gnotesSetStatus('Saved', 'ok');
-  } catch (e) {
-    gnotesSetStatus('Save failed', 'err');
-  }
 }
 
 function settingsInitValues() {
@@ -8692,6 +8750,113 @@ let _smgmtRunningLabels = new Set();
 let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
+
+// Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
+const _SMGMT_LINGER_MS = 60 * 60 * 1000;
+const _smgmtLingerLabels = new Map();
+let _smgmtLingerPollId = null;
+
+function _smgmtLingerStorageKey(label) {
+  return 'smgmtLinger_' + label;
+}
+
+function _smgmtLingerRestore() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('smgmtLinger_sprint-')) continue;
+      const label = key.slice('smgmtLinger_'.length);
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      if (!data || !data.endedAt) { localStorage.removeItem(key); continue; }
+      if (Date.now() - data.endedAt > _SMGMT_LINGER_MS) {
+        localStorage.removeItem(key);
+        continue;
+      }
+      _smgmtLingerLabels.set(label, data);
+      if (data.live) _smgmtLiveCache[label] = data.live;
+    }
+  } catch (_) { /* ignore corrupt storage */ }
+}
+
+function _smgmtLingerActive(label) {
+  const entry = _smgmtLingerLabels.get(label);
+  if (!entry) return false;
+  if (Date.now() - entry.endedAt > _SMGMT_LINGER_MS) {
+    _smgmtLingerLabels.delete(label);
+    try { localStorage.removeItem(_smgmtLingerStorageKey(label)); } catch (_) {}
+    return false;
+  }
+  return true;
+}
+
+function _smgmtIsLinger(label) {
+  return _smgmtLingerActive(label) && !_smgmtRunningLabels.has(label);
+}
+
+function _smgmtLingerLive(label) {
+  if (!_smgmtIsLinger(label)) return _smgmtLiveCache[label] || null;
+  const entry = _smgmtLingerLabels.get(label);
+  return (entry && entry.live) || _smgmtLiveCache[label] || null;
+}
+
+function _smgmtLingerStart(label) {
+  const live = _smgmtLiveCache[label];
+  if (!live) return;
+  const entry = { endedAt: Date.now(), live: JSON.parse(JSON.stringify(live)) };
+  _smgmtLingerLabels.set(label, entry);
+  try { localStorage.setItem(_smgmtLingerStorageKey(label), JSON.stringify(entry)); } catch (_) {}
+  _smgmtLingerPollRestart();
+}
+
+function _smgmtLingerExpire() {
+  let changed = false;
+  for (const label of [..._smgmtLingerLabels.keys()]) {
+    if (!_smgmtLingerActive(label)) changed = true;
+  }
+  return changed;
+}
+
+function _smgmtHasLinger() {
+  return [..._smgmtLingerLabels.keys()].some(l => _smgmtIsLinger(l));
+}
+
+function _smgmtPrimaryRunningLabel() {
+  if (_smgmtRunningLabels.size > 0) return _smgmtRunningLabels.values().next().value;
+  for (const label of _smgmtLingerLabels.keys()) {
+    if (_smgmtIsLinger(label)) return label;
+  }
+  return null;
+}
+
+function _smgmtLingerPollRestart() {
+  if (_smgmtLingerPollId !== null) {
+    clearInterval(_smgmtLingerPollId);
+    _smgmtLingerPollId = null;
+  }
+  if (!_smgmtHasLinger()) return;
+  _smgmtLingerPollId = setInterval(_smgmtLingerTick, 30000);
+}
+
+function _smgmtLingerTick() {
+  if (!_smgmtLingerExpire()) return;
+  const lbl = _smgmtPrimaryRunningLabel();
+  _smgmtRunningViewUpdate(lbl, lbl ? _smgmtLingerLive(lbl) : null);
+  _smgmtUpdateSubnav();
+  if (typeof _smgmtRender === 'function' && _smgmtData) _smgmtRender(_smgmtData);
+  if (!_smgmtHasLinger() && _smgmtLingerPollId !== null) {
+    clearInterval(_smgmtLingerPollId);
+    _smgmtLingerPollId = null;
+  }
+}
+
+window._smgmtLingerStart = _smgmtLingerStart;
+window._smgmtIsLinger = _smgmtIsLinger;
+window._smgmtLingerLive = _smgmtLingerLive;
+window._smgmtLingerRestore = _smgmtLingerRestore;
+window._smgmtPrimaryRunningLabel = _smgmtPrimaryRunningLabel;
+
 // Currently-selected level-rail node (issue #802), fed to the inspector panel.
 let _smgmtRailSelectedNum = null;
 // Poll timer for live data (2s indicator refresh)
@@ -9799,9 +9964,6 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
-  // Restore compact/dense density from localStorage (issue #547)
-  _smgmtDensityInit();
-
   // Load data in parallel
   await Promise.all([
     loadHomeData(false),
@@ -9994,8 +10156,8 @@ function _smgmtShowSubView(view) {
   // Render the level-rail from cache when switching to Running (issue #802) so the
   // board shows immediately without waiting for the next 2s poll tick.
   if (view === 'running') {
-    const lbl = _smgmtRunningLabels.values().next().value;
-    const live = lbl ? (_smgmtLiveCache[lbl] || null) : null;
+    const lbl = _smgmtPrimaryRunningLabel();
+    const live = lbl ? _smgmtLingerLive(lbl) : null;
     _smgmtRunningViewUpdate(lbl || null, live);
   }
 }
@@ -10004,7 +10166,11 @@ function _smgmtShowSubView(view) {
 // Running tab while any sprint runs, and the total sprint count on History.
 function _smgmtUpdateSubnav() {
   const dot = document.getElementById('smgmt-running-dot');
-  if (dot) dot.hidden = !_smgmtAnySprintRunning;
+  const hasLinger = _smgmtHasLinger();
+  if (dot) {
+    dot.hidden = !_smgmtAnySprintRunning && !hasLinger;
+    dot.classList.toggle('linger', hasLinger && !_smgmtAnySprintRunning);
+  }
   const badge = document.getElementById('smgmt-history-count');
   if (badge) {
     const data = _smgmtData || {};
@@ -10032,6 +10198,7 @@ async function _smgmtLoadSummaries(repo) {
 // fed by GET /api/sprints/history (issue #805) — local-only, no GitHub call.
 let _histLedgerData = [];
 const _histExpanded = new Set();   // labels of currently-expanded cards
+let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 // Folding (issue #807): the N most-recent sprints render expanded; older ones
 // collapse into aggregate folds of the same size. _histFoldSize mirrors the
 // `history_fold_size` project setting (default 10); _histFoldExpanded tracks
@@ -10054,7 +10221,7 @@ const _histRunStats = {};
 // Terminal states that lock a card: no further action is possible, links only.
 function _histIsLocked(state) {
   const s = (state || '').toLowerCase();
-  return s === 'finished' || s === 'deleted';
+  return s === 'finished' || s === 'deleted' || s === 'completed';
 }
 
 // A rerun child sprint carries a dotted label (e.g. sprint-61.1).
@@ -10086,28 +10253,58 @@ function _histFmtTokens(n) {
 function _histIssueChip(iss) {
   const st = (iss.state || '').toLowerCase();
   if (iss.failure_reason || (iss.agent_status || '').toLowerCase() === 'failed') {
-    return { cls: 'crashed', label: 'FAILED' };
+    return { cls: 'crashed', label: 'CRASHED · in-progress' };
   }
   if (st === 'merged') return { cls: 'merged',  label: 'MERGED' };
   if (st === 'closed') return { cls: 'crashed', label: 'CRASHED' };
-  if (iss.time_spent != null) return { cls: 'uat', label: 'OPEN·UAT' };
+  if (iss.time_spent != null) return { cls: 'uat', label: 'OPEN · UAT' };
   return { cls: 'notrun', label: 'NOT RUN' };
+}
+
+function _histIssueIcon(iss) {
+  const chip = _histIssueChip(iss);
+  if (chip.cls === 'merged') {
+    return '<span class="iss-icon ok"><i class="ti ti-check"></i></span>';
+  }
+  if (chip.cls === 'crashed') {
+    return '<span class="iss-icon fail"><i class="ti ti-x"></i></span>';
+  }
+  return '<span class="iss-icon idle"></span>';
+}
+
+function _histProgressText(s) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  if (!issues.length) return '';
+  const done = issues.filter(i => (i.state || '').toLowerCase() === 'merged').length;
+  return `${done}/${issues.length} done`;
+}
+
+function _histEstBarMini(s) {
+  const acc = s.estimate_accuracy;
+  if (acc == null || isNaN(acc)) return '';
+  const accPct = acc <= 1
+    ? Math.round(acc * 100)
+    : Math.round(Math.min(100, 100 / acc));
+  const tone = acc > 1.25 ? 'var(--red)' : (acc > 1.0 ? 'var(--amber)' : 'var(--green)');
+  const fill = Math.min(100, Math.max(10, accPct));
+  return `<span class="hist-est-mini" title="Estimate accuracy ${Number(acc).toFixed(2)}×">
+    <span class="hist-est-mini-fill" style="width:${fill}%;background:${tone}"></span>
+    <span class="hist-est-mini-lbl">${accPct}%</span>
+  </span>`;
 }
 
 function _histIssueRowHtml(iss, isChild) {
   const chip = _histIssueChip(iss);
-  // Rerun children (a rerun flag, or any issue inside a child sprint card) are
-  // indented with a ↳ prefix in the issue list.
   const rerun = iss.is_rerun || iss.rerun || isChild;
   const arrow = rerun ? '<span class="iss-rerun">↳</span> ' : '';
   const id = iss.ticket_id != null ? ('#' + iss.ticket_id) : '#?';
-  const failReason = iss.failure_reason
-    ? `<span class="iss-fail-reason">${escHtml(String(iss.failure_reason))}</span>` : '';
+  const title = iss.title ? `<span class="iss-title">${escHtml(String(iss.title))}</span>` : '';
   return `<div class="iss-row">
+    ${_histIssueIcon(iss)}
     <span class="iss-id">${arrow}${escHtml(String(id))}</span>
+    ${title}
     <span class="iss-chip ${chip.cls}">${chip.label}</span>
     <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
-    ${failReason}
   </div>`;
 }
 
@@ -10203,16 +10400,24 @@ function _histVerbsHtml(s) {
 }
 
 // Link targets. The PR pill opens the GitHub PR; the Summary pill opens the
-// sprint's summary file; Logs deep-links into the Logs tab for the sprint.
+// sprint's summary issue (or markdown file); Logs deep-links into the Logs tab.
+function _histRepo(s) {
+  const cached = _cachedFullRepo[_slug];
+  if (cached) return cached;
+  const p = (s && s.project) ? String(s.project) : '';
+  return p.includes('/') ? p : '';
+}
 function _histPrUrl(s) {
   if (s.pr_number == null) return '';
-  const repo = _cachedFullRepo[_slug] || '';
+  const repo = _histRepo(s);
+  if (!repo) return '';
   return `https://github.com/${repo}/pull/${s.pr_number}`;
 }
 function _histSummaryIssueUrl(s) {
   if (s.summary_issue_url) return s.summary_issue_url;
   if (s.summary_issue_num == null) return '';
-  const repo = _cachedFullRepo[_slug] || '';
+  const repo = _histRepo(s);
+  if (!repo) return '';
   return `https://github.com/${repo}/issues/${s.summary_issue_num}`;
 }
 function _histSummaryUrl(s) {
@@ -10262,6 +10467,51 @@ function _histHeadLinksHtml(s) {
   return html ? `<span class="hist-head-links">${html}</span>` : '';
 }
 
+// Compact header actions: PR / Summary / Logs + lifecycle verbs in one row.
+function _histHeadActionsHtml(s) {
+  let html = '';
+  const pr = _histPrUrl(s);
+  if (pr) {
+    html += `<a class="hist-head-btn link-pr" href="${escHtml(pr)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint PR">
+      <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
+  }
+  const sum = _histSummaryUrl(s);
+  if (sum) {
+    const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num}` : 'Summary';
+    html += `<a class="hist-head-btn link-sum" href="${escHtml(sum)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint summary">
+      <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
+  }
+  html += `<a class="hist-head-btn" href="${escHtml(_histLogsUrl(s))}"
+    onclick="event.stopPropagation()" title="Open sprint logs">
+    <i class="ti ti-list-details"></i> Logs</a>`;
+
+  if (!_histIsLocked(s.lifecycle_state)) {
+    const state = (s.lifecycle_state || '').toLowerCase();
+    const lbl = escHtml(s.label || '');
+    const rawLabel = s.label || '';
+    if (state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
+      const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+      const rerunTitle = _smgmtAnySprintRunning
+        ? 'title="Cannot re-run: another sprint is currently running."'
+        : '';
+      const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
+      html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
+        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
+        <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
+    } else if (state === 'completed' || state === 'ready_to_merge') {
+      html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
+        onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
+        <i class="ti ti-flag-check"></i> Finish sprint</button>`;
+      html += `<button type="button" class="hist-head-btn hist-head-btn--delete"
+        onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')">
+        <i class="ti ti-trash"></i> Delete</button>`;
+    }
+  }
+  return html ? `<span class="hist-head-actions">${html}</span>` : '';
+}
+
 // Metrics row: an estimate-accuracy bar (actual ÷ estimated) plus duration and
 // token badges, per mock v5.
 function _histMetricsHtml(s) {
@@ -10304,19 +10554,18 @@ function _histStateChip(state, sprint) {
   // partial_finished from children's states, so no client-side inference here.
   const s = (state || 'unknown').toLowerCase();
   const map = {
-    completed:        ['completed', '✓ Completed'],
-    ready_to_merge:   ['completed', '⇪ Ready to merge'],
-    needs_rework:     ['failed',    '✕ Needs rework'],
-    partial_finished: ['partial',   '◐ Partial finished'],
-    deleted:          ['deleted',   '🗑 Deleted'],
-    running:          ['running',   '● Running'],
-    draft:            ['planning',  '… Draft'],
-    planned:          ['planning',  '◇ Planned'],
-    // Legacy spellings — only reachable from cached client data.
-    finished:  ['finished',  '🔒 Finished'],
-    failed:    ['failed',    '✕ Needs rework'],
-    cancelled: ['failed',    '✕ Needs rework'],
-    planning:  ['planning',  '… Draft'],
+    completed:        ['completed', 'Completed'],
+    ready_to_merge:   ['completed', 'Ready to merge'],
+    needs_rework:     ['failed',    'Failed'],
+    partial_finished: ['partial',   'Partial'],
+    deleted:          ['deleted',   'Deleted'],
+    running:          ['running',   'Running'],
+    draft:            ['planning',  'Draft'],
+    planned:          ['planning',  'Planned'],
+    finished:  ['finished',  'Finished'],
+    failed:    ['failed',    'Failed'],
+    cancelled: ['failed',    'Failed'],
+    planning:  ['planning',  'Draft'],
   };
   const pair = map[s] || ['unknown', s];
   const reason = sprint && sprint.end_reason && (s === 'needs_rework' || s === 'failed' || s === 'cancelled')
@@ -10329,8 +10578,9 @@ function _histStateChip(state, sprint) {
 // One stat chip: an icon, a label, and a mono value. Built as a helper so every
 // chip lines up on the same grid.
 function _histStatChip(icon, label, value, cls) {
+  const prefix = label ? escHtml(label) + ' ' : '';
   return `<span class="stat-chip${cls ? ' ' + cls : ''}">
-    <i class="ti ${icon}"></i>${escHtml(label)} <b>${escHtml(value)}</b></span>`;
+    <i class="ti ${icon}"></i>${prefix}<b>${escHtml(value)}</b></span>`;
 }
 
 // The split-bar: one width-proportional segment per agent, percentages summing
@@ -10351,6 +10601,21 @@ function _histSplitBarHtml(stats) {
     <div class="split-bar">${segs}</div>
     <div class="split-legend">${legend}</div>
   </div>`;
+}
+
+function _histAutoExpandRecent(groups) {
+  for (let i = 0; i < groups.length && i < _histFoldSize; i++) {
+    const members = _histGroupMembers(groups[i]);
+    for (let j = 0; j < members.length; j++) {
+      const s = members[j];
+      const lbl = s.label;
+      if (!lbl) continue;
+      // Completed/deleted rows stay collapsed by default — title + badge + Logs only.
+      if (_histIsLocked(s.lifecycle_state)) continue;
+      _histExpanded.add(lbl);
+      _histLoadRunStats(lbl);
+    }
+  }
 }
 
 // The gantt: one row per reached ticket (unreached tickets simply have no row —
@@ -10385,7 +10650,7 @@ function _histGanttHtml(s, stats) {
     </div>`;
   }).join('');
   return `<div class="stats-block">
-    <div class="stats-section-label">Per-ticket timeline</div>
+    <div class="stats-section-label">Timeline</div>
     <div class="gantt">${rows}</div>
   </div>`;
 }
@@ -10403,15 +10668,21 @@ function _histStatsHtml(s) {
   const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
   const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
 
+  const _gst = (s.lifecycle_state || '').toLowerCase();
+  const sprintFailed = _gst === 'needs_rework' || _gst === 'failed';
+
   const chips = [];
-  if (wall != null) chips.push(_histStatChip('ti-clock', 'Wall', _histFmtSecs(wall)));
+  if (wall != null) chips.push(_histStatChip('ti-clock', 'wall', _histFmtSecs(wall)));
+  if (hasRuns) {
+    chips.push(_histStatChip('ti-robot', 'agent time', _histFmtSecs(stats.agent_total_seconds)));
+  }
   if (tokens != null) {
-    let tokVal = _histFmtTokens(tokens) + ' tok';
+    let tokVal = _histFmtTokens(tokens);
     if (hasRuns && stats.token_cost_usd != null) tokVal += ' ≈ $' + Number(stats.token_cost_usd).toFixed(2);
-    chips.push(_histStatChip('ti-coin', 'Tokens', tokVal));
+    else tokVal += ' tok';
+    chips.push(_histStatChip('ti-coin', 'tokens', tokVal));
   }
   if (hasRuns) {
-    chips.push(_histStatChip('ti-robot', 'Agent', _histFmtSecs(stats.agent_total_seconds)));
     if (stats.fix_round_count > 0) {
       const refs = (stats.fix_round_tickets || []).map(n => '#' + n).join(', ');
       const word = stats.fix_round_count === 1 ? 'fix round' : 'fix rounds';
@@ -10419,11 +10690,21 @@ function _histStatsHtml(s) {
         stats.fix_round_count + ' ' + word + (refs ? ' (' + refs + ')' : ''), 'stat-chip--fix'));
     }
     if (stats.slowest_ticket) {
-      chips.push(_histStatChip('ti-hourglass-low', 'Slowest',
+      chips.push(_histStatChip('ti-hourglass-low', 'slowest',
         '#' + stats.slowest_ticket.ticket + ' · ' + _histFmtSecs(stats.slowest_ticket.seconds)));
     }
     if (stats.parallel_saved_seconds != null) {
-      chips.push(_histStatChip('ti-arrows-split', 'Parallel saved', _histFmtSecs(stats.parallel_saved_seconds)));
+      chips.push(_histStatChip('ti-arrows-split', 'parallel saved',
+        '~' + _histFmtSecs(stats.parallel_saved_seconds)));
+    }
+    if (sprintFailed && stats.crash) {
+      const failed = (Array.isArray(s.failed_tickets) ? s.failed_tickets : [])
+        .find(ft => ft.ticket_id === stats.crash.ticket);
+      const reason = failed ? String(failed.failure_reason || '') : '';
+      const crashAgent = /tester/i.test(reason) ? 'tester' : 'coder';
+      const tail = reason ? ' · ' + reason.split('\n')[0].slice(0, 40) : '';
+      chips.push(_histStatChip('ti-alert-triangle', 'crash',
+        '#' + stats.crash.ticket + ' · ' + crashAgent + tail, 'stat-chip--crash'));
     }
   }
 
@@ -10600,7 +10881,23 @@ function _histReconcileChipHtml(s) {
     <i class="ti ti-alert-triangle"></i> ${n} ${word}</span>`;
 }
 
-function _histCardHtml(s) {
+// Header hint chips: full detail when expanded; collapsed rows only surface
+// actionable signals (stale branches, reconciliation failures).
+function _histHeadHintsHtml(s, expanded) {
+  if (expanded) {
+    return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
+  }
+  let html = '';
+  const r = s.reconciliation;
+  if (r && Array.isArray(r.checks) && r.checks.length && !r.all_clear) {
+    html += _histReconcileChipHtml(s);
+  }
+  html += _histStaleChipHtml(s);
+  return html;
+}
+
+function _histCardHtml(s, opts) {
+  opts = opts || {};
   const locked   = _histIsLocked(s.lifecycle_state);
   const child    = _histIsChild(s.label);
   const expanded = _histExpanded.has(s.label);
@@ -10614,29 +10911,39 @@ function _histCardHtml(s) {
   const display = (typeof sprintLabelDisplay === 'function') ? sprintLabelDisplay(s.label) : (s.label || '');
   const chev = expanded ? 'ti-chevron-down' : 'ti-chevron-right';
   const lbl = escHtml(s.label || '');
+  const headCompact = locked && !expanded;
+  const progress = headCompact ? '' : _histProgressText(s);
+  const headActions = _histHeadActionsHtml(s);
+  const bulkBtn = opts.bulkCompleteBtn || '';
+  const headRight = (headActions || bulkBtn)
+    ? `<span class="hist-card-head-right">${headActions}${bulkBtn}</span>`
+    : '';
+  const hints = headCompact ? '' : _histHeadHintsHtml(s, expanded);
+  const duration = (!headCompact && s.duration != null)
+    ? `<span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>`
+    : '';
+  const midBits = headCompact ? '' : [duration, _histEstBarMini(s), hints].join('');
+  const headMid = midBits ? `<div class="hist-card-head-mid">${midBits}</div>` : '';
   const body = expanded ? `
-      ${_histMetricsHtml(s)}
       ${_histStatsHtml(s)}
       ${_histPostSprintHtml(s)}
       ${_histReconcileHtml(s)}
       ${_histIssueListHtml(s)}
       ${lockNote}
-      ${_histLinksHtml(s)}
-      ${_histVerbsHtml(s)}` : '';
+      ${locked ? _histLinksHtml(s) : ''}` : '';
   return `<div class="${cls.join(' ')}" data-label="${lbl}">
     <div class="hist-card-head" onclick="_histToggleCard('${lbl}')">
-      <i class="ti ${chev} hist-chev"></i>
-      ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
-      <span class="hist-card-title">${escHtml(display)}</span>
-      ${_histStateChip(s.lifecycle_state, s)}
-      ${_histHeadLinksHtml(s)}
-      ${_histPostSprintChipHtml(s)}
-      ${_histReconcileChipHtml(s)}
-      ${_histStaleChipHtml(s)}
-      <span class="hist-card-spacer"></span>
-      <span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>
+      <div class="hist-card-head-left">
+        <i class="ti ${chev} hist-chev"></i>
+        ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
+        <span class="hist-card-title">${escHtml(display)}</span>
+        ${_histStateChip(s.lifecycle_state, s)}
+        ${progress ? `<span class="hist-progress">${escHtml(progress)}</span>` : ''}
+      </div>
+      ${headMid}
+      ${headRight}
     </div>
-    ${body}
+    ${body ? `<div class="hist-card-body">${body}</div>` : ''}
   </div>`;
 }
 
@@ -10695,8 +11002,31 @@ function _histGroupSprints(sprints) {
   });
 }
 
+function _histGroupNeedsBulkComplete(group) {
+  const children = group.children || [];
+  if (!children.length || !group.baseSprint) return false;
+  const members = [group.baseSprint, ...children];
+  return members.some(s => {
+    const st = (s.lifecycle_state || '').toLowerCase();
+    return st !== 'completed' && st !== 'deleted';
+  });
+}
+
+function _histBulkCompleteBtnHtml(group) {
+  if (!_histGroupNeedsBulkComplete(group)) return '';
+  const lbl = escHtml(group.baseLabel || '');
+  return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+          onclick="event.stopPropagation();smgmtBulkCompleteSprint('${lbl}')"
+          title="Complete parent and all child sprints">
+    <i class="ti ti-circle-check"></i> Bulk complete
+  </button>`;
+}
+
 function _histGroupHtml(group) {
-  const head = group.baseSprint ? _histCardHtml(group.baseSprint) : '';
+  const bulkBtn = _histBulkCompleteBtnHtml(group);
+  const head = group.baseSprint
+    ? _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn })
+    : '';
   const childHtml = (group.children || []).map(_histCardHtml).join('');
   if (!childHtml) return head;
   if (!head) {
@@ -10820,8 +11150,6 @@ function _histToggleFold(id) {
 // Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
 function _histToolbarHtml() {
   return `<div class="hist-toolbar">
-    <button class="hist-scan-btn" id="hist-scan-btn" onclick="_histScanStale()">
-      <i class="ti ti-git-branch"></i> Scan stale branches</button>
     <span class="hist-toolbar-note">
       <i class="ti ti-stack-2"></i>
       Showing the ${_histFoldSize} most recent sprints — older sprints are grouped into folds of ${_histFoldSize}.
@@ -10851,19 +11179,21 @@ function _histStaleChipHtml(s) {
 async function _histScanStale() {
   const repo = _cachedFullRepo[_slug];
   if (!repo) return;
-  const btn = document.getElementById('hist-scan-btn');
+  const btn = document.getElementById('ps-stale-scan-btn');
   if (btn) { btn.disabled = true; }
   try {
     const resp = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
     if (resp.ok) {
       const data = await resp.json();
       _histStaleBySprint = data.by_sprint || {};
-      _histRenderLedger(_histLedgerData);
+      if (_histLedgerData && _histLedgerData.length) {
+        _histRenderLedger(_histLedgerData);
+      }
     }
   } catch (_) {
     /* leave existing chips untouched on a transient failure */
   } finally {
-    const b = document.getElementById('hist-scan-btn');
+    const b = document.getElementById('ps-stale-scan-btn');
     if (b) { b.disabled = false; }
   }
 }
@@ -10936,6 +11266,10 @@ function _histRenderLedger(sprints) {
   // Group re-run sub-sprints under their base sprint, then partition by fold
   // size on base groups (AC2/AC3) — sub-sprints (.1, .2) are not top-level rows.
   const groups = _histGroupSprints(sprints);
+  if (!_histDidAutoExpand && groups.length) {
+    _histAutoExpandRecent(groups);
+    _histDidAutoExpand = true;
+  }
   const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
   const recentHtml = recent.map(_histGroupHtml).join('');
   const foldsHtml = folds.map(_histFoldHtml).join('');
@@ -11890,72 +12224,15 @@ async function _preflightInjectBanner(label, tickets, repo) {
 /** Last args passed to _preflightLoadBanners, so the toggle can re-render. */
 let _preflightLastArgs = null;
 
-/** Pre-flight banners on by default; persisted per-project via localStorage. */
+/** Pre-flight hints always on (toolbar toggle removed). */
 function _preflightEnabled() {
-  return localStorage.getItem(_settingsKey('preflight')) !== 'off';
-}
-
-/** Toggle pre-flight banner visibility, persist, and re-render in place. */
-function _smgmtTogglePreflight() {
-  const next = _preflightEnabled() ? 'off' : 'on';
-  localStorage.setItem(_settingsKey('preflight'), next);
-  _smgmtUpdatePreflightToggleUI();
-  if (next === 'off') {
-    document.querySelectorAll('.smgmt-preflight-banner').forEach(el => el.remove());
-  }
-  if (_preflightLastArgs) {
-    _smgmtLoadMiniRail(_preflightLastArgs.orderedLabels, _preflightLastArgs.bySprint);
-  }
-}
-
-/** Sync the toolbar toggle button to the current setting. */
-function _smgmtUpdatePreflightToggleUI() {
-  const btn = document.getElementById('smgmt-preflight-toggle');
-  if (!btn) return;
-  const on = _preflightEnabled();
-  btn.classList.toggle('is-off', !on);
-  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.title = on
-    ? 'Pre-flight checks on — click to hide banners'
-    : 'Pre-flight checks off — click to show banners';
-  const lbl = document.getElementById('smgmt-preflight-toggle-label');
-  if (lbl) lbl.textContent = on ? 'Pre-flight: on' : 'Pre-flight: off';
-}
-
-// ── Compact/dense view toggle (issue #547) ────────────────────────────────────
-
-const _SMGMT_DENSITY_KEY = 'sprintBoard.density';
-
-function _smgmtDensityInit() {
-  if (localStorage.getItem(_SMGMT_DENSITY_KEY) === 'compact') _smgmtDensityApply(true);
-}
-
-function _smgmtDensityApply(compact) {
-  const pane = document.getElementById('pane-sprint-mgmt');
-  const btn  = document.getElementById('smgmt-density-toggle');
-  if (!pane || !btn) return;
-  pane.classList.toggle('smgmt-compact', compact);
-  btn.setAttribute('aria-pressed', String(compact));
-  btn.title = compact
-    ? 'Normal view — click to toggle'
-    : 'Compact view — click to toggle';
-  const lbl = document.getElementById('smgmt-density-label');
-  if (lbl) lbl.textContent = compact ? 'Normal' : 'Compact';
-}
-
-function _smgmtDensityToggle() {
-  const pane = document.getElementById('pane-sprint-mgmt');
-  const compact = !pane.classList.contains('smgmt-compact');
-  _smgmtDensityApply(compact);
-  localStorage.setItem(_SMGMT_DENSITY_KEY, compact ? 'compact' : 'normal');
+  return true;
 }
 
 /** Kick off pre-flight checks — hints render inside run preview, not a separate banner. */
 function _preflightLoadBanners(orderedLabels, bySprint) {
   _preflightLastArgs = { orderedLabels, bySprint };
-  _smgmtUpdatePreflightToggleUI();
   document.querySelectorAll('.smgmt-preflight-banner').forEach(el => el.remove());
-  if (!_preflightEnabled()) return;
   // Mini-rail loader merges pre-flight hints into the run preview strip.
 }
 
@@ -12702,39 +12979,55 @@ function _smgmtLiveHeartbeatSec() {
 function _smgmtRunningViewUpdate(label, live) {
   const emptyEl = document.getElementById('smgmt-running-empty');
   const shellEl = document.getElementById('smgmt-run-shell');
-  const running = !!(label && _smgmtRunningLabels.has(label));
-  if (emptyEl) emptyEl.style.display = running ? 'none' : '';
-  if (shellEl) shellEl.hidden = !running;
-  if (!running) {
+  const primary = label || _smgmtPrimaryRunningLabel();
+  const isLiveRun = !!(primary && _smgmtRunningLabels.has(primary));
+  const isLinger = !!(primary && _smgmtIsLinger(primary));
+  const showShell = isLiveRun || isLinger;
+  if (emptyEl) emptyEl.style.display = showShell ? 'none' : '';
+  if (shellEl) {
+    shellEl.hidden = !showShell;
+    shellEl.classList.toggle('linger', isLinger);
+  }
+  if (!showShell) {
     if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
     return;
   }
-  _smgmtRunHeadUpdate(label, live);
-  _smgmtMetricsUpdate(label, live);
-  _smgmtRailUpdate(label, live);
+  const snap = live || _smgmtLingerLive(primary);
+  _smgmtRunHeadUpdate(primary, snap, isLinger);
+  _smgmtMetricsUpdate(primary, snap);
+  _smgmtRailUpdate(primary, snap);
 }
 
-function _smgmtRunHeadHtml(label, live) {
+function _smgmtRunHeadHtml(label, live, isLinger) {
   const display = sprintLabelDisplay(label);
   const elapsed = live && live.time_spent_sec > 0 ? _fmtRunningTime(live.time_spent_sec) : '0m 0s';
-  const estRem = (live && live.est_remaining_minutes != null)
+  const estRem = (!isLinger && live && live.est_remaining_minutes != null)
     ? `est. remaining ~${live.est_remaining_minutes}m (calibrated)` : '';
   const metaParts = [`elapsed ${elapsed}`];
   if (estRem) metaParts.push(estRem);
+  if (isLinger) metaParts.push('finished — snapshot');
   const hb = _smgmtLiveHeartbeatSec();
   const safeLabel = escHtml(label);
+  const badge = isLinger
+    ? '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Finished</span>'
+    : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Running</span>';
+  const cancelBtn = isLinger ? '' :
+    `<button type="button" class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${safeLabel}')">
+        <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  const watchdog = isLinger
+    ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
+    : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog · heartbeat ${hb}s ago</span>`;
   return `<div class="run-head-card" id="smgmt-run-head-card" data-label="${safeLabel}">
     <div class="run-head-top">
       <div class="run-head-left">
         <span class="run-head-title">${escHtml(display)}</span>
-        <span class="run-head-badge"><span class="run-head-badge-dot"></span>Running</span>
+        ${badge}
       </div>
-      <button type="button" class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${safeLabel}')">
-        <i class="ti ti-player-stop"></i> Cancel sprint</button>
+      ${cancelBtn}
     </div>
     <div class="run-head-sub">
       <span class="run-head-meta" id="smgmt-run-head-meta">${escHtml(metaParts.join(' · '))}</span>
-      <span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog · heartbeat ${hb}s ago</span>
+      ${watchdog}
     </div>
   </div>`;
 }
@@ -12752,13 +13045,16 @@ function _smgmtRunHeadPatch(label, live) {
   if (wdEl) wdEl.textContent = `watchdog · heartbeat ${_smgmtLiveHeartbeatSec()}s ago`;
 }
 
-function _smgmtRunHeadUpdate(label, live) {
+function _smgmtRunHeadUpdate(label, live, isLinger) {
   const headEl = document.getElementById('smgmt-run-head');
   if (!headEl) return;
   const card = document.getElementById('smgmt-run-head-card');
-  if (!card || card.dataset.label !== label) {
-    headEl.innerHTML = _smgmtRunHeadHtml(label, live || {});
-  } else {
+  const linger = !!isLinger;
+  if (!card || card.dataset.label !== label || card.dataset.linger !== (linger ? '1' : '0')) {
+    headEl.innerHTML = _smgmtRunHeadHtml(label, live || {}, linger);
+    const newCard = document.getElementById('smgmt-run-head-card');
+    if (newCard) newCard.dataset.linger = linger ? '1' : '0';
+  } else if (!linger) {
     _smgmtRunHeadPatch(label, live || {});
   }
 }
@@ -13581,7 +13877,10 @@ function _smgmtLivePollRestart() {
     _smgmtLogPollId = null;
   }
 
-  if (_smgmtRunningLabels.size === 0) return;
+  if (_smgmtRunningLabels.size === 0) {
+    _smgmtLingerPollRestart();
+    return;
+  }
 
   // Poll every 2 seconds for banner + Running-tab rail/metrics updates
   _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
@@ -13643,7 +13942,7 @@ async function _smgmtLivePollTick() {
         _sprintProgressRender();
         if (_snavPanelOpen) _snavRenderPanel();
         _smgmtRunningViewUpdate(label, live);
-        _smgmtRunHeadPatch(label, live);
+        if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, live);
       }
     }
   } catch (_) { /* silently ignore poll errors */ }
@@ -16289,11 +16588,7 @@ function _nsUpdateHint() {
   hintEl.textContent = count > 1 ? `Will create: ${labels.join(', ')}` : '';
 }
 
-function _nsClose(force) {
-  const label = (document.getElementById('ns-label').value || '').trim();
-  if (!force && label.length > 0) {
-    if (!confirm('Discard unsaved sprint label?')) return;
-  }
+function _nsClose() {
   document.getElementById('ns-backdrop').classList.add('hidden');
   document.getElementById('ns-modal').classList.add('hidden');
   _clearBodyInert();
@@ -16833,7 +17128,7 @@ function _setupModals() {
       } else if (!document.getElementById('cl-modal').classList.contains('hidden')) {
         createLabelModalCancel();
       } else if (!document.getElementById('ns-modal').classList.contains('hidden')) {
-        _nsClose(false);
+        _nsClose();
       } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
         _ntClose();
       } else if (!document.getElementById('apm-modal').classList.contains('hidden')) {
@@ -16858,14 +17153,19 @@ function _setupModals() {
   document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
   document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
 
+  document.getElementById('bc-close-btn').addEventListener('click', _bcClose);
+  document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);
+  document.getElementById('bc-backdrop').addEventListener('click', _bcClose);
+  document.getElementById('bc-confirm-btn').addEventListener('click', _bcConfirm);
+
   document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
   document.getElementById('rr-backdrop').addEventListener('click', _rrClose);
   document.getElementById('rr-confirm-btn').addEventListener('click', _rrConfirm);
 
-  document.getElementById('ns-close-btn').addEventListener('click', () => _nsClose(false));
-  document.getElementById('ns-cancel-btn').addEventListener('click', () => _nsClose(false));
-  document.getElementById('ns-backdrop').addEventListener('click', () => _nsClose(false));
+  document.getElementById('ns-close-btn').addEventListener('click', _nsClose);
+  document.getElementById('ns-cancel-btn').addEventListener('click', _nsClose);
+  document.getElementById('ns-backdrop').addEventListener('click', _nsClose);
 
   document.getElementById('ns-submit-btn').addEventListener('click', async function() {
     const labelVal = (document.getElementById('ns-label').value || '').trim();
@@ -21014,6 +21314,7 @@ function _evlDayLabel(ts) {
 }
 
 function _evlBadgeLabel(source, type) {
+  if (type === 'ticket_failed') return 'ERROR';
   if (source === 'github') return 'GITHUB';
   if (source === 'dashboard') return 'DASH';
   if (source === 'agent') {
@@ -21021,6 +21322,145 @@ function _evlBadgeLabel(source, type) {
     return 'AGENT';
   }
   return (source || '').toUpperCase();
+}
+
+function _evlBadgeCls(label) {
+  if (label === 'ERROR') return 'error';
+  if (label === 'GITHUB') return 'github';
+  if (label === 'DASH') return 'dash';
+  if (label === 'SPRINT') return 'sprint';
+  return 'agent';
+}
+
+function _evlMatchesFilter(ev, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'agent') {
+    var src = ev.source || '';
+    var type = ev.type || '';
+    if (src === 'agent') return true;
+    if (src === 'dashboard' && type.indexOf('sprint_') === 0) return true;
+    return false;
+  }
+  return ev.source === filter;
+}
+
+function _evlParseIssueNum(ev) {
+  var d = ev.detail || {};
+  if (d.issue_num != null) return d.issue_num;
+  var t = ev.target || '';
+  var m = t.match(/#?(\d+)/);
+  return m ? m[1] : null;
+}
+
+function _evlIssueChip(num, extraCls) {
+  if (num == null) return '';
+  var repo = _projectData ? (_projectData.repo || '') : '';
+  var href = repo ? 'https://github.com/' + repo + '/issues/' + encodeURIComponent(num) : '';
+  var cls = 'evl-chip evl-chip--issue' + (extraCls ? ' ' + extraCls : '');
+  var inner = '#' + escHtml(String(num));
+  return href
+    ? '<a class="' + cls + '" href="' + escHtml(href) + '" target="_blank" rel="noopener">' + inner + '</a>'
+    : '<span class="' + cls + '">' + inner + '</span>';
+}
+
+function _evlSprintChip(label) {
+  if (!label) return '';
+  return '<span class="evl-chip evl-chip--sprint">' + escHtml(label) + '</span>';
+}
+
+function _evlBranchChip(branch) {
+  if (!branch) return '';
+  return '<span class="evl-chip evl-chip--branch"><i class="ti ti-git-branch"></i>'
+    + escHtml(branch) + '</span>';
+}
+
+function _evlAgentChip(role) {
+  var key = (role || 'agent').toLowerCase();
+  return '<span class="evl-chip evl-chip--agent log-agent-' + escHtml(key) + '">'
+    + escHtml(key) + '</span>';
+}
+
+function _evlIsError(ev) {
+  var type = ev.type || '';
+  if (type === 'ticket_failed') return true;
+  if (type === 'agent_finished') {
+    var st = (ev.detail || {}).status || '';
+    return st === 'error' || st === 'timed_out';
+  }
+  return false;
+}
+
+function _evlErrorPanelHtml(ev) {
+  var d = ev.detail || {};
+  var reason = d.reason || d.message || d.summary || '';
+  var errType = d.error_type || '';
+  var loc = d.location || '';
+  var gateName = d.gate_name || (d.gate ? 'pytest' : '');
+  var issueNum = _evlParseIssueNum(ev);
+  var sprintLabel = d.sprint_label || '';
+
+  if (!errType && reason) {
+    var em = reason.match(/\b([A-Z][a-zA-Z]+Error)\b/);
+    if (em) errType = em[1];
+  }
+  if (!loc && reason) {
+    var lm = reason.match(/([\w/.-]+\.py:\d+)/);
+    if (lm) loc = lm[1];
+  }
+
+  var head = '';
+  if (errType && loc) head = escHtml(errType) + ' · <span class="evl-error-loc">' + escHtml(loc) + '</span>';
+  else if (errType) head = escHtml(errType);
+  else if (d.failure_class) head = escHtml(String(d.failure_class));
+  else if (d.category) head = escHtml(String(d.category));
+
+  var msg = d.message || reason;
+  if (msg && msg.length > 400) msg = msg.substring(0, 400) + '…';
+
+  var gateLine = '';
+  if (gateName || d.sidecar) {
+    gateLine = 'gate: ' + escHtml(gateName || 'failure');
+    if (d.sidecar) gateLine += ' · sidecar ' + escHtml(d.sidecar.split('/').slice(-3).join('/'));
+  }
+
+  var actions = '<div class="evl-error-actions">';
+  if (issueNum) {
+    actions += '<button type="button" class="evl-error-btn" onclick="evlOpenIssueLog('
+      + escHtml(String(issueNum)) + ')"><i class="ti ti-file-text"></i> Full log</button>';
+    var repo = _projectData ? (_projectData.repo || '') : '';
+    if (repo) {
+      actions += '<a class="evl-error-btn" href="https://github.com/' + escHtml(repo)
+        + '/issues/' + encodeURIComponent(issueNum) + '" target="_blank" rel="noopener">#'
+        + escHtml(String(issueNum)) + '</a>';
+    }
+    actions += '<button type="button" class="evl-error-btn evl-error-btn--action" data-issue="'
+      + escHtml(String(issueNum)) + '" data-sprint="' + escHtml(sprintLabel || '')
+      + '" onclick="evlRedispatchCoder(this.dataset.issue, this.dataset.sprint || null)">'
+      + 'Re-dispatch coder</button>';
+  }
+  actions += '</div>';
+
+  return '<div class="evl-error-panel">'
+    + (head ? '<div class="evl-error-head">' + head + '</div>' : '')
+    + (msg ? '<div class="evl-error-msg">' + escHtml(msg) + '</div>' : '')
+    + (gateLine ? '<div class="evl-error-gate">' + gateLine + '</div>' : '')
+    + actions
+    + '</div>';
+}
+
+function evlOpenIssueLog(issueNum) {
+  logsSetView('issues');
+  setTimeout(function() {
+    var row = document.querySelector('[data-issue-log="' + issueNum + '"]');
+    if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 300);
+}
+
+function evlRedispatchCoder(issueNum, sprintLabel) {
+  if (typeof switchTab === 'function') switchTab('sprint-mgmt');
+  if (sprintLabel && typeof _smgmtFocusIssue === 'function') {
+    _smgmtFocusIssue(issueNum, sprintLabel);
+  }
 }
 
 function _evlLabelChipClass(name) {
@@ -21034,7 +21474,58 @@ function _evlLabelChipClass(name) {
 function _evlDescHtml(ev) {
   var type = ev.type || '';
   var detail = ev.detail || {};
-  var target = escHtml(ev.target || '');
+  var target = ev.target || '';
+  var issueNum = _evlParseIssueNum(ev);
+
+  if (type === 'ticket_failed') {
+    var role = (detail.agent || 'agent').toLowerCase();
+    var branch = detail.branch || '';
+    var tail = detail.reason ? ' — ' + escHtml(String(detail.reason).substring(0, 80)) : '';
+    return '<span class="lr-desc">'
+      + _evlAgentChip(role) + ' failed on ' + _evlIssueChip(issueNum)
+      + (branch ? ' · ' + _evlBranchChip(branch) : '')
+      + tail
+      + '</span>';
+  }
+
+  if (type === 'sprint_started') {
+    var sprintId = detail.sprint_id || target || '';
+    var count = detail.ticket_count;
+    return '<span class="lr-desc">sprint started ' + _evlSprintChip(sprintId)
+      + (count != null ? ' <span class="evl-meta">' + escHtml(String(count)) + ' tickets</span>' : '')
+      + '</span>';
+  }
+
+  if (type === 'sprint_finished') {
+    var finLabel = detail.sprint_id || target || '';
+    var parts = [];
+    if (detail.done != null) parts.push(detail.done + ' done');
+    if (detail.failed != null && detail.failed > 0) parts.push(detail.failed + ' failed');
+    if (detail.skipped != null && detail.skipped > 0) parts.push(detail.skipped + ' skipped');
+    return '<span class="lr-desc">sprint finished ' + _evlSprintChip(finLabel)
+      + (parts.length ? ' <span class="evl-meta">' + escHtml(parts.join(' · ')) + '</span>' : '')
+      + '</span>';
+  }
+
+  if (type === 'sprint_rerun') {
+    var parent = detail.sprint_id || '';
+    var sub = detail.sub_label || target || '';
+    return '<span class="lr-desc">sprint rerun '
+      + _evlSprintChip(parent) + ' <span class="evl-meta">→</span> ' + _evlSprintChip(sub)
+      + '</span>';
+  }
+
+  if (type === 'ticket_dispatched' || type === 'ticket_agent_finished') {
+    var agentName = (detail.agent || '').toLowerCase();
+    var verb = type === 'ticket_dispatched' ? 'dispatched' : 'finished';
+    return '<span class="lr-desc">'
+      + _evlAgentChip(agentName) + ' ' + verb + ' on ' + _evlIssueChip(issueNum)
+      + '</span>';
+  }
+
+  if (type === 'ticket_label_changed') {
+    return '<span class="lr-desc">' + escHtml(_evlLabelChangeText(ev)) + '</span>';
+  }
 
   if (type === 'label_added' || type === 'label_removed') {
     var actCls = type === 'label_added' ? 'added' : 'removed';
@@ -21044,17 +21535,17 @@ function _evlDescHtml(ev) {
     return '<span class="lr-desc">'
       + '<span class="lbl-act ' + actCls + '">' + actIcon + '</span>'
       + ' label <span class="lbl-chip ' + chipCls + '">' + escHtml(labelName) + '</span>'
-      + (target ? ' on <span class="mono">' + target + '</span>' : '')
+      + (issueNum ? ' on ' + _evlIssueChip(issueNum) : (target ? ' on <span class="mono">' + escHtml(target) + '</span>' : ''))
       + '</span>';
   }
 
   if (type === 'pr_opened' || type === 'pr_merged') {
     var prCls = type === 'pr_opened' ? 'pr-open' : 'pr-merged';
     var prIcon = type === 'pr_opened' ? 'ti-git-pull-request' : 'ti-git-merge';
-    var head = detail.head ? '<span class="branch-name">' + escHtml(detail.head) + '</span>' : '';
-    var base = detail.base ? '<span class="branch-name">' + escHtml(detail.base) + '</span>' : '';
-    var arrow = head && base ? ' → ' : '';
-    var prNum = target ? '<span class="mono">' + target + '</span>' : '';
+    var head = detail.head ? _evlBranchChip(detail.head) : '';
+    var base = detail.base ? _evlBranchChip(detail.base) : '';
+    var arrow = head && base ? ' <span class="evl-meta">→</span> ' : '';
+    var prNum = target ? _evlIssueChip(target.replace(/^#/, '')) : '';
     var action = type === 'pr_opened' ? 'opened' : 'merged';
     return '<span class="lr-desc">'
       + '<i class="ti ' + prIcon + ' git-ico ' + prCls + '"></i>'
@@ -21066,63 +21557,61 @@ function _evlDescHtml(ev) {
   if (type === 'branch_created') {
     var branchRef = detail.ref || ev.target || '';
     return '<span class="lr-desc">'
-      + '<i class="ti ti-git-branch git-ico branch"></i>'
-      + 'branch <span class="branch-name">' + escHtml(branchRef) + '</span> created'
+      + 'branch ' + _evlBranchChip(branchRef) + ' created'
       + '</span>';
   }
 
   if (type === 'issue_opened') {
-    return '<span class="lr-desc"><span class="mono">' + target + '</span> opened</span>';
+    return '<span class="lr-desc">' + _evlIssueChip(issueNum || target.replace(/^#/, '')) + ' opened</span>';
   }
   if (type === 'issue_closed') {
-    return '<span class="lr-desc"><span class="mono">' + target + '</span> closed</span>';
+    return '<span class="lr-desc">' + _evlIssueChip(issueNum || target.replace(/^#/, '')) + ' closed</span>';
   }
 
-  // Agent lifecycle rows (issue #719): render '<role> <action> #<issue>' with a
-  // clickable GitHub issue link. Fall back to the raw UUID actor when the event
-  // carries no role/issue (legacy events, non-sprint agents).
   if (type === 'agent_started' || type === 'agent_finished') {
-    var action = type === 'agent_started' ? 'started' : 'finished';
     var aRole = detail.role || '';
     var aIssue = detail.issue_num;
-    // issue #764: Duration column for finished agent rows, sourced from the
-    // durable agent_runs.duration_seconds enriched onto the event server-side.
-    var durSecs = (type === 'agent_finished')
-      ? (ev.duration_seconds != null ? ev.duration_seconds : detail.duration)
-      : null;
-    var durHtml = (durSecs != null)
-      ? '<span class="evl-agent-duration">' + escHtml(_evlFmtDuration(durSecs)) + '</span>'
-      : '';
+    var st = detail.status || '';
+    var isFail = type === 'agent_finished' && (st === 'error' || st === 'timed_out');
+    var verb = type === 'agent_started' ? 'started' : (isFail ? 'failed on' : 'finished');
     if (aRole && aIssue) {
-      var repo = _projectData ? (_projectData.repo || '') : '';
-      var issueUrl = repo
-        ? 'https://github.com/' + repo + '/issues/' + encodeURIComponent(aIssue)
-        : '';
-      var issueLink = issueUrl
-        ? '<a class="evl-issue-link" href="' + escHtml(issueUrl) + '" target="_blank" rel="noopener">#' + escHtml(String(aIssue)) + '</a>'
-        : '#' + escHtml(String(aIssue));
       return '<span class="lr-desc evl-agent-row">'
-        + '<span class="evl-agent-role">' + escHtml(aRole) + '</span> '
-        + action + ' ' + issueLink + durHtml
+        + _evlAgentChip(aRole) + ' ' + verb + ' ' + _evlIssueChip(aIssue)
         + '</span>';
     }
-    // Fallback: no role/issue → show action and the raw agent UUID (no regression)
     var rawId = escHtml(ev.actor || ev.target || '');
     return '<span class="lr-desc evl-agent-row">'
-      + 'agent ' + action + (rawId ? ' <span class="mono">' + rawId + '</span>' : '')
+      + 'agent ' + verb + (rawId ? ' <span class="mono">' + rawId + '</span>' : '')
       + '</span>';
   }
 
   var label = type.replace(/_/g, ' ');
-  return '<span class="lr-desc">' + escHtml(label) + (target ? ' <span class="mono">' + target + '</span>' : '') + '</span>';
+  return '<span class="lr-desc">' + escHtml(label)
+    + (target ? ' <span class="mono">' + escHtml(target) + '</span>' : '') + '</span>';
+}
+
+function _evlDurationPill(ev) {
+  var type = ev.type || '';
+  var detail = ev.detail || {};
+  var secs = null;
+  if (type === 'agent_finished') {
+    secs = ev.duration_seconds != null ? ev.duration_seconds : detail.duration;
+  } else if (type === 'ticket_agent_finished') {
+    secs = detail.duration;
+  } else if (type === 'sprint_finished') {
+    secs = detail.duration;
+  }
+  if (secs == null) return '';
+  var txt = _evlFmtDuration(secs);
+  if (!txt) return '';
+  var warn = Number(secs) >= 3600;
+  return '<span class="evl-dur-pill' + (warn ? ' warn' : '') + '">' + escHtml(txt) + '</span>';
 }
 
 function evlRenderTimeline(events, filter) {
   if (!events || events.length === 0) return '<div class="logs-empty">No events found.</div>';
 
-  var visible = filter === 'all'
-    ? events
-    : events.filter(function(e) { return e.source === filter; });
+  var visible = events.filter(function(e) { return _evlMatchesFilter(e, filter); });
 
   if (visible.length === 0) return '<div class="logs-empty">No events for this filter.</div>';
 
@@ -21159,7 +21648,7 @@ function evlRenderTimeline(events, filter) {
   for (var j = 0; j < byDay.length; j++) {
     var bucket = byDay[j];
     var visibleInDay = bucket.events.filter(function(e) {
-      return filter === 'all' || e.source === filter;
+      return _evlMatchesFilter(e, filter);
     });
     if (visibleInDay.length === 0) continue;
 
@@ -21167,21 +21656,27 @@ function evlRenderTimeline(events, filter) {
 
     for (var k = 0; k < bucket.events.length; k++) {
       var ev = bucket.events[k];
-      if (filter !== 'all' && ev.source !== filter) continue;
+      if (!_evlMatchesFilter(ev, filter)) continue;
 
       var timePart = (ev.timestamp || '').substring(11, 16);
       var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
-      var badgeCls = badgeLabel === 'GITHUB' ? 'github' : (badgeLabel === 'DASH' ? 'dash' : 'agent');
+      var badgeCls = _evlBadgeCls(badgeLabel);
       var desc = _evlDescHtml(ev);
       var actor = (ev.source === 'github' && ev.actor)
         ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
         : '';
       var cleanup = _evlBranchCleanupHtml(ev);
+      var durPill = _evlDurationPill(ev);
+      var isErr = _evlIsError(ev);
+      var errPanel = isErr ? _evlErrorPanelHtml(ev) : '';
 
-      html += '<div class="evl-log-row" data-source="' + escHtml(ev.source) + '">'
+      html += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
+        + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '">'
         + '<span class="lr-time">' + escHtml(timePart) + '</span>'
         + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
         + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
+        + durPill
+        + errPanel
         + '</div>';
     }
   }
@@ -22140,6 +22635,33 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer">
     <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>
     <button class="btn-primary" id="fs-confirm-btn" type="button" disabled>Merge Sprint</button>
+  </div>
+</div>
+
+<!-- ── Bulk Complete Sprint modal ── -->
+<div class="modal-backdrop hidden" id="bc-backdrop"></div>
+<div class="modal hidden" id="bc-modal"
+     role="dialog" aria-modal="true" aria-labelledby="bc-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="bc-modal-title">Bulk complete sprint?</span>
+    <button class="modal-close" id="bc-close-btn" aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div id="bc-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
+    <div id="bc-content" class="hidden">
+      <div class="rr-controls">
+        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to close:</span>
+        <a onclick="_bcSelectAll(true)">Select all</a>
+        <a onclick="_bcSelectAll(false)">Select none</a>
+      </div>
+      <div class="rr-ticket-list" id="bc-ticket-list"></div>
+      <div class="fs-actions" id="bc-actions"></div>
+    </div>
+    <div class="modal-error hidden" id="bc-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" id="bc-cancel-btn" type="button">Cancel</button>
+    <button class="btn-primary" id="bc-confirm-btn" type="button" disabled>Bulk complete</button>
   </div>
 </div>
 
@@ -23738,20 +24260,46 @@ const _PS_ICON_OPTIONS = [
 ];
 const _PS_DEFAULT_ICON = 'ti-folder';
 const _PS_DEFAULT_COLOR = 'gray';
+const _PS_ICON_PREVIEW_LIMIT = 10;
 let _psSelectedIcon = _PS_DEFAULT_ICON;
 let _psSelectedColor = _PS_DEFAULT_COLOR;
+let _psIconsExpanded = false;
 
 function _psRenderIconPicker() {
   const grid = document.getElementById('ps-icon-grid');
   if (!grid) return;
-  grid.innerHTML = _PS_ICON_OPTIONS.map(ic => {
+  const overLimit = _PS_ICON_OPTIONS.length > _PS_ICON_PREVIEW_LIMIT;
+  grid.innerHTML = _PS_ICON_OPTIONS.map((ic, idx) => {
     const on = ic === _psSelectedIcon;
+    const hidden = overLimit && !_psIconsExpanded
+      && idx >= _PS_ICON_PREVIEW_LIMIT && ic !== _psSelectedIcon;
     const label = ic.replace(/^ti-/, '').replace(/-/g, ' ');
-    return `<button type="button" class="ps-icon-opt" role="radio"
+    const cls = 'ps-icon-opt' + (hidden ? ' ps-icon-opt--hidden' : '');
+    return `<button type="button" class="${cls}" role="radio"
               aria-checked="${on}" tabindex="${on ? 0 : -1}"
               aria-label="${label} icon" title="${ic}"
               onclick="_psSelectIcon('${ic}')"><i class="ti ${ic}"></i></button>`;
   }).join('');
+  _psUpdateIconsSeeMoreBtn();
+}
+
+function _psUpdateIconsSeeMoreBtn() {
+  const btn = document.getElementById('ps-icons-see-more');
+  if (!btn) return;
+  const total = _PS_ICON_OPTIONS.length;
+  if (total <= _PS_ICON_PREVIEW_LIMIT) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.textContent = _psIconsExpanded
+    ? 'See less'
+    : `See more (${total - _PS_ICON_PREVIEW_LIMIT} more)`;
+}
+
+function _psToggleIconGrid() {
+  _psIconsExpanded = !_psIconsExpanded;
+  _psRenderIconPicker();
 }
 
 function _psSelectIcon(icon) {

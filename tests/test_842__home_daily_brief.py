@@ -162,6 +162,12 @@ def test_ac7_project_header_name_and_status_pill(html):
     # three pill states (active/running, idle, blocked)
     assert "pbstatus run" in html
     assert "pbstatus idle" in html
+    assert "_projectBadgeHtml" in html, "project icon badge must use settings identity"
+    assert "colorHex" in html, "project color must resolve like sprint mgmt"
+    assert "ti-terminal" not in html, "generic terminal icon must not be hardcoded"
+    assert "_projectTitleLinkHtml" in html, "project title must link to sprint mgmt"
+    assert "pb-title-link" in html, "project title link class missing"
+    assert "/sprint-mgmt" in html, "project brief must jump to sprint management"
 
 
 # ── AC8: AI summary paragraph ─────────────────────────────────────────────────
@@ -170,6 +176,8 @@ def test_ac8_ai_summary_from_stored_summary_endpoint(html):
     assert "/brief/summary" in html, "must read stored per-project summary"
     assert "pb-sum-text" in html, "AI summary paragraph element missing"
     assert "pb-sum-tag" in html, "AI summary tag missing"
+    assert "pb-sum-loading" in html, "AI summary block must show inline loading state"
+    assert "summaryLoadingHtml" in html, "summary loading helper missing"
 
 
 # ── AC9: permanent one-line status ────────────────────────────────────────────
@@ -182,43 +190,42 @@ def test_ac9_one_line_status_present(html):
     assert "in_progress" in html
 
 
-# ── AC10: show/hide details toggle ────────────────────────────────────────────
+# ── AC10: 2×2 project grid with separator lines ───────────────────────────────
 
-def test_ac10_details_toggle(html):
-    assert "pb-toggle" in html, "details toggle button missing"
-    assert "pb-details" in html, "collapsible details container missing"
-    assert "Show details" in html and "Hide details" in html
-    # only the shipped-detail + recent-activity live inside the collapsible region
+def test_ac10_project_grid_layout(html):
+    assert "pb-grid" in html, "2×2 project grid missing"
+    for cell in ("pb-cell-summary", "pb-cell-todo", "pb-cell-shipped", "pb-cell-activity"):
+        assert cell in html, f"grid cell {cell} missing"
+    assert re.search(r"\.pb-grid\{[^}]*grid-template-columns", html), \
+        "project grid must use two columns"
     assert "Shipped detail" in html
     assert "Recent activity" in html
-    # collapsed hides the details region
-    assert re.search(r"\.pbrief\.collapsed\s+\.pb-details\s*\{[^}]*display\s*:\s*none",
-                     html), "collapsed state must hide .pb-details"
+    assert "HOME_ACTIVITY_LIMIT" in html, "recent activity list cap missing"
 
 
-# ── AC11: summary + status stay visible when collapsed ────────────────────────
+# ── AC11: TO-DO and Recent activity share the right column ─────────────────────
 
-def test_ac11_summary_and_status_outside_details(html):
-    """pb-summary and pb-statusline must be siblings of (not inside) pb-details
-    so collapsing details never hides them."""
-    details_idx = html.index('class="pb-details"') if 'class="pb-details"' in html \
-        else html.index("pb-details")
-    # In the template markup the summary + statusline appear before pb-details.
-    summary_idx = html.index("pb-sum-body")
-    status_idx = html.index("pb-statusline")
-    assert summary_idx < details_idx, "AI summary must precede the details block"
-    assert status_idx < details_idx, "status line must precede the details block"
-    # And the collapse rule only targets .pb-details (not the summary/status).
-    assert "collapsed .pb-summary" not in html
-    assert "collapsed .pb-statusline" not in html
+def test_ac11_todo_and_activity_aligned_right(html):
+    """TO-DO (row 1) and Recent activity (row 2) sit in the right grid column."""
+    todo_idx = html.index("pb-cell-todo")
+    activity_idx = html.index("pb-cell-activity")
+    summary_idx = html.index("pb-cell-summary")
+    shipped_idx = html.index("pb-cell-shipped")
+    assert todo_idx < activity_idx, "TO-DO must precede Recent activity in markup"
+    assert summary_idx < shipped_idx, "AI summary must precede Shipped detail in markup"
+    assert re.search(r"\.pb-cell-todo\{[^}]*grid-column\s*:\s*2", html), \
+        "TO-DO must occupy the right column"
+    assert re.search(r"\.pb-cell-activity\{[^}]*grid-column\s*:\s*2", html), \
+        "Recent activity must occupy the right column"
 
 
-# ── AC12: per-project independent toggle ──────────────────────────────────────
+# ── AC12: Open commander link in bottom-right footer ───────────────────────────
 
-def test_ac12_toggle_is_per_block(html):
-    """Toggling uses the nearest .pbrief ancestor, so blocks are independent."""
-    assert "closest('.pbrief')" in html or 'closest(".pbrief")' in html, \
-        "toggle must scope to the nearest .pbrief, not a shared global"
+def test_ac12_open_commander_footer(html):
+    assert "pb-foot" in html, "project card footer missing"
+    assert "open-proj" in html, "Open commander link missing"
+    assert re.search(r"\.pb-foot\{[^}]*justify-content\s*:\s*flex-end", html), \
+        "Open commander must sit at the bottom right"
 
 
 # ── AC13: add new project ─────────────────────────────────────────────────────

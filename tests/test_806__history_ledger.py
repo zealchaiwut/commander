@@ -108,7 +108,7 @@ def test_ac1_issue_chip_covers_all_four_states():
     chip = _fn_body("_histIssueChip")
     # Display vocabulary mandated by the AC.
     assert "MERGED" in chip
-    assert "OPEN·UAT" in chip
+    assert "OPEN" in chip and "UAT" in chip
     assert "CRASHED" in chip
     assert "NOT RUN" in chip
 
@@ -155,11 +155,11 @@ def test_ac2_verbs_wired_to_existing_handlers():
 
 
 def test_ac2_locked_states_get_no_verbs():
-    """A locked (finished/deleted) sprint short-circuits before any verb button."""
+    """A locked (finished/deleted/completed) sprint short-circuits before any verb button."""
     verbs = _fn_body("_histVerbsHtml")
     assert "_histIsLocked" in verbs, "verb builder must consult the lock predicate"
     locked = _fn_body("_histIsLocked")
-    assert "finished" in locked and "deleted" in locked
+    assert "finished" in locked and "deleted" in locked and "completed" in locked
 
 
 # ═══════════════════════ AC3 — Re-run gating ════════════════════════════════
@@ -232,6 +232,7 @@ def test_ac5_issue_row_rerun_arrow_prefix():
 
 def test_ac6_pr_pill_targets_pr_number():
     url = _fn_body("_histPrUrl")
+    assert "_histRepo" in url, "PR URL must resolve repo from cache or sprint row"
     assert "pr_number" in url, "the PR pill target is built from the sprint's pr_number"
     assert "/pull/" in url, "the PR pill opens the GitHub pull-request URL"
 
@@ -305,7 +306,7 @@ def test_failed_block_renders_on_failed_sprint():
     assert "failed" in fail
     assert "failure_reason" in fail or "failed_tickets" in fail
     card = _fn_body("_histCardHtml")
-    assert "_histHeadLinksHtml" in card, "PR/summary links render on the card head"
+    assert "_histHeadActionsHtml" in card, "PR/summary/logs actions render on the card head"
     assert "_histRerunSprint" in PROJECT_HTML
     rerun = _fn_body("_histRerunSprint")
     assert "auto_run" in rerun and "true" in rerun
@@ -319,4 +320,41 @@ def test_post_sprint_block_renders_documenter_and_reviewer():
     assert "follow_up_tickets" in block or "ps-ticket" in block
     card = _fn_body("_histCardHtml")
     assert "_histPostSprintHtml" in card
-    assert "_histPostSprintChipHtml" in card
+    hints = _fn_body("_histHeadHintsHtml")
+    assert "_histPostSprintChipHtml" in hints
+    assert "hist-card-head-left" in card
+    assert "hist-card-body" in card
+
+
+def test_bulk_complete_button_on_parent_with_children():
+    group = _fn_body("_histGroupHtml")
+    assert "_histBulkCompleteBtnHtml" in group
+    assert "bulkCompleteBtn" in _fn_body("_histGroupHtml")
+    card = _fn_body("_histCardHtml")
+    assert "hist-card-head-right" in card
+    assert "bulkCompleteBtn" in card
+    btn = _fn_body("_histBulkCompleteBtnHtml")
+    assert "smgmtBulkCompleteSprint" in btn
+    assert "Bulk complete" in btn
+    assert "hist-head-btn--bulk" in btn
+    assert "hist-group-actions" not in btn
+    needs = _fn_body("_histGroupNeedsBulkComplete")
+    assert "completed" in needs and "deleted" in needs
+
+
+def test_bulk_complete_modal_mounts():
+    assert 'id="bc-modal"' in PROJECT_HTML
+    assert 'id="bc-confirm-btn"' in PROJECT_HTML
+    assert "bulk-complete-preview" in PROJECT_HTML or "smgmtBulkCompleteSprint" in PROJECT_HTML
+
+
+def test_locked_collapsed_cards_hide_header_details():
+    """Completed/deleted rows default collapsed with a compact header (no progress/duration)."""
+    card = _fn_body("_histCardHtml")
+    assert "headCompact" in card
+    assert "_histProgressText(s)" in card
+    assert "headCompact ?" in card
+    auto = _fn_body("_histAutoExpandRecent")
+    assert "_histIsLocked(s.lifecycle_state)" in auto
+    rule = _css_rule(".hist-card.locked:not(.expanded) .hist-card-head")
+    assert rule, "locked collapsed cards must use a single-line header"

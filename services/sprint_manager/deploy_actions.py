@@ -83,6 +83,14 @@ def restart_label(entry: dict) -> Optional[str]:
     return (entry.get("launchd_label") or "").strip() or None
 
 
+def script_working_dir(entry: dict) -> Optional[str]:
+    """Return ``working_dir`` when it exists on disk (for script subprocess cwd)."""
+    working_dir = (entry.get("working_dir") or "").strip()
+    if working_dir and os.path.isdir(working_dir):
+        return working_dir
+    return None
+
+
 def stop_start_scripts(entry: dict) -> tuple[Optional[str], Optional[str]]:
     """Return ``(stop, start)`` scripts from the env config (None when absent).
 

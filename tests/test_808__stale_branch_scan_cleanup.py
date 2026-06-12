@@ -296,10 +296,12 @@ def test_ac3_chip_is_rendered_in_the_card_head():
 # ── AC4 — toolbar scan button ─────────────────────────────────────────────────
 
 def test_ac4_toolbar_has_scan_button():
+    assert 'id="ps-stale-scan-btn"' in PROJECT_HTML
+    assert "Scan stale branches" in PROJECT_HTML
+    assert 'id="ps-sprint-cleanup-card"' in PROJECT_HTML
+    assert "_histScanStale()" in PROJECT_HTML, "the button triggers the scan handler"
     toolbar = _fn_body("_histToolbarHtml")
-    assert "hist-scan-btn" in toolbar
-    assert "Scan stale branches" in toolbar
-    assert "_histScanStale()" in toolbar, "the button triggers the scan handler"
+    assert "Scan stale branches" not in toolbar, "scan action lives in project settings, not history toolbar"
 
 
 def test_ac4_scan_handler_hits_the_scan_endpoint():

@@ -19,6 +19,10 @@ globalThis._rrVersionedLabel ??= null;
 globalThis._fsLabel ??= null;
 globalThis._fsPreview ??= null;
 
+// Bulk Complete Sprint modal (parent + child lineage)
+globalThis._bcLabel ??= null;
+globalThis._bcPreview ??= null;
+
 // Run preflight modal (issue #448)
 globalThis._pfCurrentLabel ??= null;
 globalThis._pfCurrentRepo ??= null;
@@ -36,6 +40,7 @@ globalThis._smgmtGhostNextNum ??= null;
 export const SPRINT_BOARD_STATE_KEYS = [
   "_rrLabel", "_rrVersionedLabel",
   "_fsLabel", "_fsPreview",
+  "_bcLabel", "_bcPreview",
   "_pfCurrentLabel", "_pfCurrentRepo", "_pfState", "_pfDagData",
   "_pfWarnings", "_pfCycle", "_pfFlags", "_pfSelectedIds",
   "_smgmtMoveLock", "_smgmtGhostNextNum",

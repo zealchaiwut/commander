@@ -35,6 +35,8 @@
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
   globalThis._fsPreview ??= null;
+  globalThis._bcLabel ??= null;
+  globalThis._bcPreview ??= null;
   globalThis._pfCurrentLabel ??= null;
   globalThis._pfCurrentRepo ??= null;
   globalThis._pfState ??= "idle";
@@ -356,6 +358,149 @@
       if (confirmBtn) {
         confirmBtn.disabled = false;
         confirmBtn.textContent = "Merge Sprint";
+      }
+    }
+  }
+
+  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
+  function _bcOpen() {
+    _setBodyInert(["bc-backdrop", "bc-modal"]);
+    document.getElementById("bc-backdrop").classList.remove("hidden");
+    document.getElementById("bc-modal").classList.remove("hidden");
+  }
+  function _bcClose() {
+    document.getElementById("bc-backdrop").classList.add("hidden");
+    document.getElementById("bc-modal").classList.add("hidden");
+    _clearBodyInert();
+    _bcLabel = null;
+    _bcPreview = null;
+  }
+  function _bcCatClass(cat) {
+    if (cat === "UAT")
+      return "rr-cat-uat";
+    if (cat === "SIT")
+      return "rr-cat-sit";
+    if (cat === "needs-rework")
+      return "rr-cat-rework";
+    if (cat === "sprint-summary")
+      return "rr-cat-summary";
+    return "rr-cat-queued";
+  }
+  function _bcSelectAll(checked) {
+    document.querySelectorAll("#bc-ticket-list input[type=checkbox]").forEach((cb) => {
+      cb.checked = checked;
+    });
+  }
+  async function smgmtBulkCompleteSprint(label) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    _bcLabel = label;
+    _bcPreview = null;
+    const parts = repo.split("/");
+    const owner = parts[0];
+    const repoName = parts.slice(1).join("/");
+    document.getElementById("bc-modal-title").textContent = `Bulk complete ${sprintLabelDisplay(label)}?`;
+    document.getElementById("bc-loading").classList.remove("hidden");
+    document.getElementById("bc-content").classList.add("hidden");
+    document.getElementById("bc-error").classList.add("hidden");
+    document.getElementById("bc-error").textContent = "";
+    const confirmBtn = document.getElementById("bc-confirm-btn");
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Bulk complete";
+    }
+    _bcOpen();
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete-preview`
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const preview = await res.json();
+      _bcPreview = preview;
+      const listEl = document.getElementById("bc-ticket-list");
+      const allTickets = preview.all_tickets || [];
+      if (allTickets.length === 0) {
+        listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
+      } else {
+        listEl.innerHTML = allTickets.map((t) => {
+          const catClass = _bcCatClass(t.category);
+          const catLabel = t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
+          return `<label class="rr-ticket-row">
+          <input type="checkbox" checked data-issue="${t.number}" onchange="">
+          <span class="rr-ticket-num">#${t.number}</span>
+          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
+          <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
+        </label>`;
+        }).join("");
+      }
+      const memberCount = (preview.member_labels || []).length;
+      const actionsEl = document.getElementById("bc-actions");
+      actionsEl.innerHTML = [
+        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close selected tickets (UAT + summary included)</div>`,
+        `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? "s" : ""} completed</div>`
+      ].join("");
+      document.getElementById("bc-loading").classList.add("hidden");
+      document.getElementById("bc-content").classList.remove("hidden");
+      if (confirmBtn)
+        confirmBtn.disabled = false;
+    } catch (e) {
+      document.getElementById("bc-loading").classList.add("hidden");
+      const errEl = document.getElementById("bc-error");
+      errEl.textContent = "Failed to load preview: " + e.message;
+      errEl.classList.remove("hidden");
+    }
+  }
+  async function _bcConfirm() {
+    const repo = _smgmtRepo();
+    if (!_bcLabel || !repo || !_bcPreview)
+      return;
+    const parts = repo.split("/");
+    const owner = parts[0];
+    const repoName = parts.slice(1).join("/");
+    const checkboxes = Array.from(document.querySelectorAll("#bc-ticket-list input[type=checkbox]"));
+    const selectedNums = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
+    const confirmBtn = document.getElementById("bc-confirm-btn");
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Completing\u2026";
+    }
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_bcLabel)}/bulk-complete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirmed: true,
+            selected_ticket_numbers: selectedNums
+          })
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      _bcClose();
+      if (data.errors && data.errors.length > 0) {
+        _smgmtShowToast(`Bulk complete finished with errors \u2014 ${data.closed} closed.`);
+      } else {
+        _smgmtShowToast(
+          `${sprintLabelDisplay(_bcLabel || "")} bulk completed \u2014 ${data.closed} closed, ${data.completed} marked completed.`
+        );
+      }
+      await loadSprintMgmt();
+    } catch (e) {
+      const errEl = document.getElementById("bc-error");
+      errEl.textContent = "Failed to bulk complete: " + e.message;
+      errEl.classList.remove("hidden");
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Bulk complete";
       }
     }
   }
@@ -1724,6 +1869,9 @@ ${data.errors.join("\n")}`);
         throw new Error(msg);
       }
       const data = await resp.json();
+      if (typeof _smgmtLingerRestore === "function")
+        _smgmtLingerRestore();
+      const prevRunning = new Set(_smgmtRunningLabels);
       _smgmtRunningLabels = /* @__PURE__ */ new Set();
       _smgmtAnySprintRunning = false;
       if (runningResp && runningResp.ok) {
@@ -1736,12 +1884,22 @@ ${data.errors.join("\n")}`);
         });
         _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
       }
+      for (const label of prevRunning) {
+        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label);
+        }
+      }
       if (optimisticRunningLabel) {
         _smgmtRunningLabels.add(optimisticRunningLabel);
         _smgmtAnySprintRunning = true;
       }
       _smgmtRender2(data);
       _smgmtLivePollRestart();
+      const lingerLbl = typeof _smgmtPrimaryRunningLabel === "function" ? _smgmtPrimaryRunningLabel() : null;
+      if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
+        const live = typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(lingerLbl) : _smgmtLiveCache[lingerLbl] || null;
+        _smgmtRunningViewUpdate(lingerLbl, live);
+      }
     } catch (err) {
       if (!silent) {
         const msg = err && err.message ? err.message : "Failed to load sprints.";
@@ -1809,6 +1967,8 @@ ${data.errors.join("\n")}`);
     for (const lbl of sortedForNext) {
       if (_smgmtRunningLabels.has(lbl))
         continue;
+      if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl))
+        continue;
       if (_smgmtFinishedLabels.has(lbl))
         continue;
       if ((bySprint[lbl] || []).length >= 1) {
@@ -1820,7 +1980,8 @@ ${data.errors.join("\n")}`);
       const tickets = bySprint[label] || [];
       if (_smgmtIsFreshRerunSprint(label))
         delete _smgmtOutcomeCache[label];
-      const outcome = _smgmtRunningLabels.has(label) ? null : _smgmtOutcomeCache[label] || null;
+      const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+      const outcome = _smgmtRunningLabels.has(label) || inLinger ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
       const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
@@ -2309,6 +2470,8 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
+    const isLinger = !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    const isRunningView = isRunning || isLinger;
     let isCollapsed = false;
     try {
       isCollapsed = localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
@@ -2322,7 +2485,7 @@ ${data.errors.join("\n")}`);
     const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
     const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
-    const isPostRun = !isRunning && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const isPostRun = !isRunningView && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
     const canRun = tickets.length >= 1 && !hasCompleted;
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
@@ -2337,6 +2500,8 @@ ${data.errors.join("\n")}`);
     if (isRunning) {
       actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+    } else if (isLinger) {
+      actionBtn = `<span class="smgmt-linger-note">Finished \u2014 snapshot kept 1h</span>`;
     } else if (isHasRework && rerunInto && tickets.length === 0) {
       actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
                   onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
@@ -2396,7 +2561,7 @@ ${data.errors.join("\n")}`);
         isOutcomeView = true;
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
-    } else if (isRunning) {
+    } else if (isRunningView) {
       ticketsContainerHtml = _smgmtRunningTicketRowsHtml(label, tickets);
     } else {
       ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
@@ -2422,16 +2587,16 @@ ${data.errors.join("\n")}`);
                     <i class="ti ti-calculator"></i> Estimate all unsized</button>
                    <span class="smgmt-bulk-est-progress"></span>`;
     const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
-    const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunning ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
+    const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
-    const live = isRunning ? _smgmtLiveCache[label] || null : null;
+    const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
     const runningComplete = live ? (live.done_count || 0) + (live.failed_count || 0) + (live.skipped_count || 0) : 0;
     const runningTotal = live ? live.total_count || tickets.length : tickets.length;
     const runningRatio = runningTotal > 0 ? `${runningComplete}/${runningTotal}` : "\u2014";
     const runningElapsed = live && live.time_spent_sec > 0 ? `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">elapsed ${_fmtRunningTime(live.time_spent_sec)}</span>` : `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}"></span>`;
-    const runningBadgeHtml = isRunning ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${runningRatio}</span>` : "";
-    const runningStripeHtml = isRunning ? '<div class="smgmt-running-stripe"></div>' : "";
-    const runningClass = isRunning ? " smgmt-running" : "";
+    const runningBadgeHtml = isRunningView ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${isLinger ? "done" : runningRatio}</span>` : "";
+    const runningStripeHtml = isRunningView ? '<div class="smgmt-running-stripe"></div>' : "";
+    const runningClass = isRunning ? " smgmt-running" : isLinger ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
     return `
@@ -2563,7 +2728,8 @@ ${data.errors.join("\n")}`);
     return `level ${current} of ${levelNums.length}`;
   }
   function _smgmtRunningBoardBannerHtml(label, tickets) {
-    const live = _smgmtLiveCache[label] || null;
+    const isLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    const live = (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null;
     const doneCount = live ? live.done_count || 0 : 0;
     const failedCount = live ? live.failed_count || 0 : 0;
     const skippedCount = live ? live.skipped_count || 0 : 0;
@@ -2572,13 +2738,14 @@ ${data.errors.join("\n")}`);
     const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
     const levelText = _smgmtRunningLevelText(live);
     const parts = [
-      `${escHtml(sprintLabelDisplay(label))} is running`,
+      isLinger ? `${escHtml(sprintLabelDisplay(label))} finished (snapshot)` : `${escHtml(sprintLabelDisplay(label))} is running`,
       `${completeCount}/${totalCount} done`,
       timeSpentSec > 0 ? _fmtRunningTime(timeSpentSec) : null,
       levelText
     ].filter(Boolean);
     const safeLabel = escHtml(label);
-    return `<div class="smgmt-board-running-banner" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
+    const lingerCls = isLinger ? " linger" : "";
+    return `<div class="smgmt-board-running-banner${lingerCls}" id="smgmt-board-banner-${safeLabel}" data-label="${safeLabel}">
     <span class="smgmt-board-running-banner-dot" aria-hidden="true"></span>
     <span class="smgmt-board-running-banner-text" id="smgmt-board-banner-text-${safeLabel}">${parts.join(" \xB7 ")}</span>
     <button type="button" class="smgmt-board-running-banner-link"
@@ -2923,6 +3090,12 @@ ${data.errors.join("\n")}`);
   globalThis._fsSelectAll = _fsSelectAll;
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
+  globalThis._bcOpen = _bcOpen;
+  globalThis._bcClose = _bcClose;
+  globalThis._bcCatClass = _bcCatClass;
+  globalThis._bcSelectAll = _bcSelectAll;
+  globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
+  globalThis._bcConfirm = _bcConfirm;
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
   globalThis.smgmtRunSprint = smgmtRunSprint2;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;

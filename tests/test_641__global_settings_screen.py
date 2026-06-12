@@ -372,20 +372,19 @@ def test_project_settings_panel_has_global_settings_link():
 
 
 def test_project_html_settings_panel_no_model_dropdowns():
-    """Project settings overlay must not offer its own agent model dropdowns.
+    """Project settings tab must not offer its own agent model dropdowns.
 
-    Model selection lives in the global settings page. The notes overlay uses
-    settings-panel styling but must NOT have agent model selects.
+    Model selection lives in the global settings page.
     """
     html_path = DASHBOARD_DIR / "static" / "project.html"
     content = html_path.read_text(encoding="utf-8")
-    start = content.find('id="gnotes-panel"')
+    start = content.find('id="pane-settings"')
     end = content.find('<!-- ── Ticket detail panel', start)
     if start == -1 or end == -1:
-        pytest.skip("gnotes-panel boundaries not found in project.html")
+        pytest.skip("pane-settings boundaries not found in project.html")
     panel_html = content[start:end]
     assert "sm-model-select" not in panel_html, (
-        "sidebar overlay panels must not contain sm-model-select (model dropdowns belong in global settings page)"
+        "project settings tab must not contain sm-model-select (model dropdowns belong in global settings page)"
     )
 
 
@@ -413,9 +412,10 @@ def test_global_settings_is_full_page_not_modal():
     assert 'id="pane-global-settings"' in content, "Global settings must use pane-global-settings tab pane"
     assert 'id="gss-page-body"' in content, "Global settings API cards must render in gss-page-body"
     assert 'id="sm-modal"' not in content, "Global settings modal (sm-modal) must be removed"
-    assert 'id="settings-panel"' not in content or 'id="gnotes-panel"' in content, (
-        "Legacy settings-panel overlay must be removed (gnotes-panel reuses settings-panel class only)"
-    )
+    assert 'id="gnotes-panel"' not in content, "Global notes panel must be removed"
+    assert 'id="sb-notes-link"' not in content, "Global notes sidebar link must be removed"
+    assert 'openNotesPanel' not in content, "Global notes panel handler must be removed"
+    assert 'id="settings-panel"' not in content, "Legacy settings-panel overlay must be removed"
 
 
 def test_global_settings_screen_has_required_sections():

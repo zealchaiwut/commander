@@ -16,6 +16,7 @@ export default [
         // built-ins (Set, JSON, Promise, …) come from ecmaVersion; these Web
         // APIs must be declared so no-undef does not flag them.
         fetch: "readonly",
+        localStorage: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
         setInterval: "readonly",
@@ -35,6 +36,23 @@ export default [
         location: "readonly",
         navigator: "readonly",
         console: "readonly",
+        // Legacy page globals (issue #797 incremental extraction). These are
+        // inline functions still living in project.html that the extracted
+        // modules call across the bundle boundary at runtime. Remove each
+        // entry as the function itself is extracted into static/src/.
+        showToast: "readonly",
+        _preflightLoadBanners: "readonly",
+        _SMGMT_FILTER_PRIORITY: "readonly",
+        _fmtWallClock: "readonly",
+        _fmtElapsed: "readonly",
+        _fmtStoppedAt: "readonly",
+        _fmtRunningTime: "readonly",
+        _fmtTicketElapsed: "readonly",
+        _sizeMinutes: "readonly",
+        _sfcRunningHtml: "readonly",
+        _sfcCompletedHtml: "readonly",
+        _sfcHasReworkHtml: "readonly",
+        _sfcCancelledHtml: "readonly",
       },
     },
     rules: {

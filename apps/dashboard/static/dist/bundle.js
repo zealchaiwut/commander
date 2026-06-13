@@ -1699,7 +1699,6 @@ ${data.errors.join("\n")}`);
     const modal = document.getElementById("gc-modal");
     const issueNum = parseInt(modal.dataset.issueNum, 10);
     const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-    const fromSprint = modal.dataset.fromSprint;
     const repo = modal.dataset.repo;
     const sprintLabel = `sprint-${sprintNum}`;
     const confirmBtn = document.getElementById("gc-confirm-btn");
@@ -1735,7 +1734,7 @@ ${data.errors.join("\n")}`);
       confirmBtn.textContent = `Create ${sprintLabel} & move`;
     }
   }
-  function _smgmtTicketDragEnd(event) {
+  function _smgmtTicketDragEnd(_event) {
     if (_smgmtDragTicket) {
       if (_smgmtDragTicket.multi) {
         _smgmtDragTicket.multi.forEach((n) => {
@@ -2795,9 +2794,7 @@ ${data.errors.join("\n")}`);
     let outcomeCardClass = "";
     let outcomeBadgeHtml = "";
     let headerMetaHtml = "";
-    let ticketCount = tickets.length;
     let ticketsContainerHtml = "";
-    let isOutcomeView = false;
     let rollupItems = tickets;
     if (outcome && (outcome.sprint_status || outcome.state)) {
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
@@ -2824,9 +2821,7 @@ ${data.errors.join("\n")}`);
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const issueList = outcome.issues || [];
-        ticketCount = issueList.length;
         ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
-        isOutcomeView = true;
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
     } else if (isRunningView) {
@@ -2848,16 +2843,6 @@ ${data.errors.join("\n")}`);
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
     const logHtml = "";
     const cancelBannerHtml = "";
-    const hasUnsizedTickets = tickets.length > 0 && tickets.some((t) => !_smgmtTicketHasEstimate(t));
-    const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? "" : " hidden"}"
-                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
-                    title="Estimate all unsized tickets in this sprint">
-                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
-                   <span class="smgmt-bulk-est-progress"></span>
-                   ${tickets.length >= 2 ? `<button class="smgmt-bulk-reest-btn"
-                    onclick="event.stopPropagation();_smgmtBulkReEstimate(Array.from(document.querySelectorAll('#smgmt-tickets-${escHtml(label)} .smgmt-ticket[data-issue]')).map(r=>parseInt(r.dataset.issue,10)).filter(Boolean))"
-                    title="Force re-estimate all tickets in this sprint">
-                    <i class="ti ti-refresh"></i> Reestimate all</button>` : ""}`;
     const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
@@ -3058,9 +3043,7 @@ ${data.errors.join("\n")}`);
     const estRemMins = live ? live.est_remaining_minutes : null;
     const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
     const currentTicket = live ? live.current_ticket : null;
-    const activeAgent = live ? live.active_agent : null;
     const recentLogLines = live ? live.recent_log_lines || [] : [];
-    const pct = totalCount > 0 ? Math.round(completeCount / totalCount * 100) : 0;
     const liveIssues = live && live.issues && live.issues.length > 0 ? live.issues : [];
     const liveByNum = {};
     liveIssues.forEach((i) => {
@@ -3313,7 +3296,7 @@ ${data.errors.join("\n")}`);
     _blSyncFilterPills();
     _blUpdateActions();
   }
-  function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+  function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");

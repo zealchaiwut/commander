@@ -501,7 +501,6 @@ export async function _gcConfirm() {
   const modal = document.getElementById('gc-modal');
   const issueNum = parseInt(modal.dataset.issueNum, 10);
   const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-  const fromSprint = modal.dataset.fromSprint;
   const repo = modal.dataset.repo;
   const sprintLabel = `sprint-${sprintNum}`;
 
@@ -545,7 +544,7 @@ export async function _gcConfirm() {
   }
 }
 
-export function _smgmtTicketDragEnd(event) {
+export function _smgmtTicketDragEnd(_event) {
   if (_smgmtDragTicket) {
     if (_smgmtDragTicket.multi) {
       _smgmtDragTicket.multi.forEach(n => {

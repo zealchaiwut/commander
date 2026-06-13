@@ -335,3 +335,63 @@ def test_last_fired_roundtrip(mem_store):
     assert sch.get_last_fired_date("owner/repo") is None
     sch.set_last_fired_date("owner/repo", "2026-06-13")
     assert sch.get_last_fired_date("owner/repo") == "2026-06-13"
+
+
+# ── API layer (FastAPI) — config + toggle endpoints back the UI ──────────────
+@pytest.fixture
+def api_client(mem_store):
+    sys.path.insert(0, str(_ROOT / "apps" / "dashboard"))
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routers import scheduler as scheduler_router
+
+    app = FastAPI()
+    app.include_router(scheduler_router.router)
+    return TestClient(app)
+
+
+def test_api_config_get_default_empty(api_client):
+    r = api_client.get("/api/scheduler/config", params={"project": "owner/repo"})
+    assert r.status_code == 200
+    assert r.json()["scheduled_run_time"] == ""   # AC1: empty by default = disabled
+
+
+def test_api_config_put_and_get(api_client):
+    r = api_client.put(
+        "/api/scheduler/config",
+        json={"project": "owner/repo", "scheduled_run_time": "01:00"},
+    )
+    assert r.status_code == 200
+    assert r.json()["scheduled_run_time"] == "01:00"
+    r2 = api_client.get("/api/scheduler/config", params={"project": "owner/repo"})
+    assert r2.json()["scheduled_run_time"] == "01:00"
+
+
+def test_api_config_rejects_bad_time(api_client):
+    r = api_client.put(
+        "/api/scheduler/config",
+        json={"project": "owner/repo", "scheduled_run_time": "99:99"},
+    )
+    assert r.status_code == 400
+
+
+def test_api_toggle_default_off_then_on(api_client):
+    # AC3: default off — map empty until something is toggled on.
+    r = api_client.get("/api/scheduler/sprints", params={"project": "owner/repo"})
+    assert r.json()["run_on_schedule"] == {}
+
+    r2 = api_client.put(
+        "/api/scheduler/sprints",
+        json={"project": "owner/repo", "sprint_label": "sprint-1", "enabled": True},
+    )
+    assert r2.status_code == 200 and r2.json()["enabled"] is True
+
+    r3 = api_client.get("/api/scheduler/sprints", params={"project": "owner/repo"})
+    assert r3.json()["run_on_schedule"] == {"sprint-1": True}
+
+
+def test_api_tick_not_due_returns_fired_false(api_client):
+    # No scheduled time configured -> tick never fires (AC9).
+    r = api_client.post("/api/scheduler/tick", json={"project": "owner/repo"})
+    assert r.status_code == 202
+    assert r.json()["fired"] is False

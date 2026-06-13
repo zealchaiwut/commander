@@ -308,6 +308,34 @@ operational end to end — auth, tools, clones, and venv are all working.
 
 ---
 
+## 7b. agent-browser (live UAT browser testing) — optional
+
+The Tester verifies browser-based UAT steps with
+[`agent-browser`](https://github.com/vercel-labs/agent-browser), a native CLI
+that drives a real Chrome (navigate, click, fill, screenshot). It is **optional**
+and **degrades gracefully**: when it is absent, browser-only UAT steps fall back
+to MANUAL — the sprint never crashes. Install it on whichever machine runs the
+**Tester** (normally the remote PRD mac mini; see
+[architecture 10.1](architecture/10_devops.md)).
+
+```bash
+npm install -g agent-browser   # the CLI binary
+agent-browser install          # downloads + sets up Chrome (large, one-time)
+agent-browser status --json    # verify: expect "chrome_installed": true
+```
+
+**Expected:** `agent-browser status --json` reports `chrome_installed: true`.
+The dispatch then injects availability into the tester env; the Run Browser
+panel and `agent_browser_runner.py` (`is_available()` → True) take over from
+MANUAL. Until installed, the tester logs `[agent-browser] available=False` and
+marks browser steps MANUAL.
+
+> Install in the same shell/PATH the Tester runs under. For the unattended
+> launchd runner, ensure the global npm bin dir (`npm bin -g`) is on the
+> service PATH, the same way `claude`'s dir is (see Failure Signatures below).
+
+---
+
 ## 8. Failure Signatures
 
 Common startup failures and their concrete fixes. Each signature maps to one
@@ -318,6 +346,7 @@ root cause — apply the fix and re-run `python scripts/doctor.py` to confirm.
 | `claude CLI not found` | The service PATH does not include the directory containing `claude`. A launchd process is detached from your login shell, so it does not inherit your interactive PATH. | Ensure the service PATH is set correctly: reinstall the service with `bash scripts/install_launchd.sh` — it resolves `claude`'s on-disk directory dynamically and writes it into the plist `PATH`. Confirm with `python scripts/doctor.py`. |
 | `Not logged in` | The Claude OAuth token is missing or was not passed to the service. The unattended runner cannot open a browser to log in interactively. | Provide the OAuth token to the service: run `claude setup-token`, then reinstall passing it — `CLAUDE_CODE_OAUTH_TOKEN=<token> bash scripts/install_launchd.sh --gh-token <gh-token>` — so the token reaches the plist `EnvironmentVariables`. |
 | `repo inaccessible` at startup | `gh` has no headless auth configured. The launchd service cannot read the macOS keychain where `gh auth login` stores credentials, so the startup repo check fails. | Configure headless `gh` auth with a `repo`-scoped token: reinstall with `bash scripts/install_launchd.sh --gh-token ghp_xxxx`, which injects `GH_TOKEN` into the plist and the agent `.env`. Verify with `GH_TOKEN=ghp_xxxx gh auth status`. |
+| `[agent-browser] available=False` despite being installed | The global npm bin dir (`npm bin -g`) is not on the Tester's PATH — common under launchd, which doesn't inherit your login PATH (same class as `claude CLI not found`). | Add the global npm bin dir to the service PATH (reinstall the launchd service so it's written into the plist `PATH`), then confirm with `agent-browser status --json`. Browser UAT is optional — until fixed, steps fall back to MANUAL, not failure. |
 
 ---
 

@@ -1898,7 +1898,7 @@
       letter-spacing: .01em; text-transform: none; flex: none;
     }
     .hist-state.completed { color: var(--steel);  background: var(--steel-bg); }
-    .hist-state.partial   { color: var(--amber);  background: var(--amber-bg); }
+    .hist-state.partial   { color: #a16207; background: color-mix(in srgb, #facc15 22%, transparent); }
     .hist-state.finished  { color: var(--text-muted); background: var(--surface-2); }
     .hist-state.failed    { color: var(--red);    background: var(--red-bg); }
     .hist-state.cancelled { color: var(--amber);  background: var(--amber-bg); }
@@ -2643,8 +2643,8 @@
     .smgmt-sprint-card.smgmt-has-rework { border-color: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05); }
     .smgmt-sprint-card.smgmt-needs-rework .smgmt-sprint-header,
     .smgmt-sprint-card.smgmt-has-rework .smgmt-sprint-header { background: linear-gradient(180deg,var(--yellow-bg) 0%,transparent 100%); }
-    .smgmt-sprint-card.smgmt-partial-finished { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-bg), 0 1px 3px rgba(0,0,0,0.05); }
-    .smgmt-sprint-card.smgmt-partial-finished .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-partial-finished { border-color: color-mix(in srgb, #facc15 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, #facc15 18%, transparent), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-partial-finished .smgmt-sprint-header { background: linear-gradient(180deg,color-mix(in srgb, #facc15 18%, transparent) 0%,transparent 100%); }
     /* Legacy 2-state fallback (kept for any path still emitting smgmt-stopped) */
     .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
     .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
@@ -2657,7 +2657,7 @@
       border: 1px solid transparent;
     }
     .smgmt-state-badge.state-finished { background: var(--steel-bg);  color: var(--steel);    border-color: var(--steel);  }
-    .smgmt-state-badge.state-partial  { background: var(--amber-bg);  color: var(--amber);    border-color: var(--amber);  }
+    .smgmt-state-badge.state-partial  { background: color-mix(in srgb, #facc15 18%, transparent);  color: #a16207;    border-color: color-mix(in srgb, #facc15 45%, transparent);  }
     .smgmt-state-badge.state-rework   { background: var(--yellow-bg); color: var(--yellow);   border-color: var(--yellow); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     /* NEXT UP badge */
@@ -10709,16 +10709,22 @@ function _histSplitBarHtml(stats) {
 }
 
 function _histAutoExpandRecent(groups) {
+  const _expand = (s) => {
+    if (!s || !s.label) return;
+    // Completed/deleted rows stay collapsed by default — title + badge + Logs only.
+    if (_histIsLocked(s.lifecycle_state)) return;
+    _histExpanded.add(s.label);
+    _histLoadRunStats(s.label);
+  };
   for (let i = 0; i < groups.length && i < _histFoldSize; i++) {
-    const members = _histGroupMembers(groups[i]);
-    for (let j = 0; j < members.length; j++) {
-      const s = members[j];
-      const lbl = s.label;
-      if (!lbl) continue;
-      // Completed/deleted rows stay collapsed by default — title + badge + Logs only.
-      if (_histIsLocked(s.lifecycle_state)) continue;
-      _histExpanded.add(lbl);
-      _histLoadRunStats(lbl);
+    const g = groups[i];
+    const children = g.children || [];
+    if (children.length) {
+      // Re-run chain: collapse the parent and older children; expand only the
+      // latest child (children are sub-ascending, so the last one) by default.
+      _expand(children[children.length - 1]);
+    } else {
+      _expand(g.baseSprint);
     }
   }
 }

@@ -963,8 +963,22 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
-  const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets)
-    .slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
+  // Live agent tags / elapsed / spinning ring only make sense while the sprint
+  // is actually running. On a finished/linger/cancelled card the snapshot is
+  // frozen, so a stale "coder_running" must not read as live (issue: #879/#880
+  // showed CODER/TESTER on a cancelled sprint).
+  const isActuallyRunning = typeof _smgmtRunningLabels !== 'undefined'
+    && _smgmtRunningLabels.has(label);
+
+  // Union every ticket carrying the label (tickets) with the run snapshot
+  // (liveIssues), so tickets that never entered the run state — dropped at
+  // run-start by a relabel/mirror race — still appear instead of vanishing
+  // (issue: #861/#862 missing from the list). Live fields win when present.
+  const mergedByNum = new Map();
+  (tickets || []).forEach(t => mergedByNum.set(t.number, { ...t, ...(liveByNum[t.number] || {}) }));
+  liveIssues.forEach(i => { if (!mergedByNum.has(i.number)) mergedByNum.set(i.number, i); });
+  const sourceTickets = Array.from(mergedByNum.values())
+    .sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
   const cardRepo = _smgmtRepo();
 
   if (sourceTickets.length === 0) {
@@ -987,13 +1001,15 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
     }
     if (ticketLevel > 0) prevLevel = ticketLevel;
 
-    const isActiveAgent = agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
+    const isActiveAgent = isActuallyRunning && agentStatus
+      && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
     let indicator = '';
     if (liveStatus === 'done') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number)) {
+    } else if (isActuallyRunning
+        && (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number))) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -1005,10 +1021,11 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
       ? `<span class="smgmt-ticket-size-pill" title="≈${(liveIss && liveIss.minutes) || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
       : '';
     const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : '';
-    const agentTagHtml = (liveIss && liveIss.agent)
+    // Suppress live agent tag + elapsed once the sprint is no longer running.
+    const agentTagHtml = (isActuallyRunning && liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
       : '';
-    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    const elapsedStr = (isActuallyRunning && liveIss) ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
     const elapsedHtml = elapsedStr
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';

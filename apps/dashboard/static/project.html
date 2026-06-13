@@ -154,6 +154,8 @@
     .snav-dot--running  { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
     .snav-dot--finished { background: #2563eb; }
     .snav-dot--rework   { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
+    /* issue #864: a sprint awaiting human sign-off shows an amber dot on the pill */
+    .snav-signoff { width: 7px; height: 7px; border-radius: 50%; background: var(--amber, #d97706); box-shadow: 0 0 0 3px rgba(217,119,6,.18); flex-shrink: 0; }
     .snav-uat        { color: #f59e0b; font-weight: 600; }
     .snav-agents     { color: var(--blue); font-weight: 600; font-family: var(--mono); letter-spacing: .02em; }
     .snav-inprogress { color: #2563eb; font-weight: 600; }
@@ -7063,6 +7065,7 @@
                 title="Sprint status" aria-label="Sprint status">
           <span class="snav-dot" id="snav-dot"></span>
           <span id="snav-pill-text">Sprint</span>
+          <span class="snav-signoff hidden" id="snav-signoff" title="Sprint awaiting sign-off" aria-label="Sprint awaiting sign-off"></span>
           <i class="ti ti-chevron-down snav-caret"></i>
         </button>
         <div class="snav-panel hidden" id="snav-panel">
@@ -19854,6 +19857,9 @@ function _smOnChange(sel) {
 let _snavState = null;
 let _snavPanelOpen = false;
 const _snavStateBySlug = {};
+// issue #864: true when this project has ≥1 sprint awaiting human sign-off
+// (derived from the brief's waiting_on_you list — the same canonical signal).
+let _snavAwaitingSignoff = false;
 
 // ── Shared sprint progress store — single source of truth for all pill components ──
 // Populated from live data (smgmt poll), explicit fetch (/api/sprint-progress), or
@@ -19970,6 +19976,16 @@ async function snavRefresh() {
     const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
     if (!res.ok) return;
     _snavState = await res.json();
+    // issue #864: surface the sign-off indicator from the brief's waiting_on_you
+    // list (DB lifecycle ready_to_merge). Best-effort — degrades to no dot if the
+    // brief is unavailable (e.g. on a traveling machine without local sprint DB).
+    try {
+      const br = await fetch(`/api/projects/${encodeURIComponent(_slug)}/brief`);
+      if (br.ok) {
+        const bj = await br.json();
+        _snavAwaitingSignoff = !!(bj.waiting_on_you && bj.waiting_on_you.length);
+      }
+    } catch (_) { /* leave last-known indicator state */ }
     // Seed the shared store from GitHub data as fallback (live poll data takes precedence)
     if (_snavState && _snavState.has_sprint && !_sprintProgressStore) {
       const cols = _snavState.columns || {};
@@ -19999,6 +20015,10 @@ function _snavRenderPill() {
   const d = _snavState;
   if (!d || !d.has_sprint) { pill.classList.add('hidden'); return; }
   pill.classList.remove('hidden');
+
+  // issue #864 (AC5/AC6): show the sign-off dot only while a sprint awaits it.
+  const signoff = document.getElementById('snav-signoff');
+  if (signoff) signoff.classList.toggle('hidden', !_snavAwaitingSignoff);
 
   // Trigger fetch if store is missing or stale (> 60s)
   if (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000) {

@@ -66,6 +66,21 @@
     .dec-act[disabled]{opacity:.6;cursor:default}
     .dec-empty{padding:14px 15px;color:var(--text-muted);font-size:13px}
 
+    /* planner state (issue #864): ran overnight + waiting on you */
+    .planner-list{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    .planner-row{display:flex;align-items:center;gap:11px;padding:12px 16px;border-top:1px solid var(--border)}
+    .planner-row:first-child{border-top:none}
+    .planner-row .label{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
+    .planner-meta{font-size:12px;color:var(--text-muted)}
+    .planner-meta .mono{font-family:var(--mono)}
+    .planner-spacer{margin-left:auto}
+    .outcome-badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0}
+    .outcome-badge.success{background:var(--green-bg);color:var(--green)}
+    .outcome-badge.failure{background:var(--red-bg);color:var(--red)}
+    .outcome-badge.partial{background:var(--amber-bg);color:var(--amber)}
+    .planner-link{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 11px;cursor:pointer;white-space:nowrap;background:var(--surface);text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+    .planner-link:hover{background:var(--surface-hover)}
+
     /* ===== per-project brief card ===== */
     .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
     .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
@@ -294,6 +309,11 @@
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
+    // issue #864: planner state — what ran overnight + what's awaiting sign-off.
+    // Both the morning brief and the evening flow render from this same shared
+    // brief payload, so the "Waiting on you" list is identical across flows.
+    html += renderRanOvernight(brief.ran_overnight || []);
+    html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
     root.innerHTML = html;
@@ -353,6 +373,69 @@
       <div class="kpi"><div class="kpi-v">${n(gk.tickets_done)}</div><div class="kpi-l">Tickets done</div></div>
       <div class="kpi"><div class="kpi-v">${n(gk.in_progress)}</div><div class="kpi-l">In progress</div></div>
       <div class="kpi"><div class="kpi-v a">${n(gk.needs_your_call)}</div><div class="kpi-l">Need your call</div></div>
+    </div>`;
+  }
+
+  // ── issue #864: ran overnight + waiting on you ─────────────────────────────
+  // Resolve the clickable target for a "ran overnight" entry: prefer the
+  // sprint's summary issue on GitHub; fall back to the project's board.
+  function _briefLinkHref(entry){
+    const repo = _repoBySlug[entry.project] || '';
+    if (entry.summary_issue_number && repo){
+      return 'https://github.com/' + repo + '/issues/' + entry.summary_issue_number;
+    }
+    return '/project/' + encodeURIComponent(entry.project || '') + '/sprint-mgmt';
+  }
+
+  // AC1 / AC7: each scheduled sprint that ran overnight, its outcome, and a
+  // direct link to its sprint brief. Hidden entirely when nothing ran (AC4).
+  function renderRanOvernight(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(e => {
+      const outcome = String(e.outcome || '').toLowerCase();
+      const cls = ['success','failure','partial'].includes(outcome) ? outcome : 'partial';
+      const ic = outcome === 'success' ? 'ti-circle-check'
+               : outcome === 'failure' ? 'ti-alert-triangle' : 'ti-progress-check';
+      const proj = e.project
+        ? `<span class="planner-meta"><span class="mono">${esc(e.project)}</span></span>` : '';
+      const external = (e.summary_issue_number && _repoBySlug[e.project])
+        ? ' target="_blank" rel="noopener"' : '';
+      return `
+        <div class="planner-row">
+          <span class="outcome-badge ${cls}"><i class="ti ${ic}" style="font-size:11px"></i>${esc(outcome || 'ran')}</span>
+          <span class="label">${esc(prettyLabel(e.label))}</span>
+          ${proj}
+          <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
+    </div>`;
+  }
+
+  // AC2 / AC8: every sprint awaiting human sign-off, with ticket count and
+  // estimated hours. Hidden entirely when nothing is pending (AC3). The same
+  // payload feeds the evening flow, so the list matches across both.
+  function renderWaitingOnYou(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(w => {
+      const hrs = (w.estimated_hours != null) ? w.estimated_hours : 0;
+      const tc = w.ticket_count || 0;
+      const proj = w.project ? ` · <span class="mono">${esc(w.project)}</span>` : '';
+      return `
+        <div class="planner-row">
+          <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:11px"></i>sign-off</span>
+          <span class="label">${esc(prettyLabel(w.label))}</span>
+          <span class="planner-meta">${tc} ticket${tc === 1 ? '' : 's'} · <span class="mono">~${esc(hrs)}h</span>${proj}</span>
+          <a class="planner-link planner-spacer" href="/project/${esc(w.project || '')}/sprint-mgmt">Sign off <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-hourglass-high"></i> Waiting on you <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
     </div>`;
   }
 

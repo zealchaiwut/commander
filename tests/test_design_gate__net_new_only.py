@@ -18,6 +18,12 @@ Each test maps to a specific behaviour:
   T8  gate PASSES with no detect calls when no frontend files changed
   T9  full-scope (legacy) still fails on any finding across the directory
 """
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
 import services.sprint_manager.sprint_manager as sm
 
 

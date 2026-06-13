@@ -274,7 +274,17 @@ def _normalise_issue(item: dict) -> dict:
         "createdAt": item.get("created_at", ""),
         "updatedAt": item.get("updated_at", ""),
         "body": item.get("body", "") or "",
+        # Milestone (issue #877): capture number + title from the REST payload so
+        # the mirrored issue carries it without a follow-up GitHub call.
+        "milestone": _milestone_ref(item.get("milestone")),
     }
+
+
+def _milestone_ref(ms: Optional[dict]) -> Optional[dict]:
+    """Reduce a REST milestone object to the {number, title} ref the mirror stores."""
+    if not ms:
+        return None
+    return {"number": ms.get("number"), "title": ms.get("title", "")}
 
 
 def _fetch_issues_conditional(
@@ -515,6 +525,13 @@ async def run_issues_sync_loop(
                 sync_issues_mirror(repo, db_module=db_module)
             except Exception as exc:  # never let the background task die
                 logger.warning("issues mirror sync error for %s: %s", repo, exc)
+            # Milestones mirror (issue #877): kept fresh on the same sweep so the
+            # GET milestones endpoint serves from the local DB at zero quota.
+            try:
+                import github_milestones
+                github_milestones.sync_milestones_mirror(repo, db_module=db_module)
+            except Exception as exc:  # never let the background task die
+                logger.warning("milestones mirror sync error for %s: %s", repo, exc)
         count += 1
         if iterations is not None and count >= iterations:
             return

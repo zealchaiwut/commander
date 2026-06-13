@@ -1,23 +1,77 @@
-"""Milestone selector endpoints (issue #879).
+"""Milestone CRUD endpoints (issue #877) + milestone selector (issue #879).
 
-Backs the milestone selector in the BA bulk-create and single new-ticket
+Issue #877: Exposes GitHub's native Milestones API through the dashboard and serves
+issues from the local mirror (with the milestone field) so reads cost zero GitHub
+quota. Service logic lives in the sibling ``milestones_service`` module.
+
+Issue #879: Backs the milestone selector in the BA bulk-create and single new-ticket
 dialogs: list a project's available GitHub milestones and mark the Active one
-(the default selection). Read-only — creating/editing milestones is the Roadmap
-tab's job (issue #878, out of scope here).
+(the default selection). Read-only — creating/editing milestones is handled by the
+CRUD endpoints (issue #877) and the Roadmap tab (issue #878, out of scope here).
 
-Mounted via ``include_router`` so no route lands in the server.py monolith
+Both are mounted via ``include_router`` so no route lands in the server.py monolith
 (COMMANDER_GATE_MONOLITH, issue #761).
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from . import milestones_service as service
+from . import milestones_service
 
-router = APIRouter(prefix="/api/milestones", tags=["milestones"])
+router = APIRouter(tags=["milestones"])
 
 
-@router.get("")
-def list_milestones(repo: str):
+class MilestoneCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_on: Optional[str] = None
+
+
+class MilestoneUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_on: Optional[str] = None
+    state: Optional[str] = None
+
+
+# ── Issue #877: Milestone CRUD endpoints ────────────────────────────────────
+
+@router.get("/api/projects/{slug}/milestones")
+def list_milestones(slug: str, state: Optional[str] = None):
+    """List milestones for a project from the mirror (live fallback pre-sync)."""
+    return milestones_service.list_milestones(slug, state=state)
+
+
+@router.post("/api/projects/{slug}/milestones", status_code=201)
+def create_milestone(slug: str, body: MilestoneCreate):
+    """Create a milestone on GitHub (title required; description/due_on optional)."""
+    return milestones_service.create_milestone(slug, body.model_dump(exclude_none=True))
+
+
+@router.patch("/api/projects/{slug}/milestones/{number}")
+def update_milestone(slug: str, number: int, body: MilestoneUpdate):
+    """Edit a milestone's title, description, due date, or state."""
+    return milestones_service.update_milestone(slug, number, body.model_dump(exclude_none=True))
+
+
+@router.delete("/api/projects/{slug}/milestones/{number}")
+def close_milestone(slug: str, number: int):
+    """Close a milestone on GitHub (DELETE maps to PATCH state=closed)."""
+    return milestones_service.close_milestone(slug, number)
+
+
+@router.get("/api/projects/{slug}/issues")
+def list_issues(slug: str, state: Optional[str] = None):
+    """List mirrored issues for a project, each carrying its milestone field."""
+    return milestones_service.list_issues(slug, state=state)
+
+
+# ── Issue #879: Milestone selector endpoint (read-only) ─────────────────────
+
+@router.get("/api/milestones")
+def selector_list_milestones(repo: str):
     """Available milestones for the selector + the Active milestone default."""
-    return service.list_milestones(repo)
+    return milestones_service.list_milestones(repo)

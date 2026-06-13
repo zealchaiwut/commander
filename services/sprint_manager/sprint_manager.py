@@ -1598,15 +1598,27 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
 
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
+
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    """Return JS/TS files added/modified in HEAD relative to base_branch.
+
+    Excludes generated build artifacts (dist/ dirs and .map files) that
+    should never be linted — ESLint treats explicitly-passed ignored files
+    as warnings under --max-warnings=0.
+    """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
         return []
-    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+    return [
+        f for f in out.splitlines()
+        if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)
+        and not any(pat in f for pat in _JS_TS_LINT_EXCLUDE)
+    ]
 
 
 # Frontend file extensions the impeccable design detector analyses.
@@ -2635,6 +2647,14 @@ def _run_frontend_lint(
     combined = ""
     passed = True
 
+    # Paths from _changed_js_ts_files are relative to the git root.
+    # Resolve the git root so linters run from there, not worktester_dashboard
+    # (which is apps/dashboard/ — a subdirectory of the git root).
+    rc_root, git_root_out, _ = _run_timed(
+        "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+    )
+    lint_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
     # eslint or biome (prefer biome if configured)
     ok_biome, biome_path, _ = _try("which", "biome")
     ok_eslint, eslint_path, _ = _try("which", "eslint")
@@ -2653,18 +2673,14 @@ def _run_frontend_lint(
         # before falling back to biome-via-npx. `npx --no biome --version`
         # exits 0 even when biome is absent because npm parses --version as its
         # own flag, producing a false-positive that then fails at invocation.
-        rc_root, git_root_out, _ = _run_timed(
-            "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
-        )
-        if rc_root == 0:
-            _local_eslint = Path(git_root_out.strip()) / "node_modules" / ".bin" / "eslint"
-            if _local_eslint.exists():
-                linter_bin = str(_local_eslint.resolve())
-                linter_args = ["--max-warnings=0"]
+        _local_eslint = lint_cwd / "node_modules" / ".bin" / "eslint"
+        if _local_eslint.exists():
+            linter_bin = str(_local_eslint.resolve())
+            linter_args = ["--max-warnings=0"]
         if not linter_bin:
             # try biome via npx — skip if not found in project
             rc_biome, _, _ = _run_timed(
-                npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
+                npx_path, "--no", "biome", "--version", cwd=lint_cwd
             )
             if rc_biome == 0:
                 linter_bin = npx_path
@@ -2674,7 +2690,7 @@ def _run_frontend_lint(
         targets = ["."] if gate_scope == "full" else js_ts_files
         sys.stdout.write(str(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...") + "\n")
         rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
-                                        cwd=worktester_dashboard)
+                                        cwd=lint_cwd)
         combined += stdout + stderr
         if rc != 0:
             structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
@@ -2692,7 +2708,7 @@ def _run_frontend_lint(
         ok_prettier, prettier_bin, _ = _try("which", "prettier")
         if not ok_prettier and ok_npx:
             rc_pcheck, _, _ = _run_timed(
-                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+                npx_path, "--no", "prettier", "--version", cwd=lint_cwd
             )
             if rc_pcheck == 0:
                 prettier_bin = npx_path
@@ -2708,7 +2724,7 @@ def _run_frontend_lint(
             cmd_args = prettier_prefix + ["--check"] + targets
             sys.stdout.write(str(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...") + "\n")
             rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
-                                            cwd=worktester_dashboard)
+                                            cwd=lint_cwd)
             combined += stdout + stderr
             if rc != 0:
                 structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",

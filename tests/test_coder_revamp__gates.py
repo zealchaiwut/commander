@@ -16,10 +16,13 @@ from sprint_manager import (
     GateResult,
     _LOGIC_FAILURE_CATEGORIES,
     _changed_js_ts_files,
+    _changed_py_files,
     _design_error_findings,
     _gate_design,
     _gate_lint,
+    _gate_pytest,
     _gate_typecheck,
+    _is_test_path,
     _run_quality_gates,
 )
 
@@ -56,30 +59,133 @@ def _fake_run(returncode=0, stdout="", stderr=""):
 
 # ── _changed_js_ts_files ──────────────────────────────────────────────────────
 
+def _touch(root: Path, *rel_paths: str) -> None:
+    """Create empty files under root so the existence filter keeps them."""
+    for rel in rel_paths:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("")
+
+
 class TestChangedJsTsFiles:
-    def test_returns_js_ts_files(self, tmp_path):
-        with patch("sprint_manager._run_timed") as mock_run:
-            mock_run.return_value = (0, "app.js\nutils.ts\nserver.py\nREADME.md\n", "")
+    """The changed-file helpers return ABSOLUTE paths to files that EXIST in the
+    worktree. git diff yields repo-root-relative paths; the helper anchors them to
+    the repo root (here mocked to tmp_path) and drops anything missing, so a tool
+    run from any cwd can find them (regression: sprint-66.1 stuck loop, #880)."""
+
+    def test_returns_js_ts_files_as_absolute_existing(self, tmp_path):
+        _touch(tmp_path, "app.js", "utils.ts", "server.py", "README.md")
+        with patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed",
+                   return_value=(0, "app.js\nutils.ts\nserver.py\nREADME.md\n", "")):
             result = _changed_js_ts_files("develop", tmp_path)
-        assert result == ["app.js", "utils.ts"]
+        assert set(result) == {str(tmp_path / "app.js"), str(tmp_path / "utils.ts")}
 
     def test_returns_empty_on_no_js_ts(self, tmp_path):
-        with patch("sprint_manager._run_timed") as mock_run:
-            mock_run.return_value = (0, "server.py\nstyle.css\n", "")
+        _touch(tmp_path, "server.py", "style.css")
+        with patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed", return_value=(0, "server.py\nstyle.css\n", "")):
             result = _changed_js_ts_files("develop", tmp_path)
         assert result == []
 
     def test_returns_empty_on_git_error(self, tmp_path):
-        with patch("sprint_manager._run_timed") as mock_run:
-            mock_run.return_value = (1, "", "fatal: not a git repo")
+        with patch("sprint_manager._run_timed", return_value=(1, "", "fatal: not a git repo")):
             result = _changed_js_ts_files("develop", tmp_path)
         assert result == []
 
     def test_includes_jsx_tsx_mjs(self, tmp_path):
-        with patch("sprint_manager._run_timed") as mock_run:
-            mock_run.return_value = (0, "component.jsx\npage.tsx\nmodule.mjs\n", "")
+        _touch(tmp_path, "component.jsx", "page.tsx", "module.mjs")
+        with patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed",
+                   return_value=(0, "component.jsx\npage.tsx\nmodule.mjs\n", "")):
             result = _changed_js_ts_files("develop", tmp_path)
-        assert set(result) == {"component.jsx", "page.tsx", "module.mjs"}
+        assert set(result) == {
+            str(tmp_path / "component.jsx"),
+            str(tmp_path / "page.tsx"),
+            str(tmp_path / "module.mjs"),
+        }
+
+
+class TestChangedPyFilesAnchoring:
+    """Root cause of the sprint-66.1 stuck loop: git diff (run in the apps/dashboard
+    subdir) returns repo-root paths like ``tests/foo.py``; the gate ran pytest from
+    the subdir, so the path resolved to apps/dashboard/tests/foo.py -> "file not
+    found" -> the gate failed forever for a ticket whose tests actually pass."""
+
+    def test_repo_root_test_resolved_to_absolute(self, tmp_path):
+        # File lives at repo-root tests/, NOT under apps/dashboard.
+        _touch(tmp_path, "tests/test_880__milestone.py")
+        # git diff is invoked in the subdir but returns the repo-root path.
+        subdir = tmp_path / "apps" / "dashboard"
+        subdir.mkdir(parents=True)
+        with patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed",
+                   return_value=(0, "tests/test_880__milestone.py\n", "")):
+            result = _changed_py_files("develop", subdir)
+        assert result == [str(tmp_path / "tests" / "test_880__milestone.py")]
+
+    def test_phantom_renamed_away_path_is_dropped(self, tmp_path):
+        # git diff lists a path that no longer exists in the worktree (renamed away).
+        with patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed",
+                   return_value=(0, "tests/test_gone.py\nserver.py\n", "")):
+            result = _changed_py_files("develop", tmp_path)
+        assert result == []  # neither file exists -> both dropped, no phantom path
+
+
+class TestIsTestPath:
+    """The pytest gate must recognise tests in any tests/ dir, not only repo-root
+    ``tests/`` (the old startswith('tests/') check silently skipped
+    apps/dashboard/tests/)."""
+
+    @pytest.mark.parametrize("path", [
+        "tests/test_x.py",
+        "apps/dashboard/tests/test_y.py",
+        "/abs/repo/tests/test_z.py",
+        "pkg/foo_test.py",
+        "test_top.py",
+    ])
+    def test_recognised_as_test(self, path):
+        assert _is_test_path(path) is True
+
+    @pytest.mark.parametrize("path", [
+        "server.py",
+        "apps/dashboard/routers/status.py",
+        "tooling/helper.py",
+    ])
+    def test_not_a_test(self, path):
+        assert _is_test_path(path) is False
+
+
+class TestGatePytestPathRobustness:
+    """The pytest gate skips gracefully (never fails) when changed test files do
+    not exist, and runs only real test files when they do."""
+
+    def test_skips_when_no_changed_test_files_exist(self, tmp_path):
+        with patch("sprint_manager._try", return_value=(True, "/usr/bin/pytest", "")), \
+             patch("sprint_manager._changed_py_files", return_value=[]):
+            result = _gate_pytest(880, tmp_path, skip=False, base_branch="develop")
+        assert result.passed is True
+        assert "no test files changed" in (result.output or "")
+
+    def test_runs_only_changed_test_files(self, tmp_path):
+        test_abs = str(tmp_path / "tests" / "test_880.py")
+        nontest_abs = str(tmp_path / "server.py")
+        captured = {}
+
+        def fake_run_timed(*args, **kwargs):
+            captured["args"] = args
+            return (0, "1 passed", "")
+
+        with patch("sprint_manager._try", return_value=(True, "/usr/bin/pytest", "")), \
+             patch("sprint_manager._changed_py_files", return_value=[nontest_abs, test_abs]), \
+             patch("sprint_manager._git_toplevel", return_value=tmp_path), \
+             patch("sprint_manager._run_timed", side_effect=fake_run_timed):
+            result = _gate_pytest(880, tmp_path, skip=False, base_branch="develop")
+        assert result.passed is True
+        # Only the test file is passed to pytest; the non-test .py is excluded.
+        assert test_abs in captured["args"]
+        assert nontest_abs not in captured["args"]
 
 
 # ── _gate_typecheck ───────────────────────────────────────────────────────────

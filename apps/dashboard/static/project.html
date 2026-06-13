@@ -6237,6 +6237,29 @@
       color: #166534;
     }
 
+    /* ── Kickoff stepper (issue #932) ── */
+    .smgmt-kickoff-wrap {
+      padding: 24px 20px; max-width: 480px; margin: 0 auto;
+    }
+    .smgmt-kickoff-title {
+      font-size: 13px; font-weight: 600; color: var(--text-muted);
+      margin: 0 0 14px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    #smgmt-kickoff-error {
+      margin-top: 12px; padding: 10px 12px;
+      background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.25);
+      border-radius: 6px; display: flex; align-items: center; gap: 10px;
+    }
+    #smgmt-kickoff-error-msg {
+      flex: 1; font-size: 12px; color: #b91c1c;
+    }
+    .smgmt-kickoff-retry-btn {
+      flex-shrink: 0; padding: 4px 10px; font-size: 12px; font-weight: 600;
+      border: 1px solid rgba(239,68,68,.4); border-radius: 5px;
+      background: rgba(239,68,68,.08); color: #b91c1c; cursor: pointer;
+    }
+    .smgmt-kickoff-retry-btn:hover { background: rgba(239,68,68,.14); }
+
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .logs-toolbar {
@@ -7682,6 +7705,17 @@
             <i class="ti ti-player-play"></i>
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
+          </div>
+          <!-- Kickoff stepper (issue #932) — shown while sprint is being launched -->
+          <div id="smgmt-kickoff-shell" hidden>
+            <div class="smgmt-kickoff-wrap">
+              <p class="smgmt-kickoff-title">Starting sprint…</p>
+              <div class="pf-stepper" id="smgmt-kickoff-steps"></div>
+              <div id="smgmt-kickoff-error" hidden>
+                <span id="smgmt-kickoff-error-msg"></span>
+                <button class="smgmt-kickoff-retry-btn" onclick="smgmtKickoffRetry()">Retry</button>
+              </div>
+            </div>
           </div>
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>

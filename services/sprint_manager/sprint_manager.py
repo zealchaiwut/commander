@@ -42,6 +42,7 @@ import smtplib
 import subprocess
 import sys
 import tempfile
+import traceback
 import threading
 import time
 import urllib.request
@@ -1840,6 +1841,8 @@ class HangDetector:
     log_path:  Optional[Path]
     proc:      subprocess.Popen
     max_total_secs: Optional[int] = None  # hard wall-clock cap (None = disabled)
+    agent_role: Optional[str] = None      # for dispatch_killed logging (coder/tester)
+    attempt:    Optional[int] = None      # dispatch attempt number, for logging
 
     _start_time:   float = field(default_factory=time.monotonic, init=False)
     _last_size:    int   = field(default=0, init=False)
@@ -1881,6 +1884,12 @@ class HangDetector:
                 total_elapsed = time.monotonic() - self._start_time
                 if total_elapsed >= self.max_total_secs:
                     structured_log.error("subprocess_timeout", f"subprocess exceeded {self.max_total_secs}s wall-clock limit — KILLING", issue_num=self.issue_num, timeout_secs=self.max_total_secs)
+                    structured_log.error(
+                        "dispatch_killed", f"#{self.issue_num} killed (timeout)",
+                        issue_num=self.issue_num, agent_role=self.agent_role,
+                        attempt=self.attempt, reason="timeout",
+                        timeout_secs=self.max_total_secs,
+                    )
                     try:
                         self.proc.kill()
                     except ProcessLookupError:
@@ -1899,6 +1908,12 @@ class HangDetector:
             idle = time.monotonic() - self._last_change
             if idle >= HANG_KILL_SECS:
                 structured_log.error("subprocess_killed", f"no log activity for {idle/60:.0f} min — KILLING subprocess", issue_num=self.issue_num, idle_minutes=round(idle / 60))
+                structured_log.error(
+                    "dispatch_killed", f"#{self.issue_num} killed (idle-silence)",
+                    issue_num=self.issue_num, agent_role=self.agent_role,
+                    attempt=self.attempt, reason="idle-silence",
+                    idle_minutes=round(idle / 60),
+                )
                 try:
                     self.proc.kill()
                 except ProcessLookupError:
@@ -2918,6 +2933,30 @@ def _gate_monolith(
     )
 
 
+def _log_gate_result(r: "GateResult", issue_num: int) -> None:
+    """Uniform per-gate outcome logging (sprint_label/run_id come from the log
+    context set in run_sprint). Previously only the monolith gate showed up; this
+    makes every gate emit gate_passed (INFO) / gate_failed (ERROR) the same way.
+    Skipped gates are not logged. Logging only — never raises."""
+    try:
+        if getattr(r, "skipped", False):
+            return
+        if r.passed:
+            structured_log.info(
+                "gate_passed", f"gate {r.gate} passed for #{issue_num}",
+                gate=r.gate, issue_num=issue_num,
+            )
+        else:
+            _lines = [ln for ln in (r.output or "").strip().splitlines() if ln.strip()]
+            _reason = _lines[-1][:200] if _lines else ""
+            structured_log.error(
+                "gate_failed", f"gate {r.gate} failed for #{issue_num}",
+                gate=r.gate, issue_num=issue_num, reason=_reason,
+            )
+    except Exception:
+        pass
+
+
 def _run_quality_gates(
     issue_num: int,
     feature_branch: str,
@@ -2958,6 +2997,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_tc)
+    _log_gate_result(r_tc, issue_num)
     if not r_tc.passed:
         return results
 
@@ -2972,6 +3012,7 @@ def _run_quality_gates(
         gate_frontend_lint=gate_frontend_lint,
     )
     results.append(r_lint)
+    _log_gate_result(r_lint, issue_num)
     if not r_lint.passed:
         return results
 
@@ -2985,6 +3026,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_design)
+    _log_gate_result(r_design, issue_num)
     if not r_design.passed:
         return results
 
@@ -2998,6 +3040,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_pytest)
+    _log_gate_result(r_pytest, issue_num)
     if not r_pytest.passed:
         return results
 
@@ -3011,6 +3054,7 @@ def _run_quality_gates(
         repo_name=repo_name,
     )
     results.append(r_merge)
+    _log_gate_result(r_merge, issue_num)
     if not r_merge.passed:
         return results
 
@@ -3023,6 +3067,7 @@ def _run_quality_gates(
         repo_name=repo_name,
     )
     results.append(r_monolith)
+    _log_gate_result(r_monolith, issue_num)
 
     return results
 
@@ -3478,6 +3523,10 @@ def record_failure(
         sc_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         sys.stdout.write(str(f"  [failure] Wrote sidecar ({failure_class}): {sc_path}") + "\n")
         sys.stdout.flush()
+        structured_log.info(
+            "sidecar_written", f"failure sidecar written for #{issue_num}",
+            issue_num=issue_num, failure_class=failure_class, path=str(sc_path),
+        )
         return sc_path
     except Exception as e:
         structured_log.error(
@@ -4334,6 +4383,12 @@ def _dispatch_coder(
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         open_mode = "w" if attempt == 0 else "a"
+        _dispatch_t0 = time.monotonic()
+        structured_log.info(
+            "dispatch_start", f"coder dispatch #{issue_num} (attempt {attempt + 1})",
+            issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+            attempt=attempt + 1, model=coder_model, cmd=cmd[:4],
+        )
         try:
             with log_path.open(open_mode) as log_f:
                 proc = subprocess.Popen(
@@ -4383,10 +4438,31 @@ def _dispatch_coder(
             except Exception:
                 pass
 
-        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc,
+                                 agent_role="coder", attempt=attempt + 1)
         detector.start()
         rc = proc.wait()
         detector.stop()
+
+        _dispatch_secs = round(time.monotonic() - _dispatch_t0, 1)
+        if rc == 0:
+            structured_log.info(
+                "dispatch_finished", f"coder #{issue_num} finished",
+                issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=0, duration_s=_dispatch_secs,
+            )
+        else:
+            _stderr_tail = ""
+            try:
+                _stderr_tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            structured_log.error(
+                "dispatch_failed", f"coder #{issue_num} exited {rc}",
+                issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=rc, duration_s=_dispatch_secs,
+                stderr_tail=_stderr_tail,
+            )
 
         # Exit code 0 means success unconditionally — check before detector.killed
         # to guard against the same race as _dispatch_tester (see issue #659).
@@ -4768,6 +4844,12 @@ def _dispatch_tester(
     sys.stdout.write(str(f"  [agent-browser] available={browser_available} injected into tester env") + "\n")
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        _dispatch_t0 = time.monotonic()
+        structured_log.info(
+            "dispatch_start", f"tester dispatch #{issue_num} (attempt {attempt + 1})",
+            issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+            attempt=attempt + 1, model=tester_model, cmd=cmd[:4],
+        )
         try:
             with log_path.open("a") as log_f:
                 proc = subprocess.Popen(
@@ -4815,10 +4897,31 @@ def _dispatch_tester(
             except Exception:
                 pass
 
-        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc,
+                                 agent_role="tester", attempt=attempt + 1)
         detector.start()
         rc = proc.wait()
         detector.stop()
+
+        _dispatch_secs = round(time.monotonic() - _dispatch_t0, 1)
+        if rc == 0:
+            structured_log.info(
+                "dispatch_finished", f"tester #{issue_num} finished",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=0, duration_s=_dispatch_secs,
+            )
+        else:
+            _stderr_tail = ""
+            try:
+                _stderr_tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            structured_log.error(
+                "dispatch_failed", f"tester #{issue_num} exited {rc}",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=rc, duration_s=_dispatch_secs,
+                stderr_tail=_stderr_tail,
+            )
 
         # Exit code 0 means success unconditionally — check before detector.killed
         # to guard against a race where the hang detector fires after the process
@@ -7554,7 +7657,7 @@ def run_sprint(
     _sprint_num_str = str(sprint_num) if sprint_num is not None else label.replace("sprint-", "")
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
-    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label)
+    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -8994,6 +9097,18 @@ def main() -> None:
                 args.label,
                 eff_repo,
             )
+        raise
+    except Exception as _crash_exc:
+        # Crash catch-all (logging only): turn a silent sprint death into a
+        # logged stack trace, then re-raise so behavior is unchanged.
+        structured_log.error(
+            "sprint_crashed",
+            f"sprint {args.label} crashed: {_crash_exc}",
+            sprint_label=args.label,
+            project=eff_repo,
+            error=str(_crash_exc),
+            traceback=traceback.format_exc(),
+        )
         raise
 
     # Clean exit: write the unified-lifecycle terminal state at the source

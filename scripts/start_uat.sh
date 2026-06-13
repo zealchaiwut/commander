@@ -105,7 +105,7 @@ fi
 cd "$UAT_DIR"
 if [ "$FOREGROUND" -eq 1 ]; then
     echo "UAT dashboard starting foreground (port $PORT) — Ctrl+C to stop."
-    exec ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT"
+    exec env ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT"
 fi
 
 ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \

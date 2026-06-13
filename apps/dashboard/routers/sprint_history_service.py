@@ -465,6 +465,15 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     if plan_state == "completed" and plan.get("end_reason"):
         end_reason = plan.get("end_reason")
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
+    # Prefer the durable `sprints` columns (written by the finish flow) over the
+    # state file, so PR/Summary links on the ledger card don't go missing when an
+    # older state.json lacks them.
+    summary_issue_url = row.get("summary_issue_url") or enrich["summary_issue_url"]
+    summary_issue_num = (
+        _parse_issue_num_from_url(summary_issue_url)
+        if summary_issue_url else enrich["summary_issue_num"]
+    )
+    summary_path = row.get("summary_path") or enrich["summary_path"]
     return {
         "label": label,
         "project": row.get("project", ""),
@@ -474,9 +483,9 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
         "tokens": enrich["tokens"],
         "estimate_accuracy": enrich["estimate_accuracy"],
         "pr_number": pr_number,
-        "summary_path": enrich["summary_path"],
-        "summary_issue_url": enrich["summary_issue_url"],
-        "summary_issue_num": enrich["summary_issue_num"],
+        "summary_path": summary_path,
+        "summary_issue_url": summary_issue_url,
+        "summary_issue_num": summary_issue_num,
         "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
         "failed_tickets": enrich["failed_tickets"],

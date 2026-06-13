@@ -2677,7 +2677,14 @@ ${data.errors.join("\n")}`);
     liveIssues.forEach((i) => {
       liveByNum[i.number] = i;
     });
-    const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets).slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
+    const isActuallyRunning = typeof _smgmtRunningLabels !== "undefined" && _smgmtRunningLabels.has(label);
+    const mergedByNum = /* @__PURE__ */ new Map();
+    (tickets || []).forEach((t) => mergedByNum.set(t.number, { ...t, ...liveByNum[t.number] || {} }));
+    liveIssues.forEach((i) => {
+      if (!mergedByNum.has(i.number))
+        mergedByNum.set(i.number, i);
+    });
+    const sourceTickets = Array.from(mergedByNum.values()).sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
     const cardRepo = _smgmtRepo();
     if (sourceTickets.length === 0) {
       return '<div class="smgmt-drop-hint">No tickets in this sprint</div>';
@@ -2697,13 +2704,13 @@ ${data.errors.join("\n")}`);
       }
       if (ticketLevel > 0)
         prevLevel = ticketLevel;
-      const isActiveAgent = agentStatus && (agentStatus.endsWith("_running") || agentStatus.endsWith("_dispatched"));
+      const isActiveAgent = isActuallyRunning && agentStatus && (agentStatus.endsWith("_running") || agentStatus.endsWith("_dispatched"));
       let indicator = "";
       if (liveStatus === "done") {
         indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
       } else if (agentStatus === "failed" || liveStatus === "skipped") {
         indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-      } else if (liveStatus === "in-progress" || isActiveAgent || currentTicket && t.number === currentTicket.number) {
+      } else if (isActuallyRunning && (liveStatus === "in-progress" || isActiveAgent || currentTicket && t.number === currentTicket.number)) {
         indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
       } else {
         indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -2712,8 +2719,8 @@ ${data.errors.join("\n")}`);
       const sizeVal = liveIss && liveIss.size || t.size || "";
       const sizePillHtml = sizeVal ? `<span class="smgmt-ticket-size-pill" title="\u2248${liveIss && liveIss.minutes || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>` : "";
       const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : "";
-      const agentTagHtml = liveIss && liveIss.agent ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>` : "";
-      const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+      const agentTagHtml = isActuallyRunning && liveIss && liveIss.agent ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>` : "";
+      const elapsedStr = isActuallyRunning && liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
       const elapsedHtml = elapsedStr ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>` : "";
       const runTicketLabels = escHtml((t.labels || []).map((l) => l.name).join(","));
       return sepHtml + `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>

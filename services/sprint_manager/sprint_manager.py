@@ -1243,17 +1243,22 @@ class FailureCategory:
     MERGE_CONFLICT   = "MERGE_CONFLICT"
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
+    DESIGN_FAIL      = "DESIGN_FAIL"
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
 # Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
 # TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
 # not a code quality problem, so it must not apply needs-rework.
+# DESIGN_FAIL (impeccable detect) is recoverable: the coder is re-dispatched with
+# the flagged anti-patterns as fix context, exactly like a pytest/lint failure,
+# instead of terminally dropping the ticket.
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
     FailureCategory.LINT_FAIL,
     FailureCategory.PYTEST_FAIL,
+    FailureCategory.DESIGN_FAIL,
 })
 
 
@@ -1601,6 +1606,26 @@ def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
     if rc != 0:
         return []
     return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+
+
+_FRONTEND_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
+
+
+def _changed_frontend_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return frontend files (.html/.css/.jsx/.tsx) added/modified vs base_branch.
+
+    The design gate scans only these so a pre-existing anti-pattern in a file the
+    ticket never touched can't fail an unrelated UI ticket (issue: #861 was failed
+    by low-contrast warnings in analytics.html, which it did not change).
+    """
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines()
+            if any(f.endswith(ext) for ext in _FRONTEND_EXTENSIONS)]
 
 
 # ── strangler-fig monolith gate (issue #761) ──────────────────────────────────
@@ -2655,17 +2680,55 @@ def _run_frontend_lint(
     return passed, combined
 
 
+def _design_error_findings(raw: str) -> tuple[list[dict], int]:
+    """Parse `impeccable detect --json` output into (errors, warning_count).
+
+    impeccable exits non-zero on ANY finding, warnings included. The gate must
+    fail only on real errors, so it parses the JSON and partitions by severity —
+    `error` blocks the ticket; `warning` is logged but allowed. Returns
+    ([] , 0) when the output is not parseable JSON (treated as no errors).
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return [], 0
+    start = raw.find("[")
+    if start == -1:
+        return [], 0
+    try:
+        items = json.loads(raw[start:])
+    except (ValueError, TypeError):
+        return [], 0
+    if not isinstance(items, list):
+        return [], 0
+    errors = [it for it in items
+              if isinstance(it, dict) and str(it.get("severity", "")).lower() == "error"]
+    warnings = sum(1 for it in items
+                   if isinstance(it, dict) and str(it.get("severity", "")).lower() == "warning")
+    return errors, warnings
+
+
 def _gate_design(
     issue_num: int,
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    worktester_root: Optional[Path] = None,
+    base_branch: str = "develop",
 ) -> GateResult:
     """Gate: run impeccable detect on the frontend for UI anti-patterns.
 
-    Uses the deterministic pattern-matching detector (no LLM).
-    Exit code 0 = no issues found; non-zero = issues detected.
-    Skips gracefully when impeccable is not installed or no HTML/CSS/JSX present.
+    Uses the deterministic pattern-matching detector (no LLM). Two scoping rules
+    keep it from failing unrelated tickets (issue #861):
+
+    * **Diff-scoped** — scans only the frontend files this ticket changed vs
+      ``base_branch``, not the whole ``static/`` tree, so a pre-existing
+      anti-pattern in an untouched file can't fail an unrelated UI ticket.
+    * **Error-only** — fails on ``severity: error`` findings; ``warning``
+      findings are logged but do not block (impeccable itself exits non-zero on
+      both). A failure routes to the coder fix-round loop (DESIGN_FAIL), so the
+      coder gets the flagged anti-patterns as context and another attempt.
+
+    Skips gracefully when impeccable is not installed or no frontend changed.
     """
     if skip:
         sys.stdout.write(str("  [gate:design] skipped") + "\n")
@@ -2681,38 +2744,43 @@ def _gate_design(
         return GateResult(gate="design", passed=True, skipped=True,
                           output="npx not found — design gate skipped")
 
-    # Detect if there is any frontend to scan
-    fe_exts = (".html", ".css", ".jsx", ".tsx")
-    has_frontend = any(
-        True for ext in fe_exts
-        for _ in worktester_dashboard.rglob(f"*{ext}")
-    ) if worktester_dashboard.exists() else False
-
-    if not has_frontend:
-        sys.stdout.write(str("  [gate:design] no frontend files found — skipped") + "\n")
+    # Scan only the frontend files this ticket changed. Fall back to the full
+    # static/ tree only when the diff is unavailable (e.g. not a git worktree).
+    diff_root = worktester_root or worktester_dashboard
+    changed_fe = _changed_frontend_files(base_branch, diff_root)
+    scan_targets: list[str]
+    if changed_fe:
+        scan_targets = [str(diff_root / f) for f in changed_fe
+                        if (diff_root / f).exists()]
+        if not scan_targets:
+            sys.stdout.write(str("  [gate:design] changed frontend files no longer present — skipped") + "\n")
+            return GateResult(gate="design", passed=True, skipped=True,
+                              output="changed frontend files absent — design gate skipped")
+        scope_desc = f"{len(scan_targets)} changed file(s)"
+    else:
+        # No changed frontend files (or diff unavailable). If the diff resolved
+        # cleanly with zero frontend changes, there's nothing to scan.
+        sys.stdout.write(str("  [gate:design] no changed frontend files — skipped") + "\n")
         return GateResult(gate="design", passed=True, skipped=True,
-                          output="no frontend files — design gate skipped")
+                          output="no changed frontend files — design gate skipped")
 
-    # Determine scan target
-    static_dir = worktester_dashboard / "apps" / "dashboard" / "static"
-    if not static_dir.exists():
-        static_dir = worktester_dashboard / "static"
-    if not static_dir.exists():
-        static_dir = worktester_dashboard
-
-    sys.stdout.write(str(f"  [gate:design] running impeccable detect {static_dir.name}/ ...") + "\n")
+    sys.stdout.write(str(f"  [gate:design] running impeccable detect on {scope_desc} ...") + "\n")
     rc, stdout, stderr = _run_timed(
-        npx_path, "--yes", "impeccable", "detect", str(static_dir), "--json",
+        npx_path, "--yes", "impeccable", "detect", *scan_targets, "--json",
         cwd=worktester_dashboard,
     )
     combined = stdout + stderr
 
-    if rc == 0:
-        sys.stdout.write(str("  [gate:design] PASS — no design anti-patterns detected") + "\n")
+    errors, warning_count = _design_error_findings(combined)
+    if warning_count:
+        sys.stdout.write(str(f"  [gate:design] {warning_count} warning(s) (non-blocking)") + "\n")
+
+    if not errors:
+        sys.stdout.write(str("  [gate:design] PASS — no error-severity anti-patterns") + "\n")
         return GateResult(gate="design", passed=True, output=combined)
     else:
-        # impeccable exits non-zero when issues are found
-        structured_log.error("gate_failed", f"[gate:design] FAIL (exit {rc})",
+        structured_log.error("gate_failed",
+                             f"[gate:design] FAIL — {len(errors)} error-severity finding(s)",
                              gate="design", issue_num=issue_num, exit_code=rc)
         _revert_to_sit(issue_num, "design", combined, repo_name=repo_name)
         return GateResult(gate="design", passed=False, output=combined)
@@ -2830,6 +2898,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_design),
         repo_name=repo_name,
+        worktester_root=worktester_root,
+        base_branch=base_branch,
     )
     results.append(r_design)
     if not r_design.passed:
@@ -3179,7 +3249,7 @@ def handle_post_tester(
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
             "typecheck":     FailureCategory.GATE_FAIL,
-            "design":        FailureCategory.GATE_FAIL,
+            "design":        FailureCategory.DESIGN_FAIL,
             "pytest":        FailureCategory.PYTEST_FAIL,
             "lint":          FailureCategory.LINT_FAIL,
             "merge-preview": FailureCategory.MERGE_CONFLICT,
@@ -4760,6 +4830,7 @@ def _follow_up_action(category: Optional[str]) -> str:
         FailureCategory.PYTEST_FAIL:     "Pytest gate failed. Review the GitHub comment, fix the failing tests, and re-run.",
         FailureCategory.LINT_FAIL:       "Lint gate failed. Fix the ruff errors noted in the GitHub comment and re-run.",
         FailureCategory.MERGE_CONFLICT:  "Merge-preview gate detected conflicts. Resolve conflicts against develop and re-run.",
+        FailureCategory.DESIGN_FAIL:     "Design gate failed. Fix the flagged UI anti-patterns (e.g. low-contrast text, banned patterns) in the files you changed so `impeccable detect` reports no error-severity findings, then re-run.",
     }
     return mapping.get(category or "", "Review the issue manually.")
 

@@ -156,6 +156,7 @@ def _mirror_labels(repo_name: str) -> list[dict] | None:
 _TTL_BY_PREFIX = {
     "labels:": 300.0,
     "sprint_labels:": 300.0,
+    "sprint_labels_live:": 300.0,
     "sprints:": 300.0,
     # Summary issues change only when a sprint finishes; 120s staleness is fine
     # and cuts the board/nav polling burn on this (GraphQL) query ~4x further.
@@ -333,6 +334,7 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
         pass
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
 
 
 def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) -> None:
@@ -348,6 +350,7 @@ def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) ->
          "--color", "0075ca", "--description", f"Sprint {sprint_num} issues")
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"labels:{r}")
 
 
@@ -368,6 +371,8 @@ def delete_label(label_name: str, repo_name: str | None = None) -> None:
     r = _r(repo_name)
     _run("label", "delete", label_name, "--repo", r, "--yes")
     invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"open_issues:{r}")
     invalidate(f"open_issues_body:{r}")
     invalidate(f"issues:{r}:")
@@ -466,24 +471,43 @@ def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dic
     return _cached(key, fetch)
 
 
+def _live_sprint_label_names(repo_name: str) -> list[str]:
+    """Sprint-* label names from a TTL-cached ``gh label list`` (300s).
+
+    The issues mirror only sees labels attached to an issue, so an EMPTY sprint
+    label (0 issues — e.g. an orphan left by a rolled-back create, or a sprint
+    whose tickets all hot-swapped away) is invisible to it. That hid the label
+    from the board and broke New Sprint with "label already exists". Unioning a
+    periodically-refreshed live label list (issue #1C-B) surfaces every existing
+    sprint label; the 300s TTL keeps the GraphQL cost to ~12 calls/hr/repo.
+    """
+    r = _r(repo_name)
+    key = f"sprint_labels_live:{r}"
+    def fetch():
+        try:
+            labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "300")
+        except Exception:
+            return []
+        return [lbl["name"] for lbl in labels
+                if isinstance(lbl, dict) and SPRINT_LABEL_RE_ALL.match(lbl.get("name", ""))]
+    return _cached(key, fetch)
+
+
+def _all_sprint_label_names(repo_name: str) -> set[str]:
+    """Union of mirror-derived sprint labels (zero-cost, fresh for active labels)
+    and the TTL-cached live label list (catches empty/orphan labels)."""
+    names = set(_live_sprint_label_names(repo_name))
+    mirror = _mirror_labels(repo_name)
+    if mirror is not None:
+        names.update(lbl["name"] for lbl in mirror
+                     if SPRINT_LABEL_RE_ALL.match(lbl["name"]))
+    return names
+
+
 def list_sprints(repo_name: str | None = None) -> list[int]:
     r = _r(repo_name)
-    labels = _mirror_labels(r)
-    if labels is not None:
-        nums = sorted({int(m.group(1)) for lbl in labels
-                       if (m := SPRINT_RE.match(lbl["name"]))})
-        if nums:
-            return nums
-    key = f"sprints:{r}"
-    def fetch():
-        labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
-        nums = []
-        for lbl in labels:
-            m = SPRINT_RE.match(lbl["name"])
-            if m:
-                nums.append(int(m.group(1)))
-        return sorted(nums)
-    return _cached(key, fetch)
+    names = _all_sprint_label_names(r)
+    return sorted({int(m.group(1)) for n in names if (m := SPRINT_RE.match(n))})
 
 
 def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
@@ -495,22 +519,13 @@ def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
 
 
 def list_sprint_labels(repo_name: str | None = None) -> list[str]:
-    """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally."""
+    """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally.
+
+    Unions the issues-mirror labels with a TTL-cached live label list so empty
+    sprint labels (attached to no issue) still appear (issue #1C-B)."""
     r = _r(repo_name)
-    labels = _mirror_labels(r)
-    if labels is not None:
-        result = [lbl["name"] for lbl in labels if SPRINT_LABEL_RE_ALL.match(lbl["name"])]
-        if result:
-            return sorted(result, key=_sprint_label_sort_key_gc)
-    key = f"sprint_labels:{r}"
-    def fetch():
-        labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
-        result = []
-        for lbl in labels:
-            if SPRINT_LABEL_RE_ALL.match(lbl["name"]):
-                result.append(lbl["name"])
-        return sorted(result, key=_sprint_label_sort_key_gc)
-    return _cached(key, fetch)
+    names = _all_sprint_label_names(r)
+    return sorted(names, key=_sprint_label_sort_key_gc)
 
 
 def get_label_color(label_name: str, repo_name: str | None = None) -> str | None:
@@ -541,6 +556,7 @@ def create_label(name: str, color: str, description: str = "", repo_name: str | 
         pass
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"labels:{r}")
 
 
@@ -582,6 +598,7 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
     invalidate(f"open_issues:{r}")
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"latest_sprint:{r}")
 
 

@@ -2985,6 +2985,12 @@
       font-size: 13px;
       color: var(--blue);
       white-space: nowrap;
+      /* Pin to the top of the sprint pane so it stays visible while scrolling a
+         long list and selecting tickets (multi-select usability). */
+      position: sticky;
+      top: 6px;
+      z-index: 20;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
     }
     .smgmt-selection-bar.show {
       display: flex;
@@ -5695,6 +5701,16 @@
     .gss-label { min-width: 170px; font-size: 13px; color: var(--text); flex-shrink: 0; }
     .gss-label .hint { display: block; font-size: 11px; color: var(--text-sub); font-weight: 400; margin-top: 2px; }
     .gss-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+    /* Risk-routed tester row: stack the label, the tier→model map, and a note. */
+    .gss-row--stack { flex-direction: column; align-items: stretch; gap: 7px; }
+    .gss-row--stack .gss-label { min-width: 0; }
+    .gss-risk-map { flex-wrap: wrap; }
+    .gss-risk-pill { font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 8px; }
+    .gss-risk-pill b { color: var(--text); font-weight: 700; }
+    .gss-risk-note { font-size: 11px; color: var(--text-sub); line-height: 1.5; }
+    .gss-risk-note code { font-family: var(--mono); font-size: 10px; color: var(--text-muted); }
     .gss-inp, .gss-select {
       border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
       padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
@@ -15607,40 +15623,36 @@ function _smgmtHotswapPlan(targetLabel, incomingNums) {
   });
 
   const incomingSet = new Set(incomingNums);
-  const occupied = Object.keys(byNum)
-    .map(Number)
-    .filter(n => n >= targetNum && byNum[n].some(num => !incomingSet.has(num)));
-  const maxNum = occupied.length ? Math.max(...occupied) : targetNum;
+  const nonIncoming = n => (byNum[n] || []).filter(num => !incomingSet.has(num));
+  const isOccupied = n => nonIncoming(n).length > 0;
+
+  // Only the CONTIGUOUS block of occupied sprints starting at the target needs
+  // to shift down — the ripple stops at the first empty slot, which absorbs the
+  // insert. Bumping sprints beyond that gap is wrong: it needlessly relabels
+  // them and leaves a fresh hole (e.g. inserting at 67 with 68 empty must move
+  // only 67→68, never touch 69).
+  let runEnd = targetNum - 1;          // last sprint in the contiguous occupied run
+  for (let n = targetNum; isOccupied(n); n++) runEnd = n;
 
   const steps = [];
-  for (let n = maxNum; n >= targetNum; n--) {
-    const nums = (byNum[n] || []).filter(num => !incomingSet.has(num));
-    if (n === targetNum) {
-      if (nums.length > 0) {
-        steps.push({
-          kind: 'shift',
-          from: n,
-          to: n + 1,
-          nums,
-          label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
-        });
-      }
-      steps.push({
-        kind: 'place',
-        to: n,
-        nums: incomingNums.slice(),
-        label: `Selected → Sprint ${n} (${incomingNums.length} ticket${incomingNums.length !== 1 ? 's' : ''})`,
-      });
-    } else if (nums.length > 0) {
-      steps.push({
-        kind: 'shift',
-        from: n,
-        to: n + 1,
-        nums,
-        label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
-      });
-    }
+  // Shift the run descending (highest first) so each destination is vacated
+  // before it is filled — no collisions.
+  for (let n = runEnd; n >= targetNum; n--) {
+    const nums = nonIncoming(n);
+    steps.push({
+      kind: 'shift',
+      from: n,
+      to: n + 1,
+      nums,
+      label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
+    });
   }
+  steps.push({
+    kind: 'place',
+    to: targetNum,
+    nums: incomingNums.slice(),
+    label: `Selected → Sprint ${targetNum} (${incomingNums.length} ticket${incomingNums.length !== 1 ? 's' : ''})`,
+  });
   return steps.length ? steps : null;
 }
 
@@ -19539,6 +19551,15 @@ const SM_MODELS = [
   'claude-haiku-4-5-20251001',
   'claude-haiku-4-5',
 ];
+// The tester model is NOT a single fixed choice — it is routed by the ticket's
+// risk tier (issue #790). This is the effective default map; the source of
+// truth is sprint.yaml → agent_config.tester.by_risk. Shown read-only so the
+// panel stops implying a fixed Tester model it doesn't actually use.
+const SM_TESTER_BY_RISK = [
+  { tier: 'LOW',    model: 'claude-haiku-4-5'  },
+  { tier: 'MEDIUM', model: 'claude-haiku-4-5'  },
+  { tier: 'HIGH',   model: 'claude-sonnet-4-6' },
+];
 const SM_STORAGE_KEY = 'commander_agent_models';
 
 function _smLoadModels() {
@@ -19566,6 +19587,18 @@ function _gssRender(data) {
   const modelRows = SM_AGENTS
     .filter(a => a.settingsKey)
     .map(a => {
+      // Tester is risk-routed, not a single model — show the effective map.
+      if (a.key === 'tester') {
+        const map = (Array.isArray(data.tester_by_risk) && data.tester_by_risk.length)
+          ? data.tester_by_risk : SM_TESTER_BY_RISK;
+        const pills = map.map(r =>
+          `<span class="gss-risk-pill"><b>${r.tier}</b> → ${r.model}</span>`).join('');
+        return `<div class="gss-row gss-row--stack">
+          <div class="gss-label">${a.label}<span class="hint">${a.hint} · risk-routed</span></div>
+          <div class="gss-control gss-risk-map">${pills}</div>
+          <div class="gss-risk-note">Model is chosen by the ticket's risk tier (issue #790), not a fixed setting. Edit in <code>sprint.yaml → agent_config.tester.by_risk</code>.</div>
+        </div>`;
+      }
       const current = data[a.settingsKey] || a.default;
       return `<div class="gss-row">
         <div class="gss-label">${a.label}<span class="hint">${a.hint}</span></div>

@@ -5962,6 +5962,9 @@
     }
     .logs-chip:hover { background: var(--surface-2); color: var(--text); }
     .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    /* Errors-only overlay pill reads in red when active (distinct from the blue
+       source filters); deck filter=errors lands here. */
+    .logs-chip--errors.active { background: var(--red-bg); border-color: var(--red); color: var(--red); }
     .logs-chip--hidden { display: none !important; }
     .logs-tags-see-more-btn { font-style: italic; color: var(--text-sub); }
     .logs-toolbar-row2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -7357,6 +7360,7 @@
                 <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
                 <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
                 <button class="logs-chip" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
+                <button class="logs-chip logs-chip--errors" id="evl-filter-errors" onclick="evlToggleErrorsOnly()" title="Show only failures/errors">Errors</button>
               </div>
               <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
                 <i class="ti ti-refresh"></i>
@@ -8707,7 +8711,14 @@ const PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
 
 function parseUrl() {
   const m = window.location.pathname.match(PATH_RE);
-  if (!m) return { slug: null, tab: 'sprint-mgmt' };
+  // Deck/monitoring deep-link params (issue: deck jump keys). `view` selects the
+  // sub-view (board/running/history/summary) or activity/tickets; `filter`
+  // pre-filters the activity log (e.g. errors). Read here so a cold load of the
+  // URL lands on the right pane.
+  const _q = new URLSearchParams(window.location.search);
+  const view = (_q.get('view') || '').toLowerCase() || null;
+  const filter = (_q.get('filter') || '').toLowerCase() || null;
+  if (!m) return { slug: null, tab: 'sprint-mgmt', view, filter };
   const slug = decodeURIComponent(m[1]);
   const rawTab = m[2] || '';
   const hash = window.location.hash;
@@ -8727,7 +8738,34 @@ function parseUrl() {
             : (rawTab === 'global-settings')  ? 'global-settings'
             : (hash === '#compare')           ? 'compare'
             : 'sprint-mgmt';
-  return { slug, tab };
+  return { slug, tab, view, filter };
+}
+
+// Deck deep-link state, consumed once on the initial route so manual nav after
+// it behaves normally (issue: deck jump keys).
+let _deepLinkView   = null;   // running | board | history | summary | activity | tickets
+let _deepLinkFilter = null;   // e.g. 'errors' (activity log)
+
+// Map a deep-link `view` to a Sprint-Mgmt sub-view id, or null if it isn't one.
+// `summary` lands on History (where the reviewable sprint summaries live).
+function _deepLinkSprintSubView() {
+  switch (_deepLinkView) {
+    case 'running': return 'running';
+    case 'history': return 'history';
+    case 'summary': return 'history';
+    case 'board':   return 'board';
+    default:        return null;
+  }
+}
+
+// Show the deck-requested sub-view. Clears the one-shot only when the repo is
+// loaded, so a cold load (repo not ready in the first switchTab) re-applies it
+// after loadSprintMgmt and the sub-view's own loader (e.g. History ledger) runs.
+function _applyDeepLinkSubView() {
+  const sub = _deepLinkSprintSubView();
+  if (!sub) return;
+  _smgmtShowSubView(sub);
+  if (_cachedFullRepo[_slug]) _deepLinkView = null;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -8968,9 +9006,13 @@ function switchTab(tab, pushHistory) {
     loadTickets();
   }
 
-  // Default to the Board sub-view whenever the Sprint Mgmt tab opens (issue #716)
+  // Open the deck-requested sub-view (running/history/summary→history/board) on
+  // the initial route, else default to Board. The one-shot is cleared only once
+  // the repo is ready (so the sub-view's loader actually ran) — see
+  // _applyDeepLinkSubView; on a cold load the repo arrives after this call.
   if (tab === 'sprint-mgmt') {
-    _smgmtShowSubView('board');
+    if (_deepLinkSprintSubView()) _applyDeepLinkSubView();
+    else _smgmtShowSubView('board');
   }
 
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
@@ -9089,15 +9131,21 @@ document.getElementById('sub-tabs').addEventListener('keydown', function(e) {
 
 // ── Popstate handler ─────────────────────────────────────────────────────────
 window.addEventListener('popstate', function(e) {
-  const state = e.state;
-  if (state && state.slug && state.tab) {
-    if (state.slug !== _slug) {
-      _ticketsRepo = null;
-      _ticketsLoaded = false;
-    }
-    _slug = state.slug;
-    switchTab(state.tab, false);
+  // Re-read the URL (incl. ?view=/?filter=) so back/forward to a deck deep link
+  // re-applies the right sub-view + errors filter, not just the tab.
+  const { slug, tab, view, filter } = parseUrl();
+  const effSlug = slug || (e.state && e.state.slug);
+  const effTab = (slug ? tab : (e.state && e.state.tab)) || 'sprint-mgmt';
+  if (!effSlug) return;
+  if (effSlug !== _slug) {
+    _ticketsRepo = null;
+    _ticketsLoaded = false;
   }
+  _slug = effSlug;
+  _deepLinkView = view;
+  _deepLinkFilter = filter;
+  _evlState.errorsOnly = (filter === 'errors');
+  switchTab(effTab, false);
 });
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -9926,7 +9974,7 @@ function toggleTodoDock() {
 }
 
 async function init() {
-  const { slug, tab } = parseUrl();
+  const { slug, tab, view, filter } = parseUrl();
 
   if (!slug) {
     window.location.replace('/');
@@ -9935,6 +9983,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+  // Stash deck deep-link intent; switchTab/logsInit consume it once on this load.
+  _deepLinkView = view;
+  _deepLinkFilter = filter;
+  if (filter === 'errors') _evlState.errorsOnly = true;  // applied on first activity render
 
   // AC2/AC3: mount the docked per-project to-do panel, keyed by slug so it shows
   // the identical list as this project's home-page block (#844).
@@ -9949,10 +10001,12 @@ async function init() {
   updateSidebarFooter();
   checkGhAuthStatus().catch(() => {});
 
-  // Replace URL if needed (e.g. sprint-history → sprint-mgmt)
+  // Replace URL if needed (e.g. sprint-history → sprint-mgmt). Preserve the
+  // query string so a deck deep-link (?view=/?filter=) survives a refresh and
+  // back/forward (popstate re-runs init → re-applies the view).
   const expected = '/project/' + encodeURIComponent(slug) + '/' + tab;
   if (window.location.pathname !== expected) {
-    history.replaceState({ slug, tab }, '', expected);
+    history.replaceState({ slug, tab }, '', expected + window.location.search);
   }
 
   // Activate the correct tab without pushing history (already set above)
@@ -10010,6 +10064,9 @@ async function init() {
     _sprintMgmtLoaded = true;
     await loadSprintMgmt();
     _smgmtArInit();
+    // Repo is ready now — re-apply the deck sub-view so its loader runs (the
+    // first switchTab fired before _cachedFullRepo was populated).
+    _applyDeepLinkSubView();
   }
 
   // If logs tab was active before _projectData was available, now fetch runs
@@ -21112,6 +21169,7 @@ const _EVL_STALE_BRANCH_RE = /^(feat|feature|sprint)\//;
 const _evlState = {
   events: null,
   sourceFilter: 'all',
+  errorsOnly: false,   // deck deep-link `filter=errors` + the Errors pill
   loading: false,
   staleBranches: new Set(),
   sprintFeatMap: {},
@@ -21303,7 +21361,15 @@ function evlRender() {
   }
 
   listEl.innerHTML = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  const _errBtn = document.getElementById('evl-filter-errors');
+  if (_errBtn) _errBtn.classList.toggle('active', _evlState.errorsOnly);
   _evlUpdateBanner();
+}
+
+// Errors-only overlay toggle (also seeded by the deck `filter=errors` deep link).
+function evlToggleErrorsOnly() {
+  _evlState.errorsOnly = !_evlState.errorsOnly;
+  evlRender();
 }
 
 async function evlFetch() {
@@ -21390,6 +21456,9 @@ function _evlBadgeCls(label) {
 }
 
 function _evlMatchesFilter(ev, filter) {
+  // Errors-only overlay (deck filter=errors / the Errors pill) composes with the
+  // source filter: only error-category rows pass when active.
+  if (_evlState.errorsOnly && !_evlIsError(ev)) return false;
   if (filter === 'all') return true;
   if (filter === 'agent') {
     var src = ev.source || '';

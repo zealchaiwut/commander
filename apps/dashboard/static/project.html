@@ -140,6 +140,28 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Active-milestone indicator (issue #880) — header, links to Roadmap ── */
+    .hnav-milestone {
+      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+      max-width: 280px; margin-bottom: 5px; padding: 5px 11px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); color: var(--text-muted);
+      font-size: 12px; text-decoration: none;
+      transition: border-color .12s, color .12s;
+    }
+    .hnav-milestone.hidden { display: none; }
+    .hnav-milestone:hover { border-color: var(--blue); color: var(--blue); }
+    .hnav-milestone .ti { font-size: 13px; flex-shrink: 0; }
+    .hnav-ms-name {
+      font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hnav-milestone:hover .hnav-ms-name { color: var(--blue); }
+    .hnav-ms-count {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      white-space: nowrap; flex-shrink: 0;
+    }
+
     /* ── Sprint status pill (sits at the tab-strip level) ── */
     .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
     .snav-pill {
@@ -3375,6 +3397,19 @@
       border-color: var(--blue);
       font-weight: 600;
     }
+    /* Backlog milestone filter (issue #879). Matches the pill toolbar; --text on
+       --surface stays AA-contrast in both themes. */
+    .bl-ms-filter {
+      font: inherit; font-size: 12px; line-height: 1.5;
+      padding: 4px 10px; min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .bl-ms-filter:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .bl-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4579,6 +4614,18 @@
       font-size: 10px; font-weight: 700;
       font-family: var(--mono);
       background: var(--surface-2); color: var(--text-sub);
+    }
+    /* Read-only milestone chip on board + backlog rows and the detail panel
+       (issue #879). Neutral, token-based fill so both themes stay AA-contrast:
+       --text on --surface-2 is high-contrast in light and dark. */
+    .smgmt-ms-chip {
+      flex-shrink: 0;
+      display: inline-flex; align-items: center;
+      max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      padding: 1px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 600;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border);
     }
     /* Size-colored pills (issue #562) */
     .smgmt-ticket[data-size="S"]  .smgmt-ticket-size-pill { background: var(--green-bg); color: var(--green); }
@@ -7095,6 +7142,14 @@
           <i class="ti ti-adjustments-cog"></i>Settings
         </button>
       </nav>
+      <!-- Active-milestone indicator (issue #880) — links to the Roadmap tab -->
+      <a class="hnav-milestone hidden" id="hnav-milestone" href="#"
+         title="Active milestone — open Roadmap"
+         aria-label="Active milestone progress, open Roadmap tab">
+        <i class="ti ti-flag-3"></i>
+        <span class="hnav-ms-name"></span>
+        <span class="hnav-ms-count"></span>
+      </a>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
         <button class="snav-pill hidden" id="snav-pill" onclick="snavTogglePanel(event)"
@@ -7259,6 +7314,10 @@
                         onclick="_blToggleFilter('size','XL',this)">XL</button>
                 <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
                         onclick="_blToggleFilter('unestimated','1',this)">unestimated</button>
+                <select class="bl-ms-filter" id="bl-ms-filter" aria-label="Filter by milestone"
+                        onchange="_blSetMilestoneFilter(this.value)">
+                  <option value="">All milestones</option>
+                </select>
               </div>
               <div id="smgmt-backlog-tickets" class="bl-grid">
                 <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
@@ -7761,6 +7820,9 @@
               </div>
               <select class="bc-select hidden" id="bc-sprint" aria-label="Target sprint">
                 <option value="">Backlog (no sprint)</option>
+              </select>
+              <select class="bc-select hidden" id="bc-milestone" aria-label="Milestone">
+                <option value="">No milestone</option>
               </select>
               <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
@@ -9360,6 +9422,75 @@ function _depChipsHtml(deps, ticketNums) {
 // ── Ticket detail panel (issue #432) ─────────────────────────────────────────
 let _tdpTickets = [];
 
+// ── Milestone selector + filter (issue #879) ─────────────────────────────────
+// Shared between the new-ticket dialog, the bulk-create dialog, and the backlog
+// milestone filter. Milestones come from /api/milestones (open milestones +
+// which one is Active); the Active milestone is the default selection.
+let _msCache = {};   // repo -> { milestones:[{number,title,active}], active }
+
+async function _msFetch(repo) {
+  if (!repo) return { milestones: [], active: null };
+  if (_msCache[repo]) return _msCache[repo];
+  try {
+    const resp = await fetch('/api/milestones?repo=' + encodeURIComponent(repo));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    _msCache[repo] = data;
+    return data;
+  } catch (e) {
+    return { milestones: [], active: null };
+  }
+}
+
+/** Fill a <select> with milestone options, defaulting to the Active milestone. */
+async function _msPopulate(selectEl, repo) {
+  if (!selectEl) return;
+  const data = await _msFetch(repo);
+  const opts = ['<option value="">No milestone</option>'];
+  for (const m of (data.milestones || [])) {
+    const sel = m.active ? ' selected' : '';
+    opts.push(`<option value="${escHtml(m.title)}"${sel}>${escHtml(m.title)}</option>`);
+  }
+  selectEl.innerHTML = opts.join('');
+}
+
+let _bcMilestonesLoadedFor = null;
+function _bcEnsureMilestonesLoaded(job) {
+  const repo = job && job.repo;
+  if (!repo || _bcMilestonesLoadedFor === repo) return;
+  _bcMilestonesLoadedFor = repo;
+  _msPopulate(document.getElementById('bc-milestone'), repo);
+}
+
+/** Rebuild the backlog milestone filter's options from the loaded backlog
+ *  tickets, preserving the current selection (issue #879 AC8). */
+function _blPopulateMilestoneFilter(tickets) {
+  const sel = document.getElementById('bl-ms-filter');
+  if (!sel) return;
+  const titles = [];
+  for (const t of (tickets || [])) {
+    const title = t.milestone && t.milestone.title;
+    if (title && !titles.includes(title)) titles.push(title);
+  }
+  titles.sort((a, b) => a.localeCompare(b));
+  const current = _blFilters.milestone || '';
+  const opts = ['<option value="">All milestones</option>'];
+  for (const title of titles) {
+    const s = title === current ? ' selected' : '';
+    opts.push(`<option value="${escHtml(title)}"${s}>${escHtml(title)}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  // If the previously-selected milestone vanished from the backlog, drop the
+  // filter so the list isn't stuck showing nothing.
+  if (current && !titles.includes(current)) _blFilters.milestone = null;
+}
+
+/** Backlog milestone filter change handler (AC8 / AC9). */
+function _blSetMilestoneFilter(val) {
+  _blFilters.milestone = val || null;
+  _smgmtRenderBacklog(_blBacklogAll);
+}
+
 function tdpOpen(num) {
   const panel   = document.getElementById('tdp');
   const numEl   = document.getElementById('tdp-num');
@@ -9384,9 +9515,15 @@ function tdpOpen(num) {
 
   const tdpSizeLabel = (ticket.labels || []).find(l => /^size-[SMLX]+$/.test(l.name));
 
+  // Read-only milestone chip (issue #879 AC7/AC10).
+  const tdpMsChip = (ticket.milestone && ticket.milestone.title)
+    ? `<span class="smgmt-ms-chip" title="Milestone: ${escHtml(ticket.milestone.title)}">${escHtml(ticket.milestone.title)}</span>`
+    : '';
+
   let html = `<div class="tdp-section">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span class="ticket-status-pill ${escHtml(ticket.status)}">${escHtml(ticket.status)}</span>
+      ${tdpMsChip}
       <a class="tdp-gh-link" href="${escHtml(ticket.url)}" target="_blank" rel="noopener">View on GitHub →</a>
     </div>
   </div>`;
@@ -10069,7 +10206,8 @@ async function init() {
   // Sprint status pill (GitHub-backed) — initial load + 30s refresh
   snavRefresh();
   _snavRefreshAll();
-  setInterval(() => { snavRefresh(); _snavRefreshAll(); }, 30000);
+  _milestoneRefresh();
+  setInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -15405,11 +15543,14 @@ function _smgmtBacklogToggle() {
 
 // ── Filtered multi-select backlog panel + what-if delta (issue #800) ────────
 let _blBacklogAll = [];
-let _blFilters = { size: null, age: null, unestimated: false, sort: null };
+let _blFilters = { size: null, age: null, unestimated: false, sort: null, milestone: null };
 
-/** Clear all backlog filters (All pill). */
+/** Clear all backlog filters (All pill). Resets the milestone filter too so the
+ *  full backlog list is restored (issue #879 AC9). */
 function _blClearFilters(btn) {
-  _blFilters = { size: null, age: null, unestimated: false, sort: null };
+  _blFilters = { size: null, age: null, unestimated: false, sort: null, milestone: null };
+  const msSel = document.getElementById('bl-ms-filter');
+  if (msSel) msSel.value = '';
   _smgmtRenderBacklog(_blBacklogAll);
 }
 
@@ -15448,6 +15589,10 @@ function _blApplyFilters(tickets) {
       if (_blFilters.age === 'gt30' && !(age > 30))  return false;
     }
     if (_blFilters.unestimated && _blTicketSize(t) !== null) return false;
+    if (_blFilters.milestone) {
+      const title = t.milestone && t.milestone.title;
+      if (title !== _blFilters.milestone) return false;
+    }
     return true;
   });
   if (_blFilters.sort === 'oldest') {
@@ -15460,7 +15605,7 @@ function _blApplyFilters(tickets) {
 
 /** Sync the is-active state of every filter pill to the current filter set. */
 function _blSyncFilterPills() {
-  const anyActive = _blFilters.size || _blFilters.age || _blFilters.unestimated || _blFilters.sort;
+  const anyActive = _blFilters.size || _blFilters.age || _blFilters.unestimated || _blFilters.sort || _blFilters.milestone;
   document.querySelectorAll('.bl-pill').forEach(p => {
     const type = p.dataset.filterType, val = p.dataset.filterVal;
     let active = false;
@@ -17481,6 +17626,10 @@ function _setupModals() {
       _ntDraftGenerated = true;
       _ntAutoSuggestLabel();
       _ntUpdateWarnings();
+      // Populate the milestone selector for the chosen project, defaulting to
+      // the Active milestone (issue #879 AC3).
+      _msPopulate(document.getElementById('nt-milestone'),
+                  document.getElementById('nt-project').value);
       document.getElementById('nt-draft-section').classList.remove('hidden');
       requestAnimationFrame(() => {
         const modal = document.getElementById('nt-modal');
@@ -17538,6 +17687,7 @@ function _setupModals() {
       formData.append('body', document.getElementById('nt-body').value);
       formData.append('project', repo);
       for (const lbl of _ntSelectedLabels) formData.append('extra_labels', lbl);
+      formData.append('milestone', (document.getElementById('nt-milestone') || {}).value || '');
       for (const f of _ntFiles) {
         formData.append('files', f);
       }
@@ -18750,7 +18900,10 @@ function _bcRenderStep2() {
     }
   } else if (stage === 3) {                             // ③ Sprint (you)
     _bcEnsureSprintsLoaded(job);
+    _bcEnsureMilestonesLoaded(job);
     if (sprintSel)   sprintSel.classList.remove('hidden');
+    const bcMsSel = document.getElementById('bc-milestone');
+    if (bcMsSel)     bcMsSel.classList.remove('hidden');
     if (continueBtn) { continueBtn.disabled = false; continueBtn.title = ''; continueBtn.classList.remove('hidden'); }
   } else if (stage === 4) {                             // ④ Post (you)
     if (reviewPostBtn) {
@@ -19565,13 +19718,15 @@ async function bcPostSelected() {
   if (reviewBtn) { reviewBtn.disabled = true; reviewBtn.textContent = 'Posting…'; }
 
   const sprintLabel = (document.getElementById('bc-sprint') || {}).value || '';
+  // Milestone chosen at the Sprint stage applies to every ticket (issue #879).
+  const milestone = (document.getElementById('bc-milestone') || {}).value || '';
   _bcPosting = true;  // → footer shows "Posting…", and we jump to Sprint Mgmt on done
 
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tickets: toPost, sprint_label: sprintLabel }),
+      body: JSON.stringify({ tickets: toPost, sprint_label: sprintLabel, milestone }),
     });
     if (!resp.ok) {
       _bcPosting = false;
@@ -20056,6 +20211,26 @@ async function _sprintProgressFetch() {
 
 function _snavRepo() {
   return _cachedFullRepo[_slug] || '';
+}
+
+// #880: hydrate the header active-milestone indicator and link it to the
+// project's Roadmap tab. No active milestone → indicator stays hidden (AC3).
+async function _milestoneRefresh() {
+  const el = document.getElementById('hnav-milestone');
+  const repo = _snavRepo();
+  if (!el || !repo) return;
+  try {
+    const res = await fetch(`/api/home/milestone?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    const m = await res.json();
+    if (!m || !m.label) { el.classList.add('hidden'); return; }
+    const name = m.title || 'Milestone';
+    el.querySelector('.hnav-ms-name').textContent = name;
+    el.querySelector('.hnav-ms-count').textContent = m.label;
+    el.setAttribute('href', `/project/${encodeURIComponent(_slug)}/roadmap`);
+    el.setAttribute('aria-label', `${name}: ${m.label}, open Roadmap tab`);
+    el.classList.remove('hidden');
+  } catch (_) { /* leave indicator in last-known state */ }
 }
 
 /** Render (or clear) the sprint status badge in the sidebar for any project. */
@@ -23000,6 +23175,12 @@ document.addEventListener('keydown', function(e) {
                  aria-expanded="false" aria-controls="nt-label-dropdown" aria-autocomplete="list">
           <div class="nt-label-dropdown hidden" id="nt-label-dropdown" role="listbox"></div>
         </div>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="nt-milestone">Milestone <span class="modal-hint" style="font-weight:normal;color:var(--text-muted)">(optional)</span></label>
+        <select class="modal-input" id="nt-milestone" aria-label="Milestone">
+          <option value="">No milestone</option>
+        </select>
       </div>
       <div class="modal-field lp-section">
         <div class="lp-hdr">

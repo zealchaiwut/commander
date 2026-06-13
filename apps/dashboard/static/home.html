@@ -83,6 +83,16 @@
     @keyframes glow{0%,100%{box-shadow:0 0 0 2px var(--green-bg)}50%{box-shadow:0 0 0 5px var(--green-bg)}}
     .pbstatus{margin-left:auto}
 
+    /* active-milestone progress indicator (issue #880) — compact, never dominant */
+    .pb-milestone{display:none;margin-left:auto;align-items:center;gap:8px;text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-muted);font-size:12px;max-width:48%;transition:border-color .12s,color .12s}
+    .pb-milestone.show{display:inline-flex}
+    .pb-milestone .ti{font-size:13px;flex-shrink:0}
+    .pb-ms-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pb-milestone:hover{border-color:var(--blue);color:var(--blue)}
+    .pb-milestone:hover .pb-ms-name{color:var(--blue)}
+    .pb-ms-count{font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
+    .pb-milestone + .pbstatus{margin-left:10px}
+
     /* 2×2 project grid: summary | to-do / shipped | activity */
     .pb-grid{display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;align-items:stretch}
     @media(max-width:740px){.pb-grid{grid-template-columns:1fr;grid-template-rows:auto}}
@@ -355,6 +365,27 @@
       const el = document.getElementById('todo-' + slug);
       if (el && window.CommanderTodo) CommanderTodo.mount(el, slug);
     });
+
+    // #880: hydrate the active-milestone progress indicator on each card.
+    projects.forEach(p => loadMilestone(p.project, p.repo));
+  }
+
+  // #880: fetch the active milestone for a project and reveal the indicator.
+  // No active milestone → the element stays hidden, card renders normally (AC3).
+  async function loadMilestone(slug, repo){
+    const el = document.getElementById('ms-' + slug);
+    if (!el || !repo) return;
+    try {
+      const r = await fetch('/api/home/milestone?repo=' + encodeURIComponent(repo));
+      if (!r.ok) return;
+      const m = await r.json();
+      if (!m || !m.label) return;
+      const name = m.title || 'Milestone';
+      el.querySelector('.pb-ms-name').textContent = name;
+      el.querySelector('.pb-ms-count').textContent = m.label;
+      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
+      el.classList.add('show');
+    } catch(_) { /* leave indicator hidden on error */ }
   }
 
   // ── AC1: brief header (date + covering-since subtitle) ─────────────────────
@@ -568,6 +599,13 @@
       <div class="pbrief${_bottomHidden(slug) ? ' hide-bottom' : ''}" data-slug="${esc(slug)}">
         <div class="pbrief-head">
           ${_projectTitleLinkHtml(slug)}
+          <a class="pb-milestone" id="ms-${esc(slug)}" href="/project/${esc(slug)}/roadmap"
+             title="Active milestone — open Roadmap"
+             aria-label="Active milestone progress, open Roadmap tab">
+            <i class="ti ti-flag-3"></i>
+            <span class="pb-ms-name"></span>
+            <span class="pb-ms-count"></span>
+          </a>
           ${_statusPill(p)}
           <button class="pb-bottom-toggle" title="Hide/show shipped detail + to-do"
                   aria-label="Toggle bottom row" onclick="toggleBottom('${esc(slug)}')">

@@ -9,7 +9,7 @@
  * are scheduled for follow-on extraction waves.
  */
 
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
+/* global _blApplyFilters, _blBacklogAll, _blPopulateMilestoneFilter, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
 
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
@@ -728,14 +728,8 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isRunning = _smgmtRunningLabels.has(label);
   const isLinger = !isRunning && typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
   const isRunningView = isRunning || isLinger;
-  // A running sprint collapses to a compact strip by default — the live detail
-  // (issue list, budget, agent stats) lives in the Running pane, so the board
-  // card is just a status header + Cancel. An explicit user toggle still wins.
-  let isCollapsed = isRunning;
-  try {
-    const _cv = localStorage.getItem('sprintColumn_' + label + '_collapsed');
-    if (_cv !== null) isCollapsed = _cv === '1';
-  } catch (_) {}
+  let isCollapsed = false;
+  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
 
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
@@ -778,10 +772,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
   } else if (isLinger) {
-    // Finished snapshot, kept 1h. A finished sprint is always post-run, so keep
-    // the board's Re-run → child action here (was History-only) and show the
-    // snapshot note beside it.
-    actionBtn = `${rerunBtn}<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
+    actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
   } else if (isHasRework && rerunInto && tickets.length === 0) {
     // Tickets moved to a child re-run — run the child, not the empty parent label.
     actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
@@ -835,7 +826,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
       // Keep planning view: rework tickets stay actionable; the finish-card hat shows the summary.
       ticketsContainerHtml = tickets.length > 0
         ? tickets.map(t => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join('')
-        : '<div class="smgmt-drop-hint">No tickets yet — add with the ⋯ menu → Move to</div>';
+        : '<div class="smgmt-drop-hint">Drop tickets here</div>';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       const issueList = outcome.issues || [];
@@ -850,7 +841,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
       ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
-      : '<div class="smgmt-drop-hint">No tickets yet — add with the ⋯ menu → Move to</div>';
+      : '<div class="smgmt-drop-hint">Drop tickets here</div>';
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
@@ -912,8 +903,10 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
   const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}${isRunning ? ' smgmt-running-clickable' : ''}" id="smgmt-card-${escHtml(label)}"
-         ${isRunning ? `onclick="if(!event.target.closest('button,a')) _smgmtShowSubView('running')"` : ''}>
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+         ondragover="${isRunning ? '' : `_smgmtDragOver(event, '${escHtml(label)}')`}"
+         ondragleave="${isRunning ? '' : `_smgmtDragLeave(event)`}"
+         ondrop="${isRunning ? '' : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
         <div class="smgmt-sprint-header-left sc-header-left">
@@ -933,12 +926,12 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
           <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">
-          ${isRunning ? '' : `<button class="smgmt-delete-btn"
+          <button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
-            <i class="ti ti-trash"></i> Delete</button>`}
+            <i class="ti ti-trash"></i> Delete</button>
+          ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ''}
-          ${actionBtn}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
@@ -963,22 +956,8 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
   const liveByNum = {};
   liveIssues.forEach(i => { liveByNum[i.number] = i; });
 
-  // Live agent tags / elapsed / spinning ring only make sense while the sprint
-  // is actually running. On a finished/linger/cancelled card the snapshot is
-  // frozen, so a stale "coder_running" must not read as live (issue: #879/#880
-  // showed CODER/TESTER on a cancelled sprint).
-  const isActuallyRunning = typeof _smgmtRunningLabels !== 'undefined'
-    && _smgmtRunningLabels.has(label);
-
-  // Union every ticket carrying the label (tickets) with the run snapshot
-  // (liveIssues), so tickets that never entered the run state — dropped at
-  // run-start by a relabel/mirror race — still appear instead of vanishing
-  // (issue: #861/#862 missing from the list). Live fields win when present.
-  const mergedByNum = new Map();
-  (tickets || []).forEach(t => mergedByNum.set(t.number, { ...t, ...(liveByNum[t.number] || {}) }));
-  liveIssues.forEach(i => { if (!mergedByNum.has(i.number)) mergedByNum.set(i.number, i); });
-  const sourceTickets = Array.from(mergedByNum.values())
-    .sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
+  const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets)
+    .slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
   const cardRepo = _smgmtRepo();
 
   if (sourceTickets.length === 0) {
@@ -1001,15 +980,13 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
     }
     if (ticketLevel > 0) prevLevel = ticketLevel;
 
-    const isActiveAgent = isActuallyRunning && agentStatus
-      && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
+    const isActiveAgent = agentStatus && (agentStatus.endsWith('_running') || agentStatus.endsWith('_dispatched'));
     let indicator = '';
     if (liveStatus === 'done') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-done">&#10003;</div></div>';
     } else if (agentStatus === 'failed' || liveStatus === 'skipped') {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-failed">&#10005;</div></div>';
-    } else if (isActuallyRunning
-        && (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number))) {
+    } else if (liveStatus === 'in-progress' || isActiveAgent || (currentTicket && t.number === currentTicket.number)) {
       indicator = '<div class="smgmt-ticket-indicator"><div class="ring"></div></div>';
     } else {
       indicator = '<div class="smgmt-ticket-indicator"><div class="circle-pending"></div></div>';
@@ -1021,11 +998,10 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
       ? `<span class="smgmt-ticket-size-pill" title="≈${(liveIss && liveIss.minutes) || _sizeMinutes(sizeVal)} min">${escHtml(sizeVal)}</span>`
       : '';
     const runSizeAttr = sizeVal ? ` data-size="${escHtml(sizeVal)}"` : '';
-    // Suppress live agent tag + elapsed once the sprint is no longer running.
-    const agentTagHtml = (isActuallyRunning && liveIss && liveIss.agent)
+    const agentTagHtml = (liveIss && liveIss.agent)
       ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>`
       : '';
-    const elapsedStr = (isActuallyRunning && liveIss) ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
+    const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
     const elapsedHtml = elapsedStr
       ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>`
       : '';
@@ -1286,6 +1262,14 @@ export function _smgmtUpdateColRollup(label, items) {
   if (el) el.textContent = _smgmtRollupText(items);
 }
 
+// Read-only milestone chip shown on board + backlog rows (issue #879 AC6/AC10).
+// Returns '' when the ticket has no milestone so unassigned rows stay clean.
+function _smgmtMilestoneChipHtml(ticket) {
+  const ms = ticket && ticket.milestone;
+  if (!ms || !ms.title) return '';
+  return `<span class="smgmt-ms-chip" title="Milestone: ${escHtml(ms.title)}">${escHtml(ms.title)}</span>`;
+}
+
 export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const hasRework = (ticket.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
   const statusClass = hasRework ? 'smgmt-status-need-rework' : ({
@@ -1341,19 +1325,27 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
+         draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
+         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
+         ondragend="_smgmtTicketDragEnd(event)"
+         ondragover="_smgmtTicketReorderDragOver(event)"
+         ondragleave="_smgmtTicketReorderDragLeave(event)"
+         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
          onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
+      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
+      ${_smgmtMilestoneChipHtml(ticket)}
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ''}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ''}
@@ -1389,6 +1381,9 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
 
 export function _smgmtRenderBacklog(tickets) {
   _blBacklogAll = tickets || [];
+  // Keep the milestone filter's options in sync with what's in the backlog
+  // (issue #879 AC8). Defined in project.html.
+  if (typeof _blPopulateMilestoneFilter === 'function') _blPopulateMilestoneFilter(_blBacklogAll);
   const countEl   = document.getElementById('smgmt-backlog-count');
   const ticketsEl = document.getElementById('smgmt-backlog-tickets');
   if (!ticketsEl) return;
@@ -1447,9 +1442,12 @@ export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
     : '';
   return `
     <div class="smgmt-ticket bl-row${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
+         draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
+         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
+         ondragend="_smgmtTicketDragEnd(event)"
          onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
@@ -1459,7 +1457,7 @@ export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${ageHtml}
+      ${_smgmtMilestoneChipHtml(ticket)}${schedDepHtml}${sizePillHtml}${ageHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">

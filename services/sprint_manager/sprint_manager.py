@@ -42,6 +42,7 @@ import smtplib
 import subprocess
 import sys
 import tempfile
+import traceback
 import threading
 import time
 import urllib.request
@@ -7554,7 +7555,7 @@ def run_sprint(
     _sprint_num_str = str(sprint_num) if sprint_num is not None else label.replace("sprint-", "")
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
-    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label)
+    structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -8994,6 +8995,18 @@ def main() -> None:
                 args.label,
                 eff_repo,
             )
+        raise
+    except Exception as _crash_exc:
+        # Crash catch-all (logging only): turn a silent sprint death into a
+        # logged stack trace, then re-raise so behavior is unchanged.
+        structured_log.error(
+            "sprint_crashed",
+            f"sprint {args.label} crashed: {_crash_exc}",
+            sprint_label=args.label,
+            project=eff_repo,
+            error=str(_crash_exc),
+            traceback=traceback.format_exc(),
+        )
         raise
 
     # Clean exit: write the unified-lifecycle terminal state at the source

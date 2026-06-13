@@ -83,6 +83,22 @@ class TestTerminalStateGuard:
         assert "Re-run" in detail
         assert "sprint-68.6" in detail
 
+    def test_phantom_terminal_plan_without_tickets_passes(self, tmp_path):
+        """A bare {"state": "completed"} plan.json with no tickets and no
+        durable `sprints` row is a phantom (a finish/sweep path stamped it for
+        a label that never dispatched anything). It must NOT block a first run —
+        regression for sprint-66, whose 8 open tickets could not be dispatched.
+        """
+        from server import _reject_terminal_label_redispatch
+        sprints_dir = tmp_path / ".commander" / "sprints"
+        sprints_dir.mkdir(parents=True, exist_ok=True)
+        # Phantom: terminal state, no tickets — exactly what was on disk.
+        (sprints_dir / "sprint-99999-plan.json").write_text(
+            json.dumps({"state": "completed"}), encoding="utf-8"
+        )
+        # sprint-99999 has no durable row → must pass through (no raise).
+        _reject_terminal_label_redispatch(tmp_path, "sprint-99999")
+
     def test_terminal_states_constant(self):
         # P1 extended the terminal set with the unified-lifecycle endings
         # (ready_to_merge / needs_rework); cancelled stays for legacy files.

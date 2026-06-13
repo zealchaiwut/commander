@@ -9203,5 +9203,43 @@ def main() -> None:
         sys.stdout.write(str(f"Sprint PR: {sprint_pr_url}") + "\n")
 
 
+class _TimestampedStdout:
+    """Prefix each orchestrator log line with a local [HH:MM:SS] stamp.
+
+    The dashboard surfaces this process's stdout as the "Orchestrator" log; the
+    stamp lets operators see when each step (coder dispatch, gate, etc.) started.
+    Installed only under CLI execution (below) so test imports never rewrap
+    sys.stdout. structured_log writes JSON to its own file, not here, so it is
+    unaffected.
+    """
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._at_line_start = True
+
+    def write(self, s):
+        if not s:
+            return 0
+        out = []
+        for ch in s:
+            if self._at_line_start and ch != "\n":
+                out.append(f"[{datetime.now().strftime('%H:%M:%S')}] ")
+                self._at_line_start = False
+            out.append(ch)
+            if ch == "\n":
+                self._at_line_start = True
+        self._stream.write("".join(out))
+        return len(s)
+
+    def flush(self):
+        self._stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 if __name__ == "__main__":
+    # Timestamp every orchestrator log line so operators can read when each
+    # step started (e.g. "[13:32:01]   Dispatching coder for issue #880 …").
+    sys.stdout = _TimestampedStdout(sys.stdout)
     main()

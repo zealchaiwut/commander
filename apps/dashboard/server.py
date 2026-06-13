@@ -9864,6 +9864,21 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     sprints_dir = commander / "sprints"
     sprints_dir.mkdir(parents=True, exist_ok=True)
 
+    # Rotate each moved ticket's per-issue log so the new run starts clean
+    # (logs are keyed by issue number, not sprint, so a re-run would otherwise
+    # show the previous run's lines + elapsed). The old log is kept as .prev so
+    # the prior run stays recoverable.
+    logs_dir = commander / "logs"
+    rotated_logs: list[int] = []
+    for issue_num in moved:
+        old_log = logs_dir / f"sprint-issue-{issue_num}.log"
+        if old_log.exists():
+            try:
+                old_log.replace(old_log.parent / f"{old_log.name}.prev")
+                rotated_logs.append(issue_num)
+            except OSError:
+                pass
+
     # Create plan.json for sub-label; original plan.json is untouched.
     # New sprints start as `draft` under the unified lifecycle (legacy files
     # may still carry "planning" — readers accept both).
@@ -9930,6 +9945,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "all_moved": all_moved,
         "decisions": decisions,
         "stripped_labels": stripped_labels,
+        "rotated_logs": rotated_logs,
     }
     if errors:
         result["errors"] = errors

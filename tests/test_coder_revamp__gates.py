@@ -15,6 +15,7 @@ from sprint_manager import (
     FailureCategory,
     GateResult,
     _LOGIC_FAILURE_CATEGORIES,
+    _TimestampedStdout,
     _changed_js_ts_files,
     _changed_py_files,
     _design_error_findings,
@@ -25,6 +26,40 @@ from sprint_manager import (
     _is_test_path,
     _run_quality_gates,
 )
+
+
+class TestTimestampedStdout:
+    """Orchestrator stdout is prefixed with a local [HH:MM:SS] stamp, one per
+    line, so operators can read when each step started (coder dispatch, etc.)."""
+
+    def test_one_stamp_per_line(self):
+        import io
+        import re
+        buf = io.StringIO()
+        ts = _TimestampedStdout(buf)
+        ts.write("  Dispatching coder for issue #880 ...\n")
+        lines = buf.getvalue().splitlines()
+        assert re.match(r"^\[\d{2}:\d{2}:\d{2}\]   Dispatching coder", lines[0])
+
+    def test_partial_writes_coalesce_into_one_line(self):
+        import io
+        import re
+        buf = io.StringIO()
+        ts = _TimestampedStdout(buf)
+        ts.write("partial")          # no newline yet
+        ts.write(" continues\n")     # completes the line — single stamp only
+        lines = buf.getvalue().splitlines()
+        assert len(lines) == 1
+        assert re.match(r"^\[\d{2}:\d{2}:\d{2}\] partial continues$", lines[0])
+
+    def test_passthrough_attrs_and_flush(self):
+        import io
+        buf = io.StringIO()
+        ts = _TimestampedStdout(buf)
+        ts.write("x\n")
+        ts.flush()  # must not raise
+        # __getattr__ delegates unknown attrs to the wrapped stream
+        assert ts.getvalue() == buf.getvalue()
 
 
 class TestDesignFixRoundRouting:

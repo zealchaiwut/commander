@@ -9459,15 +9459,12 @@ function updateProjectHeader(proj) {
   }
   if (nameEl) nameEl.textContent = proj.name || _slug;
 
-  // Status pill
+  // Status pill. The "Sprint X running" label is intentionally NOT rendered here
+  // (hotfix #2): it duplicated the sprint-nav status pill and the sub-nav running
+  // dot, and the Sprint-Mgmt auto-refresh pill already governs the Board / Running
+  // / History sub-views. UAT-pending stays — it's a distinct, actionable signal.
   if (pillEl) {
-    if (proj.status === 'running' && proj.sprint_running) {
-      const label = proj.sprint_running.label || '';
-      pillEl.innerHTML = `<span class="proj-header-pill pill-running">
-        <span class="pill-dot"></span>
-        Sprint ${escHtml(label.replace('sprint-', ''))} running
-      </span>`;
-    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+    if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
       const count = proj.uat_count || 0;
       pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
         <span class="pill-dot"></span>

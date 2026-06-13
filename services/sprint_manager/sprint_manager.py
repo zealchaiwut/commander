@@ -4326,11 +4326,28 @@ def _dispatch_coder(
             _cat = _h.get("category", "?")
             _detail = _h.get("reason") or _h.get("summary") or ""
             _ctx_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        _ctx_lines.append(
+            "Fix-round focus: target ONLY what the gate flagged above. Re-use the"
+            " existing feature branch and its prior work — fix the specific"
+            " failure and do NOT re-implement acceptance criteria that already"
+            " pass or rewrite passing tests. A fix-round is a surgical fix, not a"
+            " re-implementation."
+        )
         failure_suffix = "\n".join(_ctx_lines)
     else:
         failure_suffix = _build_failure_suffix(issue_num)
     if failure_suffix:
         prompt = prompt + failure_suffix
+
+    # Re-estimate after failure: a ticket that failed once is usually bigger than
+    # first sized — bump its cached size one tier on a fix-round so the
+    # budget/forecast and model-routing below reflect reality (resume-from-failure
+    # TODO). No-op for unestimated tickets.
+    if prior_failures:
+        _bumped = _bump_estimate_size(issue_num)
+        if _bumped:
+            sys.stdout.write(str(f"  [re-estimate] #{issue_num}: size bumped to {_bumped} after prior failure") + "\n")
+            sys.stdout.flush()
 
     # Give the headless run the same coder persona an interactive /coder session
     # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
@@ -4667,6 +4684,40 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+    # Single pytest run: the tester still WRITES the pytest tests for each AC and
+    # verifies the UAT steps, but does NOT execute the pytest suite itself — the
+    # sprint_manager pytest gate runs it once after the tester exits. Avoids the
+    # double pytest run (tester + gate). Toggle off by setting
+    # COMMANDER_TESTER_RUN_PYTEST=1 (then the tester runs pytest too).
+    if os.environ.get("COMMANDER_TESTER_RUN_PYTEST", "").strip().lower() not in ("1", "true", "yes", "on"):
+        if "do not execute the pytest" not in prompt.lower():
+            prompt += (
+                " PYTEST EXECUTION: write a pytest test for each acceptance criterion,"
+                " but do NOT execute the pytest suite yourself — sprint_manager's"
+                " quality gate runs pytest once after you exit. Verify the UAT steps"
+                " (HTTP / browser / inspection), confirm the tests you wrote are"
+                " anchored to their AC, then report READY_FOR_UAT; the gate validates"
+                " that the tests pass."
+            )
+
+    # Re-run fast path: if a prior attempt failed, point the tester at the
+    # previously-failing AC / gate FIRST so a re-verify isn't a full from-scratch
+    # pass (resume-from-failure TODO).
+    try:
+        _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+        if _sc.exists():
+            _scd = json.loads(_sc.read_text(encoding="utf-8"))
+            _fc = _scd.get("failure_class") or _scd.get("category")
+            if _fc:
+                prompt += (
+                    f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
+                    " acceptance criterion / gate tied to that failure FIRST; if it now"
+                    " passes, quickly confirm the remaining AC rather than re-testing"
+                    " everything from scratch."
+                )
+    except Exception:
+        pass
+
     # Impeccable design context (issue #713): inject into every tester dispatch so
     # the tester verifies UI tickets against the same design rules via context.mjs.
     if "context.mjs" not in prompt:
@@ -6870,6 +6921,37 @@ def _load_estimate(issue_num: int) -> Optional[dict]:
             break
         current = parent
     return None
+
+
+def _bump_estimate_size(issue_num: int) -> Optional[str]:
+    """Bump a ticket's cached size one tier (S→M→L→XL) on a fix-round, so the
+    budget/forecast and model-routing reflect that a failed ticket is bigger than
+    first sized (resume-from-failure TODO). Returns the new size, or None when
+    there's no estimate or it's already XL."""
+    _order = ["S", "M", "L", "XL"]
+    current = REPO_ROOT.resolve()
+    while True:
+        p = current / ".commander" / "estimates" / f"issue-{issue_num}.json"
+        if p.exists():
+            try:
+                data = json.loads(p.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+            sz = str(data.get("size") or "").upper()
+            if sz in _order and _order.index(sz) < len(_order) - 1:
+                new_sz = _order[_order.index(sz) + 1]
+                data["size"] = new_sz
+                data["size_bumped_on_failure"] = True
+                try:
+                    p.write_text(json.dumps(data, indent=2))
+                    return new_sz
+                except OSError:
+                    return None
+            return None
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
 
 
 def _load_sprint_plan(sprints_dir: Path, label: str) -> Optional[list[int]]:

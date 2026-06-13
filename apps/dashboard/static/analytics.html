@@ -738,8 +738,8 @@
         <div class="card-head">
           <i class="ti ti-chart-bar"></i>
           <div>
-            <div class="card-title">Tokens by size</div>
-            <div class="card-sub">average total tokens per ticket size · used for M6 model routing</div>
+            <div class="card-title">By size</div>
+            <div class="card-sub">average actual time per ticket size · used for model routing · tokens N/A (soon)</div>
           </div>
         </div>
         <div class="card-body">
@@ -748,14 +748,15 @@
               <tr>
                 <th>Size</th>
                 <th style="text-align:right">Tickets</th>
-                <th style="text-align:right">Avg tokens</th>
+                <th style="text-align:right">Avg time</th>
+                <th style="text-align:right;color:var(--text-muted)">Avg tokens</th>
               </tr>
             </thead>
             <tbody id="cost-size-tbody">
-              <tr><td style="font-weight:600">S</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">M</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">L</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">XL</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+              <tr><td style="font-weight:600">S</td><td style="text-align:right">—</td><td style="text-align:right">—</td><td style="text-align:right;color:var(--text-muted)">N/A (soon)</td></tr>
+              <tr><td style="font-weight:600">M</td><td style="text-align:right">—</td><td style="text-align:right">—</td><td style="text-align:right;color:var(--text-muted)">N/A (soon)</td></tr>
+              <tr><td style="font-weight:600">L</td><td style="text-align:right">—</td><td style="text-align:right">—</td><td style="text-align:right;color:var(--text-muted)">N/A (soon)</td></tr>
+              <tr><td style="font-weight:600">XL</td><td style="text-align:right">—</td><td style="text-align:right">—</td><td style="text-align:right;color:var(--text-muted)">N/A (soon)</td></tr>
             </tbody>
           </table>
         </div>
@@ -1217,10 +1218,12 @@
       if (szTbody) {
         var psat = data.per_size_avg_tokens || {};
         szTbody.innerHTML = ['S', 'M', 'L', 'XL'].map(function(sz) {
-          var entry = psat[sz] || {count: 0, avg_tokens: null};
+          var entry = psat[sz] || {count: 0, avg_minutes: null};
+          var timeCell = entry.avg_minutes != null ? (entry.avg_minutes + 'm') : '—';
           return '<tr><td style="font-weight:600">' + sz + '</td>' +
             '<td style="text-align:right">' + (entry.count || 0) + '</td>' +
-            '<td style="text-align:right;font-family:var(--mono)">' + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '—') + '</td></tr>';
+            '<td style="text-align:right;font-family:var(--mono)">' + timeCell + '</td>' +
+            '<td style="text-align:right;color:var(--text-muted)">N/A (soon)</td></tr>';
         }).join('');
       }
     }

@@ -1688,6 +1688,22 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         status = _sprint_statuses.get(key, {})
         issues = status.get("issues", [])
         if not issues:
+            # Disk fallback: sprint_manager writes <label>-state.json regardless
+            # of which port it posts to. Read the FULL sub-label state (e.g.
+            # sprint-67.1-state.json) so the pill reflects the running sub-sprint
+            # and its live progress instead of a GitHub-derived base guess (the
+            # pill showed "S71 0/11" while 67.1 ran — same gap #950 fixed for /live).
+            try:
+                _sp = (_commander_dir(_project_root_path(r["project"]))
+                       / "sprints" / f"{r['sprint_label']}-state.json")
+                if _sp.exists():
+                    _disk = json.loads(_sp.read_text(encoding="utf-8"))
+                    issues = _disk.get("issues", [])
+                    if issues and status.get("sprint_number") is None:
+                        status = {**status, "sprint_number": _disk.get("sprint_number")}
+            except Exception:
+                pass
+        if not issues:
             continue
         sprint_number = status.get("sprint_number")
         if sprint_number is None:
@@ -2141,6 +2157,40 @@ def get_global_settings():
     return build_effective_response(stored)
 
 
+_AGENT_MODEL_KEYS = (
+    "default_model", "coder_model", "tester_model",
+    "estimator_model", "documentor_model",
+)
+
+
+def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
+    """Write any agent-model fields from a settings Save into each project's
+    sprint.yaml ``agent_config`` — the single source ``sprint_manager`` reads at
+    dispatch. Without this the Save only updated the settings DB while the run
+    kept using the stale sprint.yaml model (coder/estimator stayed opus despite
+    a sonnet Save). Returns the repos updated."""
+    model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
+    if not model_cfg:
+        return []
+    try:
+        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+    except Exception:
+        return []
+    updated: list[str] = []
+    for proj in projects_module.load_projects():
+        repo = (proj.get("repo") or "").strip()
+        if not repo:
+            continue
+        try:
+            sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
+            if sy.exists():
+                _update_sprint_yaml_agent_config(sy, model_cfg)
+                updated.append(repo)
+        except Exception:
+            continue
+    return updated
+
+
 @app.put("/api/settings")
 def put_global_settings(body: dict):
     """Persist a global settings override.
@@ -2152,6 +2202,9 @@ def put_global_settings(body: dict):
     current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
     merged = {**current, **body}
     _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
+    # Single source: agent-model fields also land in each project's sprint.yaml
+    # so the dispatcher (reads sprint.yaml, not the settings DB) applies them.
+    _propagate_models_to_sprint_yaml(body)
     return build_effective_response(merged)
 
 
@@ -2211,6 +2264,17 @@ def put_project_settings(slug: str, body: dict):
     current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
     merged = {**current_project_override, **body}
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
+    # Single source: write agent-model fields into THIS project's sprint.yaml so
+    # the dispatcher applies them (settings DB alone is not read by the run).
+    _model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
+    if _model_cfg:
+        try:
+            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+            _sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
+            if _sy.exists():
+                _update_sprint_yaml_agent_config(_sy, _model_cfg)
+        except Exception:
+            pass
     display_patch: dict = {}
     if "icon" in body:
         display_patch["icon"] = body["icon"]
@@ -8731,8 +8795,10 @@ def get_calibration(project: str):
                 if issue_num is None:
                     continue
 
-                # Only count tickets that were actually completed
-                if iss.get("status") not in ("done", "passed"):
+                # Count any ticket that reached a completed state — done/passed
+                # plus uat/merged — so calibration isn't starved when tickets
+                # finish via UAT rather than a literal "done" status.
+                if iss.get("status") not in ("done", "passed", "uat", "merged"):
                     continue
 
                 start_ts = _parse_ts(iss.get("coder_started_at"))

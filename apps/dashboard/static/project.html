@@ -16111,13 +16111,14 @@ function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
   _smgmtMoveToIssue    = issueNum;
   _smgmtMoveFromSprint = fromSprintLabel || null;
 
-  const sprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
-
   let html = '';
-  sprintNums.forEach(n => {
-    const label = `sprint-${n}`;
+  _smgmtMoveTargets().forEach(t => {
+    const label = t.label;
     if (label === fromSprintLabel) return; // skip current sprint
-    html += `<button class="smgmt-moveto-option" onclick="_smgmtMoveToConfirm(${issueNum},'${label}')">Sprint ${n}</button>`;
+    const locked = t.running;              // a running sprint can't take new tickets
+    const onclick = locked ? '' : `onclick="_smgmtMoveToConfirm(${issueNum},'${label}')"`;
+    html += `<button class="smgmt-moveto-option" ${locked ? 'disabled' : ''} ${onclick}>` +
+            `${escHtml(sprintLabelDisplay(label))}${locked ? ' (running)' : ''}</button>`;
   });
 
   // Only show Backlog option if ticket is currently in a sprint
@@ -16310,6 +16311,22 @@ async function _smgmtRunEstimate(issueNum) {
 let _smgmtMoveModalIssue = null;
 let _smgmtMoveModalFrom  = null;
 
+// Active sprint targets for the move-ticket UIs: the board's known sprint
+// labels (GitHub-derived, incl sub-labels like sprint-66.6), with finished
+// sprints dropped and running ones flagged so the UI locks them. Single source
+// = the board's sprint set, not the all-base-numbers _smgmtData.sprints (which
+// listed old finished sprints like 59/65/66 and never showed sub-labels).
+function _smgmtMoveTargets() {
+  const partOf = lbl => {
+    const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || '');
+    return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+  };
+  return Object.keys(_smgmtBySprint || {})
+    .filter(lbl => !_smgmtFinishedLabels.has(lbl))
+    .sort((a, b) => { const pa = partOf(a), pb = partOf(b); return pa[0] - pb[0] || pa[1] - pb[1]; })
+    .map(lbl => ({ label: lbl, running: _smgmtRunningLabels.has(lbl) }));
+}
+
 function _smgmtMoveToModalOpen(issueNum, fromLabel) {
   _smgmtRowMenuClose();
   _smgmtMoveModalIssue = issueNum;
@@ -16319,15 +16336,18 @@ function _smgmtMoveToModalOpen(issueNum, fromLabel) {
   document.getElementById('mt-ticket-info').textContent =
     issue ? `#${issue.number} — ${issue.title}` : `#${issueNum}`;
 
-  const sprintNums = (_smgmtData?.sprints || []).slice().sort((a, b) => a - b);
-  const nextNum    = _smgmtGhostComputeNextFree();
+  const targets = _smgmtMoveTargets();
+  const nextNum = _smgmtGhostComputeNextFree();
 
   let html = '';
-  sprintNums.forEach(n => {
-    const lbl       = `sprint-${n}`;
+  targets.forEach(t => {
+    const lbl       = t.label;
     const isCurrent = lbl === fromLabel;
-    html += `<button class="mt-option" ${isCurrent ? 'disabled' : ''} onclick="_smgmtMoveModalPick('${lbl}', false)">` +
-            `<i class="ti ti-flag"></i> Sprint ${n}${isCurrent ? ' (current)' : ''}</button>`;
+    const locked    = t.running;            // a running sprint can't take new tickets
+    const disabled  = isCurrent || locked;
+    const note      = isCurrent ? ' (current)' : (locked ? ' (running — locked)' : '');
+    html += `<button class="mt-option" ${disabled ? 'disabled' : ''} onclick="_smgmtMoveModalPick('${lbl}', false)">` +
+            `<i class="ti ti-flag"></i> ${escHtml(sprintLabelDisplay(lbl))}${note}</button>`;
   });
   html += `<button class="mt-option mt-option-new" onclick="_smgmtMoveModalPick('sprint-${nextNum}', true)">` +
           `<i class="ti ti-plus"></i> Create new sprint (Sprint ${nextNum})</button>`;

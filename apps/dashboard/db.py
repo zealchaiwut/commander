@@ -154,6 +154,7 @@ def init_db():
         """)
         _create_ticket_status_table(conn)
         _create_issues_table(conn)
+        _create_milestones_table(conn)
         _create_sync_state_table(conn)
         _create_sprint_lifecycle_tables(conn)
         _create_sprint_history_table(conn)
@@ -229,6 +230,128 @@ def _create_sync_state_table(conn: sqlite3.Connection) -> None:
             updated_at TEXT
         )
     """)
+
+
+# ── Milestones mirror (issue #877) ────────────────────────────────────────────
+#
+# A local mirror of repo milestones, kept fresh by
+# github_milestones.sync_milestones_mirror() via ETag-conditional polling — the
+# same read-from-DB-not-GitHub model as the issues mirror. The GET milestones
+# endpoint serves from this table so reads consume zero GitHub rate-limit quota;
+# before the first sync it falls back to a live GitHub fetch. Write operations
+# (create/edit/close) upsert here too so the change is visible immediately.
+
+
+def _create_milestones_table(conn: sqlite3.Connection) -> None:
+    """Create the milestones mirror table (issue #877).
+
+    `raw` holds the full GitHub-shaped milestone dict so readers can reconstruct
+    every field without a live call. Primary key is (repo, number) so multiple
+    repos can be mirrored.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS milestones (
+            repo        TEXT NOT NULL DEFAULT '',
+            number      INTEGER NOT NULL,
+            title       TEXT,
+            description TEXT,
+            state       TEXT,
+            due_on      TEXT,
+            updated_at  TEXT,
+            raw         TEXT,
+            PRIMARY KEY (repo, number)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_milestones_repo_state "
+        "ON milestones (repo, state)"
+    )
+
+
+def upsert_milestones(repo: str, milestones: list[dict]) -> int:
+    """Upsert a batch of GitHub-shaped milestone dicts into the mirror.
+
+    Each dict carries: number, title, description, state, due_on, plus any extra
+    fields preserved in the `raw` column. Returns the number written.
+    """
+    if not milestones:
+        return 0
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        for ms in milestones:
+            number = ms.get("number")
+            if number is None:
+                continue
+            conn.execute(
+                """INSERT INTO milestones
+                       (repo, number, title, description, state, due_on,
+                        updated_at, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(repo, number) DO UPDATE SET
+                       title       = excluded.title,
+                       description = excluded.description,
+                       state       = excluded.state,
+                       due_on      = excluded.due_on,
+                       updated_at  = excluded.updated_at,
+                       raw         = excluded.raw""",
+                (
+                    repo,
+                    int(number),
+                    ms.get("title", ""),
+                    ms.get("description", ""),
+                    ms.get("state", ""),
+                    ms.get("due_on", "") or "",
+                    ms.get("updated_at", "") or ms.get("updatedAt", ""),
+                    json.dumps(ms),
+                ),
+            )
+        conn.commit()
+    return len(milestones)
+
+
+def _row_to_milestone(row: sqlite3.Row) -> dict:
+    """Reconstruct a GitHub-shaped milestone dict from a mirror row."""
+    if row["raw"]:
+        try:
+            return json.loads(row["raw"])
+        except (ValueError, TypeError):
+            pass
+    return {
+        "number": row["number"],
+        "title": row["title"],
+        "description": row["description"],
+        "state": row["state"],
+        "due_on": row["due_on"],
+    }
+
+
+def get_mirrored_milestones(repo: str, state: str | None = None) -> list[dict]:
+    """Return mirrored milestones for a repo as GitHub-shaped dicts.
+
+    Optionally filter by state ('open' / 'closed'). Returns an empty list when
+    nothing is mirrored yet (callers may then fall back to a live fetch).
+    """
+    sql = "SELECT * FROM milestones WHERE repo = ?"
+    params: list = [repo]
+    if state is not None:
+        sql += " AND state = ?"
+        params.append(state)
+    sql += " ORDER BY number ASC"
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_milestone(r) for r in rows]
+
+
+def get_mirrored_milestone(repo: str, number: int) -> dict | None:
+    """Return a single mirrored milestone, or None if not present."""
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        row = conn.execute(
+            "SELECT * FROM milestones WHERE repo = ? AND number = ?",
+            (repo, int(number)),
+        ).fetchone()
+    return _row_to_milestone(row) if row else None
 
 
 # ── Brief summary cache (issue #840) ──────────────────────────────────────────

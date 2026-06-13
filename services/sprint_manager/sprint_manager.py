@@ -3523,6 +3523,10 @@ def record_failure(
         sc_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         sys.stdout.write(str(f"  [failure] Wrote sidecar ({failure_class}): {sc_path}") + "\n")
         sys.stdout.flush()
+        structured_log.info(
+            "sidecar_written", f"failure sidecar written for #{issue_num}",
+            issue_num=issue_num, failure_class=failure_class, path=str(sc_path),
+        )
         return sc_path
     except Exception as e:
         structured_log.error(

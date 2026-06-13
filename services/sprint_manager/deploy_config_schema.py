@@ -68,7 +68,13 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
         "uat": {
             "host": "local",
             "branch": "develop",
-            "launchd_label": "com.perfcoach.uat",
+            "port": 9001,
+            # perf-coach is a uv/uvicorn app (backend.main:app) on :9001. The
+            # foreground start_uat.sh would hang the dashboard's Start (it waits
+            # for the script to exit), so Start/Stop target the daemonizing
+            # deploy-start/deploy-stop scripts shipped in the perf-coach repo.
+            "start_script": "bash scripts/deploy-start.sh",
+            "stop_script": "bash scripts/deploy-stop.sh",
         },
     },
     "vector-search-demo": {

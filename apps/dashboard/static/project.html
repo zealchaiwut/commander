@@ -7103,7 +7103,8 @@
                   class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
           <button class="subtab" id="smgmt-subtab-history" role="tab"
                   aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
-                  class="subtab-badge" id="smgmt-history-count" aria-label="Total sprints">0</span></button>
+                  class="subtab-badge needs-action" id="smgmt-history-count"
+                  aria-label="Sprints needing your action" hidden>0</span></button>
           <div class="subnav-actions">
             <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
                     onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
@@ -8966,6 +8967,9 @@ function switchTab(tab, pushHistory) {
   if (tab === 'sprint-mgmt' && !_sprintMgmtLoaded && _cachedFullRepo[_slug]) {
     _sprintMgmtLoaded = true;
     loadSprintMgmt().then(() => _smgmtArInit());
+    // Prime the History needs-action badge without opening the tab — the feed
+    // is local-only (issue #805), so this is cheap. Board is the default view.
+    _histLoadLedger(_cachedFullRepo[_slug]);
   } else if (tab === 'sprint-mgmt' && _sprintMgmtLoaded) {
     // Tab switched back — restart ticker if not already running
     if (_arTickerId === null && _arInterval > 0) _smgmtArStartTicker();
@@ -10173,11 +10177,29 @@ function _smgmtUpdateSubnav() {
   }
   const badge = document.getElementById('smgmt-history-count');
   if (badge) {
-    const data = _smgmtData || {};
-    const order = (data.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
-    const total = order.length || (data.sprints || []).length;
-    badge.textContent = String(total);
+    // Notification semantics, not an inventory count: show only sprints that
+    // need the operator's action (the Merge Sprint sign-off, a re-run, or a
+    // failure to investigate). Completed/deleted/running carry no action, so a
+    // history of all-completed sprints shows no badge at all.
+    const n = _histNeedsActionCount();
+    badge.textContent = String(n);
+    badge.hidden = n === 0;
   }
+}
+
+// Lifecycle states that require the human (sprint-lifecycle redesign):
+//   ready_to_merge → Merge Sprint (UAT sign-off)
+//   needs_rework   → review + Re-run
+//   failed         → investigate / Resume
+// completed / deleted / cancelled / running are excluded (no action needed;
+// running has its own pulsing dot on the Running tab).
+const _HIST_ACTION_STATES = new Set(['ready_to_merge', 'needs_rework', 'failed']);
+
+function _histNeedsActionCount() {
+  return (_histLedgerData || []).reduce(
+    (acc, s) => acc + (_HIST_ACTION_STATES.has(s && s.lifecycle_state) ? 1 : 0),
+    0,
+  );
 }
 
 async function _smgmtLoadSummaries(repo) {
@@ -11343,6 +11365,7 @@ async function _histLoadLedger(repo) {
     let sprints = data.sprints || [];
     _histLedgerData = sprints;
     _histRenderLedger(sprints);
+    _smgmtUpdateSubnav();   // refresh the needs-action badge from fresh states
   } catch (_) {
     if (el) el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
   }

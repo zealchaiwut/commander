@@ -194,7 +194,8 @@ class TestListFromMirror:
             github_milestones._normalise_milestone(_rest_milestone(1, title="A")),
         ])
         with self._no_http():
-            ms = milestones_service.list_milestones("r")
+            # Pass state param to get a list (not a selector dict)
+            ms = milestones_service.list_milestones("r", state="open")
         assert {m["number"] for m in ms} == {1}
 
     # ── AC-1: fallback to live GitHub API before first sync ───────────────────
@@ -204,7 +205,8 @@ class TestListFromMirror:
         with patch.object(github_milestones, "_get_gh_token", return_value="tok"), \
              patch.object(github_milestones.httpx, "get",
                           return_value=_fake_resp(200, body=body)):
-            ms = milestones_service.list_milestones("r")
+            # Pass state param to get a list (not a selector dict)
+            ms = milestones_service.list_milestones("r", state="open")
         assert {m["number"] for m in ms} == {99}
 
 

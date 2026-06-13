@@ -12,6 +12,10 @@
 import './state.js';
 
 import {
+  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
+} from './scheduled-run.js';
+
+import {
   _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
   smgmtRerunSprint, _rrConfirm,
 } from './rerun-modal.js';
@@ -186,3 +190,8 @@ globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
+
+// Run-on-schedule toggle (issue #863)
+globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
+globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
+globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;

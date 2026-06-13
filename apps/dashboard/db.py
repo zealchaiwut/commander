@@ -1057,7 +1057,10 @@ def record_sprint_start(
     """Write (or move to) a `running` sprints row (issue #757).
 
     Idempotent on `label`: a second start re-asserts state='running' and
-    refreshes started_at without creating a duplicate row.
+    refreshes started_at without creating a duplicate row. A transition INTO
+    running clears any prior ended_at/end_reason — a running sprint has not
+    ended, so a re-run (or a recovery heal after a stale terminal flip) must not
+    carry a lingering finish timestamp.
     """
     started_at = started_at or _now_iso()
     with get_conn() as conn:
@@ -1072,7 +1075,9 @@ def record_sprint_start(
                 state        = 'running',
                 started_at   = excluded.started_at,
                 created_at   = COALESCE(sprints.created_at, excluded.created_at),
-                parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
+                parent_label = COALESCE(excluded.parent_label, sprints.parent_label),
+                ended_at     = NULL,
+                end_reason   = NULL
             """,
             (label, project, started_at, started_at, parent_label),
         )

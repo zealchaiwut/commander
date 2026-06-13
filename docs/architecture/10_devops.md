@@ -50,6 +50,28 @@ the `prd/` clone are reserved for the remote mac mini. The working machine's
 `prd/` clone stays on master only for mirroring the remote, and is not the dev
 dashboard.
 
+### Never mutate git in the serving clone
+
+A sprint mutates git **only in the `coder/` and `tester/` worktrees** — verified:
+every `git checkout`/branch/commit in `sprint_manager.py` is pinned to
+`cfg.worktree_coder` / `cfg.worktree_tester`, and the dashboard's
+attachments-branch step clones into a `tmpdir`. The sprint does **not** touch the
+dashboard's own clone.
+
+The collision that does happen is the **serving clone doing double duty** — it is
+both the dashboard's checkout and (if you dev there) the operator's working clone.
+Two rules keep them from stepping on each other:
+
+1. **STATUS.md is write-only.** `scripts/sync_status_md.py` rewrites the file on
+   disk but no longer `git commit`s it. The dashboard serves it from disk; the
+   old ~30s auto-commit moved the serving clone's branch (the recurring
+   `chore: auto-sync STATUS.md` commits), diverging it from origin — which broke
+   `Deploy` (ff-only pull) and collided with operator branch state.
+2. **Don't branch-switch the serving clone for unrelated dev.** Do operator dev
+   on `hotfix/*` / `feature/*` branches in the dev clone, and let `develop` there
+   stay a clean mirror of origin so `Deploy` always fast-forwards. Avoid editor
+   source-control checkouts in the clone a dashboard/sprint is actively using.
+
 ## 10.2 Promotion path
 
 develop → master, deploy-to-production.

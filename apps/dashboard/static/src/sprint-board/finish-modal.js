@@ -12,9 +12,9 @@
  */
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
-   escHtml, _smgmtShowToast, loadSprintMgmt,
+   escHtml, loadSprintMgmt,
    _fsLabel:writable, _fsPreview:writable, _fsActiveJob:writable,
-   renderProgressActivity, updateProgressActivityLog, paToggleLog */
+   renderProgressActivity */
 
 export function _fsOpen() {
   _setBodyInert(['fs-backdrop', 'fs-modal']);
@@ -125,7 +125,7 @@ function _fsConnectStream(owner, repoName, label) {
 
   es.onmessage = (e) => {
     let snap;
-    try { snap = JSON.parse(e.data); } catch (_) { return; }
+    try { snap = JSON.parse(e.data); } catch { return; }
     if (snap.ping) return;
     if (_fsActiveJob) _fsActiveJob.snapshot = snap;
     if (snap.status === 'done') {

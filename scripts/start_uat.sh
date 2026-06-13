@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # start_uat.sh — Start the UAT dashboard on port 8001.
 #
+# Usage:
+#   bash scripts/start_uat.sh              # background (default) — logs to uat.log
+#   bash scripts/start_uat.sh --foreground # foreground — logs to stdout, Ctrl+C to stop
+#
 # UAT_DIR is derived from this script's location:
 #   SCRIPT_DIR   = <project-dir>/prd/scripts/
 #   REPO_ROOT    = <project-dir>/prd/
@@ -14,10 +18,15 @@
 #     uat/
 #       apps/dashboard/            ← UAT_DIR
 #
-# Writes a PID file to <UAT_DIR>/uat.pid.
-# Logs are written to <UAT_DIR>/uat.log.
+# Writes a PID file to <UAT_DIR>/uat.pid (background mode only).
+# Logs are written to <UAT_DIR>/uat.log (background mode only).
 
 set -euo pipefail
+
+FOREGROUND=0
+for arg in "$@"; do
+  [ "$arg" = "--foreground" ] && FOREGROUND=1
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -60,8 +69,8 @@ if [ ! -f "$VENV/bin/uvicorn" ]; then
     exit 1
 fi
 
-# Check if already running
-if [ -f "$PID_FILE" ]; then
+# Check if already running (background mode only — foreground always proceeds)
+if [ "$FOREGROUND" -eq 0 ] && [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "UAT is already running (PID $OLD_PID). Use stop_all.sh to stop it first."
@@ -92,8 +101,13 @@ else
     fi
 fi
 
-# ── Launch uvicorn in background ──────────────────────────────────────────────
+# ── Launch uvicorn ────────────────────────────────────────────────────────────
 cd "$UAT_DIR"
+if [ "$FOREGROUND" -eq 1 ]; then
+    echo "UAT dashboard starting foreground (port $PORT) — Ctrl+C to stop."
+    exec ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT"
+fi
+
 ENVIRONMENT=uat "$VENV/bin/uvicorn" server:app --host 0.0.0.0 --port "$PORT" \
     >> "$LOG_FILE" 2>&1 &
 

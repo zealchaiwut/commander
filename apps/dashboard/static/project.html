@@ -7111,6 +7111,13 @@
     .rm-history-row:last-child { border-bottom: none; }
     .rm-history-row-title { flex: 1; color: var(--text-muted); }
     .rm-empty { text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: 14px; }
+    .rm-stale-notice {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border: 1px solid var(--amber, #b45309);
+      background: color-mix(in srgb, var(--amber, #b45309) 8%, transparent);
+      border-radius: 6px; font-size: 13px; color: var(--text);
+    }
+    .rm-stale-notice i { color: var(--amber, #b45309); }
     .rm-add-card {
       border: 1px dashed var(--border); border-radius: 6px;
       padding: 16px; display: flex; flex-direction: column; gap: 10px;
@@ -26830,6 +26837,16 @@ function _rmRender() {
   var milestones = _rmData.milestones || [];
   var closed = _rmData.closed_milestones || [];
   var h = '';
+  if (_rmData.stale) {
+    var _hasCached = milestones.length > 0 || closed.length > 0;
+    var _msg = _hasCached
+      ? 'GitHub unreachable — showing cached data.'
+      : 'GitHub unreachable — couldn’t refresh milestones. Try again shortly.';
+    h += '<div class="rm-stale-notice" role="status">'
+       + '<i class="ti ti-cloud-off"></i><span>' + _msg + '</span>'
+       + '<button class="rm-btn" onclick="_rmRefresh()" style="margin-left:auto"><i class="ti ti-refresh"></i> Retry</button>'
+       + '</div>';
+  }
   h += '<div class="rm-toolbar">';
   h += '<span style="font-size:14px;font-weight:700">Milestones</span>';
   h += '<span class="rm-toolbar-gap"></span>';

@@ -15,8 +15,28 @@ Running-view metric strip without growing the guarded file (COMMANDER_GATE_MONOL
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+
+def _inflight_seconds(started_at: Optional[str]) -> int:
+    """Live elapsed seconds since ``started_at`` for an unfinished agent_runs row.
+
+    agent_runs timestamps are naive UTC (``record_sprint_start`` writes
+    ``utcnow().isoformat()``); compare against a naive UTC now. Returns 0 on any
+    parse failure so a malformed timestamp never breaks the metric strip.
+    """
+    if not started_at:
+        return 0
+    try:
+        ts = datetime.fromisoformat(started_at)
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        delta = (datetime.utcnow() - ts).total_seconds()
+        return int(delta) if delta > 0 else 0
+    except (ValueError, TypeError):
+        return 0
 
 # Path setup mirrors the routers/ modules so the sibling ``db`` / ``settings_repo``
 # imports resolve whether the dashboard is launched from its dir or the repo root.
@@ -111,7 +131,8 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
         with _db.get_conn() as conn:
             _db._create_agent_runs_table(conn)
             rows = conn.execute(
-                "SELECT agent, total_tokens, duration_seconds, attempt_kind "
+                "SELECT agent, total_tokens, duration_seconds, attempt_kind, "
+                "started_at, finished_at "
                 "FROM agent_runs WHERE sprint_label = ?",
                 (sprint_label,),
             ).fetchall()
@@ -130,10 +151,20 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
         tok = r["total_tokens"]
         if tok:
             token_total += int(tok)
-        dur = r["duration_seconds"]
         agent = (r["agent"] or "").lower()
-        if dur and agent in time_by_agent:
+        if agent not in time_by_agent:
+            continue
+        dur = r["duration_seconds"]
+        if dur:
             time_by_agent[agent] += int(dur)
+        elif not r["finished_at"]:
+            # In-flight run: duration_seconds is written only at finish, so an
+            # unfinished row reads 0 and the Agent Time card sat at 0m0s for the
+            # whole run. Count the live elapsed (now − started_at) so the split
+            # ticks while the agent works.
+            elapsed = _inflight_seconds(r["started_at"])
+            if elapsed > 0:
+                time_by_agent[agent] += elapsed
 
     metrics: dict[str, Any] = {
         "agent_runs_present": True,

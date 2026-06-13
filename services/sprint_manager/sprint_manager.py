@@ -7546,44 +7546,11 @@ def run_sprint(
     if not dry_run and not resume and not retry_failed:
         _neon_sprint_init(label, state.issues, eff_repo or "", _eff_sprints_dir)
 
-    # ── Sprint estimator (issue #166) ──────────────────────────────────────────
-    # Runs BEFORE the per-ticket loop so the human can see estimates on the
-    # dashboard before any coding starts.  Failure never blocks the sprint.
-    if not skip_estimator and not dry_run and not resume and not retry_failed:
-        sys.stdout.write(str("\n  [estimator] Running sprint estimator ...") + "\n")
-        try:
-            from sprint_estimator import run_estimator  # noqa: PLC0415
-            eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
-            est_result = run_estimator(
-                sprint_label = label,
-                repo_name    = eff_repo,
-                sprints_dir  = eff_sprints_dir,
-                cfg          = cfg,
-            )
-            # Merge estimates into state keyed by issue number (int)
-            state.estimates = {
-                num: est.to_dict()
-                for num, est in est_result.estimates.items()
-            }
-            state.estimator_status        = "succeeded"
-            state.estimator_total_minutes = est_result.total_minutes
-            state.save(state_path)
-            _post_sprint_status(state, api_url=api_url)
-            sys.stdout.write(str(f"  [estimator] Estimator succeeded: "
-                f"{len(est_result.estimates)} tickets, "
-                f"{est_result.total_minutes} total minutes") + "\n")
-        except ImportError:
-            structured_log.warn("estimator_module_missing", "[estimator] sprint_estimator module not found — skipping")
-            state.estimator_status = "failed"
-            state.save(state_path)
-        except Exception as e:
-            structured_log.warn("estimator_sprint_failed", f"[estimator] estimator failed: {e}", exc=str(e))
-            state.estimator_status = "failed"
-            state.save(state_path)
-    elif skip_estimator:
-        sys.stdout.write(str("  [estimator] --skip-estimator active — skipping estimation") + "\n")
-        state.estimator_status = "skipped"
-    # ── end estimator ──────────────────────────────────────────────────────────
+    # Sprint-level estimation no longer runs at dispatch: every ticket is
+    # estimated when it is created (per-issue estimator), so re-estimating the
+    # whole backlog before the loop was redundant work and a noisy log line.
+    # The state field stays "skipped" for serialization/back-compat readers.
+    state.estimator_status = "skipped"
 
     # -- Topological dispatch setup (issue #445) --
     _plan_order = _load_sprint_plan(_eff_sprints_dir, label)

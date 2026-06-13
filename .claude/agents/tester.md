@@ -387,26 +387,32 @@ browser — it is importable from the repo root.
 
 1. **Browser interaction** — the step is flagged `agent-testable` by the BA ticket
    **or** its text clearly describes a browser interaction (keywords: `open`,
-   `navigate`, `click`, `see`, `expect`, `page`). Execute it via the agent-browser
-   runner instead of marking MANUAL:
+   `navigate`, `click`, `see`, `expect`, `page`). **Drive the `agent-browser` CLI
+   directly** (it is on PATH). agent-browser is a *low-level command CLI for AI
+   agents* — there is **no** high-level `run`/`--task` command. First load the
+   usage guide once, then compose the step from low-level commands:
 
-   ```python
-   import services.sprint_manager.agent_browser_runner as abr
-   result = abr.run_browser_step(step_text, BASE_URL)   # BASE_URL = $UAT_BASE_URL
-   status = abr.report_status(result)                   # "PASS" | "FAIL" | "MANUAL"
+   ```bash
+   agent-browser skills get core --full          # learn the commands + patterns
+   agent-browser open "$UAT_BASE_URL"            # navigate
+   # …interact: click <sel> | type <sel> <text> | find <locator> <val> <action> | press <key>
+   agent-browser get text "<sel>"                # read state to assert
+   agent-browser is visible "<sel>"              # or: is enabled|checked
+   agent-browser screenshot "<path>"             # capture evidence
    ```
 
-   - `status == "PASS"` → record ✅ PASS and attach `result["screenshot_path"]`.
-   - `status == "FAIL"` → record ❌ FAIL and attach `result["screenshot_path"]`.
-     A ❌ FAIL browser step sets the overall ticket status to `NEEDS_FIXES`,
-     identical to a failed AC check (see Step 7).
-   - `status == "MANUAL"` → the runner returned `"uncovered"` (or
-     `abr.is_available()` is `False`, e.g. agent-browser not installed in this
-     environment). Only then mark ⚠️ MANUAL with the reason. A `"uncovered"`
-     result on one step does **not** affect other steps in the same ticket.
+   `services/sprint_manager/agent_browser_runner.py` provides helpers (importable
+   from the repo root): `abr.classify_uat_step(step_text, agent_testable=<bool>)`
+   pre-routes (`"browser"|"http"|"manual"`), and `abr.run_cli(args)` is a thin
+   one-command wrapper returning `(rc, stdout, stderr)` if you prefer Python over
+   shell. Decide the step's result from your assertions:
 
-   You can pre-route a step with `abr.classify_uat_step(step_text, agent_testable=<bool>)`
-   which returns `"browser"`, `"http"`, or `"manual"`.
+   - assertion holds → ✅ PASS, attach the screenshot path.
+   - assertion fails → ❌ FAIL, attach the screenshot. A ❌ FAIL browser step sets
+     the overall ticket status to `NEEDS_FIXES`, identical to a failed AC (Step 7).
+   - `abr.is_available()` is `False` (agent-browser not installed here) **or**
+     classify returns `"manual"` → ⚠️ MANUAL with the reason. One MANUAL step does
+     **not** affect other steps in the same ticket.
 
 2. **HTTP-only call** — the step mentions an endpoint, URL, API, or request and
    has no browser interaction. Attempt it with `httpx` against `$UAT_BASE_URL`
@@ -415,9 +421,9 @@ browser — it is importable from the repo root.
 3. **Neither** — mark ⚠️ MANUAL with a brief reason (e.g., "visual check",
    "mobile layout").
 
-When `COMMANDER_AGENT_BROWSER_AVAILABLE=0` in your environment, all browser
-steps will come back `"uncovered"` and fall back to ⚠️ MANUAL automatically;
-HTTP steps still execute normally. Never crash on a missing runner.
+When `COMMANDER_AGENT_BROWSER_AVAILABLE=0` (or `abr.is_available()` is `False`),
+all browser steps fall back to ⚠️ MANUAL automatically; HTTP steps still execute
+normally. Never crash when agent-browser is absent.
 
 ### Step 6.5 — Design-contract verification (UI tickets only) — BLOCKING gate
 

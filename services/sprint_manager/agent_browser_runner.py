@@ -4,16 +4,22 @@ Sprint UAT steps that target a web UI normally fall back to MANUAL because the
 tester has no automated browser. This module wires `agent-browser` (a native
 CLI that drives real Chrome) as an *optional* capability:
 
-* When `agent-browser` is installed and Chrome has been set up
-  (`agent-browser install`), :func:`run_browser_step` drives the browser,
-  performs the described interaction, asserts the outcome, and returns a
-  screenshot path.
-* When the binary is absent (or Chrome is not set up), it degrades gracefully:
-  a single WARNING is logged and the step is reported as ``"uncovered"`` so the
-  caller falls back to MANUAL.
+agent-browser (0.27.x) is a **low-level command CLI for AI agents** — ``open``,
+``click``, ``type``, ``find``, ``get``, ``is``, ``screenshot``, ``snapshot``, … —
+with no high-level "run this task" command. So the Tester agent *drives* it
+directly (see tester.md Step 6 + ``agent-browser skills get core``); this module
+provides the shared primitives:
 
-Importing this module has no side-effects — the binary is only invoked when
-:func:`is_available` or :func:`run_browser_step` is called.
+* :func:`is_available` — True only when the binary works (``--version``) and
+  Chrome was downloaded (``agent-browser install``).
+* :func:`run_cli` — run one ``agent-browser`` command, returning
+  ``(rc, stdout, stderr)``; never raises (missing binary / timeout degrade).
+* :func:`classify_uat_step` — route a UAT step to ``browser`` / ``http`` /
+  ``manual``.
+
+When the binary is absent (or Chrome is not set up) the Tester gates on
+:func:`is_available` and falls back to MANUAL. Importing has no side-effects —
+the binary is only invoked when these functions are called.
 """
 from __future__ import annotations
 
@@ -84,16 +90,21 @@ _NON_BROWSER_RE = re.compile("|".join(_NON_BROWSER_PATTERNS), re.IGNORECASE)
 
 # ── capability detection ────────────────────────────────────────────────────
 
-def _chrome_ready() -> bool:
-    """Return True when ``agent-browser install`` has been run (Chrome set up).
+#: Where ``agent-browser install`` downloads Chrome-for-Testing.
+_CHROME_DIR = Path(os.environ.get("AGENT_BROWSER_HOME", str(Path.home() / ".agent-browser"))) / "browsers"
 
-    Probes ``agent-browser status --json``. A non-zero exit, a missing binary,
-    or a ``chrome_installed: false`` flag all mean "not ready". A zero exit with
-    non-JSON output is treated as ready (older CLI versions without --json).
+
+def _chrome_ready() -> bool:
+    """Return True when the agent-browser CLI works and Chrome is set up.
+
+    The shipped CLI (0.27.x) has **no** ``status`` command — it is a low-level
+    command CLI. Readiness = the binary responds to ``--version`` (exit 0) AND a
+    Chrome build was downloaded under ``~/.agent-browser/browsers/`` (by
+    ``agent-browser install``).
     """
     try:
         result = subprocess.run(
-            [BINARY, "status", "--json"],
+            [BINARY, "--version"],
             capture_output=True,
             text=True,
             timeout=_STATUS_TIMEOUT_S,
@@ -103,10 +114,9 @@ def _chrome_ready() -> bool:
     if result.returncode != 0:
         return False
     try:
-        data = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError:
-        return True
-    return bool(data.get("chrome_installed", True))
+        return _CHROME_DIR.is_dir() and any(_CHROME_DIR.glob("chrome-*"))
+    except OSError:
+        return False
 
 
 def is_available() -> bool:
@@ -205,70 +215,30 @@ def _uncovered(detail: str) -> dict:
     return {"status": "uncovered", "detail": detail, "screenshot_path": None}
 
 
-def run_browser_step(step_text: str, base_url: str) -> dict:
-    """Execute a single UAT step against a live browser.
+def run_cli(args: list[str], timeout: float = _STEP_TIMEOUT_S) -> tuple[int, str, str]:
+    """Run a single ``agent-browser`` command and return ``(rc, stdout, stderr)``.
 
-    Returns a dict with keys:
-        status          "pass" | "fail" | "uncovered"
-        detail          human-readable explanation (always a str)
-        screenshot_path path to a .png on disk, or None
+    agent-browser (0.27.x) is a **low-level** command CLI — ``open``, ``click``,
+    ``type``, ``find``, ``get``, ``is``, ``screenshot``, ``snapshot``, … — built
+    for an AI agent to drive (see ``agent-browser skills get core``). There is no
+    high-level "run this task" command. The Tester agent composes these commands
+    per UAT step (tester.md Step 6); this is the thin executor they share.
 
-    Never raises: any failure to drive the browser is reported as ``"fail"``,
-    and absence of the tool (or a non-automatable step) as ``"uncovered"`` so
-    the caller can fall back to MANUAL.
+    Never raises: a missing binary / timeout maps to ``(-1, "", <message>)`` so
+    the caller can degrade to MANUAL rather than crash the run.
     """
-    if not is_available():
-        log.warning(
-            "agent-browser not installed; UAT browser step falls back to MANUAL: %s",
-            step_text,
-        )
-        return _uncovered("agent-browser not installed")
-
-    if not is_step_automatable(step_text):
-        return _uncovered("step requires physical device/hardware — not browser-automatable")
-
-    screenshot_path = _new_screenshot_path()
-    cmd = [
-        BINARY, "run",
-        "--url", base_url,
-        "--task", step_text,
-        "--screenshot", str(screenshot_path),
-        "--json",
-    ]
     try:
-        result = subprocess.run(
-            cmd,
+        r = subprocess.run(
+            [BINARY, *args],
             capture_output=True,
             text=True,
-            timeout=_STEP_TIMEOUT_S,
+            timeout=timeout,
         )
+        return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
     except subprocess.TimeoutExpired:
-        return {"status": "fail", "detail": "agent-browser timed out", "screenshot_path": None}
+        return -1, "", f"agent-browser timed out after {timeout:.0f}s"
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"status": "fail", "detail": f"agent-browser execution error: {exc}", "screenshot_path": None}
-
-    shot = str(screenshot_path) if screenshot_path.exists() else None
-    status, detail = _parse_result(result)
-    return {"status": status, "detail": detail, "screenshot_path": shot}
-
-
-def _parse_result(result) -> tuple[str, str]:
-    """Map an ``agent-browser run --json`` result to (status, detail)."""
-    raw = (result.stdout or "").strip()
-    try:
-        data = json.loads(raw) if raw else {}
-    except json.JSONDecodeError:
-        if result.returncode == 0:
-            return "pass", raw or "browser step succeeded"
-        return "fail", (result.stderr or raw or "browser step failed").strip()
-
-    detail = data.get("detail") or data.get("message") or ""
-    success = data.get("success")
-    if success is None:
-        success = result.returncode == 0
-    if success:
-        return "pass", detail or "browser step succeeded"
-    return "fail", detail or (result.stderr or "browser step failed").strip()
+        return -1, "", f"agent-browser execution error: {exc}"
 
 
 # ── per-step screenshot capture for sprint UAT (issue #712) ──────────────────

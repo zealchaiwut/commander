@@ -18,6 +18,8 @@ globalThis._rrVersionedLabel ??= null;
 // Finish Sprint modal (issue #367 parity)
 globalThis._fsLabel ??= null;
 globalThis._fsPreview ??= null;
+// Active finish-sprint progress job (issue #929 — reconnect support)
+globalThis._fsActiveJob ??= null;
 
 // Bulk Complete Sprint modal (parent + child lineage)
 globalThis._bcLabel ??= null;
@@ -39,7 +41,7 @@ globalThis._smgmtGhostNextNum ??= null;
 
 export const SPRINT_BOARD_STATE_KEYS = [
   "_rrLabel", "_rrVersionedLabel",
-  "_fsLabel", "_fsPreview",
+  "_fsLabel", "_fsPreview", "_fsActiveJob",
   "_bcLabel", "_bcPreview",
   "_pfCurrentLabel", "_pfCurrentRepo", "_pfState", "_pfDagData",
   "_pfWarnings", "_pfCycle", "_pfFlags", "_pfSelectedIds",

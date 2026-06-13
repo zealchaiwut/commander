@@ -21,7 +21,7 @@ import {
 } from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
-  smgmtFinishSprint, _fsConfirm,
+  smgmtFinishSprint, _fsConfirm, _fsRetry,
 } from './finish-modal.js';
 import {
   _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
@@ -75,13 +75,14 @@ globalThis._rrSelectAll = _rrSelectAll;
 globalThis.smgmtRerunSprint = smgmtRerunSprint;
 globalThis._rrConfirm = _rrConfirm;
 
-// Finish modal (issue #367)
+// Finish modal (issue #367 / #929)
 globalThis._fsOpen = _fsOpen;
 globalThis._fsClose = _fsClose;
 globalThis._fsCatClass = _fsCatClass;
 globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
+globalThis._fsRetry = _fsRetry;
 
 // Bulk Complete modal (parent + child lineage)
 globalThis._bcOpen = _bcOpen;

@@ -146,7 +146,7 @@
     <div class="pa-log-stream${collapsed}"${streamId}>${linesHtml}</div>
   </div>`;
   }
-  function renderProgressActivity(payload, opts) {
+  function renderProgressActivity2(payload, opts) {
     if (!payload || typeof payload !== "object")
       payload = {};
     opts = opts || {};
@@ -458,6 +458,7 @@
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
   globalThis._fsPreview ??= null;
+  globalThis._fsActiveJob ??= null;
   globalThis._bcLabel ??= null;
   globalThis._bcPreview ??= null;
   globalThis._pfCurrentLabel ??= null;
@@ -693,8 +694,17 @@
   }
   function _fsClose() {
     document.getElementById("fs-backdrop").classList.add("hidden");
+    document.getElementById("fs-modal").classList.remove("hidden");
     document.getElementById("fs-modal").classList.add("hidden");
     _clearBodyInert();
+    if (_fsActiveJob && _fsActiveJob.es) {
+      _fsActiveJob.es.close();
+      _fsActiveJob.es = null;
+    }
+    const snap = _fsActiveJob && _fsActiveJob.snapshot;
+    if (!snap || snap.status === "done" || snap.status === "error") {
+      _fsActiveJob = null;
+    }
     _fsLabel = null;
     _fsPreview = null;
   }
@@ -714,25 +724,173 @@
       cb.checked = checked;
     });
   }
+  function _fsProgressSlot() {
+    return document.getElementById("fs-progress");
+  }
+  function _fsPreviewSlot() {
+    return document.getElementById("fs-content");
+  }
+  function _fsEnterProgressView(snap) {
+    document.getElementById("fs-loading").classList.add("hidden");
+    _fsPreviewSlot() && _fsPreviewSlot().classList.add("hidden");
+    document.getElementById("fs-error").classList.add("hidden");
+    const slot = _fsProgressSlot();
+    if (slot) {
+      slot.innerHTML = renderProgressActivity(snap, { id: "fs-pa", retryFn: "_fsRetry" });
+      slot.classList.remove("hidden");
+    }
+    const confirmBtn = document.getElementById("fs-confirm-btn");
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (confirmBtn)
+      confirmBtn.classList.add("hidden");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+  }
+  function _fsUpdateProgress(snap) {
+    const slot = _fsProgressSlot();
+    if (!slot || slot.classList.contains("hidden"))
+      return;
+    const logEl = document.getElementById("pa-log-stream-fs-pa");
+    const atBottom = !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
+    slot.innerHTML = renderProgressActivity(snap, { id: "fs-pa", retryFn: "_fsRetry" });
+    if (atBottom) {
+      const newLog = document.getElementById("pa-log-stream-fs-pa");
+      if (newLog)
+        newLog.scrollTop = newLog.scrollHeight;
+    }
+  }
+  function _fsDone(snap) {
+    _fsUpdateProgress(snap);
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+    _fsActiveJob = null;
+    setTimeout(() => loadSprintMgmt(), 1500);
+  }
+  function _fsHandleError(snap) {
+    _fsUpdateProgress(snap);
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.remove("hidden");
+  }
+  function _fsConnectStream(owner, repoName, label) {
+    const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+    const es = new EventSource(url);
+    if (_fsActiveJob)
+      _fsActiveJob.es = es;
+    es.onmessage = (e) => {
+      let snap;
+      try {
+        snap = JSON.parse(e.data);
+      } catch (_) {
+        return;
+      }
+      if (snap.ping)
+        return;
+      if (_fsActiveJob)
+        _fsActiveJob.snapshot = snap;
+      if (snap.status === "done") {
+        es.close();
+        if (_fsActiveJob)
+          _fsActiveJob.es = null;
+        _fsDone(snap);
+      } else if (snap.status === "error") {
+        es.close();
+        if (_fsActiveJob)
+          _fsActiveJob.es = null;
+        _fsHandleError(snap);
+      } else {
+        _fsUpdateProgress(snap);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      if (_fsActiveJob)
+        _fsActiveJob.es = null;
+    };
+  }
+  async function _fsRetry() {
+    if (!_fsActiveJob)
+      return;
+    const { owner, repoName, label, params } = _fsActiveJob;
+    const emptySnap = { status: "running", mode: "bar", done: 0, total: params.total || 2, current: "Retrying\u2026", log_tail: [] };
+    _fsEnterProgressView(emptySnap);
+    _fsActiveJob.snapshot = emptySnap;
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params, confirmed: true }) }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      _fsConnectStream(owner, repoName, label);
+    } catch (e) {
+      const slot = _fsProgressSlot();
+      if (slot) {
+        slot.innerHTML = renderProgressActivity({ status: "error", mode: "bar", error: "Retry failed: " + e.message, log_tail: [] }, { id: "fs-pa", retryFn: "_fsRetry" });
+      }
+      const retryBtn = document.getElementById("fs-retry-btn");
+      if (retryBtn)
+        retryBtn.classList.remove("hidden");
+    }
+  }
   async function smgmtFinishSprint(label) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    _fsLabel = label;
-    _fsPreview = null;
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
+    if (_fsActiveJob && _fsActiveJob.label === label) {
+      _fsLabel = label;
+      document.getElementById("fs-modal-title").textContent = `Merging ${sprintLabelDisplay(label)}\u2026`;
+      _fsOpen();
+      const snap = _fsActiveJob.snapshot;
+      if (snap) {
+        _fsEnterProgressView(snap);
+        if (snap.status === "done") {
+          _fsDone(snap);
+        } else if (snap.status === "error") {
+          _fsHandleError(snap);
+        } else {
+          _fsConnectStream(owner, repoName, label);
+        }
+      }
+      return;
+    }
+    _fsLabel = label;
+    _fsPreview = null;
     document.getElementById("fs-modal-title").textContent = `Merge ${sprintLabelDisplay(label)}?`;
     document.getElementById("fs-loading").classList.remove("hidden");
     document.getElementById("fs-content").classList.add("hidden");
     document.getElementById("fs-error").classList.add("hidden");
     document.getElementById("fs-error").textContent = "";
     const confirmBtn = document.getElementById("fs-confirm-btn");
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
     if (confirmBtn) {
+      confirmBtn.classList.remove("hidden");
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Merge Sprint";
     }
+    if (cancelBtn)
+      cancelBtn.textContent = "Cancel";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+    const progSlot = _fsProgressSlot();
+    if (progSlot)
+      progSlot.classList.add("hidden");
     _fsOpen();
     try {
       const res = await fetch(
@@ -756,7 +914,7 @@
           const catClass = _fsCatClass(t.category);
           const catLabel = t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
           return `<label class="rr-ticket-row">
-          <input type="checkbox" checked data-issue="${t.number}" onchange="">
+          <input type="checkbox" checked data-issue="${t.number}" data-title="${escHtml(t.title)}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
           <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
           <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
@@ -796,47 +954,46 @@
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
     const checkboxes = Array.from(document.querySelectorAll("#fs-ticket-list input[type=checkbox]"));
-    const selectedNums = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
+    const selectedTickets = checkboxes.filter((c) => c.checked).map((c) => ({ number: parseInt(c.dataset.issue, 10), title: c.dataset.title || `#${c.dataset.issue}` }));
+    const selectedNums = selectedTickets.map((t) => t.number);
     const confirmBtn = document.getElementById("fs-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "Merging\u2026";
+      confirmBtn.textContent = "Starting\u2026";
     }
+    const bgParams = {
+      move_non_uat_to: _fsPreview.next_sprint_label || "",
+      selected_ticket_numbers: selectedNums,
+      selected_tickets: selectedTickets,
+      merge_pr: !!_fsPreview.sprint_pr,
+      sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
+      total: selectedNums.length + 2
+    };
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish`,
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish-bg`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirmed: true,
-            move_non_uat_to: _fsPreview.next_sprint_label,
-            selected_ticket_numbers: selectedNums,
-            merge_pr: !!_fsPreview.sprint_pr,
-            sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null
-          })
+          body: JSON.stringify({ confirmed: true, ...bgParams })
         }
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
-      const data = await res.json();
-      _fsClose();
-      if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`Merged with errors \u2014 ${data.closed} closed.`);
-      } else {
-        let msg = `${sprintLabelDisplay(_fsLabel || "")} merged \u2014 ${data.closed} closed`;
-        if (data.moved > 0)
-          msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
-        _smgmtShowToast(msg + ".");
-      }
-      await loadSprintMgmt();
+      await res.json();
+      const initialSnap = { status: "running", mode: "bar", done: 0, total: bgParams.total, current: "Starting\u2026", log_tail: [] };
+      _fsActiveJob = { label: _fsLabel, owner, repoName, params: bgParams, snapshot: initialSnap, es: null };
+      document.getElementById("fs-modal-title").textContent = `Merging ${sprintLabelDisplay(_fsLabel)}\u2026`;
+      _fsEnterProgressView(initialSnap);
+      _fsConnectStream(owner, repoName, _fsLabel);
     } catch (e) {
       const errEl = document.getElementById("fs-error");
-      errEl.textContent = "Failed to finish sprint: " + e.message;
+      errEl.textContent = "Failed to start finish: " + e.message;
       errEl.classList.remove("hidden");
       if (confirmBtn) {
+        confirmBtn.classList.remove("hidden");
         confirmBtn.disabled = false;
         confirmBtn.textContent = "Merge Sprint";
       }
@@ -3535,7 +3692,7 @@ ${data.errors.join("\n")}`);
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
-      ${renderProgressActivity({
+      ${renderProgressActivity2({
       status: "running",
       mode: totalCount > 0 ? "bar" : "indeterminate",
       current: currentTicket ? `#${currentTicket.number}` : "",
@@ -3782,6 +3939,7 @@ ${data.errors.join("\n")}`);
   globalThis._fsSelectAll = _fsSelectAll;
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
+  globalThis._fsRetry = _fsRetry;
   globalThis._bcOpen = _bcOpen;
   globalThis._bcClose = _bcClose;
   globalThis._bcCatClass = _bcCatClass;
@@ -3895,7 +4053,7 @@ ${data.errors.join("\n")}`);
   root.escapeLogHtml = escapeLogHtml;
   root.extractRaw = extractRaw;
   root.AGENT_NAMES = AGENT_NAMES;
-  root.renderProgressActivity = renderProgressActivity;
+  root.renderProgressActivity = renderProgressActivity2;
   root.updateProgressActivityLog = updateProgressActivityLog;
   root.paToggleLog = paToggleLog;
   injectProgressActivityCss();

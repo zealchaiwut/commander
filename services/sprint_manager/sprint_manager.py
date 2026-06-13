@@ -1578,12 +1578,28 @@ def _write_runtime_port(worktree_coder: Path, port: int) -> None:
     sys.stdout.write(str(f"  [port] wrote {port} to {port_file}") + "\n")
 
 
-def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return .py files added/modified in HEAD relative to base_branch.
+def _git_toplevel(cwd: Path) -> Path:
+    """Return the repo root for cwd (``git rev-parse --show-toplevel``).
 
-    Uses git diff <base_branch> --name-only --diff-filter=ACM to find files
-    that were Added, Copied, or Modified relative to base_branch.
-    Returns a list of relative paths (e.g. ['server.py', 'tests/test_foo.py']).
+    Falls back to cwd if the command fails. ``git diff`` prints paths relative
+    to this root regardless of the cwd it runs in, so gates must resolve changed
+    paths against it before handing them to a tool — otherwise a repo-root path
+    like ``tests/foo.py`` is looked up under a subdir (apps/dashboard) and the
+    tool reports "file not found" (issue: sprint-66.1 stuck loop on #880).
+    """
+    rc, out, _ = _run_timed("git", "rev-parse", "--show-toplevel", cwd=cwd)
+    if rc == 0 and out.strip():
+        return Path(out.strip())
+    return Path(cwd)
+
+
+def _changed_files_resolved(base_branch: str, cwd: Path, exts: tuple[str, ...]) -> list[str]:
+    """Changed files (added/modified vs base_branch) matching exts, as absolute
+    paths that EXIST in the worktree.
+
+    git diff yields repo-root-relative paths; we anchor them to the repo root and
+    drop any that no longer exist (renamed-away / deleted phantoms). Absolute paths
+    are cwd-independent, so the gate tool finds them no matter where it runs.
     """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
@@ -1591,21 +1607,28 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
     )
     if rc != 0:
         return []
-    return [f for f in out.splitlines() if f.endswith(".py")]
+    root = _git_toplevel(cwd)
+    resolved: list[str] = []
+    for rel in out.splitlines():
+        if not any(rel.endswith(ext) for ext in exts):
+            continue
+        p = root / rel
+        if p.is_file():
+            resolved.append(str(p))
+    return resolved
+
+
+def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return .py files added/modified vs base_branch, as absolute existing paths."""
+    return _changed_files_resolved(base_branch, cwd, (".py",))
 
 
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
 
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified in HEAD relative to base_branch."""
-    rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
-        cwd=cwd,
-    )
-    if rc != 0:
-        return []
-    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+    """Return JS/TS files added/modified vs base_branch, as absolute existing paths."""
+    return _changed_files_resolved(base_branch, cwd, _JS_TS_EXTENSIONS)
 
 
 _FRONTEND_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
@@ -1617,15 +1640,25 @@ def _changed_frontend_files(base_branch: str, cwd: Path) -> list[str]:
     The design gate scans only these so a pre-existing anti-pattern in a file the
     ticket never touched can't fail an unrelated UI ticket (issue: #861 was failed
     by low-contrast warnings in analytics.html, which it did not change).
+    Returns absolute existing paths.
     """
-    rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
-        cwd=cwd,
+    return _changed_files_resolved(base_branch, cwd, _FRONTEND_EXTENSIONS)
+
+
+def _is_test_path(path: str) -> bool:
+    """True if path looks like a pytest test module, anywhere in the tree.
+
+    Matches files under any ``tests`` dir, or whose basename is ``test_*.py`` /
+    ``*_test.py``. The old gate keyed on ``startswith('tests/')`` only, so tests
+    under apps/dashboard/tests were silently never run.
+    """
+    parts = Path(path).parts
+    base = parts[-1] if parts else path
+    return (
+        "tests" in parts
+        or base.startswith("test_")
+        or base.endswith("_test.py")
     )
-    if rc != 0:
-        return []
-    return [f for f in out.splitlines()
-            if any(f.endswith(ext) for ext in _FRONTEND_EXTENSIONS)]
 
 
 # ── strangler-fig monolith gate (issue #761) ──────────────────────────────────
@@ -2331,14 +2364,20 @@ def _gate_pytest(
         sys.stdout.write(str("  [gate:pytest] running pytest -x (full scope) ...") + "\n")
         rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
     else:
-        # changed scope: only run test files changed relative to base_branch
+        # changed scope: only run test files changed relative to base_branch.
+        # _changed_py_files returns absolute paths to files that EXIST (renamed-away
+        # / deleted phantoms are dropped), so pytest never errors on a missing path.
         changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
-        test_files = [f for f in changed if f.startswith("tests/")]
+        test_files = [f for f in changed if _is_test_path(f)]
         if not test_files:
             sys.stdout.write(str("  [gate:pytest] no test files changed — skipped") + "\n")
             return GateResult(gate="pytest", passed=True, output="no test files changed")
         sys.stdout.write(str(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}") + "\n")
-        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=worktester_dashboard)
+        # Run from the repo root so conftest/rootdir discovery is consistent for
+        # tests in either tests/ (repo root) or apps/dashboard/tests/.
+        rc, stdout, stderr = _run_timed(
+            pytest_bin, "-x", *test_files, cwd=_git_toplevel(worktester_dashboard)
+        )
 
     combined = stdout + stderr
     if rc == 0:

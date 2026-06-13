@@ -10492,7 +10492,7 @@ function _histVerbsHtml(s) {
       : '';
     const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
     html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
-               onclick="_histRerunSprint('${lbl}')">
+               onclick="smgmtRerunSprint('${lbl}')">
                <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   } else if (state === 'completed' || state === 'ready_to_merge') {
     html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
@@ -10603,7 +10603,7 @@ function _histHeadActionsHtml(s) {
         : '';
       const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
       html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
-        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
+        onclick="event.stopPropagation();smgmtRerunSprint('${lbl}')">
         <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
     } else if (state === 'completed' || state === 'ready_to_merge') {
       html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
@@ -11381,56 +11381,10 @@ function _histRenderLedger(sprints) {
   el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
 }
 
-// Re-run from History: create the versioned sub-sprint and dispatch immediately
-// (no modal) so operators can recover without switching back to the Board tab.
-async function _histRerunSprint(label) {
-  const repo = _cachedFullRepo[_slug];
-  if (!repo) return;
-  try {
-    const prevResp = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
-    );
-    if (!prevResp.ok) throw new Error(await prevResp.text());
-    const preview = await prevResp.json();
-    const ticketNumbers = (preview.tickets || [])
-      .filter(t => t.checked !== false)
-      .map(t => t.number);
-    if (!ticketNumbers.length) {
-      _smgmtShowToast('No tickets to re-run.');
-      return;
-    }
-    // The rerun endpoint moves every ticket to the new sub-label and waits for
-    // GitHub + the mirror to reflect all moves before it returns (so the run
-    // never starts on a partial set) — that can take a few seconds.
-    _smgmtShowToast('Preparing re-run — moving tickets to the new sprint…');
-    const resp = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true }) }
-    );
-    if (!resp.ok) {
-      let detail = await resp.text();
-      try {
-        const parsed = JSON.parse(detail);
-        detail = parsed.detail || detail;
-      } catch (_) { /* plain-text error body */ }
-      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-    }
-    const data = await resp.json();
-    const subLabel = data.sub_label;
-    if (subLabel && typeof _smgmtApplyRerunOptimistic === 'function') {
-      _smgmtApplyRerunOptimistic(label, subLabel, ticketNumbers);
-    }
-    const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';
-    _smgmtShowToast(`${subDisplay} started (${ticketNumbers.length} ticket${ticketNumbers.length !== 1 ? 's' : ''})`);
-    await loadSprintMgmt(true, subLabel || null);
-    _smgmtLivePollRestart();
-    _histLoadLedger(repo);
-    _smgmtShowSubView('running');
-  } catch (e) {
-    _smgmtShowToast('Re-run failed: ' + (e.message || e));
-  }
-}
+// Re-run from History reuses the Board's confirm modal (smgmtRerunSprint): it
+// previews the carried tickets, lets the operator select + confirm, then creates
+// the versioned sub-sprint and runs it. Wired on the history buttons' onclick so
+// the History and Board reruns share one path (no separate direct-dispatch).
 
 async function _histLoadLedger(repo) {
   if (!repo) return;

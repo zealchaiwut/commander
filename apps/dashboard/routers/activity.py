@@ -30,11 +30,13 @@ def get_project_events(
     since: Optional[str] = None,
     until: Optional[str] = None,
     limit: int = 100,
+    category: Optional[str] = None,
 ):
     """Return structured events for a project, newest-first.
 
-    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date), limit.
+    Filters: source (agent|dashboard|github), target (exact), since/until (ISO date),
+    category (agent|error|gate|sprint — dispatch lifecycle events only), limit.
     404 — unknown project slug.
-    400 — invalid source value.
+    400 — invalid source or category value.
     """
-    return activity_service.get_project_events(slug, source, target, since, until, limit)
+    return activity_service.get_project_events(slug, source, target, since, until, limit, category)

@@ -4064,7 +4064,7 @@ def _dispatch_doctor(
     return None  # all checks passed
 
 
-def _coder_resume_context(worktree: Path, base_branch: str) -> str:
+def _coder_resume_context(worktree: Path, base_branch: str, issue_num: Optional[int] = None) -> str:
     """RESUME instruction for the coder when the checked-out feature branch
     already has commits ahead of base (prior-run work).
 
@@ -4073,6 +4073,8 @@ def _coder_resume_context(worktree: Path, base_branch: str) -> str:
     still says "implement the issue" — a fresh agent then re-implements from
     scratch, which is slow and redundant. This tells it to continue from the
     existing work instead. Returns "" when there is no prior work (fresh ticket).
+    Logs a one-line ``[resume]`` marker so the orchestrator log shows resume vs
+    fresh (operator request — previously only visible inside the agent prompt).
     """
     base_ref = f"origin/{base_branch}"
     rc, count_out, _ = _run_timed("git", "rev-list", "--count", f"{base_ref}..HEAD", cwd=worktree)
@@ -4084,6 +4086,9 @@ def _coder_resume_context(worktree: Path, base_branch: str) -> str:
         n = 0
     if n <= 0:
         return ""
+    _tag = f"#{issue_num}: " if issue_num is not None else ""
+    sys.stdout.write(str(f"  [resume] {_tag}building on {n} prior commit(s) on the feature branch") + "\n")
+    sys.stdout.flush()
     _, log_out, _ = _run_timed(
         "git", "log", "--oneline", "-n", "20", f"{base_ref}..HEAD", cwd=worktree
     )
@@ -4277,7 +4282,7 @@ def _dispatch_coder(
     # Resume context: when the feature branch already carries prior-run work,
     # tell the coder to continue from it rather than re-implement from scratch
     # (the hygiene step rebased it onto the sprint branch, so it's checked out).
-    prompt += _coder_resume_context(cwd_path, sprint_branch)
+    prompt += _coder_resume_context(cwd_path, sprint_branch, issue_num=issue_num)
 
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:
@@ -4602,6 +4607,22 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
+    # Single pytest run: the tester still WRITES the pytest tests for each AC and
+    # verifies the UAT steps, but does NOT execute the pytest suite itself — the
+    # sprint_manager pytest gate runs it once after the tester exits. Avoids the
+    # double pytest run (tester + gate). Toggle off by setting
+    # COMMANDER_TESTER_RUN_PYTEST=1 (then the tester runs pytest too).
+    if os.environ.get("COMMANDER_TESTER_RUN_PYTEST", "").strip().lower() not in ("1", "true", "yes", "on"):
+        if "do not execute the pytest" not in prompt.lower():
+            prompt += (
+                " PYTEST EXECUTION: write a pytest test for each acceptance criterion,"
+                " but do NOT execute the pytest suite yourself — sprint_manager's"
+                " quality gate runs pytest once after you exit. Verify the UAT steps"
+                " (HTTP / browser / inspection), confirm the tests you wrote are"
+                " anchored to their AC, then report READY_FOR_UAT; the gate validates"
+                " that the tests pass."
+            )
+
     # Impeccable design context (issue #713): inject into every tester dispatch so
     # the tester verifies UI tickets against the same design rules via context.mjs.
     if "context.mjs" not in prompt:
@@ -7434,6 +7455,14 @@ def _run_pipeline_dispatch(
         ctx = pctx.get(num, {})
         history = ctx.get("fix_history", [])
         reason = f"Fix-loop exhausted after {len(history)} attempt(s)"
+        # Surface WHY it failed: the last attempt's category + summary, so the
+        # board/summary shows the actual cause (e.g. PYTEST_FAIL) instead of only
+        # "exhausted after N attempts" (operator request).
+        if history:
+            _last = history[-1]
+            _lcat = _last.get("category") or "?"
+            _lsum = (_last.get("summary") or "").strip()
+            reason = f"{reason} — last: {_lcat}" + (f": {_lsum}" if _lsum else "")
         sys.stdout.write(str(f"  [pipeline] {reason} — tagging needs-rework") + "\n")
         sys.stdout.flush()
         ist.set_agent_status("failed")

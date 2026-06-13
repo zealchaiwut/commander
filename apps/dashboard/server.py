@@ -5496,6 +5496,91 @@ def _sprint_pid_alive(project_root: Path, sprint_label: str) -> bool:
     return False
 
 
+def _live_manager_pid(project_root: Path, sprint_label: str) -> Optional[int]:
+    """Authoritative "is the sprint_manager process actually alive right now?".
+
+    Returns the live PID (or 0 for a still-starting two-phase ``-pid.pending``
+    claim) only when a process for THIS exact sprint label is running; None
+    otherwise. When psutil is available the argv is checked (sprint_manager.py
+    followed by the label) to guard against PID reuse by an unrelated process.
+
+    This probe is independent of any persisted DB/plan state. It exists so a
+    sprint whose lifecycle row was flipped to a terminal state by a reconcile
+    race — e.g. a startup sweep landing mid-dispatch before the PID file was
+    written — can be recovered while the manager is in fact still working
+    (symptom: a running sprint shows "done"/needs_rework moments after dispatch).
+    """
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    for f in (sprints_dir / f"{sprint_label}-pid",
+              sprints_dir / f"{sprint_label}-pid.pending"):
+        if not f.exists():
+            continue
+        try:
+            raw = f.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw in ("", "0"):
+            return 0  # two-phase pending claim — manager is starting up
+        try:
+            pid = int(raw)
+        except ValueError:
+            continue
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue  # dead pid — not a live manager
+        except PermissionError:
+            return pid  # alive, owned by another user — can't argv-check
+        except OSError:
+            continue
+        # Alive — guard against PID reuse with an argv check when possible.
+        if _psutil is not None:
+            try:
+                argv = _psutil.Process(pid).cmdline()
+                sm_idx = next(
+                    i for i, a in enumerate(argv) if "sprint_manager.py" in a
+                )
+                if not (len(argv) > sm_idx + 1 and argv[sm_idx + 1] == sprint_label):
+                    continue  # pid reused by an unrelated process
+            except StopIteration:
+                continue  # alive pid but not a sprint_manager — reuse
+            except Exception:
+                pass  # can't introspect — trust the live pid
+        return pid
+    return None
+
+
+def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
+    """Re-assert a sprint's lifecycle state as running across DB + plan.json.
+
+    Called when a live manager PID is found for a sprint whose stored state was
+    wrongly flipped to a terminal value. record_sprint_start clears the stale
+    ended_at/end_reason as part of the transition.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    row = None
+    try:
+        row = db.get_sprint(sprint_label)
+    except Exception:
+        pass
+    project = (row or {}).get("project") or ""
+    started_at = (row or {}).get("started_at")
+    try:
+        _sprint_db_set_state(sprint_label, project, "running", started_at=started_at)
+    except Exception:
+        pass
+    try:
+        _plan_json_set_state(project_root, sprint_label, "running",
+                             started_at=started_at)
+    except Exception:
+        pass
+    _log.warning(
+        "Sprint %s: stored state was terminal but manager PID is alive — "
+        "healed back to running", sprint_label,
+    )
+
+
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
     """Check if a sprint is running.
 
@@ -5527,6 +5612,14 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             _db_row = None
     if _db_row is not None:
         if _db_row.get("state") != "running":
+            # Recovery: a reconcile race can flip a still-running sprint to a
+            # terminal state (e.g. a startup sweep landing mid-dispatch before
+            # the PID file is written). If the manager is provably alive, the
+            # stored state is wrong — heal it back to running instead of
+            # reporting the sprint dead forever.
+            if _live_manager_pid(project_root, sprint_label) is not None:
+                _heal_sprint_to_running(project_root, sprint_label)
+                return True
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
@@ -5550,6 +5643,11 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
     if plan is not None:
         plan_state = plan.get("state")
         if plan_state in _NOT_RUNNING_PLAN_STATES:
+            # Same recovery as the DB branch for legacy (no-DB-row) sprints: a
+            # live manager overrides a stale terminal plan.json.
+            if _live_manager_pid(project_root, sprint_label) is not None:
+                _heal_sprint_to_running(project_root, sprint_label)
+                return True
             return False
         if plan_state == "running":
             sprints_dir = _commander_dir(project_root) / "sprints"
@@ -5694,6 +5792,17 @@ def _all_sprints_running() -> list[dict]:
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(data, dict) or data.get("state") != "running":
+                # Recovery: a stale terminal plan.json with a provably-alive
+                # manager is still running — a reconcile race flipped it. Heal
+                # and report it, so the running pane doesn't drop a live sprint.
+                if isinstance(data, dict):
+                    _recover_pid = _live_manager_pid(root, label)
+                    if _recover_pid is not None:
+                        _heal_sprint_to_running(root, label)
+                        result.append({
+                            "project": proj["repo"], "sprint_label": label,
+                            "pid": _recover_pid or None,
+                        })
                 continue
             # Verify PID alive; reconcile dead ones to cancelled
             pid = _get_sprint_pid(root, label)

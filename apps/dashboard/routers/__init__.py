@@ -11,6 +11,7 @@ from .backup import router as backup_router
 from .doctor import router as doctor_router
 from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
+from .milestones import router as milestones_router
 from .runs import router as runs_router
 from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
@@ -25,6 +26,7 @@ __all__ = [
     "doctor_router",
     "home_milestone_router",
     "log_search_router",
+    "milestones_router",
     "runs_router",
     "sprint_history_router",
     "sprints_router",

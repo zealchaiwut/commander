@@ -1243,22 +1243,17 @@ class FailureCategory:
     MERGE_CONFLICT   = "MERGE_CONFLICT"
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
-    DESIGN_FAIL      = "DESIGN_FAIL"
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
 # Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
 # TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
 # not a code quality problem, so it must not apply needs-rework.
-# DESIGN_FAIL (impeccable detect) is recoverable: the coder is re-dispatched with
-# the flagged anti-patterns as fix context, exactly like a pytest/lint failure,
-# instead of terminally dropping the ticket.
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
     FailureCategory.LINT_FAIL,
     FailureCategory.PYTEST_FAIL,
-    FailureCategory.DESIGN_FAIL,
 })
 
 
@@ -1578,28 +1573,12 @@ def _write_runtime_port(worktree_coder: Path, port: int) -> None:
     sys.stdout.write(str(f"  [port] wrote {port} to {port_file}") + "\n")
 
 
-def _git_toplevel(cwd: Path) -> Path:
-    """Return the repo root for cwd (``git rev-parse --show-toplevel``).
+def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return .py files added/modified in HEAD relative to base_branch.
 
-    Falls back to cwd if the command fails. ``git diff`` prints paths relative
-    to this root regardless of the cwd it runs in, so gates must resolve changed
-    paths against it before handing them to a tool — otherwise a repo-root path
-    like ``tests/foo.py`` is looked up under a subdir (apps/dashboard) and the
-    tool reports "file not found" (issue: sprint-66.1 stuck loop on #880).
-    """
-    rc, out, _ = _run_timed("git", "rev-parse", "--show-toplevel", cwd=cwd)
-    if rc == 0 and out.strip():
-        return Path(out.strip())
-    return Path(cwd)
-
-
-def _changed_files_resolved(base_branch: str, cwd: Path, exts: tuple[str, ...]) -> list[str]:
-    """Changed files (added/modified vs base_branch) matching exts, as absolute
-    paths that EXIST in the worktree.
-
-    git diff yields repo-root-relative paths; we anchor them to the repo root and
-    drop any that no longer exist (renamed-away / deleted phantoms). Absolute paths
-    are cwd-independent, so the gate tool finds them no matter where it runs.
+    Uses git diff <base_branch> --name-only --diff-filter=ACM to find files
+    that were Added, Copied, or Modified relative to base_branch.
+    Returns a list of relative paths (e.g. ['server.py', 'tests/test_foo.py']).
     """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
@@ -1607,58 +1586,40 @@ def _changed_files_resolved(base_branch: str, cwd: Path, exts: tuple[str, ...]) 
     )
     if rc != 0:
         return []
-    root = _git_toplevel(cwd)
-    resolved: list[str] = []
-    for rel in out.splitlines():
-        if not any(rel.endswith(ext) for ext in exts):
-            continue
-        p = root / rel
-        if p.is_file():
-            resolved.append(str(p))
-    return resolved
-
-
-def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return .py files added/modified vs base_branch, as absolute existing paths."""
-    return _changed_files_resolved(base_branch, cwd, (".py",))
+    return [f for f in out.splitlines() if f.endswith(".py")]
 
 
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
 
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified vs base_branch, as absolute existing paths."""
-    return _changed_files_resolved(base_branch, cwd, _JS_TS_EXTENSIONS)
+    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
 
 
-_FRONTEND_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
+# Frontend file extensions the impeccable design detector analyses.
+_DESIGN_FE_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
 
 
 def _changed_frontend_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return frontend files (.html/.css/.jsx/.tsx) added/modified vs base_branch.
+    """Return frontend files added/modified in HEAD relative to base_branch.
 
-    The design gate scans only these so a pre-existing anti-pattern in a file the
-    ticket never touched can't fail an unrelated UI ticket (issue: #861 was failed
-    by low-contrast warnings in analytics.html, which it did not change).
-    Returns absolute existing paths.
+    Scoped to the extensions the impeccable design gate analyses
+    (.html/.css/.jsx/.tsx). Returns repo-root-relative paths.
     """
-    return _changed_files_resolved(base_branch, cwd, _FRONTEND_EXTENSIONS)
-
-
-def _is_test_path(path: str) -> bool:
-    """True if path looks like a pytest test module, anywhere in the tree.
-
-    Matches files under any ``tests`` dir, or whose basename is ``test_*.py`` /
-    ``*_test.py``. The old gate keyed on ``startswith('tests/')`` only, so tests
-    under apps/dashboard/tests were silently never run.
-    """
-    parts = Path(path).parts
-    base = parts[-1] if parts else path
-    return (
-        "tests" in parts
-        or base.startswith("test_")
-        or base.endswith("_test.py")
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
     )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _DESIGN_FE_EXTENSIONS)]
 
 
 # ── strangler-fig monolith gate (issue #761) ──────────────────────────────────
@@ -1974,7 +1935,6 @@ def _sweep_stale_status(
     sprint_label: str,
     repo_name: Optional[str],
     active_issue: Optional[int] = None,
-    spare_issues: Optional["set[int]"] = None,
 ) -> None:
     """Remove a leftover transient status label (``in-progress`` or ``SIT``) from
     sprint tickets that are not being actively worked.
@@ -1984,18 +1944,10 @@ def _sweep_stale_status(
     mode both run concurrently, so a crash between the remove-label and add-label
     calls, or an interrupted prior run, can leave a ghost label on a ticket no
     longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
-    clear all except ``active_issue`` and any ``spare_issues``. Best-effort and
-    bounded (no per-ticket fetches).
-
-    ``spare_issues``: tickets whose label is legitimate and must NOT be cleared —
-    e.g. SIT tickets the run will dispatch straight to the tester (coded in a
-    prior run). Clearing those demotes them to a coder re-dispatch and the tester
-    never runs (incident: #880 was re-coded, then crashed, instead of tested).
+    clear all except ``active_issue``. Best-effort and bounded (no per-ticket
+    fetches).
     """
     r = _r(repo_name)
-    spare: "set[int]" = set(spare_issues or ())
-    if active_issue is not None:
-        spare.add(active_issue)
     try:
         out = subprocess.run(
             ["gh", "issue", "list", "--repo", r,
@@ -2010,7 +1962,7 @@ def _sweep_stale_status(
         return
     cleared: list[int] = []
     for n in nums:
-        if n in spare:
+        if active_issue is not None and n == active_issue:
             continue
         try:
             subprocess.run(
@@ -2335,34 +2287,6 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         structured_log.warn("success_comment_failed", f"failed to post success comment: {e}", issue_num=issue_num, exc=str(e))
 
 
-def _find_tool_bin(tool: str, worktester_dashboard: Path) -> Optional[str]:
-    """Resolve a gate tool (pytest / ruff / mypy): PATH first, then the known
-    venv locations.
-
-    The old code only looked in ``worktester_dashboard/../venv`` (e.g.
-    ``tester/apps/venv``), which does not exist — the venvs live at
-    ``worktester_dashboard/venv`` (tester/apps/dashboard/venv) and the clone root
-    (tester/venv). When ``which`` also missed, the gate hit "binary not found"
-    and failed before running a single test (sprint-66.6: every pytest gate
-    failed this way, exhausting fix-rounds on already-passing code).
-    """
-    ok, path, _ = _try("which", tool)
-    if ok and path.strip():
-        return path.strip()
-    candidates = [
-        worktester_dashboard / "venv" / "bin" / tool,                  # tester/apps/dashboard/venv
-        worktester_dashboard.parent.parent / "venv" / "bin" / tool,    # tester/venv (clone root)
-        worktester_dashboard / ".." / "venv" / "bin" / tool,           # legacy tester/apps/venv
-    ]
-    for c in candidates:
-        try:
-            if c.exists():
-                return str(c.resolve())
-        except OSError:
-            continue
-    return None
-
-
 def _gate_pytest(
     issue_num: int,
     worktester_dashboard: Path,
@@ -2382,32 +2306,39 @@ def _gate_pytest(
 
     _post_agent_event("gate:pytest")
 
-    # Detect pytest binary (PATH, then known venv locations).
-    pytest_bin = _find_tool_bin("pytest", worktester_dashboard)
-    if not pytest_bin:
-        output = "pytest binary not found on PATH or in the worktree venvs."
-        structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
-        return GateResult(gate="pytest", passed=False, output=output)
+    # Detect pytest binary
+    ok, pytest_path, _ = _try("which", "pytest")
+    if not ok:
+        # Try inside dashboard venv
+        venv_pytest = worktester_dashboard / ".." / "venv" / "bin" / "pytest"
+        if venv_pytest.exists():
+            pytest_bin = str(venv_pytest.resolve())
+        else:
+            output = "pytest binary not found on PATH and no venv/bin/pytest found."
+            structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
+            return GateResult(gate="pytest", passed=False, output=output)
+    else:
+        pytest_bin = pytest_path
 
     # Determine which test files to run based on gate_scope
     if gate_scope == "full":
         sys.stdout.write(str("  [gate:pytest] running pytest -x (full scope) ...") + "\n")
         rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
     else:
-        # changed scope: only run test files changed relative to base_branch.
-        # _changed_py_files returns absolute paths to files that EXIST (renamed-away
-        # / deleted phantoms are dropped), so pytest never errors on a missing path.
+        # changed scope: only run test files changed relative to base_branch
         changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
-        test_files = [f for f in changed if _is_test_path(f)]
+        test_files = [f for f in changed if f.startswith("tests/")]
         if not test_files:
             sys.stdout.write(str("  [gate:pytest] no test files changed — skipped") + "\n")
             return GateResult(gate="pytest", passed=True, output="no test files changed")
         sys.stdout.write(str(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}") + "\n")
-        # Run from the repo root so conftest/rootdir discovery is consistent for
-        # tests in either tests/ (repo root) or apps/dashboard/tests/.
-        rc, stdout, stderr = _run_timed(
-            pytest_bin, "-x", *test_files, cwd=_git_toplevel(worktester_dashboard)
+        # Paths from git diff are relative to the git root, not worktester_dashboard.
+        # Run pytest from the git root so tests/ paths resolve correctly.
+        rc_root, git_root_out, _ = _run_timed(
+            "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard,
         )
+        pytest_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=pytest_cwd)
 
     combined = stdout + stderr
     if rc == 0:
@@ -2444,7 +2375,12 @@ def _gate_lint(
     any_ran = False
 
     # ── Python lint via ruff ───────────────────────────────────────────────────
-    ruff_bin = _find_tool_bin("ruff", worktester_dashboard)
+    ok_ruff, ruff_path, _ = _try("which", "ruff")
+    if not ok_ruff:
+        venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
+        ruff_bin = str(venv_ruff.resolve()) if venv_ruff.exists() else None
+    else:
+        ruff_bin = ruff_path
 
     if ruff_bin:
         if gate_scope == "full":
@@ -2591,7 +2527,12 @@ def _gate_typecheck(
         py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
 
     if py_files:
-        mypy_bin = _find_tool_bin("mypy", worktester_dashboard)
+        ok_mypy, mypy_path, _ = _try("which", "mypy")
+        if not ok_mypy:
+            venv_mypy = worktester_dashboard / ".." / "venv" / "bin" / "mypy"
+            mypy_bin = str(venv_mypy.resolve()) if venv_mypy.exists() else None
+        else:
+            mypy_bin = mypy_path
 
         if mypy_bin:
             targets = ["."] if gate_scope == "full" else py_files
@@ -2739,31 +2680,53 @@ def _run_frontend_lint(
     return passed, combined
 
 
-def _design_error_findings(raw: str) -> tuple[list[dict], int]:
-    """Parse `impeccable detect --json` output into (errors, warning_count).
+def _impeccable_findings(npx_path: str, target: str, cwd: Path) -> Optional[list[dict]]:
+    """Run ``impeccable detect <target> --json`` and return the findings list.
 
-    impeccable exits non-zero on ANY finding, warnings included. The gate must
-    fail only on real errors, so it parses the JSON and partitions by severity —
-    `error` blocks the ticket; `warning` is logged but allowed. Returns
-    ([] , 0) when the output is not parseable JSON (treated as no errors).
+    Returns ``[]`` when the target is clean, the parsed list when anti-patterns
+    are found, or ``None`` when output could not be parsed (caller decides how
+    to handle an inconclusive scan).
     """
-    raw = (raw or "").strip()
-    if not raw:
-        return [], 0
-    start = raw.find("[")
-    if start == -1:
-        return [], 0
+    rc, out, _ = _run_timed(
+        npx_path, "--yes", "impeccable", "detect", target, "--json", cwd=cwd,
+    )
+    text = (out or "").strip()
+    if not text:
+        # No JSON emitted: clean exit means no findings; otherwise inconclusive.
+        return [] if rc == 0 else None
     try:
-        items = json.loads(raw[start:])
-    except (ValueError, TypeError):
-        return [], 0
-    if not isinstance(items, list):
-        return [], 0
-    errors = [it for it in items
-              if isinstance(it, dict) and str(it.get("severity", "")).lower() == "error"]
-    warnings = sum(1 for it in items
-                   if isinstance(it, dict) and str(it.get("severity", "")).lower() == "warning")
-    return errors, warnings
+        data = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict):
+        data = data.get("findings") or data.get("results") or []
+    return data if isinstance(data, list) else []
+
+
+def _finding_sig(f: dict) -> tuple:
+    """Stable signature for a finding, ignoring the file path (so base and HEAD
+    copies of the same file compare cleanly even from different temp paths)."""
+    return (f.get("antipattern"), f.get("line"), (f.get("snippet") or "").strip())
+
+
+def _net_new_findings(base: list[dict], head: list[dict]) -> list[dict]:
+    """Findings present at HEAD but not accounted for at base (multiset diff).
+
+    Each base finding cancels at most one HEAD finding with the same signature,
+    so adding a *second* identical anti-pattern still surfaces as net-new.
+    """
+    remaining: dict[tuple, int] = {}
+    for f in base:
+        sig = _finding_sig(f)
+        remaining[sig] = remaining.get(sig, 0) + 1
+    net_new: list[dict] = []
+    for f in head:
+        sig = _finding_sig(f)
+        if remaining.get(sig, 0) > 0:
+            remaining[sig] -= 1
+        else:
+            net_new.append(f)
+    return net_new
 
 
 def _gate_design(
@@ -2771,23 +2734,18 @@ def _gate_design(
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
-    worktester_root: Optional[Path] = None,
     base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
     """Gate: run impeccable detect on the frontend for UI anti-patterns.
 
-    Uses the deterministic pattern-matching detector (no LLM). Two scoping rules
-    keep it from failing unrelated tickets (issue #861):
+    Uses the deterministic pattern-matching detector (no LLM).
 
-    * **Diff-scoped** — scans only the frontend files this ticket changed vs
-      ``base_branch``, not the whole ``static/`` tree, so a pre-existing
-      anti-pattern in an untouched file can't fail an unrelated UI ticket.
-    * **Error-only** — fails on ``severity: error`` findings; ``warning``
-      findings are logged but do not block (impeccable itself exits non-zero on
-      both). A failure routes to the coder fix-round loop (DESIGN_FAIL), so the
-      coder gets the flagged anti-patterns as context and another attempt.
-
-    Skips gracefully when impeccable is not installed or no frontend changed.
+    gate_scope='changed' (default): scope to frontend files changed relative to
+    base_branch and fail only on *net-new* anti-patterns the diff introduces —
+    pre-existing baseline findings in those files do not bounce the ticket
+    (mirrors the diff-aware monolith/typecheck/lint gates). gate_scope='full'
+    restores the legacy whole-directory scan that fails on any finding.
     """
     if skip:
         sys.stdout.write(str("  [gate:design] skipped") + "\n")
@@ -2803,43 +2761,109 @@ def _gate_design(
         return GateResult(gate="design", passed=True, skipped=True,
                           output="npx not found — design gate skipped")
 
-    # Scan only the frontend files this ticket changed. Fall back to the full
-    # static/ tree only when the diff is unavailable (e.g. not a git worktree).
-    diff_root = worktester_root or worktester_dashboard
-    changed_fe = _changed_frontend_files(base_branch, diff_root)
-    scan_targets: list[str]
-    if changed_fe:
-        scan_targets = [str(diff_root / f) for f in changed_fe
-                        if (diff_root / f).exists()]
-        if not scan_targets:
-            sys.stdout.write(str("  [gate:design] changed frontend files no longer present — skipped") + "\n")
-            return GateResult(gate="design", passed=True, skipped=True,
-                              output="changed frontend files absent — design gate skipped")
-        scope_desc = f"{len(scan_targets)} changed file(s)"
-    else:
-        # No changed frontend files (or diff unavailable). If the diff resolved
-        # cleanly with zero frontend changes, there's nothing to scan.
-        sys.stdout.write(str("  [gate:design] no changed frontend files — skipped") + "\n")
-        return GateResult(gate="design", passed=True, skipped=True,
-                          output="no changed frontend files — design gate skipped")
+    # Detect if there is any frontend to scan
+    has_frontend = any(
+        True for ext in _DESIGN_FE_EXTENSIONS
+        for _ in worktester_dashboard.rglob(f"*{ext}")
+    ) if worktester_dashboard.exists() else False
 
-    sys.stdout.write(str(f"  [gate:design] running impeccable detect on {scope_desc} ...") + "\n")
+    if not has_frontend:
+        sys.stdout.write(str("  [gate:design] no frontend files found — skipped") + "\n")
+        return GateResult(gate="design", passed=True, skipped=True,
+                          output="no frontend files — design gate skipped")
+
+    # ── changed-scope: fail only on net-new anti-patterns the diff introduces ──
+    if gate_scope != "full":
+        changed = _changed_frontend_files(base_branch, cwd=worktester_dashboard)
+        if not changed:
+            sys.stdout.write(str("  [gate:design] no changed frontend files — PASS") + "\n")
+            return GateResult(gate="design", passed=True,
+                              output="no changed frontend files")
+
+        sys.stdout.write(
+            str(f"  [gate:design] checking {len(changed)} changed frontend file(s) "
+                f"for net-new anti-patterns vs {base_branch} ...") + "\n")
+
+        net_new: list[dict] = []
+        inconclusive: list[str] = []
+        for rel in changed:
+            head_findings = _impeccable_findings(npx_path, rel, cwd=worktester_dashboard)
+            if head_findings is None:
+                inconclusive.append(rel)
+                continue
+            if not head_findings:
+                continue  # file is clean at HEAD; nothing to compare
+            # Base version of the file (empty if newly added → all findings net-new)
+            rc_show, base_src, _ = _run_timed(
+                "git", "show", f"{base_branch}:{rel}", cwd=worktester_dashboard,
+            )
+            base_findings: list[dict] = []
+            if rc_show == 0:
+                suffix = os.path.splitext(rel)[1] or ".html"
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=suffix, delete=False, encoding="utf-8")
+                try:
+                    tmp.write(base_src)
+                    tmp.close()
+                    parsed = _impeccable_findings(npx_path, tmp.name, cwd=worktester_dashboard)
+                    base_findings = parsed or []
+                finally:
+                    try:
+                        os.unlink(tmp.name)
+                    except OSError:
+                        pass
+            file_net_new = _net_new_findings(base_findings, head_findings)
+            for f in file_net_new:
+                f = dict(f)
+                f.setdefault("file", rel)
+                net_new.append(f)
+
+        if inconclusive:
+            # Could not analyse a changed file — fail closed rather than wave it through.
+            msg = ("design gate could not analyse changed file(s): "
+                   + ", ".join(inconclusive))
+            structured_log.error("gate_failed", f"[gate:design] FAIL — {msg}",
+                                 gate="design", issue_num=issue_num)
+            _revert_to_sit(issue_num, "design", msg, repo_name=repo_name)
+            return GateResult(gate="design", passed=False, output=msg)
+
+        if net_new:
+            lines = [f"{len(net_new)} net-new design anti-pattern(s) introduced by this diff:"]
+            for f in net_new:
+                lines.append(
+                    f"  [{f.get('antipattern')}] {f.get('file')}: {f.get('snippet') or f.get('name')}")
+            msg = "\n".join(lines)
+            structured_log.error("gate_failed", f"[gate:design] FAIL — {len(net_new)} net-new",
+                                 gate="design", issue_num=issue_num)
+            _revert_to_sit(issue_num, "design", msg, repo_name=repo_name)
+            return GateResult(gate="design", passed=False, output=msg)
+
+        sys.stdout.write(
+            str("  [gate:design] PASS — no net-new design anti-patterns in changed files") + "\n")
+        return GateResult(
+            gate="design", passed=True,
+            output=f"{len(changed)} changed frontend file(s); no net-new anti-patterns")
+
+    # ── full-scope (legacy): fail on any finding across the whole static dir ──
+    static_dir = worktester_dashboard / "apps" / "dashboard" / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard / "static"
+    if not static_dir.exists():
+        static_dir = worktester_dashboard
+
+    sys.stdout.write(str(f"  [gate:design] running impeccable detect {static_dir.name}/ (full) ...") + "\n")
     rc, stdout, stderr = _run_timed(
-        npx_path, "--yes", "impeccable", "detect", *scan_targets, "--json",
+        npx_path, "--yes", "impeccable", "detect", str(static_dir), "--json",
         cwd=worktester_dashboard,
     )
     combined = stdout + stderr
 
-    errors, warning_count = _design_error_findings(combined)
-    if warning_count:
-        sys.stdout.write(str(f"  [gate:design] {warning_count} warning(s) (non-blocking)") + "\n")
-
-    if not errors:
-        sys.stdout.write(str("  [gate:design] PASS — no error-severity anti-patterns") + "\n")
+    if rc == 0:
+        sys.stdout.write(str("  [gate:design] PASS — no design anti-patterns detected") + "\n")
         return GateResult(gate="design", passed=True, output=combined)
     else:
-        structured_log.error("gate_failed",
-                             f"[gate:design] FAIL — {len(errors)} error-severity finding(s)",
+        # impeccable exits non-zero when issues are found
+        structured_log.error("gate_failed", f"[gate:design] FAIL (exit {rc})",
                              gate="design", issue_num=issue_num, exit_code=rc)
         _revert_to_sit(issue_num, "design", combined, repo_name=repo_name)
         return GateResult(gate="design", passed=False, output=combined)
@@ -2957,8 +2981,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_design),
         repo_name=repo_name,
-        worktester_root=worktester_root,
         base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r_design)
     if not r_design.passed:
@@ -3308,7 +3332,7 @@ def handle_post_tester(
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
             "typecheck":     FailureCategory.GATE_FAIL,
-            "design":        FailureCategory.DESIGN_FAIL,
+            "design":        FailureCategory.GATE_FAIL,
             "pytest":        FailureCategory.PYTEST_FAIL,
             "lint":          FailureCategory.LINT_FAIL,
             "merge-preview": FailureCategory.MERGE_CONFLICT,
@@ -3970,43 +3994,49 @@ def _worktree_hygiene(
         if ok2 and br_out2.strip():
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
 
-    # An existing feature branch is RESUMABLE prior work — reconcile it onto the
-    # current base, never treat its existence as fatal. (Old behaviour: a
-    # "fresh" dispatch aborted with `divergent-branch` when a branch existed at a
-    # different SHA — but on a re-run that's normal, which killed #879; and a
-    # rebase conflict failed the ticket with `merge`, which killed #880.)
-    if feature_branch is not None:
-        _try("git", "checkout", feature_branch, cwd=worktree)
-        # Already contained in the base? Its commits are in the sprint branch
-        # (merged by a prior sub-sprint) — nothing to rebase; re-applying them is
-        # exactly what conflicted for #880. Use the branch as-is.
-        already_in_base, _, _ = _try(
-            "git", "merge-base", "--is-ancestor", feature_branch,
-            f"origin/{merge_target}", cwd=worktree,
-        )
-        if already_in_base:
-            sys.stdout.write(str(
-                f"  [hygiene] {feature_branch} already in origin/{merge_target} — no rebase needed"
-            ) + "\n")
-            sys.stdout.flush()
-        else:
+    if not is_retry:
+        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
+        if feature_branch is not None and base_sha:
+            ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
+            branch_sha = branch_sha.strip() if ok else None
+            if branch_sha and branch_sha != base_sha:
+                detail = (
+                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
+                    f"but base is {base_sha[:8]}"
+                )
+                sys.stdout.write(str(f"  [hygiene] ERROR: {detail}") + "\n")
+                sys.stdout.flush()
+                record_failure(
+                    int(ticket_id),
+                    "divergent-branch",
+                    detail=detail,
+                    repo_root=effective_root,
+                )
+                return worktree_sha, base_sha, "divergent-branch"
+    else:
+        # 5b — retry-round: checkout feature branch and rebase onto base
+        if feature_branch is not None:
             sys.stdout.write(str(f"  [hygiene] Rebasing {feature_branch} onto origin/{merge_target}") + "\n")
             sys.stdout.flush()
+            _try("git", "checkout", feature_branch, cwd=worktree)
             ok, _, rebase_err = _try(
                 "git", "rebase", f"origin/{merge_target}", cwd=worktree,
             )
             if not ok:
-                # Conflict: the branch can't replay onto the new base. Reset it to
-                # base so the coder rebuilds cleanly (its RESUME context still has
-                # the prior commits via reflog/PR), instead of failing the ticket.
-                sys.stdout.write(str(
-                    f"  [hygiene] Rebase conflict for #{ticket_id} — resetting "
-                    f"{feature_branch} to origin/{merge_target} for a clean coder pass "
-                    f"(prior commits dropped): {rebase_err}"
-                ) + "\n")
+                sys.stdout.write(str(f"  [hygiene] Rebase conflict for #{ticket_id}: {rebase_err}") + "\n")
                 sys.stdout.flush()
                 _try("git", "rebase", "--abort", cwd=worktree)
-                _try("git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree)
+                detail = (
+                    f"Rebase of {feature_branch} onto origin/{merge_target} "
+                    f"failed with conflict"
+                )
+                record_failure(
+                    int(ticket_id),
+                    "merge",
+                    detail=detail,
+                    repo_root=effective_root,
+                )
+                return worktree_sha, base_sha, "merge"
 
     return worktree_sha, base_sha, None
 
@@ -4067,52 +4097,6 @@ def _dispatch_doctor(
         pass  # can't stat path — don't block on it
 
     return None  # all checks passed
-
-
-def _coder_resume_context(worktree: Path, base_branch: str, issue_num: Optional[int] = None) -> str:
-    """RESUME instruction for the coder when the checked-out feature branch
-    already has commits ahead of base (prior-run work).
-
-    On a re-run / fix-round the hygiene step rebases the existing feature branch
-    onto the sprint branch (so prior commits survive), but the dispatch prompt
-    still says "implement the issue" — a fresh agent then re-implements from
-    scratch, which is slow and redundant. This tells it to continue from the
-    existing work instead. Returns "" when there is no prior work (fresh ticket).
-    Logs a one-line ``[resume]`` marker so the orchestrator log shows resume vs
-    fresh (operator request — previously only visible inside the agent prompt).
-    """
-    base_ref = f"origin/{base_branch}"
-    rc, count_out, _ = _run_timed("git", "rev-list", "--count", f"{base_ref}..HEAD", cwd=worktree)
-    if rc != 0:
-        return ""
-    try:
-        n = int((count_out or "0").strip())
-    except ValueError:
-        n = 0
-    if n <= 0:
-        return ""
-    _tag = f"#{issue_num}: " if issue_num is not None else ""
-    sys.stdout.write(str(f"  [resume] {_tag}building on {n} prior commit(s) on the feature branch") + "\n")
-    sys.stdout.flush()
-    _, log_out, _ = _run_timed(
-        "git", "log", "--oneline", "-n", "20", f"{base_ref}..HEAD", cwd=worktree
-    )
-    _, stat_out, _ = _run_timed(
-        "git", "diff", "--stat", f"{base_ref}...HEAD", cwd=worktree
-    )
-    commits = (log_out or "").strip() or "(commit subjects unavailable)"
-    files = (stat_out or "").strip() or "(file summary unavailable)"
-    return (
-        f"\n\nRESUME — a feature branch for this issue already has prior work: "
-        f"{n} commit(s) ahead of {base_branch}. You are CONTINUING this work, not "
-        f"starting over. First run `git log {base_ref}..HEAD` and "
-        f"`git diff {base_ref}...HEAD` to see what is already implemented, then "
-        f"finish the remaining acceptance criteria and address any prior failure. "
-        f"Do NOT re-create files that already satisfy their AC or rewrite passing "
-        f"tests — build on the existing commits.\n"
-        f"Prior commits:\n{commits}\n"
-        f"Files already changed:\n{files}"
-    )
 
 
 def _dispatch_coder(
@@ -4283,11 +4267,6 @@ def _dispatch_coder(
             f"last output: {_tail_str}; "
             "continue, do not restart"
         )
-
-    # Resume context: when the feature branch already carries prior-run work,
-    # tell the coder to continue from it rather than re-implement from scratch
-    # (the hygiene step rebased it onto the sprint branch, so it's checked out).
-    prompt += _coder_resume_context(cwd_path, sprint_branch, issue_num=issue_num)
 
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:
@@ -4612,22 +4591,6 @@ def _dispatch_tester(
             " Do not run update_ticket.py, gh issue edit --add-label, or any other"
             " label-mutation command."
         )
-    # Single pytest run: the tester still WRITES the pytest tests for each AC and
-    # verifies the UAT steps, but does NOT execute the pytest suite itself — the
-    # sprint_manager pytest gate runs it once after the tester exits. Avoids the
-    # double pytest run (tester + gate). Toggle off by setting
-    # COMMANDER_TESTER_RUN_PYTEST=1 (then the tester runs pytest too).
-    if os.environ.get("COMMANDER_TESTER_RUN_PYTEST", "").strip().lower() not in ("1", "true", "yes", "on"):
-        if "do not execute the pytest" not in prompt.lower():
-            prompt += (
-                " PYTEST EXECUTION: write a pytest test for each acceptance criterion,"
-                " but do NOT execute the pytest suite yourself — sprint_manager's"
-                " quality gate runs pytest once after you exit. Verify the UAT steps"
-                " (HTTP / browser / inspection), confirm the tests you wrote are"
-                " anchored to their AC, then report READY_FOR_UAT; the gate validates"
-                " that the tests pass."
-            )
-
     # Impeccable design context (issue #713): inject into every tester dispatch so
     # the tester verifies UI tickets against the same design rules via context.mjs.
     if "context.mjs" not in prompt:
@@ -4774,19 +4737,14 @@ def _dispatch_tester(
     )
     browser_hint = (
         " LIVE BROWSER UAT (issue #710): In Step 6, route each UAT step with"
-        " agent_browser_runner.classify_uat_step(step_text, agent_testable=<bool>)"
-        " ('browser' | 'http' | 'manual'). For a 'browser' step, DRIVE the"
-        " agent-browser CLI directly (it is on PATH) — it is a low-level command"
-        " CLI built for AI agents, with NO high-level 'run' command. First run"
-        " `agent-browser skills get core --full` to learn the commands, then:"
-        " `agent-browser open <base_url>`, perform the interaction"
-        " (click/type/find/press), assert the expected outcome with"
-        " `agent-browser get <text|url|title|...>` and `agent-browser is"
-        " <visible|enabled|checked> <sel>`, and capture `agent-browser screenshot"
-        " <path>`. (agent_browser_runner.run_cli(args) is a thin one-command"
-        " wrapper if you prefer Python.) Record the step PASS or FAIL with the"
-        " screenshot. A FAIL sets the ticket status to NEEDS_FIXES, identical to a"
-        " failed AC. Mark a step MANUAL ONLY when classify returns 'manual' or"
+        " services/sprint_manager/agent_browser_runner.py."
+        " If the step is flagged agent-testable OR its text describes a browser"
+        " interaction (keywords: open, navigate, click, see, expect, page),"
+        " execute it via agent_browser_runner.run_browser_step(step_text, base_url)"
+        " instead of marking MANUAL. Record the result as PASS or FAIL in the test"
+        " report with the returned screenshot_path attached. A FAIL browser step"
+        " sets the overall ticket status to NEEDS_FIXES, identical to a failed AC."
+        " Mark a step MANUAL ONLY when the runner returns status 'uncovered' or"
         " agent_browser_runner.is_available() is False. HTTP-only UAT steps"
         " continue to run via httpx unchanged."
         f" COMMANDER_AGENT_BROWSER_AVAILABLE={'1' if browser_available else '0'} in your env."
@@ -4955,7 +4913,6 @@ def _follow_up_action(category: Optional[str]) -> str:
         FailureCategory.PYTEST_FAIL:     "Pytest gate failed. Review the GitHub comment, fix the failing tests, and re-run.",
         FailureCategory.LINT_FAIL:       "Lint gate failed. Fix the ruff errors noted in the GitHub comment and re-run.",
         FailureCategory.MERGE_CONFLICT:  "Merge-preview gate detected conflicts. Resolve conflicts against develop and re-run.",
-        FailureCategory.DESIGN_FAIL:     "Design gate failed. Fix the flagged UI anti-patterns (e.g. low-contrast text, banned patterns) in the files you changed so `impeccable detect` reports no error-severity findings, then re-run.",
     }
     return mapping.get(category or "", "Review the issue manually.")
 
@@ -7460,14 +7417,6 @@ def _run_pipeline_dispatch(
         ctx = pctx.get(num, {})
         history = ctx.get("fix_history", [])
         reason = f"Fix-loop exhausted after {len(history)} attempt(s)"
-        # Surface WHY it failed: the last attempt's category + summary, so the
-        # board/summary shows the actual cause (e.g. PYTEST_FAIL) instead of only
-        # "exhausted after N attempts" (operator request).
-        if history:
-            _last = history[-1]
-            _lcat = _last.get("category") or "?"
-            _lsum = (_last.get("summary") or "").strip()
-            reason = f"{reason} — last: {_lcat}" + (f": {_lsum}" if _lsum else "")
         sys.stdout.write(str(f"  [pipeline] {reason} — tagging needs-rework") + "\n")
         sys.stdout.flush()
         ist.set_agent_status("failed")
@@ -7750,11 +7699,44 @@ def run_sprint(
     if not dry_run and not resume and not retry_failed:
         _neon_sprint_init(label, state.issues, eff_repo or "", _eff_sprints_dir)
 
-    # Sprint-level estimation no longer runs at dispatch: every ticket is
-    # estimated when it is created (per-issue estimator), so re-estimating the
-    # whole backlog before the loop was redundant work and a noisy log line.
-    # The state field stays "skipped" for serialization/back-compat readers.
-    state.estimator_status = "skipped"
+    # ── Sprint estimator (issue #166) ──────────────────────────────────────────
+    # Runs BEFORE the per-ticket loop so the human can see estimates on the
+    # dashboard before any coding starts.  Failure never blocks the sprint.
+    if not skip_estimator and not dry_run and not resume and not retry_failed:
+        sys.stdout.write(str("\n  [estimator] Running sprint estimator ...") + "\n")
+        try:
+            from sprint_estimator import run_estimator  # noqa: PLC0415
+            eff_sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+            est_result = run_estimator(
+                sprint_label = label,
+                repo_name    = eff_repo,
+                sprints_dir  = eff_sprints_dir,
+                cfg          = cfg,
+            )
+            # Merge estimates into state keyed by issue number (int)
+            state.estimates = {
+                num: est.to_dict()
+                for num, est in est_result.estimates.items()
+            }
+            state.estimator_status        = "succeeded"
+            state.estimator_total_minutes = est_result.total_minutes
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
+            sys.stdout.write(str(f"  [estimator] Estimator succeeded: "
+                f"{len(est_result.estimates)} tickets, "
+                f"{est_result.total_minutes} total minutes") + "\n")
+        except ImportError:
+            structured_log.warn("estimator_module_missing", "[estimator] sprint_estimator module not found — skipping")
+            state.estimator_status = "failed"
+            state.save(state_path)
+        except Exception as e:
+            structured_log.warn("estimator_sprint_failed", f"[estimator] estimator failed: {e}", exc=str(e))
+            state.estimator_status = "failed"
+            state.save(state_path)
+    elif skip_estimator:
+        sys.stdout.write(str("  [estimator] --skip-estimator active — skipping estimation") + "\n")
+        state.estimator_status = "skipped"
+    # ── end estimator ──────────────────────────────────────────────────────────
 
     # -- Topological dispatch setup (issue #445) --
     _plan_order = _load_sprint_plan(_eff_sprints_dir, label)
@@ -7793,13 +7775,9 @@ def run_sprint(
     # Clear any stale in-progress / SIT labels left by a prior interrupted or
     # crashed run before dispatch begins — otherwise those tickets show stuck
     # spinners on the board, and in pipeline mode a ghost SIT would violate the
-    # at-most-one-SIT invariant (issue #738 AC5). BUT spare SIT tickets the
-    # re-run will dispatch straight to the tester (coded in a prior run): wiping
-    # their SIT demotes them to a coder re-dispatch and the tester never runs
-    # (incident: #880 was re-coded then crashed instead of being tested).
-    _sit_dispatch = {n for n, act in rerun_decisions.items() if act == "dispatch_tester"}
+    # at-most-one-SIT invariant (issue #738 AC5).
     _sweep_stale_in_progress(label, eff_repo)
-    _sweep_stale_status("SIT", label, eff_repo, spare_issues=_sit_dispatch)
+    _sweep_stale_status("SIT", label, eff_repo)
 
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
@@ -9296,43 +9274,5 @@ def main() -> None:
         sys.stdout.write(str(f"Sprint PR: {sprint_pr_url}") + "\n")
 
 
-class _TimestampedStdout:
-    """Prefix each orchestrator log line with a local [HH:MM:SS] stamp.
-
-    The dashboard surfaces this process's stdout as the "Orchestrator" log; the
-    stamp lets operators see when each step (coder dispatch, gate, etc.) started.
-    Installed only under CLI execution (below) so test imports never rewrap
-    sys.stdout. structured_log writes JSON to its own file, not here, so it is
-    unaffected.
-    """
-
-    def __init__(self, stream):
-        self._stream = stream
-        self._at_line_start = True
-
-    def write(self, s):
-        if not s:
-            return 0
-        out = []
-        for ch in s:
-            if self._at_line_start and ch != "\n":
-                out.append(f"[{datetime.now().strftime('%H:%M:%S')}] ")
-                self._at_line_start = False
-            out.append(ch)
-            if ch == "\n":
-                self._at_line_start = True
-        self._stream.write("".join(out))
-        return len(s)
-
-    def flush(self):
-        self._stream.flush()
-
-    def __getattr__(self, name):
-        return getattr(self._stream, name)
-
-
 if __name__ == "__main__":
-    # Timestamp every orchestrator log line so operators can read when each
-    # step started (e.g. "[13:32:01]   Dispatching coder for issue #880 …").
-    sys.stdout = _TimestampedStdout(sys.stdout)
     main()

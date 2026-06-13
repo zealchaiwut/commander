@@ -524,6 +524,7 @@ def get_project_details(repo: str, agents: list[dict]) -> dict:
             "sprint_label":   _ticket_sprint_label(issue),
             "labels":         [l["name"] for l in issue.get("labels", [])],
             "body":           issue.get("body") or "",
+            "milestone":      github_client.milestone_view(issue),
         })
 
     proj_agents = _project_agents(proj, agents)

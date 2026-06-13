@@ -5695,6 +5695,16 @@
     .gss-label { min-width: 170px; font-size: 13px; color: var(--text); flex-shrink: 0; }
     .gss-label .hint { display: block; font-size: 11px; color: var(--text-sub); font-weight: 400; margin-top: 2px; }
     .gss-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+    /* Risk-routed tester row: stack the label, the tier→model map, and a note. */
+    .gss-row--stack { flex-direction: column; align-items: stretch; gap: 7px; }
+    .gss-row--stack .gss-label { min-width: 0; }
+    .gss-risk-map { flex-wrap: wrap; }
+    .gss-risk-pill { font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 8px; }
+    .gss-risk-pill b { color: var(--text); font-weight: 700; }
+    .gss-risk-note { font-size: 11px; color: var(--text-sub); line-height: 1.5; }
+    .gss-risk-note code { font-family: var(--mono); font-size: 10px; color: var(--text-muted); }
     .gss-inp, .gss-select {
       border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
       padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
@@ -19539,6 +19549,15 @@ const SM_MODELS = [
   'claude-haiku-4-5-20251001',
   'claude-haiku-4-5',
 ];
+// The tester model is NOT a single fixed choice — it is routed by the ticket's
+// risk tier (issue #790). This is the effective default map; the source of
+// truth is sprint.yaml → agent_config.tester.by_risk. Shown read-only so the
+// panel stops implying a fixed Tester model it doesn't actually use.
+const SM_TESTER_BY_RISK = [
+  { tier: 'LOW',    model: 'claude-haiku-4-5'  },
+  { tier: 'MEDIUM', model: 'claude-haiku-4-5'  },
+  { tier: 'HIGH',   model: 'claude-sonnet-4-6' },
+];
 const SM_STORAGE_KEY = 'commander_agent_models';
 
 function _smLoadModels() {
@@ -19566,6 +19585,18 @@ function _gssRender(data) {
   const modelRows = SM_AGENTS
     .filter(a => a.settingsKey)
     .map(a => {
+      // Tester is risk-routed, not a single model — show the effective map.
+      if (a.key === 'tester') {
+        const map = (Array.isArray(data.tester_by_risk) && data.tester_by_risk.length)
+          ? data.tester_by_risk : SM_TESTER_BY_RISK;
+        const pills = map.map(r =>
+          `<span class="gss-risk-pill"><b>${r.tier}</b> → ${r.model}</span>`).join('');
+        return `<div class="gss-row gss-row--stack">
+          <div class="gss-label">${a.label}<span class="hint">${a.hint} · risk-routed</span></div>
+          <div class="gss-control gss-risk-map">${pills}</div>
+          <div class="gss-risk-note">Model is chosen by the ticket's risk tier (issue #790), not a fixed setting. Edit in <code>sprint.yaml → agent_config.tester.by_risk</code>.</div>
+        </div>`;
+      }
       const current = data[a.settingsKey] || a.default;
       return `<div class="gss-row">
         <div class="gss-label">${a.label}<span class="hint">${a.hint}</span></div>

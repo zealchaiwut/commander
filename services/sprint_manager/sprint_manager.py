@@ -3970,49 +3970,43 @@ def _worktree_hygiene(
         if ok2 and br_out2.strip():
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
 
-    if not is_retry:
-        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
-        if feature_branch is not None and base_sha:
-            ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
-            branch_sha = branch_sha.strip() if ok else None
-            if branch_sha and branch_sha != base_sha:
-                detail = (
-                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
-                    f"but base is {base_sha[:8]}"
-                )
-                sys.stdout.write(str(f"  [hygiene] ERROR: {detail}") + "\n")
-                sys.stdout.flush()
-                record_failure(
-                    int(ticket_id),
-                    "divergent-branch",
-                    detail=detail,
-                    repo_root=effective_root,
-                )
-                return worktree_sha, base_sha, "divergent-branch"
-    else:
-        # 5b — retry-round: checkout feature branch and rebase onto base
-        if feature_branch is not None:
+    # An existing feature branch is RESUMABLE prior work — reconcile it onto the
+    # current base, never treat its existence as fatal. (Old behaviour: a
+    # "fresh" dispatch aborted with `divergent-branch` when a branch existed at a
+    # different SHA — but on a re-run that's normal, which killed #879; and a
+    # rebase conflict failed the ticket with `merge`, which killed #880.)
+    if feature_branch is not None:
+        _try("git", "checkout", feature_branch, cwd=worktree)
+        # Already contained in the base? Its commits are in the sprint branch
+        # (merged by a prior sub-sprint) — nothing to rebase; re-applying them is
+        # exactly what conflicted for #880. Use the branch as-is.
+        already_in_base, _, _ = _try(
+            "git", "merge-base", "--is-ancestor", feature_branch,
+            f"origin/{merge_target}", cwd=worktree,
+        )
+        if already_in_base:
+            sys.stdout.write(str(
+                f"  [hygiene] {feature_branch} already in origin/{merge_target} — no rebase needed"
+            ) + "\n")
+            sys.stdout.flush()
+        else:
             sys.stdout.write(str(f"  [hygiene] Rebasing {feature_branch} onto origin/{merge_target}") + "\n")
             sys.stdout.flush()
-            _try("git", "checkout", feature_branch, cwd=worktree)
             ok, _, rebase_err = _try(
                 "git", "rebase", f"origin/{merge_target}", cwd=worktree,
             )
             if not ok:
-                sys.stdout.write(str(f"  [hygiene] Rebase conflict for #{ticket_id}: {rebase_err}") + "\n")
+                # Conflict: the branch can't replay onto the new base. Reset it to
+                # base so the coder rebuilds cleanly (its RESUME context still has
+                # the prior commits via reflog/PR), instead of failing the ticket.
+                sys.stdout.write(str(
+                    f"  [hygiene] Rebase conflict for #{ticket_id} — resetting "
+                    f"{feature_branch} to origin/{merge_target} for a clean coder pass "
+                    f"(prior commits dropped): {rebase_err}"
+                ) + "\n")
                 sys.stdout.flush()
                 _try("git", "rebase", "--abort", cwd=worktree)
-                detail = (
-                    f"Rebase of {feature_branch} onto origin/{merge_target} "
-                    f"failed with conflict"
-                )
-                record_failure(
-                    int(ticket_id),
-                    "merge",
-                    detail=detail,
-                    repo_root=effective_root,
-                )
-                return worktree_sha, base_sha, "merge"
+                _try("git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree)
 
     return worktree_sha, base_sha, None
 

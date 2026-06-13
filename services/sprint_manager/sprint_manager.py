@@ -4335,6 +4335,12 @@ def _dispatch_coder(
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         open_mode = "w" if attempt == 0 else "a"
+        _dispatch_t0 = time.monotonic()
+        structured_log.info(
+            "dispatch_start", f"coder dispatch #{issue_num} (attempt {attempt + 1})",
+            issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+            attempt=attempt + 1, model=coder_model, cmd=cmd[:4],
+        )
         try:
             with log_path.open(open_mode) as log_f:
                 proc = subprocess.Popen(
@@ -4388,6 +4394,26 @@ def _dispatch_coder(
         detector.start()
         rc = proc.wait()
         detector.stop()
+
+        _dispatch_secs = round(time.monotonic() - _dispatch_t0, 1)
+        if rc == 0:
+            structured_log.info(
+                "dispatch_finished", f"coder #{issue_num} finished",
+                issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=0, duration_s=_dispatch_secs,
+            )
+        else:
+            _stderr_tail = ""
+            try:
+                _stderr_tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            structured_log.error(
+                "dispatch_failed", f"coder #{issue_num} exited {rc}",
+                issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=rc, duration_s=_dispatch_secs,
+                stderr_tail=_stderr_tail,
+            )
 
         # Exit code 0 means success unconditionally — check before detector.killed
         # to guard against the same race as _dispatch_tester (see issue #659).
@@ -4769,6 +4795,12 @@ def _dispatch_tester(
     sys.stdout.write(str(f"  [agent-browser] available={browser_available} injected into tester env") + "\n")
 
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        _dispatch_t0 = time.monotonic()
+        structured_log.info(
+            "dispatch_start", f"tester dispatch #{issue_num} (attempt {attempt + 1})",
+            issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+            attempt=attempt + 1, model=tester_model, cmd=cmd[:4],
+        )
         try:
             with log_path.open("a") as log_f:
                 proc = subprocess.Popen(
@@ -4820,6 +4852,26 @@ def _dispatch_tester(
         detector.start()
         rc = proc.wait()
         detector.stop()
+
+        _dispatch_secs = round(time.monotonic() - _dispatch_t0, 1)
+        if rc == 0:
+            structured_log.info(
+                "dispatch_finished", f"tester #{issue_num} finished",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=0, duration_s=_dispatch_secs,
+            )
+        else:
+            _stderr_tail = ""
+            try:
+                _stderr_tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            structured_log.error(
+                "dispatch_failed", f"tester #{issue_num} exited {rc}",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=rc, duration_s=_dispatch_secs,
+                stderr_tail=_stderr_tail,
+            )
 
         # Exit code 0 means success unconditionally — check before detector.killed
         # to guard against a race where the hang detector fires after the process

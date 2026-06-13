@@ -2,7 +2,9 @@
 
 AC-1: run_sprint() has skip_estimator=True as default parameter value
 AC-2: Running without estimator flags does not print [estimator] Running sprint estimator
-AC-3: skip_estimator=False (--no-skip-estimator) prints [estimator] Running sprint estimator
+AC-3: the in-sprint estimator step is REMOVED — estimation now runs per ticket
+      at creation time, so the sprint-dispatch path never estimates the backlog
+      (not even with skip_estimator=False; the flag is a no-op for back-compat)
 AC-4: No other behavior of run_sprint() is changed
 AC-5: Existing skip_estimator=True (--skip-estimator) still works, no estimator run output
 """
@@ -89,11 +91,15 @@ def test_ac2_no_flags_does_not_run_estimator(monkeypatch, tmp_path, capsys):
 
 # ── AC-3 ──────────────────────────────────────────────────────────────────────
 
-def test_ac3_no_skip_estimator_flag_runs_estimator(monkeypatch, tmp_path, capsys):
-    _run(monkeypatch, tmp_path, skip_estimator=False)  # simulates --no-skip-estimator
+def test_ac3_in_sprint_estimator_removed(monkeypatch, tmp_path, capsys):
+    # The in-sprint estimator step was removed: every ticket is estimated when
+    # it is created (per-issue estimator), so the sprint-dispatch path never
+    # re-estimates the backlog — not even with skip_estimator=False. The flag is
+    # retained as a no-op for CLI back-compat.
+    _run(monkeypatch, tmp_path, skip_estimator=False)
     out = capsys.readouterr().out
-    assert "[estimator] Running sprint estimator" in out, (
-        "Estimator MUST print 'Running sprint estimator' when skip_estimator=False"
+    assert "[estimator] Running sprint estimator" not in out, (
+        "The sprint-dispatch estimator step was removed; it must not run"
     )
 
 

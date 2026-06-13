@@ -2525,6 +2525,10 @@
       display: none;
     }
     .smgmt-sprint-card.smgmt-collapsed .smgmt-sprint-header { margin-bottom: 0; }
+    /* A running card is a shortcut into the Running pane (its header stays
+       interactive; buttons/links inside stopPropagation via the onclick guard). */
+    .smgmt-sprint-card.smgmt-running-clickable { cursor: pointer; }
+    .smgmt-sprint-card.smgmt-running-clickable:hover { border-color: var(--green); }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -6648,12 +6652,16 @@
        variants. Values come from the /live snapshot; agent_runs-only cards are
        omitted by the builder when their source is absent. */
     .metrics {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
-      padding: 0;
+      display: flex; flex-wrap: wrap; gap: 8px; padding: 0;
     }
     .metric { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
-      border: 1px solid var(--border); border-radius: 8px; background: var(--surface); min-width: 0; }
-    .metric-time { grid-column: 1; max-width: calc(25% - 6px); }
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+      min-width: 0; flex: 1 1 150px; }
+    /* Agent time carries a two-part sub ("coder … · tester …"); give it a wider
+       basis so the value and split stay on one line, and let it wrap instead of
+       squashing into a narrow pinned column on small screens. */
+    .metric-time { flex: 1 1 230px; }
+    .metric-time .metric-value, .metric-time .metric-sub { white-space: nowrap; }
     .metric-label {
       font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
       color: var(--text-sub);
@@ -6763,6 +6771,8 @@
       padding: 10px 12px; }
     .log-line { white-space: pre-wrap; word-break: break-word; color: var(--text-sub); }
     .log-empty { color: var(--text-muted); font-style: italic; }
+    .log-fallback-note { color: var(--text-muted); font-size: 11px; line-height: 1.5;
+      padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
 
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
@@ -13558,12 +13568,36 @@ function _smgmtInspectorStreamTick() {
     // Drop a stale response if the user switched tabs mid-flight.
     if (String(_smgmtInspectorTab) !== want) return;
     const tail = (data && typeof data.tail === 'string') ? data.tail : '';
-    if (!tail.trim()) {
+    if (tail.trim()) {
+      bodyEl.innerHTML = tail.split('\n').map(line =>
+        `<div class="log-line">${colorizeLogLine(line, repo)}</div>`).join('');
+      return;
+    }
+    // A per-issue log is empty until the agent's step finishes — `claude -p`
+    // returns its whole result at once, it doesn't stream token by token. So
+    // mid-run the panel would read "No log output yet" even though the coder
+    // was dispatched minutes ago. Fall back to the orchestrator dispatch log,
+    // which carries the "Dispatching coder for #N" line, so the operator sees
+    // the run is live rather than a blank box.
+    if (tab === 'orchestrator') {
       bodyEl.innerHTML = '<span class="log-empty">No log output yet.</span>';
       return;
     }
-    bodyEl.innerHTML = tail.split('\n').map(line =>
-      `<div class="log-line">${colorizeLogLine(line, repo)}</div>`).join('');
+    fetch(`/api/sprints/${encodeURIComponent(label)}/dispatch-log`
+        + `?project=${encodeURIComponent(repo)}&tail_lines=200`)
+      .then(r => r.ok ? r.json() : null).then(od => {
+        if (String(_smgmtInspectorTab) !== want) return;
+        const otail = (od && typeof od.tail === 'string') ? od.tail : '';
+        const note = `<div class="log-fallback-note">#${escHtml(String(tab))} hasn't `
+          + `written output yet — Claude returns it when the step finishes. `
+          + `Showing the orchestrator log meanwhile.</div>`;
+        if (!otail.trim()) {
+          bodyEl.innerHTML = note;
+          return;
+        }
+        bodyEl.innerHTML = note + otail.split('\n').map(line =>
+          `<div class="log-line">${colorizeLogLine(line, repo)}</div>`).join('');
+      }).catch(() => { /* keep prior content on transient error */ });
   }).catch(() => { /* leave the previous content in place on a transient error */ });
 }
 

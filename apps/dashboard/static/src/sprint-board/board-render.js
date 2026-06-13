@@ -728,8 +728,14 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isRunning = _smgmtRunningLabels.has(label);
   const isLinger = !isRunning && typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
   const isRunningView = isRunning || isLinger;
-  let isCollapsed = false;
-  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
+  // A running sprint collapses to a compact strip by default — the live detail
+  // (issue list, budget, agent stats) lives in the Running pane, so the board
+  // card is just a status header + Cancel. An explicit user toggle still wins.
+  let isCollapsed = isRunning;
+  try {
+    const _cv = localStorage.getItem('sprintColumn_' + label + '_collapsed');
+    if (_cv !== null) isCollapsed = _cv === '1';
+  } catch (_) {}
 
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
@@ -903,10 +909,11 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const collapsedClass = isCollapsed ? ' smgmt-collapsed' : '';
   const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}${isRunning ? ' smgmt-running-clickable' : ''}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? '' : `_smgmtDragOver(event, '${escHtml(label)}')`}"
          ondragleave="${isRunning ? '' : `_smgmtDragLeave(event)`}"
-         ondrop="${isRunning ? '' : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
+         ondrop="${isRunning ? '' : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}"
+         ${isRunning ? `onclick="if(!event.target.closest('button,a')) _smgmtShowSubView('running')"` : ''}>
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
         <div class="smgmt-sprint-header-left sc-header-left">
@@ -926,9 +933,9 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
           <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">
-          <button class="smgmt-delete-btn"
+          ${isRunning ? '' : `<button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
-            <i class="ti ti-trash"></i> Delete</button>
+            <i class="ti ti-trash"></i> Delete</button>`}
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ''}

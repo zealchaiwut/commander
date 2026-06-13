@@ -903,6 +903,63 @@ def update_issue_body(issue_id: int, body: str, repo_name: str | None = None):
     invalidate(f"issues:{r}:")
 
 
+# ── milestone operations (issue #878) ────────────────────────────────────────
+
+def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:
+    """Return all milestones for the repo as a list of dicts.
+
+    Fields include: number, title, description, due_on, state.
+    """
+    r = _r(repo_name)
+    return _json("api", f"repos/{r}/milestones", "-f", f"state={state}",
+                 "-f", "per_page=100")
+
+
+def list_issues_with_milestone(repo_name: str | None = None) -> list[dict]:
+    """Return all issues (open and closed) that belong to any milestone.
+
+    Backed by the mirror when available; falls back to the gh CLI.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        return [i for i in mirror if i.get("milestone")]
+    return _json(
+        "issue", "list", "--repo", r,
+        "--state", "all",
+        "--json", "number,title,labels,state,milestone",
+        "--limit", "500",
+    )
+
+
+def create_milestone(title: str, description: str = "",
+                     due_on: str | None = None,
+                     repo_name: str | None = None) -> dict:
+    """Create a new GitHub milestone and return its dict."""
+    r = _r(repo_name)
+    args = ["api", f"repos/{r}/milestones", "--method", "POST",
+            "-f", f"title={title}", "-f", f"description={description}"]
+    if due_on:
+        args += ["-f", f"due_on={due_on}"]
+    return _json(*args)
+
+
+def update_milestone(number: int, fields: dict,
+                     repo_name: str | None = None) -> dict:
+    """PATCH a milestone's fields (title, description, due_on, state)."""
+    r = _r(repo_name)
+    args = ["api", f"repos/{r}/milestones/{number}", "--method", "PATCH"]
+    for k, v in fields.items():
+        args += ["-f", f"{k}={v}"]
+    return _json(*args)
+
+
+def set_milestone_state(number: int, state: str,
+                        repo_name: str | None = None) -> dict:
+    """Open or close a milestone by setting its state field."""
+    return update_milestone(number, {"state": state}, repo_name=repo_name)
+
+
 # ── test report ───────────────────────────────────────────────────────────────
 
 def get_test_report(issue_id: int, repo_name: str | None = None) -> dict:

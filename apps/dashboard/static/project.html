@@ -6998,6 +6998,67 @@
       border-bottom: 1px solid var(--border); margin-bottom: 10px;
       font-size: 10px; color: var(--text-muted); user-select: none;
     }
+
+    /* ── Roadmap tab (issue #878) ──────────────────────────────────────────── */
+    #pane-roadmap { padding: 16px 0; display: flex; flex-direction: column; gap: 16px; }
+    .rm-toolbar { display: flex; align-items: center; gap: 10px; }
+    .rm-toolbar-gap { flex: 1; }
+    .rm-list { display: flex; flex-direction: column; gap: 10px; }
+    .rm-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .rm-card.rm-active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+    .rm-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .rm-card-title { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; }
+    .rm-active-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 5px;
+      background: var(--text); color: var(--surface);
+    }
+    .rm-card-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; }
+    .rm-card-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .rm-progress-wrap {
+      flex: 1; min-width: 120px;
+      background: var(--surface-2); border-radius: 5px; height: 6px; overflow: hidden;
+    }
+    .rm-progress-fill { height: 100%; background: var(--text); border-radius: 5px; }
+    .rm-progress-text { font-size: 12px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
+    .rm-due { font-size: 12px; color: var(--text-muted); }
+    .rm-card-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+    .rm-btn {
+      font-size: 12px; padding: 4px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .rm-btn:hover { border-color: var(--text-muted); color: var(--text); }
+    .rm-btn-prim { background: var(--text); color: var(--surface); border-color: var(--text); }
+    .rm-btn-prim:hover { opacity: .85; color: var(--surface); }
+    .rm-edit-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+    .rm-edit-form input, .rm-edit-form textarea {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 5px;
+      padding: 7px 10px; font-size: 13px; color: var(--text); font-family: inherit;
+      outline: none; transition: border-color .15s; width: 100%;
+    }
+    .rm-edit-form input:focus, .rm-edit-form textarea:focus { border-color: var(--text); }
+    .rm-edit-form textarea { min-height: 60px; resize: vertical; }
+    .rm-edit-row { display: flex; gap: 6px; }
+    .rm-history-section { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 6px; }
+    .rm-history-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+    .rm-history-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+    }
+    .rm-history-row:last-child { border-bottom: none; }
+    .rm-history-row-title { flex: 1; color: var(--text-muted); }
+    .rm-empty { text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: 14px; }
+    .rm-add-card {
+      border: 1px dashed var(--border); border-radius: 6px;
+      padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
   </style>
 </head>
 <body>
@@ -7136,6 +7197,11 @@
           <i class="ti ti-chart-bar"></i>Analytics
         </button>
         <!-- Notes moved to the global left sidebar (issue #717) -->
+        <!-- Roadmap (issue #878) -->
+        <button class="stab" role="tab" id="stab-roadmap"
+                aria-selected="false" onclick="switchTab('roadmap')">
+          <i class="ti ti-map-2"></i>Roadmap
+        </button>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
                 aria-selected="false" onclick="switchTab('settings')">
@@ -8535,6 +8601,11 @@
         </div><!-- /proj-settings-wrap -->
       </div><!-- /pane-settings -->
 
+      <!-- Roadmap tab (issue #878) -->
+      <div class="tab-pane" id="pane-roadmap" role="tabpanel" aria-labelledby="stab-roadmap">
+        <div id="rm-root"></div>
+      </div><!-- /pane-roadmap -->
+
     </div>
   </div>
 
@@ -9059,7 +9130,7 @@ function switchTab(tab, pushHistory) {
   if (subTabsRow) subTabsRow.classList.toggle('hidden', onGlobalSettings);
 
   // Update aria-selected + active class on project sub-tabs (not global settings)
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = !onGlobalSettings && t === tab;
@@ -9076,7 +9147,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'settings', 'global-settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings', 'global-settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -9166,6 +9237,11 @@ function switchTab(tab, pushHistory) {
   // Init notes tab
   if (tab === 'notes') {
     notesInit();
+  }
+
+  // Init roadmap tab (issue #878)
+  if (tab === 'roadmap') {
+    roadmapInit();
   }
 
   // Init project settings tab
@@ -26548,6 +26624,218 @@ async function sprintCleanupConfirm() {
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
   }
+}
+
+// ── Roadmap tab (issue #878) ──────────────────────────────────────────────────
+var _rmData = null;
+var _rmLoaded = false;
+
+function roadmapInit() {
+  if (_rmLoaded) { _rmRender(); return; }
+  _rmLoaded = true;
+  var root = document.getElementById('rm-root');
+  if (root) root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Loading…</div>';
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/roadmap?repo=' + encodeURIComponent(repo))
+    .then(function(r) { return r.json(); })
+    .then(function(data) { _rmData = data; _rmRender(); })
+    .catch(function() {
+      var r2 = document.getElementById('rm-root');
+      if (r2) r2.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Failed to load roadmap.</div>';
+    });
+}
+
+function _rmRefresh() { _rmLoaded = false; roadmapInit(); }
+
+function _rmRepo() { return _cachedFullRepo[_slug] || _slug; }
+
+function _rmRender() {
+  var root = document.getElementById('rm-root');
+  if (!root || !_rmData) return;
+  var milestones = _rmData.milestones || [];
+  var closed = _rmData.closed_milestones || [];
+  var h = '';
+  h += '<div class="rm-toolbar">';
+  h += '<span style="font-size:14px;font-weight:700">Milestones</span>';
+  h += '<span class="rm-toolbar-gap"></span>';
+  h += '<button class="rm-btn" onclick="_rmShowAdd()"><i class="ti ti-plus"></i> Add milestone</button>';
+  h += '</div>';
+  h += '<div class="rm-add-card" id="rm-add-form" style="display:none">';
+  h += '<div class="rm-edit-form">';
+  h += '<input id="rm-new-title" placeholder="Milestone title" />';
+  h += '<textarea id="rm-new-desc" placeholder="Description (optional)"></textarea>';
+  h += '<input id="rm-new-due" type="date" />';
+  h += '</div>';
+  h += '<div class="rm-edit-row">';
+  h += '<button class="rm-btn rm-btn-prim" onclick="_rmCreate()">Create</button>';
+  h += '<button class="rm-btn" onclick="_rmHideAdd()">Cancel</button>';
+  h += '</div></div>';
+  if (milestones.length > 0) {
+    h += '<div class="rm-list" id="rm-list">';
+    milestones.forEach(function(ms) { h += _rmCardHtml(ms); });
+    h += '</div>';
+  } else if (closed.length === 0) {
+    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>No milestones yet.</div>';
+  }
+  if (closed.length > 0) {
+    h += '<div class="rm-history-section">';
+    h += '<div class="rm-history-label">Closed milestones</div>';
+    closed.forEach(function(ms) { h += _rmHistoryHtml(ms); });
+    h += '</div>';
+  }
+  root.innerHTML = h;
+  _rmInitDnd();
+}
+
+function _rmCardHtml(ms) {
+  var prog = ms.progress || {};
+  var done = prog.completed || 0;
+  var total = prog.total || 0;
+  var pct = total > 0 ? Math.round(done / total * 100) : 0;
+  var due = ms.due_on ? ms.due_on.substring(0, 10) : null;
+  var active = ms.active;
+  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '">';
+  h += '<div class="rm-card-head">';
+  h += '<span class="rm-card-title">' + _rmEsc(ms.title) + '</span>';
+  if (active) h += '<span class="rm-active-badge">Active</span>';
+  h += '</div>';
+  if (ms.description) h += '<div class="rm-card-desc">' + _rmEsc(ms.description) + '</div>';
+  h += '<div class="rm-card-meta">';
+  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill" style="width:' + pct + '%"></div></div>';
+  h += '<span class="rm-progress-text">' + done + ' / ' + total + '</span>';
+  if (due) h += '<span class="rm-due"><i class="ti ti-calendar-event"></i> ' + due + '</span>';
+  h += '</div><div class="rm-card-actions">';
+  if (!active) h += '<button class="rm-btn" onclick="_rmMarkActive(' + ms.number + ')">Mark active</button>';
+  h += '<button class="rm-btn" onclick="_rmEditCard(' + ms.number + ')">Edit</button>';
+  h += '<button class="rm-btn" onclick="_rmClose(' + ms.number + ')">Close</button>';
+  h += '</div></div>';
+  return h;
+}
+
+function _rmHistoryHtml(ms) {
+  return '<div class="rm-history-row" id="rm-hist-' + ms.number + '">' +
+    '<i class="ti ti-circle-check" style="color:var(--text-muted)"></i>' +
+    '<span class="rm-history-row-title">' + _rmEsc(ms.title) + '</span>' +
+    '<button class="rm-btn" onclick="_rmReopen(' + ms.number + ')">Re-open</button></div>';
+}
+
+function _rmEsc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _rmShowAdd() { var el = document.getElementById('rm-add-form'); if (el) el.style.display = ''; }
+function _rmHideAdd() { var el = document.getElementById('rm-add-form'); if (el) el.style.display = 'none'; }
+
+function _rmCreate() {
+  var title = (document.getElementById('rm-new-title') || {}).value || '';
+  var desc = (document.getElementById('rm-new-desc') || {}).value || '';
+  var due = (document.getElementById('rm-new-due') || {}).value || null;
+  if (!title.trim()) return;
+  fetch('/api/roadmap/milestones?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title: title, description: desc, due_on: due || null})
+  }).then(function() { _rmRefresh(); }).catch(function() {});
+}
+
+function _rmMarkActive(num) {
+  fetch('/api/roadmap/settings?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({active_milestone: num})
+  }).then(function() { _rmRefresh(); }).catch(function() {});
+}
+
+function _rmEditCard(num) {
+  var ms = (_rmData.milestones || []).filter(function(m) { return m.number === num; })[0];
+  if (!ms) return;
+  var card = document.getElementById('rm-card-' + num);
+  if (!card) return;
+  var due = ms.due_on ? ms.due_on.substring(0, 10) : '';
+  var editDiv = document.createElement('div');
+  editDiv.className = 'rm-edit-form';
+  editDiv.id = 'rm-ef-' + num;
+  editDiv.innerHTML =
+    '<input id="rm-et-' + num + '" value="' + _rmEsc(ms.title) + '" placeholder="Title" />' +
+    '<textarea id="rm-ed-' + num + '">' + _rmEsc(ms.description || '') + '</textarea>' +
+    '<input id="rm-edu-' + num + '" type="date" value="' + due + '" />' +
+    '<div class="rm-edit-row">' +
+    '<button class="rm-btn rm-btn-prim" onclick="_rmSaveEdit(' + num + ')">Save</button>' +
+    '<button class="rm-btn" onclick="_rmCancelEdit(' + num + ')">Cancel</button></div>';
+  var actions = card.querySelector('.rm-card-actions');
+  if (actions) actions.style.display = 'none';
+  card.appendChild(editDiv);
+}
+
+function _rmSaveEdit(num) {
+  var title = (document.getElementById('rm-et-' + num) || {}).value || '';
+  var desc = (document.getElementById('rm-ed-' + num) || {}).value || '';
+  var due = (document.getElementById('rm-edu-' + num) || {}).value || null;
+  var fields = {description: desc};
+  if (title) fields.title = title;
+  if (due) fields.due_on = due + 'T00:00:00Z';
+  fetch('/api/roadmap/milestones/' + num + '?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(fields)
+  }).then(function() { _rmRefresh(); }).catch(function() {});
+}
+
+function _rmCancelEdit(num) {
+  var ef = document.getElementById('rm-ef-' + num);
+  if (ef) ef.remove();
+  var card = document.getElementById('rm-card-' + num);
+  if (card) { var a = card.querySelector('.rm-card-actions'); if (a) a.style.display = ''; }
+}
+
+function _rmClose(num) {
+  if (!confirm('Close this milestone? It will be moved to the history section.')) return;
+  fetch('/api/roadmap/milestones/' + num + '/close?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'POST'
+  }).then(function() { _rmRefresh(); }).catch(function() {});
+}
+
+function _rmReopen(num) {
+  fetch('/api/roadmap/milestones/' + num + '/reopen?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'POST'
+  }).then(function() { _rmRefresh(); }).catch(function() {});
+}
+
+function _rmInitDnd() {
+  var list = document.getElementById('rm-list');
+  if (!list) return;
+  var dragging = null;
+  list.querySelectorAll('.rm-card').forEach(function(card) {
+    card.addEventListener('dragstart', function(e) {
+      dragging = card;
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(function() { card.style.opacity = '.4'; }, 0);
+    });
+    card.addEventListener('dragend', function() {
+      card.style.opacity = '';
+      dragging = null;
+      _rmPersistOrder();
+    });
+    card.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      if (!dragging || dragging === card) return;
+      var rect = card.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) {
+        list.insertBefore(dragging, card);
+      } else {
+        list.insertBefore(dragging, card.nextSibling);
+      }
+    });
+  });
+}
+
+function _rmPersistOrder() {
+  var list = document.getElementById('rm-list');
+  if (!list) return;
+  var order = Array.from(list.querySelectorAll('.rm-card')).map(function(c) {
+    return parseInt(c.getAttribute('data-ms'), 10);
+  });
+  fetch('/api/roadmap/settings?repo=' + encodeURIComponent(_rmRepo()), {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({order: order})
+  }).catch(function() {});
 }
 </script>
 

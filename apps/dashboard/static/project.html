@@ -11399,6 +11399,10 @@ async function _histRerunSprint(label) {
       _smgmtShowToast('No tickets to re-run.');
       return;
     }
+    // The rerun endpoint moves every ticket to the new sub-label and waits for
+    // GitHub + the mirror to reflect all moves before it returns (so the run
+    // never starts on a partial set) — that can take a few seconds.
+    _smgmtShowToast('Preparing re-run — moving tickets to the new sprint…');
     const resp = await fetch(
       `/api/sprints/${encodeURIComponent(label)}/rerun?project=${encodeURIComponent(repo)}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' },

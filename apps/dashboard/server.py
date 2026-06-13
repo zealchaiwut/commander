@@ -9731,6 +9731,39 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
     }
 
 
+def _await_rerun_relabel(project: str, sub_label: str, expected: list[int],
+                         timeout_s: float = 15.0, interval_s: float = 2.0) -> set[int]:
+    """Wait until every re-run ticket actually carries ``sub_label``.
+
+    The per-issue label edits succeed synchronously, but GitHub's issue *list* is
+    eventually consistent and the local issues mirror (which both the board pane
+    and the sprint dispatch read) only reflects the move after a re-sync. Without
+    this, the running pane / sprint_manager can start on a partial set (issue:
+    re-run started before all tickets had moved to sprint-N.x). Re-syncs the
+    mirror each round and polls until all expected numbers appear under
+    ``sub_label`` (or the timeout elapses). Returns the confirmed-present set.
+    """
+    want = set(expected)
+    if not want:
+        return set()
+    deadline = time.monotonic() + timeout_s
+    present: set[int] = set()
+    while True:
+        try:
+            github_events_sync.sync_issues_mirror(project)
+        except Exception:
+            pass
+        github_client.invalidate("open_issues_body:")
+        github_client.invalidate("open_issues:")
+        try:
+            present = want & {i["number"] for i in _get_sprint_issues(project, sub_label)}
+        except Exception:
+            present = set()
+        if want.issubset(present) or time.monotonic() >= deadline:
+            return present
+        time.sleep(interval_s)
+
+
 @app.post("/api/sprints/{sprint_label}/rerun")
 def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     """Create an independent sub-sprint from selected non-UAT tickets.
@@ -9855,6 +9888,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     github_client.invalidate("issues:")
     github_client.invalidate("sprint_labels:")
 
+    # Block until GitHub + the local mirror both reflect every moved ticket under
+    # the new sub-label, so the running pane and the dispatch never start on a
+    # partial set (issue: re-run began before all tickets had moved to N.x).
+    confirmed_moved = _await_rerun_relabel(project, sub_label, moved)
+    all_moved = set(moved).issubset(confirmed_moved)
+
     # Scoped activity-log event for the sprint target (issue #721). The
     # stripped_labels payload is the timestamped audit trail of which stale
     # session-state labels were removed from which items on re-run (issue #811).
@@ -9887,6 +9926,8 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "parent_label": sprint_label,
         "dispatch_count": len(moved),
         "moved": moved,
+        "moved_confirmed": sorted(confirmed_moved),
+        "all_moved": all_moved,
         "decisions": decisions,
         "stripped_labels": stripped_labels,
     }

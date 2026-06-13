@@ -925,6 +925,7 @@ from routers import (  # noqa: E402
     runs_router,
     sprint_history_router,
     sprints_router,
+    status_router,
     system_router,
     tickets_router,
 )
@@ -937,6 +938,7 @@ app.include_router(log_search_router)
 app.include_router(runs_router)
 app.include_router(sprint_history_router)
 app.include_router(sprints_router)
+app.include_router(status_router)
 app.include_router(system_router)
 app.include_router(tickets_router)
 

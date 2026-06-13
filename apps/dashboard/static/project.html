@@ -1204,6 +1204,7 @@
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
     .deploy-card__meta-val { color: var(--text); word-break: break-word; }
     .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
+    .deploy-card__commit-msg { color: var(--text-muted); font-size: 11.5px; margin-left: 6px; }
     /* Editable run folder + port rows (issue #769) */
     .deploy-field-val { flex: 1; min-width: 0; }
     .deploy-field-edit {
@@ -25830,7 +25831,8 @@ function _deployCardHtml(c, i) {
     +      branchRow
     +      _deployFolderPortRows(c, i)
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
-    + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
+    + '      <span class="deploy-card__meta-val"><span class="is-mono" id="deploy-card-sha-' + i + '">…</span>'
+    + '      <span class="deploy-card__commit-msg" id="deploy-card-msg-' + i + '"></span></span></div>'
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
     + '      <span class="deploy-card__meta-val" id="deploy-card-time-' + i + '">—</span></div>'
     + (c.host !== 'render'
@@ -26041,6 +26043,12 @@ function _deploySetSha(i, sha) {
   if (el) el.textContent = _deployShortSha(sha);
 }
 
+function _deploySetCommitMsg(i, msg) {
+  var el = document.getElementById('deploy-card-msg-' + i);
+  if (!el) return;
+  el.textContent = (msg && msg !== 'unknown') ? '— ' + msg : '';
+}
+
 // AC7/AC8: paint the run-state pill and re-render the actions so the enable/
 // disable logic matches the new state — no full page refresh required.
 function _deploySetRunState(i, state) {
@@ -26102,8 +26110,9 @@ function _deployLoadCardStatus(c, i) {
       })
       .catch(function() { _deploySetSha(i, null); });
   } else {
-    // local: git_sha, server_started_at, last_deployed_at come from /api/deploy/overview.
+    // local: git_sha, git_commit_msg, server_started_at, last_deployed_at from /api/deploy/overview.
     _deploySetSha(i, c.git_sha);
+    _deploySetCommitMsg(i, c.git_commit_msg);
     _deploySetTime(i, c.last_deployed_at);
     _deploySetStarted(i, c.server_started_at);
     // AC7: read the live run state for the card from launchctl print.
@@ -26334,7 +26343,7 @@ function _deployExecDeploy(i) {
       // local (AC3): git pull output → restart → health check.
       var out = (d.pull_output || '').trim();
       if (out) _deployLogPush(i, out);
-      if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
+      if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); _deploySetCommitMsg(i, null); }
       _deploySetStatus(i, 'live');
       var _deployNow = new Date().toISOString();
       _deploySetTime(i, _deployNow);

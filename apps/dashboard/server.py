@@ -210,6 +210,7 @@ def _capture_git_value(cmd: list) -> str:
 
 _GIT_SHA: str = _capture_git_value(["git", "rev-parse", "HEAD"])
 _GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+_GIT_COMMIT_MSG: str = _capture_git_value(["git", "log", "-1", "--pretty=%s"])
 _STARTED_AT: str = datetime.now(timezone.utc).isoformat()
 _BUILD_TIMESTAMP: str = _STARTED_AT
 
@@ -2966,6 +2967,7 @@ def get_deploy_overview():
             card["start_errors"] = cfg.get("start_errors", [])
             if card["host"] == "local":
                 card["git_sha"] = _GIT_SHA
+                card["git_commit_msg"] = _GIT_COMMIT_MSG
                 card["server_started_at"] = _STARTED_AT
                 card["last_deployed_at"] = _deploy_times.get(f"{slug}/{card['env']}")
             environments.append(card)

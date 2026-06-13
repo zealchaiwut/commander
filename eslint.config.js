@@ -60,7 +60,11 @@ export default [
     },
     rules: {
       "no-undef": "error",
-      "no-unused-vars": "warn",
+      "no-unused-vars": ["warn", {
+        "varsIgnorePattern": "^_$",
+        "caughtErrorsIgnorePattern": "^_$",
+        "argsIgnorePattern": "^_",
+      }],
     },
   },
 ];

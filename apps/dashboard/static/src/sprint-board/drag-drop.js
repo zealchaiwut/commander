@@ -60,6 +60,10 @@ export function _smgmtUpdateSelectionUI() {
                   onclick="_smgmtDeleteSelected()">
             <i class="ti ti-trash"></i> Delete
           </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>
@@ -497,7 +501,6 @@ export async function _gcConfirm() {
   const modal = document.getElementById('gc-modal');
   const issueNum = parseInt(modal.dataset.issueNum, 10);
   const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-  const fromSprint = modal.dataset.fromSprint;
   const repo = modal.dataset.repo;
   const sprintLabel = `sprint-${sprintNum}`;
 
@@ -541,7 +544,7 @@ export async function _gcConfirm() {
   }
 }
 
-export function _smgmtTicketDragEnd(event) {
+export function _smgmtTicketDragEnd(_event) {
   if (_smgmtDragTicket) {
     if (_smgmtDragTicket.multi) {
       _smgmtDragTicket.multi.forEach(n => {

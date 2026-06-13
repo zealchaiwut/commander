@@ -9,8 +9,10 @@
  * are scheduled for follow-on extraction waves.
  */
 
+/* eslint-disable no-unused-vars */
 /* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, escHtml, sprintLabelDisplay,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
+/* eslint-enable no-unused-vars */
 
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   const listEl = document.getElementById('smgmt-sprint-list');
@@ -814,9 +816,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   let outcomeCardClass = '';
   let outcomeBadgeHtml = '';
   let headerMetaHtml = '';
-  let ticketCount = tickets.length;
   let ticketsContainerHtml = '';
-  let isOutcomeView = false;
   let rollupItems = tickets;
 
   if (outcome && (outcome.sprint_status || outcome.state)) {
@@ -840,9 +840,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       const issueList = outcome.issues || [];
-      ticketCount = issueList.length;
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
-      isOutcomeView = true;
       rollupItems = issueList.map(i => ({ number: i.number }));
     }
   } else if (isRunningView) {
@@ -873,14 +871,6 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   // Run-stats / dispatch-log forensics live in History only (sprint-lifecycle.md P4).
   const logHtml = '';
   const cancelBannerHtml = '';
-
-  // Bulk estimate button (issue #598): show when any ticket lacks a size-* label
-  const hasUnsizedTickets = tickets.length > 0 && tickets.some(t => !_smgmtTicketHasEstimate(t));
-  const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? '' : ' hidden'}"
-                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
-                    title="Estimate all unsized tickets in this sprint">
-                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
-                   <span class="smgmt-bulk-est-progress"></span>`;
 
   const plannedBadge = (!isNext && !finished && !isPostRun && !outcomeBadgeHtml)
     ? '<span class="sc-planned-badge">PLANNED</span>'
@@ -1115,11 +1105,7 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
   const estRemMins    = live ? live.est_remaining_minutes : null;
   const timeSpentSec  = live ? (live.time_spent_sec || 0) : 0;
   const currentTicket = live ? live.current_ticket : null;
-  const activeAgent   = live ? live.active_agent : null;
   const recentLogLines = live ? (live.recent_log_lines || []) : [];
-
-  // Progress bar percentage (complete / total)
-  const pct = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
 
   // Use locked snapshot (live.issues) as the source of truth for rows when available.
   // Fall back to label-derived tickets only during the pre-snapshot window.
@@ -1422,7 +1408,7 @@ export function _smgmtRenderBacklog(tickets) {
   _blUpdateActions();
 }
 
-export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
   const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = _smgmtTicketHasEstimate(ticket);
   const backlogLabelNames = (ticket.labels || []).map(l => l.name).join(',');

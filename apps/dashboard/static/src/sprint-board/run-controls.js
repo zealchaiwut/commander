@@ -306,9 +306,6 @@ export function _pfBuildFlagsHtml() {
   const flags = _pfFlags && (_pfFlags.flags || []);
   if (!flags || !flags.length) return '';
 
-  const label = _pfCurrentLabel;
-  const repo  = _pfCurrentRepo;
-
   const rows = flags.map(f => {
     const num = f.issue_number;
     const resolved = f.status !== 'pending';
@@ -376,7 +373,7 @@ export function _pfBuildFlagsHtml() {
   </div>`;
 }
 
-export function _pfFlagShowSizePicker(num, currentSize) {
+export function _pfFlagShowSizePicker(num, _currentSize) {
   const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
   const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
   if (actionsEl) actionsEl.style.display = 'none';

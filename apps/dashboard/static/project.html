@@ -3079,6 +3079,13 @@
     }
     .smgmt-selection-bar-delete.show { display: inline-flex; }
     .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-sel-reest-btn {
+      padding: 5px 10px; font-size: 12px; font-weight: 600;
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -3954,6 +3961,60 @@
     .smgmt-op-log-line--ok { color: var(--green); }
     .smgmt-op-log-line--err { color: var(--red); }
     .smgmt-op-log-line--step { color: var(--blue); }
+    /* Batch reestimate overlay extensions (issue #930) */
+    .smgmt-op-bg-btn {
+      margin-left: auto; flex-shrink: 0;
+      background: none; border: none; cursor: pointer;
+      font-size: 16px; color: var(--text-muted); padding: 2px 6px;
+      border-radius: 4px; line-height: 1;
+    }
+    .smgmt-op-bg-btn:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-op-bg-btn[hidden] { display: none !important; }
+    .smgmt-op-current {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      margin-top: 2px;
+    }
+    .smgmt-op-current[hidden] { display: none !important; }
+    .smgmt-op-done {
+      font-size: 12px; font-weight: 600; color: var(--green);
+      margin-top: 4px;
+    }
+    .smgmt-op-done[hidden] { display: none !important; }
+    .smgmt-op-error {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--red); margin-top: 4px;
+    }
+    .smgmt-op-error[hidden] { display: none !important; }
+    .smgmt-op-retry-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer;
+    }
+    .smgmt-op-retry-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .smgmt-op-close-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer; margin-left: auto;
+    }
+    .smgmt-op-close-btn:hover { background: var(--surface-3); }
+    .smgmt-op-close-btn[hidden] { display: none !important; }
+    /* Background indicator pill when batch runs in background */
+    .smgmt-reest-bg-pill {
+      display: none; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 999px; padding: 4px 10px;
+      cursor: pointer; position: fixed; bottom: 16px; right: 16px;
+      z-index: 900; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .smgmt-reest-bg-pill.show { display: flex; }
+    .smgmt-reest-bg-pill:hover { border-color: var(--blue); color: var(--blue); }
+    .smgmt-bulk-reest-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer;
+    }
+    .smgmt-bulk-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
     .smgmt-move-spinner {
       display: inline-block; width: 16px; height: 16px;
       border: 2px solid var(--border); border-top-color: var(--blue);
@@ -7374,15 +7435,27 @@
         <div class="smgmt-move-overlay" id="smgmt-move-overlay" role="alertdialog" aria-busy="true" aria-live="assertive" aria-label="Working, please wait">
           <div class="smgmt-move-overlay-pill">
             <div class="smgmt-op-head">
-              <span class="smgmt-move-spinner"></span>
+              <span class="smgmt-move-spinner" id="smgmt-move-spinner"></span>
               <span id="smgmt-move-overlay-msg">Working…</span>
+              <button class="smgmt-op-bg-btn" id="smgmt-op-bg-btn"
+                      onclick="_smgmtBulkReEstBackground()" title="Background — keep running" hidden>×</button>
             </div>
+            <div class="smgmt-op-current" id="smgmt-op-current" hidden></div>
             <div class="smgmt-op-progress-wrap" id="smgmt-op-progress-wrap" hidden>
               <div class="smgmt-op-progress-bar"><div class="smgmt-op-progress-fill" id="smgmt-op-progress-fill"></div></div>
               <span class="smgmt-op-progress-pct" id="smgmt-op-progress-pct">0%</span>
             </div>
             <div class="smgmt-op-log" id="smgmt-op-log" hidden></div>
+            <div class="smgmt-op-done" id="smgmt-op-done" hidden></div>
+            <div class="smgmt-op-error" id="smgmt-op-error" hidden></div>
           </div>
+        </div>
+
+        <!-- Background-mode indicator for batch reestimate (issue #930) -->
+        <div class="smgmt-reest-bg-pill" id="smgmt-reest-bg-pill"
+             onclick="_smgmtBulkReEstReopen()" title="Click to return to batch reestimate">
+          <span class="smgmt-move-spinner" style="width:10px;height:10px;border-width:2px"></span>
+          <span id="smgmt-reest-bg-text">Reestimating…</span>
         </div>
 
         <!-- Sprint sub-nav: Board / Running / History (issue #798) -->
@@ -14969,6 +15042,191 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     }
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
   }
+}
+
+// ── Batch reestimate with shared progress component bar mode (issue #930) ─────
+
+let _bulkReEst = { running: false, done: 0, total: 0, failed: [], finished: false };
+
+/** Called by the selection bar "Reestimate" button — routes to batch or single flow. */
+function _smgmtReEstimateSelected() {
+  const nums = Array.from(_smgmtSelectedIssues);
+  if (!nums.length) return;
+  _smgmtClearSelection();
+  _smgmtBulkReEstimate(nums);
+}
+
+/**
+ * Entrypoint for batch or single-ticket reestimate.
+ * Single ticket (<2): delegates to lightweight _smgmtReEstimateRun.
+ * Batch (>=2): opens shared progress component in bar mode.
+ */
+function _smgmtBulkReEstimate(issueNums) {
+  if (!issueNums || issueNums.length === 0) return;
+  if (issueNums.length === 1) {
+    _smgmtReEstimateRun(issueNums[0], null);
+    return;
+  }
+  _smgmtBulkReEstRun(issueNums);
+}
+
+async function _smgmtBulkReEstRun(issueNums) {
+  const total = issueNums.length;
+  _bulkReEst = { running: true, done: 0, total, failed: [], finished: false };
+
+  // Open shared progress component in bar mode
+  _smgmtBoardLock(`0 of ${total}`, { progress: true, total, clearLog: true });
+
+  // Show batch-reestimate extras (background button, current ticket)
+  const bgBtn    = document.getElementById('smgmt-op-bg-btn');
+  const currentEl = document.getElementById('smgmt-op-current');
+  const doneEl   = document.getElementById('smgmt-op-done');
+  const errorEl  = document.getElementById('smgmt-op-error');
+  if (bgBtn)    bgBtn.hidden    = false;
+  if (currentEl) currentEl.hidden = false;
+  if (doneEl)   doneEl.hidden   = true;
+  if (errorEl)  errorEl.hidden  = true;
+
+  const repo = _smgmtRepo() || '';
+
+  for (const issueNum of issueNums) {
+    if (!_bulkReEst.running) break;
+
+    // Show current ticket
+    if (currentEl) currentEl.textContent = `Estimating #${issueNum}…`;
+
+    try {
+      const resp = await fetch(
+        `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
+        { method: 'POST' }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok || !data.size) throw new Error('no size returned');
+
+      _bulkReEst.done++;
+      const timeLabel = data.minutes ? `, ~${data.minutes}m` : '';
+      _smgmtBoardLog(`#${issueNum} -> ${data.size}${timeLabel}`, 'ok');
+
+      // Patch the ticket row in the board
+      _smgmtBulkReEstPatchRow(issueNum, data);
+    } catch (err) {
+      _bulkReEst.failed.push(issueNum);
+      _smgmtBoardLog(`#${issueNum} failed: ${err.message}`, 'err');
+    }
+
+    const progress = _bulkReEst.done + _bulkReEst.failed.length;
+    const msgEl = document.getElementById('smgmt-move-overlay-msg');
+    if (msgEl) msgEl.textContent = `${progress} of ${total}`;
+    _smgmtBoardProgress(progress, total);
+  }
+
+  _bulkReEst.running  = false;
+  _bulkReEst.finished = true;
+
+  if (currentEl) currentEl.hidden = true;
+  if (bgBtn) bgBtn.hidden = true;
+
+  if (_bulkReEst.failed.length > 0) {
+    _smgmtBulkReEstShowError(_bulkReEst.failed, _bulkReEst.done);
+  } else {
+    _smgmtBulkReEstShowDone(_bulkReEst.done);
+  }
+}
+
+function _smgmtBulkReEstPatchRow(issueNum, data) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.dataset.size = data.size;
+  let pill = row.querySelector('.smgmt-ticket-size-pill, .smgmt-est-detail-btn');
+  if (!pill) {
+    pill = document.createElement('span');
+    pill.className = 'smgmt-ticket-size-pill';
+    const titleEl = row.querySelector('.smgmt-ticket-title');
+    if (titleEl) titleEl.after(pill);
+  } else if (pill.tagName === 'BUTTON') {
+    const span = document.createElement('span');
+    span.className = 'smgmt-ticket-size-pill';
+    pill.replaceWith(span);
+    pill = span;
+  }
+  pill.textContent = data.size;
+  pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+  if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
+}
+
+function _smgmtBulkReEstShowDone(doneCount) {
+  const doneEl = document.getElementById('smgmt-op-done');
+  const msgEl  = document.getElementById('smgmt-move-overlay-msg');
+  if (msgEl)  msgEl.textContent = 'Done';
+  if (doneEl) {
+    doneEl.textContent = `${doneCount} reestimated`;
+    doneEl.hidden = false;
+  }
+  // Replace spinner with close affordance
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = 'none';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'smgmt-op-close-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = _smgmtBulkReEstClose;
+  const head = document.querySelector('.smgmt-op-head');
+  if (head) head.appendChild(closeBtn);
+}
+
+function _smgmtBulkReEstShowError(failed, doneCount) {
+  const errorEl = document.getElementById('smgmt-op-error');
+  const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+  if (msgEl) msgEl.textContent = `Done — ${failed.length} failed`;
+  if (errorEl) {
+    errorEl.hidden = false;
+    errorEl.innerHTML = `<span>${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed</span>
+      <button class="smgmt-op-retry-btn" onclick="_smgmtBulkReEstRetry()">Retry failed</button>
+      <button class="smgmt-op-close-btn" style="margin-left:auto" onclick="_smgmtBulkReEstClose()">Close</button>`;
+  }
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = 'none';
+}
+
+function _smgmtBulkReEstRetry() {
+  const failed = _bulkReEst.failed.slice();
+  if (!failed.length) return;
+  _smgmtBulkReEstimate(failed);
+}
+
+function _smgmtBulkReEstBackground() {
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.remove('active');
+  const pill = document.getElementById('smgmt-reest-bg-pill');
+  const bgText = document.getElementById('smgmt-reest-bg-text');
+  if (pill) pill.classList.add('show');
+  if (bgText) bgText.textContent = `Reestimating… ${_bulkReEst.done + _bulkReEst.failed.length} of ${_bulkReEst.total}`;
+}
+
+function _smgmtBulkReEstReopen() {
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.add('active');
+  const pill = document.getElementById('smgmt-reest-bg-pill');
+  if (pill) pill.classList.remove('show');
+}
+
+function _smgmtBulkReEstClose() {
+  _bulkReEst = { running: false, done: 0, total: 0, failed: [], finished: false };
+  // Restore spinner visibility
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = '';
+  // Hide extra elements
+  const bgBtn     = document.getElementById('smgmt-op-bg-btn');
+  const currentEl = document.getElementById('smgmt-op-current');
+  const doneEl    = document.getElementById('smgmt-op-done');
+  const errorEl   = document.getElementById('smgmt-op-error');
+  if (bgBtn)     bgBtn.hidden    = true;
+  if (currentEl) currentEl.hidden = true;
+  if (doneEl)    doneEl.hidden   = true;
+  if (errorEl)   errorEl.hidden  = true;
+  // Remove any dynamically added close buttons
+  document.querySelectorAll('.smgmt-op-close-btn').forEach(b => b.remove());
+  _smgmtBoardUnlock();
 }
 
 // ── Ticket row context menu (issue #500) ──────────────────────────────────

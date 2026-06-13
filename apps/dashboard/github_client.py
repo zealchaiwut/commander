@@ -281,7 +281,7 @@ def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -
         return _json(
             "issue", "list", "--repo", r,
             "--state", "open",
-            "--json", "number,title,labels,assignees,state,url,body,createdAt,updatedAt",
+            "--json", "number,title,labels,assignees,state,url,body,milestone,createdAt,updatedAt",
             "--limit", str(limit),
         )
     return _cached(key, fetch)
@@ -770,17 +770,56 @@ def search_issues_by_title(title: str, repo_name: str | None = None) -> list[dic
 
 
 def create_issue(title: str, body: str, labels: list[str],
-                 repo_name: str | None = None) -> tuple[int, str]:
+                 repo_name: str | None = None,
+                 milestone: str | None = None) -> tuple[int, str]:
     r = _r(repo_name)
-    url = _run(
+    args = [
         "issue", "create", "--repo", r,
         "--title", title, "--body", body,
         "--label", ",".join(labels),
-    )
+    ]
+    # `gh issue create --milestone` resolves a milestone by title; only pass it
+    # when one was chosen so an empty selection leaves the issue unassigned
+    # (issue #879 AC5).
+    if milestone:
+        args += ["--milestone", milestone]
+    url = _run(*args)
     number = int(url.rstrip("/").split("/")[-1])
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
     return number, url
+
+
+def list_milestones(repo_name: str | None = None, state: str = "open") -> list[dict]:
+    """Return the repo's milestones as [{"number", "title", "state"}, ...].
+
+    Used by the milestone selector (issue #879) and the roadmap tab. ``state``
+    is one of "open" | "closed" | "all" (GitHub's milestone filter). Cached on
+    the standard github_client TTL.
+    """
+    r = _r(repo_name)
+    key = f"milestones:{r}:{state}"
+
+    def fetch():
+        raw = _json("api", f"repos/{r}/milestones?state={state}&per_page=100")
+        return [
+            {"number": m["number"], "title": m["title"], "state": m.get("state", "open")}
+            for m in (raw or [])
+        ]
+
+    return _cached(key, fetch)
+
+
+def milestone_view(issue: dict) -> dict | None:
+    """Shrink a gh issue's milestone object to the {number, title} the UI needs.
+
+    Returns None for an unassigned issue so chips/filters can branch on falsiness
+    (issue #879 AC5/AC6/AC7).
+    """
+    ms = issue.get("milestone")
+    if not ms:
+        return None
+    return {"number": ms.get("number"), "title": ms.get("title")}
 
 
 def list_labels(repo_name: str | None = None) -> list[dict]:

@@ -60,6 +60,10 @@ export function _smgmtUpdateSelectionUI() {
                   onclick="_smgmtDeleteSelected()">
             <i class="ti ti-trash"></i> Delete
           </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>

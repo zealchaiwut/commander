@@ -880,7 +880,11 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
                     onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
                     title="Estimate all unsized tickets in this sprint">
                     <i class="ti ti-calculator"></i> Estimate all unsized</button>
-                   <span class="smgmt-bulk-est-progress"></span>`;
+                   <span class="smgmt-bulk-est-progress"></span>
+                   ${tickets.length >= 2 ? `<button class="smgmt-bulk-reest-btn"
+                    onclick="event.stopPropagation();_smgmtBulkReEstimate(Array.from(document.querySelectorAll('#smgmt-tickets-${escHtml(label)} .smgmt-ticket[data-issue]')).map(r=>parseInt(r.dataset.issue,10)).filter(Boolean))"
+                    title="Force re-estimate all tickets in this sprint">
+                    <i class="ti ti-refresh"></i> Reestimate all</button>` : ''}`;
 
   const plannedBadge = (!isNext && !finished && !isPostRun && !outcomeBadgeHtml)
     ? '<span class="sc-planned-badge">PLANNED</span>'

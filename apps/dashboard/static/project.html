@@ -140,6 +140,28 @@
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
 
+    /* ── Active-milestone indicator (issue #880) — header, links to Roadmap ── */
+    .hnav-milestone {
+      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+      max-width: 280px; margin-bottom: 5px; padding: 5px 11px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); color: var(--text-muted);
+      font-size: 12px; text-decoration: none;
+      transition: border-color .12s, color .12s;
+    }
+    .hnav-milestone.hidden { display: none; }
+    .hnav-milestone:hover { border-color: var(--blue); color: var(--blue); }
+    .hnav-milestone .ti { font-size: 13px; flex-shrink: 0; }
+    .hnav-ms-name {
+      font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hnav-milestone:hover .hnav-ms-name { color: var(--blue); }
+    .hnav-ms-count {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      white-space: nowrap; flex-shrink: 0;
+    }
+
     /* ── Sprint status pill (sits at the tab-strip level) ── */
     .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
     .snav-pill {
@@ -7057,6 +7079,14 @@
           <i class="ti ti-adjustments-cog"></i>Settings
         </button>
       </nav>
+      <!-- Active-milestone indicator (issue #880) — links to the Roadmap tab -->
+      <a class="hnav-milestone hidden" id="hnav-milestone" href="#"
+         title="Active milestone — open Roadmap"
+         aria-label="Active milestone progress, open Roadmap tab">
+        <i class="ti ti-flag-3"></i>
+        <span class="hnav-ms-name"></span>
+        <span class="hnav-ms-count"></span>
+      </a>
       <!-- Sprint status pill (GitHub-backed; works cross-machine while traveling) -->
       <div class="snav-wrap">
         <button class="snav-pill hidden" id="snav-pill" onclick="snavTogglePanel(event)"
@@ -9976,7 +10006,8 @@ async function init() {
   // Sprint status pill (GitHub-backed) — initial load + 30s refresh
   snavRefresh();
   _snavRefreshAll();
-  setInterval(() => { snavRefresh(); _snavRefreshAll(); }, 30000);
+  _milestoneRefresh();
+  setInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -19891,6 +19922,26 @@ async function _sprintProgressFetch() {
 
 function _snavRepo() {
   return _cachedFullRepo[_slug] || '';
+}
+
+// #880: hydrate the header active-milestone indicator and link it to the
+// project's Roadmap tab. No active milestone → indicator stays hidden (AC3).
+async function _milestoneRefresh() {
+  const el = document.getElementById('hnav-milestone');
+  const repo = _snavRepo();
+  if (!el || !repo) return;
+  try {
+    const res = await fetch(`/api/home/milestone?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return;
+    const m = await res.json();
+    if (!m || !m.label) { el.classList.add('hidden'); return; }
+    const name = m.title || 'Milestone';
+    el.querySelector('.hnav-ms-name').textContent = name;
+    el.querySelector('.hnav-ms-count').textContent = m.label;
+    el.setAttribute('href', `/project/${encodeURIComponent(_slug)}/roadmap`);
+    el.setAttribute('aria-label', `${name}: ${m.label}, open Roadmap tab`);
+    el.classList.remove('hidden');
+  } catch (_) { /* leave indicator in last-known state */ }
 }
 
 /** Render (or clear) the sprint status badge in the sidebar for any project. */

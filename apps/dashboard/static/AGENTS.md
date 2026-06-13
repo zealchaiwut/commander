@@ -37,3 +37,5 @@ launchd instance picks up static changes immediately.
 - `log-colorize.js` public API — `project.html` and other pages depend on its function signatures.
 - Inline CSS that controls mobile/Tailscale layout — do not remove without verifying on a mobile device.
 - Sprint board column ordering and CSS classes — the sprint manager and tests reference these class names.
+
+<!-- needs-review: hotfix/board-history-running-ux — directory had changes; review and update this file -->

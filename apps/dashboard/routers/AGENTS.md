@@ -33,3 +33,5 @@ not in `server.py`.
 
 - `__init__.py` `__all__` list — always extend it when adding a new router; never shrink it.
 - `backup.py` route paths — the backup endpoints are used by scripts; changing paths is breaking.
+
+<!-- needs-review: hotfix/board-history-running-ux — directory had changes; review and update this file -->

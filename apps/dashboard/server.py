@@ -8788,8 +8788,10 @@ def get_calibration(project: str):
                 if issue_num is None:
                     continue
 
-                # Only count tickets that were actually completed
-                if iss.get("status") not in ("done", "passed"):
+                # Count any ticket that reached a completed state — done/passed
+                # plus uat/merged — so calibration isn't starved when tickets
+                # finish via UAT rather than a literal "done" status.
+                if iss.get("status") not in ("done", "passed", "uat", "merged"):
                     continue
 
                 start_ts = _parse_ts(iss.get("coder_started_at"))

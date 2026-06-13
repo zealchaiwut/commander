@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Analytics — Commander</title>
+  <title>Analytics · Commander</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <script>
   (function() {
@@ -25,8 +25,8 @@
       --surface-hover:#f5f6f8;
       --border:       #e5e7eb;
       --text:         #111827;
-      --text-muted:   #6b7280;
-      --text-sub:     #9ca3af;
+      --text-muted:   #4b5563;
+      --text-sub:     #606878;
       --green:        #16a34a;
       --green-bg:     #dcfce7;
       --amber:        #d97706;
@@ -64,7 +64,7 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 14px;
       min-height: 100dvh;
       display: flex;
@@ -223,7 +223,7 @@
       flex-direction: column;
       gap: 6px;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-muted);
       padding-top: 22px;
     }
@@ -242,7 +242,7 @@
     }
     .cal-table th {
       text-align: right;
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
@@ -265,7 +265,7 @@
     /* ── Size badges ── */
     .sz-badge {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       padding: 2px 8px;
       border-radius: 4px;
@@ -278,7 +278,7 @@
     /* ── Verdicts ── */
     .verdict {
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       padding: 2px 8px;
       border-radius: 4px;
@@ -290,7 +290,7 @@
     /* ── Apply button ── */
     .btn-apply {
       font-family: var(--mono);
-      font-size: 10px;
+      font-size: 12px;
       color: var(--text-sub);
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -305,7 +305,7 @@
 
     /* ── Cal note + empty ── */
     .cal-note {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-sub);
       margin-top: 12px;
       display: flex;
@@ -338,7 +338,7 @@
       padding: 16px;
     }
     .metric-label {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
@@ -388,7 +388,7 @@
       margin-top: 10px;
       flex-wrap: wrap;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-sub);
       line-height: 1.6;
     }
@@ -410,7 +410,7 @@
 
     /* ── Data-source footnote ── */
     .src-note {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-sub);
       font-family: var(--mono);
       line-height: 1.6;
@@ -420,7 +420,7 @@
     /* ── Cost tab ── */
     .estimate-badge {
       display: inline-block;
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 600;
       letter-spacing: .03em;
       color: var(--amber);
@@ -568,7 +568,7 @@
           </table>
           <div class="cal-note">
             <i class="ti ti-info-circle"></i>
-            "Apply" writes the avg as the project's configured estimate for that size — the manual version of the Settings auto-suggest.
+            "Apply" writes the avg as the project's configured estimate for that size · the manual version of the Settings auto-suggest.
           </div>
         </div>
       </div>
@@ -589,7 +589,7 @@
         <!-- First-pass rate card -->
         <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
           <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
-          <div class="metric-val"><span id="fpr-val">—</span><span class="unit">%</span></div>
+          <div class="metric-val"><span id="fpr-val">·</span><span class="unit">%</span></div>
           <div class="metric-sub" id="fpr-sub"></div>
           <div class="bar"><span id="fpr-bar" style="width:0%;background:var(--green)"></span></div>
           <div class="metric-empty">No data for this period</div>
@@ -598,7 +598,7 @@
         <!-- Rework rate card -->
         <div class="metric-card" id="card-rework" role="region" aria-label="Rework rate">
           <div class="metric-label"><i class="ti ti-refresh" style="font-size:13px"></i> Rework rate</div>
-          <div class="metric-val"><span id="rwr-val">—</span><span class="unit">%</span></div>
+          <div class="metric-val"><span id="rwr-val">·</span><span class="unit">%</span></div>
           <div class="metric-sub" id="rwr-sub"></div>
           <div class="bar"><span id="rwr-bar" style="width:0%;background:var(--amber)"></span></div>
           <div class="metric-empty">No data for this period</div>
@@ -607,7 +607,7 @@
         <!-- Avg duration by agent card -->
         <div class="metric-card" id="card-duration" role="region" aria-label="Average duration by agent">
           <div class="metric-label"><i class="ti ti-clock" style="font-size:13px"></i> Avg duration by agent</div>
-          <div class="metric-val"><span id="dur-val">—</span></div>
+          <div class="metric-val"><span id="dur-val">·</span></div>
           <div class="breakdown" id="dur-breakdown"></div>
           <div class="metric-empty">No data for this period</div>
         </div>
@@ -615,7 +615,7 @@
         <!-- Throughput card -->
         <div class="metric-card" id="card-throughput" role="region" aria-label="Throughput">
           <div class="metric-label"><i class="ti ti-stack-2" style="font-size:13px"></i> Throughput</div>
-          <div class="metric-val"><span id="thr-val">—</span><span class="unit">tickets / sprint</span></div>
+          <div class="metric-val"><span id="thr-val">·</span><span class="unit">tickets / sprint</span></div>
           <div class="metric-sub" id="thr-sub"></div>
           <div class="metric-empty">No data for this period</div>
         </div>
@@ -623,7 +623,7 @@
         <!-- Cost per sprint card -->
         <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
           <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
-          <div class="metric-val"><span id="cps-val">—</span></div>
+          <div class="metric-val"><span id="cps-val">·</span></div>
           <div class="breakdown" id="cps-breakdown"></div>
           <div class="metric-empty">No data for this period</div>
         </div>
@@ -631,7 +631,7 @@
         <!-- Cost per ticket card -->
         <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
           <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
-          <div class="metric-val"><span id="cpt-val">—</span></div>
+          <div class="metric-val"><span id="cpt-val">·</span></div>
           <div class="metric-sub" id="cpt-sub"></div>
           <div class="metric-empty">No data for this period</div>
         </div>
@@ -750,10 +750,10 @@
               </tr>
             </thead>
             <tbody id="cost-size-tbody">
-              <tr><td style="font-weight:600">S</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">M</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">L</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
-              <tr><td style="font-weight:600">XL</td><td style="text-align:right">—</td><td style="text-align:right;font-family:var(--mono)">—</td></tr>
+              <tr><td style="font-weight:600">S</td><td style="text-align:right">·</td><td style="text-align:right;font-family:var(--mono)">·</td></tr>
+              <tr><td style="font-weight:600">M</td><td style="text-align:right">·</td><td style="text-align:right;font-family:var(--mono)">·</td></tr>
+              <tr><td style="font-weight:600">L</td><td style="text-align:right">·</td><td style="text-align:right;font-family:var(--mono)">·</td></tr>
+              <tr><td style="font-weight:600">XL</td><td style="text-align:right">·</td><td style="text-align:right;font-family:var(--mono)">·</td></tr>
             </tbody>
           </table>
         </div>
@@ -865,7 +865,7 @@
        'dur-val', 'dur-breakdown', 'thr-val', 'thr-sub',
        'cps-val', 'cps-breakdown', 'cpt-val', 'cpt-sub'].forEach(function(id) {
         var el = document.getElementById(id);
-        if (el) el.textContent = '—';
+        if (el) el.textContent = '·';
       });
       ['fpr-bar', 'rwr-bar'].forEach(function(id) {
         var el = document.getElementById(id);
@@ -1055,11 +1055,11 @@
         }
         html += '<tr>';
         html += '<td><span class="sz-badge sz-' + sz + '">' + sz + '</span></td>';
-        html += '<td>' + (cfg !== null && cfg !== undefined ? Math.round(cfg) + 'm' : '—') + '</td>';
+        html += '<td>' + (cfg !== null && cfg !== undefined ? Math.round(cfg) + 'm' : '·') + '</td>';
         html += '<td>' + count + '</td>';
-        html += '<td>' + (min !== null && min !== undefined ? Math.round(min) + 'm' : '—') + '</td>';
-        html += '<td>' + (avg !== null && avg !== undefined ? Math.round(avg) + 'm' : '—') + '</td>';
-        html += '<td>' + (max !== null && max !== undefined ? Math.round(max) + 'm' : '—') + '</td>';
+        html += '<td>' + (min !== null && min !== undefined ? Math.round(min) + 'm' : '·') + '</td>';
+        html += '<td>' + (avg !== null && avg !== undefined ? Math.round(avg) + 'm' : '·') + '</td>';
+        html += '<td>' + (max !== null && max !== undefined ? Math.round(max) + 'm' : '·') + '</td>';
         html += '<td><span class="verdict ' + vCls + '">' + v + '</span>' + applyBtn + '</td>';
         html += '</tr>';
       });
@@ -1145,7 +1145,7 @@
     };
 
     function _fmtTokens(n) {
-      if (!n && n !== 0) return '—';
+      if (!n && n !== 0) return '·';
       if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
       if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
       return String(n);
@@ -1218,7 +1218,7 @@
           var entry = psat[sz] || {count: 0, avg_tokens: null};
           return '<tr><td style="font-weight:600">' + sz + '</td>' +
             '<td style="text-align:right">' + (entry.count || 0) + '</td>' +
-            '<td style="text-align:right;font-family:var(--mono)">' + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '—') + '</td></tr>';
+            '<td style="text-align:right;font-family:var(--mono)">' + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '·') + '</td></tr>';
         }).join('');
       }
     }

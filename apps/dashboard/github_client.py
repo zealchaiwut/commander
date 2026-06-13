@@ -486,6 +486,60 @@ def list_sprints(repo_name: str | None = None) -> list[int]:
     return _cached(key, fetch)
 
 
+def list_milestones(repo_name: str | None = None) -> list[dict]:
+    """List repository milestones (issue #861, Plan next sprint).
+
+    Returns ``[{title, state, dueOn, number}, ...]`` for all milestones. Used to
+    resolve the *active milestone* (the open milestone with the nearest due
+    date). Cached on the standard TTL like the other read paths.
+    """
+    r = _r(repo_name)
+    key = f"milestones:{r}"
+
+    def fetch():
+        out = _json("api", f"repos/{r}/milestones",
+                    "--paginate", "-X", "GET",
+                    "-f", "state=all", "-f", "per_page=100")
+        result = []
+        for m in out or []:
+            result.append({
+                "title": m.get("title", ""),
+                "state": m.get("state", "open"),
+                "dueOn": m.get("due_on"),
+                "number": m.get("number"),
+            })
+        return result
+
+    return _cached(key, fetch)
+
+
+def list_open_issues_for_planning(repo_name: str | None = None,
+                                  limit: int = 300) -> list[dict]:
+    """Open issues with the fields the sprint planner needs (issue #861).
+
+    Like ``list_open_issues_with_body`` but also requests the ``milestone``
+    field, so the planner can filter to the active milestone's open backlog
+    (AC3). Uses the DB mirror when it already carries body+milestone, else a
+    cached ``gh issue list``.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None and all(
+            "body" in i and "milestone" in i for i in mirror):
+        return [i for i in mirror if i.get("state") == "open"][:limit]
+    key = f"open_issues_planning:{r}"
+
+    def fetch():
+        return _json(
+            "issue", "list", "--repo", r,
+            "--state", "open",
+            "--json", "number,title,labels,assignees,state,url,body,milestone,createdAt,updatedAt",
+            "--limit", str(limit),
+        )
+
+    return _cached(key, fetch)
+
+
 def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
     """Return (base, suffix) sort key for sprint labels (plain or dotted)."""
     m = SPRINT_LABEL_RE_ALL.match(label)

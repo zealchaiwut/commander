@@ -237,7 +237,32 @@
   function todayIso(){ return fmtIso(new Date()); }
 
   // ── boot ──────────────────────────────────────────────────────────────────
+  // Deck/monitoring deep links open `/?project=<P>&view=<V>[&filter=errors]`.
+  // `/` serves this home page, so translate that into the canonical project URL
+  // and bounce there; project.html reads ?view= / ?filter= to pick the pane.
+  // view -> tab segment; the sub-view (board/running/history/summary) and the
+  // errors filter are carried in the query for project.html to apply.
+  function _deckRedirect(){
+    const p = new URLSearchParams(window.location.search);
+    const project = p.get('project');
+    if (!project) return false;
+    const view = (p.get('view') || '').toLowerCase();
+    const tab = (view === 'activity') ? 'logs'
+              : (view === 'tickets')  ? 'tickets'
+              : 'sprint';   // running / board / history / summary all live here
+    const q = new URLSearchParams();
+    if (view) q.set('view', view);
+    const filter = p.get('filter');
+    if (filter) q.set('filter', filter);
+    const qs = q.toString();
+    window.location.replace(
+      '/project/' + encodeURIComponent(project) + '/' + tab + (qs ? '?' + qs : '')
+    );
+    return true;
+  }
+
   async function init(){
+    if (_deckRedirect()) return;   // bounced to the project view; stop here
     try {
       const home = await (await fetch('/api/home')).json();
       (home.projects || []).forEach(p => {

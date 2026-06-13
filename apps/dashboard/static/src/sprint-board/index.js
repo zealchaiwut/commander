@@ -35,6 +35,7 @@ import {
   _pfBuildDAGHtml, _pfDrawDAGArrows, _pfToggleTicket, _pfGetSelectedTickets,
   _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
+  _pfStepperInit, _pfStepState, _pfStepperAnimate, _pfStepperSummary,
 } from './run-controls.js';
 import {
   computeDropPlan,
@@ -118,6 +119,11 @@ globalThis._pfUpdateSections = _pfUpdateSections;
 globalThis._pfShowError = _pfShowError;
 globalThis._pfRetry = _pfRetry;
 globalThis._pfConfirm = _pfConfirm;
+// Stepper functions (issue #933)
+globalThis._pfStepperInit = _pfStepperInit;
+globalThis._pfStepState = _pfStepState;
+globalThis._pfStepperAnimate = _pfStepperAnimate;
+globalThis._pfStepperSummary = _pfStepperSummary;
 
 // Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
 // computeDropPlan is a DOM-free decision helper kept on the global (and thus in

@@ -12,6 +12,22 @@
    _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
    _pfFlags:writable, _pfSelectedIds:writable */
 
+// ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
+
+/** Step definitions matching the pre-flight panel check groups. */
+const PF_STEPS = [
+  { key: 'ac',        label: 'Acceptance criteria', autoFixable: true  },
+  { key: 'estimates', label: 'Estimate coverage',    autoFixable: true  },
+  { key: 'cycle',     label: 'Dependency graph',     autoFixable: false },
+  { key: 'missizing', label: 'Mis-sizing review',    autoFixable: false },
+  { key: 'conflicts', label: 'Conflict analysis',    autoFixable: false },
+];
+
+/** Count of steps currently in fail state (blocks Run Sprint). */
+let _pfStepFails = 0;
+
+// ────────────────────────────────────────────────────────────────────────────
+
 // Effective agent models for the current preflight (from /preflight `models`,
 // resolved server-side from sprint.yaml — what the run will actually use).
 let _pfModels = null;
@@ -133,10 +149,11 @@ export function _pfOpen(label) {
 }
 
 export function _pfReset() {
-  document.getElementById('pf-loading').classList.remove('hidden');
+  document.getElementById('pf-loading').classList.add('hidden');
+  document.getElementById('pf-stepper').classList.remove('hidden');
   document.getElementById('pf-content').classList.add('hidden');
   document.getElementById('pf-error').classList.add('hidden');
-  document.getElementById('pf-footer').classList.add('hidden');
+  document.getElementById('pf-footer').classList.remove('hidden');
   document.getElementById('pf-confirm-btn').disabled = true;
   document.getElementById('pf-confirm-btn').textContent = 'Run Sprint';
   _pfDagData = null;
@@ -145,11 +162,13 @@ export function _pfReset() {
   _pfFlags = null;
   _pfModels = null;
   _pfSelectedIds = new Set();
+  _pfStepperInit();
 }
 
 export function _pfClose() {
   document.getElementById('pf-backdrop').classList.add('hidden');
   document.getElementById('pf-modal').classList.add('hidden');
+  document.getElementById('pf-stepper').classList.add('hidden');
   _pfCurrentLabel = null;
   _pfCurrentRepo  = null;
   _pfState        = 'idle';
@@ -158,6 +177,7 @@ export function _pfClose() {
   _pfCycle        = null;
   _pfFlags        = null;
   _pfSelectedIds  = new Set();
+  _pfStepFails    = 0;
 }
 
 export async function _pfFetch() {
@@ -181,6 +201,8 @@ export async function _pfFetch() {
     }
     _pfState = 'success';
     _pfShowSuccess();
+    // Drive the stepper animation with the fetched data (issue #933)
+    _pfStepperAnimate(data);
   } catch (e) {
     if (_pfCurrentLabel !== label) return;
     _pfState = 'error';
@@ -218,7 +240,8 @@ export function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  _pfUpdateConfirmBtn();
+  // Note: _pfUpdateConfirmBtn() is called at the end of _pfStepperAnimate (issue #933)
+  // so the Run button is only enabled after stepper resolves all steps.
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
@@ -229,15 +252,19 @@ export function _pfUpdateConfirmBtn() {
   const hasCycle = !!(_pfCycle && _pfCycle.length);
   const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
   const hasPending = pendingFlags.length > 0;
+  const hasFail = _pfStepFails > 0;
   const confirmBtn = document.getElementById('pf-confirm-btn');
   if (!confirmBtn) return;
-  confirmBtn.disabled = hasCycle || hasPending;
+  confirmBtn.disabled = hasCycle || hasPending || hasFail;
   if (hasCycle) {
     confirmBtn.title = 'Cannot run: dependency cycle detected. Resolve the cycle first.';
     confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: dependency cycle detected');
   } else if (hasPending) {
     confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? 's' : ''} need review.`;
     confirmBtn.setAttribute('aria-label', 'Run Sprint — disabled: mis-sizing flags need review');
+  } else if (hasFail) {
+    confirmBtn.title = `Cannot run: ${_pfStepFails} blocking issue${_pfStepFails > 1 ? 's' : ''} detected.`;
+    confirmBtn.setAttribute('aria-label', `Run Sprint — disabled: ${_pfStepFails} blocking issue(s)`);
   } else {
     confirmBtn.title = '';
     confirmBtn.setAttribute('aria-label', 'Run Sprint');
@@ -620,5 +647,171 @@ export async function _pfConfirm() {
   } catch (e) {
     _pfState = 'error';
     _pfShowError('Failed to run sprint: ' + e.message);
+  }
+}
+
+
+// ── Pre-flight stepper functions (shared ProgressActivity — stepper mode, issue #933) ─
+
+/** Initialise all steps to `pending` state. Called from _pfReset(). */
+export function _pfStepperInit() {
+  _pfStepFails = 0;
+  const stepsEl = document.getElementById('pf-stepper-steps');
+  if (!stepsEl) return;
+  stepsEl.innerHTML = PF_STEPS.map(s =>
+    `<div class="pf-step-item pf-step-item--pending" id="pf-step-${s.key}">
+      <span class="pf-step-icon" aria-hidden="true"></span>
+      <div class="pf-step-content">
+        <span class="pf-step-name">${escHtml(s.label)}</span>
+        <span class="pf-step-note" id="pf-step-note-${s.key}"></span>
+      </div>
+    </div>`
+  ).join('');
+  const summaryEl = document.getElementById('pf-stepper-summary');
+  if (summaryEl) {
+    summaryEl.textContent = '';
+    summaryEl.className = 'pf-stepper-summary hidden';
+  }
+}
+
+/** Transition a single step to a new state with an optional note. */
+export function _pfStepState(key, state, note) {
+  const item = document.getElementById(`pf-step-${key}`);
+  if (!item) return;
+  item.className = `pf-step-item pf-step-item--${state}`;
+  const noteEl = document.getElementById(`pf-step-note-${key}`);
+  if (noteEl) noteEl.textContent = note || '';
+}
+
+/**
+ * Call the preflight-fix SSE endpoint and collect summary counts.
+ * Auto-fixes missing AC and missing size estimates for the sprint.
+ */
+async function _pfRunAutoFix(label, repo) {
+  const resp = await fetch(
+    `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+    { method: 'POST' }
+  );
+  if (!resp.ok) throw new Error(`preflight-fix ${resp.status}`);
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', filled = 0, estimated = 0, errors = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
+      if (!m) continue;
+      if (m[1] === 'done') {
+        try {
+          const d = JSON.parse(m[2]);
+          filled    = d.filled    || 0;
+          estimated = d.estimated || 0;
+          errors    = d.errors    || [];
+        } catch (_) { /* ignore parse errors */ }
+      }
+    }
+  }
+  return { filled, estimated, errors };
+}
+
+/**
+ * Drive the stepper state machine using preflight API response data.
+ * Steps animate pending → checking → pass/fail/fixed sequentially.
+ * Called from _pfFetch() after a successful preflight response.
+ */
+export async function _pfStepperAnimate(data) {
+  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const label = _pfCurrentLabel;
+  const repo  = _pfCurrentRepo;
+
+  // ── Steps 1 & 2: Acceptance criteria + Estimate coverage (auto-fixable) ──
+  _pfStepState('ac',        'checking', '');
+  _pfStepState('estimates', 'checking', '');
+  await delay(350);
+
+  const missingAc  = (data.warnings && data.warnings.missing_ac    || []);
+  const unestimated = (data.warnings && data.warnings.unestimated  || []);
+  const hasAcIssues  = missingAc.length  > 0;
+  const hasEstIssues = unestimated.length > 0;
+
+  if ((hasAcIssues || hasEstIssues) && label && repo) {
+    // Auto-fix: call preflight-fix endpoint for missing AC and estimates
+    try {
+      const fix = await _pfRunAutoFix(label, repo);
+      const acNote  = fix.filled    > 0 ? `${fix.filled} acceptance criteria generated`
+                    : hasAcIssues       ? `${missingAc.length} ticket(s) missing AC`
+                    : '';
+      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated`
+                    : hasEstIssues      ? `${unestimated.length} ticket(s) unestimated`
+                    : '';
+      _pfStepState('ac',        fix.filled    > 0 ? 'fixed' : 'pass', acNote);
+      _pfStepState('estimates', fix.estimated > 0 ? 'fixed' : 'pass', estNote);
+    } catch (_) {
+      // Fix call failed — show pass with warning note (non-blocking)
+      _pfStepState('ac',        'pass', hasAcIssues  ? `${missingAc.length} ticket(s) missing AC`     : '');
+      _pfStepState('estimates', 'pass', hasEstIssues ? `${unestimated.length} ticket(s) unestimated`   : '');
+    }
+  } else {
+    _pfStepState('ac',        'pass', '');
+    _pfStepState('estimates', 'pass', '');
+  }
+  await delay(300);
+
+  // ── Step 3: Dependency cycle (non-auto-fixable, blocking on cycle) ────────
+  _pfStepState('cycle', 'checking', '');
+  await delay(350);
+  if (data.cycle && data.cycle.length) {
+    _pfStepState('cycle', 'fail', `Cycle: ${data.cycle.join(' → ')}`);
+    _pfStepFails++;
+  } else {
+    _pfStepState('cycle', 'pass', '');
+  }
+  await delay(300);
+
+  // ── Step 4: Mis-sizing review (non-auto-fixable, blocking if pending flags) ─
+  _pfStepState('missizing', 'checking', '');
+  await delay(350);
+  const pendingFlags = (data.mis_sizing_flags && data.mis_sizing_flags.flags || [])
+    .filter(f => f.status === 'pending');
+  if (pendingFlags.length > 0) {
+    _pfStepState('missizing', 'fail', `${pendingFlags.length} flag(s) require review`);
+    _pfStepFails++;
+  } else {
+    _pfStepState('missizing', 'pass', '');
+  }
+  await delay(300);
+
+  // ── Step 5: Conflict analysis (informational, non-blocking) ───────────────
+  _pfStepState('conflicts', 'checking', '');
+  await delay(350);
+  const selectedTickets = _pfGetSelectedTickets();
+  const conflicts = _pfComputeConflicts(selectedTickets);
+  if (conflicts.length > 0) {
+    _pfStepState('conflicts', 'pass', `${conflicts.length} conflict(s) — execution order planned`);
+  } else {
+    _pfStepState('conflicts', 'pass', '');
+  }
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+  _pfStepperSummary();
+  _pfUpdateConfirmBtn();
+}
+
+/** Show the overall summary: all-clear or blocking count. */
+export function _pfStepperSummary() {
+  const summaryEl = document.getElementById('pf-stepper-summary');
+  if (!summaryEl) return;
+  summaryEl.classList.remove('hidden');
+  if (_pfStepFails > 0) {
+    summaryEl.textContent =
+      `${_pfStepFails} blocking issue${_pfStepFails > 1 ? 's' : ''} — cannot run`;
+    summaryEl.className = 'pf-stepper-summary pf-stepper-summary--blocking';
+  } else {
+    summaryEl.textContent = 'All checks passed — ready to run';
+    summaryEl.className = 'pf-stepper-summary pf-stepper-summary--clear';
   }
 }

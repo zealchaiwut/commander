@@ -33,6 +33,7 @@ export default [
         FormData: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
+        TextDecoder: "readonly",
         location: "readonly",
         navigator: "readonly",
         console: "readonly",

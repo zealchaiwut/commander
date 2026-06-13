@@ -7309,9 +7309,12 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     # which port the dashboard is on. Use it when in-memory cache is empty
     # (server restart, or sprint_manager posting to a different port).
     if not status_data:
-        _fb_m = re.search(r"(\d+)", sprint_label)
-        _fb_n = _fb_m.group(1) if _fb_m else sprint_label
-        _fb_path = commander / "sprints" / f"sprint-{_fb_n}-state.json"
+        # Use the FULL sprint label for the state filename. A re-run sub-label
+        # like "sprint-66.5" has its own sprint-66.5-state.json; the old regex
+        # extracted only the base number ("66"), so /live read the PARENT
+        # sprint's stale state and the running pane showed no active issue on a
+        # re-run (operator: "can't see which issue is working when you re-run").
+        _fb_path = commander / "sprints" / f"{sprint_label}-state.json"
         if _fb_path.exists():
             try:
                 status_data = json.loads(_fb_path.read_text(encoding="utf-8"))
@@ -7333,12 +7336,19 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     if started_at_dt:
         time_spent_sec = max(0, int((now_utc - started_at_dt).total_seconds()))
 
-    # ── current_ticket: the most-recent in-progress issue from sprint status ──
+    # ── current_ticket: the ticket an agent is actively working ───────────────
     current_ticket: Optional[dict] = None
     issues = status_data.get("issues", [])
-    # Prefer the last issue with status "in-progress"; fall back to last non-done issue
+    # Prefer the ticket with an in-flight agent (state.json keeps status="pending"
+    # while agent_status flips to coder_running/tester_running), then any issue
+    # marked in-progress, then the first non-terminal one.
+    _ACTIVE_AGENT = ("coder_dispatched", "coder_running", "tester_dispatched", "tester_running")
+    active_iss = [i for i in issues if i.get("agent_status") in _ACTIVE_AGENT]
     in_progress = [i for i in issues if i.get("status") == "in-progress"]
-    if in_progress:
+    if active_iss:
+        iss = active_iss[-1]
+        current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
+    elif in_progress:
         iss = in_progress[-1]
         current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
     else:

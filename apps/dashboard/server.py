@@ -1681,6 +1681,22 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         status = _sprint_statuses.get(key, {})
         issues = status.get("issues", [])
         if not issues:
+            # Disk fallback: sprint_manager writes <label>-state.json regardless
+            # of which port it posts to. Read the FULL sub-label state (e.g.
+            # sprint-67.1-state.json) so the pill reflects the running sub-sprint
+            # and its live progress instead of a GitHub-derived base guess (the
+            # pill showed "S71 0/11" while 67.1 ran — same gap #950 fixed for /live).
+            try:
+                _sp = (_commander_dir(_project_root_path(r["project"]))
+                       / "sprints" / f"{r['sprint_label']}-state.json")
+                if _sp.exists():
+                    _disk = json.loads(_sp.read_text(encoding="utf-8"))
+                    issues = _disk.get("issues", [])
+                    if issues and status.get("sprint_number") is None:
+                        status = {**status, "sprint_number": _disk.get("sprint_number")}
+            except Exception:
+                pass
+        if not issues:
             continue
         sprint_number = status.get("sprint_number")
         if sprint_number is None:

@@ -15617,40 +15617,36 @@ function _smgmtHotswapPlan(targetLabel, incomingNums) {
   });
 
   const incomingSet = new Set(incomingNums);
-  const occupied = Object.keys(byNum)
-    .map(Number)
-    .filter(n => n >= targetNum && byNum[n].some(num => !incomingSet.has(num)));
-  const maxNum = occupied.length ? Math.max(...occupied) : targetNum;
+  const nonIncoming = n => (byNum[n] || []).filter(num => !incomingSet.has(num));
+  const isOccupied = n => nonIncoming(n).length > 0;
+
+  // Only the CONTIGUOUS block of occupied sprints starting at the target needs
+  // to shift down — the ripple stops at the first empty slot, which absorbs the
+  // insert. Bumping sprints beyond that gap is wrong: it needlessly relabels
+  // them and leaves a fresh hole (e.g. inserting at 67 with 68 empty must move
+  // only 67→68, never touch 69).
+  let runEnd = targetNum - 1;          // last sprint in the contiguous occupied run
+  for (let n = targetNum; isOccupied(n); n++) runEnd = n;
 
   const steps = [];
-  for (let n = maxNum; n >= targetNum; n--) {
-    const nums = (byNum[n] || []).filter(num => !incomingSet.has(num));
-    if (n === targetNum) {
-      if (nums.length > 0) {
-        steps.push({
-          kind: 'shift',
-          from: n,
-          to: n + 1,
-          nums,
-          label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
-        });
-      }
-      steps.push({
-        kind: 'place',
-        to: n,
-        nums: incomingNums.slice(),
-        label: `Selected → Sprint ${n} (${incomingNums.length} ticket${incomingNums.length !== 1 ? 's' : ''})`,
-      });
-    } else if (nums.length > 0) {
-      steps.push({
-        kind: 'shift',
-        from: n,
-        to: n + 1,
-        nums,
-        label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
-      });
-    }
+  // Shift the run descending (highest first) so each destination is vacated
+  // before it is filled — no collisions.
+  for (let n = runEnd; n >= targetNum; n--) {
+    const nums = nonIncoming(n);
+    steps.push({
+      kind: 'shift',
+      from: n,
+      to: n + 1,
+      nums,
+      label: `Sprint ${n} → Sprint ${n + 1} (${nums.length} ticket${nums.length !== 1 ? 's' : ''})`,
+    });
   }
+  steps.push({
+    kind: 'place',
+    to: targetNum,
+    nums: incomingNums.slice(),
+    label: `Selected → Sprint ${targetNum} (${incomingNums.length} ticket${incomingNums.length !== 1 ? 's' : ''})`,
+  });
   return steps.length ? steps : null;
 }
 

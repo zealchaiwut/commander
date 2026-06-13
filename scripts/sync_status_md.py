@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Regenerate STATUS.md and commit if content changed.
+"""Regenerate STATUS.md on disk when its content changed (write-only, no commit).
 
-Compares new content against the existing file (excluding the timestamp
-line, which always differs). Only writes and commits when sprint progress
-or goal text actually changed.
+Compares new content against the existing file (excluding the timestamp line,
+which always differs) and rewrites the file only when sprint progress or goal
+text actually changed. The dashboard serves STATUS.md from disk, so it is a
+generated artifact and is NOT committed — committing it every ~30s during a
+sprint moved the dashboard's working clone and broke Deploy / collided with the
+operator's branch.
 
 Exit codes:
-  0 — STATUS.md updated and committed
-  1 — no change detected, nothing committed
+  0 — STATUS.md (re)written, or already a non-git target
+  1 — no change detected, nothing written
   2 — error
 
 Usage:
     python3 scripts/sync_status_md.py [--repo owner/repo] [--out PATH] [--note TEXT]
 
---note TEXT: optional context appended to commit message, e.g. "#123 moved to UAT"
+--note TEXT: optional context (kept for CLI compatibility; no longer used).
 """
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -36,10 +38,6 @@ def _body(content: str) -> str:
     """Return content with the first two lines (timestamp + blank) stripped."""
     lines = content.splitlines()
     return "\n".join(lines[2:]) if len(lines) > 2 else "\n".join(lines)
-
-
-def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd)
 
 
 def main() -> None:
@@ -105,29 +103,13 @@ def main() -> None:
             pass
         raise
 
-    # Git commit
-    r = _git("rev-parse", "--git-dir", cwd=project_root)
-    if r.returncode != 0:
-        sys.stdout.write(str(f"STATUS.md written to {out_path} (not a git repo, skipping commit).") + "\n")
-        sys.exit(0)
-
-    _git("add", str(out_path), cwd=project_root)
-
-    r = _git("diff", "--cached", "--quiet", cwd=project_root)
-    if r.returncode == 0:
-        sys.stdout.write(str("STATUS.md written but no staged diff, skipping commit.") + "\n")
-        sys.exit(1)
-
-    msg = "chore: auto-sync STATUS.md — sprint progress updated"
-    if args.note:
-        msg += f" [{args.note}]"
-
-    r = _git("commit", "-m", msg, cwd=project_root)
-    if r.returncode != 0:
-        sys.stderr.write(str(f"git commit failed: {r.stderr.strip()}") + "\n")
-        sys.exit(2)
-
-    sys.stdout.write(str(f"STATUS.md committed: {msg}") + "\n")
+    # Write-only: STATUS.md is a generated artifact the dashboard serves from
+    # disk — it is NOT committed. Committing it here every ~30s during a sprint
+    # moved the dashboard's working clone (the recurring "chore: auto-sync
+    # STATUS.md" commits), diverging that clone from origin — which broke
+    # "Deploy" (an ff-only pull) and collided with the operator's branch state.
+    # The file is refreshed on disk for the live view; git history is untouched.
+    sys.stdout.write(str(f"STATUS.md written to {out_path}.") + "\n")
     sys.exit(0)
 
 

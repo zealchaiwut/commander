@@ -60,6 +60,9 @@ import {
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
   _smgmtApplyRerunOptimistic, _smgmtIsFreshRerunSprint,
 } from './board-render.js';
+import {
+  smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
+} from './plan-next.js';
 
 // Re-run modal (issue #512)
 globalThis._rrOpen = _rrOpen;
@@ -186,3 +189,7 @@ globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
+
+// Plan next sprint (issue #861)
+globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;

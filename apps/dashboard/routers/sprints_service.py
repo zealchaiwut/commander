@@ -108,6 +108,272 @@ def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=
     return sprint_label
 
 
+# ── Plan next sprint (issue #861) ────────────────────────────────────────────
+
+def _planning_size_minutes(srv, project: str) -> dict:
+    """Project-configured size->minutes table (falls back to planner defaults)."""
+    from services.sprint_manager.sprint_planner import DEFAULT_SIZE_MINUTES
+    try:
+        eff = srv.build_effective_response(
+            srv._settings_repo.get_setting(srv.APP_CONFIG_KEY, project=project))
+    except Exception:  # noqa: BLE001 — settings backend optional
+        return dict(DEFAULT_SIZE_MINUTES)
+    return {
+        "S": eff.get("estimation_s_minutes", DEFAULT_SIZE_MINUTES["S"]),
+        "M": eff.get("estimation_m_minutes", DEFAULT_SIZE_MINUTES["M"]),
+        "L": eff.get("estimation_l_minutes", DEFAULT_SIZE_MINUTES["L"]),
+        "XL": eff.get("estimation_xl_minutes", DEFAULT_SIZE_MINUTES["XL"]),
+    }
+
+
+def _planning_capacity(srv, project: str) -> int:
+    """Configured sprint capacity in minutes (``sprint_budget_minutes``)."""
+    try:
+        eff = srv.build_effective_response(
+            srv._settings_repo.get_setting(srv.APP_CONFIG_KEY, project=project))
+        return int(eff.get("sprint_budget_minutes", 180))
+    except Exception:  # noqa: BLE001
+        return 180
+
+
+def _issue_to_plan_ticket(srv, iss: dict, estimates_dir, size_minutes: dict,
+                          *, carry_over: bool = False):
+    """Build a ``PlanTicket`` from a GitHub issue + its resolved estimate."""
+    from services.sprint_manager.sprint_planner import PlanTicket
+    resolved = srv._resolve_issue_estimate(iss, estimates_dir)
+    size = resolved["size"]
+    minutes = size_minutes.get(size) if size else None
+    return PlanTicket(
+        number=iss["number"], title=iss.get("title", ""),
+        size=size, minutes=minutes, files=list(resolved.get("files") or []),
+        carry_over=carry_over,
+    )
+
+
+def _carry_over_issues(srv, gc, project: str) -> list[dict]:
+    """Unfinished tickets from the most recent completed sprint (AC4)."""
+    from services.sprint_manager import sprint_planner
+    try:
+        finished = srv._finished_sprint_summaries(project) or {}
+    except Exception:  # noqa: BLE001
+        finished = {}
+    nums = []
+    for label in finished:
+        m = srv._SPRINT_LABEL_RE.match(label) if hasattr(srv, "_SPRINT_LABEL_RE") else None
+        try:
+            nums.append(int(label.split("-")[1].split(".")[0]))
+        except (IndexError, ValueError):
+            continue
+    if not nums:
+        return []
+    last = max(nums)
+    try:
+        sprint_issues = gc.list_issues(last, repo_name=project)
+    except Exception:  # noqa: BLE001
+        return []
+    return sprint_planner.carry_over_tickets(
+        sprint_issues, is_finished=lambda i: gc.classify_issue(i) == "done")
+
+
+def _pending_signoff_labels(srv, project: str) -> list[str]:
+    """All sprint labels whose persisted plan is in pending-sign-off state."""
+    import json
+    from services.sprint_manager.sprint_planner import PENDING_SIGNOFF_STATUS
+    project_root = srv._project_root_path(project)
+    sprints_dir = srv._commander_dir(project_root) / "sprints"
+    if not sprints_dir.exists():
+        return []
+    labels = []
+    for path in sorted(sprints_dir.glob("sprint-*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if data.get("status") == PENDING_SIGNOFF_STATUS:
+            labels.append(data.get("label") or path.stem)
+    return labels
+
+
+def _existing_pending_signoff(srv, project: str):
+    """Return the label of an existing pending-sign-off draft, or None (AC11)."""
+    labels = _pending_signoff_labels(srv, project)
+    return labels[0] if labels else None
+
+
+def pending_signoff_sprints(project: str) -> dict:
+    """Labels of sprints currently in pending-sign-off state (issue #861, AC9).
+
+    Drives the board's visual distinction: the frontend marks these cards as
+    pending sign-off after each render.
+    """
+    srv = _server()
+    return {"labels": _pending_signoff_labels(srv, project)}
+
+
+def _make_estimate_fn(srv, gc, project: str, issue_by_num: dict, size_minutes: dict):
+    """Build the lazy estimator hook the planner calls for unsized tickets (AC7)."""
+    from services.sprint_manager.estimate_issue import (
+        apply_estimated_status, apply_label, run_estimator,
+    )
+    from services.sprint_manager.sprint_planner import PlanTicket
+
+    def estimate_fn(ticket):
+        iss = issue_by_num.get(ticket.number)
+        if iss is None:
+            return None
+        issue_data = {
+            "title": iss.get("title", ""),
+            "body": iss.get("body", ""),
+            "labels": iss.get("labels", []),
+        }
+        try:
+            est, err = run_estimator(ticket.number, issue_data, project=project)
+        except Exception:  # noqa: BLE001 — estimator is best-effort (AC7)
+            return None
+        if not est or err:
+            return None
+        size = est.get("size")
+        if not size:
+            return None
+        # Persist the new size + estimated status to GitHub so the draft reflects it.
+        try:
+            apply_label(ticket.number, project, size)
+            apply_estimated_status(ticket.number, project)
+        except Exception:  # noqa: BLE001 — labelling failure must not lose the estimate
+            pass
+        return PlanTicket(
+            number=ticket.number, title=ticket.title, size=size,
+            minutes=size_minutes.get(size),
+            files=list(est.get("files_likely_affected") or []),
+            carry_over=ticket.carry_over,
+        )
+
+    return estimate_fn
+
+
+def _persist_pending_signoff(srv, gc, project: str, sprint_num: int,
+                             milestone_title: str, result) -> str:
+    """Create the sprint label, apply it to the selected tickets, and write the
+    pending-sign-off plan file — verified, with rollback on failure (AC2, AC9).
+    """
+    from services.sprint_manager import sprint_creation
+    from services.sprint_manager.sprint_planner import PENDING_SIGNOFF_STATUS
+
+    sprint_label = f"sprint-{sprint_num}"
+    ticket_nums = [t.number for t in result.selected]
+    project_root = srv._project_root_path(project)
+
+    def _write_plan():
+        srv._sprint_json_write(
+            srv._sprint_json_path(project_root, sprint_label),
+            {
+                "label": sprint_label,
+                "goal": f"Auto-planned from milestone {milestone_title}",
+                "project": project,
+                "status": PENDING_SIGNOFF_STATUS,
+                "milestone": milestone_title,
+                "tickets": ticket_nums,
+                "total_minutes": result.total_minutes,
+            },
+        )
+
+    def _plan_written():
+        return srv._sprint_json_path(project_root, sprint_label).exists()
+
+    deps = sprint_creation.SprintCreateDeps(
+        github_client=gc, repo=project, sprint_num=sprint_num,
+        tickets=ticket_nums, write_plan_fn=_write_plan, plan_written_fn=_plan_written,
+    )
+    try:
+        sprint_creation.create_sprint_verified(deps)
+    finally:
+        gc.invalidate("sprints:")
+    return sprint_label
+
+
+def plan_next_sprint(project: str, replace: bool = False) -> dict:
+    """Draft the next sprint from the active milestone's backlog (issue #861).
+
+    Pulls open backlog tickets from the active milestone, carries over unfinished
+    work from the most recent completed sprint, packs to the configured capacity
+    (preferring estimated tickets and estimating unsized ones that fit), orders by
+    the dependency DAG, and creates a pending-sign-off sprint. Returns a JSON dict
+    describing the outcome; never raises for the expected empty/conflict cases.
+    """
+    from services.sprint_manager import sprint_planner
+    from services.sprint_manager.sprint_planner import (
+        STATUS_CONFLICT, STATUS_EMPTY, STATUS_NO_MILESTONE, STATUS_OK,
+    )
+
+    srv = _server()
+    gc = srv.github_client
+
+    milestones = gc.list_milestones(repo_name=project)
+    milestone = sprint_planner.active_milestone(milestones)
+    if milestone is None:
+        return {"status": STATUS_NO_MILESTONE, "created": False,
+                "reason": "No active milestone — nothing to plan."}
+
+    existing = _existing_pending_signoff(srv, project)
+    if existing and not replace:
+        return {"status": STATUS_CONFLICT, "created": False,
+                "existing_label": existing,
+                "reason": (f"A pending-sign-off sprint ({existing}) already exists. "
+                           "Replace it or cancel.")}
+
+    capacity = _planning_capacity(srv, project)
+    size_minutes = _planning_size_minutes(srv, project)
+    project_root = srv._project_root_path(project)
+    estimates_dir = srv._commander_dir(project_root) / "estimates"
+
+    issues = gc.list_open_issues_for_planning(repo_name=project) or []
+    issue_by_num = {i["number"]: i for i in issues}
+
+    carry_issues = _carry_over_issues(srv, gc, project)
+    carry_nums = {i["number"] for i in carry_issues}
+    for i in carry_issues:
+        issue_by_num.setdefault(i["number"], i)
+
+    backlog_issues = sprint_planner.select_milestone_backlog(
+        issues, milestone["title"],
+        is_backlog=lambda i: gc.classify_issue(i) == "backlog")
+    backlog_issues = [i for i in backlog_issues if i["number"] not in carry_nums]
+
+    carry_tickets = [
+        _issue_to_plan_ticket(srv, i, estimates_dir, size_minutes, carry_over=True)
+        for i in carry_issues
+    ]
+    backlog_tickets = [
+        _issue_to_plan_ticket(srv, i, estimates_dir, size_minutes)
+        for i in backlog_issues
+    ]
+
+    sprints = gc.list_sprints(repo_name=project)
+    next_num = (max(sprints) if sprints else 0) + 1
+
+    estimate_fn = _make_estimate_fn(srv, gc, project, issue_by_num, size_minutes)
+    result = sprint_planner.plan_next_sprint(
+        has_active_milestone=True, capacity_minutes=capacity,
+        carry_over=carry_tickets, backlog=backlog_tickets,
+        next_sprint_number=next_num, existing_pending_label=None,
+        estimate_fn=estimate_fn, order_fn=sprint_planner.dag_order,
+        size_minutes=size_minutes,
+    )
+
+    if result.status != STATUS_OK:
+        return {"status": result.status, "created": False, "reason": result.reason}
+
+    label = _persist_pending_signoff(
+        srv, gc, project, next_num, milestone["title"], result)
+    return {
+        "status": STATUS_OK, "created": True, "sprint_label": label,
+        "milestone": milestone["title"],
+        "tickets": [t.number for t in result.selected],
+        "total_minutes": result.total_minutes,
+        "capacity_minutes": capacity,
+    }
+
+
 def get_sprints():
     srv = _server()
     try:

@@ -1847,6 +1847,7 @@ ${data.errors.join("\n")}`);
     _smgmtKbRestoreFocus();
     orderedLabels.forEach((lbl) => _smgmtApplySort(lbl));
     _smgmtFilterApply();
+    if (typeof _smgmtLoadPendingSignoff === "function") _smgmtLoadPendingSignoff();
   }
   function _smgmtLabelFilterRender(issues) {
     _smgmtLastLabelIssues = issues || [];
@@ -2687,11 +2688,6 @@ ${data.errors.join("\n")}`);
     const el = document.getElementById(`smgmt-col-rollup-${label}`);
     if (el) el.textContent = _smgmtRollupText(items);
   }
-  function _smgmtMilestoneChipHtml(ticket) {
-    const ms = ticket && ticket.milestone;
-    if (!ms || !ms.title) return "";
-    return `<span class="smgmt-ms-chip" title="Milestone: ${escHtml(ms.title)}">${escHtml(ms.title)}</span>`;
-  }
   function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
     const hasRework = (ticket.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework");
     const statusClass = hasRework ? "smgmt-status-need-rework" : {
@@ -2752,7 +2748,6 @@ ${data.errors.join("\n")}`);
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${_smgmtMilestoneChipHtml(ticket)}
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
@@ -2787,7 +2782,6 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtRenderBacklog(tickets) {
     _blBacklogAll = tickets || [];
-    if (typeof _blPopulateMilestoneFilter === "function") _blPopulateMilestoneFilter(_blBacklogAll);
     const countEl = document.getElementById("smgmt-backlog-count");
     const ticketsEl = document.getElementById("smgmt-backlog-tickets");
     if (!ticketsEl) return;
@@ -2839,12 +2833,105 @@ ${data.errors.join("\n")}`);
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${_smgmtMilestoneChipHtml(ticket)}${schedDepHtml}${sizePillHtml}${ageHtml}
+      ${schedDepHtml}${sizePillHtml}${ageHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
         <i class="ti ti-menu-2"></i></button>
     </div>`;
+  }
+
+  // apps/dashboard/static/src/sprint-board/plan-next.js
+  async function _planNextRequest(repo, replace) {
+    let res;
+    try {
+      res = await fetch("/api/sprints/plan-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, replace })
+      });
+    } catch (e) {
+      _smgmtShowToast("Plan next sprint failed: " + e.message);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _smgmtShowToast("Plan next sprint failed: " + (data.detail || "HTTP " + res.status));
+      return;
+    }
+    switch (data.status) {
+      case "ok":
+        await loadSprintMgmt();
+        _smgmtShowToast(
+          `Planned ${data.sprint_label} \xB7 ${(data.tickets || []).length} tickets (${data.total_minutes}m) \u2014 pending sign-off`
+        );
+        break;
+      case "no_milestone":
+        _smgmtShowToast("No active milestone \u2014 nothing to plan.");
+        break;
+      case "empty":
+        _smgmtShowToast(data.reason || "No eligible tickets to plan.");
+        break;
+      case "conflict":
+        if (window.confirm(
+          `${data.reason}
+
+Replace the existing draft (${data.existing_label})?`
+        )) {
+          await _planNextRequest(repo, true);
+        }
+        break;
+      default:
+        _smgmtShowToast("Plan next sprint: unexpected response.");
+    }
+  }
+  async function smgmtPlanNextSprint() {
+    const repo = _smgmtRepo();
+    if (!repo) {
+      _smgmtShowToast("No project selected.");
+      return;
+    }
+    const btn = document.getElementById("smgmt-plan-next-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+    }
+    try {
+      await _planNextRequest(repo, false);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("is-loading");
+      }
+    }
+  }
+  async function _smgmtLoadPendingSignoff2() {
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    let labels = [];
+    try {
+      const res = await fetch(
+        `/api/sprints/pending-signoff?project=${encodeURIComponent(repo)}`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      labels = data.labels || [];
+    } catch {
+      return;
+    }
+    for (const label of labels) {
+      const card = document.getElementById(`smgmt-card-${label}`);
+      if (!card) continue;
+      card.classList.add("smgmt-pending-signoff");
+      if (card.querySelector(".smgmt-pending-signoff-badge")) continue;
+      const header = card.querySelector(".smgmt-sprint-header, .sc-header");
+      if (!header) continue;
+      const badge = document.createElement("span");
+      badge.className = "smgmt-pending-signoff-badge";
+      badge.textContent = "Pending sign-off";
+      badge.setAttribute("title", "Awaiting sign-off before this sprint goes live");
+      header.appendChild(badge);
+    }
   }
 
   // apps/dashboard/static/src/sprint-board/index.js
@@ -2960,6 +3047,8 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
   globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic2;
+  globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+  globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff2;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

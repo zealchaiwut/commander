@@ -2644,6 +2644,18 @@
     /* Legacy 2-state fallback (kept for any path still emitting smgmt-stopped) */
     .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
     .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
+    /* Pending sign-off draft (issue #861) — distinct from active/completed. */
+    .smgmt-sprint-card.smgmt-pending-signoff { border-color: var(--purple); box-shadow: 0 0 0 3px var(--purple-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-pending-signoff .smgmt-sprint-header,
+    .smgmt-sprint-card.smgmt-pending-signoff .sc-header { background: linear-gradient(180deg,var(--purple-bg) 0%,transparent 100%); }
+    .smgmt-pending-signoff-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      margin-left: 8px; padding: 2px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: .02em;
+      color: var(--purple); background: var(--purple-bg);
+      border: 1px solid var(--purple);
+    }
+    #smgmt-plan-next-btn.is-loading { opacity: .6; pointer-events: none; }
     /* Labeled state badges — FINISHED / NEED FIXED SPRINT / IDLE */
     .smgmt-state-badge {
       display: inline-flex; align-items: center;
@@ -7110,6 +7122,13 @@
                     aria-label="Clean up empty sprints" style="display:none">
               <i class="ti ti-trash"></i>
               Clean up empty sprints
+            </button>
+            <button class="btn-ghost" id="smgmt-plan-next-btn"
+                    onclick="smgmtPlanNextSprint()"
+                    title="Draft the next sprint from the active milestone's backlog"
+                    aria-label="Plan next sprint">
+              <i class="ti ti-wand"></i>
+              Plan next sprint
             </button>
             <button class="btn-primary" id="smgmt-new-sprint-btn"
                     onclick="smgmtOpenNewSprint()" title="Create a new sprint"

@@ -14,12 +14,9 @@ AC-8: Unit tests cover (a) is_available mocked which hit/miss, (b) run_browser_s
 """
 from __future__ import annotations
 
-import logging
 import sys
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -31,11 +28,12 @@ import services.sprint_manager.agent_browser_runner as abr
 
 def test_module_imports_with_no_side_effects():
     """AC-1: importing the module must not call the binary or raise."""
-    # Re-import is a no-op; assert the public surface exists.
-    assert hasattr(abr, "is_available")
-    assert hasattr(abr, "run_browser_step")
-    assert callable(abr.is_available)
-    assert callable(abr.run_browser_step)
+    # Re-import is a no-op; assert the public surface exists. agent-browser 0.27
+    # is a low-level CLI with no high-level `run` command, so the Tester drives it
+    # via the `run_cli` one-command primitive (not a `run_browser_step` wrapper).
+    assert hasattr(abr, "is_available") and callable(abr.is_available)
+    assert hasattr(abr, "run_cli") and callable(abr.run_cli)
+    assert hasattr(abr, "classify_uat_step") and callable(abr.classify_uat_step)
 
 
 # ── AC-2 / AC-8(a): is_available with mocked which hit/miss ──────────────────
@@ -60,39 +58,65 @@ def test_is_available_true_when_which_hits_and_chrome_ready():
         assert abr.is_available() is True
 
 
-# ── AC-3 / AC-4 / AC-8(b): unavailable -> uncovered + WARNING ────────────────
+# ── _chrome_ready: probes --version + the downloaded Chrome dir (no `status`) ─
 
-def test_run_browser_step_unavailable_returns_uncovered(caplog):
-    """AC-3/AC-4/AC-8(b): unavailable -> uncovered result, WARNING logged, no raise."""
-    with patch.object(abr, "is_available", return_value=False):
-        with caplog.at_level(logging.WARNING):
-            result = abr.run_browser_step("Navigate to home and verify title", "http://localhost:3000")
+def test_chrome_ready_true_when_version_ok_and_chrome_present(tmp_path):
+    chrome = tmp_path / "chrome-149.0.0"
+    chrome.mkdir()
 
-    assert set(result.keys()) == {"status", "detail", "screenshot_path"}
-    assert result["status"] == "uncovered"
-    assert result["detail"] == "agent-browser not installed"
-    assert result["screenshot_path"] is None
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
+    class _R:
+        returncode = 0
+        stdout = "agent-browser 0.27.3"
+        stderr = ""
+    with patch.object(abr.subprocess, "run", return_value=_R()), \
+         patch.object(abr, "_CHROME_DIR", tmp_path):
+        assert abr._chrome_ready() is True
 
 
-# ── AC-5 / AC-8(c): non-browser step -> uncovered ────────────────────────────
+def test_chrome_ready_false_when_chrome_missing(tmp_path):
+    class _R:
+        returncode = 0
+        stdout = "agent-browser 0.27.3"
+        stderr = ""
+    with patch.object(abr.subprocess, "run", return_value=_R()), \
+         patch.object(abr, "_CHROME_DIR", tmp_path):  # empty dir, no chrome-*
+        assert abr._chrome_ready() is False
 
-@pytest.mark.parametrize("step", [
-    "Tap the back button on a physical Android device",
-    "Connect the USB hardware dongle and observe the LED",
-    "Run the app on a real iPhone and pinch to zoom",
-])
-def test_non_browser_step_returns_uncovered(step):
-    """AC-5/AC-8(c): device/hardware steps are not automatable -> uncovered."""
-    with patch.object(abr, "is_available", return_value=True):
-        result = abr.run_browser_step(step, "http://localhost:3000")
-    assert result["status"] == "uncovered"
-    assert result["screenshot_path"] is None
+
+def test_chrome_ready_false_when_binary_errors(tmp_path):
+    with patch.object(abr.subprocess, "run", side_effect=OSError("not found")):
+        assert abr._chrome_ready() is False
+
+
+# ── run_cli: thin one-command executor the Tester composes UAT steps from ─────
+
+def test_run_cli_passthrough():
+    class _R:
+        returncode = 0
+        stdout = "https://example.com/"
+        stderr = ""
+    with patch.object(abr.subprocess, "run", return_value=_R()) as m:
+        rc, out, err = abr.run_cli(["get", "url"])
+    assert (rc, out, err) == (0, "https://example.com/", "")
+    # invoked the real binary with our args
+    assert m.call_args[0][0][0] == abr.BINARY and m.call_args[0][0][1:] == ["get", "url"]
+
+
+def test_run_cli_timeout_degrades():
+    import subprocess as _sp
+    with patch.object(abr.subprocess, "run", side_effect=_sp.TimeoutExpired("agent-browser", 5)):
+        rc, out, err = abr.run_cli(["open", "http://x"], timeout=5)
+    assert rc == -1 and out == "" and "timed out" in err
+
+
+def test_run_cli_missing_binary_degrades():
+    with patch.object(abr.subprocess, "run", side_effect=OSError("no such binary")):
+        rc, out, err = abr.run_cli(["open", "http://x"])
+    assert rc == -1 and out == "" and "error" in err.lower()
 
 
 def test_browser_step_is_automatable():
-    """AC-5: a normal web interaction is recognised as automatable."""
+    """A normal web interaction is recognised as automatable."""
     assert abr.is_step_automatable("Navigate to the home page and verify the title is 'My App'") is True
 
 
@@ -115,53 +139,11 @@ def test_pass_and_fail_classification():
     assert abr.counts_as_failure(failed) is True
 
 
-# ── AC-7: installed -> navigate, assert, real screenshot on disk ─────────────
+# ── classify routing still drives Step 6 (browser / http / manual) ───────────
 
-def test_run_browser_step_returns_real_screenshot_when_installed(tmp_path):
-    """AC-7: with agent-browser available, a pass returns a screenshot path that exists."""
-    shot = tmp_path / "uat-shot.png"
-
-    def fake_run(cmd, *args, **kwargs):
-        # Simulate agent-browser writing a screenshot and reporting success.
-        shot.write_bytes(b"\x89PNG\r\n\x1a\n")
-
-        class _R:
-            returncode = 0
-            stdout = '{"success": true, "detail": "title matched: My App"}'
-            stderr = ""
-        return _R()
-
-    with patch.object(abr, "is_available", return_value=True), \
-         patch.object(abr, "_new_screenshot_path", return_value=shot), \
-         patch.object(abr.subprocess, "run", side_effect=fake_run):
-        result = abr.run_browser_step(
-            "Navigate to the home page and verify the title is 'My App'",
-            "http://localhost:3000",
-        )
-
-    assert result["status"] == "pass"
-    assert result["detail"]
-    assert result["screenshot_path"] == str(shot)
-    assert Path(result["screenshot_path"]).exists()
-
-
-def test_run_browser_step_reports_fail_on_failed_assertion(tmp_path):
-    """AC-7: a failed assertion from agent-browser surfaces as status fail."""
-    shot = tmp_path / "uat-shot.png"
-
-    def fake_run(cmd, *args, **kwargs):
-        shot.write_bytes(b"\x89PNG\r\n\x1a\n")
-
-        class _R:
-            returncode = 0
-            stdout = '{"success": false, "detail": "title mismatch"}'
-            stderr = ""
-        return _R()
-
-    with patch.object(abr, "is_available", return_value=True), \
-         patch.object(abr, "_new_screenshot_path", return_value=shot), \
-         patch.object(abr.subprocess, "run", side_effect=fake_run):
-        result = abr.run_browser_step("Navigate and verify title", "http://localhost:3000")
-
-    assert result["status"] == "fail"
-    assert "mismatch" in result["detail"]
+def test_classify_uat_step_routes():
+    assert abr.classify_uat_step("Open the home page and click Run") == "browser"
+    assert abr.classify_uat_step("GET /api/health returns 200") == "http"
+    assert abr.classify_uat_step("Looks visually balanced on a phone") == "manual"
+    # BA agent-testable flag forces the browser route.
+    assert abr.classify_uat_step("verify the calibration chart", agent_testable=True) == "browser"

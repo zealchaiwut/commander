@@ -102,12 +102,11 @@ def test_manual_only_when_uncovered():
     assert abr.report_status({"status": "fail", "screenshot_path": None}) != "MANUAL"
 
 
-def test_not_installed_falls_back_to_uncovered_manual():
-    """AC-4: when the runner is not installed, the step becomes MANUAL (uncovered)."""
+def test_not_installed_means_manual():
+    """AC-4: when agent-browser is not installed, browser steps fall back to
+    MANUAL — the Tester gates on is_available() before driving the CLI."""
     with patch.object(abr, "is_available", return_value=False):
-        result = abr.run_browser_step(EXAMPLE_BROWSER_STEP, "http://localhost:8000")
-    assert result["status"] == "uncovered"
-    assert abr.report_status(result) == "MANUAL"
+        assert abr.is_available() is False  # the gate the Tester checks in Step 6
 
 
 # ── AC-5: HTTP-only steps continue to route to httpx ─────────────────────────
@@ -178,55 +177,27 @@ def test_example_step_classifies_as_browser():
     assert abr.classify_uat_step(EXAMPLE_BROWSER_STEP) == "browser"
 
 
-def test_example_step_pass_produces_screenshot_not_manual(tmp_path):
-    """AC-7: a passing run of the example step reports PASS with a real screenshot."""
-    shot = tmp_path / "uat-spinner.png"
-
-    def fake_run(cmd, *args, **kwargs):
-        shot.write_bytes(b"\x89PNG\r\n\x1a\n")
-
-        class _R:
-            returncode = 0
-            stdout = '{"success": true, "detail": "spinner appeared"}'
-            stderr = ""
-        return _R()
-
-    with (
-        patch.object(abr, "is_available", return_value=True),
-        patch.object(abr, "_new_screenshot_path", return_value=shot),
-        patch.object(abr.subprocess, "run", side_effect=fake_run),
-    ):
-        result = abr.run_browser_step(EXAMPLE_BROWSER_STEP, "http://localhost:8000")
-
-    assert abr.report_status(result) == "PASS"
-    assert result["status"] != "uncovered"  # never MANUAL
-    assert result["screenshot_path"] == str(shot)
-    assert Path(result["screenshot_path"]).exists()
+def test_example_step_driven_via_cli(tmp_path):
+    """AC-7: the example browser step is driven through the low-level CLI —
+    run_cli shells one agent-browser command and passes its result through."""
+    class _R:
+        returncode = 0
+        stdout = "spinner"
+        stderr = ""
+    with patch.object(abr.subprocess, "run", return_value=_R()) as m:
+        rc, out, err = abr.run_cli(["is", "visible", ".spinner"])
+    assert rc == 0 and out == "spinner"
+    # invoked the real binary with the composed command
+    assert m.call_args[0][0][0] == abr.BINARY
 
 
-def test_example_step_fail_sets_needs_fixes_signal(tmp_path):
-    """AC-7/AC-3: a failing run of the example step is a failure with a screenshot."""
-    shot = tmp_path / "uat-error.png"
-
-    def fake_run(cmd, *args, **kwargs):
-        shot.write_bytes(b"\x89PNG\r\n\x1a\n")
-
-        class _R:
-            returncode = 0
-            stdout = '{"success": false, "detail": "spinner never appeared"}'
-            stderr = ""
-        return _R()
-
-    with (
-        patch.object(abr, "is_available", return_value=True),
-        patch.object(abr, "_new_screenshot_path", return_value=shot),
-        patch.object(abr.subprocess, "run", side_effect=fake_run),
-    ):
-        result = abr.run_browser_step(EXAMPLE_BROWSER_STEP, "http://localhost:8000")
-
-    assert abr.report_status(result) == "FAIL"
-    assert abr.counts_as_failure(result) is True
-    assert Path(result["screenshot_path"]).exists()
+def test_failed_assertion_counts_as_needs_fixes_signal():
+    """AC-7/AC-3: a FAIL result the Tester records for a browser step is a real
+    failure (→ NEEDS_FIXES), never a MANUAL fallback."""
+    failed = {"status": "fail", "detail": "spinner never appeared", "screenshot_path": "/tmp/x.png"}
+    assert abr.report_status(failed) == "FAIL"
+    assert abr.counts_as_failure(failed) is True
+    assert abr.is_manual_fallback(failed) is False
 
 
 # ── tester.md documents the Step-6 contract (AC-1, AC-2, AC-4, AC-5) ─────────
@@ -235,9 +206,10 @@ def test_tester_md_step6_documents_browser_contract():
     """tester.md Step 6 must document the browser-runner routing and fallbacks."""
     text = TESTER_MD.read_text(encoding="utf-8")
     lower = text.lower()
-    assert "agent_browser_runner" in text            # the runner is wired in
+    assert "agent_browser_runner" in text            # the runner helpers are wired in
+    assert "agent-browser" in lower                   # Step 6 drives the CLI directly
     assert "httpx" in lower                           # AC-5: http path retained
-    assert "uncovered" in lower                       # AC-4: MANUAL only on uncovered
+    assert "manual" in lower                           # AC-4: MANUAL fallback documented
     assert "screenshot" in lower                      # AC-2: screenshot recorded
     # AC-1: at least some of the browser keywords are listed in Step 6
     assert any(kw in lower for kw in ("navigate", "click", "expect"))

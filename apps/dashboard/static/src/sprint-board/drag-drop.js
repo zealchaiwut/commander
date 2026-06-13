@@ -73,6 +73,11 @@ export function _smgmtUpdateSelectionUI() {
     }
     bar.classList.add('show');
     if (listEl) listEl.classList.add('has-selection');
+    // Anchor the bar to the sprint being selected: when every selected ticket
+    // belongs to one sprint, sit the bar directly above that sprint's card so
+    // it reads as "this sprint's selection"; a cross-sprint selection falls back
+    // to the top of the list (hotfix #4).
+    _smgmtPositionSelectionBar(bar, listEl);
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
     _smgmtPopulateMoveToMenu();
@@ -85,6 +90,32 @@ export function _smgmtUpdateSelectionUI() {
   } else {
     if (bar) bar.classList.remove('show');
     if (listEl) listEl.classList.remove('has-selection');
+  }
+}
+
+// Move the selection bar to sit immediately above the card of the sprint whose
+// tickets are selected. Cross-sprint (or unresolved) selections go to the top of
+// the list. Sticky positioning keeps it visible while scrolling (hotfix #4).
+function _smgmtPositionSelectionBar(bar, listEl) {
+  if (!bar || !listEl) return;
+  try {
+    const labels = new Set();
+    (_smgmtData && _smgmtData.issues || []).forEach(i => {
+      if (_smgmtSelectedIssues.has(i.number) && i.sprint_label) labels.add(i.sprint_label);
+    });
+    let target = null;
+    if (labels.size === 1) {
+      const lbl = [...labels][0];
+      const card = document.getElementById('smgmt-card-' + lbl);
+      if (card && card.parentNode === listEl) target = card;
+    }
+    if (target) {
+      if (bar.nextElementSibling !== target) listEl.insertBefore(bar, target);
+    } else if (listEl.firstChild !== bar) {
+      listEl.insertBefore(bar, listEl.firstChild);
+    }
+  } catch (_) {
+    if (listEl.firstChild !== bar) listEl.insertBefore(bar, listEl.firstChild);
   }
 }
 

@@ -2573,6 +2573,14 @@
     }
     .smgmt-hist-link:hover { filter: brightness(.97); }
     .smgmt-hist-link i { font-size: 12px; }
+    .smgmt-running-link {
+      display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+      padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--green, #16a34a); background: var(--green-bg, rgba(22,163,74,.1));
+      border: 1px solid var(--green, #16a34a); border-radius: 999px;
+    }
+    .smgmt-running-link:hover { filter: brightness(.97); }
+    .smgmt-running-link i { font-size: 12px; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -15735,11 +15743,9 @@ function smgmtToggleCollapse(label) {
   if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
   if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
   try {
-    if (isCollapsed) {
-      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
-    } else {
-      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
-    }
+    // Tri-state so a running sprint's default-collapse (hotfix #5) doesn't fight
+    // a manual expand: '1' = collapsed, '0' = explicitly expanded.
+    localStorage.setItem('sprintColumn_' + label + '_collapsed', isCollapsed ? '1' : '0');
   } catch (_) {}
 }
 

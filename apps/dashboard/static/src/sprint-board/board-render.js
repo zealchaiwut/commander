@@ -936,9 +936,9 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
           ${isRunning ? '' : `<button class="smgmt-delete-btn"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i> Delete</button>`}
-          ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ''}
+          ${actionBtn}
           <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? 'No open tickets' : 'Finish sprint'}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">

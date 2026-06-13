@@ -2005,6 +2005,9 @@
       padding: 4px 0; font-size: 11.5px;
     }
     .iss-row + .iss-row { border-top: 1px solid var(--border); }
+    .iss-row-link { cursor: pointer; border-radius: 4px; margin: 0 -6px; padding-left: 6px; padding-right: 6px; transition: background .12s; }
+    .iss-row-link:hover { background: var(--hover-bg, rgba(127,127,127,.08)); }
+    .iss-row-link:hover .iss-title { text-decoration: underline; }
     .iss-icon {
       width: 14px; height: 14px; border-radius: 3px; flex: none;
       display: inline-flex; align-items: center; justify-content: center; font-size: 9px;
@@ -9241,7 +9244,7 @@ function switchTab(tab, pushHistory) {
   // _applyDeepLinkSubView; on a cold load the repo arrives after this call.
   if (tab === 'sprint-mgmt') {
     if (_deepLinkSprintSubView()) _applyDeepLinkSubView();
-    else _smgmtShowSubView('board');
+    else _smgmtShowSubView(_smgmtSavedSubView() || 'board');
   }
 
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
@@ -10519,8 +10522,15 @@ function _smgmtSummaryRender(openData, closedData) {
 // ── Sprint Mgmt Board|History sub-view toggle (issue #716) ─────────────────
 // Current sub-view within the Sprint Mgmt tab ('board' | 'history').
 let _smgmtSubView = 'board';
+function _smgmtSubViewStorageKey() { return 'smgmt-subview-' + _slug; }
+// Persisted so a page refresh / auto-refresh returns the user to the sub-view
+// they were on (Board / Running / History), not always Board (hotfix #6).
+function _smgmtSavedSubView() {
+  try { return sessionStorage.getItem(_smgmtSubViewStorageKey()); } catch (_) { return null; }
+}
 function _smgmtShowSubView(view) {
   _smgmtSubView = view;
+  try { sessionStorage.setItem(_smgmtSubViewStorageKey(), view); } catch (_) {}
   ['board', 'running', 'history'].forEach(v => {
     const btn = document.getElementById('smgmt-subtab-' + v);
     if (btn) {
@@ -10692,13 +10702,36 @@ function _histEstBarMini(s) {
   </span>`;
 }
 
-function _histIssueRowHtml(iss, isChild) {
+// Resolve an issue title from the ledger row, falling back to the board's
+// per-sprint ticket cache so History rows show titles even when the ledger
+// (e.g. agent_runs-synthesized rows) carries only the number (hotfix #1).
+function _histIssueTitle(iss, s) {
+  if (iss.title) return String(iss.title);
+  try {
+    const tickets = (s && s.label && _smgmtBySprint[s.label]) || [];
+    const hit = tickets.find(t => String(t.number) === String(iss.ticket_id));
+    if (hit && hit.title) return String(hit.title);
+  } catch (_) {}
+  return '';
+}
+
+function _histIssueRowHtml(iss, isChild, s) {
   const chip = _histIssueChip(iss);
   const rerun = iss.is_rerun || iss.rerun || isChild;
   const arrow = rerun ? '<span class="iss-rerun">↳</span> ' : '';
-  const id = iss.ticket_id != null ? ('#' + iss.ticket_id) : '#?';
-  const title = iss.title ? `<span class="iss-title">${escHtml(String(iss.title))}</span>` : '';
-  return `<div class="iss-row">
+  const num = iss.ticket_id;
+  const id = num != null ? ('#' + num) : '#?';
+  const titleText = _histIssueTitle(iss, s);
+  const title = titleText ? `<span class="iss-title">${escHtml(titleText)}</span>` : '';
+  // Clickable like the board: open the GitHub issue in a new tab. Guard
+  // stopPropagation so it doesn't toggle the history card's expand state.
+  const repo = (typeof _histRepo === 'function') ? _histRepo(s) : '';
+  const clickable = (num != null && repo)
+    ? ` role="link" tabindex="0" title="Open #${escHtml(String(num))} on GitHub"`
+      + ` onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"`
+    : '';
+  const cls = 'iss-row' + (clickable ? ' iss-row-link' : '');
+  return `<div class="${cls}"${clickable}>
     ${_histIssueIcon(iss)}
     <span class="iss-id">${arrow}${escHtml(String(id))}</span>
     ${title}
@@ -10763,7 +10796,7 @@ function _histIssueListHtml(s) {
       : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
     return `${failedBlock}${empty}`;
   }
-  return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild)).join('')}</div>`;
+  return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild, s)).join('')}</div>`;
 }
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED

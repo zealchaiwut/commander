@@ -2565,6 +2565,14 @@
        interactive; buttons/links inside stopPropagation via the onclick guard). */
     .smgmt-sprint-card.smgmt-running-clickable { cursor: pointer; }
     .smgmt-sprint-card.smgmt-running-clickable:hover { border-color: var(--green); }
+    .smgmt-hist-link {
+      display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+      padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--steel, #475569); background: var(--steel-bg, rgba(71,85,105,.1));
+      border: 1px solid var(--steel, #475569); border-radius: 999px;
+    }
+    .smgmt-hist-link:hover { filter: brightness(.97); }
+    .smgmt-hist-link i { font-size: 12px; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -12697,6 +12705,23 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     else headerLeft.appendChild(badge);
   }
 
+  // Finished sprints deep-link into the History sub-view (hotfix #7) — same
+  // affordance as a running sprint linking to Running. Skip needs_rework (it
+  // keeps the planning layout with its own Re-run path).
+  const _finishedStates = ['completed', 'ready_to_merge', 'partial_finished'];
+  if (headerLeft && _finishedStates.indexOf(meta.state) !== -1
+      && !headerLeft.querySelector('.smgmt-hist-link')) {
+    const safeLabel = String(label).replace(/'/g, "\\'");
+    const link = document.createElement('button');
+    link.className = 'smgmt-hist-link';
+    link.type = 'button';
+    link.title = 'View this sprint in History';
+    link.innerHTML = '<i class="ti ti-history"></i> History';
+    link.setAttribute('onclick',
+      `event.stopPropagation();_smgmtShowSubView('history');_histFocusLabel('${safeLabel}')`);
+    headerLeft.appendChild(link);
+  }
+
   // needs_rework sprints keep the planning layout (budget + run preview + tickets).
   if (meta.state === 'needs_rework') return;
 
@@ -14058,17 +14083,23 @@ function _smgmtMetricsHtml(live) {
     + '<div class="metric-value">' + active + '</div>'
     + '<div class="metric-sub">' + escHtml(mode) + ' · ' + escHtml(agentNames) + '</div></div>');
 
+  // Fix rounds are per-issue (each ticket retries independently up to its own
+  // cap), so a sprint-level "fix rounds X/2" tile is meaningless and could read
+  // e.g. 9/2 by summing across tickets (hotfix #8). The per-issue fix-round
+  // badge lives on each rail node instead. Here we surface only how many
+  // tickets are *currently* in a fix round — a real sprint-level signal.
   if (live.agent_runs_present) {
-    const fr = Number(live.fix_rounds || 0);
-    const maxFr = live.fix_round_max || 2;
-    const retryIss = (live.issues || []).find(i => _smgmtRailFixRound(i));
-    const fixSub = retryIss
-      ? `#${retryIss.number} retrying with failure context` : '';
-    cards.push('<div class="metric metric-fix' + (fr > 0 ? ' amber' : '') + '">'
-      + '<div class="metric-label">Fix rounds</div>'
-      + '<div class="metric-value">' + fr + '<span class="metric-unit">/ ' + maxFr + '</span></div>'
-      + (fixSub ? `<div class="metric-sub">${escHtml(fixSub)}</div>` : '')
-      + '</div>');
+    const retrying = (live.issues || []).filter(i => _smgmtRailFixRound(i)).length;
+    if (retrying > 0) {
+      const retryIss = (live.issues || []).find(i => _smgmtRailFixRound(i));
+      const fixSub = retryIss ? `#${retryIss.number} retrying with failure context` : '';
+      cards.push('<div class="metric metric-fix amber">'
+        + '<div class="metric-label">Retrying</div>'
+        + '<div class="metric-value">' + retrying
+        + '<span class="metric-unit">ticket' + (retrying === 1 ? '' : 's') + '</span></div>'
+        + (fixSub ? `<div class="metric-sub">${escHtml(fixSub)}</div>` : '')
+        + '</div>');
+    }
   }
 
   if (live.token_cost_usd != null) {

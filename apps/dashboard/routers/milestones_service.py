@@ -52,3 +52,15 @@ def list_milestones(repo: str) -> dict:
         })
 
     return {"milestones": out, "active": active_title}
+
+
+def resolve_bulk_milestone(milestone: Optional[str], job: Optional[dict]) -> Optional[str]:
+    """Resolve a bulk job's milestone selection (issue #879).
+
+    The Sprint stage sends the chosen milestone title in the request body; fall
+    back to the job's stored milestone for resilience (e.g. resumed sessions).
+    An empty/blank value means "no milestone" (AC5). Kept here (not in the
+    server monolith) so handlers stay thin and the logic is unit-testable.
+    """
+    chosen = milestone if milestone is not None else (job or {}).get("milestone")
+    return ((chosen or "").strip()) or None

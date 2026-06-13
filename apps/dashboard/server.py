@@ -936,6 +936,7 @@ app.include_router(backup_router)
 app.include_router(doctor_router)
 app.include_router(log_search_router)
 app.include_router(milestones_router)
+from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
 app.include_router(sprint_history_router)
 app.include_router(sprints_router)
@@ -5567,8 +5568,7 @@ def get_sprint_management_issues(repo: str):
             "sprint_label": found_sprint_label,
             "status": github_client.classify_issue(iss),
             "url": iss.get("url", ""), "created_at": iss.get("createdAt", "") or iss.get("created_at", ""),
-            "estimate_stale": estimate_stale,
-            "milestone": github_client.milestone_view(iss),
+            "estimate_stale": estimate_stale, "milestone": github_client.milestone_view(iss),
         })
         if found_sprint_label is not None and found_sprint_label in sprint_ticket_counts:
             sprint_ticket_counts[found_sprint_label] += 1
@@ -11766,17 +11766,10 @@ async def create_ticket_from_draft(
         if lbl and lbl not in labels:
             labels.append(lbl)
 
-    # Empty selection → no milestone assigned (issue #879 AC5).
-    milestone = (milestone or "").strip() or None
-
     try:
         number, url = github_client.create_issue(
-            title=title,
-            body=body,
-            labels=labels,
-            repo_name=project or None,
-            milestone=milestone,
-        )
+            title=title, body=body, labels=labels, repo_name=project or None,
+            milestone=(milestone or "").strip() or None)
     except subprocess.CalledProcessError as e:
         raise HTTPException(502, detail=f"gh CLI failed: {e.stderr.strip()[:300]}")
 
@@ -12834,21 +12827,7 @@ class BulkPostSelectedBody(BaseModel):
     # Target sprint chosen at the Sprint stage: "" (backlog), "NEW", or "sprint-N".
     # Falls back to the job's stored sprint_label when omitted.
     sprint_label: str | None = None
-    # Milestone title chosen at the Sprint stage (issue #879). None / "" means no
-    # milestone is assigned. Falls back to the job's stored milestone when omitted.
-    milestone: str | None = None
-
-
-def _resolve_bulk_milestone(milestone: str | None, job: dict | None) -> str | None:
-    """Resolve a bulk job's milestone selection.
-
-    The Sprint stage sends the chosen milestone title in the request body; fall
-    back to the job's stored milestone for resilience (e.g. resumed sessions).
-    An empty/blank value means "no milestone" (issue #879 AC5).
-    """
-    chosen = milestone if milestone is not None else (job or {}).get("milestone")
-    chosen = (chosen or "").strip()
-    return chosen or None
+    milestone: str | None = None  # chosen at Sprint stage; None/"" = no milestone (#879)
 
 
 def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> str:
@@ -12960,12 +12939,11 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             job["sprint_label"] = sprint_label
             _persist_bulk_job(job)
 
-        # Milestone chosen at the Sprint stage applies to every ticket in the
-        # batch; persist it on the job so retries reuse it (issue #879).
+        # Milestone chosen at the Sprint stage applies to the whole batch; persist
+        # it so retries reuse it. Empty = no milestone (issue #879).
         milestone = _resolve_bulk_milestone(body.milestone, job)
         if milestone != job.get("milestone"):
-            job["milestone"] = milestone
-            _persist_bulk_job(job)
+            job["milestone"] = milestone; _persist_bulk_job(job)
 
         for item in body.tickets:
             idx = item.index
@@ -13012,13 +12990,8 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             created_issue_number: int | None = None
             pre_estimate = t.get("estimate") if t.get("estimate_state") == "sized" else None
             try:
-                number, url = github_client.create_issue(
-                    title=t["title"],
-                    body=body_with_attachments,
-                    labels=labels,
-                    repo_name=issue_repo,
-                    milestone=job.get("milestone"),
-                )
+                number, url = github_client.create_issue(title=t["title"], body=body_with_attachments,
+                    labels=labels, repo_name=issue_repo, milestone=job.get("milestone"))
                 t["state"] = "created"
                 t["issue_num"] = number
                 t["issue_url"] = url
@@ -13144,13 +13117,8 @@ async def _post_ticket_body_to_github(job_id: str, index: int, body_text: str) -
         return
 
     try:
-        number, url = github_client.create_issue(
-            title=title,
-            body=body_text,
-            labels=labels,
-            repo_name=issue_repo,
-            milestone=job.get("milestone"),
-        )
+        number, url = github_client.create_issue(title=title, body=body_text,
+            labels=labels, repo_name=issue_repo, milestone=job.get("milestone"))
         t["state"] = "created"
         t["body"] = body_text
         t["issue_num"] = number

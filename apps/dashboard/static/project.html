@@ -4116,6 +4116,39 @@
       border: 1px solid var(--border);
       flex-shrink: 0;
     }
+    /* Pending sign-off badge — amber 'needs you' state (issue #862) */
+    .sc-signoff-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      background: var(--amber-bg);
+      color: var(--amber);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--amber);
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    /* Approve / Reject sign-off actions (issue #862) */
+    .smgmt-approve-btn {
+      padding: 4px 12px; font-size: 11px; font-weight: 600;
+      background: var(--green); color: #fff; border: none; border-radius: 5px;
+      cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-approve-btn:hover { opacity: .85; }
+    .smgmt-reject-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--red); border: 1px solid var(--red);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-reject-btn:hover { background: var(--red-bg); }
+    .smgmt-blocked-hint--signoff { color: var(--amber); }
     .sc-blocked-hint {
       font-size: 11px;
       color: var(--text-muted);

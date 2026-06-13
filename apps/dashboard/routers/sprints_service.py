@@ -85,11 +85,14 @@ def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=
              "status": "pending", "tickets": ticket_list},
         )
         # plan.json is a deprecated cache (issue #757) — best-effort dual-write.
-        # New sprints start as `draft` under the unified lifecycle.
+        # New sprints start as `draft` under the unified lifecycle, and enter
+        # the pending sign-off gate (issue #862): they cannot run until an
+        # explicit approval is recorded on the board.
         try:
             srv._plan_json_set_state(
                 project_root, sprint_label, "draft",
                 created_at=datetime.now(timezone.utc).isoformat(),
+                signoff={"state": "pending"},
             )
         except Exception:
             pass

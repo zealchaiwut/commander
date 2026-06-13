@@ -503,6 +503,48 @@
       _smgmtShowToast(`Cancel failed: ${e.message}`);
     }
   }
+  async function smgmtApproveSprint(label) {
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    if (!confirm(`Approve ${sprintLabelDisplay(label)}? This signs off the sprint and enables Run Sprint.`)) return;
+    try {
+      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _smgmtShowToast(`Approve failed: ${err.detail || res.status}`);
+        return;
+      }
+      _smgmtShowToast(`${sprintLabelDisplay(label)} approved \u2014 ready to run`);
+      loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast(`Approve failed: ${e.message}`);
+    }
+  }
+  async function smgmtRejectSprint(label) {
+    const repo = _smgmtRepo();
+    if (!repo) return;
+    if (!confirm(`Reject ${sprintLabelDisplay(label)}? The sprint is dissolved and all its tickets return to the backlog.`)) return;
+    try {
+      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _smgmtShowToast(`Reject failed: ${err.detail || res.status}`);
+        return;
+      }
+      _smgmtShowToast(`${sprintLabelDisplay(label)} rejected \u2014 tickets returned to backlog`);
+      loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast(`Reject failed: ${e.message}`);
+    }
+  }
   function _pfOpen(label) {
     const repo = _smgmtRepo();
     if (!repo) return;
@@ -2270,6 +2312,8 @@ ${data.errors.join("\n")}`);
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
     const isPostRun = !isRunningView && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
     const canRun = tickets.length >= 1 && !hasCompleted;
+    const signoffState = (_smgmtData?.sprint_signoff || {})[label] || null;
+    const isPendingSignoff = !isRunningView && !isPostRun && !isHasRework && signoffState === "pending";
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const childLabel = _smgmtNextChildLabel(label);
@@ -2291,6 +2335,19 @@ ${data.errors.join("\n")}`);
                   <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
     } else if (isHasRework || isPostRun) {
       actionBtn = rerunBtn;
+    } else if (isPendingSignoff) {
+      actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked" disabled
+                  title="Approve sign-off before running this sprint"
+                  aria-label="Run Sprint \u2014 disabled: pending sign-off">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>
+                 <button class="smgmt-reject-btn"
+                  onclick="smgmtRejectSprint('${escHtml(label)}')"
+                  title="Reject and dissolve this sprint">
+                  <i class="ti ti-x"></i> Reject</button>
+                 <button class="smgmt-approve-btn"
+                  onclick="smgmtApproveSprint('${escHtml(label)}')"
+                  title="Approve sign-off and enable Run Sprint">
+                  <i class="ti ti-check"></i> Approve</button>`;
     } else if (_smgmtAnySprintRunning) {
       actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
                   title="Another sprint is running"
@@ -2365,7 +2422,7 @@ ${data.errors.join("\n")}`);
                     title="Estimate all unsized tickets in this sprint">
                     <i class="ti ti-calculator"></i> Estimate all unsized</button>
                    <span class="smgmt-bulk-est-progress"></span>`;
-    const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
+    const plannedBadge = isPendingSignoff ? '<span class="sc-signoff-badge"><i class="ti ti-shield-half"></i> Pending sign-off</span>' : !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
     const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
@@ -2394,7 +2451,7 @@ ${data.errors.join("\n")}`);
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
           ${runningBadgeHtml}
-          ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
+          ${isNext && !isRunning && !isPendingSignoff ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
@@ -2957,6 +3014,8 @@ Replace the existing draft (${data.existing_label})?`
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
   globalThis.smgmtRunSprint = smgmtRunSprint2;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;
+  globalThis.smgmtApproveSprint = smgmtApproveSprint;
+  globalThis.smgmtRejectSprint = smgmtRejectSprint;
   globalThis._pfOpen = _pfOpen;
   globalThis._pfReset = _pfReset;
   globalThis._pfClose = _pfClose;

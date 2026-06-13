@@ -926,6 +926,7 @@ from routers import (  # noqa: E402
     milestones_router,
     roadmap_router,
     runs_router,
+    signoff_router,
     sprint_history_router,
     sprints_router,
     status_router,
@@ -941,6 +942,7 @@ app.include_router(log_search_router)
 app.include_router(milestones_router)
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
+app.include_router(signoff_router)
 app.include_router(sprint_history_router)
 app.include_router(sprints_router)
 app.include_router(status_router)
@@ -5263,6 +5265,82 @@ def _plan_json_set_state(
     _write_plan_json(project_root, sprint_label, existing)
 
 
+# ── Sprint sign-off gate (issue #862) ────────────────────────────────────────
+# A newly planned sprint enters a "pending sign-off" state that blocks
+# dispatch until an explicit approval is recorded. The state is stored in
+# plan.json under the `signoff` key so it survives restarts/reloads and never
+# silently advances on read:
+#   pending  -> {"signoff": {"state": "pending"}}
+#   approved -> {"signoff": {"state": "approved", "approver": <who>,
+#                            "approved_at": <iso-8601>}}
+# Sprints created before this feature have no `signoff` key — they return None
+# (no gate) so existing/legacy sprints are unaffected.
+
+def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str]:
+    """Return 'pending', 'approved', or None for a sprint's sign-off gate."""
+    plan = _read_plan_json(project_root, sprint_label)
+    if not plan:
+        return None
+    signoff = plan.get("signoff")
+    if isinstance(signoff, dict):
+        st = signoff.get("state")
+        if st in ("pending", "approved"):
+            return st
+    return None
+
+
+def _sprint_signoff_set_approved(
+    project_root: Path, sprint_label: str, approver: str, approved_at: str,
+) -> None:
+    """Record approval in plan.json and clear the pending gate.
+
+    Also lifts the lifecycle state out of `draft` to `planned` so the sprint
+    reads as ready-to-run once the gate is cleared (AC5).
+    """
+    existing = _read_plan_json(project_root, sprint_label) or {}
+    existing["signoff"] = {
+        "state": "approved",
+        "approver": approver,
+        "approved_at": approved_at,
+    }
+    if existing.get("state") in (None, "draft"):
+        existing["state"] = "planned"
+    _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_signoff_cleanup_files(project_root: Path, sprint_label: str) -> None:
+    """Remove a dissolved sprint's local files (plan/goal/state/json)."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    for path in (
+        _sprint_plan_path(project_root, sprint_label),
+        _sprint_goal_path(project_root, sprint_label),
+        _sprint_json_path(project_root, sprint_label),
+        sprints_dir / f"{sprint_label}-state.json",
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def _assert_sprint_signed_off(project_root: Path, sprint_label: str) -> None:
+    """Raise 409 when a sprint is still awaiting sign-off (issue #862).
+
+    Called from the run path so a pending sprint cannot be dispatched — the
+    same gate that mutes the Run Sprint button on the board.
+    """
+    if _sprint_signoff_state(project_root, sprint_label) == "pending":
+        raise HTTPException(
+            409,
+            detail=(
+                f"Sprint {sprint_label} is pending sign-off — approve it on the "
+                "board before running."
+            ),
+        )
+
+
 def _sprint_db_set_state(
     sprint_label: str,
     project: str,
@@ -5820,6 +5898,16 @@ def get_sprint_management_issues(repo: str):
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
 
+    # Sign-off gate state per renderable label (issue #862) — drives the
+    # PENDING SIGN-OFF badge and the muted Run Sprint button on the board.
+    # Read over all renderable labels (not just those with tickets) so a fresh
+    # 0-ticket sprint still reports its pending gate.
+    sprint_signoff: dict[str, str] = {}
+    for lbl in renderable_sprint_labels:
+        st = _sprint_signoff_state(project_root, lbl)
+        if st is not None:
+            sprint_signoff[lbl] = st
+
     return {
         "sprints": sprints,
         "order": order,
@@ -5830,6 +5918,7 @@ def get_sprint_management_issues(repo: str):
         "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
         "sprint_rerun_into": sprint_rerun_into,
+        "sprint_signoff": sprint_signoff,
     }
 
 
@@ -6684,6 +6773,10 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
 
     # One label = one attempt: terminal labels are never re-dispatched (P0).
     _reject_terminal_label_redispatch(project_root, body.sprint_label)
+
+    # Pending sign-off gate (issue #862): a planned sprint must be approved
+    # before it can run. Blocks silent advance past the governance gate.
+    _assert_sprint_signed_off(project_root, body.sprint_label)
 
     # Block empty runs before spawn — instant no-op sprints leave no live logs.
     from services.sprint_manager import sprint_manager as _sm_run

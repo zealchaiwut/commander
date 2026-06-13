@@ -25833,6 +25833,10 @@ function _deployCardHtml(c, i) {
     + '      <span class="deploy-card__meta-val is-mono" id="deploy-card-sha-' + i + '">…</span></div>'
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
     + '      <span class="deploy-card__meta-val" id="deploy-card-time-' + i + '">—</span></div>'
+    + (c.host !== 'render'
+        ? '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Server started</span>'
+          + '      <span class="deploy-card__meta-val" id="deploy-card-started-' + i + '">—</span></div>'
+        : '')
     + '  </div>'
     + '  <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
     +      _deployIdleActionsHtml(i)
@@ -26071,8 +26075,16 @@ function _deploySetTime(i, ts) {
   el.textContent = isNaN(d.getTime()) ? String(ts) : d.toLocaleString();
 }
 
-// Load the commit SHA + status for a card. AC4: local SHA from /api/health
-// (git_sha). AC5: render SHA from the live deploy-status endpoint.
+function _deploySetStarted(i, ts) {
+  var el = document.getElementById('deploy-card-started-' + i);
+  if (!el) return;
+  if (!ts) { el.textContent = '—'; return; }
+  var d = new Date(ts);
+  el.textContent = isNaN(d.getTime()) ? String(ts) : d.toLocaleString();
+}
+
+// Load the commit SHA + status for a card. AC4: local SHA from /api/version
+// (git_sha, server_started_at). AC5: render SHA from the live deploy-status endpoint.
 function _deployLoadCardStatus(c, i) {
   if (c.host === 'render') {
     var slug = c.project;
@@ -26090,11 +26102,10 @@ function _deployLoadCardStatus(c, i) {
       })
       .catch(function() { _deploySetSha(i, null); });
   } else {
-    // local: the dashboard's own /api/health reports the running git_sha.
-    fetch('/api/health')
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(d) { _deploySetSha(i, d && d.git_sha); })
-      .catch(function() { _deploySetSha(i, null); });
+    // local: git_sha, server_started_at, last_deployed_at come from /api/deploy/overview.
+    _deploySetSha(i, c.git_sha);
+    _deploySetTime(i, c.last_deployed_at);
+    _deploySetStarted(i, c.server_started_at);
     // AC7: read the live run state for the card from launchctl print.
     _deployRefreshRunState(i);
   }
@@ -26325,7 +26336,9 @@ function _deployExecDeploy(i) {
       if (out) _deployLogPush(i, out);
       if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); }
       _deploySetStatus(i, 'live');
-      _deploySetTime(i, new Date().toISOString());
+      var _deployNow = new Date().toISOString();
+      _deploySetTime(i, _deployNow);
+      if (_deployCards[i]) _deployCards[i].last_deployed_at = _deployNow;
       // self-restart bounces the dashboard — the reconnect overlay + auto-reload
       // is the completion signal, so don't health-check a server that's going down.
       if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }

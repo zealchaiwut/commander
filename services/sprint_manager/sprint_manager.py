@@ -2919,6 +2919,30 @@ def _gate_monolith(
     )
 
 
+def _log_gate_result(r: "GateResult", issue_num: int) -> None:
+    """Uniform per-gate outcome logging (sprint_label/run_id come from the log
+    context set in run_sprint). Previously only the monolith gate showed up; this
+    makes every gate emit gate_passed (INFO) / gate_failed (ERROR) the same way.
+    Skipped gates are not logged. Logging only — never raises."""
+    try:
+        if getattr(r, "skipped", False):
+            return
+        if r.passed:
+            structured_log.info(
+                "gate_passed", f"gate {r.gate} passed for #{issue_num}",
+                gate=r.gate, issue_num=issue_num,
+            )
+        else:
+            _lines = [ln for ln in (r.output or "").strip().splitlines() if ln.strip()]
+            _reason = _lines[-1][:200] if _lines else ""
+            structured_log.error(
+                "gate_failed", f"gate {r.gate} failed for #{issue_num}",
+                gate=r.gate, issue_num=issue_num, reason=_reason,
+            )
+    except Exception:
+        pass
+
+
 def _run_quality_gates(
     issue_num: int,
     feature_branch: str,
@@ -2959,6 +2983,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_tc)
+    _log_gate_result(r_tc, issue_num)
     if not r_tc.passed:
         return results
 
@@ -2973,6 +2998,7 @@ def _run_quality_gates(
         gate_frontend_lint=gate_frontend_lint,
     )
     results.append(r_lint)
+    _log_gate_result(r_lint, issue_num)
     if not r_lint.passed:
         return results
 
@@ -2986,6 +3012,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_design)
+    _log_gate_result(r_design, issue_num)
     if not r_design.passed:
         return results
 
@@ -2999,6 +3026,7 @@ def _run_quality_gates(
         gate_scope=gate_scope,
     )
     results.append(r_pytest)
+    _log_gate_result(r_pytest, issue_num)
     if not r_pytest.passed:
         return results
 
@@ -3012,6 +3040,7 @@ def _run_quality_gates(
         repo_name=repo_name,
     )
     results.append(r_merge)
+    _log_gate_result(r_merge, issue_num)
     if not r_merge.passed:
         return results
 
@@ -3024,6 +3053,7 @@ def _run_quality_gates(
         repo_name=repo_name,
     )
     results.append(r_monolith)
+    _log_gate_result(r_monolith, issue_num)
 
     return results
 

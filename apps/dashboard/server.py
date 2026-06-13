@@ -9534,7 +9534,11 @@ def _compute_calibration(
                     continue
 
             for issue in state_data.get("issues", []):
-                if issue.get("status") != "done":
+                # Count any lifecycle "done-equivalent" status, not just literal
+                # "done": the sprint-lifecycle redesign settles passed tickets as
+                # uat/merged/passed, so a "done"-only filter silently blanked the
+                # est-vs-actual plot for newer sprints (hotfix #3).
+                if issue.get("status") not in ("done", "uat", "merged", "passed"):
                     continue
 
                 issue_num = issue.get("number")

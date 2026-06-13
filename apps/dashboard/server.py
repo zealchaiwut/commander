@@ -210,6 +210,7 @@ def _capture_git_value(cmd: list) -> str:
 
 _GIT_SHA: str = _capture_git_value(["git", "rev-parse", "HEAD"])
 _GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+_GIT_COMMIT_MSG: str = _capture_git_value(["git", "log", "-1", "--pretty=%s"])
 _STARTED_AT: str = datetime.now(timezone.utc).isoformat()
 _BUILD_TIMESTAMP: str = _STARTED_AT
 
@@ -235,6 +236,26 @@ def _compute_build_hash() -> str:
 
 _BUILD_HASH: str = _compute_build_hash()
 _APP_VERSION: str = "1.0"
+
+# ── Per-env last-deploy timestamps (persisted across requests, reset on restart) ─
+_DEPLOY_TIMES_FILE = Path(__file__).parent / "runtime" / "deploy-times.json"
+
+def _load_deploy_times() -> dict:
+    try:
+        return json.loads(_DEPLOY_TIMES_FILE.read_text()) if _DEPLOY_TIMES_FILE.exists() else {}
+    except Exception:
+        return {}
+
+def _save_deploy_time(slug: str, env: str) -> None:
+    times = _load_deploy_times()
+    times[f"{slug}/{env}"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _DEPLOY_TIMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _DEPLOY_TIMES_FILE.write_text(json.dumps(times))
+    except Exception:
+        pass
+
+_deploy_times: dict = _load_deploy_times()
 
 # ── GitHub CLI auth preflight state (issue #424) ──────────────────────────────
 # Populated once at startup by _check_gh_auth(); served via /api/gh-auth-status.
@@ -2642,6 +2663,9 @@ def deploy_environment(slug: str, env: str):
     except HTTPException as exc:
         restart_result = {"ok": False, "error": exc.detail}
 
+    _save_deploy_time(slug, env)
+    _deploy_times[f"{slug}/{env}"] = datetime.now(timezone.utc).isoformat()
+
     resp = {
         "ok": True,
         "env": env,
@@ -2941,6 +2965,11 @@ def get_deploy_overview():
             card["start_ready"] = cfg.get("start_ready", card["host"] == "render")
             card["stop_errors"] = cfg.get("stop_errors", [])
             card["start_errors"] = cfg.get("start_errors", [])
+            if card["host"] == "local":
+                card["git_sha"] = _GIT_SHA
+                card["git_commit_msg"] = _GIT_COMMIT_MSG
+                card["server_started_at"] = _STARTED_AT
+                card["last_deployed_at"] = _deploy_times.get(f"{slug}/{card['env']}")
             environments.append(card)
 
     return {"environments": environments}

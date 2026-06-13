@@ -48,6 +48,49 @@ Open `http://localhost:8000` and add your first repo from the dashboard.
 4. **Sign off** — review the tickets that reach UAT, close the good ones, rerun
    any that need rework.
 
+## Restart after machine reboot
+
+After a machine restart the dashboard servers need to come back up before the
+Deploy tab shows live run-state and commit info.
+
+**PRD (port 8000) — two paths:**
+
+| Setup | What to do |
+|---|---|
+| launchd installed (`launchctl list \| grep commander`) | Auto-restarts on reboot — nothing to do. Confirm with `curl -s http://localhost:8000/api/health \| jq .status` |
+| Manual / dev (no launchd) | `cd ~/dev/commander/prd && bash scripts/start_prd.sh` |
+
+**UAT (port 8001) — always manual:**
+
+```bash
+# Run from the PRD clone (start_uat.sh targets ../uat automatically)
+cd ~/dev/commander/prd
+bash scripts/start_uat.sh
+```
+
+Or, if working directly in the UAT clone:
+
+```bash
+cd ~/dev/commander/uat
+bash scripts/start_uat.sh
+```
+
+**Stop either server:**
+
+```bash
+bash scripts/stop_all.sh        # both PRD + UAT
+bash scripts/stop_all.sh prd    # PRD only
+bash scripts/stop_all.sh uat    # UAT only
+```
+
+**After starting**, open the Deploy tab — the card for that environment will
+show the running commit SHA, commit message, server-started time, and last
+deploy timestamp.
+
+> If port 8000/8001 is still held after a kill (orphaned uvicorn worker),
+> find and kill it: `lsof -i :8000 -sTCP:LISTEN` → `kill -9 <pid>`, then
+> restart.
+
 ## Next steps
 
 - [machine-onboarding.md](machine-onboarding.md) — provision a brand-new machine

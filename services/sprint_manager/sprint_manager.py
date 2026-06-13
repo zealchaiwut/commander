@@ -1841,6 +1841,8 @@ class HangDetector:
     log_path:  Optional[Path]
     proc:      subprocess.Popen
     max_total_secs: Optional[int] = None  # hard wall-clock cap (None = disabled)
+    agent_role: Optional[str] = None      # for dispatch_killed logging (coder/tester)
+    attempt:    Optional[int] = None      # dispatch attempt number, for logging
 
     _start_time:   float = field(default_factory=time.monotonic, init=False)
     _last_size:    int   = field(default=0, init=False)
@@ -1882,6 +1884,12 @@ class HangDetector:
                 total_elapsed = time.monotonic() - self._start_time
                 if total_elapsed >= self.max_total_secs:
                     structured_log.error("subprocess_timeout", f"subprocess exceeded {self.max_total_secs}s wall-clock limit — KILLING", issue_num=self.issue_num, timeout_secs=self.max_total_secs)
+                    structured_log.error(
+                        "dispatch_killed", f"#{self.issue_num} killed (timeout)",
+                        issue_num=self.issue_num, agent_role=self.agent_role,
+                        attempt=self.attempt, reason="timeout",
+                        timeout_secs=self.max_total_secs,
+                    )
                     try:
                         self.proc.kill()
                     except ProcessLookupError:
@@ -1900,6 +1908,12 @@ class HangDetector:
             idle = time.monotonic() - self._last_change
             if idle >= HANG_KILL_SECS:
                 structured_log.error("subprocess_killed", f"no log activity for {idle/60:.0f} min — KILLING subprocess", issue_num=self.issue_num, idle_minutes=round(idle / 60))
+                structured_log.error(
+                    "dispatch_killed", f"#{self.issue_num} killed (idle-silence)",
+                    issue_num=self.issue_num, agent_role=self.agent_role,
+                    attempt=self.attempt, reason="idle-silence",
+                    idle_minutes=round(idle / 60),
+                )
                 try:
                     self.proc.kill()
                 except ProcessLookupError:
@@ -4420,7 +4434,8 @@ def _dispatch_coder(
             except Exception:
                 pass
 
-        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc,
+                                 agent_role="coder", attempt=attempt + 1)
         detector.start()
         rc = proc.wait()
         detector.stop()
@@ -4878,7 +4893,8 @@ def _dispatch_tester(
             except Exception:
                 pass
 
-        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc)
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc,
+                                 agent_role="tester", attempt=attempt + 1)
         detector.start()
         rc = proc.wait()
         detector.stop()

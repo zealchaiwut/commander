@@ -7767,23 +7767,45 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         elif raw_minutes and not raw_size:
             raw_size = _letter_from_minutes(raw_minutes)
 
+        # pipeline_stage: coarse lane assignment for the two-queue lane view (issue #927)
+        # Derived from raw agent_status before normalization so all raw values are visible.
+        tac = iss.get("tester_attempt_count", 0)
+        if raw_agent_status in ("coder_dispatched", "coder_running"):
+            pipeline_stage = "coding"
+        elif raw_agent_status == "coder_done":
+            pipeline_stage = "awaiting_tester"
+        elif raw_agent_status in ("tester_dispatched", "tester_running"):
+            pipeline_stage = "testing"
+        elif (
+            derived_status in ("done", "skipped")
+            or raw_agent_status in ("tester_done", "completed", "failed")
+        ):
+            pipeline_stage = "done"
+        elif tac > 0:
+            pipeline_stage = "rework"
+        else:
+            pipeline_stage = "pending"
+
         issues_out.append({
-            "number":         num,
-            "title":          iss.get("title", ""),
-            "status":         derived_status,
-            "agent_status":   public_agent_status,
-            "agent":          active_role,
-            "elapsed_secs":   issue_elapsed,
-            "size":           raw_size,
-            "minutes":        raw_minutes,
-            "dispatch_level": iss.get("dispatch_level", 0),
+            "number":               num,
+            "title":                iss.get("title", ""),
+            "status":               derived_status,
+            "agent_status":         public_agent_status,
+            "agent":                active_role,
+            "elapsed_secs":         issue_elapsed,
+            "size":                 raw_size,
+            "minutes":              raw_minutes,
+            "dispatch_level":       iss.get("dispatch_level", 0),
             # Size-routed coder model (issue #789) so the running pane's Coder
             # badge can show which model is implementing the ticket.
-            "coder_model":    iss.get("coder_model"),
+            "coder_model":          iss.get("coder_model"),
             # Surface the actual failure category/reason so the inspector shows
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
-            "category":       iss.get("category"),
-            "failure_reason": iss.get("failure_reason"),
+            "category":             iss.get("category"),
+            "failure_reason":       iss.get("failure_reason"),
+            # Lane view fields (issue #927)
+            "pipeline_stage":       pipeline_stage,
+            "tester_attempt_count": tac,
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
@@ -7882,6 +7904,11 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         # Running-view metric strip (issue #803) — agent_runs-derived keys are
         # present only when their source exists, so the frontend hides cards.
         **_live_metrics.running_metrics(sprint_label, project),
+        # Two-queue lane view capacity (issue #927): max concurrent slots per lane.
+        # The pipeline currently supports 1 coder + 1 tester; stored on state if
+        # a future config adds more slots per lane.
+        "max_coder_slots":  int(status_data.get("max_coder_slots", 1)),
+        "max_tester_slots": int(status_data.get("max_tester_slots", 1)),
     }
 
 

@@ -6940,6 +6940,55 @@
     .metric.amber .metric-value { color: var(--amber); }
     @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
 
+    /* ── Two-queue coder/tester lane view (issue #927) ───────────────────────
+       Two side-by-side lanes (Coder / Tester). Each lane has a capacity header
+       showing slot-dot indicators and Working + Waiting groups. Done fold and
+       Upcoming fold sit below the lanes. Emphasis uses full-border + tint fill;
+       no coloured side-stripes (impeccable gate). Spacing on the 4px scale. */
+    .lanes-wrap { display: flex; flex-direction: column; gap: 12px; }
+    .lanes-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .lane { border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+      overflow: hidden; min-width: 0; }
+    .lane-head {
+      padding: 10px 14px 8px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .lane-title { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--text-sub); display: flex; align-items: center; gap: 8px; }
+    .lane-title-coder { color: var(--purple); }
+    .lane-title-tester { color: var(--amber); }
+    .lane-capacity { font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .lane-dots { display: flex; gap: 4px; align-items: center; }
+    .lane-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+    .lane-dot.filled { background: var(--purple); }
+    .lane-dot.filled-tester { background: var(--amber); }
+    .lane-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+    .lane-group-label { font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub); padding: 2px 4px; }
+    .lane-group { display: flex; flex-direction: column; gap: 6px; }
+    .lane-group.empty .lane-group-label { color: var(--text-muted); opacity: .7; }
+    /* CODED badge — tester-waiting items that finished coding */
+    .node-coded-badge { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 7px; border-radius: 999px; text-transform: uppercase;
+      background: var(--green-bg); color: var(--green); }
+    /* Done fold and Upcoming fold */
+    .lane-fold { border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+      overflow: hidden; }
+    .lane-fold-toggle { display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 9px 12px; background: none; border: none; font: inherit; cursor: pointer;
+      color: var(--text-sub); font-size: 12px; font-weight: 700; text-align: left; }
+    .lane-fold-toggle:hover { background: var(--surface-hover); }
+    .lane-fold-toggle .ti { font-size: 11px; transition: transform .15s ease; }
+    .lane-fold-body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+    /* Upcoming items are dimmed — they are gated, not slot-waiting */
+    .lane-upcoming-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border: 1px dashed var(--border); border-radius: 8px; background: var(--bg);
+      font-size: 12px; color: var(--text-muted); opacity: .85; }
+    .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
+    @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
+
     /* ── Node inspector panel (issue #804) ───────────────────────────────────
        Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
        .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
@@ -7644,6 +7693,8 @@
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics"></div>
             <!-- Level-rail node board (issue #802) -->
             <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail"></div>
+            <!-- Two-queue coder/tester lane view (issue #927) -->
+            <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
             <!-- Node inspector panel (issue #804) -->
             <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
           </div>
@@ -13508,6 +13559,7 @@ function _smgmtRunningViewUpdate(label, live) {
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
   _smgmtRailUpdate(primary, snap);
+  _smgmtLanesUpdate(primary, snap);
 }
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
@@ -13880,6 +13932,260 @@ function _smgmtRailSelectNode(num) {
   if (typeof _smgmtInspectorFeed === 'function') {
     try { _smgmtInspectorFeed(ticket || { number: num }, label); } catch (_) { /* inspector not mounted yet */ }
   }
+}
+
+// ── Two-queue coder/tester lane view (issue #927) ────────────────────────────
+// Renders a Coder lane and a Tester lane in the Running sub-view. Each lane
+// shows a capacity header (slot dots, N of MAX working, M waiting) and two
+// groups: Working (active agents) and Waiting (queued for a slot). Below the
+// lanes sit a Done fold (collapsed) and an Upcoming fold (collapsed) for
+// level-gated issues not yet eligible.
+
+/** Classify an issue from the /live snapshot into its pipeline stage.
+ *  Falls back to the pipeline_stage field when present (backend #927). */
+function _smgmtLaneStage(iss) {
+  if (!iss) return 'pending';
+  // Use backend-derived pipeline_stage when available
+  if (iss.pipeline_stage) return iss.pipeline_stage;
+  // Fallback: derive from agent field (pre-#927 snapshots)
+  if (iss.agent === 'coder') return 'coding';
+  if (iss.agent === 'tester') return 'testing';
+  if (iss.status === 'done' || iss.status === 'skipped' || iss.agent_status === 'failed') return 'done';
+  const tac = iss.tester_attempt_count || 0;
+  return tac > 0 ? 'rework' : 'pending';
+}
+
+/** HTML for a single capacity-dot indicator strip. */
+function _smgmtLaneDotsHtml(working, max, roleClass) {
+  let html = '';
+  for (let i = 0; i < max; i++) {
+    const filled = i < working;
+    html += `<span class="lane-dot${filled ? ' ' + roleClass : ''}"></span>`;
+  }
+  return `<span class="lane-dots">${html}</span>`;
+}
+
+/** Capacity header text: "N of MAX working · M waiting". */
+function _smgmtLaneCapacityText(working, max, waiting) {
+  const wTxt = `${working} of ${max} working`;
+  return waiting > 0 ? `${wTxt} · ${waiting} waiting` : wTxt;
+}
+
+/** One card inside a lane — reuses the existing .node markup for card primitives. */
+function _smgmtLaneCardHtml(iss, stage, live) {
+  const num = iss.number;
+  const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
+  const issueUrl = iss.url || (repo ? `https://github.com/${repo}/issues/${num}` : '#');
+  const sizePill = iss.size
+    ? `<span class="node-size" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>`
+    : '';
+  const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+  const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
+
+  // CODED badge for awaiting_tester items (coder finished, tester not started)
+  const codedBadge = stage === 'awaiting_tester'
+    ? '<span class="node-coded-badge">CODED</span>' : '';
+
+  // FIX n/2 badge for rework items or coding items that are a fix attempt
+  const tac = iss.tester_attempt_count || 0;
+  const maxAttempts = (live && live.fix_round_max) || 2;
+  const fixBadge = tac > 0
+    ? `<span class="node-fix-badge">FIX ${tac}/${maxAttempts}</span>` : '';
+
+  // Agent badge for actively working items
+  let agentBadge = '';
+  if (stage === 'coding' || stage === 'rework') {
+    if (iss.agent === 'coder') {
+      const cm = (typeof _shortModelName === 'function') ? _shortModelName(iss.coder_model) : '';
+      const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
+      agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}</span>`;
+    }
+  } else if (stage === 'testing') {
+    if (iss.agent === 'tester') {
+      agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
+    }
+  }
+
+  // Node state class matches existing rail node conventions
+  let nodeClass = 'queued';
+  if (stage === 'coding' && iss.agent === 'coder') nodeClass = 'coder-active';
+  else if (stage === 'testing' && iss.agent === 'tester') nodeClass = 'tester-active';
+  else if (stage === 'done') nodeClass = 'done';
+
+  const icon = stage === 'done' ? '&#10003;' : '&#9679;';
+  return `<button type="button" class="node ${nodeClass}" role="listitem"`
+    + ` data-issue="${num}" aria-selected="false"`
+    + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
+    + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
+    + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${num}</a>`
+    + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+    + sizePill + codedBadge + fixBadge + agentBadge + timeEl
+    + `</button>`;
+}
+
+/** Full lanes HTML from a /live snapshot. */
+function _smgmtLanesHtml(label, live) {
+  const issues = (live && live.issues) || [];
+  const maxCoder = (live && live.max_coder_slots) || 1;
+  const maxTester = (live && live.max_tester_slots) || 1;
+
+  // Identify the current active dispatch_level so level-gated issues
+  // show in the Upcoming fold rather than the lane waiting groups.
+  const levels = (live && live.levels) || [];
+  const activeLevelNums = new Set(
+    levels.filter(l => l.state === 'active' || l.state === 'complete').map(l => l.level),
+  );
+  const maxActive = activeLevelNums.size > 0 ? Math.max(...activeLevelNums) : 0;
+  const isUpcoming = iss => {
+    const lvl = iss.dispatch_level || 0;
+    return lvl > 0 && maxActive > 0 && lvl > maxActive;
+  };
+
+  // Partition issues by stage
+  const coderWorking = [];
+  const coderWaiting = [];
+  const testerWaiting = [];
+  const testerWorking = [];
+  const done = [];
+  const upcoming = [];
+
+  issues.forEach(iss => {
+    const stage = _smgmtLaneStage(iss);
+    if (stage === 'done') { done.push({ iss, stage }); return; }
+    if (isUpcoming(iss)) { upcoming.push(iss); return; }
+    if (stage === 'coding') {
+      if (iss.agent === 'coder') coderWorking.push({ iss, stage });
+      else coderWaiting.push({ iss, stage });
+    } else if (stage === 'rework') {
+      if (iss.agent === 'coder') coderWorking.push({ iss, stage });
+      else coderWaiting.push({ iss, stage });
+    } else if (stage === 'awaiting_tester') {
+      testerWaiting.push({ iss, stage });
+    } else if (stage === 'testing') {
+      testerWorking.push({ iss, stage });
+    } else {
+      // pending — waiting for coder slot
+      coderWaiting.push({ iss, stage });
+    }
+  });
+
+  const renderGroup = (items, label, role, live) => {
+    const cls = items.length === 0 ? ' empty' : '';
+    const cards = items.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+    const placeholder = items.length === 0
+      ? `<div style="font-size:12px;color:var(--text-muted);padding:4px 4px 2px;font-style:italic;">—</div>`
+      : '';
+    return `<div class="lane-group${cls}">`
+      + `<div class="lane-group-label">${escHtml(label)}</div>`
+      + cards + placeholder
+      + `</div>`;
+  };
+
+  const coderLane = `<div class="lane" data-lane="coder">
+    <div class="lane-head">
+      <div class="lane-title"><span class="lane-title-coder">Coder</span></div>
+      <div class="lane-capacity">
+        ${_smgmtLaneDotsHtml(coderWorking.length, maxCoder, 'filled')}
+        <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
+      </div>
+    </div>
+    <div class="lane-body">
+      ${renderGroup(coderWorking, 'Working', 'coder', live)}
+      ${renderGroup(coderWaiting, 'Waiting', 'coder', live)}
+    </div>
+  </div>`;
+
+  const testerLane = `<div class="lane" data-lane="tester">
+    <div class="lane-head">
+      <div class="lane-title"><span class="lane-title-tester">Tester</span></div>
+      <div class="lane-capacity">
+        ${_smgmtLaneDotsHtml(testerWorking.length, maxTester, 'filled-tester')}
+        <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
+      </div>
+    </div>
+    <div class="lane-body">
+      ${renderGroup(testerWorking, 'Working', 'tester', live)}
+      ${renderGroup(testerWaiting, 'Waiting', 'tester', live)}
+    </div>
+  </div>`;
+
+  // Done fold — collapsed by default
+  const doneFoldId = 'smgmt-lanes-done-fold';
+  const doneBadge = done.length > 0 ? ` (${done.length})` : '';
+  const doneCards = done.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+  const doneFold = `<div class="lane-fold" id="${doneFoldId}">
+    <button type="button" class="lane-fold-toggle"
+            onclick="_smgmtLaneFoldToggle('${doneFoldId}')"
+            aria-expanded="false">
+      <i class="ti ti-chevron-right"></i>
+      Done${escHtml(doneBadge)}
+    </button>
+    <div class="lane-fold-body" hidden>${doneCards}</div>
+  </div>`;
+
+  // Upcoming fold — collapsed by default
+  const upcomingFoldId = 'smgmt-lanes-upcoming-fold';
+  const upBadge = upcoming.length > 0 ? ` (${upcoming.length})` : '';
+  const upItems = upcoming.map(iss => {
+    const lvl = iss.dispatch_level || 0;
+    const dep = lvl > 0 ? `start after Level ${lvl - 1}` : 'upcoming';
+    return `<div class="lane-upcoming-item">`
+      + `<span class="node-num">#${iss.number}</span>`
+      + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+      + `<span class="lane-upcoming-dep">${escHtml(dep)}</span>`
+      + `</div>`;
+  }).join('');
+  const upcomingFold = `<div class="lane-fold" id="${upcomingFoldId}">
+    <button type="button" class="lane-fold-toggle"
+            onclick="_smgmtLaneFoldToggle('${upcomingFoldId}')"
+            aria-expanded="false">
+      <i class="ti ti-chevron-right"></i>
+      Upcoming${escHtml(upBadge)}
+    </button>
+    <div class="lane-fold-body" hidden>${upItems}</div>
+  </div>`;
+
+  return `<div class="lanes-row">${coderLane}${testerLane}</div>`
+    + doneFold
+    + upcomingFold;
+}
+
+/** Toggle a lane fold open/closed. */
+function _smgmtLaneFoldToggle(foldId) {
+  const foldEl = document.getElementById(foldId);
+  if (!foldEl) return;
+  const btn = foldEl.querySelector('.lane-fold-toggle');
+  const body = foldEl.querySelector('.lane-fold-body');
+  if (!btn || !body) return;
+  const expanded = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  body.hidden = expanded;
+  const icon = btn.querySelector('.ti');
+  if (icon) {
+    icon.classList.toggle('ti-chevron-right', expanded);
+    icon.classList.toggle('ti-chevron-down', !expanded);
+  }
+}
+
+/** Update the lanes pane from a live snapshot. Full re-render each tick
+ *  (lane view is simpler than the rail — no flicker risk at 2s poll). */
+function _smgmtLanesUpdate(label, live) {
+  const lanesEl = document.getElementById('smgmt-lanes');
+  if (!lanesEl) return;
+  const issues = (live && live.issues) || [];
+  if (!issues.length || !label) {
+    lanesEl.hidden = true;
+    return;
+  }
+  lanesEl.hidden = false;
+  // Preserve fold-open state across re-renders
+  const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
+    && document.querySelector('#smgmt-lanes-done-fold .lane-fold-toggle[aria-expanded="true"]'));
+  const upOpen = !!(document.getElementById('smgmt-lanes-upcoming-fold')
+    && document.querySelector('#smgmt-lanes-upcoming-fold .lane-fold-toggle[aria-expanded="true"]'));
+  lanesEl.innerHTML = _smgmtLanesHtml(label, live);
+  if (doneOpen) _smgmtLaneFoldToggle('smgmt-lanes-done-fold');
+  if (upOpen)   _smgmtLaneFoldToggle('smgmt-lanes-upcoming-fold');
 }
 
 // ── Node inspector panel (issue #804) ────────────────────────────────────────

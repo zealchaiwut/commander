@@ -15,6 +15,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from . import brief
+from . import scheduler
 from . import sprints_service
 from . import todos
 
@@ -30,6 +31,12 @@ router.include_router(brief.router)
 # router for the same reason — todos carries its own ``/api/projects`` prefix,
 # so include_router mounts the routes unchanged without growing server.py.
 router.include_router(todos.router)
+
+# Scheduled overnight sprint queue endpoints (issue #863) ride on this
+# already-mounted router for the same reason — scheduler declares full
+# ``/api/scheduler/*`` paths and carries no prefix, so include_router mounts the
+# routes unchanged without growing server.py (COMMANDER_GATE_MONOLITH).
+router.include_router(scheduler.router)
 
 
 class SprintOrderBody(BaseModel):

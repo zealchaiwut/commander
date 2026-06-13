@@ -46,6 +46,57 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
+  // apps/dashboard/static/src/sprint-board/scheduled-run.js
+  var _schedMap = {};
+  function _smgmtSchedToggleHtml2(label) {
+    const on = !!_schedMap[label];
+    const id = `sched-toggle-${label}`;
+    return `<label class="smgmt-sched-toggle" title="Auto-run this sprint at the project's scheduled time">
+    <input type="checkbox" id="${escHtml(id)}" ${on ? "checked" : ""}
+      onchange="smgmtToggleRunOnSchedule('${escHtml(label)}', this)"
+      aria-label="Run sprint ${escHtml(label)} on schedule">
+    <span>Run on schedule</span>
+  </label>`;
+  }
+  async function smgmtToggleRunOnSchedule(label, el) {
+    const repo = typeof _smgmtRepo === "function" ? _smgmtRepo() : null;
+    if (!repo) return;
+    const enabled = !!(el && el.checked);
+    _schedMap[label] = enabled;
+    try {
+      const res = await fetch("/api/scheduler/sprints", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, sprint_label: label, enabled })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      _schedMap[label] = !enabled;
+      if (el) el.checked = !enabled;
+      if (typeof _smgmtShowToast === "function") {
+        _smgmtShowToast("Could not update schedule: " + (e.message || e));
+      }
+    }
+  }
+  async function _smgmtHydrateSchedToggles2(repo) {
+    if (!repo) return;
+    try {
+      const res = await fetch(`/api/scheduler/sprints?project=${encodeURIComponent(repo)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = data.run_on_schedule || {};
+      for (const k of Object.keys(_schedMap)) delete _schedMap[k];
+      Object.keys(map).forEach((k) => {
+        _schedMap[k] = !!map[k];
+      });
+      Object.keys(map).forEach((label) => {
+        const cb = document.getElementById(`sched-toggle-${label}`);
+        if (cb) cb.checked = !!map[label];
+      });
+    } catch (_) {
+    }
+  }
+
   // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrOpen() {
     _setBodyInert(["rr-backdrop", "rr-modal"]);
@@ -501,48 +552,6 @@
       }
     } catch (e) {
       _smgmtShowToast(`Cancel failed: ${e.message}`);
-    }
-  }
-  async function smgmtApproveSprint(label) {
-    const repo = _smgmtRepo();
-    if (!repo) return;
-    if (!confirm(`Approve ${sprintLabelDisplay(label)}? This signs off the sprint and enables Run Sprint.`)) return;
-    try {
-      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        _smgmtShowToast(`Approve failed: ${err.detail || res.status}`);
-        return;
-      }
-      _smgmtShowToast(`${sprintLabelDisplay(label)} approved \u2014 ready to run`);
-      loadSprintMgmt();
-    } catch (e) {
-      _smgmtShowToast(`Approve failed: ${e.message}`);
-    }
-  }
-  async function smgmtRejectSprint(label) {
-    const repo = _smgmtRepo();
-    if (!repo) return;
-    if (!confirm(`Reject ${sprintLabelDisplay(label)}? The sprint is dissolved and all its tickets return to the backlog.`)) return;
-    try {
-      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/reject`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo })
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        _smgmtShowToast(`Reject failed: ${err.detail || res.status}`);
-        return;
-      }
-      _smgmtShowToast(`${sprintLabelDisplay(label)} rejected \u2014 tickets returned to backlog`);
-      loadSprintMgmt();
-    } catch (e) {
-      _smgmtShowToast(`Reject failed: ${e.message}`);
     }
   }
   function _pfOpen(label) {
@@ -1784,6 +1793,9 @@ ${data.errors.join("\n")}`);
         _smgmtAnySprintRunning = true;
       }
       _smgmtRender2(data);
+      if (typeof _smgmtHydrateSchedToggles === "function") {
+        _smgmtHydrateSchedToggles(repo);
+      }
       _smgmtLivePollRestart();
       const lingerLbl = typeof _smgmtPrimaryRunningLabel === "function" ? _smgmtPrimaryRunningLabel() : null;
       if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
@@ -1889,7 +1901,6 @@ ${data.errors.join("\n")}`);
     _smgmtKbRestoreFocus();
     orderedLabels.forEach((lbl) => _smgmtApplySort(lbl));
     _smgmtFilterApply();
-    if (typeof _smgmtLoadPendingSignoff === "function") _smgmtLoadPendingSignoff();
   }
   function _smgmtLabelFilterRender(issues) {
     _smgmtLastLabelIssues = issues || [];
@@ -2312,8 +2323,6 @@ ${data.errors.join("\n")}`);
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
     const isPostRun = !isRunningView && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
     const canRun = tickets.length >= 1 && !hasCompleted;
-    const signoffState = (_smgmtData?.sprint_signoff || {})[label] || null;
-    const isPendingSignoff = !isRunningView && !isPostRun && !isHasRework && signoffState === "pending";
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const childLabel = _smgmtNextChildLabel(label);
@@ -2335,19 +2344,6 @@ ${data.errors.join("\n")}`);
                   <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
     } else if (isHasRework || isPostRun) {
       actionBtn = rerunBtn;
-    } else if (isPendingSignoff) {
-      actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked" disabled
-                  title="Approve sign-off before running this sprint"
-                  aria-label="Run Sprint \u2014 disabled: pending sign-off">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>
-                 <button class="smgmt-reject-btn"
-                  onclick="smgmtRejectSprint('${escHtml(label)}')"
-                  title="Reject and dissolve this sprint">
-                  <i class="ti ti-x"></i> Reject</button>
-                 <button class="smgmt-approve-btn"
-                  onclick="smgmtApproveSprint('${escHtml(label)}')"
-                  title="Approve sign-off and enable Run Sprint">
-                  <i class="ti ti-check"></i> Approve</button>`;
     } else if (_smgmtAnySprintRunning) {
       actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
                   title="Another sprint is running"
@@ -2356,9 +2352,10 @@ ${data.errors.join("\n")}`);
     } else {
       const runDisabled = !canRun ? "disabled" : "";
       const runTitle = !canRun ? 'title="Add at least one ticket first"' : "";
+      const schedToggle = typeof _smgmtSchedToggleHtml === "function" ? _smgmtSchedToggleHtml(label) : "";
       actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
                   onclick="smgmtRunSprint('${label}')">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
+                  <i class="ti ti-player-play"></i> Run Sprint</button>${schedToggle}`;
     }
     const isOutcomeCompleted = isReadyToMerge || isHasRework || outcomeState === "completed";
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
@@ -2422,7 +2419,7 @@ ${data.errors.join("\n")}`);
                     title="Estimate all unsized tickets in this sprint">
                     <i class="ti ti-calculator"></i> Estimate all unsized</button>
                    <span class="smgmt-bulk-est-progress"></span>`;
-    const plannedBadge = isPendingSignoff ? '<span class="sc-signoff-badge"><i class="ti ti-shield-half"></i> Pending sign-off</span>' : !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
+    const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
     const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
@@ -2451,7 +2448,7 @@ ${data.errors.join("\n")}`);
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
           ${runningBadgeHtml}
-          ${isNext && !isRunning && !isPendingSignoff ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
+          ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
@@ -2898,99 +2895,6 @@ ${data.errors.join("\n")}`);
     </div>`;
   }
 
-  // apps/dashboard/static/src/sprint-board/plan-next.js
-  async function _planNextRequest(repo, replace) {
-    let res;
-    try {
-      res = await fetch("/api/sprints/plan-next", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, replace })
-      });
-    } catch (e) {
-      _smgmtShowToast("Plan next sprint failed: " + e.message);
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      _smgmtShowToast("Plan next sprint failed: " + (data.detail || "HTTP " + res.status));
-      return;
-    }
-    switch (data.status) {
-      case "ok":
-        await loadSprintMgmt();
-        _smgmtShowToast(
-          `Planned ${data.sprint_label} \xB7 ${(data.tickets || []).length} tickets (${data.total_minutes}m) \u2014 pending sign-off`
-        );
-        break;
-      case "no_milestone":
-        _smgmtShowToast("No active milestone \u2014 nothing to plan.");
-        break;
-      case "empty":
-        _smgmtShowToast(data.reason || "No eligible tickets to plan.");
-        break;
-      case "conflict":
-        if (window.confirm(
-          `${data.reason}
-
-Replace the existing draft (${data.existing_label})?`
-        )) {
-          await _planNextRequest(repo, true);
-        }
-        break;
-      default:
-        _smgmtShowToast("Plan next sprint: unexpected response.");
-    }
-  }
-  async function smgmtPlanNextSprint() {
-    const repo = _smgmtRepo();
-    if (!repo) {
-      _smgmtShowToast("No project selected.");
-      return;
-    }
-    const btn = document.getElementById("smgmt-plan-next-btn");
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add("is-loading");
-    }
-    try {
-      await _planNextRequest(repo, false);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.classList.remove("is-loading");
-      }
-    }
-  }
-  async function _smgmtLoadPendingSignoff2() {
-    const repo = _smgmtRepo();
-    if (!repo) return;
-    let labels = [];
-    try {
-      const res = await fetch(
-        `/api/sprints/pending-signoff?project=${encodeURIComponent(repo)}`
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      labels = data.labels || [];
-    } catch {
-      return;
-    }
-    for (const label of labels) {
-      const card = document.getElementById(`smgmt-card-${label}`);
-      if (!card) continue;
-      card.classList.add("smgmt-pending-signoff");
-      if (card.querySelector(".smgmt-pending-signoff-badge")) continue;
-      const header = card.querySelector(".smgmt-sprint-header, .sc-header");
-      if (!header) continue;
-      const badge = document.createElement("span");
-      badge.className = "smgmt-pending-signoff-badge";
-      badge.textContent = "Pending sign-off";
-      badge.setAttribute("title", "Awaiting sign-off before this sprint goes live");
-      header.appendChild(badge);
-    }
-  }
-
   // apps/dashboard/static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
@@ -3014,8 +2918,6 @@ Replace the existing draft (${data.existing_label})?`
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
   globalThis.smgmtRunSprint = smgmtRunSprint2;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;
-  globalThis.smgmtApproveSprint = smgmtApproveSprint;
-  globalThis.smgmtRejectSprint = smgmtRejectSprint;
   globalThis._pfOpen = _pfOpen;
   globalThis._pfReset = _pfReset;
   globalThis._pfClose = _pfClose;
@@ -3106,8 +3008,9 @@ Replace the existing draft (${data.existing_label})?`
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
   globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic2;
-  globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
-  globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff2;
+  globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
+  globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
+  globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

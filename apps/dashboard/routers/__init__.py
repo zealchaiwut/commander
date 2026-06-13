@@ -14,6 +14,7 @@ from .log_search import router as log_search_router
 from .milestones import router as milestones_router
 from .roadmap import router as roadmap_router
 from .runs import router as runs_router
+from .scheduler import router as scheduler_router
 from .signoff import router as signoff_router
 from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
@@ -31,6 +32,7 @@ __all__ = [
     "milestones_router",
     "roadmap_router",
     "runs_router",
+    "scheduler_router",
     "signoff_router",
     "sprint_history_router",
     "sprints_router",

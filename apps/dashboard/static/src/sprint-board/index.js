@@ -12,6 +12,10 @@
 import './state.js';
 
 import {
+  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
+} from './scheduled-run.js';
+
+import {
   _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
   smgmtRerunSprint, _rrConfirm,
 } from './rerun-modal.js';
@@ -25,7 +29,6 @@ import {
 } from './bulk-complete-modal.js';
 import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
-  smgmtApproveSprint, smgmtRejectSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
   _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
@@ -61,9 +64,6 @@ import {
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
   _smgmtApplyRerunOptimistic, _smgmtIsFreshRerunSprint,
 } from './board-render.js';
-import {
-  smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
-} from './plan-next.js';
 
 // Re-run modal (issue #512)
 globalThis._rrOpen = _rrOpen;
@@ -94,8 +94,6 @@ globalThis._bcConfirm = _bcConfirm;
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
 globalThis.smgmtCancelSprint = smgmtCancelSprint;
-globalThis.smgmtApproveSprint = smgmtApproveSprint;
-globalThis.smgmtRejectSprint = smgmtRejectSprint;
 globalThis._pfOpen = _pfOpen;
 globalThis._pfReset = _pfReset;
 globalThis._pfClose = _pfClose;
@@ -193,6 +191,7 @@ globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
 
-// Plan next sprint (issue #861)
-globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
-globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
+// Run-on-schedule toggle (issue #863)
+globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
+globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
+globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;

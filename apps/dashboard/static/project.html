@@ -2486,6 +2486,14 @@
     }
     .smgmt-run-btn.smgmt-run-btn--rerun:hover:not(:disabled) { background: var(--amber-bg); }
     .smgmt-run-btn.smgmt-run-btn--rerun:disabled { opacity: .45; cursor: not-allowed; }
+    /* Run-on-schedule toggle on approved sprint cards (issue #863) */
+    .smgmt-sched-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-left: 12px; font-size: 12px; color: var(--text-muted);
+      cursor: pointer; user-select: none;
+    }
+    .smgmt-sched-toggle input[type=checkbox] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--blue); }
+    .smgmt-sched-toggle:hover { color: var(--text); }
     /* Rerun modal ticket list */
     .rr-ticket-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 8px; }
     .rr-ticket-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
@@ -8480,6 +8488,13 @@
                 <div class="ps-row-label">Sprint budget<span class="ps-hint">capacity bar target</span></div>
                 <div class="ps-row-control">
                   <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000"> <span class="ps-unit">min</span>
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Scheduled run time<span class="ps-hint">empty disables overnight queue</span></div>
+                <div class="ps-row-control">
+                  <input class="ps-inp" id="ps-scheduled-time" type="time" style="width:140px" aria-label="Scheduled overnight run time, 24-hour local">
+                  <span class="ps-unit">local</span>
                 </div>
               </div>
               <div class="ps-row">
@@ -25024,6 +25039,7 @@ async function projSettingsLoad() {
     _psSetVal('ps-tester-repo', data.tester_test_repo || '');
 
     await _psUpdateBranchHints();
+    await _psLoadScheduledTime();
     _psLoadEstSuggestions();
 
     // Determine if project has any override; show/hide inherit notice
@@ -25047,6 +25063,47 @@ async function _psUpdateBranchHints() {
     setHint('ps-default-branch-uat-hint', global.default_branch_uat);
     setHint('ps-default-branch-prd-hint', global.default_branch_prd);
   } catch (_) {}
+}
+
+// Scheduled overnight run time (issue #863) — stored separately from app_config
+// via /api/scheduler/config, keyed by the project's owner/repo.
+function _psSchedulerRepo() {
+  const proj = (_cachedFullRepo || {})[_slug];
+  return (proj && proj.repo) ? proj.repo : _slug;
+}
+
+async function _psLoadScheduledTime() {
+  const el = document.getElementById('ps-scheduled-time');
+  if (!el) return;
+  try {
+    const repo = _psSchedulerRepo();
+    const resp = await fetch(`/api/scheduler/config?project=${encodeURIComponent(repo)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    el.value = data.scheduled_run_time || '';
+  } catch (_) {}
+}
+
+async function _psSaveScheduledTime() {
+  const el = document.getElementById('ps-scheduled-time');
+  if (!el) return true;
+  try {
+    const repo = _psSchedulerRepo();
+    const resp = await fetch('/api/scheduler/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo, scheduled_run_time: el.value || '' }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      _psSetStatus('Schedule save failed: ' + (err.detail || resp.status), 'err');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    _psSetStatus('Schedule save failed: ' + e.message, 'err');
+    return false;
+  }
 }
 
 async function _psUpdateInheritNotice(slug) {
@@ -25102,6 +25159,10 @@ async function projSettingsSave() {
       _psSetStatus('Save failed: ' + (err.detail || resp.status), 'err');
       return;
     }
+
+    // Save the scheduled overnight run time (issue #863) — separate store.
+    const schedOk = await _psSaveScheduledTime();
+    if (!schedOk) return;  // _psSaveScheduledTime already set the error status
 
     // Save environment paths
     const envResult = await projEnvSave();

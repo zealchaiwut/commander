@@ -434,6 +434,42 @@ def is_self_restart(entry: dict) -> bool:
     return restart_label(entry) == DASHBOARD_LAUNCHD_LABEL
 
 
+def is_self_restart_dir(entry: dict, self_dir: Optional[str]) -> bool:
+    """True when *entry*'s working_dir is the dashboard's own clone.
+
+    Script-path equivalent of is_self_restart: a stop+start restart whose
+    working_dir is the running dashboard's clone would have its ``stop`` step
+    kill the process serving the request before ``start`` runs, so it must be
+    detached (see build_detached_restart_command).
+    """
+    wd = (entry.get("working_dir") or "").strip()
+    if not wd or not self_dir:
+        return False
+    try:
+        return os.path.realpath(wd) == os.path.realpath(str(self_dir))
+    except OSError:
+        return False
+
+
+def build_detached_restart_command(
+    stop: Optional[str], start: Optional[str], delay_seconds: float = 1.0
+) -> list[str]:
+    """Build a detached ``sleep; stop; start`` helper for a script self-restart.
+
+    The sleep lets the HTTP response flush before ``stop`` kills the dashboard.
+    Run via ``Popen(start_new_session=True)`` so the helper survives ``stop``
+    (which kills the dashboard's process group) and goes on to run ``start`` —
+    the missing-restart bug was the synchronous handler being killed mid-stop,
+    so ``start`` never ran.
+    """
+    parts = [f"sleep {delay_seconds}"]
+    if stop:
+        parts.append(stop)
+    if start:
+        parts.append(start)
+    return ["sh", "-c", "; ".join(parts)]
+
+
 def build_self_restart_command(
     label: str, uid: Optional[int] = None, delay_seconds: float = 1.0
 ) -> list[str]:

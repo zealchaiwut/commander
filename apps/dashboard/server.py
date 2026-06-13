@@ -2474,6 +2474,25 @@ def _restart_environment(entry: dict) -> dict:
     stop, start = _deploy_actions.stop_start_scripts(entry)
     restart_env = _deploy_actions.build_restart_env(entry)
     script_cwd = _deploy_actions.script_working_dir(entry)
+
+    # Self-restart over scripts: the `stop` step would kill THIS process before
+    # `start` runs (cause of "Failed to fetch" + a dashboard that never comes
+    # back). Detach a `sleep; stop; start` helper in a new session so the
+    # response flushes first and the helper survives the stop to run start.
+    if _deploy_actions.is_self_restart_dir(entry, str(_REPO_ROOT)):
+        cmd = _deploy_actions.build_detached_restart_command(stop, start)
+        popen_kw: dict = {
+            "start_new_session": True,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if restart_env is not None:
+            popen_kw["env"] = restart_env
+        if script_cwd:
+            popen_kw["cwd"] = script_cwd
+        subprocess.Popen(cmd, **popen_kw)
+        return {"method": "scripts-self-detached", "detached": True}
+
     steps = []
     for phase, script in (("stop", stop), ("start", start)):
         run_kw: dict = {

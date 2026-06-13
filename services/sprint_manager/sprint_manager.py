@@ -2275,6 +2275,7 @@ def _gate_pytest(
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
     gate_scope: str = "changed",
+    worktester_root: Optional[Path] = None,
 ) -> GateResult:
     """Gate 1 — run pytest -x inside the tester worktree dashboard.
 
@@ -2287,11 +2288,16 @@ def _gate_pytest(
 
     _post_agent_event("gate:pytest")
 
+    # Resolve tester root — used for venv detection and changed-scope cwd.
+    # Root is the git repo root (parent of apps/dashboard). Fall back to
+    # worktester_dashboard so the logic degrades gracefully on flat layouts.
+    wt_root = worktester_root or worktester_dashboard
+
     # Detect pytest binary
     ok, pytest_path, _ = _try("which", "pytest")
     if not ok:
-        # Try inside dashboard venv
-        venv_pytest = worktester_dashboard / ".." / "venv" / "bin" / "pytest"
+        # Try inside the tester worktree venv (root-level, not apps/dashboard)
+        venv_pytest = wt_root / "venv" / "bin" / "pytest"
         if venv_pytest.exists():
             pytest_bin = str(venv_pytest.resolve())
         else:
@@ -2307,13 +2313,15 @@ def _gate_pytest(
         rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
     else:
         # changed scope: only run test files changed relative to base_branch
+        # git diff paths are relative to repo root; run pytest from root so
+        # the paths resolve correctly (root-level tests/ is not under apps/dashboard).
         changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
         test_files = [f for f in changed if f.startswith("tests/")]
         if not test_files:
             sys.stdout.write(str("  [gate:pytest] no test files changed — skipped") + "\n")
             return GateResult(gate="pytest", passed=True, output="no test files changed")
         sys.stdout.write(str(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}") + "\n")
-        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=worktester_dashboard)
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=wt_root)
 
     combined = stdout + stderr
     if rc == 0:
@@ -2843,6 +2851,7 @@ def _run_quality_gates(
         repo_name=repo_name,
         base_branch=base_branch,
         gate_scope=gate_scope,
+        worktester_root=worktester_root,
     )
     results.append(r_pytest)
     if not r_pytest.passed:

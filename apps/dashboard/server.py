@@ -920,7 +920,7 @@ from routers import (  # noqa: E402
     activity_router,
     analytics_router,
     backup_router,
-    doctor_router,
+    doctor_router, home_milestone_router,
     log_search_router,
     runs_router,
     sprint_history_router,
@@ -940,7 +940,7 @@ app.include_router(sprint_history_router)
 app.include_router(sprints_router)
 app.include_router(status_router)
 app.include_router(system_router)
-app.include_router(tickets_router)
+app.include_router(tickets_router); app.include_router(home_milestone_router)
 
 logger = logging.getLogger(__name__)
 
@@ -1239,7 +1239,7 @@ async def projects_redirect(path: str):
 
 # ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
 
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings", "global-settings"}
+_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings", "global-settings", "roadmap"}
 
 
 @app.get("/project/{slug}")

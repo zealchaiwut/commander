@@ -1603,6 +1603,25 @@ def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
     return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
 
 
+# Frontend file extensions the impeccable design detector analyses.
+_DESIGN_FE_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
+
+
+def _changed_frontend_files(base_branch: str, cwd: Path) -> list[str]:
+    """Return frontend files added/modified in HEAD relative to base_branch.
+
+    Scoped to the extensions the impeccable design gate analyses
+    (.html/.css/.jsx/.tsx). Returns repo-root-relative paths.
+    """
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=cwd,
+    )
+    if rc != 0:
+        return []
+    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _DESIGN_FE_EXTENSIONS)]
+
+
 # ── strangler-fig monolith gate (issue #761) ──────────────────────────────────
 
 # Repo-root-relative path of the monolith we are strangling. New endpoints must
@@ -2655,17 +2674,72 @@ def _run_frontend_lint(
     return passed, combined
 
 
+def _impeccable_findings(npx_path: str, target: str, cwd: Path) -> Optional[list[dict]]:
+    """Run ``impeccable detect <target> --json`` and return the findings list.
+
+    Returns ``[]`` when the target is clean, the parsed list when anti-patterns
+    are found, or ``None`` when output could not be parsed (caller decides how
+    to handle an inconclusive scan).
+    """
+    rc, out, _ = _run_timed(
+        npx_path, "--yes", "impeccable", "detect", target, "--json", cwd=cwd,
+    )
+    text = (out or "").strip()
+    if not text:
+        # No JSON emitted: clean exit means no findings; otherwise inconclusive.
+        return [] if rc == 0 else None
+    try:
+        data = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict):
+        data = data.get("findings") or data.get("results") or []
+    return data if isinstance(data, list) else []
+
+
+def _finding_sig(f: dict) -> tuple:
+    """Stable signature for a finding, ignoring the file path (so base and HEAD
+    copies of the same file compare cleanly even from different temp paths)."""
+    return (f.get("antipattern"), f.get("line"), (f.get("snippet") or "").strip())
+
+
+def _net_new_findings(base: list[dict], head: list[dict]) -> list[dict]:
+    """Findings present at HEAD but not accounted for at base (multiset diff).
+
+    Each base finding cancels at most one HEAD finding with the same signature,
+    so adding a *second* identical anti-pattern still surfaces as net-new.
+    """
+    remaining: dict[tuple, int] = {}
+    for f in base:
+        sig = _finding_sig(f)
+        remaining[sig] = remaining.get(sig, 0) + 1
+    net_new: list[dict] = []
+    for f in head:
+        sig = _finding_sig(f)
+        if remaining.get(sig, 0) > 0:
+            remaining[sig] -= 1
+        else:
+            net_new.append(f)
+    return net_new
+
+
 def _gate_design(
     issue_num: int,
     worktester_dashboard: Path,
     skip: bool,
     repo_name: Optional[str] = None,
+    base_branch: str = "develop",
+    gate_scope: str = "changed",
 ) -> GateResult:
     """Gate: run impeccable detect on the frontend for UI anti-patterns.
 
     Uses the deterministic pattern-matching detector (no LLM).
-    Exit code 0 = no issues found; non-zero = issues detected.
-    Skips gracefully when impeccable is not installed or no HTML/CSS/JSX present.
+
+    gate_scope='changed' (default): scope to frontend files changed relative to
+    base_branch and fail only on *net-new* anti-patterns the diff introduces —
+    pre-existing baseline findings in those files do not bounce the ticket
+    (mirrors the diff-aware monolith/typecheck/lint gates). gate_scope='full'
+    restores the legacy whole-directory scan that fails on any finding.
     """
     if skip:
         sys.stdout.write(str("  [gate:design] skipped") + "\n")
@@ -2682,9 +2756,8 @@ def _gate_design(
                           output="npx not found — design gate skipped")
 
     # Detect if there is any frontend to scan
-    fe_exts = (".html", ".css", ".jsx", ".tsx")
     has_frontend = any(
-        True for ext in fe_exts
+        True for ext in _DESIGN_FE_EXTENSIONS
         for _ in worktester_dashboard.rglob(f"*{ext}")
     ) if worktester_dashboard.exists() else False
 
@@ -2693,14 +2766,86 @@ def _gate_design(
         return GateResult(gate="design", passed=True, skipped=True,
                           output="no frontend files — design gate skipped")
 
-    # Determine scan target
+    # ── changed-scope: fail only on net-new anti-patterns the diff introduces ──
+    if gate_scope != "full":
+        changed = _changed_frontend_files(base_branch, cwd=worktester_dashboard)
+        if not changed:
+            sys.stdout.write(str("  [gate:design] no changed frontend files — PASS") + "\n")
+            return GateResult(gate="design", passed=True,
+                              output="no changed frontend files")
+
+        sys.stdout.write(
+            str(f"  [gate:design] checking {len(changed)} changed frontend file(s) "
+                f"for net-new anti-patterns vs {base_branch} ...") + "\n")
+
+        net_new: list[dict] = []
+        inconclusive: list[str] = []
+        for rel in changed:
+            head_findings = _impeccable_findings(npx_path, rel, cwd=worktester_dashboard)
+            if head_findings is None:
+                inconclusive.append(rel)
+                continue
+            if not head_findings:
+                continue  # file is clean at HEAD; nothing to compare
+            # Base version of the file (empty if newly added → all findings net-new)
+            rc_show, base_src, _ = _run_timed(
+                "git", "show", f"{base_branch}:{rel}", cwd=worktester_dashboard,
+            )
+            base_findings: list[dict] = []
+            if rc_show == 0:
+                suffix = os.path.splitext(rel)[1] or ".html"
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=suffix, delete=False, encoding="utf-8")
+                try:
+                    tmp.write(base_src)
+                    tmp.close()
+                    parsed = _impeccable_findings(npx_path, tmp.name, cwd=worktester_dashboard)
+                    base_findings = parsed or []
+                finally:
+                    try:
+                        os.unlink(tmp.name)
+                    except OSError:
+                        pass
+            file_net_new = _net_new_findings(base_findings, head_findings)
+            for f in file_net_new:
+                f = dict(f)
+                f.setdefault("file", rel)
+                net_new.append(f)
+
+        if inconclusive:
+            # Could not analyse a changed file — fail closed rather than wave it through.
+            msg = ("design gate could not analyse changed file(s): "
+                   + ", ".join(inconclusive))
+            structured_log.error("gate_failed", f"[gate:design] FAIL — {msg}",
+                                 gate="design", issue_num=issue_num)
+            _revert_to_sit(issue_num, "design", msg, repo_name=repo_name)
+            return GateResult(gate="design", passed=False, output=msg)
+
+        if net_new:
+            lines = [f"{len(net_new)} net-new design anti-pattern(s) introduced by this diff:"]
+            for f in net_new:
+                lines.append(
+                    f"  [{f.get('antipattern')}] {f.get('file')}: {f.get('snippet') or f.get('name')}")
+            msg = "\n".join(lines)
+            structured_log.error("gate_failed", f"[gate:design] FAIL — {len(net_new)} net-new",
+                                 gate="design", issue_num=issue_num)
+            _revert_to_sit(issue_num, "design", msg, repo_name=repo_name)
+            return GateResult(gate="design", passed=False, output=msg)
+
+        sys.stdout.write(
+            str("  [gate:design] PASS — no net-new design anti-patterns in changed files") + "\n")
+        return GateResult(
+            gate="design", passed=True,
+            output=f"{len(changed)} changed frontend file(s); no net-new anti-patterns")
+
+    # ── full-scope (legacy): fail on any finding across the whole static dir ──
     static_dir = worktester_dashboard / "apps" / "dashboard" / "static"
     if not static_dir.exists():
         static_dir = worktester_dashboard / "static"
     if not static_dir.exists():
         static_dir = worktester_dashboard
 
-    sys.stdout.write(str(f"  [gate:design] running impeccable detect {static_dir.name}/ ...") + "\n")
+    sys.stdout.write(str(f"  [gate:design] running impeccable detect {static_dir.name}/ (full) ...") + "\n")
     rc, stdout, stderr = _run_timed(
         npx_path, "--yes", "impeccable", "detect", str(static_dir), "--json",
         cwd=worktester_dashboard,
@@ -2830,6 +2975,8 @@ def _run_quality_gates(
         worktester_dashboard,
         skip=(skip_all or not gate_design),
         repo_name=repo_name,
+        base_branch=base_branch,
+        gate_scope=gate_scope,
     )
     results.append(r_design)
     if not r_design.passed:

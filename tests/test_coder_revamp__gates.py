@@ -137,12 +137,15 @@ class TestGateDesign:
         assert result.passed is True
 
     def test_design_fail_reverts_to_sit(self, tmp_path):
+        # Full-scope legacy behaviour: any finding across the directory fails the
+        # gate and reverts to SIT. (The default 'changed' scope fails only on
+        # net-new findings — see test_design_gate__net_new_only.py.)
         (tmp_path / "style.css").write_text("body { color: red; }")
         with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
             with patch("sprint_manager._run_timed") as mock_run:
                 mock_run.return_value = (1, '[{"antipattern": "low-contrast"}]', "")
                 with patch("sprint_manager._revert_to_sit") as mock_revert:
-                    result = _gate_design(1, tmp_path, skip=False)
+                    result = _gate_design(1, tmp_path, skip=False, gate_scope="full")
         assert result.passed is False
         mock_revert.assert_called_once()
 

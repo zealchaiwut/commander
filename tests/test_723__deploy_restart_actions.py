@@ -157,6 +157,33 @@ def test_self_restart_command_is_detached_sleep_then_kickstart():
     assert "launchctl kickstart -k gui/501/com.commander.dashboard" in cmd[2]
 
 
+def test_is_self_restart_dir_matches_own_clone(tmp_path):
+    """Script-path self-restart: working_dir == the dashboard's own clone."""
+    root = str(tmp_path)
+    assert da.is_self_restart_dir({"working_dir": root}, root) is True
+    assert da.is_self_restart_dir({"working_dir": str(tmp_path / "other")}, root) is False
+    assert da.is_self_restart_dir({}, root) is False
+    assert da.is_self_restart_dir({"working_dir": root}, None) is False
+
+
+def test_detached_restart_command_sleeps_then_stop_then_start():
+    """The detached helper runs sleep → stop → start so the response flushes and
+    the helper survives `stop` killing the dashboard before `start` runs."""
+    cmd = da.build_detached_restart_command(
+        "bash scripts/stop_all.sh uat", "bash scripts/start_uat.sh"
+    )
+    assert cmd[0] == "sh"
+    body = cmd[2]
+    i_sleep, i_stop, i_start = (
+        body.index("sleep"), body.index("stop_all.sh"), body.index("start_uat.sh")
+    )
+    assert i_sleep < i_stop < i_start  # ordered
+
+    # Missing stop/start are simply omitted, never empty segments.
+    only_start = da.build_detached_restart_command(None, "bash start.sh")
+    assert "start.sh" in only_start[2] and ";  " not in only_start[2]
+
+
 # ── endpoint tests ───────────────────────────────────────────────────────────
 
 
@@ -352,10 +379,19 @@ def test_restart_falls_back_to_scripts_without_label(client_ctx):
     assert not any(c and c[0][0] == "launchctl" for c, _ in calls)
 
 
-def test_restart_scripts_use_working_dir_as_cwd(client_ctx):
-    """Relative stop/start scripts run with cwd=working_dir when it exists."""
+def test_restart_scripts_use_working_dir_as_cwd(client_ctx, tmp_path):
+    """Relative stop/start scripts run with cwd=working_dir when it exists.
+
+    Uses a working_dir that is NOT the dashboard's own clone, so this exercises
+    the synchronous (non-self) script path; a self-restart over scripts detaches
+    instead (covered separately)."""
     client, srv, settings_repo = client_ctx
-    wd = str(REPO_ROOT)
+    wd = str(tmp_path)
+    # Readiness checks the referenced .sh files exist under working_dir.
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "stop_all.sh").write_text("#!/bin/sh\n")
+    (scripts / "start_uat.sh").write_text("#!/bin/sh\n")
     _save_deploy_config(srv, settings_repo, {
         "uat": {
             "host": "local",
@@ -379,6 +415,34 @@ def test_restart_scripts_use_working_dir_as_cwd(client_ctx):
     assert resp.status_code == 200, resp.text
     assert len(calls) == 2
     assert all(cwd == wd for cwd in calls)
+
+
+def test_script_self_restart_detaches_not_synchronous(client_ctx):
+    """A stop+start restart whose working_dir is the dashboard's own clone must
+    detach (Popen) so `stop` can't kill the handler before `start` runs — the
+    cause of "Failed to fetch" + a dashboard that never came back."""
+    client, srv, settings_repo = client_ctx
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": str(srv._REPO_ROOT),   # the dashboard's own clone
+            "branch": "develop",
+            "stop_script": "bash scripts/stop_all.sh uat",
+            "start_script": "bash scripts/start_uat.sh",
+        },
+    })
+
+    run_mock = MagicMock()
+    popen_mock = MagicMock()
+    with patch.object(srv.subprocess, "run", run_mock):
+        with patch.object(srv.subprocess, "Popen", popen_mock):
+            resp = client.post("/api/projects/commander/environments/uat/restart")
+
+    assert resp.status_code == 202, resp.text
+    # Detached helper spawned in a new session; stop/start NOT run synchronously.
+    popen_mock.assert_called_once()
+    assert popen_mock.call_args.kwargs.get("start_new_session") is True
+    run_mock.assert_not_called()
 
 
 def test_restart_rejects_when_nothing_configured(client_ctx):

@@ -17,7 +17,7 @@
     }
     return s;
   }
-  function colorizeLogLine(text, repo) {
+  function colorizeLogLine2(text, repo) {
     const escaped = escapeLogHtml(extractRaw(text));
     return escaped.replace(TOKEN_RE, function(match, issue, agent) {
       if (issue) {
@@ -28,6 +28,429 @@
       const key = agent.toLowerCase();
       return '<span class="log-chip log-chip--agent log-agent-' + key + '">' + agent + "</span>";
     });
+  }
+
+  // apps/dashboard/static/src/progress-activity.js
+  function _e(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _detectMode(payload) {
+    if (payload.mode)
+      return payload.mode;
+    if (Array.isArray(payload.steps) && payload.steps.length > 0)
+      return "stepper";
+    if (payload.total != null)
+      return "bar";
+    return "indeterminate";
+  }
+  var _STEP_ICON = {
+    pending: "\u25CB",
+    checking: "\u2026",
+    running: "\u25CF",
+    done: "\u2713",
+    pass: "\u2713",
+    fixed: "\u2713",
+    failed: "\u2717"
+  };
+  var _LOG_CLASS = {
+    dispatch: "pa-log-dispatch",
+    success: "pa-log-success",
+    warn: "pa-log-warn",
+    fail: "pa-log-fail"
+  };
+  function _barHtml(p) {
+    const done = Number(p.done ?? 0);
+    const total = Number(p.total ?? 0);
+    const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+    const shimmer = pct < 100 ? '<div class="pa-bar-shimmer"></div>' : "";
+    const countsHtml = total > 0 ? `<span class="pa-counts">${done} of ${total}</span>` : "";
+    const estHtml = p.est_remaining_minutes != null ? `<span class="pa-est-rem">~${_e(p.est_remaining_minutes)}m remaining</span>` : "";
+    return `<div class="pa-bar-track">
+    <div class="pa-bar-fill" style="width:${pct}%">${shimmer}</div>
+  </div>
+  <div class="pa-bar-meta">
+    <span class="pa-current">${_e(p.current)}</span>
+    ${countsHtml}
+    ${estHtml}
+  </div>`;
+  }
+  function _stepperHtml(p) {
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const rows = steps.map((s) => {
+      const state = _e(s.state || "pending");
+      const icon = _STEP_ICON[s.state] || "\u25CB";
+      const note = s.note ? `<span class="pa-step-note">${_e(s.note)}</span>` : "";
+      return `<div class="pa-step pa-step--${state}" id="pa-step-${_e(s.key || "")}">
+      <span class="pa-step-icon" aria-hidden="true">${icon}</span>
+      <div class="pa-step-content">
+        <span class="pa-step-name">${_e(s.label || s.key || "")}</span>
+        ${note}
+      </div>
+    </div>`;
+    }).join("");
+    return `<div class="pa-steps">${rows}</div>`;
+  }
+  function _indeterminateHtml(p) {
+    const cur = p.current ? `<span class="pa-current">${_e(p.current)}</span>` : "";
+    return `<div class="pa-indeterminate">
+    <div class="pa-spinner"></div>
+    ${cur}
+    <div class="pa-indet-shimmer"></div>
+  </div>`;
+  }
+  function _doneHtml(p) {
+    const txt = p.result ? _e(p.result) : "Done";
+    return `<div class="pa-done">
+    <span class="pa-done-icon" aria-hidden="true">\u2713</span>
+    <span class="pa-result">${txt}</span>
+  </div>`;
+  }
+  function _errorHtml(p, opts) {
+    const msg = p.error || "An error occurred.";
+    const fn = opts.retryFn || "";
+    const retryBtn = fn ? `<button class="pa-retry-btn" type="button" onclick="${_e(fn)}()">Retry</button>` : `<button class="pa-retry-btn" type="button">Retry</button>`;
+    return `<div class="pa-error">
+    <div class="pa-error-msg">${_e(msg)}</div>
+    ${retryBtn}
+  </div>`;
+  }
+  function _logLineHtml(line, colorize) {
+    if (!line)
+      return "";
+    if (typeof line === "string") {
+      const msg2 = colorize ? colorize(line, "") : _e(line);
+      return `<div class="pa-log-line"><span class="pa-log-msg">${msg2}</span></div>`;
+    }
+    const cls = _LOG_CLASS[line.type] || "";
+    const tsHtml = line.timestamp && line.timestamp !== "\u2014" ? `<span class="pa-log-time">${_e(line.timestamp)}</span>` : "";
+    const msg = colorize ? colorize(String(line.message || ""), "") : _e(line.message || "");
+    return `<div class="pa-log-line${cls ? " " + cls : ""}">${tsHtml}<span class="pa-log-msg">${msg}</span></div>`;
+  }
+  function _logSectionHtml(p, rootId, opts) {
+    const lines = Array.isArray(p.log_tail) ? p.log_tail : [];
+    const colorize = opts.colorize || null;
+    const collapsed = opts.logCollapsed ? " pa-log-collapsed" : "";
+    const streamId = rootId ? ` id="pa-log-stream-${_e(rootId)}"` : "";
+    const toggleArg = rootId ? `'${_e(rootId)}'` : "''";
+    const agentSlot = opts.logHeaderAgentHtml || "";
+    const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log\u2026</div>';
+    const linesHtml = lines.length ? lines.map((l) => _logLineHtml(l, colorize)).join("") : emptyMsg;
+    return `<div class="pa-log">
+    <div class="pa-log-header" onclick="paToggleLog(${toggleArg})" role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();paToggleLog(${toggleArg})}">
+      <span class="pa-log-indicator" aria-hidden="true"></span>
+      <span class="pa-log-label">live</span>
+      ${agentSlot}
+      <button class="pa-log-toggle-btn" type="button" aria-label="Toggle log" tabindex="-1">&#9650;</button>
+    </div>
+    <div class="pa-log-stream${collapsed}"${streamId}>${linesHtml}</div>
+  </div>`;
+  }
+  function renderProgressActivity(payload, opts) {
+    if (!payload || typeof payload !== "object")
+      payload = {};
+    opts = opts || {};
+    const status = payload.status || "running";
+    const mode = _detectMode(payload);
+    const rootId = opts.id || "";
+    const idAttr = rootId ? ` id="${_e(rootId)}"` : "";
+    let bodyHtml;
+    if (status === "done") {
+      bodyHtml = _doneHtml(payload);
+    } else if (status === "error") {
+      bodyHtml = _errorHtml(payload, opts);
+    } else if (mode === "stepper") {
+      bodyHtml = _stepperHtml(payload);
+    } else if (mode === "bar") {
+      bodyHtml = _barHtml(payload);
+    } else {
+      bodyHtml = _indeterminateHtml(payload);
+    }
+    const showLog = !opts.hideLog && status !== "done" && status !== "error" && (status === "running" || Array.isArray(payload.log_tail));
+    const logHtml = showLog ? _logSectionHtml(payload, rootId, opts) : "";
+    return `<div class="pa-root pa-mode-${_e(mode)} pa-status-${_e(status)}"${idAttr}>${bodyHtml}${logHtml}</div>`;
+  }
+  function updateProgressActivityLog(rootId, logTail, colorize) {
+    if (typeof document === "undefined")
+      return;
+    const streamEl = document.getElementById("pa-log-stream-" + rootId);
+    if (!streamEl)
+      return;
+    const lines = Array.isArray(logTail) ? logTail : [];
+    const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log\u2026</div>';
+    streamEl.innerHTML = lines.length ? lines.map((l) => _logLineHtml(l, colorize || null)).join("") : emptyMsg;
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+  function paToggleLog(rootId) {
+    if (typeof document === "undefined")
+      return;
+    const el = document.getElementById("pa-log-stream-" + rootId);
+    if (el)
+      el.classList.toggle("pa-log-collapsed");
+  }
+  var PA_CSS = `
+@keyframes pa-shimmer {
+  0%   { left: -40%; }
+  100% { left: 110%; }
+}
+@keyframes pa-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pa-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .4; }
+}
+
+.pa-root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* \u2500\u2500 Bar mode \u2500\u2500 */
+.pa-bar-track {
+  height: 4px;
+  background: rgba(22,163,74,.18);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  margin: 0 16px;
+}
+.pa-bar-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 2px;
+  transition: width .6s ease;
+  position: relative;
+  overflow: hidden;
+}
+.pa-bar-shimmer {
+  position: absolute;
+  top: 0; left: -40%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.55) 50%, transparent 100%);
+  animation: pa-shimmer 1.8s ease-in-out infinite;
+}
+.pa-bar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 22px;
+}
+.pa-current {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pa-counts {
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.pa-est-rem {
+  color: var(--text-sub);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* \u2500\u2500 Stepper mode \u2500\u2500 */
+.pa-steps {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px;
+}
+.pa-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  min-height: 28px;
+}
+.pa-step-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pa-step--pending  .pa-step-icon { color: var(--text-sub); }
+.pa-step--checking .pa-step-icon { color: var(--blue); }
+.pa-step--running  .pa-step-icon { color: var(--blue); }
+.pa-step--done     .pa-step-icon { color: var(--green); }
+.pa-step--pass     .pa-step-icon { color: var(--green); }
+.pa-step--fixed    .pa-step-icon { color: var(--amber); }
+.pa-step--failed   .pa-step-icon { color: var(--red); }
+.pa-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pa-step-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.pa-step-note {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+/* \u2500\u2500 Indeterminate mode \u2500\u2500 */
+.pa-indeterminate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+}
+.pa-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid rgba(22,163,74,.2);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: pa-spin .8s linear infinite;
+}
+.pa-indet-shimmer {
+  height: 4px;
+  flex: 1;
+  background: rgba(22,163,74,.15);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.pa-indet-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -40%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(22,163,74,.45) 50%, transparent 100%);
+  animation: pa-shimmer 1.8s ease-in-out infinite;
+}
+
+/* \u2500\u2500 Done end state \u2500\u2500 */
+.pa-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.pa-done-icon {
+  color: var(--green);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.pa-result {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* \u2500\u2500 Error end state \u2500\u2500 */
+.pa-error {
+  padding: 10px 16px;
+}
+.pa-error-msg {
+  font-size: 13px;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+.pa-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--red);
+  border: 1px solid var(--red);
+  background: var(--surface);
+  transition: background .12s;
+  font-family: inherit;
+}
+.pa-retry-btn:hover { background: var(--red-bg); }
+
+/* \u2500\u2500 Live-log slot \u2500\u2500 */
+.pa-log {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.pa-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.pa-log-header:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+.pa-log-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  animation: pa-pulse 2s ease-in-out infinite;
+}
+.pa-log-label { flex: 1; }
+.pa-log-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-sub);
+  cursor: pointer;
+  font-family: inherit;
+}
+.pa-log-stream {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  padding: 0 16px 10px;
+}
+.pa-log-stream.pa-log-collapsed { display: none; }
+.pa-log-line {
+  display: flex;
+  gap: 6px;
+}
+.pa-log-time {
+  color: var(--text-sub);
+  flex-shrink: 0;
+}
+.pa-log-msg {
+  color: var(--text);
+  flex: 1;
+  word-break: break-all;
+}
+.pa-log-line.pa-log-dispatch .pa-log-msg { color: var(--blue); }
+.pa-log-line.pa-log-success  .pa-log-msg { color: var(--green); }
+.pa-log-line.pa-log-warn     .pa-log-msg { color: var(--amber); }
+.pa-log-line.pa-log-fail     .pa-log-msg { color: var(--red); }
+`;
+  var _cssInjected = false;
+  function injectProgressActivityCss() {
+    if (_cssInjected || typeof document === "undefined")
+      return;
+    _cssInjected = true;
+    const style = document.createElement("style");
+    style.dataset.paStyle = "1";
+    style.textContent = PA_CSS;
+    document.head.appendChild(style);
   }
 
   // apps/dashboard/static/src/sprint-board/state.js
@@ -783,6 +1206,8 @@
     const flags = _pfFlags && (_pfFlags.flags || []);
     if (!flags || !flags.length)
       return "";
+    const label = _pfCurrentLabel;
+    const repo = _pfCurrentRepo;
     const rows = flags.map((f) => {
       const num = f.issue_number;
       const resolved = f.status !== "pending";
@@ -838,7 +1263,7 @@
     ${rows.join("")}
   </div>`;
   }
-  function _pfFlagShowSizePicker(num, _currentSize) {
+  function _pfFlagShowSizePicker(num, currentSize) {
     const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
     const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
     if (actionsEl)
@@ -1281,10 +1706,6 @@
                   onclick="_smgmtDeleteSelected()">
             <i class="ti ti-trash"></i> Delete
           </button>
-          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>
@@ -1697,6 +2118,7 @@ ${data.errors.join("\n")}`);
     const modal = document.getElementById("gc-modal");
     const issueNum = parseInt(modal.dataset.issueNum, 10);
     const sprintNum = parseInt(modal.dataset.sprintNum, 10);
+    const fromSprint = modal.dataset.fromSprint;
     const repo = modal.dataset.repo;
     const sprintLabel = `sprint-${sprintNum}`;
     const confirmBtn = document.getElementById("gc-confirm-btn");
@@ -1732,7 +2154,7 @@ ${data.errors.join("\n")}`);
       confirmBtn.textContent = `Create ${sprintLabel} & move`;
     }
   }
-  function _smgmtTicketDragEnd(_event) {
+  function _smgmtTicketDragEnd(event) {
     if (_smgmtDragTicket) {
       if (_smgmtDragTicket.multi) {
         _smgmtDragTicket.multi.forEach((n) => {
@@ -2792,7 +3214,9 @@ ${data.errors.join("\n")}`);
     let outcomeCardClass = "";
     let outcomeBadgeHtml = "";
     let headerMetaHtml = "";
+    let ticketCount = tickets.length;
     let ticketsContainerHtml = "";
+    let isOutcomeView = false;
     let rollupItems = tickets;
     if (outcome && (outcome.sprint_status || outcome.state)) {
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
@@ -2819,7 +3243,9 @@ ${data.errors.join("\n")}`);
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const issueList = outcome.issues || [];
+        ticketCount = issueList.length;
         ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+        isOutcomeView = true;
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
     } else if (isRunningView) {
@@ -2841,6 +3267,12 @@ ${data.errors.join("\n")}`);
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
     const logHtml = "";
     const cancelBannerHtml = "";
+    const hasUnsizedTickets = tickets.length > 0 && tickets.some((t) => !_smgmtTicketHasEstimate(t));
+    const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? "" : " hidden"}"
+                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
+                    title="Estimate all unsized tickets in this sprint">
+                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
+                   <span class="smgmt-bulk-est-progress"></span>`;
     const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
@@ -3041,7 +3473,9 @@ ${data.errors.join("\n")}`);
     const estRemMins = live ? live.est_remaining_minutes : null;
     const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
     const currentTicket = live ? live.current_ticket : null;
+    const activeAgent = live ? live.active_agent : null;
     const recentLogLines = live ? live.recent_log_lines || [] : [];
+    const pct = totalCount > 0 ? Math.round(completeCount / totalCount * 100) : 0;
     const liveIssues = live && live.issues && live.issues.length > 0 ? live.issues : [];
     const liveByNum = {};
     liveIssues.forEach((i) => {
@@ -3101,14 +3535,19 @@ ${data.errors.join("\n")}`);
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
-      <div class="smgmt-live-log" id="smgmt-live-log-${escHtml(label)}">
-        <div class="smgmt-live-log-bar">
-          <span class="smgmt-live-indicator"></span>
-          <span>live</span>
-          <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>
-        </div>
-        <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${_smgmtLiveLogLinesHtml(recentLogLines)}</div>
-      </div>
+      ${renderProgressActivity({
+      status: "running",
+      mode: totalCount > 0 ? "bar" : "indeterminate",
+      current: currentTicket ? `#${currentTicket.number}` : "",
+      done: completeCount,
+      total: totalCount,
+      est_remaining_minutes: estRemMins != null ? estRemMins : void 0,
+      log_tail: recentLogLines
+    }, {
+      id: `running-${escHtml(label)}`,
+      colorize: typeof colorizeLogLine === "function" ? colorizeLogLine : null,
+      logHeaderAgentHtml: `<span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>`
+    })}
     </div>`;
   }
   function _smgmtRollupText(items) {
@@ -3294,7 +3733,7 @@ ${data.errors.join("\n")}`);
     _blSyncFilterPills();
     _blUpdateActions();
   }
-  function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
+  function _smgmtBacklogTicketHtml(ticket, sprintNums) {
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -3452,9 +3891,13 @@ ${data.errors.join("\n")}`);
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
-  root.colorizeLogLine = colorizeLogLine;
+  root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;
   root.extractRaw = extractRaw;
   root.AGENT_NAMES = AGENT_NAMES;
+  root.renderProgressActivity = renderProgressActivity;
+  root.updateProgressActivityLog = updateProgressActivityLog;
+  root.paToggleLog = paToggleLog;
+  injectProgressActivityCss();
 })();
 //# sourceMappingURL=bundle.js.map

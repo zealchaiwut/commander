@@ -5016,23 +5016,51 @@ _NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
 
 
 def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
-    """Raise 409 when the label's plan already reached a terminal state.
+    """Raise 409 when the label *actually ran* and reached a terminal state.
 
     Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
     instead of re-dispatching the same label, so every label maps to exactly
     one run in logs, agent_runs, and the History ledger.
+
+    The durable lifecycle store is the `sprints` table (issue #757); plan.json
+    is a deprecated cache. A finish/sweep path can stamp a bare
+    ``{"state": "completed"}`` into plan.json for a label that never dispatched
+    anything (no tickets, no DB row, no run) — trusting that phantom blocked a
+    brand-new sprint from ever running. So: block only on evidence of a real
+    run — a terminal row in the durable table, or a terminal plan.json that
+    still carries the tickets it ran. A terminal-but-empty plan.json alone is
+    not a run.
     """
-    plan = _read_plan_json(project_root, sprint_label)
-    state = (plan or {}).get("state")
-    if state in _TERMINAL_PLAN_STATES:
-        raise HTTPException(
-            409,
-            detail=(
-                f"Sprint {sprint_label} already ran (state={state}). "
-                "Same-label re-dispatch is disabled — use Re-run to create a "
-                "child sub-sprint instead."
-            ),
-        )
+    # 1. Durable lifecycle table — authoritative when a row exists.
+    durable_state = None
+    try:
+        row = db.get_sprint(sprint_label)
+        if row:
+            durable_state = row.get("state")
+    except Exception:
+        durable_state = None  # DB best-effort; fall through to plan.json
+    if durable_state in _TERMINAL_PLAN_STATES:
+        _raise_terminal_redispatch(sprint_label, durable_state)
+
+    # 2. No durable row: only the plan.json cache claims terminal. Honor it
+    #    only when it has real run evidence (the tickets it dispatched). A bare
+    #    {"state": "completed"} with no tickets is a phantom — let it run.
+    if durable_state is None:
+        plan = _read_plan_json(project_root, sprint_label) or {}
+        state = plan.get("state")
+        if state in _TERMINAL_PLAN_STATES and plan.get("tickets"):
+            _raise_terminal_redispatch(sprint_label, state)
+
+
+def _raise_terminal_redispatch(sprint_label: str, state: str) -> None:
+    raise HTTPException(
+        409,
+        detail=(
+            f"Sprint {sprint_label} already ran (state={state}). "
+            "Same-label re-dispatch is disabled — use Re-run to create a "
+            "child sub-sprint instead."
+        ),
+    )
 
 
 def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:

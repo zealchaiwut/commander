@@ -150,6 +150,22 @@
       white-space: nowrap; transition: background .15s, border-color .15s;
     }
     .snav-pill:hover { background: var(--surface); border-color: var(--text-sub); }
+    /* Active-milestone pill (issue #880). High-contrast --blue/--text on the
+       surface-2 pill so it reads clearly without dominating the header. */
+    .msnav-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 10px; border-radius: 16px; max-width: 320px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      white-space: nowrap; transition: background .15s, border-color .15s;
+    }
+    .msnav-pill:hover { background: var(--surface); border-color: var(--blue); }
+    .msnav-icon { color: var(--blue); font-size: 13px; flex-shrink: 0; }
+    .msnav-name {
+      color: var(--blue); font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .msnav-count { color: var(--text); flex-shrink: 0; font-variant-numeric: tabular-nums; }
     .snav-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-sub); flex-shrink: 0; }
     .snav-dot--running  { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
     .snav-dot--finished { background: #2563eb; }
@@ -7070,6 +7086,13 @@
           <div class="snav-panel-body" id="snav-panel-body"></div>
         </div>
       </div>
+      <!-- Active milestone progress (issue #880): opens the Roadmap tab on click -->
+      <button class="msnav-pill hidden" id="msnav-pill" onclick="switchTab('roadmap')"
+              title="Active milestone — open Roadmap" aria-label="Active milestone progress, open Roadmap">
+        <i class="ti ti-flag-2 msnav-icon"></i>
+        <span class="msnav-name" id="msnav-name"></span>
+        <span class="msnav-count" id="msnav-count"></span>
+      </button>
       </div><!-- /sub-tabs-row -->
     </header>
 
@@ -9976,7 +9999,8 @@ async function init() {
   // Sprint status pill (GitHub-backed) — initial load + 30s refresh
   snavRefresh();
   _snavRefreshAll();
-  setInterval(() => { snavRefresh(); _snavRefreshAll(); }, 30000);
+  _msnavRefresh();  // active-milestone pill (issue #880)
+  setInterval(() => { snavRefresh(); _snavRefreshAll(); _msnavRefresh(); }, 30000);
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -19961,6 +19985,32 @@ async function _snavRefreshAll() {
       _snavRenderSidebarBadge(slug, state);
     } catch (_) {}
   }
+}
+
+/** Refresh the active-milestone pill in the project header (issue #880).
+
+    Fetches the project's active milestone progress and shows a compact
+    "X done + Y UAT / Z total" pill that opens the Roadmap tab on click. Hidden
+    when the project has no active milestone. Called on load and every 30s so
+    counts track real-time milestone issue states. */
+async function _msnavRefresh() {
+  const pill = document.getElementById('msnav-pill');
+  if (!pill) return;
+  const repo = _snavRepo();
+  if (!repo) { pill.classList.add('hidden'); return; }
+  try {
+    const res = await fetch(`/api/milestones/project?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) { pill.classList.add('hidden'); return; }
+    const m = await res.json();
+    if (!m || !m.title) { pill.classList.add('hidden'); return; }
+    const nameEl = document.getElementById('msnav-name');
+    const countEl = document.getElementById('msnav-count');
+    if (nameEl) nameEl.textContent = m.title;
+    if (countEl) countEl.textContent = `${m.done} done + ${m.uat} UAT / ${m.total} total`;
+    pill.setAttribute('aria-label',
+      `Active milestone ${m.title}, ${m.done} done plus ${m.uat} UAT of ${m.total} total. Open Roadmap.`);
+    pill.classList.remove('hidden');
+  } catch (_) { /* leave last-known pill state */ }
 }
 
 async function snavRefresh() {

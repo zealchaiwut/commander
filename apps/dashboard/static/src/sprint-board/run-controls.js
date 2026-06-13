@@ -12,6 +12,38 @@
    _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
    _pfFlags:writable, _pfSelectedIds:writable */
 
+// Effective agent models for the current preflight (from /preflight `models`,
+// resolved server-side from sprint.yaml — what the run will actually use).
+let _pfModels = null;
+
+/** Short model label, e.g. "claude-sonnet-4-6" → "sonnet-4-6". */
+function _pfModelShort(m) {
+  const s = String(m || '');
+  return s.replace(/^claude-/, '') || s;
+}
+
+/** "Agents" section for the preflight modal: the effective model per role, so
+ *  the operator confirms what will run before dispatch. */
+function _pfBuildModelsHtml() {
+  const m = _pfModels;
+  if (!m) return '';
+  const rows = [];
+  rows.push(`<span class="pf-model-pill"><b>Coder</b> ${escHtml(_pfModelShort(m.coder))}</span>`);
+  const br = m.tester_by_risk || {};
+  const testerTxt = Object.keys(br).length
+    ? Object.keys(br).map(k => `${k.toLowerCase()}:${_pfModelShort(br[k])}`).join(' · ')
+    : 'risk-routed';
+  rows.push(`<span class="pf-model-pill"><b>Tester</b> ${escHtml(testerTxt)}</span>`);
+  rows.push(`<span class="pf-model-pill"><b>Estimator</b> ${escHtml(_pfModelShort(m.estimator))}</span>`);
+  if (m.documentor) {
+    rows.push(`<span class="pf-model-pill"><b>Documentor</b> ${escHtml(_pfModelShort(m.documentor))}</span>`);
+  }
+  return `<div class="pf-section">
+      <div class="pf-section-label">Agent models <span class="pf-model-note">— confirm before run · edit in Settings → Agent Models</span></div>
+      <div class="pf-section-body pf-model-pills">${rows.join('')}</div>
+    </div>`;
+}
+
 export function smgmtRunBlockedToast() {
   _smgmtShowToast('Another sprint is running — wait for it to finish or cancel it');
 }
@@ -63,6 +95,7 @@ export function _pfReset() {
   _pfWarnings = null;
   _pfCycle = null;
   _pfFlags = null;
+  _pfModels = null;
   _pfSelectedIds = new Set();
 }
 
@@ -94,6 +127,7 @@ export async function _pfFetch() {
     _pfWarnings = data.warnings         || null;
     _pfCycle    = data.cycle            || null;
     _pfFlags    = data.mis_sizing_flags || null;
+    _pfModels   = data.models           || null;
     if (_pfDagData) {
       for (const t of (_pfDagData.tickets || [])) _pfSelectedIds.add(t.id);
     }
@@ -118,8 +152,10 @@ export function _pfShowSuccess() {
   const flagsHtml     = _pfBuildFlagsHtml();
   const conflictsHtml = _pfBuildConflictsHtml();
   const orderHtml     = _pfBuildOrderHtml();
+  const modelsHtml    = _pfBuildModelsHtml();
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
+     ${modelsHtml}
      ${warningsHtml}
      ${cycleHtml}
      ${flagsHtml}

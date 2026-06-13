@@ -5846,6 +5846,12 @@
 
     /* Conflicts and Proposed Order sections */
     .pf-section { margin-top: 20px; }
+    .pf-model-note { font-weight: 400; color: var(--text-muted); font-size: 11px; }
+    .pf-model-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pf-model-pill { display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; padding: 3px 9px; border-radius: 999px;
+      background: var(--surface-2); border: 1px solid var(--border); color: var(--text-sub); }
+    .pf-model-pill b { color: var(--text); font-weight: 600; }
     .pf-section-label {
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px;
@@ -19645,7 +19651,10 @@ function _gssRender(data) {
           <div class="gss-risk-note">Model is chosen by the ticket's risk tier (issue #790), not a fixed setting. Edit in <code>sprint.yaml → agent_config.tester.by_risk</code>.</div>
         </div>`;
       }
-      const current = data[a.settingsKey] || a.default;
+      // Show the EFFECTIVE model: a per-agent override, else the global
+      // default_model, else the hardcoded default — so the panel never shows
+      // sonnet while default_model silently routes the agent to another model.
+      const current = data[a.settingsKey] || data.default_model || a.default;
       return `<div class="gss-row">
         <div class="gss-label">${a.label}<span class="hint">${a.hint}</span></div>
         <div class="gss-control">

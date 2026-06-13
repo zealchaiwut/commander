@@ -48,6 +48,26 @@ existing host. Runbook: [features/agent-skills.md](features/agent-skills.md).
       `skills-lock.json` are in git; `install_agent_skills.sh` still refreshes
       on `--resetup-machine`
 
+### Resume-from-failure on gate fail (don't rework from scratch)
+
+When a ticket fails a quality gate (design / pytest / lint / merge-preview), the
+fix-round re-dispatches the agent with the failure sidecar as context, but the
+agent effectively re-runs the whole ticket. Make the re-run **pick up from the
+failed step** instead of redoing everything:
+
+- [ ] **Coder:** on a fix-round, reuse the existing feature branch + its diff and
+      target only the failing gate (e.g. fix the flagged design anti-pattern /
+      failing test), not a full re-implementation. The branch is already checked
+      out; bias the prompt to "fix what the gate flagged" over "implement #N".
+- [ ] **Tester:** on re-run after a coder fix, re-test only the previously
+      failing AC / gate first (fast path), then the rest — avoid a full re-verify
+      from zero when only one thing changed.
+- [ ] **Re-estimate after a failure:** a ticket that failed once is usually
+      bigger/harder than first sized. After the first failure, re-run the
+      per-issue estimator (or bump the size) so the budget/forecast and
+      model-routing reflect reality on the retry, rather than reusing the stale
+      pre-failure estimate.
+
 <!-- Anything above this line is hand-maintained. -->
 
 <!-- AUTO:milestones START -->

@@ -2985,6 +2985,12 @@
       font-size: 13px;
       color: var(--blue);
       white-space: nowrap;
+      /* Pin to the top of the sprint pane so it stays visible while scrolling a
+         long list and selecting tickets (multi-select usability). */
+      position: sticky;
+      top: 6px;
+      z-index: 20;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
     }
     .smgmt-selection-bar.show {
       display: flex;

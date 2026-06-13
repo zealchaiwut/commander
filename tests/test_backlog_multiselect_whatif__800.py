@@ -134,13 +134,18 @@ def test_backlog_multiselect_whatif__preview_level_silent_when_absent(html):
 
 
 # AC7 — drag-and-drop still works after multi-select UI
-def test_backlog_multiselect_whatif__drag_and_drop_preserved(html):
-    row = _fn(html, "_smgmtBacklogTicketHtml")
-    assert 'draggable="true"' in row, "rows must remain draggable"
-    assert "_smgmtBacklogTicketDragStart" in row, "dragstart handler must remain"
-    assert "function _smgmtDropOnSprint" in html, "sprint-column drop must remain"
-    panel_open = html[html.find('id="smgmt-backlog-pane"'):html.find('id="smgmt-backlog-pane"') + 400]
-    assert "_smgmtDropOnBacklog" in panel_open, "panel must remain a drop target"
+def test_backlog_multiselect_whatif__drag_removed(html):
+    # Drag-and-drop was removed (operator decision); tickets move via the row
+    # ⋯ menu → "Move to" + the multi-select bar. Row builders live in the
+    # extracted board-render.js module (issue #797).
+    board_render = (
+        _REPO_ROOT / "apps" / "dashboard" / "static" / "src" / "sprint-board"
+        / "board-render.js"
+    ).read_text(encoding="utf-8")
+    assert 'draggable="true"' not in board_render, "no row may be draggable"
+    assert "_smgmtBacklogTicketDragStart" not in board_render, "dragstart handler gone"
+    assert "_smgmtDropOnSprint(event" not in board_render, "sprint-card drop gone"
+    assert "_smgmtRowMenuOpen" in board_render, "row ⋯ menu (Move to) remains the move path"
 
 
 # AC8 — mock v5 DOM contract + age serialization that backs the age filter

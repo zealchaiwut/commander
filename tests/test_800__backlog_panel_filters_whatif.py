@@ -325,27 +325,33 @@ class TestPreviewLevel:
 # AC7 — Drag-and-drop across the panel still works
 # ---------------------------------------------------------------------------
 
-class TestDragStillWorks:
-    def test_rows_remain_draggable(self, html):
-        fn = _fn(html, "_smgmtBacklogTicketHtml", 1600)
-        assert 'draggable="true"' in fn, \
-            "Backlog rows must remain draggable after multi-select UI is added"
-        assert "_smgmtBacklogTicketDragStart" in fn, \
-            "Backlog rows must keep their dragstart handler"
+# Drag-and-drop was removed from the board (operator decision): tickets move
+# via the row ⋯ menu → "Move to" and the multi-select bar. The ticket builders
+# now live in static/src/sprint-board/board-render.js (issue #797 extraction).
+_BOARD_RENDER = (
+    Path(__file__).resolve().parent.parent
+    / "apps" / "dashboard" / "static" / "src" / "sprint-board" / "board-render.js"
+).read_text(encoding="utf-8")
 
-    def test_rows_carry_bl_row_token(self, html):
-        fn = _fn(html, "_smgmtBacklogTicketHtml", 1600)
-        assert "bl-row" in fn, \
-            "Backlog rows must carry the .bl-row mock token"
 
-    def test_panel_remains_drop_target(self, html):
-        panel_open = _slice(html, 'id="smgmt-backlog-pane"', ">")
-        assert "_smgmtDropOnBacklog" in panel_open or "ondrop" in panel_open, \
-            "Panel must remain a drop target (drag back to backlog)"
+class TestDragRemoved:
+    def test_rows_not_draggable(self):
+        assert 'draggable="true"' not in _BOARD_RENDER, \
+            "Drag-and-drop was removed — no ticket row may be draggable"
+        assert "_smgmtBacklogTicketDragStart" not in _BOARD_RENDER, \
+            "Backlog dragstart handler must be gone"
 
-    def test_sprint_columns_drop_unchanged(self, html):
-        assert "function _smgmtDropOnSprint" in html, \
-            "Existing sprint-column drop handler must remain (drag onto a sprint)"
+    def test_rows_carry_bl_row_token(self):
+        assert "bl-row" in _BOARD_RENDER, \
+            "Backlog rows must still carry the .bl-row mock token"
+
+    def test_sprint_card_has_no_drop_handler(self):
+        assert "_smgmtDropOnSprint(event" not in _BOARD_RENDER, \
+            "Sprint cards must no longer wire the drop handler"
+
+    def test_move_via_row_menu_available(self):
+        assert "_smgmtRowMenuOpen" in _BOARD_RENDER, \
+            "Tickets must keep the ⋯ row menu (Move to) as the move affordance"
 
 
 # ---------------------------------------------------------------------------

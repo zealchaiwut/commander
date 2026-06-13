@@ -158,7 +158,31 @@ export function _smgmtSetSelected(number, selected) {
   }
 }
 
+// Multi-select is scoped to ONE sprint (or the backlog) at a time so the batch
+// Move-to / hotswap target is unambiguous. Selecting a ticket in a different
+// sprint than the current selection clears the old selection first.
+function _smgmtTicketSprintKey(number) {
+  const iss = (_smgmtData?.issues || []).find(i => i.number === number);
+  if (!iss) return undefined;
+  return iss.sprint == null ? 'backlog' : iss.sprint;
+}
+
+function _smgmtSelectionSprintKey() {
+  const first = [..._smgmtSelectedIssues][0];
+  return first == null ? undefined : _smgmtTicketSprintKey(first);
+}
+
+function _smgmtEnforceSelectionScope(number) {
+  if (_smgmtSelectedIssues.size === 0) return;
+  const cur = _smgmtSelectionSprintKey();
+  const next = _smgmtTicketSprintKey(number);
+  if (cur !== undefined && next !== undefined && cur !== next) {
+    _smgmtClearSelection();
+  }
+}
+
 export function _smgmtToggleSelect(number, checked) {
+  if (checked) _smgmtEnforceSelectionScope(number);
   _smgmtSetSelected(number, checked);
   _smgmtLastSelectedNum = checked ? number : null;
   _smgmtUpdateSelectionUI();
@@ -186,8 +210,9 @@ export function _smgmtRowClick(event, number, label) {
   }
 
   if (event.ctrlKey || event.metaKey) {
-    // Ctrl/Cmd+click: toggle this ticket without clearing other selections.
+    // Ctrl/Cmd+click: toggle this ticket without clearing same-sprint siblings.
     const nowSelected = !_smgmtSelectedIssues.has(number);
+    if (nowSelected) _smgmtEnforceSelectionScope(number);
     _smgmtSetSelected(number, nowSelected);
     _smgmtLastSelectedNum = nowSelected ? number : null;
     _smgmtUpdateSelectionUI();
@@ -196,6 +221,7 @@ export function _smgmtRowClick(event, number, label) {
 
   // Plain click: toggle this ticket on/off.
   const nowSelected = !_smgmtSelectedIssues.has(number);
+  if (nowSelected) _smgmtEnforceSelectionScope(number);
   _smgmtSetSelected(number, nowSelected);
   _smgmtLastSelectedNum = nowSelected ? number : null;
   _smgmtUpdateSelectionUI();

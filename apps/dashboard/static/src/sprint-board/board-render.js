@@ -9,7 +9,7 @@
  * are scheduled for follow-on extraction waves.
  */
 
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
 
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
@@ -832,7 +832,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
       // Keep planning view: rework tickets stay actionable; the finish-card hat shows the summary.
       ticketsContainerHtml = tickets.length > 0
         ? tickets.map(t => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join('')
-        : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        : '<div class="smgmt-drop-hint">No tickets yet — add with the ⋯ menu → Move to</div>';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       const issueList = outcome.issues || [];
@@ -847,7 +847,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     // Planning view ticket rows
     ticketsContainerHtml = tickets.length > 0
       ? tickets.map(t => _smgmtTicketRowHtml(t, label)).join('')
-      : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+      : '<div class="smgmt-drop-hint">No tickets yet — add with the ⋯ menu → Move to</div>';
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
@@ -910,9 +910,6 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const collapseLabel = (isCollapsed ? 'Expand ' : 'Collapse ') + escHtml(sprintLabelDisplay(label));
   return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}${isRunning ? ' smgmt-running-clickable' : ''}" id="smgmt-card-${escHtml(label)}"
-         ondragover="${isRunning ? '' : `_smgmtDragOver(event, '${escHtml(label)}')`}"
-         ondragleave="${isRunning ? '' : `_smgmtDragLeave(event)`}"
-         ondrop="${isRunning ? '' : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}"
          ${isRunning ? `onclick="if(!event.target.closest('button,a')) _smgmtShowSubView('running')"` : ''}>
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
@@ -1324,22 +1321,15 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   return `
     <div class="smgmt-ticket${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
-         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
-         ondragend="_smgmtTicketDragEnd(event)"
-         ondragover="_smgmtTicketReorderDragOver(event)"
-         ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
          onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? 'checked' : ''}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
-      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || '#')}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -1437,12 +1427,9 @@ export function _smgmtBacklogTicketHtml(ticket, sprintNums) {
     : '';
   return `
     <div class="smgmt-ticket bl-row${isSelected ? ' is-selected' : ''}" id="smgmt-ticket-${ticket.number}"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
-         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
-         ondragend="_smgmtTicketDragEnd(event)"
          onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb" draggable="false"

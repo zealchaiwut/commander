@@ -47,7 +47,6 @@ def _auto_install_deps() -> None:
         )
         sys.exit(_result.returncode)
 
-
 _auto_install_deps()
 
 try:
@@ -197,7 +196,6 @@ _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 _orphans_removed_total: int = 0
 
-
 # ── Git startup metadata (issue #329) ─────────────────────────────────────────
 # Captured once at process start; never re-runs git per request.
 
@@ -206,7 +204,6 @@ def _capture_git_value(cmd: list) -> str:
         return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
     except Exception:
         return "unknown"
-
 
 _GIT_SHA: str = _capture_git_value(["git", "rev-parse", "HEAD"])
 _GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
@@ -7767,25 +7764,6 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         elif raw_minutes and not raw_size:
             raw_size = _letter_from_minutes(raw_minutes)
 
-        # pipeline_stage: coarse lane assignment for the two-queue lane view (issue #927)
-        # Derived from raw agent_status before normalization so all raw values are visible.
-        tac = iss.get("tester_attempt_count", 0)
-        if raw_agent_status in ("coder_dispatched", "coder_running"):
-            pipeline_stage = "coding"
-        elif raw_agent_status == "coder_done":
-            pipeline_stage = "awaiting_tester"
-        elif raw_agent_status in ("tester_dispatched", "tester_running"):
-            pipeline_stage = "testing"
-        elif (
-            derived_status in ("done", "skipped")
-            or raw_agent_status in ("tester_done", "completed", "failed")
-        ):
-            pipeline_stage = "done"
-        elif tac > 0:
-            pipeline_stage = "rework"
-        else:
-            pipeline_stage = "pending"
-
         issues_out.append({
             "number":               num,
             "title":                iss.get("title", ""),
@@ -7803,9 +7781,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
             "category":             iss.get("category"),
             "failure_reason":       iss.get("failure_reason"),
-            # Lane view fields (issue #927)
-            "pipeline_stage":       pipeline_stage,
-            "tester_attempt_count": tac,
+            "pipeline_stage":       _live_metrics.pipeline_stage_from_status(raw_agent_status, derived_status, iss.get("tester_attempt_count", 0)),
+            "tester_attempt_count": iss.get("tester_attempt_count", 0),
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
@@ -7904,11 +7881,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         # Running-view metric strip (issue #803) — agent_runs-derived keys are
         # present only when their source exists, so the frontend hides cards.
         **_live_metrics.running_metrics(sprint_label, project),
-        # Two-queue lane view capacity (issue #927): max concurrent slots per lane.
-        # The pipeline currently supports 1 coder + 1 tester; stored on state if
-        # a future config adds more slots per lane.
-        "max_coder_slots":  int(status_data.get("max_coder_slots", 1)),
-        "max_tester_slots": int(status_data.get("max_tester_slots", 1)),
+        **_live_metrics.lane_capacity(status_data),
     }
 
 

@@ -40,9 +40,12 @@ for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
 
 _HTML_PATH = DASHBOARD_DIR / "static" / "project.html"
 _SERVER_PY = DASHBOARD_DIR / "server.py"
+_LIVE_METRICS_PY = DASHBOARD_DIR / "live_metrics.py"
 
 PROJECT_HTML = _HTML_PATH.read_text(encoding="utf-8")
 SERVER_SRC = _SERVER_PY.read_text(encoding="utf-8")
+LIVE_METRICS_SRC = _LIVE_METRICS_PY.read_text(encoding="utf-8")
+BACKEND_SRC = SERVER_SRC + LIVE_METRICS_SRC
 
 
 # ─────────────────────────── helpers ─────────────────────────────────────────
@@ -353,15 +356,15 @@ def test_ac9_tester_attempt_count_in_issues_out():
 
 def test_ac9_max_coder_slots_in_live_response():
     """Backend /live endpoint includes max_coder_slots at top level."""
-    assert "max_coder_slots" in SERVER_SRC, (
-        "max_coder_slots not found in server.py — /live response must expose it"
+    assert "max_coder_slots" in BACKEND_SRC, (
+        "max_coder_slots not found in server.py or live_metrics.py — /live response must expose it"
     )
 
 
 def test_ac9_max_tester_slots_in_live_response():
     """Backend /live endpoint includes max_tester_slots at top level."""
-    assert "max_tester_slots" in SERVER_SRC, (
-        "max_tester_slots not found in server.py — /live response must expose it"
+    assert "max_tester_slots" in BACKEND_SRC, (
+        "max_tester_slots not found in server.py or live_metrics.py — /live response must expose it"
     )
 
 
@@ -380,8 +383,8 @@ def test_ac9_pipeline_stage_coding_from_coder_running():
 
 def test_ac9_pipeline_stage_awaiting_tester_from_coder_done():
     """Backend derives pipeline_stage='awaiting_tester' from coder_done."""
-    assert "awaiting_tester" in SERVER_SRC or "awaiting-tester" in SERVER_SRC, (
-        "server.py does not derive pipeline_stage='awaiting_tester' for coder_done"
+    assert "awaiting_tester" in BACKEND_SRC or "awaiting-tester" in BACKEND_SRC, (
+        "server.py/live_metrics.py does not derive pipeline_stage='awaiting_tester' for coder_done"
     )
 
 

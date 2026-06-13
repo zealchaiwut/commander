@@ -2335,6 +2335,34 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         structured_log.warn("success_comment_failed", f"failed to post success comment: {e}", issue_num=issue_num, exc=str(e))
 
 
+def _find_tool_bin(tool: str, worktester_dashboard: Path) -> Optional[str]:
+    """Resolve a gate tool (pytest / ruff / mypy): PATH first, then the known
+    venv locations.
+
+    The old code only looked in ``worktester_dashboard/../venv`` (e.g.
+    ``tester/apps/venv``), which does not exist — the venvs live at
+    ``worktester_dashboard/venv`` (tester/apps/dashboard/venv) and the clone root
+    (tester/venv). When ``which`` also missed, the gate hit "binary not found"
+    and failed before running a single test (sprint-66.6: every pytest gate
+    failed this way, exhausting fix-rounds on already-passing code).
+    """
+    ok, path, _ = _try("which", tool)
+    if ok and path.strip():
+        return path.strip()
+    candidates = [
+        worktester_dashboard / "venv" / "bin" / tool,                  # tester/apps/dashboard/venv
+        worktester_dashboard.parent.parent / "venv" / "bin" / tool,    # tester/venv (clone root)
+        worktester_dashboard / ".." / "venv" / "bin" / tool,           # legacy tester/apps/venv
+    ]
+    for c in candidates:
+        try:
+            if c.exists():
+                return str(c.resolve())
+        except OSError:
+            continue
+    return None
+
+
 def _gate_pytest(
     issue_num: int,
     worktester_dashboard: Path,
@@ -2354,19 +2382,12 @@ def _gate_pytest(
 
     _post_agent_event("gate:pytest")
 
-    # Detect pytest binary
-    ok, pytest_path, _ = _try("which", "pytest")
-    if not ok:
-        # Try inside dashboard venv
-        venv_pytest = worktester_dashboard / ".." / "venv" / "bin" / "pytest"
-        if venv_pytest.exists():
-            pytest_bin = str(venv_pytest.resolve())
-        else:
-            output = "pytest binary not found on PATH and no venv/bin/pytest found."
-            structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
-            return GateResult(gate="pytest", passed=False, output=output)
-    else:
-        pytest_bin = pytest_path
+    # Detect pytest binary (PATH, then known venv locations).
+    pytest_bin = _find_tool_bin("pytest", worktester_dashboard)
+    if not pytest_bin:
+        output = "pytest binary not found on PATH or in the worktree venvs."
+        structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
+        return GateResult(gate="pytest", passed=False, output=output)
 
     # Determine which test files to run based on gate_scope
     if gate_scope == "full":
@@ -2423,12 +2444,7 @@ def _gate_lint(
     any_ran = False
 
     # ── Python lint via ruff ───────────────────────────────────────────────────
-    ok_ruff, ruff_path, _ = _try("which", "ruff")
-    if not ok_ruff:
-        venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
-        ruff_bin = str(venv_ruff.resolve()) if venv_ruff.exists() else None
-    else:
-        ruff_bin = ruff_path
+    ruff_bin = _find_tool_bin("ruff", worktester_dashboard)
 
     if ruff_bin:
         if gate_scope == "full":
@@ -2575,12 +2591,7 @@ def _gate_typecheck(
         py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
 
     if py_files:
-        ok_mypy, mypy_path, _ = _try("which", "mypy")
-        if not ok_mypy:
-            venv_mypy = worktester_dashboard / ".." / "venv" / "bin" / "mypy"
-            mypy_bin = str(venv_mypy.resolve()) if venv_mypy.exists() else None
-        else:
-            mypy_bin = mypy_path
+        mypy_bin = _find_tool_bin("mypy", worktester_dashboard)
 
         if mypy_bin:
             targets = ["."] if gate_scope == "full" else py_files

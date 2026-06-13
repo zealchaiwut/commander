@@ -4989,6 +4989,45 @@ def _commander_dir(project_root: Path) -> Path:
     return project_root / ".commander"
 
 
+def _effective_agent_models(project_root: Path) -> dict:
+    """Resolve the model each sprint agent will actually use, read straight from
+    the project's sprint.yaml agent_config — the SAME source sprint_manager
+    reads at dispatch. Mirrors _resolve_model precedence: per-agent key →
+    default_model → hardcoded. Surfaced in the preflight so the run-confirm
+    modal shows the real models (no drift with a settings snapshot).
+    """
+    agent_cfg: dict = {}
+    try:
+        import yaml as _yaml
+        sy = _commander_dir(project_root) / "sprint.yaml"
+        if sy.exists():
+            data = _yaml.safe_load(sy.read_text(encoding="utf-8")) or {}
+            ac = data.get("agent_config")
+            if isinstance(ac, dict):
+                agent_cfg = ac
+    except Exception:
+        agent_cfg = {}
+
+    default_model = agent_cfg.get("default_model") or None
+
+    def _resolve(key: str, hardcoded: str) -> str:
+        return str(agent_cfg.get(key) or default_model or hardcoded)
+
+    # Tester is risk-routed (issue #790): agent_config.tester.by_risk.
+    by_risk = {"LOW": "claude-haiku-4-5", "MEDIUM": "claude-haiku-4-5", "HIGH": "claude-sonnet-4-6"}
+    tester_sub = agent_cfg.get("tester")
+    if isinstance(tester_sub, dict) and isinstance(tester_sub.get("by_risk"), dict):
+        by_risk = {str(k).upper(): str(v) for k, v in tester_sub["by_risk"].items()}
+
+    return {
+        "coder":         _resolve("coder_model", "claude-sonnet-4-6"),
+        "estimator":     _resolve("estimator_model", "claude-sonnet-4-6"),
+        "documentor":    _resolve("documentor_model", "claude-sonnet-4-6"),
+        "tester_by_risk": by_risk,
+        "default_model": default_model,
+    }
+
+
 def _sprint_order_path(project_root: Path) -> Path:
     return _commander_dir(project_root) / "sprint-order.json"
 
@@ -6534,6 +6573,8 @@ def get_sprint_preflight(sprint_label: str, project: str):
         "cycle": cycle_path,
         "stale_threshold_days": _STALE_ESTIMATE_DAYS,
         "mis_sizing_flags": mis_sizing_flags,
+        # Effective agent models the run will use — shown in the confirm modal.
+        "models": _effective_agent_models(_project_root_path(project)),
     }
 
 

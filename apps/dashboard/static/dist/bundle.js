@@ -506,6 +506,29 @@
   }
 
   // apps/dashboard/static/src/sprint-board/run-controls.js
+  var _pfModels = null;
+  function _pfModelShort(m) {
+    const s = String(m || "");
+    return s.replace(/^claude-/, "") || s;
+  }
+  function _pfBuildModelsHtml() {
+    const m = _pfModels;
+    if (!m)
+      return "";
+    const rows = [];
+    rows.push(`<span class="pf-model-pill"><b>Coder</b> ${escHtml(_pfModelShort(m.coder))}</span>`);
+    const br = m.tester_by_risk || {};
+    const testerTxt = Object.keys(br).length ? Object.keys(br).map((k) => `${k.toLowerCase()}:${_pfModelShort(br[k])}`).join(" \xB7 ") : "risk-routed";
+    rows.push(`<span class="pf-model-pill"><b>Tester</b> ${escHtml(testerTxt)}</span>`);
+    rows.push(`<span class="pf-model-pill"><b>Estimator</b> ${escHtml(_pfModelShort(m.estimator))}</span>`);
+    if (m.documentor) {
+      rows.push(`<span class="pf-model-pill"><b>Documentor</b> ${escHtml(_pfModelShort(m.documentor))}</span>`);
+    }
+    return `<div class="pf-section">
+      <div class="pf-section-label">Agent models <span class="pf-model-note">\u2014 confirm before run \xB7 edit in Settings \u2192 Agent Models</span></div>
+      <div class="pf-section-body pf-model-pills">${rows.join("")}</div>
+    </div>`;
+  }
   function smgmtRunBlockedToast() {
     _smgmtShowToast("Another sprint is running \u2014 wait for it to finish or cancel it");
   }
@@ -554,6 +577,7 @@
     _pfWarnings = null;
     _pfCycle = null;
     _pfFlags = null;
+    _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
   }
   function _pfClose() {
@@ -585,6 +609,7 @@
       _pfWarnings = data.warnings || null;
       _pfCycle = data.cycle || null;
       _pfFlags = data.mis_sizing_flags || null;
+      _pfModels = data.models || null;
       if (_pfDagData) {
         for (const t of _pfDagData.tickets || [])
           _pfSelectedIds.add(t.id);
@@ -608,7 +633,9 @@
     const flagsHtml = _pfBuildFlagsHtml();
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
+    const modelsHtml = _pfBuildModelsHtml();
     document.getElementById("pf-content").innerHTML = `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
+     ${modelsHtml}
      ${warningsHtml}
      ${cycleHtml}
      ${flagsHtml}

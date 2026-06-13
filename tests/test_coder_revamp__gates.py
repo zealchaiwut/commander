@@ -12,13 +12,36 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "sprint_manager"))
 
 from sprint_manager import (
+    FailureCategory,
     GateResult,
+    _LOGIC_FAILURE_CATEGORIES,
     _changed_js_ts_files,
+    _design_error_findings,
     _gate_design,
     _gate_lint,
     _gate_typecheck,
     _run_quality_gates,
 )
+
+
+class TestDesignFixRoundRouting:
+    """A design-gate failure is recoverable: it routes to the coder fix-round
+    loop (DESIGN_FAIL is a logic category) instead of terminally dropping."""
+
+    def test_design_fail_is_a_logic_category(self):
+        assert FailureCategory.DESIGN_FAIL in _LOGIC_FAILURE_CATEGORIES, (
+            "design failures must re-dispatch the coder via the fix-round loop"
+        )
+
+    def test_parser_partitions_error_vs_warning(self):
+        errs, warns = _design_error_findings(
+            '[{"severity": "error"}, {"severity": "warning"}, {"severity": "warning"}]'
+        )
+        assert len(errs) == 1 and warns == 2
+
+    def test_parser_tolerates_non_json(self):
+        assert _design_error_findings("npm warn ...\nno json here") == ([], 0)
+        assert _design_error_findings("") == ([], 0)
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -120,31 +143,48 @@ class TestGateDesign:
         assert result.passed is True
         assert result.skipped is True
 
-    def test_no_frontend_skips_gracefully(self, tmp_path):
+    def test_no_changed_frontend_skips_gracefully(self, tmp_path):
+        # Diff-scoped: with no changed frontend files the gate skips (it no longer
+        # scans the whole static/ tree, so unrelated tickets aren't failed).
         with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
-            result = _gate_design(1, tmp_path, skip=False)
-        # tmp_path has no HTML/CSS/JSX files
+            with patch("sprint_manager._changed_frontend_files", return_value=[]):
+                result = _gate_design(1, tmp_path, skip=False)
         assert result.passed is True
         assert result.skipped is True
 
     def test_design_pass(self, tmp_path):
-        # Create a fake HTML file so has_frontend = True
         (tmp_path / "index.html").write_text("<html></html>")
         with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
-            with patch("sprint_manager._run_timed") as mock_run:
-                mock_run.return_value = (0, "[]", "")
-                result = _gate_design(1, tmp_path, skip=False)
-        assert result.passed is True
-
-    def test_design_fail_reverts_to_sit(self, tmp_path):
-        (tmp_path / "style.css").write_text("body { color: red; }")
-        with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
-            with patch("sprint_manager._run_timed") as mock_run:
-                mock_run.return_value = (1, '[{"antipattern": "low-contrast"}]', "")
-                with patch("sprint_manager._revert_to_sit") as mock_revert:
+            with patch("sprint_manager._changed_frontend_files", return_value=["index.html"]):
+                with patch("sprint_manager._run_timed", return_value=(0, "[]", "")):
                     result = _gate_design(1, tmp_path, skip=False)
+        assert result.passed is True
+        assert result.skipped is False
+
+    def test_design_fail_reverts_to_sit_on_error_severity(self, tmp_path):
+        # An error-severity finding in a CHANGED file fails the gate.
+        (tmp_path / "style.css").write_text("body { color: red; }")
+        findings = '[{"antipattern": "gradient-text", "severity": "error"}]'
+        with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
+            with patch("sprint_manager._changed_frontend_files", return_value=["style.css"]):
+                with patch("sprint_manager._run_timed", return_value=(1, findings, "")):
+                    with patch("sprint_manager._revert_to_sit") as mock_revert:
+                        result = _gate_design(1, tmp_path, skip=False)
         assert result.passed is False
         mock_revert.assert_called_once()
+
+    def test_design_warning_only_does_not_fail(self, tmp_path):
+        # impeccable exits non-zero on warnings too, but warnings must not block:
+        # the gate parses severity and passes when there are no error findings.
+        (tmp_path / "style.css").write_text("body { color: #999; }")
+        findings = '[{"antipattern": "low-contrast", "severity": "warning"}]'
+        with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
+            with patch("sprint_manager._changed_frontend_files", return_value=["style.css"]):
+                with patch("sprint_manager._run_timed", return_value=(1, findings, "")):
+                    with patch("sprint_manager._revert_to_sit") as mock_revert:
+                        result = _gate_design(1, tmp_path, skip=False)
+        assert result.passed is True
+        mock_revert.assert_not_called()
 
 
 # ── _gate_lint (frontend extension) ──────────────────────────────────────────

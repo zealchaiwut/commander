@@ -2332,7 +2332,13 @@ def _gate_pytest(
             sys.stdout.write(str("  [gate:pytest] no test files changed — skipped") + "\n")
             return GateResult(gate="pytest", passed=True, output="no test files changed")
         sys.stdout.write(str(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}") + "\n")
-        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=worktester_dashboard)
+        # Paths from git diff are relative to the git root, not worktester_dashboard.
+        # Run pytest from the git root so tests/ paths resolve correctly.
+        rc_root, git_root_out, _ = _run_timed(
+            "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard,
+        )
+        pytest_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=pytest_cwd)
 
     combined = stdout + stderr
     if rc == 0:

@@ -6751,6 +6751,10 @@
     }
     .node-agent--coder { background: var(--purple-bg); color: var(--purple); }
     .node-agent--tester { background: var(--amber-bg); color: var(--amber); }
+    /* Size-routed model name appended to the coder badge — lighter weight,
+       monospace, no caps, so the model reads as a sub-detail of "Coder". */
+    .node-agent-model { font-family: var(--mono); font-weight: 600; text-transform: none;
+      letter-spacing: 0; opacity: .8; margin-left: 3px; }
     .node-queued-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
@@ -13510,6 +13514,14 @@ function _smgmtRailLevelMeta(L, live) {
 
 /** Markup for one ticket node card: state icon, #num, title, size pill, elapsed
  *  time, agent badge, and (when present) a fix-round badge. */
+/** Compact model name for badges: "claude-sonnet-4-6" → "sonnet-4-6",
+ *  "claude-haiku-4-5-20251001" → "haiku-4-5". Strips the "claude-" prefix and
+ *  any trailing -YYYYMMDD date stamp. */
+function _shortModelName(m) {
+  if (!m) return '';
+  return String(m).replace(/^claude-/, '').replace(/-\d{8}$/, '');
+}
+
 function _smgmtRailNodeHtml(iss, live) {
   const state = _smgmtRailNodeState(iss);
   const num = iss.number;
@@ -13525,7 +13537,9 @@ function _smgmtRailNodeHtml(iss, live) {
     ? `<span class="node-fix-badge">Fix round ${fr}/${maxRounds}</span>` : '';
   let agentBadge = '';
   if (state === 'coder-active') {
-    agentBadge = '<span class="node-agent node-agent--coder">Coder</span>';
+    const cm = _shortModelName(iss.coder_model);
+    const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
+    agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}</span>`;
   } else if (state === 'tester-active') {
     agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
   }
@@ -13633,14 +13647,18 @@ function _smgmtRailPatch(label, live) {
     let agentEl = nodeEl.querySelector('.node-agent');
     if (state === 'coder-active' || state === 'tester-active') {
       const cls = state === 'coder-active' ? 'node-agent--coder' : 'node-agent--tester';
-      const txt = state === 'coder-active' ? 'Coder' : 'Tester';
       if (!agentEl) {
         agentEl = document.createElement('span');
         agentEl.className = 'node-agent';
         nodeEl.appendChild(agentEl);
       }
       agentEl.className = `node-agent ${cls}`;
-      agentEl.textContent = txt;
+      if (state === 'coder-active') {
+        const cm = _shortModelName(iss.coder_model);
+        agentEl.innerHTML = cm ? `Coder <span class="node-agent-model">${escHtml(cm)}</span>` : 'Coder';
+      } else {
+        agentEl.textContent = 'Tester';
+      }
     } else if (agentEl) { agentEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);

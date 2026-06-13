@@ -556,7 +556,12 @@ def load_config(path: Path) -> "SprintConfig":
 
     # ── dashboard section ─────────────────────────────────────────────────────
     dashboard = data.get("dashboard") or {}
-    api_url   = (dashboard.get("api_url") or DASHBOARD_API_URL).strip()
+    # A clone-specific DASHBOARD_API_URL (set in that clone's apps/dashboard/.env,
+    # loaded via load_dotenv at import) overrides the shared sprint.yaml value: the
+    # project-root yaml can't tell PRD (8000) from UAT (8001), so when the running
+    # clone's own .env declares the URL it wins. Falls back to yaml, then hardcoded.
+    _env_api_url = os.environ.get("DASHBOARD_API_URL")
+    api_url   = (_env_api_url or dashboard.get("api_url") or DASHBOARD_API_URL).strip()
 
     # ── agents section ────────────────────────────────────────────────────────
     agents = data.get("agents") or {}
@@ -1292,6 +1297,7 @@ class IssueState:
     failure_reason:       Optional[str] = None
     dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
     tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
+    coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
 
     def to_dict(self) -> dict:
         return {
@@ -1311,6 +1317,7 @@ class IssueState:
             "failure_reason":     self.failure_reason,
             "dispatch_level":     self.dispatch_level,
             "tester_attempt_count": self.tester_attempt_count,
+            "coder_model":        self.coder_model,
         }
 
     @staticmethod
@@ -1333,6 +1340,7 @@ class IssueState:
         )
         iss.dispatch_level = d.get("dispatch_level", 0)
         iss.tester_attempt_count = d.get("tester_attempt_count", 0)
+        iss.coder_model = d.get("coder_model")
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -7357,6 +7365,7 @@ def _run_pipeline_dispatch(
         # Pre-compute model + routing_reason (issue #789) so agent_runs captures
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
+        ist.coder_model = _coder_model_sel  # surface size-routed model on the live running pane (bug: coder badge had no model)
         # Determine attempt_kind for this dispatch (issue #787).
         _pipe_attempt_kind = ctx.get("attempt_kind", "initial")
         _db_agent_start_sm(
@@ -8245,6 +8254,7 @@ def run_sprint(
                 # agent_runs row so the selection is captured at dispatch time.
                 _ser_est = _load_estimate(num)
                 _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
+                issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,

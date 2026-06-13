@@ -13,6 +13,7 @@ it never spawns sprints a different way.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -25,8 +26,9 @@ from services.sprint_manager import sprint_scheduler as _sched
 
 # Local dashboard base URL — the scheduler talks to its own HTTP surface so it
 # reuses the exact manual-run path (gates, locking, logging) rather than a
-# parallel dispatch.
-_BASE_URL = "http://127.0.0.1:8000"
+# parallel dispatch. Derive the port from this process's own PORT env so the
+# UAT clone (8001) hits itself rather than the PRD server (8000).
+_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
 
 # Poll cadence + ceiling for waiting on a sprint to finish.
 _POLL_SECS = 15

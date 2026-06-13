@@ -501,6 +501,18 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
     enrich = _enrich_from_state(label, sprints_dirs)
     plan = _read_plan_file(sprints_dirs, label) or {}
     state_raw = plan.get("status") or plan.get("state")
+    # Sort chronologically like the DB-backed builders (ISO timestamps), NOT by
+    # the raw label string — otherwise "sprint-999"/"sprint-8" sort lexically
+    # above "sprint-69" and float to the top of History (issue: sprint-69 buried
+    # under older runs). Prefer plan/state timestamps; fixtures with no timestamp
+    # fall back to "" and sort to the bottom under reverse=True.
+    state_file = _read_state_file(sprints_dirs, label) or {}
+    sort_key = (
+        plan.get("ended_at")
+        or plan.get("started_at")
+        or state_file.get("start_timestamp")
+        or ""
+    )
     return {
         "label": label,
         "project": plan.get("project", ""),
@@ -519,7 +531,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
         "failure_reason": enrich["failure_reason"],
         "plan_status": enrich.get("plan_status"),
         "post_sprint": enrich.get("post_sprint"),
-        "_sort_key": label,
+        "_sort_key": sort_key,
     }
 
 

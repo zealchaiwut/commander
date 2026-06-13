@@ -25,6 +25,7 @@ import {
 } from './bulk-complete-modal.js';
 import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
+  smgmtApproveSprint, smgmtRejectSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
   _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
@@ -90,6 +91,8 @@ globalThis._bcConfirm = _bcConfirm;
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
 globalThis.smgmtCancelSprint = smgmtCancelSprint;
+globalThis.smgmtApproveSprint = smgmtApproveSprint;
+globalThis.smgmtRejectSprint = smgmtRejectSprint;
 globalThis._pfOpen = _pfOpen;
 globalThis._pfReset = _pfReset;
 globalThis._pfClose = _pfClose;

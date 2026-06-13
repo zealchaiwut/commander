@@ -39,6 +39,54 @@ export async function smgmtCancelSprint(label) {
 }
 
 
+// ── Sprint sign-off: Approve / Reject (issue #862) ───────────────────────────
+
+export async function smgmtApproveSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  // Confirmation gate: dismissing leaves the sprint pending (no state change).
+  if (!confirm(`Approve ${sprintLabelDisplay(label)}? This signs off the sprint and enables Run Sprint.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _smgmtShowToast(`Approve failed: ${err.detail || res.status}`);
+      return;
+    }
+    _smgmtShowToast(`${sprintLabelDisplay(label)} approved — ready to run`);
+    loadSprintMgmt();
+  } catch (e) {
+    _smgmtShowToast(`Approve failed: ${e.message}`);
+  }
+}
+
+export async function smgmtRejectSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  // Confirmation gate: rejecting dissolves the sprint and returns tickets to backlog.
+  if (!confirm(`Reject ${sprintLabelDisplay(label)}? The sprint is dissolved and all its tickets return to the backlog.`)) return;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      _smgmtShowToast(`Reject failed: ${err.detail || res.status}`);
+      return;
+    }
+    _smgmtShowToast(`${sprintLabelDisplay(label)} rejected — tickets returned to backlog`);
+    loadSprintMgmt();
+  } catch (e) {
+    _smgmtShowToast(`Reject failed: ${e.message}`);
+  }
+}
+
 
 export function _pfOpen(label) {
   const repo = _smgmtRepo();

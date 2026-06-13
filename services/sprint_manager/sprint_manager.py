@@ -4064,6 +4064,47 @@ def _dispatch_doctor(
     return None  # all checks passed
 
 
+def _coder_resume_context(worktree: Path, base_branch: str) -> str:
+    """RESUME instruction for the coder when the checked-out feature branch
+    already has commits ahead of base (prior-run work).
+
+    On a re-run / fix-round the hygiene step rebases the existing feature branch
+    onto the sprint branch (so prior commits survive), but the dispatch prompt
+    still says "implement the issue" — a fresh agent then re-implements from
+    scratch, which is slow and redundant. This tells it to continue from the
+    existing work instead. Returns "" when there is no prior work (fresh ticket).
+    """
+    base_ref = f"origin/{base_branch}"
+    rc, count_out, _ = _run_timed("git", "rev-list", "--count", f"{base_ref}..HEAD", cwd=worktree)
+    if rc != 0:
+        return ""
+    try:
+        n = int((count_out or "0").strip())
+    except ValueError:
+        n = 0
+    if n <= 0:
+        return ""
+    _, log_out, _ = _run_timed(
+        "git", "log", "--oneline", "-n", "20", f"{base_ref}..HEAD", cwd=worktree
+    )
+    _, stat_out, _ = _run_timed(
+        "git", "diff", "--stat", f"{base_ref}...HEAD", cwd=worktree
+    )
+    commits = (log_out or "").strip() or "(commit subjects unavailable)"
+    files = (stat_out or "").strip() or "(file summary unavailable)"
+    return (
+        f"\n\nRESUME — a feature branch for this issue already has prior work: "
+        f"{n} commit(s) ahead of {base_branch}. You are CONTINUING this work, not "
+        f"starting over. First run `git log {base_ref}..HEAD` and "
+        f"`git diff {base_ref}...HEAD` to see what is already implemented, then "
+        f"finish the remaining acceptance criteria and address any prior failure. "
+        f"Do NOT re-create files that already satisfy their AC or rewrite passing "
+        f"tests — build on the existing commits.\n"
+        f"Prior commits:\n{commits}\n"
+        f"Files already changed:\n{files}"
+    )
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -4232,6 +4273,11 @@ def _dispatch_coder(
             f"last output: {_tail_str}; "
             "continue, do not restart"
         )
+
+    # Resume context: when the feature branch already carries prior-run work,
+    # tell the coder to continue from it rather than re-implement from scratch
+    # (the hygiene step rebased it onto the sprint branch, so it's checked out).
+    prompt += _coder_resume_context(cwd_path, sprint_branch)
 
     # Inject failure context: accumulated history (fix-loop, issue #618) or sidecar fallback
     if prior_failures:

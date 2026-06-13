@@ -7424,6 +7424,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             "size":           raw_size,
             "minutes":        raw_minutes,
             "dispatch_level": iss.get("dispatch_level", 0),
+            # Surface the actual failure category/reason so the inspector shows
+            # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
+            "category":       iss.get("category"),
+            "failure_reason": iss.get("failure_reason"),
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──

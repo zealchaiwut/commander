@@ -6723,6 +6723,9 @@
     .inspector-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px;
       font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--text-sub);
       background: var(--surface-2); }
+    .inspector-working { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: .02em; }
+    .inspector-working .smgmt-active-spinner { width: 9px; height: 9px; border-width: 2px; }
     .inspector-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px;
       color: var(--text-muted); }
     .inspector-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -13449,12 +13452,23 @@ function _smgmtInspectorAgentKey(iss) {
 /** Build the attempt timeline rows for a ticket. Feature-detects a rich
  *  ``attempts`` history on the ticket; when none (and no failure records)
  *  exist, degrades to a single current-state row (AC7) — never throws. */
+/** Human failure reason from an attempt/ticket: prefer an explicit reason, else
+ *  the failure category (e.g. CRASH → "crash"), never a hardcoded "gate failed"
+ *  (a crash is not a gate failure). */
+function _smgmtFailReason(o) {
+  if (!o) return 'failed';
+  if (o.gate_reason) return o.gate_reason;
+  if (o.failure_reason) return o.failure_reason;
+  if (o.category) return String(o.category).toLowerCase().replace(/_/g, ' ');
+  return 'failed';
+}
+
 function _smgmtInspectorAttempts(ticket) {
   const t = ticket || {};
   const raw = Array.isArray(t.attempts) ? t.attempts : null;
   if (raw && raw.length) {
     return raw.map(a => {
-      const gate = a.gate_reason || a.failure_reason || null;
+      const gate = a.gate_reason || a.failure_reason || a.category || null;
       const state = a.state
         || (gate ? 'failed'
           : a.agent_status === 'running' ? 'running'
@@ -13463,21 +13477,21 @@ function _smgmtInspectorAttempts(ticket) {
         kind: a.kind || a.attempt_kind || 'attempt',
         state: state,
         agent: a.agent || null,
-        gate_reason: state === 'failed' ? (gate || 'gate failed') : null,
+        gate_reason: state === 'failed' ? _smgmtFailReason(a) : null,
         sidecar: state === 'running' ? (a.prior_failure || a.last_gate || gate || '') : '',
         label: a.label || a.title || '',
       };
     });
   }
   // Degrade: a single row describing the ticket's current state.
-  const failed = t.agent_status === 'failed' || !!t.failure_reason;
+  const failed = t.agent_status === 'failed' || !!t.failure_reason || !!t.category;
   const running = t.agent_status === 'running';
   const state = failed ? 'failed' : running ? 'running' : (t.status === 'done' ? 'done' : 'queued');
   return [{
     kind: 'current',
     state: state,
     agent: t.agent || null,
-    gate_reason: failed ? (t.gate_reason || t.failure_reason || 'gate failed') : null,
+    gate_reason: failed ? _smgmtFailReason(t) : null,
     sidecar: running ? (t.prior_failure || t.last_gate || '') : '',
     label: '',
   }];
@@ -13567,11 +13581,22 @@ function _smgmtInspectorFeed(ticket, label) {
     + (issueUrl ? `<a class="inspector-link" href="${issueUrl}" target="_blank" rel="noopener">Issue</a>` : '')
     + `<a class="inspector-link" href="${escHtml(logsUrl)}">Full log</a></div>`;
 
+  // Active-agent chip: /live sets `agent` only while an agent is working this
+  // ticket, so a truthy agent means "CODER/TESTER working now" — the inspector
+  // header points at who is on it (issue: no indicator of which agent is working).
+  const liveIss = (live && Array.isArray(live.issues))
+    ? live.issues.find(i => i.number === t.number) : null;
+  const workingAgent = (liveIss && liveIss.agent) ? String(liveIss.agent).toLowerCase() : '';
+  const workingChip = (workingAgent === 'coder' || workingAgent === 'tester')
+    ? `<span class="inspector-working node-agent node-agent--${workingAgent}">`
+      + `<span class="smgmt-active-spinner"></span> ${escHtml(workingAgent.toUpperCase())} working</span>`
+    : '';
+
   panel.innerHTML =
     `<div class="inspector-head">`
     + `<span class="inspector-num">#${escHtml(String(_smgmtInspectorNum != null ? _smgmtInspectorNum : ''))}</span>`
     + `<span class="inspector-title">${escHtml(t.title || '')}</span>`
-    + size + est + links
+    + workingChip + size + est + links
     + `</div>`
     + `<div class="inspector-body">`
     + _smgmtInspectorAttemptsHtml(t)

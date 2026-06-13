@@ -1974,6 +1974,7 @@ def _sweep_stale_status(
     sprint_label: str,
     repo_name: Optional[str],
     active_issue: Optional[int] = None,
+    spare_issues: Optional["set[int]"] = None,
 ) -> None:
     """Remove a leftover transient status label (``in-progress`` or ``SIT``) from
     sprint tickets that are not being actively worked.
@@ -1983,10 +1984,18 @@ def _sweep_stale_status(
     mode both run concurrently, so a crash between the remove-label and add-label
     calls, or an interrupted prior run, can leave a ghost label on a ticket no
     longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
-    clear all except ``active_issue``. Best-effort and bounded (no per-ticket
-    fetches).
+    clear all except ``active_issue`` and any ``spare_issues``. Best-effort and
+    bounded (no per-ticket fetches).
+
+    ``spare_issues``: tickets whose label is legitimate and must NOT be cleared —
+    e.g. SIT tickets the run will dispatch straight to the tester (coded in a
+    prior run). Clearing those demotes them to a coder re-dispatch and the tester
+    never runs (incident: #880 was re-coded, then crashed, instead of tested).
     """
     r = _r(repo_name)
+    spare: "set[int]" = set(spare_issues or ())
+    if active_issue is not None:
+        spare.add(active_issue)
     try:
         out = subprocess.run(
             ["gh", "issue", "list", "--repo", r,
@@ -2001,7 +2010,7 @@ def _sweep_stale_status(
         return
     cleared: list[int] = []
     for n in nums:
-        if active_issue is not None and n == active_issue:
+        if n in spare:
             continue
         try:
             subprocess.run(
@@ -7704,9 +7713,13 @@ def run_sprint(
     # Clear any stale in-progress / SIT labels left by a prior interrupted or
     # crashed run before dispatch begins — otherwise those tickets show stuck
     # spinners on the board, and in pipeline mode a ghost SIT would violate the
-    # at-most-one-SIT invariant (issue #738 AC5).
+    # at-most-one-SIT invariant (issue #738 AC5). BUT spare SIT tickets the
+    # re-run will dispatch straight to the tester (coded in a prior run): wiping
+    # their SIT demotes them to a coder re-dispatch and the tester never runs
+    # (incident: #880 was re-coded then crashed instead of being tested).
+    _sit_dispatch = {n for n, act in rerun_decisions.items() if act == "dispatch_tester"}
     _sweep_stale_in_progress(label, eff_repo)
-    _sweep_stale_status("SIT", label, eff_repo)
+    _sweep_stale_status("SIT", label, eff_repo, spare_issues=_sit_dispatch)
 
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(

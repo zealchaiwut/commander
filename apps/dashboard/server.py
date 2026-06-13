@@ -7668,6 +7668,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             "size":           raw_size,
             "minutes":        raw_minutes,
             "dispatch_level": iss.get("dispatch_level", 0),
+            # Size-routed coder model (issue #789) so the running pane's Coder
+            # badge can show which model is implementing the ticket.
+            "coder_model":    iss.get("coder_model"),
             # Surface the actual failure category/reason so the inspector shows
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
             "category":       iss.get("category"),
@@ -7686,7 +7689,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             for iss in state_data.get("issues", []):
                 if iss.get("coder_started_at") and not iss.get("tester_finished_at"):
                     agent_name = "tester" if iss.get("tester_started_at") else "coder"
-                    active_agent = {"name": agent_name, "model": None, "pid": None}
+                    # Show the size-routed coder model in the header active-agent
+                    # chip (issue #789); tester model is risk-routed elsewhere.
+                    agent_model = iss.get("coder_model") if agent_name == "coder" else None
+                    active_agent = {"name": agent_name, "model": agent_model, "pid": None}
                     break
         except Exception:
             pass

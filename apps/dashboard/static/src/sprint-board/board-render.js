@@ -778,7 +778,10 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
   } else if (isLinger) {
-    actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
+    // Finished snapshot, kept 1h. A finished sprint is always post-run, so keep
+    // the board's Re-run → child action here (was History-only) and show the
+    // snapshot note beside it.
+    actionBtn = `${rerunBtn}<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
   } else if (isHasRework && rerunInto && tickets.length === 0) {
     // Tickets moved to a child re-run — run the child, not the empty parent label.
     actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}

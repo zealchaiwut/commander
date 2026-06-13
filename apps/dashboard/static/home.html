@@ -504,18 +504,15 @@
       return '<div class="timeline"><div class="tl-row"><span class="tl-txt muted">No recent activity.</span></div></div>';
     }
     const shown = acts.slice(0, HOME_ACTIVITY_LIMIT);
-    const hidden = acts.length - shown.length;
     const rows = shown.map(a => {
       const src = String(a.source || '').toLowerCase();
       const badge = src === 'github' ? 'github' : 'agent';
       const lbl = (a.source || 'EVENT').toUpperCase();
       return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    const more = hidden > 0
-      ? `<div class="tl-more">${hidden} more in <a href="/project/${esc(p.project)}/logs">Logs</a></div>`
-      : '';
+    // The "N more in Logs" row was redundant with the foot link below.
     const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
-    return `<div class="timeline">${rows}${more}${foot}</div>`;
+    return `<div class="timeline">${rows}${foot}</div>`;
   }
 
   function renderProject(p){

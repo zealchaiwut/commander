@@ -159,6 +159,7 @@ def init_db():
         _create_sprint_lifecycle_tables(conn)
         _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
+        _create_advisor_suggestions_table(conn)
         conn.commit()
 
 
@@ -888,6 +889,31 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+
+
+def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_suggestions draft store (issue #881).
+
+    One row per suggestion from the most recent advisor run. Replaced wholesale
+    on every new run so there is no suggestion history beyond the current draft
+    set per project.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_suggestions (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0,
+            pitch     TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            milestone TEXT NOT NULL,
+            scope     TEXT NOT NULL CHECK(scope IN ('S', 'M', 'L'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_suggestions_project "
+        "ON advisor_suggestions (project)"
+    )
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:

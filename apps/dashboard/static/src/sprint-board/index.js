@@ -6,11 +6,15 @@
  * concern modules also runs their side effects; ./state.js seeds modal/drag
  * state on `window`.
  *
- * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal.
+ * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal
+ * · bulk-complete modal · plan-next · scheduled-run.
  */
 
 import './state.js';
 
+import {
+  smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
+} from './plan-next.js';
 import {
   _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
 } from './scheduled-run.js';
@@ -195,3 +199,7 @@ globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
 globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
 globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
+
+// Plan next sprint + pending-sign-off decoration (issue #861)
+globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;

@@ -5385,6 +5385,13 @@ def get_sprint_management_issues(repo: str):
         if st is not None:
             sprint_signoff[lbl] = st
 
+    # Ledger-backed "this label actually ran" — board re-run / merge affordances
+    # use this instead of ticket labels (needs-rework/SIT from a prior sprint move).
+    sprint_has_run: dict[str, bool] = {
+        lbl: _sprint_has_own_run_outcome(project_root, lbl)
+        for lbl in renderable_sprint_labels
+    }
+
     return {
         "sprints": sprints,
         "order": order,
@@ -5396,6 +5403,7 @@ def get_sprint_management_issues(repo: str):
         "finished_sprints": finished_sprints,
         "sprint_rerun_into": sprint_rerun_into,
         "sprint_signoff": sprint_signoff,
+        "sprint_has_run": sprint_has_run,
     }
 
 
@@ -7192,6 +7200,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     if est_remaining_minutes is None and total_count > 0:
         est_remaining_minutes = 0
 
+    # ── agent_runs: cumulative per-ticket elapsed (all coder/tester attempts) ─
+    _agent_run_rows = _live_metrics._fetch_sprint_agent_run_rows(sprint_label)
+    _runs_by_issue = _live_metrics.runs_by_issue(_agent_run_rows)
+
     # ── issues array: snapshot with per-ticket status, agent, elapsed, size ──
     _IN_FLIGHT_AGENT_STATUSES = frozenset({
         "coder_dispatched", "coder_running", "coder_done",
@@ -7235,13 +7247,11 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         else:
             active_role = None
 
-        # elapsed_secs: coder_started_at → tester_finished_at (or now if still running)
-        coder_start_dt = _parse_ts_utc(iss.get("coder_started_at"))
-        if coder_start_dt is not None:
-            end_dt = _parse_ts_utc(iss.get("tester_finished_at")) or now_utc
-            issue_elapsed: Optional[int] = max(0, int((end_dt - coder_start_dt).total_seconds()))
-        else:
-            issue_elapsed = None
+        # elapsed_secs: sum of all agent_runs for this ticket (fix rounds included),
+        # or coder_started_at → tester_finished_at when runs are not recorded.
+        issue_elapsed = _live_metrics.issue_elapsed_secs(
+            iss, now_utc, _runs_by_issue,
+        )
 
         # size + minutes: state estimates → local JSON → GitHub size-* label
         raw_size, raw_minutes = _live_issue_size_and_minutes(
@@ -7252,7 +7262,13 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         pipeline_stage = _live_metrics.pipeline_stage_from_status(
             raw_agent_status or "", derived_status, tac,
         )
-        coder_attempt = _live_coder_attempt_count(num, sprint_label) if num else 0
+        coder_attempt = (
+            sum(
+                1 for r in (_runs_by_issue.get(int(num)) or [])
+                if (r.get("agent") or "").lower() == "coder"
+            )
+            if num is not None else 0
+        )
         if coder_attempt < 1 and raw_agent_status in ("coder_dispatched", "coder_running"):
             coder_attempt = 1
 
@@ -9243,6 +9259,281 @@ _CALIBRATION_SIZE_SETTING_KEYS = {
     "L": "estimation_l_minutes",
     "XL": "estimation_xl_minutes",
 }
+_CALIBRATION_CACHE_VERSION = 1
+_CALIBRATION_DONE_STATUSES = frozenset({"done", "uat", "merged", "passed"})
+
+
+def _calibration_cache_path(commander_dir: Path) -> Path:
+    return commander_dir / "calibration_cache.json"
+
+
+def _calibration_empty_by_size() -> dict[str, dict]:
+    return {
+        sz: {
+            "count": 0,
+            "min_minutes": None,
+            "avg_minutes": None,
+            "max_minutes": None,
+        }
+        for sz in _CALIBRATION_SIZES
+    }
+
+
+def _calibration_empty_cache() -> dict:
+    return {
+        "version": _CALIBRATION_CACHE_VERSION,
+        "archive_bootstrap_done": False,
+        "by_size": _calibration_empty_by_size(),
+        "processed": [],
+        "points": [],
+    }
+
+
+def _load_calibration_cache(commander_dir: Path) -> dict:
+    path = _calibration_cache_path(commander_dir)
+    if not path.is_file():
+        return _calibration_empty_cache()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return _calibration_empty_cache()
+    if data.get("version") != _CALIBRATION_CACHE_VERSION:
+        return _calibration_empty_cache()
+    by_size = data.get("by_size") or {}
+    for sz in _CALIBRATION_SIZES:
+        if sz not in by_size:
+            by_size[sz] = _calibration_empty_by_size()[sz]
+    data["by_size"] = by_size
+    if not isinstance(data.get("processed"), list):
+        data["processed"] = []
+    if not isinstance(data.get("points"), list):
+        data["points"] = []
+    return data
+
+
+def _save_calibration_cache(commander_dir: Path, cache: dict) -> None:
+    path = _calibration_cache_path(commander_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+
+
+def _calibration_add_sample(
+    cache: dict,
+    size: str,
+    actual_minutes: float,
+    point: dict | None = None,
+) -> None:
+    """Incrementally update per-size count/min/avg/max (no full rescan)."""
+    bucket = cache["by_size"][size]
+    val = round(actual_minutes, 2)
+    count = int(bucket["count"] or 0)
+    if count == 0:
+        bucket["count"] = 1
+        bucket["min_minutes"] = val
+        bucket["avg_minutes"] = val
+        bucket["max_minutes"] = val
+    else:
+        old_avg = float(bucket["avg_minutes"])
+        new_count = count + 1
+        bucket["avg_minutes"] = round((old_avg * count + val) / new_count, 2)
+        bucket["count"] = new_count
+        bucket["min_minutes"] = round(min(float(bucket["min_minutes"]), val), 2)
+        bucket["max_minutes"] = round(max(float(bucket["max_minutes"]), val), 2)
+    if point is not None:
+        cache["points"].append(point)
+
+
+def _calibration_issue_sample(
+    issue: dict,
+    estimates_dir: Path,
+    configured_minutes: dict[str, int],
+) -> tuple[str, float, dict] | None:
+    """Return (size, actual_minutes, point_dict) for one completed ticket."""
+    if issue.get("status") not in _CALIBRATION_DONE_STATUSES:
+        return None
+    issue_num = issue.get("number")
+    size = None
+    if issue_num is not None and estimates_dir.is_dir():
+        est_file = estimates_dir / f"issue-{issue_num}.json"
+        if est_file.is_file():
+            try:
+                est = json.loads(est_file.read_text(encoding="utf-8"))
+                size = est.get("size")
+            except (json.JSONDecodeError, OSError):
+                size = None
+    if size not in _CALIBRATION_SIZES:
+        return None
+
+    coder_min = _analytics_elapsed_minutes(
+        issue.get("coder_started_at"), issue.get("coder_finished_at"))
+    tester_min = _analytics_elapsed_minutes(
+        issue.get("tester_started_at"), issue.get("tester_finished_at"))
+    if coder_min is None and tester_min is None:
+        return None
+
+    actual_minutes = (coder_min or 0.0) + (tester_min or 0.0)
+    point = {
+        "issue_number": issue_num,
+        "estimated_size": size,
+        "estimated_minutes": configured_minutes[size],
+        "actual_minutes": round(actual_minutes, 2),
+    }
+    return size, actual_minutes, point
+
+
+def _calibration_state_key(state_file: Path, sprints_dir: Path, issue_num: int) -> str:
+    rel = state_file.relative_to(sprints_dir)
+    return f"{rel.as_posix()}/{issue_num}"
+
+
+def _calibration_absorb_state_file(
+    cache: dict,
+    state_file: Path,
+    sprints_dir: Path,
+    estimates_dir: Path,
+    configured_minutes: dict[str, int],
+    processed: set[str],
+) -> bool:
+    """Merge new tickets from one state file into cache; return True if anything added."""
+    try:
+        state_data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    changed = False
+    for issue in state_data.get("issues", []):
+        issue_num = issue.get("number")
+        if issue_num is None:
+            continue
+        key = _calibration_state_key(state_file, sprints_dir, issue_num)
+        if key in processed:
+            continue
+        sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
+        if sample is None:
+            continue
+        size, actual_minutes, point = sample
+        _calibration_add_sample(cache, size, actual_minutes, point)
+        cache["processed"].append(key)
+        processed.add(key)
+        changed = True
+    return changed
+
+
+def _refresh_calibration_cache(
+    project_root: Path,
+    configured_minutes: dict[str, int],
+) -> dict:
+    """Bootstrap archive once, then ingest only new live sprint state files."""
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    estimates_dir = commander / "estimates"
+    cache = _load_calibration_cache(commander)
+    processed = set(cache.get("processed") or [])
+    changed = False
+
+    if not sprints_dir.is_dir():
+        return cache
+
+    archive_dir = sprints_dir / "archive"
+    if not cache.get("archive_bootstrap_done") and archive_dir.is_dir():
+        for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
+            if _calibration_absorb_state_file(
+                cache, state_file, sprints_dir, estimates_dir,
+                configured_minutes, processed,
+            ):
+                changed = True
+        cache["archive_bootstrap_done"] = True
+        changed = True
+
+    for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+        if _calibration_absorb_state_file(
+            cache, state_file, sprints_dir, estimates_dir,
+            configured_minutes, processed,
+        ):
+            changed = True
+
+    if changed:
+        _save_calibration_cache(commander, cache)
+    return cache
+
+
+def _iter_calibration_state_files(
+    sprints_dir: Path,
+    *,
+    include_archive: bool = False,
+) -> list[Path]:
+    """State files for a full scan (optionally including archive/)."""
+    if not sprints_dir.is_dir():
+        return []
+    roots = [sprints_dir]
+    if include_archive:
+        archive = sprints_dir / "archive"
+        if archive.is_dir():
+            roots.append(archive)
+    files: list[Path] = []
+    for root in roots:
+        files.extend(sorted(root.glob("sprint-*-state.json")))
+    return files
+
+
+def _compute_calibration_from_files(
+    project_root: Path,
+    configured_minutes: dict[str, int],
+    since_dt: datetime | None,
+    until_dt: datetime | None,
+    sprint_filter: str | None,
+    *,
+    include_archive: bool,
+) -> dict:
+    """Full scan for scoped queries (since/until/sprint filters)."""
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    estimates_dir = _commander_dir(project_root) / "estimates"
+
+    by_size = {
+        sz: {
+            "configured_minutes": configured_minutes[sz],
+            **(_calibration_empty_by_size()[sz]),
+        }
+        for sz in _CALIBRATION_SIZES
+    }
+    buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
+    points: list[dict] = []
+
+    for state_file in _iter_calibration_state_files(
+        sprints_dir, include_archive=include_archive,
+    ):
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        if sprint_filter and state_data.get("sprint_label", "") != sprint_filter:
+            continue
+
+        start_dt = _analytics_parse_ts(state_data.get("start_timestamp"))
+        if start_dt:
+            if since_dt and start_dt < since_dt:
+                continue
+            if until_dt and start_dt > until_dt:
+                continue
+
+        for issue in state_data.get("issues", []):
+            sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
+            if sample is None:
+                continue
+            size, actual_minutes, point = sample
+            buckets[size].append(actual_minutes)
+            points.append(point)
+
+    for sz in _CALIBRATION_SIZES:
+        vals = buckets[sz]
+        if vals:
+            by_size[sz]["count"] = len(vals)
+            by_size[sz]["min_minutes"] = round(min(vals), 2)
+            by_size[sz]["avg_minutes"] = round(sum(vals) / len(vals), 2)
+            by_size[sz]["max_minutes"] = round(max(vals), 2)
+
+    return {"by_size": by_size, "points": points}
 
 
 def _compute_calibration(
@@ -9268,95 +9559,31 @@ def _compute_calibration(
     effective = build_effective_response(stored)
     configured_minutes = {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
 
-    # Skeleton result — all sizes always present regardless of data availability.
+    project_root = _project_root_path(repo)
+
+    # Scoped queries need a per-request full scan (archive included).
+    if since or until or sprint_filter:
+        return _compute_calibration_from_files(
+            project_root,
+            configured_minutes,
+            since_dt,
+            until_dt,
+            sprint_filter,
+            include_archive=True,
+        )
+
+    cache = _refresh_calibration_cache(project_root, configured_minutes)
     by_size = {
         sz: {
             "configured_minutes": configured_minutes[sz],
-            "count": 0,
-            "min_minutes": None,
-            "avg_minutes": None,
-            "max_minutes": None,
+            "count": cache["by_size"][sz]["count"],
+            "min_minutes": cache["by_size"][sz]["min_minutes"],
+            "avg_minutes": cache["by_size"][sz]["avg_minutes"],
+            "max_minutes": cache["by_size"][sz]["max_minutes"],
         }
         for sz in _CALIBRATION_SIZES
     }
-    points: list[dict] = []
-
-    # Source is status + estimate files only — Neon is not queried (issue #718).
-    project_root = _project_root_path(repo)
-    sprints_dir = _commander_dir(project_root) / "sprints"
-    estimates_dir = _commander_dir(project_root) / "estimates"
-
-    buckets: dict[str, list[float]] = {sz: [] for sz in _CALIBRATION_SIZES}
-    issue_rows: list[tuple] = []
-
-    if sprints_dir.exists():
-        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
-            try:
-                state_data = json.loads(state_file.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-
-            if sprint_filter and state_data.get("sprint_label", "") != sprint_filter:
-                continue
-
-            start_dt = _analytics_parse_ts(state_data.get("start_timestamp"))
-            if start_dt:
-                if since_dt and start_dt < since_dt:
-                    continue
-                if until_dt and start_dt > until_dt:
-                    continue
-
-            for issue in state_data.get("issues", []):
-                # Count any lifecycle "done-equivalent" status, not just literal
-                # "done": the sprint-lifecycle redesign settles passed tickets as
-                # uat/merged/passed, so a "done"-only filter silently blanked the
-                # est-vs-actual plot for newer sprints (hotfix #3).
-                if issue.get("status") not in ("done", "uat", "merged", "passed"):
-                    continue
-
-                issue_num = issue.get("number")
-                size = None
-                if issue_num is not None and estimates_dir.exists():
-                    est_file = estimates_dir / f"issue-{issue_num}.json"
-                    if est_file.exists():
-                        try:
-                            est = json.loads(est_file.read_text(encoding="utf-8"))
-                            size = est.get("size")
-                        except Exception:
-                            size = None
-                if size not in buckets:
-                    continue
-
-                coder_min = _analytics_elapsed_minutes(
-                    issue.get("coder_started_at"), issue.get("coder_finished_at"))
-                tester_min = _analytics_elapsed_minutes(
-                    issue.get("tester_started_at"), issue.get("tester_finished_at"))
-                if coder_min is None and tester_min is None:
-                    continue
-
-                actual_minutes = (coder_min or 0.0) + (tester_min or 0.0)
-                buckets[size].append(actual_minutes)
-                issue_rows.append((issue_num, size, actual_minutes))
-
-    # Compute aggregates.
-    for sz in _CALIBRATION_SIZES:
-        vals = buckets[sz]
-        if vals:
-            by_size[sz]["count"] = len(vals)
-            by_size[sz]["min_minutes"] = round(min(vals), 2)
-            by_size[sz]["avg_minutes"] = round(sum(vals) / len(vals), 2)
-            by_size[sz]["max_minutes"] = round(max(vals), 2)
-
-    # Build points list.
-    for issue_number, estimated_size, actual_minutes in issue_rows:
-        points.append({
-            "issue_number": issue_number,
-            "estimated_size": estimated_size,
-            "estimated_minutes": configured_minutes[estimated_size],
-            "actual_minutes": round(actual_minutes, 2),
-        })
-
-    return {"by_size": by_size, "points": points}
+    return {"by_size": by_size, "points": list(cache.get("points") or [])}
 
 
 @app.get("/api/projects/{slug}/analytics/calibration")

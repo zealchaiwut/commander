@@ -120,6 +120,10 @@ summary stay untouched:
 - A fresh branch, PR, and summary are created for the sub-sprint.
 - The sub-sprint then runs the full Stage 2 pipeline under its own label.
 
+On the board, **Re-run** appears only after the sprint label has its own run in
+the history ledger (`sprint_has_run`), not merely because moved tickets still
+carry `needs-rework` from a prior sprint.
+
 ---
 
 ## Agents at a glance

@@ -112,6 +112,83 @@ def _blended_rate(project: Optional[str]) -> Optional[float]:
         return None
 
 
+def _fetch_sprint_agent_run_rows(sprint_label: str) -> list[dict]:
+    """All agent_runs rows for a sprint label (empty list on any DB error)."""
+    import db as _db  # sibling module
+
+    try:
+        with _db.get_conn() as conn:
+            _db._create_agent_runs_table(conn)
+            raw = conn.execute(
+                "SELECT issue_number, agent, total_tokens, duration_seconds, "
+                "attempt_kind, started_at, finished_at "
+                "FROM agent_runs WHERE sprint_label = ?",
+                (sprint_label,),
+            ).fetchall()
+            return [dict(r) for r in raw]
+    except Exception:
+        return []
+
+
+def runs_by_issue(rows: list[dict]) -> dict[int, list[dict]]:
+    """Group agent_runs rows by issue_number."""
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        num = r.get("issue_number")
+        if num is None:
+            continue
+        out.setdefault(int(num), []).append(r)
+    return out
+
+
+def _parse_ts_utc(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).rstrip("Z"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def issue_elapsed_secs(
+    iss: dict,
+    now_utc: datetime,
+    runs_by_issue_map: dict[int, list[dict]],
+) -> Optional[int]:
+    """Cumulative wall time for one ticket across all coder/tester attempts.
+
+    Prefers ``agent_runs`` (sums every dispatch including fix rounds). Falls
+  back to coder_started_at → tester_finished_at when no runs are recorded.
+    """
+    num = iss.get("number")
+    if num is None:
+        return None
+
+    runs = runs_by_issue_map.get(int(num)) or []
+    if runs:
+        total = 0
+        counted = False
+        for r in runs:
+            dur = r.get("duration_seconds")
+            if dur:
+                total += int(dur)
+                counted = True
+            elif not r.get("finished_at"):
+                inflight = _inflight_seconds(r.get("started_at"))
+                if inflight > 0:
+                    total += inflight
+                counted = True
+        if counted:
+            return max(0, total)
+
+    coder_start_dt = _parse_ts_utc(iss.get("coder_started_at"))
+    if coder_start_dt is None:
+        return None
+    end_dt = _parse_ts_utc(iss.get("tester_finished_at")) or now_utc
+    return max(0, int((end_dt - coder_start_dt).total_seconds()))
+
+
 def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]:
     """agent_runs-derived metrics for the Running-view metric strip (issue #803).
 
@@ -124,20 +201,7 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
       - ``agent_time_split`` — {"coder": secs, "tester": secs} from duration_seconds
       - ``token_cost_usd`` / ``usd_per_token`` — only when a price map is set
     """
-    import db as _db  # sibling module
-
-    rows: list = []
-    try:
-        with _db.get_conn() as conn:
-            _db._create_agent_runs_table(conn)
-            rows = conn.execute(
-                "SELECT agent, total_tokens, duration_seconds, attempt_kind, "
-                "started_at, finished_at "
-                "FROM agent_runs WHERE sprint_label = ?",
-                (sprint_label,),
-            ).fetchall()
-    except Exception:
-        rows = []
+    rows = _fetch_sprint_agent_run_rows(sprint_label)
 
     if not rows:
         return {}

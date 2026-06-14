@@ -441,6 +441,8 @@ export function _smgmtApplyRerunOptimistic(
   _smgmtData.sprint_parents[subLabel] = parentLabel;
   if (!_smgmtData.sprint_rerun_into) _smgmtData.sprint_rerun_into = {};
   _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
+  if (!_smgmtData.sprint_has_run) _smgmtData.sprint_has_run = {};
+  _smgmtData.sprint_has_run[parentLabel] = true;
   if (!_smgmtData.sprint_plan_states) _smgmtData.sprint_plan_states = {};
   _smgmtData.sprint_plan_states[subLabel] = "draft";
   delete _smgmtOutcomeCache[parentLabel];
@@ -456,6 +458,11 @@ export function _smgmtApplyRerunOptimistic(
   }
 }
 
+/** True when the history ledger says this label has its own run (not ticket labels). */
+function _smgmtHasLedgerRun(label) {
+  return Boolean((_smgmtData?.sprint_has_run || {})[label]);
+}
+
 export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
@@ -464,14 +471,9 @@ export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtIsFreshRerunSprint(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
-    const tickets = bySprint[label] || [];
-    const hasRework = tickets.some((t) =>
-      (t.labels || []).some(
-        (l) => l.name === "need-rework" || l.name === "needs-rework",
-      ),
-    );
-    const hasCompleted = _smgmtHasCompletedTickets(tickets);
-    if (tickets.length > 0 && !hasRework && !hasCompleted) continue;
+    // Outcome bands only for labels that actually ran — not tickets moved
+    // from a prior sprint with stale needs-rework/SIT labels.
+    if (!_smgmtHasLedgerRun(label)) continue;
     toFetch.push(label);
   }
   await Promise.all(
@@ -925,20 +927,18 @@ export function _smgmtCardHtml(
     outcome &&
     (outcome.state ||
       (outcome.sprint_status === "completed" ? "completed" : null));
+  const hasLedgerRun = _smgmtHasLedgerRun(label);
   const isHasRework =
-    outcomeLifecycle === "needs_rework" ||
-    outcomeState === "has_rework" ||
-    outcomeState === "cancelled";
+    hasLedgerRun &&
+    (outcomeLifecycle === "needs_rework" ||
+      outcomeState === "has_rework" ||
+      outcomeState === "cancelled");
   const isReadyToMerge =
-    outcomeLifecycle === "ready_to_merge" ||
-    (outcomeLifecycle === "completed" && outcomeState === "completed");
-  const hasCompleted = isFreshRerun
-    ? false
-    : _smgmtHasCompletedTickets(tickets);
+    hasLedgerRun &&
+    (outcomeLifecycle === "ready_to_merge" ||
+      (outcomeLifecycle === "completed" && outcomeState === "completed"));
   const isPostRun =
-    !isRunningView &&
-    !planBlocksPostRun &&
-    !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
+    !isRunningView && !planBlocksPostRun && hasLedgerRun;
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
   const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);

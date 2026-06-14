@@ -144,3 +144,14 @@ class TestBoardRendering:
         assert "isHasRework || isPostRun" in _BUNDLE_SRC, (
             "static/dist/bundle.js is stale — run `npm run build`"
         )
+
+    def test_post_run_gated_on_ledger_not_ticket_labels(self):
+        assert "sprint_has_run" in _BOARD_RENDER_SRC, (
+            "board must read sprint_has_run from the API"
+        )
+        assert "_smgmtHasLedgerRun" in _BOARD_RENDER_SRC, (
+            "board must gate post-run affordances on ledger run state"
+        )
+        assert "hasLedgerRun &&" in _BOARD_RENDER_SRC, (
+            "isHasRework / isReadyToMerge must require a ledger run"
+        )

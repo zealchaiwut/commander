@@ -14,6 +14,9 @@ AC10) — it is left NULL on insert and dropped from every returned dict.
 from __future__ import annotations
 
 import json
+import logging
+import os
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,9 +24,12 @@ from typing import Optional
 
 from sqlalchemy import func
 
+from services.sprint_manager.commander_paths import discover_commander_dir
 from services.sprint_manager.models import ProjectTodo
 from services.sprint_manager.neon_db import get_session as _neon_get_session
 from services.sprint_manager import todo_attachment_repo as _attach_repo
+
+logger = logging.getLogger("commander.todo_repo")
 
 # Sentinel for "field not supplied" so a PATCH can update done / text / position
 # independently — None is a legitimate value we must not confuse with "omitted".
@@ -39,12 +45,22 @@ def _open_session():
     return _neon_get_session()
 
 
-def _try_open_session():
-    """Return an open session, or None when no backing DB is configured.
+def _neon_enabled() -> bool:
+    """Neon is optional — UAT runs with COMMANDER_DISABLE_NEON=1 even when DATABASE_URL is set."""
+    flag = os.environ.get("COMMANDER_DISABLE_NEON", "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return False
+    return bool(os.environ.get("DATABASE_URL", "").strip())
 
-    When Neon is disabled, ``get_engine()`` raises; in that mode todo reads and
-    writes degrade to the local JSON store rather than 500ing.
+
+def _try_open_session():
+    """Return an open session, or None when Neon is disabled / unavailable.
+
+    When Neon is disabled, todo reads and writes use the local JSON store so
+    todos never split across Neon and JSON (which made lists appear empty).
     """
+    if not _neon_enabled():
+        return None
     try:
         return _open_session()
     except Exception:
@@ -70,37 +86,112 @@ def _orm_to_dict(t: ProjectTodo, attachments: list[dict] | None = None) -> dict:
 
 
 # ── Local JSON fallback store (used when Neon is unavailable) ─────────────────
-# One file for the whole dashboard; each record carries its own project field so
-# isolation is enforced the same way the SQL ``WHERE project = ?`` does.
+# One file for the whole dashboard at the project .commander dir (nested-layout
+# aware via discover_commander_dir). Each record carries its own project field.
 _fallback_lock = threading.Lock()
+_CLONE_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _fallback_store_path() -> Path:
-    # todo_repo.py lives at <repo>/services/sprint_manager/todo_repo.py
-    root = Path(__file__).resolve().parent.parent.parent
-    d = root / ".commander"
+    d = discover_commander_dir(Path(__file__).resolve())
     d.mkdir(parents=True, exist_ok=True)
     return d / "project_todos_store.json"
 
 
+def _empty_fallback_data() -> dict:
+    return {"todos": [], "next_id": 1}
+
+
+def _normalize_fallback_data(data: dict) -> dict:
+    data.setdefault("todos", [])
+    data.setdefault("next_id", 1)
+    if data["todos"]:
+        max_id = max(int(t.get("id") or 0) for t in data["todos"])
+        if int(data["next_id"]) <= max_id:
+            data["next_id"] = max_id + 1
+    return data
+
+
+def _maybe_migrate_legacy_clone_store(canonical: Path) -> None:
+    """Merge todos from clone-local ``.commander/`` into the project store once."""
+    legacy = _CLONE_ROOT / ".commander" / "project_todos_store.json"
+    if not legacy.is_file() or legacy.resolve() == canonical.resolve():
+        return
+    try:
+        leg = _normalize_fallback_data(json.loads(legacy.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("legacy todo store unreadable at %s: %s", legacy, exc)
+        return
+    if not leg["todos"]:
+        return
+    if canonical.is_file():
+        try:
+            can = _normalize_fallback_data(
+                json.loads(canonical.read_text(encoding="utf-8"))
+            )
+        except (json.JSONDecodeError, OSError):
+            can = _empty_fallback_data()
+    else:
+        can = _empty_fallback_data()
+    seen = {(t["project"], t["id"]) for t in can["todos"]}
+    for rec in leg["todos"]:
+        key = (rec.get("project"), rec.get("id"))
+        if key not in seen:
+            can["todos"].append(rec)
+            seen.add(key)
+    can["next_id"] = max(can["next_id"], leg["next_id"])
+    _fallback_write_atomic(canonical, can)
+    try:
+        migrated = legacy.with_suffix(".json.migrated")
+        legacy.rename(migrated)
+        logger.info("merged legacy todos from %s into %s", legacy, canonical)
+    except OSError as exc:
+        logger.warning("could not rename legacy todo store %s: %s", legacy, exc)
+
+
 def _fallback_read() -> dict:
     p = _fallback_store_path()
-    if not p.exists():
-        return {"todos": [], "next_id": 1}
+    _maybe_migrate_legacy_clone_store(p)
+    if not p.is_file():
+        return _empty_fallback_data()
+
+    for candidate in (p, p.with_suffix(".json.bak")):
+        if not candidate.is_file():
+            continue
+        try:
+            return _normalize_fallback_data(
+                json.loads(candidate.read_text(encoding="utf-8"))
+            )
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("todo store unreadable at %s: %s", candidate, exc)
+
+    logger.error(
+        "todo store corrupt at %s — refusing writes that would wipe data",
+        p,
+    )
+    return {**_empty_fallback_data(), "_read_only": True}
+
+
+def _fallback_write_atomic(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {k: v for k, v in data.items() if k != "_read_only"}
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
     try:
-        data = json.loads(p.read_text())
-        data.setdefault("todos", [])
-        data.setdefault("next_id", 1)
-        return data
-    except Exception:
-        return {"todos": [], "next_id": 1}
+        shutil.copy2(path, path.with_suffix(".json.bak"))
+    except OSError as exc:
+        logger.warning("todo store backup failed: %s", exc)
 
 
 def _fallback_write(data: dict) -> None:
+    if data.get("_read_only"):
+        logger.error("todo store write skipped — last read failed (data would be lost)")
+        return
     try:
-        _fallback_store_path().write_text(json.dumps(data, indent=2))
-    except Exception:
-        pass
+        _fallback_write_atomic(_fallback_store_path(), data)
+    except OSError as exc:
+        logger.error("todo store write failed: %s", exc)
 
 
 def _fallback_to_dict(rec: dict, attachments: list[dict] | None = None) -> dict:

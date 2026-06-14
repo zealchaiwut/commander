@@ -1196,6 +1196,28 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         conn.commit()
 
 
+def transition_sprint_state(
+    label: str,
+    to_state: str,
+    actor: str,
+    end_reason: str | None = None,
+) -> tuple[bool, str | None]:
+    """Guarded sprint lifecycle writer — returns (ok, rejection_reason).
+
+    Single authoritative entry-point for running→terminal transitions so the
+    foundation guard (issue #1087) can enforce actor-based ownership.
+    Currently all actors are permitted; #1087 will tighten to require
+    actor="manager" for running→terminal transitions.
+
+    Returns (True, None) on success or (False, reason) when rejected.
+    """
+    _TERMINAL = {"ready_to_merge", "needs_rework", "completed"}
+    if to_state not in _TERMINAL:
+        return (False, f"transition_sprint_state: unsupported to_state={to_state!r}")
+    _set_sprint_terminal(label, to_state, end_reason, None)
+    return (True, None)
+
+
 def rename_sprint(old_label: str, new_label: str) -> None:
     """Rename a sprint and its ticket-order rows (issue #758).
 

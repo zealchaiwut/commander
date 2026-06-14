@@ -191,6 +191,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 # Configurable via .env: how long (seconds) a 'working' agent can be silent before
 # it is marked 'timed_out'.  Default: 300 s (5 minutes).
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
+COMMANDER_SWEEP_GRACE_SECONDS: int = int(os.environ.get("COMMANDER_SWEEP_GRACE_SECONDS", "30"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _start_time: float = 0.0
@@ -420,10 +421,8 @@ def _sweep_orphan_pid_files() -> None:
 
 
 def _sweep_plan_json_states(projects: list) -> None:
-    """Reconcile plan.json files with state=running that have no alive PID (issue #507).
-
-    Called once on startup after PID sweeping completes.  Any sprint whose
-    plan.json says running but whose PID is dead gets reconciled to needs_rework.
+    """Three-condition gate before settling running plan.json to needs_rework (issue #1089).
+    Writes go through db.transition_sprint_state(actor="reconcile") — never direct (AC2).
     """
     reconciled = 0
     for proj in projects:
@@ -440,37 +439,36 @@ def _sweep_plan_json_states(projects: list) -> None:
                     continue
                 if not isinstance(data, dict) or data.get("state") != "running":
                     continue
-                pid_file    = sprints_dir / f"{label}-pid"
-                pending_file = sprints_dir / f"{label}-pid.pending"
-                pid_alive = False
-                for candidate in (pid_file, pending_file):
-                    if not candidate.exists():
-                        continue
-                    try:
-                        raw = candidate.read_text(encoding="utf-8").strip()
-                        if raw in ("", "0"):
-                            pid_alive = True
-                            break
-                        pid = int(raw)
-                        os.kill(pid, 0)
-                        pid_alive = True
-                        break
-                    except (ProcessLookupError, ValueError, OSError):
-                        pass
-                    except PermissionError:
-                        pid_alive = True
-                        break
-                if not pid_alive:
-                    data["state"] = "needs_rework"
-                    data["end_reason"] = "process lost"
-                    try:
-                        tmp = plan_file.with_suffix(".json.tmp")
-                        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                        os.replace(str(tmp), str(plan_file))
-                        reconciled += 1
-                        print(f"[startup-sweep] reconciled {label} plan.json: running→needs_rework (PID dead)")
-                    except Exception as exc:
-                        print(f"[startup-sweep] could not reconcile {label} plan.json: {exc}")
+                # Condition 1: PID file absent (orphan sweep already cleaned dead PIDs)
+                if (sprints_dir / f"{label}-pid").exists() or (sprints_dir / f"{label}-pid.pending").exists():
+                    continue
+                # Condition 2: no live manager process (guards startup race before PID written)
+                if _live_manager_pid(project_root, label) is not None:
+                    continue
+                # Condition 3: grace window must have elapsed
+                row = db.get_sprint(label)
+                raw_ts = (row or {}).get("started_at") or data.get("started_at")
+                if not raw_ts:
+                    print(f"[startup-sweep] {label}: no started_at — grace assumed, skip")
+                    continue
+                try:
+                    started = datetime.fromisoformat(raw_ts)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - started).total_seconds()
+                except (ValueError, TypeError):
+                    age = COMMANDER_SWEEP_GRACE_SECONDS + 1
+                if age < COMMANDER_SWEEP_GRACE_SECONDS:
+                    print(f"[startup-sweep] {label}: grace {age:.0f}s < {COMMANDER_SWEEP_GRACE_SECONDS}s — skip")
+                    continue
+                # All three conditions met — route through the guarded writer (AC2)
+                ok, rejection = db.transition_sprint_state(label, "needs_rework", actor="reconcile", end_reason="process lost")
+                if ok:
+                    _plan_json_set_state(project_root, label, "needs_rework", end_reason="process lost")
+                    reconciled += 1
+                    print(f"[startup-sweep] reconciled {label}: running→needs_rework")
+                else:
+                    print(f"[startup-sweep] {label}: guard rejected — {rejection}")  # AC5
         except Exception as exc:
             print(f"[startup-sweep] plan.json sweep error for {proj.get('repo')}: {exc}")
     if reconciled:

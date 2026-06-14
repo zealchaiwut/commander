@@ -14,7 +14,6 @@ from __future__ import annotations
 import textwrap
 import sys
 from pathlib import Path
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).parent.parent

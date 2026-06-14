@@ -2328,26 +2328,37 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _smgmtPopulateSelectionDropdown() {
   }
+  function _smgmtMoveTargetLabels() {
+    const partOf = (lbl) => {
+      const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || "");
+      return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+    };
+    const finished = _smgmtFinishedLabels || /* @__PURE__ */ new Set();
+    return Object.keys(_smgmtBySprint || {}).filter((lbl) => !finished.has(lbl)).sort((a, b) => {
+      const pa = partOf(a), pb = partOf(b);
+      return pa[0] - pb[0] || pa[1] - pb[1];
+    });
+  }
   function _smgmtPopulateMoveToMenu() {
     const menu = document.getElementById("smgmt-move-to-menu");
     if (!menu || !_smgmtData)
       return;
     const selectedNums = Array.from(_smgmtSelectedIssues);
-    const occupiedSprints = new Set(
+    const occupiedLabels = new Set(
       selectedNums.map((n) => {
         const iss = (_smgmtData.issues || []).find((i) => i.number === n);
-        return iss ? iss.sprint : void 0;
-      }).filter((s) => s != null)
+        return iss ? iss.sprint_label : void 0;
+      }).filter((lbl) => lbl != null)
     );
-    const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
     let html = "";
-    sprints.forEach((n) => {
-      if (occupiedSprints.has(n))
+    _smgmtMoveTargetLabels().forEach((label) => {
+      if (occupiedLabels.has(label))
         return;
-      const label = `sprint-${n}`;
-      html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
-      if (typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
-        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">Sprint ${n} \u2014 replace (hotswap)</button>`;
+      const running = _smgmtRunningLabels.has(label);
+      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(label) : label.replace("sprint-", "Sprint ");
+      html += `<button class="smgmt-move-to-item" ${running ? "disabled" : ""} onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">${display}${running ? " (running)" : ""}</button>`;
+      if (!running && typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
+        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">${display} \u2014 replace (hotswap)</button>`;
       }
     });
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;

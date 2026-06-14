@@ -1141,13 +1141,15 @@ def record_sprint_start(
 
 
 def record_sprint_finish(label: str, ended_at: str | None = None,
-                         end_reason: str | None = None) -> None:
+                         end_reason: str | None = None,
+                         project: str = "") -> None:
     """Move a sprints row to `completed` (issue #757)."""
-    _set_sprint_terminal(label, "completed", end_reason, ended_at)
+    _set_sprint_terminal(label, "completed", end_reason, ended_at, project=project)
 
 
 def record_sprint_needs_rework(label: str, end_reason: str | None = None,
-                               ended_at: str | None = None) -> None:
+                               ended_at: str | None = None,
+                               project: str = "") -> None:
     """Move a sprints row to `needs_rework` with a reason.
 
     Unified-lifecycle terminal for every bad ending: ticket failure, crash,
@@ -1158,9 +1160,10 @@ def record_sprint_needs_rework(label: str, end_reason: str | None = None,
 
 
 def record_sprint_ready_to_merge(label: str, end_reason: str | None = None,
-                                 ended_at: str | None = None) -> None:
+                                 ended_at: str | None = None,
+                                 project: str = "") -> None:
     """Move a sprints row to `ready_to_merge` (run ended, all tickets passed)."""
-    _set_sprint_terminal(label, "ready_to_merge", end_reason, ended_at)
+    _set_sprint_terminal(label, "ready_to_merge", end_reason, ended_at, project=project)
 
 
 def record_sprint_cancel(label: str, end_reason: str = "stopped by user",
@@ -1176,7 +1179,7 @@ def record_sprint_fail(label: str, end_reason: str | None = None,
 
 
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
-                         ended_at: str | None) -> None:
+                         ended_at: str | None, project: str = "") -> None:
     ended_at = ended_at or _now_iso()
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
@@ -1184,14 +1187,17 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         # (e.g. a legacy sprint cancelled before its first DB write).
         conn.execute(
             """
-            INSERT INTO sprints (label, state, created_at, ended_at, end_reason)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sprints (label, project, state, created_at, ended_at, end_reason)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(label) DO UPDATE SET
                 state      = excluded.state,
                 ended_at   = excluded.ended_at,
-                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason),
+                project    = CASE
+                    WHEN excluded.project IS NOT NULL AND excluded.project != ''
+                    THEN excluded.project ELSE sprints.project END
             """,
-            (label, state, ended_at, ended_at, end_reason),
+            (label, project or "", state, ended_at, ended_at, end_reason),
         )
         conn.commit()
 

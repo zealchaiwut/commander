@@ -4428,6 +4428,72 @@ def _coder_clone_path(project_root: Path) -> Path:
     return project_root
 
 
+def _tester_clone_path(project_root: Path) -> Path:
+    """Return the tester clone path for a project root (nested or flat layout)."""
+    nested = project_root / "tester"
+    if nested.exists():
+        return nested
+    flat = project_root.parent / f"{project_root.name}-tester"
+    if flat.exists():
+        return flat
+    return nested
+
+
+def _sprint_yaml_path(project_root: Path) -> Path:
+    return _commander_dir(project_root) / "sprint.yaml"
+
+
+def _ensure_sprint_yaml(project_root: Path, repo: str) -> Optional[Path]:
+    """Ensure project-root sprint.yaml exists for sprint_manager dispatch.
+
+    Without it sprint_manager falls back to stale ~/commander/work-* paths and
+    design-doc guards check the wrong worktree. Generated from the nested/flat
+    clone layout when missing; never overwrites an existing file.
+    """
+    path = _sprint_yaml_path(project_root)
+    if path.exists():
+        return path
+    commander = _commander_dir(project_root)
+    commander.mkdir(parents=True, exist_ok=True)
+    api_url = (os.environ.get("DASHBOARD_API_URL") or "http://localhost:8000").strip()
+    content = (
+        f"repo_name: {repo}\n\n"
+        "worktrees:\n"
+        f"  coder: { _coder_clone_path(project_root) }\n"
+        f"  tester: { _tester_clone_path(project_root) }\n"
+        "  tester_app_subdir: apps/dashboard\n\n"
+        "paths:\n"
+        f"  scripts_dir: { _REPO_ROOT / 'scripts' }\n"
+        f"  logs_dir: { commander / 'logs' }\n"
+        f"  sprints_dir: { commander / 'sprints' }\n"
+        f"  alerts_dir: { commander / 'alerts' }\n\n"
+        "dashboard:\n"
+        f"  api_url: {api_url}\n"
+    )
+    try:
+        path.write_text(content, encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def _sprint_manager_argv(sprint_label: str, repo: str, project_root: Path) -> list[str]:
+    """Build sprint_manager CLI argv with repo + config so dispatch is project-scoped."""
+    argv = [
+        sys.executable,
+        str(SPRINT_MANAGER_PATH),
+        sprint_label,
+        "--alert-mode",
+        _ALERT_MODES,
+        "--repo",
+        repo,
+    ]
+    cfg = _ensure_sprint_yaml(project_root, repo)
+    if cfg is not None:
+        argv.extend(["--config", str(cfg)])
+    return argv
+
+
 def _main_clone_path(project_root: Path) -> Path:
     """Return the main working clone for a project root.
 
@@ -4745,12 +4811,14 @@ def _sprint_db_set_state(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
+                project=project or "",
             )
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
         elif state in ("needs_rework", "cancelled", "failed"):
             # cancelled/failed are legacy callers — all bad endings land in
@@ -4759,6 +4827,7 @@ def _sprint_db_set_state(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
     except Exception:
         pass
@@ -6466,8 +6535,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(body.sprint_label, body.project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -10058,6 +10126,10 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
                              parent=sprint_label)
     except Exception:
         pass
+    _sprint_db_set_state(
+        sub_label, project, "running",
+        started_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -10069,8 +10141,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     run_log_fh = open(run_log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(sub_label, project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=run_log_fh,

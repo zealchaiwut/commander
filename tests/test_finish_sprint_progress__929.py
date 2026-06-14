@@ -2,9 +2,6 @@
 import os
 import pytest
 import httpx
-import json
-import asyncio
-from unittest.mock import patch
 
 
 BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")

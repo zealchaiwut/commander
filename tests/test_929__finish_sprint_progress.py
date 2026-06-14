@@ -259,6 +259,14 @@ def test_project_html_has_retry_button():
     )
 
 
+def test_index_exports_fs_retry_on_global():
+    """AC8 — sprint-board barrel must expose _fsRetry for _setupModals wiring."""
+    index_js = (REPO_ROOT / "apps" / "dashboard" / "static" / "src" / "sprint-board" / "index.js").read_text()
+    assert "globalThis._fsRetry = _fsRetry" in index_js, (
+        "_fsRetry not assigned on globalThis in sprint-board/index.js"
+    )
+
+
 # ── AC9: shared ProgressActivity used, no one-off UI ─────────────────────────
 
 def test_finish_modal_calls_render_progress_activity():

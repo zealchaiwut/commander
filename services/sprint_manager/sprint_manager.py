@@ -8137,6 +8137,41 @@ def run_sprint(
             summary.merged.append(f"#{num}")
             continue
 
+        # Already-merged guard (hotfix E2): if this ticket's feature branch is
+        # already merged into the sprint base branch, it passed in a prior run —
+        # never re-dispatch it, even if its UAT label was stripped. That is
+        # exactly how sprint-73's #931 (merged at 19:35, UAT stripped at 19:50)
+        # got re-run into a divergent-branch crash. Trust git, not the label, and
+        # re-apply UAT so the board reflects reality.
+        if issue_state.status not in ("done", "skipped"):
+            _e2_fb = _find_feature_branch(num)
+            _e2_merged = (
+                _is_branch_merged_into(_e2_fb, target_branch) if _e2_fb
+                else _was_feature_merged_via_log(num, target_branch)
+            )
+            if _e2_merged:
+                sys.stdout.write(str(
+                    f"\n--- {progress} Issue #{num}: {title} --- "
+                    f"[SKIP: already merged into {target_branch} in a prior run]") + "\n")
+                try:
+                    structured_log.event(
+                        "issue.skip", run_id=_run_id, issue_num=num,
+                        sprint_label=label, agent_role="sprint",
+                        skip_reason=f"already merged into {target_branch}",
+                    )
+                except Exception:
+                    pass
+                issue_state.status = "done"
+                issue_state.set_agent_status("merged")
+                _transition_safe(
+                    num, _TicketState.UAT,
+                    actor="sprint_manager:already_merged", repo_name=eff_repo,
+                )
+                summary.processed.append(f"#{num}")
+                summary.merged.append(f"#{num}")
+                state.save(state_path)
+                continue
+
         sys.stdout.write(str(f"\n--- {progress} Issue #{num}: {title} ---") + "\n")
         try:
             structured_log.event(

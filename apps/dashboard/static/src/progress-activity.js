@@ -77,7 +77,7 @@ function _barHtml(p) {
       ? `<span class="pa-est-rem">~${_e(p.est_remaining_minutes)}m remaining</span>`
       : "";
   return `<div class="pa-bar-track">
-    <div class="pa-bar-fill" style="width:${pct}%">${shimmer}</div>
+    <div class="pa-bar-fill" style="transform:scaleX(${pct / 100})">${shimmer}</div>
   </div>
   <div class="pa-bar-meta">
     <span class="pa-current">${_e(p.current)}</span>
@@ -291,9 +291,11 @@ export const PA_CSS = `
 }
 .pa-bar-fill {
   height: 100%;
+  width: 100%;
   background: var(--green);
   border-radius: 2px;
-  transition: width .6s ease;
+  transform-origin: left;
+  transition: transform .6s ease;
   position: relative;
   overflow: hidden;
 }

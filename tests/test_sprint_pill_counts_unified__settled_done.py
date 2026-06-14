@@ -99,3 +99,38 @@ def test_lint_autofix_helper_defined_and_wired():
     # Wired into the lint gate before the check runs.
     gate = src[src.index("def _gate_lint("):]
     assert "_lint_autofix_commit(issue_num, worktester_dashboard, base_branch," in gate
+
+
+# ── Rec 2c: outcome band unions agent_runs (== History ledger) ──────────────
+
+def test_outcome_ingested_unions_agent_runs():
+    """The outcome band must union agent_runs the same way History does, so the
+    two panes show the same counts for a finished sprint."""
+    src = _SERVER.read_text(encoding="utf-8")
+    fn = src[src.index("def _outcome_from_ingested_row("):]
+    fn = fn[: fn.index("\ndef ", 1)]
+    assert "sprint_history_service._issues_from_agent_runs(sprint_label)" in fn, \
+        "outcome ingested path does not union agent_runs"
+    # Additive only — must not rewrite a ticket already present.
+    assert "if not _eid or _eid in _seen:" in fn
+
+
+# ── Rec 2d: finish-card lazy-ingest (collapse dual path everywhere) ──────────
+
+def test_finish_card_lazy_ingests():
+    src = _SERVER.read_text(encoding="utf-8")
+    fn = src[src.index("def get_sprint_finish_card("):]
+    fn = fn[: fn.index("\ndef ", 1)]
+    assert "_fc_db_row = db.get_sprint(sprint_label)" in fn
+    assert "db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)" in fn
+
+
+# ── Rec 2a: processed vs completed kept distinct (anti-regression) ──────────
+
+def test_donut_documents_completed_vs_processed_invariant():
+    """The donut center is COMPLETED % (done+uat); the pill is PROCESSED
+    (settled). They are intentionally different — guard the invariant comment so
+    a future change doesn't conflate them."""
+    src = _PROJECT_HTML.read_text(encoding="utf-8")
+    assert "Donut center shows COMPLETED %" in src
+    assert "Do not unify them." in src

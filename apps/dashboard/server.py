@@ -9839,14 +9839,13 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({"completed", "del
 def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
     """Lifecycle state for bulk-complete gating (plan.json, then DB)."""
     plan = _read_plan_json(project_root, sprint_label)
-    if plan and (plan.get("state") or "").lower() == "deleted":
-        return "deleted"
-    if plan and (plan.get("state") or "").strip():
-        return (plan.get("state") or "").lower()
+    state = (plan.get("state") or "").strip().lower() if plan else ""
+    if state:
+        return state
     try:
         row = db.get_sprint(sprint_label)
-        if row and (row.get("state") or "").strip():
-            return (row.get("state") or "").lower()
+        if row:
+            return (row.get("state") or "").strip().lower()
     except Exception:
         pass
     return ""
@@ -10374,8 +10373,6 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
-        "children_all_completed": children_all_completed,
-        "unsettled_children": unsettled_children,
     }
 
 
@@ -10426,9 +10423,12 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
-    all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
-
+    # Cheap local child-state gate first — a 409 here avoids N+1 GitHub calls
+    # in _bulk_complete_collect_issues. Silently passes when no children exist,
+    # so collect_issues still raises its own 400 for the "no child sprints" case.
     _bulk_complete_assert_children_completed(project_root, base_label)
+
+    all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
 
     for lbl in all_labels:
         if _is_sprint_running(project_root, lbl):

@@ -2177,6 +2177,21 @@ def deploy_environment(slug: str, env: str):
     except _deploy_actions.DeployActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Preflight: deploy is pull-only and never switches branches, so a pull of
+    # <branch> while a different branch is checked out aborts with a cryptic
+    # "Not possible to fast-forward". Detect the wrong branch up front and return
+    # an actionable 409. Best-effort — a probe failure never blocks the deploy.
+    cur = subprocess.run(
+        _deploy_actions.build_current_branch_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if cur.returncode == 0:
+        mismatch = _deploy_actions.branch_mismatch_error(
+            cur.stdout, branch, working_dir
+        )
+        if mismatch:
+            raise HTTPException(status_code=409, detail=mismatch)
+
     pull = subprocess.run(
         _deploy_actions.build_pull_command(branch),
         capture_output=True, text=True, cwd=working_dir,

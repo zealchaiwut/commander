@@ -1177,11 +1177,19 @@ Replace the existing draft (${data.existing_label})?`
         }).join("");
       }
       const memberCount = (preview.member_labels || []).length;
+      const mergeSteps = preview.merge_steps || [];
       const actionsEl = document.getElementById("bc-actions");
-      actionsEl.innerHTML = [
+      const actionRows = [];
+      for (const step of mergeSteps) {
+        actionRows.push(
+          `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge <code>${escHtml(step.head)}</code> \u2192 <code>${escHtml(step.base)}</code></div>`
+        );
+      }
+      actionRows.push(
         `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close selected tickets (UAT + summary included)</div>`,
         `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? "s" : ""} completed</div>`
-      ].join("");
+      );
+      actionsEl.innerHTML = actionRows.join("");
       document.getElementById("bc-loading").classList.add("hidden");
       document.getElementById("bc-content").classList.remove("hidden");
       if (confirmBtn)
@@ -1193,6 +1201,27 @@ Replace the existing draft (${data.existing_label})?`
       errEl.classList.remove("hidden");
     }
   }
+  async function _bcMergeStep(owner, repoName, step) {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprint-branch-merge`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmed: true,
+          head: step.head,
+          base: step.base,
+          title: step.title || "",
+          delete_branch: step.delete_branch !== false
+        })
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
   async function _bcConfirm() {
     const repo = _smgmtRepo();
     if (!_bcLabel || !repo || !_bcPreview)
@@ -1200,6 +1229,8 @@ Replace the existing draft (${data.existing_label})?`
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
+    const label = _bcLabel;
+    const mergeSteps = _bcPreview.merge_steps || [];
     const checkboxes = Array.from(document.querySelectorAll("#bc-ticket-list input[type=checkbox]"));
     const selectedNums = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
     const confirmBtn = document.getElementById("bc-confirm-btn");
@@ -1207,9 +1238,29 @@ Replace the existing draft (${data.existing_label})?`
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Completing\u2026";
     }
+    _bcClose();
+    const settleLabel = "Close tickets and mark sprints completed";
+    const refreshLabel = "Refreshing board\u2026";
+    const totalSteps = mergeSteps.length + 2;
+    let doneSteps = 0;
+    _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}\u2026`, {
+      progress: true,
+      total: totalSteps,
+      clearLog: true
+    });
+    _smgmtBoardLog("Starting bulk complete\u2026", "step");
     try {
+      for (const step of mergeSteps) {
+        const stepLabel = step.label || `${step.head} \u2192 ${step.base}`;
+        _smgmtBoardLog(stepLabel, "step");
+        await _bcMergeStep(owner, repoName, step);
+        doneSteps += 1;
+        _smgmtBoardProgress(doneSteps, totalSteps);
+        _smgmtBoardLog(`\u2713 ${stepLabel}`, "ok");
+      }
+      _smgmtBoardLog(settleLabel, "step");
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_bcLabel)}/bulk-complete`,
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1224,23 +1275,30 @@ Replace the existing draft (${data.existing_label})?`
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      _bcClose();
+      doneSteps += 1;
+      _smgmtBoardProgress(doneSteps, totalSteps);
+      _smgmtBoardLog(`\u2713 ${settleLabel}`, "ok");
+      _smgmtBoardLog(refreshLabel, "step");
+      await loadSprintMgmt();
+      doneSteps += 1;
+      _smgmtBoardProgress(doneSteps, totalSteps);
+      _smgmtBoardLog("\u2713 Bulk complete finished", "ok");
       if (data.errors && data.errors.length > 0) {
         _smgmtShowToast(`Bulk complete finished with errors \u2014 ${data.closed} closed.`);
       } else {
         _smgmtShowToast(
-          `${sprintLabelDisplay(_bcLabel || "")} bulk completed \u2014 ${data.closed} closed, ${data.completed} marked completed.`
+          `${sprintLabelDisplay(label)} bulk completed \u2014 ${data.closed} closed, ${data.completed} marked completed.`
         );
       }
-      await loadSprintMgmt();
     } catch (e) {
-      const errEl = document.getElementById("bc-error");
-      errEl.textContent = "Failed to bulk complete: " + e.message;
-      errEl.classList.remove("hidden");
-      if (confirmBtn) {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "Bulk complete";
+      _smgmtBoardLog(`\u2717 ${e.message}`, "err");
+      _smgmtShowToast("Bulk complete failed: " + e.message);
+      try {
+        await loadSprintMgmt();
+      } catch (_) {
       }
+    } finally {
+      _smgmtBoardUnlock();
     }
   }
 
@@ -2362,7 +2420,7 @@ This will close the issue on GitHub. This cannot be undone.`))
       _smgmtData.issues = _smgmtData.issues.filter((i) => i.number !== num);
     _smgmtClearSelection();
     _smgmtRender(_smgmtData);
-    _smgmtBoardLock(`Deleting #${num}\u2026`);
+    _smgmtBoardLock2(`Deleting #${num}\u2026`);
     try {
       const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
         method: "POST"
@@ -2374,7 +2432,7 @@ This will close the issue on GitHub. This cannot be undone.`))
       alert("Failed to delete issue: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock();
+      _smgmtBoardUnlock2();
     }
   }
   async function _smgmtMoveSelectedTo(targetLabel) {
@@ -2396,7 +2454,7 @@ This will close the issue on GitHub. This cannot be undone.`))
       _smgmtClearSelection();
       _smgmtRender(_smgmtData);
     }
-    _smgmtBoardLock(`Moving ${nums.length} ticket${nums.length !== 1 ? "s" : ""} to ${dest}\u2026`);
+    _smgmtBoardLock2(`Moving ${nums.length} ticket${nums.length !== 1 ? "s" : ""} to ${dest}\u2026`);
     try {
       const res = await fetch("/api/sprints/batch-labels", {
         method: "POST",
@@ -2417,7 +2475,7 @@ ${data.errors.join("\n")}`);
       _smgmtShowToast("Failed to move tickets: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock();
+      _smgmtBoardUnlock2();
     }
   }
   function _smgmtTicketDragStart(event, issueNum, fromSprint) {
@@ -2695,7 +2753,7 @@ ${data.errors.join("\n")}`);
       if (_smgmtData)
         _smgmtRender(_smgmtData);
       const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel || "backlog" }));
-      _smgmtBoardLock();
+      _smgmtBoardLock2();
       try {
         const res = await fetch("/api/sprints/batch-labels", {
           method: "POST",
@@ -2709,7 +2767,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock();
+        _smgmtBoardUnlock2();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -2723,7 +2781,7 @@ ${data.errors.join("\n")}`);
         _smgmtRender(_smgmtData);
       }
       _smgmtClearSelection();
-      _smgmtBoardLock();
+      _smgmtBoardLock2();
       try {
         const res = await fetch(`/api/issues/${number}/sprint-label`, {
           method: "POST",
@@ -2742,7 +2800,7 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number}: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock();
+        _smgmtBoardUnlock2();
       }
     }
   }
@@ -2879,7 +2937,7 @@ ${data.errors.join("\n")}`);
       if (_smgmtData)
         _smgmtRender(_smgmtData);
       const changes = nums.map((n) => ({ issue_num: n, sprint_label: "backlog" }));
-      _smgmtBoardLock();
+      _smgmtBoardLock2();
       try {
         const res = await fetch("/api/sprints/batch-labels", {
           method: "POST",
@@ -2893,7 +2951,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets to backlog: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock();
+        _smgmtBoardUnlock2();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -2904,7 +2962,7 @@ ${data.errors.join("\n")}`);
         _smgmtRender(_smgmtData);
       }
       _smgmtClearSelection();
-      _smgmtBoardLock();
+      _smgmtBoardLock2();
       try {
         const res = await fetch(`/api/issues/${number}/sprint-label`, {
           method: "POST",
@@ -2923,11 +2981,11 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock();
+        _smgmtBoardUnlock2();
       }
     }
   }
-  function _smgmtBoardLock(message, opts) {
+  function _smgmtBoardLock2(message, opts) {
     _smgmtMoveLock = true;
     _smgmtArStopTicker();
     const overlay = document.getElementById("smgmt-move-overlay");
@@ -2950,12 +3008,12 @@ ${data.errors.join("\n")}`);
         logEl.innerHTML = "";
     }
     if (showProgress && opts.total != null) {
-      _smgmtBoardProgress(0, opts.total);
+      _smgmtBoardProgress2(0, opts.total);
     } else if (!showProgress) {
-      _smgmtBoardProgress(0, 1);
+      _smgmtBoardProgress2(0, 1);
     }
   }
-  function _smgmtBoardProgress(done, total) {
+  function _smgmtBoardProgress2(done, total) {
     const fill = document.getElementById("smgmt-op-progress-fill");
     const pctEl = document.getElementById("smgmt-op-progress-pct");
     const pct = total > 0 ? Math.round(done / total * 100) : 0;
@@ -2964,7 +3022,7 @@ ${data.errors.join("\n")}`);
     if (pctEl)
       pctEl.textContent = pct + "%";
   }
-  function _smgmtBoardLog(line, kind) {
+  function _smgmtBoardLog2(line, kind) {
     const logEl = document.getElementById("smgmt-op-log");
     if (!logEl)
       return;
@@ -2974,7 +3032,7 @@ ${data.errors.join("\n")}`);
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   }
-  function _smgmtBoardUnlock() {
+  function _smgmtBoardUnlock2() {
     _smgmtMoveLock = false;
     const overlay = document.getElementById("smgmt-move-overlay");
     if (overlay)
@@ -2987,7 +3045,7 @@ ${data.errors.join("\n")}`);
       logEl.hidden = true;
       logEl.innerHTML = "";
     }
-    _smgmtBoardProgress(0, 1);
+    _smgmtBoardProgress2(0, 1);
     if (_arInterval > 0)
       _smgmtArStartTicker();
   }
@@ -4381,10 +4439,10 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
   globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
   globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
-  globalThis._smgmtBoardLock = _smgmtBoardLock;
-  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
-  globalThis._smgmtBoardProgress = _smgmtBoardProgress;
-  globalThis._smgmtBoardLog = _smgmtBoardLog;
+  globalThis._smgmtBoardLock = _smgmtBoardLock2;
+  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock2;
+  globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
+  globalThis._smgmtBoardLog = _smgmtBoardLog2;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
   globalThis._smgmtRender = _smgmtRender2;

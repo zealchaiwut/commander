@@ -109,6 +109,8 @@ def _run_managed(srv, tmp_path, project="owner/proj-run", label="sprint-90"):
         patch("server._build_sprint_subprocess_env", return_value={}),
         patch("server._plan_json_set_state", return_value=None),
         patch("subprocess.Popen", return_value=mock_proc),
+        patch("services.sprint_manager.sprint_manager.list_backlog_issues",
+              return_value=[{"number": 1, "title": "Backlog ticket", "labels": []}]),
     ]
     with _stack(patches):
         client = TestClient(srv.app)

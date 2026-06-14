@@ -160,6 +160,7 @@ def init_db():
         _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
         _create_advisor_suggestions_table(conn)
+        _create_advisor_look_ahead_table(conn)
         conn.commit()
 
 
@@ -918,6 +919,28 @@ def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_advisor_suggestions_project "
         "ON advisor_suggestions (project)"
+    )
+
+
+def _create_advisor_look_ahead_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_look_ahead store (issue #883 / brief #884).
+
+    Ordered entries from the most recent advisor look-ahead run. Replaced
+    wholesale on every new run — no history beyond the current set per project.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_look_ahead (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            position  INTEGER NOT NULL,
+            entry     TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_look_ahead_project "
+        "ON advisor_look_ahead (project)"
     )
 
 

@@ -456,11 +456,17 @@ function _histSplitBarHtml(stats) {
   </div>`;
 }
 
+function _histShouldAutoExpand(s) {
+  if (!s || !s.label) return false;
+  const st = (s.lifecycle_state || '').toLowerCase();
+  if (_histIsLocked(st)) return false;
+  // Completed/partial rows stay collapsed; only actionable states open by default.
+  return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge' || st === 'running';
+}
+
 function _histAutoExpandRecent(groups) {
   const _expand = (s) => {
-    if (!s || !s.label) return;
-    // Completed/deleted rows stay collapsed by default — title + badge + Logs only.
-    if (_histIsLocked(s.lifecycle_state)) return;
+    if (!_histShouldAutoExpand(s)) return;
     _histExpanded.add(s.label);
     _histLoadRunStats(s.label);
   };
@@ -879,9 +885,24 @@ function _histGroupNeedsBulkComplete(group) {
   });
 }
 
+function _histChildSprintsAllCompleted(group) {
+  const children = group.children || [];
+  if (!children.length) return false;
+  const settled = new Set(['completed', 'deleted', 'ready_to_merge']);
+  return children.every(s => settled.has((s.lifecycle_state || '').toLowerCase()));
+}
+
 function _histBulkCompleteBtnHtml(group) {
+  if (!group.children?.length || !group.baseSprint) return '';
   if (!_histGroupNeedsBulkComplete(group)) return '';
   const lbl = escHtml(group.baseLabel || '');
+  const childrenReady = _histChildSprintsAllCompleted(group);
+  if (!childrenReady) {
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Finish all child sprint runs before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+  }
   return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
           onclick="event.stopPropagation();smgmtBulkCompleteSprint('${lbl}')"
           title="Complete parent and all child sprints">
@@ -993,14 +1014,23 @@ function _histFoldHtml(fold) {
     ? (fold.from === fold.to ? ('Sprint ' + fold.from) : ('Sprints ' + fold.from + '–' + fold.to))
     : ('Sprints · ' + fold.sprints.length);
   const fid = escHtml(fold.id);
+  const nums = (fold.groups || [])
+    .map(g => _histLabelParts(g.baseLabel).baseNum)
+    .filter(n => n > 0);
+  const chips = !open && nums.length
+    ? `<div class="fold-chip-row" onclick="event.stopPropagation();_histToggleFold('${fid}')">`
+      + nums.map(n => `<span class="fold-num-chip">${n}</span>`).join('')
+      + '</div>'
+    : '';
   const body = open
     ? `<div class="fold-body">${(fold.groups || []).map(_histGroupHtml).join('')}</div>`
     : '';
   return `<div class="fold ${open ? 'expanded' : ''}" data-fold="${fid}">
     <div class="fold-head" onclick="_histToggleFold('${fid}')">
       <i class="ti ${chev} fold-chev"></i>
-      <span class="fold-title">${escHtml(range)}</span>
-      <span class="fold-count">${fold.sprints.length} sprints</span>
+      <span class="fold-title">${open ? escHtml(range) : 'Older sprints'}</span>
+      ${open ? `<span class="fold-count">${fold.sprints.length} sprints</span>` : ''}
+      ${chips}
       <span class="fold-spacer"></span>
       ${_histFoldAggHtml(fold.sprints)}
     </div>
@@ -1019,7 +1049,7 @@ function _histToolbarHtml() {
   return `<div class="hist-toolbar">
     <span class="hist-toolbar-note">
       <i class="ti ti-stack-2"></i>
-      Showing the ${_histFoldSize} most recent sprints — older sprints are grouped into folds of ${_histFoldSize}.
+      Latest ${_histFoldSize} sprint groups expanded below — older groups collapse to sprint numbers; click to open details.
     </span>
   </div>`;
 }

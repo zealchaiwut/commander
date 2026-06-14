@@ -1912,6 +1912,13 @@
     .hist-head-btn--delete:hover { background: var(--red-bg); }
     .hist-head-btn--bulk { color: var(--green); border-color: var(--green-bg); }
     .hist-head-btn--bulk:hover { background: var(--green-bg); }
+    .hist-head-btn--bulk:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      /* No pointer-events:none — disabled attr already blocks activation,
+         and removing it keeps the title tooltip alive and stops clicks
+         leaking through to the card-toggle handler. */
+    }
     .hist-card-head-right {
       grid-column: 2; grid-row: 1;
       display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap;
@@ -2265,6 +2272,20 @@
     }
     .fold-stat i { font-size: 12px; }
     .fold-stat--fail { color: var(--red); border-color: var(--red-bg); }
+    .fold-chip-row {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+      padding: 0 4px 0 8px; max-width: 55%;
+    }
+    .fold-num-chip {
+      font-family: var(--mono); font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-muted); cursor: pointer; line-height: 1.4;
+    }
+    .fold-num-chip:hover {
+      color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, var(--border));
+      background: var(--blue-bg);
+    }
     /* Member cards revealed when a fold is expanded — same gap/indent rhythm
        as the top-level ledger so they read as identical sprint rows. */
     .fold-body {
@@ -4113,6 +4134,14 @@
     .run-shell.linger .run-head-badge-dot {
       background: var(--text-sub);
       animation: none;
+    }
+    .run-shell.linger .run-head-badge--cancelled {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid rgba(217,119,6,.30);
+    }
+    .run-shell.linger .run-head-badge--cancelled .run-head-badge-dot {
+      background: var(--amber);
     }
     #smgmt-running-dot.linger {
       background: var(--text-sub);
@@ -6982,6 +7011,11 @@
        monospace, no caps, so the model reads as a sub-detail of "Coder". */
     .node-agent-model { font-family: var(--mono); font-weight: 600; text-transform: none;
       letter-spacing: 0; opacity: .8; margin-left: 3px; }
+    .node-size-inline { font-family: var(--mono); font-weight: 700; text-transform: uppercase;
+      letter-spacing: .03em; margin-left: 4px; padding: 0 5px; border-radius: 4px;
+      background: var(--surface-2, rgba(0,0,0,.06)); font-size: 10px; }
+    .node-retry-badge { font-family: var(--mono); font-weight: 600; text-transform: none;
+      letter-spacing: 0; opacity: .85; margin-left: 4px; font-size: 10px; }
     .node-queued-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
     .node-backend-badge { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
       padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
@@ -9397,22 +9431,41 @@ let _smgmtRunningLabels = new Set();
 let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
+let _smgmtLiveCacheRepo = null;
 
 // Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
 const _SMGMT_LINGER_MS = 60 * 60 * 1000;
 const _smgmtLingerLabels = new Map();
 let _smgmtLingerPollId = null;
 
-function _smgmtLingerStorageKey(label) {
-  return 'smgmtLinger_' + label;
+function _smgmtLingerRepoKey(repo) {
+  return (repo || '').replace('/', '__');
 }
 
-function _smgmtLingerRestore() {
+function _smgmtLingerStorageKey(repo, label) {
+  return 'smgmtLinger_' + _smgmtLingerRepoKey(repo) + '_' + label;
+}
+
+function _smgmtLingerRestore(repo) {
+  if (!repo) return;
+  // Drop in-memory linger from other projects (cross-project Running pane bleed).
+  for (const [label, entry] of [..._smgmtLingerLabels.entries()]) {
+    if (!entry || entry.project !== repo) {
+      _smgmtLingerLabels.delete(label);
+    }
+  }
   try {
+    const prefix = 'smgmtLinger_' + _smgmtLingerRepoKey(repo) + '_';
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('smgmtLinger_sprint-')) continue;
-      const label = key.slice('smgmtLinger_'.length);
+      if (!key) continue;
+      // Legacy keys (label-only) caused commander linger to show on other projects.
+      if (key.startsWith('smgmtLinger_sprint-')) {
+        localStorage.removeItem(key);
+        continue;
+      }
+      if (!key.startsWith(prefix)) continue;
+      const label = key.slice(prefix.length);
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const data = JSON.parse(raw);
@@ -9421,6 +9474,7 @@ function _smgmtLingerRestore() {
         localStorage.removeItem(key);
         continue;
       }
+      data.project = data.project || repo;
       _smgmtLingerLabels.set(label, data);
       if (data.live) _smgmtLiveCache[label] = data.live;
     }
@@ -9432,13 +9486,19 @@ function _smgmtLingerActive(label) {
   if (!entry) return false;
   if (Date.now() - entry.endedAt > _SMGMT_LINGER_MS) {
     _smgmtLingerLabels.delete(label);
-    try { localStorage.removeItem(_smgmtLingerStorageKey(label)); } catch (_) {}
+    const repo = entry.project || _smgmtRepo();
+    try {
+      if (repo) localStorage.removeItem(_smgmtLingerStorageKey(repo, label));
+    } catch (_) {}
     return false;
   }
   return true;
 }
 
 function _smgmtIsLinger(label) {
+  const repo = _smgmtRepo();
+  const entry = _smgmtLingerLabels.get(label);
+  if (!repo || !entry || entry.project !== repo) return false;
   return _smgmtLingerActive(label) && !_smgmtRunningLabels.has(label);
 }
 
@@ -9448,29 +9508,52 @@ function _smgmtLingerLive(label) {
   return (entry && entry.live) || _smgmtLiveCache[label] || null;
 }
 
-function _smgmtLingerStart(label) {
+function _smgmtLingerStart(label, opts) {
+  const repo = _smgmtRepo();
   const live = _smgmtLiveCache[label];
-  if (!live) return;
-  const entry = { endedAt: Date.now(), live: JSON.parse(JSON.stringify(live)) };
+  if (!repo || !live) return;
+  const snap = JSON.parse(JSON.stringify(live));
+  // Freeze terminal snapshot: no in-flight agents tick after finish/cancel.
+  snap.active_agents = [];
+  snap.active_agent = null;
+  snap.current_ticket = null;
+  if (opts && opts.cancelled) snap.run_state = 'cancelled';
+  const entry = {
+    endedAt: Date.now(),
+    live: snap,
+    cancelled: !!(opts && opts.cancelled),
+    project: repo,
+  };
   _smgmtLingerLabels.set(label, entry);
-  try { localStorage.setItem(_smgmtLingerStorageKey(label), JSON.stringify(entry)); } catch (_) {}
+  try {
+    localStorage.setItem(_smgmtLingerStorageKey(repo, label), JSON.stringify(entry));
+  } catch (_) {}
   _smgmtLingerPollRestart();
 }
 
 function _smgmtLingerExpire() {
   let changed = false;
-  for (const label of [..._smgmtLingerLabels.keys()]) {
+  const repo = _smgmtRepo();
+  for (const [label, entry] of [..._smgmtLingerLabels.entries()]) {
+    if (repo && entry && entry.project !== repo) continue;
     if (!_smgmtLingerActive(label)) changed = true;
   }
   return changed;
 }
 
 function _smgmtHasLinger() {
-  return [..._smgmtLingerLabels.keys()].some(l => _smgmtIsLinger(l));
+  const repo = _smgmtRepo();
+  if (!repo) return false;
+  for (const label of _smgmtLingerLabels.keys()) {
+    if (_smgmtIsLinger(label)) return true;
+  }
+  return false;
 }
 
 function _smgmtPrimaryRunningLabel() {
   if (_smgmtRunningLabels.size > 0) return _smgmtRunningLabels.values().next().value;
+  const repo = _smgmtRepo();
+  if (!repo) return null;
   for (const label of _smgmtLingerLabels.keys()) {
     if (_smgmtIsLinger(label)) return label;
   }
@@ -12168,8 +12251,25 @@ function _smgmtCollectExistingLabels() {
   return existing;
 }
 
+/** Draft child plan already spawned from parentLabel (mirrors backend). */
+function _reusableRerunChildLabel(parentLabel) {
+  const m = /^(sprint-\d+)(?:\.(\d+))?$/.exec(parentLabel || '');
+  if (!m) return null;
+  const base = m[1];
+  const currentSuffix = m[2] != null ? parseInt(m[2], 10) : 0;
+  const child = `${base}.${currentSuffix + 1}`;
+  const parents = (_smgmtData && _smgmtData.sprint_parents) || {};
+  const states = (_smgmtData && _smgmtData.sprint_plan_states) || {};
+  if (parents[child] !== parentLabel) return null;
+  const st = (states[child] || '').toLowerCase();
+  if (st === 'draft' || st === 'planned' || st === 'planning') return child;
+  return null;
+}
+
 /** Next re-run sibling label — mirrors backend _next_sprint_sublabel. */
 function _nextSprintSublabel(sprintLabel) {
+  const reusable = _reusableRerunChildLabel(sprintLabel);
+  if (reusable) return reusable;
   const m = /^(sprint-\d+)(?:\.(\d+))?$/.exec(sprintLabel || '');
   if (!m) return sprintLabel;
   const base = m[1];
@@ -12209,8 +12309,9 @@ function _smgmtStateMeta(outcome, ticketCount) {
     completed:        { state: 'completed',        cardClass: 'smgmt-completed',        badge: 'COMPLETED',        badgeCls: 'state-finished' },
     needs_rework:     { state: 'needs_rework',     cardClass: 'smgmt-needs-rework',     badge: 'NEEDS REWORK',     badgeCls: 'state-rework'   },
     partial_finished: { state: 'partial_finished', cardClass: 'smgmt-partial-finished', badge: 'PARTIAL FINISHED', badgeCls: 'state-partial'  },
+    planned:          { state: 'planned',          cardClass: '',                       badge: 'PLANNED',          badgeCls: 'state-planned'  },
   };
-  const meta = META[lifecycle] || META.ready_to_merge;
+  const meta = META[lifecycle] || { state: lifecycle, cardClass: '', badge: lifecycle.toUpperCase().replace(/_/g, ' '), badgeCls: 'state-planned' };
   const count = ticketCount != null ? ticketCount
     : (outcome && Array.isArray(outcome.issues) ? outcome.issues.length : null);
   if (lifecycle === 'ready_to_merge' && count === 0) {
@@ -12629,16 +12730,22 @@ function _smgmtRunningViewUpdate(label, live) {
   const primary = label || _smgmtPrimaryRunningLabel();
   const isLiveRun = !!(primary && _smgmtRunningLabels.has(primary));
   const snap = live || _smgmtLingerLive(primary);
-  // A re-run child (e.g. sprint-73.1) can be actively running before the
-  // running-labels set catches up, so _smgmtIsLinger alone wrongly paints the
-  // header "Finished/snapshot" while a coder is mid-dispatch. Trust the rendered
-  // snapshot: if it shows active agents or a current ticket, the sprint is NOT
-  // finished — never show the linger/Finished state for it (persistent bug fix).
-  const snapActive = !!(snap && (
+  // Post-run linger (finish or cancel): greyed frozen snapshot for 1h.
+  const isLinger = !!(primary && _smgmtIsLinger(primary)) && !isLiveRun;
+  // Re-run child race only: not in running-all yet but /live shows active agents.
+  const repo = _smgmtRepo();
+  const lingerEntry = primary ? _smgmtLingerLabels.get(primary) : null;
+  const primaryOnProject = !primary || _smgmtRunningLabels.has(primary)
+    || (lingerEntry && lingerEntry.project === repo);
+  if (primary && !primaryOnProject) {
+    if (emptyEl) emptyEl.style.display = '';
+    if (shellEl) shellEl.hidden = true;
+    return;
+  }
+  const snapActive = !isLinger && !!(snap && (
     (Array.isArray(snap.active_agents) && snap.active_agents.length > 0) ||
     snap.current_ticket
   ));
-  const isLinger = !!(primary && _smgmtIsLinger(primary)) && !isLiveRun && !snapActive;
   const showShell = isLiveRun || isLinger || snapActive;
   if (emptyEl) emptyEl.style.display = showShell ? 'none' : '';
   if (shellEl) {
@@ -12662,11 +12769,14 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
     ? `est. remaining ~${live.est_remaining_minutes}m (calibrated)` : '';
   const metaParts = [`elapsed ${elapsed}`];
   if (estRem) metaParts.push(estRem);
-  if (isLinger) metaParts.push('finished — snapshot');
+  const cancelled = isLinger && live && live.run_state === 'cancelled';
+  if (isLinger) metaParts.push(cancelled ? 'cancelled — snapshot' : 'finished — snapshot');
   const hb = _smgmtLiveHeartbeatSec();
   const safeLabel = escHtml(label);
   const badge = isLinger
-    ? '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Finished</span>'
+    ? (cancelled
+      ? '<span class="run-head-badge run-head-badge--cancelled"><span class="run-head-badge-dot"></span>Cancelled</span>'
+      : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Finished</span>')
     : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Running</span>';
   const cancelBtn = isLinger ? '' :
     `<button type="button" class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${safeLabel}')">
@@ -13081,12 +13191,36 @@ function _smgmtLaneCapacityText(working, max, waiting) {
   return waiting > 0 ? `${wTxt} · ${waiting} waiting` : wTxt;
 }
 
+/** Retry / attempt badge for WORKING lane cards (coder dispatches + tester rework). */
+function _smgmtLaneRetryBadge(iss, stage, live) {
+  const maxR = (live && live.fix_round_max) || 3;
+  if (stage === 'testing' && iss.agent === 'tester') {
+    const tac = Number(iss.tester_attempt_count) || 0;
+    const cur = Math.max(1, tac);
+    return `<span class="node-retry-badge" title="Tester attempt">retry ${cur}/${maxR}</span>`;
+  }
+  if ((stage === 'coding' || stage === 'rework') && iss.agent === 'coder') {
+    const cur = Math.max(1, Number(iss.coder_attempt) || 1);
+    return `<span class="node-retry-badge" title="Coder attempt">retry ${cur}/${maxR}</span>`;
+  }
+  return '';
+}
+
+/** Size pill inlined with the agent badge on WORKING cards. */
+function _smgmtLaneSizeInline(iss) {
+  return iss.size
+    ? `<span class="node-size-inline" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>`
+    : '';
+}
+
 /** One card inside a lane — reuses the existing .node markup for card primitives. */
 function _smgmtLaneCardHtml(iss, stage, live) {
   const num = iss.number;
   const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
   const issueUrl = iss.url || (repo ? `https://github.com/${repo}/issues/${num}` : '#');
-  const sizePill = iss.size
+  const isWorking = (stage === 'coding' || stage === 'rework' || stage === 'testing')
+    && (iss.agent === 'coder' || iss.agent === 'tester');
+  const sizePill = (!isWorking && iss.size)
     ? `<span class="node-size" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>`
     : '';
   const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
@@ -13096,23 +13230,23 @@ function _smgmtLaneCardHtml(iss, stage, live) {
   const codedBadge = stage === 'awaiting_tester'
     ? '<span class="node-coded-badge">CODED</span>' : '';
 
-  // FIX n/2 badge for rework items or coding items that are a fix attempt
+  // FIX n/2 badge for rework items waiting (not actively working)
   const tac = iss.tester_attempt_count || 0;
-  const maxAttempts = (live && live.fix_round_max) || 2;
-  const fixBadge = tac > 0
+  const maxAttempts = (live && live.fix_round_max) || 3;
+  const fixBadge = (!isWorking && tac > 0)
     ? `<span class="node-fix-badge">FIX ${tac}/${maxAttempts}</span>` : '';
 
-  // Agent badge for actively working items
+  // Agent badge for actively working items — model, size, and retry inline
   let agentBadge = '';
   if (stage === 'coding' || stage === 'rework') {
     if (iss.agent === 'coder') {
       const cm = (typeof _shortModelName === 'function') ? _shortModelName(iss.coder_model) : '';
       const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
-      agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}</span>`;
+      agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}${_smgmtLaneSizeInline(iss)}${_smgmtLaneRetryBadge(iss, stage, live)}</span>`;
     }
   } else if (stage === 'testing') {
     if (iss.agent === 'tester') {
-      agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
+      agentBadge = `<span class="node-agent node-agent--tester">Tester${_smgmtLaneSizeInline(iss)}${_smgmtLaneRetryBadge(iss, stage, live)}</span>`;
     }
   }
 
@@ -20297,7 +20431,7 @@ function _snavRenderSidebarBadge(slug, d) {
     ? store.done
     : (runState === 'finished')
       ? (d.done || 0) + (d.uat || 0)
-      : (d.total || 0) - (cols.backlog || 0);
+      : _snavSettledDone(d.total, cols);
 
   // Trigger a fresh fetch if the store is missing or stale (> 60s)
   if (isCurrentProject && (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000)) {
@@ -20336,6 +20470,18 @@ async function _snavRefreshAll() {
   }
 }
 
+/** GitHub-derived "done" = settled work past SIT (uat + done + needs-rework),
+ *  i.e. total minus the not-yet-settled columns. Single canonical definition
+ *  shared by every pill fallback so the nav pill, sidebar badge, and board
+ *  badge can't disagree — matches the backend /api/sprint-progress settled
+ *  count and the live snapshot's done+failed+skipped. The old `total - backlog`
+ *  formula wrongly counted in-progress + SIT tickets as done. */
+function _snavSettledDone(total, cols) {
+  cols = cols || {};
+  return Math.max(0, (total || 0) - (cols.backlog || 0)
+    - (cols['in-progress'] || 0) - (cols.sit || 0));
+}
+
 async function snavRefresh() {
   const repo = _snavRepo();
   if (!repo) return;
@@ -20358,7 +20504,7 @@ async function snavRefresh() {
       const cols = _snavState.columns || {};
       const ghDone = (_snavState.state === 'finished')
         ? (_snavState.done || 0) + (_snavState.uat || 0)
-        : (_snavState.total || 0) - (cols.backlog || 0);
+        : _snavSettledDone(_snavState.total, cols);
       _sprintProgressStore = {
         has_sprint: true,
         sprint_label: `sprint-${_snavState.sprint}`,
@@ -20417,7 +20563,7 @@ function _snavRenderPill() {
             const lc = _snavColsFromLive(liveData);
             return lc.done + lc.failed + lc.skipped;
           }
-          return (d.total || 0) - (cols.backlog || 0);
+          return _snavSettledDone(d.total, cols);
         })();
     const total = (store && store.has_sprint && store.sprint === d.sprint)
       ? store.total
@@ -20560,7 +20706,10 @@ function _snavDonutHtml(cols, total) {
   } else {
     circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="14"></circle>`;
   }
-  // UAT counts as done (project tracks UAT as the completed state).
+  // Donut center shows COMPLETED % = done + uat (CLAUDE.md: UAT is the done
+  // state for completion UI). This is deliberately a different metric from the
+  // nav pill's PROCESSED count (settled-past-SIT incl. failed/needs-rework via
+  // _snavSettledDone) — completion vs throughput. Do not unify them.
   const donePct = total > 0 ? Math.round(((cols.done || 0) + (cols.uat || 0)) / total * 100) : 0;
   const legend = segs.filter(s => (cols[s.key] || 0) > 0).map(s => {
     const v = cols[s.key] || 0;

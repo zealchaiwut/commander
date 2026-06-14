@@ -373,6 +373,8 @@
     html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
+    // issue #884: advisor suggestions at end of brief body
+    html += renderSuggestedNext(brief.suggested_next || []);
     root.innerHTML = html;
 
     // hydrate per-project AI summaries from the stored summary store
@@ -565,6 +567,36 @@
     <div>
       <div class="sec-title"><i class="ti ti-gavel"></i> Needs your decision <span class="count">${decisions.length}</span></div>
       <div class="decisions">${rows}</div>
+    </div>`;
+  }
+
+  // ── issue #884: advisor "Suggested Next" section ───────────────────────────
+  // Rendered at the end of the brief body. Each item links to the project's
+  // Roadmap tab where the full advisor suggestions panel lives (issue #882).
+  // Section omitted entirely when the list is empty (AC5).
+  function renderSuggestedNext(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(function(s){
+      const slug = s.slug || '';
+      const href = '/project/' + encodeURIComponent(slug) + '/roadmap';
+      const ic = s.type === 'look_ahead'
+        ? 'ti-arrow-right'
+        : 'ti-bulb';
+      const badge = s.type === 'look_ahead'
+        ? '<span class="outcome-badge partial" style="font-size:9px;padding:1px 6px"><i class="ti ti-arrow-right" style="font-size:9px"></i>look-ahead</span>'
+        : '';
+      return `
+        <div class="planner-row">
+          <i class="ti ${ic}" style="font-size:14px;color:var(--text-muted);flex-shrink:0"></i>
+          ${badge}
+          <span style="flex:1;font-size:13px;color:var(--text)">${esc(s.text || '')}</span>
+          <a class="planner-link planner-spacer" href="${esc(href)}">Roadmap <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-stars"></i> Suggested Next <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
     </div>`;
   }
 

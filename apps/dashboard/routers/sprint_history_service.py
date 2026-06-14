@@ -780,11 +780,45 @@ def _discover_file_labels(sprints_dirs: Path | list[Path]) -> set[str]:
             continue
         for p in sprints_dir.glob("*-state.json"):
             labels.add(p.name[: -len("-state.json")])
+        for p in sprints_dir.glob("*-plan.json"):
+            labels.add(p.name[: -len("-plan.json")])
         for p in sprints_dir.glob("sprint-*.json"):
-            if p.name.endswith("-state.json"):
+            if p.name.endswith("-state.json") or p.name.endswith("-plan.json"):
                 continue
             labels.add(p.stem)
     return {l for l in labels if _LABEL_RE.match(l)}
+
+
+def _resolve_sprint_project(
+    label: str,
+    declared: str,
+    sprints_dirs: Path | list[Path],
+    db_module,
+) -> str:
+    """Infer owner/repo when the sprints row was ingested without project (child reruns)."""
+    if (declared or "").strip():
+        return declared.strip()
+    plan = _read_plan_file(sprints_dirs, label) or {}
+    proj = (plan.get("project") or "").strip()
+    if proj:
+        return proj
+    state = _read_state_file(sprints_dirs, label) or {}
+    proj = (state.get("project") or "").strip()
+    if proj:
+        return proj
+    parent = (plan.get("parent") or "").strip()
+    if parent:
+        prow = db_module.get_sprint(parent)
+        if prow and (prow.get("project") or "").strip():
+            return prow["project"].strip()
+    row = db_module.get_sprint(label)
+    if row:
+        parent = (row.get("parent_label") or "").strip()
+        if parent:
+            prow = db_module.get_sprint(parent)
+            if prow and (prow.get("project") or "").strip():
+                return prow["project"].strip()
+    return ""
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -828,6 +862,14 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         records.append(_record_from_files(label, search_dirs))
 
     if project:
+        for rec in records:
+            if not (rec.get("project") or "").strip():
+                rec["project"] = _resolve_sprint_project(
+                    rec.get("label") or "",
+                    rec.get("project") or "",
+                    search_dirs,
+                    db,
+                )
         records = [r for r in records if r.get("project") == project]
 
     _finalize_records(records, search_dirs)

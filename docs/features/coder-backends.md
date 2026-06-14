@@ -38,40 +38,23 @@ When only the coder backend changes, these paths are untouched:
 ## Integration point
 
 All coder subprocess spawning lives in `_dispatch_coder()` in
-`services/sprint_manager/sprint_manager.py` (~lines 3866–3917).
+`services/sprint_manager/sprint_manager.py`.
 
-Today:
+Backend selection (issues #916–#920, landed on `develop`):
 
-```python
-cmd = [
-    "claude",
-    "--model", coder_model,
-    "--dangerously-skip-permissions",
-]
-coder_persona = _load_agent_persona("coder", cwd_path)
-if coder_persona:
-    cmd += ["--append-system-prompt", coder_persona]
-cmd += ["-p", prompt]
-```
+- `sprint.yaml` → `agent_config.coder.backend` (`claude-code` default, or `cline`)
+- `use_cline_followups` + `follow-up` label → routes to Cline when `.clinerules` exists
+- Fix-loop escalation: Cline failure → retry on `claude-code` (`_next_coder_backend`)
 
-Proposed env flag (not implemented yet):
+Cline headless dispatch:
 
 ```bash
-COMMANDER_CODER_BACKEND=cline   # default: claude
+cline -y -m <model> "<persona + prompt>"
 ```
 
-Cline equivalent (headless, auto-approve):
-
-```bash
-cline -y -m claude-sonnet-4-6 "<persona + prompt>"
-```
-
-`-y` / `--yolo` skips tool-approval prompts (analogous to
-`--dangerously-skip-permissions`). The process exits when the task completes.
-
-Persona from `.claude/agents/coder.md` must be **prepended to the prompt**
-(Cline has no `--append-system-prompt`), or mirrored in Cline project rules
-(`.clinerules` in the coder worktree).
+`-y` skips tool-approval prompts (analogous to
+`--dangerously-skip-permissions`). Persona from `.claude/agents/coder.md` is
+prepended to the prompt (Cline has no `--append-system-prompt`).
 
 ---
 
@@ -79,12 +62,11 @@ Persona from `.claude/agents/coder.md` must be **prepended to the prompt**
 
 | Location | Change |
 |----------|--------|
-| `_dispatch_coder()` | Build `cmd` from `COMMANDER_CODER_BACKEND` |
-| `_dispatch_doctor()` | When backend is `cline`, probe `cline` on PATH + auth; do not require `claude` for coder-only doctor path |
-| `_doctor_probe_auth()` | Split by role/backend (coder = Cline, tester = Claude) |
-| FileNotFound handler in `_dispatch_coder()` | Report missing `cline` CLI when backend is Cline |
-
-Default remains `claude` so existing sprints need no config change.
+| `_dispatch_coder()` | Build `cmd` from resolved `coder_backend` |
+| `_dispatch_doctor()` | Probe `cline` or `claude` on PATH per backend |
+| `_doctor_probe_auth()` | Split by backend (`cline --version` vs `claude --version`) |
+| `SprintConfig` | `coder_backend`, `use_cline_followups` from sprint.yaml |
+| FileNotFound handler | Report missing `cline` or `claude` by backend |
 
 ---
 
@@ -128,10 +110,11 @@ Same prompt, different harness. Before trusting overnight sprints, manually veri
 
 ## Recommended rollout
 
-**Phase 1 — flag + minimal code**
+**Phase 1 — sprint.yaml backend flag** ✅ landed (#916–#920)
 
-- Add `COMMANDER_CODER_BACKEND=cline|claude` (default `claude`)
-- Touch only `_dispatch_coder`, `_dispatch_doctor`, `_doctor_probe_auth`
+- `agent_config.coder.backend: cline|claude-code` in sprint.yaml
+- `_dispatch_coder`, `_dispatch_doctor`, `_doctor_probe_auth` backend-aware
+- Follow-up label routing + fix-loop escalation to claude-code
 
 **Phase 2 — Cline setup in coder worktree**
 
@@ -161,7 +144,7 @@ cline -y -m claude-sonnet-4-6 \
 | Task | Tool |
 |------|------|
 | Interactive development, UAT review, dashboard edits | Cursor on `uat/` or `prd/` (Composer 2.5; Opus when stuck) |
-| Overnight sprint coder | Cline CLI in `coder/` (when implemented) |
+| Overnight sprint coder | Cline CLI in `coder/` (when sprint.yaml backend is `cline`) |
 | Overnight sprint tester + BA | Claude Code in `tester/` / dashboard |
 | Manual spikes on other repos | Cline VS Code extension or CLI |
 
@@ -172,5 +155,6 @@ and humans will conflict on the same worktree.
 
 ## Status
 
-**Not implemented.** Documented 2026-06-12 from architecture discussion. Track
-implementation tasks in [todo.md](../todo.md#todo).
+**Phase 1 implemented** on `develop` (issues #916–#920). Phase 2 (worktree MCP +
+`.clinerules`) and Phase 3 (telemetry) remain optional follow-ups — see
+[todo.md](../todo.md#todo).

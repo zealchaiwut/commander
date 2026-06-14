@@ -78,6 +78,37 @@ def build_head_sha_command() -> list[str]:
     return ["git", "rev-parse", "HEAD"]
 
 
+def build_current_branch_command() -> list[str]:
+    """Command that prints the checked-out branch name (``HEAD`` if detached)."""
+    return ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+
+
+def branch_mismatch_error(
+    current: str, expected: str, working_dir: str
+) -> Optional[str]:
+    """Return an actionable error when the clone is on the wrong branch, else None.
+
+    Deploy is pull-only and never switches branches (see module docstring), so a
+    ``git pull --ff-only origin <expected>`` run while a different branch is
+    checked out aborts with a cryptic ``fatal: Not possible to fast-forward``.
+    Detecting the mismatch up front lets the endpoint return a clear 409 telling
+    the operator exactly how to fix it (a detached ``HEAD`` is treated as a
+    mismatch too — the fix is the same checkout).
+
+    Returns None when the branches match. The caller skips the check entirely on
+    a probe failure, so this never blocks on an undeterminable branch.
+    """
+    current = (current or "").strip()
+    expected = (expected or "").strip()
+    if not current or not expected or current == expected:
+        return None
+    return (
+        f"Clone is on branch '{current}', but deploy targets '{expected}'. "
+        f"Deploy is pull-only and never switches branches — switch it first: "
+        f"cd {working_dir} && git checkout {expected}"
+    )
+
+
 def restart_label(entry: dict) -> Optional[str]:
     """Return the configured ``launchd_label`` (non-empty) or None."""
     return (entry.get("launchd_label") or "").strip() or None

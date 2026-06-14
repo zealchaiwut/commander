@@ -942,11 +942,17 @@ Replace the existing draft (${data.existing_label})?`
     <div class="split-legend">${legend}</div>
   </div>`;
   }
+  function _histShouldAutoExpand(s) {
+    if (!s || !s.label)
+      return false;
+    const st = (s.lifecycle_state || "").toLowerCase();
+    if (_histIsLocked(st))
+      return false;
+    return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running";
+  }
   function _histAutoExpandRecent(groups) {
     const _expand = (s) => {
-      if (!s || !s.label)
-        return;
-      if (_histIsLocked(s.lifecycle_state))
+      if (!_histShouldAutoExpand(s))
         return;
       _histExpanded.add(s.label);
       _histLoadRunStats(s.label);
@@ -1348,10 +1354,26 @@ Replace the existing draft (${data.existing_label})?`
       return st !== "completed" && st !== "deleted";
     });
   }
+  function _histChildSprintsAllCompleted(group) {
+    const children = group.children || [];
+    if (!children.length)
+      return false;
+    const settled = /* @__PURE__ */ new Set(["completed", "deleted", "ready_to_merge"]);
+    return children.every((s) => settled.has((s.lifecycle_state || "").toLowerCase()));
+  }
   function _histBulkCompleteBtnHtml(group) {
+    if (!group.children?.length || !group.baseSprint)
+      return "";
     if (!_histGroupNeedsBulkComplete(group))
       return "";
     const lbl = escHtml(group.baseLabel || "");
+    const childrenReady = _histChildSprintsAllCompleted(group);
+    if (!childrenReady) {
+      return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Finish all child sprint runs before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+    }
     return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
           onclick="event.stopPropagation();smgmtBulkCompleteSprint('${lbl}')"
           title="Complete parent and all child sprints">
@@ -1420,12 +1442,15 @@ Replace the existing draft (${data.existing_label})?`
     const chev = open ? "ti-chevron-down" : "ti-chevron-right";
     const range = fold.from != null && fold.to != null ? fold.from === fold.to ? "Sprint " + fold.from : "Sprints " + fold.from + "\u2013" + fold.to : "Sprints \xB7 " + fold.sprints.length;
     const fid = escHtml(fold.id);
+    const nums = (fold.groups || []).map((g) => _histLabelParts(g.baseLabel).baseNum).filter((n) => n > 0);
+    const chips = !open && nums.length ? `<div class="fold-chip-row" onclick="event.stopPropagation();_histToggleFold('${fid}')">` + nums.map((n) => `<span class="fold-num-chip">${n}</span>`).join("") + "</div>" : "";
     const body = open ? `<div class="fold-body">${(fold.groups || []).map(_histGroupHtml).join("")}</div>` : "";
     return `<div class="fold ${open ? "expanded" : ""}" data-fold="${fid}">
     <div class="fold-head" onclick="_histToggleFold('${fid}')">
       <i class="ti ${chev} fold-chev"></i>
-      <span class="fold-title">${escHtml(range)}</span>
-      <span class="fold-count">${fold.sprints.length} sprints</span>
+      <span class="fold-title">${open ? escHtml(range) : "Older sprints"}</span>
+      ${open ? `<span class="fold-count">${fold.sprints.length} sprints</span>` : ""}
+      ${chips}
       <span class="fold-spacer"></span>
       ${_histFoldAggHtml(fold.sprints)}
     </div>
@@ -1443,7 +1468,7 @@ Replace the existing draft (${data.existing_label})?`
     return `<div class="hist-toolbar">
     <span class="hist-toolbar-note">
       <i class="ti ti-stack-2"></i>
-      Showing the ${_histFoldSize} most recent sprints \u2014 older sprints are grouped into folds of ${_histFoldSize}.
+      Latest ${_histFoldSize} sprint groups expanded below \u2014 older groups collapse to sprint numbers; click to open details.
     </span>
   </div>`;
   }
@@ -2356,6 +2381,17 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtShowToast(`Cancel failed: ${err.detail || res.status}`);
       } else {
         _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} cancel signal sent`);
+        _smgmtRunningLabels.delete(label);
+        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+        if (typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label, { cancelled: true });
+        }
+        if (typeof _smgmtLivePollRestart === "function")
+          _smgmtLivePollRestart();
+        if (typeof _smgmtRunningViewUpdate === "function") {
+          const snap = typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null;
+          _smgmtRunningViewUpdate(label, snap);
+        }
         setTimeout(() => loadSprintMgmt(), 2e3);
       }
     } catch (e) {
@@ -3274,26 +3310,37 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _smgmtPopulateSelectionDropdown() {
   }
+  function _smgmtMoveTargetLabels() {
+    const partOf = (lbl) => {
+      const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || "");
+      return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+    };
+    const finished = _smgmtFinishedLabels || /* @__PURE__ */ new Set();
+    return Object.keys(_smgmtBySprint || {}).filter((lbl) => !finished.has(lbl)).sort((a, b) => {
+      const pa = partOf(a), pb = partOf(b);
+      return pa[0] - pb[0] || pa[1] - pb[1];
+    });
+  }
   function _smgmtPopulateMoveToMenu() {
     const menu = document.getElementById("smgmt-move-to-menu");
     if (!menu || !_smgmtData)
       return;
     const selectedNums = Array.from(_smgmtSelectedIssues);
-    const occupiedSprints = new Set(
+    const occupiedLabels = new Set(
       selectedNums.map((n) => {
         const iss = (_smgmtData.issues || []).find((i) => i.number === n);
-        return iss ? iss.sprint : void 0;
-      }).filter((s) => s != null)
+        return iss ? iss.sprint_label : void 0;
+      }).filter((lbl) => lbl != null)
     );
-    const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
     let html = "";
-    sprints.forEach((n) => {
-      if (occupiedSprints.has(n))
+    _smgmtMoveTargetLabels().forEach((label) => {
+      if (occupiedLabels.has(label))
         return;
-      const label = `sprint-${n}`;
-      html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
-      if (typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
-        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">Sprint ${n} \u2014 replace (hotswap)</button>`;
+      const running = _smgmtRunningLabels.has(label);
+      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(label) : label.replace("sprint-", "Sprint ");
+      html += `<button class="smgmt-move-to-item" ${running ? "disabled" : ""} onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">${display}${running ? " (running)" : ""}</button>`;
+      if (!running && typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
+        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">${display} \u2014 replace (hotswap)</button>`;
       }
     });
     html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
@@ -4086,8 +4133,13 @@ ${data.errors.join("\n")}`);
         throw new Error(msg);
       }
       const data = await resp.json();
+      if (_smgmtLiveCacheRepo !== repo) {
+        _smgmtLiveCacheRepo = repo;
+        for (const k of Object.keys(_smgmtLiveCache))
+          delete _smgmtLiveCache[k];
+      }
       if (typeof _smgmtLingerRestore === "function")
-        _smgmtLingerRestore();
+        _smgmtLingerRestore(repo);
       const prevRunning = new Set(_smgmtRunningLabels);
       _smgmtRunningLabels = /* @__PURE__ */ new Set();
       _smgmtAnySprintRunning = false;
@@ -4119,6 +4171,8 @@ ${data.errors.join("\n")}`);
       if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
         const live = typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(lingerLbl) : _smgmtLiveCache[lingerLbl] || null;
         _smgmtRunningViewUpdate(lingerLbl, live);
+      } else if (typeof _smgmtRunningViewUpdate === "function") {
+        _smgmtRunningViewUpdate(null, null);
       }
     } catch (err) {
       if (!silent) {
@@ -4163,8 +4217,29 @@ ${data.errors.join("\n")}`);
     const orderedLabelsRaw = order.length > 0 ? order.filter((l) => /^sprint-\d+(\.\d+)*$/.test(l)) : [...sprints].sort((a, b) => a - b).map((n) => `sprint-${n}`);
     const _sprintParents = data.sprint_parents || {};
     const _rerunInto = data.sprint_rerun_into || {};
+    const _smgmtWorkTickets = (tickets) => (tickets || []).filter((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some(
+        (n) => ["sprint-summary", "docs", "documentation"].includes(n)
+      );
+    });
+    const _smgmtTicketSettledOnBoard = (t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return names.some(
+        (n) => ["UAT", "UAT-approved", "released", "SIT"].includes(n)
+      );
+    };
+    const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
+      if (!rerunInto[label])
+        return false;
+      const work = _smgmtWorkTickets(tickets);
+      return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
+    };
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      const ticketCount = (bySprint[label] || []).length;
+      const tickets = bySprint[label] || [];
+      if (_smgmtHideRerunParent(label, tickets, _rerunInto))
+        return false;
+      const ticketCount = tickets.length;
       if (ticketCount > 0)
         return true;
       if (_rerunInto[label])
@@ -4734,6 +4809,17 @@ ${data.errors.join("\n")}`);
     }
     return "";
   }
+  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set([
+    "UAT",
+    "UAT-approved",
+    "released"
+  ]);
+  function _smgmtHasDispatchableTickets(tickets) {
+    return tickets.some((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
+    });
+  }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
     const isLinger = !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -4750,13 +4836,19 @@ ${data.errors.join("\n")}`);
     const isFreshRerun = _smgmtIsFreshRerunSprint(label);
     if (isFreshRerun)
       outcome = null;
+    const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
+    const planBlocksPostRun = [
+      "planned",
+      "draft",
+      "planning"
+    ].includes(planState);
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
     const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
-    const isPostRun = !isRunningView && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
-    const canRun = tickets.length >= 1 && !hasCompleted;
+    const isPostRun = !isRunningView && !planBlocksPostRun && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const childLabel = _smgmtNextChildLabel(label);
@@ -4785,7 +4877,7 @@ ${data.errors.join("\n")}`);
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
     } else {
       const runDisabled = !canRun ? "disabled" : "";
-      const runTitle = !canRun ? 'title="Add at least one ticket first"' : "";
+      const runTitle = !canRun ? 'title="No dispatchable tickets \u2014 remaining items are already SIT/UAT or in progress"' : "";
       const schedToggle = typeof _smgmtSchedToggleHtml === "function" ? _smgmtSchedToggleHtml(label) : "";
       actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
                   onclick="smgmtRunSprint('${label}')">
@@ -4800,7 +4892,7 @@ ${data.errors.join("\n")}`);
     let headerMetaHtml = "";
     let ticketsContainerHtml = "";
     let rollupItems = tickets;
-    if (outcome && (outcome.sprint_status || outcome.state)) {
+    if (outcome && (outcome.sprint_status || outcome.state) && !planBlocksPostRun) {
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
       outcomeCardClass = " " + meta.cardClass;
       outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;

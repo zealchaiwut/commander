@@ -193,7 +193,6 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
-_subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 _orphans_removed_total: int = 0
 
@@ -939,14 +938,18 @@ app = FastAPI(lifespan=lifespan)
 # in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
 from routers import (  # noqa: E402
     activity_router,
+    advisor_router,
     analytics_router,
     backup_router,
     doctor_router,
+    finish_progress_router,
     home_milestone_router,
     log_search_router,
+    logs_router,
     milestones_router,
     roadmap_router,
     runs_router,
+    settings_router,
     signoff_router,
     sprint_history_router,
     sprints_router,
@@ -954,12 +957,19 @@ from routers import (  # noqa: E402
     system_router,
     tickets_router,
 )
+# broadcast and _subscribers are now owned by routers/logs_service.py; import
+# them here so existing call sites in this file continue to work unchanged.
+from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
 app.include_router(activity_router)
+app.include_router(advisor_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)
+app.include_router(finish_progress_router)
 app.include_router(log_search_router)
+app.include_router(logs_router)
+app.include_router(settings_router)
 app.include_router(milestones_router)
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
@@ -995,39 +1005,6 @@ async def add_api_no_cache_headers(request: Request, call_next):
 
 
 # ── request models ────────────────────────────────────────────────────────────
-
-class AgentEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:  Optional[str] = None
-    agent_id:    Optional[str] = None
-    event_type:  str
-    working_dir: str = "unknown"
-    tool_name:   Optional[str] = None
-    status:      str = "working"
-    name:        Optional[str] = None
-
-    @model_validator(mode="after")
-    def resolve_session_id(self) -> "AgentEvent":
-        if not self.session_id:
-            self.session_id = self.agent_id or "unknown"
-        return self
-
-
-class TokenUsageEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:    Optional[str] = None
-    event_type:    str = "token_usage"
-    working_dir:   str = "unknown"
-    input_tokens:  int = 0
-    output_tokens: int = 0
-    agent_role:    Optional[str] = None
-    model_name:    Optional[str] = None
-    # owner/repo from COMMANDER_PROJECT (sprint-dispatched agents). Optional;
-    # interactive sessions fall back to the working-dir basename.
-    project:       Optional[str] = None
-
 
 class RejectBody(BaseModel):
     reason: str
@@ -1208,14 +1185,6 @@ def _compute_health_status(
     return "ok"
 
 
-# ── SSE broadcast ─────────────────────────────────────────────────────────────
-
-async def broadcast(data: dict):
-    msg = json.dumps(data)
-    for q in _subscribers:
-        await q.put(msg)
-
-
 # ── agent endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -1361,155 +1330,7 @@ def get_environment():
 
 
 # /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
-
-
-_seen_agent_sessions: set[str] = set()
-
-
-def _agent_project_from_name(agent_name: str | None) -> str | None:
-    """Derive the full owner/repo project key from an agent name string.
-
-    Agent names are formatted as 'role·repo·branch·#short'. We extract the
-    repo label (second component) and match it against the loaded projects list.
-    Returns None if no match is found.
-    """
-    if not agent_name:
-        return None
-    parts = agent_name.split("·")
-    if len(parts) < 2:
-        return None
-    repo_label = parts[1]
-    try:
-        all_projects = projects_module.load_projects()
-    except Exception:
-        return None
-    matched = next(
-        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
-        None,
-    )
-    return matched
-
-
-def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
-    """Extract (role, issue_num) from an agent name string (issue #719).
-
-    Names are formatted as 'role·label·branch·#short' with an optional trailing
-    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
-    The role is the first '·'-delimited component; the issue number is the
-    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
-    """
-    role = None
-    issue_num = None
-    if agent_name and "·" in agent_name:
-        role = agent_name.split("·")[0] or None
-    if agent_name:
-        m = re.search(r"issue-(\d+)", agent_name)
-        if m:
-            issue_num = int(m.group(1))
-    return role, issue_num
-
-
-@app.post("/api/agent-event")
-async def receive_event(request: Request, event: AgentEvent):
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-
-    session_id = event.session_id or "unknown"
-    project = _agent_project_from_name(event.name)
-    actor = event.name or session_id
-    role, issue_num = _parse_agent_identity(event.name)
-
-    if project:
-        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
-            _seen_agent_sessions.add(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_started",
-                target=session_id,
-                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
-                action_id=session_id,
-            )
-        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
-            _seen_agent_sessions.discard(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_finished",
-                target=session_id,
-                detail={"status": event.status, "role": role, "issue_num": issue_num},
-                action_id=session_id,
-            )
-
-    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(session_id, event.event_type, event.model_dump())
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-@app.post("/api/token-usage")
-async def receive_token_usage(event: TokenUsageEvent):
-    if not event.input_tokens and not event.output_tokens:
-        return {"ok": True}
-    # Prefer the explicit owner/repo the dispatcher tagged; the working-dir
-    # basename ("uat", "coder") can't split cost per project.
-    project = event.project or (
-        Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
-    )
-    session_id = event.session_id or "unknown"
-    db.record_token_usage(
-        session_id,
-        project,
-        event.input_tokens,
-        event.output_tokens,
-        agent_role=event.agent_role,
-        model_name=event.model_name,
-    )
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-# /api/agents and /api/events moved to routers/activity.py (issue #794)
-
-
-@app.delete("/api/events/test")
-def clear_test_events():
-    """Remove test/debug events and agents from the database and clear test alerts from memory."""
-    events_deleted = db.delete_test_events()
-    agents_deleted = db.delete_test_agents()
-    # Also purge in-memory test alerts using the module-level _test_pat pattern.
-    before = len(_alerts)
-    _alerts[:] = [
-        a for a in _alerts
-        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
-    ]
-    alerts_cleared = before - len(_alerts)
-    return {"ok": True, "events_deleted": events_deleted, "agents_deleted": agents_deleted, "alerts_cleared": alerts_cleared}
-
-
-@app.get("/events")
-async def sse_stream(request: Request):
-    queue: asyncio.Queue = asyncio.Queue()
-    _subscribers.append(queue)
-
-    async def generator():
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            if queue in _subscribers:
-                _subscribers.remove(queue)
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# /api/agent-event, /api/token-usage, /api/events/test, /events moved to routers/logs.py
 
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
@@ -1678,6 +1499,22 @@ def get_sprint_nav_status(repo: str = ""):
     }
 
 
+def _settled_done_from_columns(total: int, columns: dict) -> int:
+    """Canonical GitHub-derived "done" = settled work past SIT
+    (uat + done + needs-rework) = total minus the not-yet-settled columns
+    (backlog + in-progress + sit).
+
+    Single source of the GitHub-side count: mirrors the frontend
+    ``_snavSettledDone()`` and the live tier's ``done+skipped+failed`` so the nav
+    pill, sidebar badge, and board running badge can never disagree. The old
+    ``done + uat`` formula undercounted needs-rework tickets; ``total - backlog``
+    (frontend) overcounted by treating in-progress + SIT as done.
+    """
+    columns = columns or {}
+    return max(0, (total or 0) - (columns.get("backlog") or 0)
+               - (columns.get("in-progress") or 0) - (columns.get("sit") or 0))
+
+
 def _sprint_progress_file_path(project: str) -> Optional[Path]:
     """Return the path to the persisted sprint-progress JSON file for a project."""
     if not project:
@@ -1774,8 +1611,8 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         return {"has_sprint": False}
 
     sprint_num = gh_data.get("sprint", 0)
-    gh_done = (gh_data.get("done") or 0) + (gh_data.get("uat") or 0)
     gh_total = gh_data.get("total") or 0
+    gh_done = _settled_done_from_columns(gh_total, gh_data.get("columns", {}))
     gh_state = gh_data.get("state", "running")
 
     result = {
@@ -1976,22 +1813,6 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
-@app.delete("/api/projects/{slug}/settings")
-def delete_project_settings(slug: str):
-    """Clear the project-level settings override.
-
-    After deletion GET /api/projects/{slug}/settings returns global defaults.
-    Returns 404 if the project slug is not found.
-    Must be registered before DELETE /api/projects/{owner}/{repo_name} to avoid
-    first-match routing collision on two-segment paths.
-    """
-    repo = _resolve_project_slug(slug)
-    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    return build_effective_response(effective)
-
-
 @app.delete("/api/projects/{owner}/{repo_name}")
 async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     import shutil
@@ -2102,18 +1923,12 @@ def get_running_sprint(project: str):
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
-    SECRET_FIELDS,
-    KNOWN_FIELDS,
     build_effective_response,
 )
 from services.sprint_manager.deploy_config_schema import (
     DEPLOY_CONFIG_KEY,
-    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
-    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
-    merge_for_put as _deploy_merge_for_put,
-    build_deploy_config_response as _build_deploy_config_response,
     known_deploy_slugs as _deploy_known_slugs,
     overview_entries_for as _deploy_overview_entries_for,
 )
@@ -2146,212 +1961,8 @@ def _resolve_project_slug(slug: str) -> str:
     return matched["repo"]
 
 
-def _validate_settings_body(body: dict) -> None:
-    """Validate a PUT settings request body.
-
-    Raises HTTPException 422 for secret fields, 400 for unknown fields.
-    """
-    for key in body:
-        if key in SECRET_FIELDS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Field '{key}' is a secret and cannot be written via this endpoint. "
-                    "Use the dedicated secret management endpoint."
-                ),
-            )
-    unknown = [k for k in body if k not in KNOWN_FIELDS]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown settings field(s): {', '.join(sorted(unknown))}. "
-                   f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}",
-        )
-
-
-@app.get("/api/settings")
-def get_global_settings():
-    """Return effective global settings.
-
-    Non-secret fields are returned as-is with defaults applied.
-    Secret fields appear as boolean presence flags (<field>_set).
-    """
-    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    return build_effective_response(stored)
-
-
-_AGENT_MODEL_KEYS = (
-    "default_model", "coder_model", "tester_model",
-    "estimator_model", "documentor_model",
-)
-
-
-def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
-    """Write any agent-model fields from a settings Save into each project's
-    sprint.yaml ``agent_config`` — the single source ``sprint_manager`` reads at
-    dispatch. Without this the Save only updated the settings DB while the run
-    kept using the stale sprint.yaml model (coder/estimator stayed opus despite
-    a sonnet Save). Returns the repos updated."""
-    model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if not model_cfg:
-        return []
-    try:
-        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-    except Exception:
-        return []
-    updated: list[str] = []
-    for proj in projects_module.load_projects():
-        repo = (proj.get("repo") or "").strip()
-        if not repo:
-            continue
-        try:
-            sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if sy.exists():
-                _update_sprint_yaml_agent_config(sy, model_cfg)
-                updated.append(repo)
-        except Exception:
-            continue
-    return updated
-
-
-@app.put("/api/settings")
-def put_global_settings(body: dict):
-    """Persist a global settings override.
-
-    Only the supplied keys are written; existing keys not in the body are preserved.
-    Returns 400 for unknown keys, 422 for secret fields.
-    """
-    _validate_settings_body(body)
-    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    merged = {**current, **body}
-    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
-    # Single source: agent-model fields also land in each project's sprint.yaml
-    # so the dispatcher (reads sprint.yaml, not the settings DB) applies them.
-    _propagate_models_to_sprint_yaml(body)
-    return build_effective_response(merged)
-
-
-def _project_json_for_repo(repo: str) -> dict | None:
-    return next(
-        (p for p in projects_module.load_projects() if p.get("repo") == repo),
-        None,
-    )
-
-
-def _apply_project_identity_defaults(
-    resp: dict,
-    repo: str,
-    proj_override: dict,
-) -> dict:
-    """Use projects.json identity when the project override has no explicit value.
-
-    Schema defaults (ti-folder / gray) must not mask projects.json — only keys
-    stored in the project-scoped override win over the JSON file.
-    """
-    proj_json = _project_json_for_repo(repo)
-    if not proj_json:
-        return resp
-    if "icon" not in proj_override:
-        resp["icon"] = proj_json.get("icon", resp.get("icon", "ti-folder"))
-    if "color" not in proj_override:
-        resp["color"] = proj_json.get("color", resp.get("color", "gray"))
-    if not proj_override.get("display_name"):
-        resp["display_name"] = proj_json.get("name", resp.get("display_name", ""))
-    return resp
-
-
-@app.get("/api/projects/{slug}/settings")
-def get_project_settings(slug: str):
-    """Return effective project settings (project overrides merged over global).
-
-    Non-secret fields returned with defaults applied; secrets as boolean flags.
-    Returns 404 when the project slug does not exist.
-    """
-    repo = _resolve_project_slug(slug)
-    proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(stored)
-    return _apply_project_identity_defaults(resp, repo, proj_override)
-
-
-@app.put("/api/projects/{slug}/settings")
-def put_project_settings(slug: str, body: dict):
-    """Persist a project-level settings override.
-
-    Only the supplied keys are written as a project override.
-    Global settings are not affected.
-    Returns 400 for unknown keys, 422 for secret fields, 404 if project not found.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_settings_body(body)
-    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    merged = {**current_project_override, **body}
-    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
-    # Single source: write agent-model fields into THIS project's sprint.yaml so
-    # the dispatcher applies them (settings DB alone is not read by the run).
-    _model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if _model_cfg:
-        try:
-            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-            _sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if _sy.exists():
-                _update_sprint_yaml_agent_config(_sy, _model_cfg)
-        except Exception:
-            pass
-    display_patch: dict = {}
-    if "icon" in body:
-        display_patch["icon"] = body["icon"]
-    if "color" in body:
-        display_patch["color"] = body["color"]
-    if "display_name" in body:
-        display_patch["name"] = body["display_name"]
-    if "tracked" in body:
-        display_patch["tracked"] = body["tracked"]
-    if display_patch:
-        projects_module.save_project_display_fields(repo, **display_patch)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(effective)
-    return _apply_project_identity_defaults(resp, repo, merged)
-
-
-# ── Deploy config API (issue #722) ───────────────────────────────────────────
-
-
-def _validate_deploy_config_body(body: dict) -> None:
-    """Validate a PUT deploy-config body.
-
-    Raises HTTPException 400 for unsupported environments, non-object entries,
-    or invalid host values.
-    """
-    if not isinstance(body, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="Deploy config body must be an object keyed by environment.",
-        )
-    for env, entry in body.items():
-        if env not in _DEPLOY_SUPPORTED_ENVS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported environment '{env}'. "
-                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
-                ),
-            )
-        if not isinstance(entry, dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Environment '{env}' config must be an object.",
-            )
-        host = entry.get("host")
-        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Environment '{env}': host must be one of "
-                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
-                ),
-            )
+# Settings/deploy-config/fs/env-vars/scaffold/notes endpoints moved to
+# routers/settings.py + routers/settings_service.py
 
 
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
@@ -2367,80 +1978,6 @@ def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
         if entry.get("host") == "local" and not entry.get("working_dir"):
             if env in envs:
                 entry["working_dir"] = envs[env]
-
-
-def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
-    """Build the GET-shaped response: seed defaults merged with stored, masked."""
-    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
-    resp = _build_deploy_config_response(merged)
-    _enrich_local_working_dirs(repo, resp)
-    return resp
-
-
-@app.get("/api/projects/{slug}/deploy-config")
-def get_project_deploy_config(slug: str):
-    """Return per-environment deploy config (seed defaults merged with overrides).
-
-    render_api_key is never returned in cleartext — each render entry carries
-    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
-    unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    resp = _deploy_config_response(slug, repo, stored)
-    _enrich_deploy_readiness(resp)
-    return resp
-
-
-@app.put("/api/projects/{slug}/deploy-config")
-def put_project_deploy_config(slug: str, body: dict):
-    """Persist a per-environment deploy config override.
-
-    Merges per environment over the stored config; a new render_api_key replaces
-    the stored secret, while an omitted/null key leaves it unchanged. Returns
-    400 for unsupported envs/hosts, 404 for an unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_deploy_config_body(body)
-    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    merged = _deploy_merge_for_put(current or {}, body)
-    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
-    return _deploy_config_response(slug, repo, merged)
-
-
-@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
-def validate_deploy_config_field(slug: str, env: str, body: dict):
-    """Validate an inline working_dir / port edit before it is persisted (#769).
-
-    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
-    returns 400 with a user-visible message so the Deploy card can surface an
-    inline error and skip the PUT:
-
-      - working_dir → must exist on disk AND be a git clone.
-      - port        → must be an integer 1–65535 AND not already in use on host.
-
-    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
-    fields are valid.
-    """
-    _resolve_project_slug(slug)
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Validation body must be an object.")
-    if "working_dir" in body:
-        try:
-            _deploy_validation.validate_working_dir(body["working_dir"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if "port" in body:
-        try:
-            port = _deploy_validation.validate_port(body["port"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if _deploy_validation.port_in_use(port):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Port {port} is already in use on this host.",
-            )
-    return {"ok": True, "env": env}
 
 
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
@@ -2639,6 +2176,21 @@ def deploy_environment(slug: str, env: str):
         working_dir, branch = _deploy_actions.require_deploy_target(entry)
     except _deploy_actions.DeployActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Preflight: deploy is pull-only and never switches branches, so a pull of
+    # <branch> while a different branch is checked out aborts with a cryptic
+    # "Not possible to fast-forward". Detect the wrong branch up front and return
+    # an actionable 409. Best-effort — a probe failure never blocks the deploy.
+    cur = subprocess.run(
+        _deploy_actions.build_current_branch_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if cur.returncode == 0:
+        mismatch = _deploy_actions.branch_mismatch_error(
+            cur.stdout, branch, working_dir
+        )
+        if mismatch:
+            raise HTTPException(status_code=409, detail=mismatch)
 
     pull = subprocess.run(
         _deploy_actions.build_pull_command(branch),
@@ -3056,73 +2608,6 @@ def post_settings_sync_commit(body: _SyncCommitBody):
     return {"ok": True, "synced_at": synced_at}
 
 
-# ── Filesystem browser (issue #643) ──────────────────────────────────────────
-
-_FS_BROWSE_ROOT: Path = Path.home()
-
-
-@app.get("/api/fs/list")
-def fs_list(path: str = ""):
-    """Return immediate subdirectories of the given path.
-
-    The path must resolve to within _FS_BROWSE_ROOT.  Traversal attempts
-    (../, symlinks escaping root, absolute paths outside root) return 403.
-    Returns {"entries": [{"name": str, "path": str}], "current": str}.
-    """
-    root = _FS_BROWSE_ROOT.resolve()
-
-    if not path or path.strip() in ("~", ""):
-        target = root
-    else:
-        # Handle ~ prefix
-        if path.startswith("~/"):
-            path = str(root / path[2:])
-        elif path == "~":
-            path = str(root)
-
-        candidate = Path(path)
-        # Normalize ../ etc without following symlinks
-        normalized = Path(os.path.normpath(str(candidate)))
-
-        # Must be under browse root before any symlink resolution
-        if not normalized.is_relative_to(root):
-            raise HTTPException(status_code=403, detail="Forbidden")
-
-        # Walk each component; reject if any symlink escapes root.
-        # This catches escape-then-reenter chains that resolve() misses.
-        cur = root
-        for part in normalized.relative_to(root).parts:
-            cur = cur / part
-            if cur.is_symlink():
-                try:
-                    link_resolved = cur.resolve()
-                    if not link_resolved.is_relative_to(root):
-                        raise HTTPException(status_code=403, detail="Forbidden")
-                except OSError:
-                    raise HTTPException(status_code=403, detail="Forbidden")
-
-        target = normalized
-
-    if not target.exists() or not target.is_dir():
-        return {"entries": [], "current": str(target)}
-
-    entries = []
-    try:
-        for item in sorted(target.iterdir()):
-            if item.is_symlink():
-                continue  # never follow symlinks out of browse root
-            if not item.is_dir():
-                continue
-            # Skip hidden dirs
-            if item.name.startswith("."):
-                continue
-            entries.append({"name": item.name, "path": str(item)})
-    except OSError as exc:
-        logger.info("[fs_list] error listing %s: %s", target, exc)
-
-    return {"entries": entries, "current": str(target)}
-
-
 # ── Environment paths (issue #643) ────────────────────────────────────────────
 
 def _derive_project_environments(repo: str) -> dict[str, str]:
@@ -3238,174 +2723,6 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
-
-
-# ── Env-var editor (issue #727) ───────────────────────────────────────────────
-
-import env_file as _env_file
-
-
-def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
-    """Resolve the on-disk directory holding an environment's `.env` file.
-
-    Prefers the stored/derived environment path (the working clone), and falls
-    back to a host=local deploy-config working_dir. Returns None when nothing is
-    configured for the requested env.
-    """
-    envs = projects_module.get_project_environments(repo)
-    if not envs:
-        envs = _derive_project_environments(repo)
-    if env in envs and envs[env]:
-        return envs[env]
-    merged = _merged_deploy_config(slug, repo)
-    entry = (merged or {}).get(env) or {}
-    return entry.get("working_dir") or None
-
-
-@app.get("/api/projects/{slug}/environments/{env}/env-vars")
-def get_env_vars(slug: str, env: str):
-    """Read the environment's `.env` file and return parsed key/value pairs.
-
-    Pairs are returned in file order. Values are plaintext — masking is a
-    display-only concern handled client-side. Returns 404 for an unknown slug or
-    an env with no configured directory.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-    env_path = Path(working_dir) / ".env"
-    return {
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-class _EnvVarItem(BaseModel):
-    key: str
-    value: str = ""
-
-
-class _PutEnvVarsBody(BaseModel):
-    vars: list[_EnvVarItem]
-
-
-@app.put("/api/projects/{slug}/environments/{env}/env-vars")
-def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
-    """Write env-var changes back to the environment's `.env` file.
-
-    Preserves original line order and inline comments for unchanged keys,
-    rewrites changed keys in place, appends new keys at the end, and drops
-    removed keys. An empty KEY is rejected (400) before any write. A filesystem
-    failure (e.g. read-only `.env`) returns 500 so the client can keep the
-    user's edits. Returns 404 for an unknown slug or unconfigured env.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-
-    pairs: list[tuple[str, str]] = []
-    for item in body.vars:
-        key = item.key.strip()
-        if not key:
-            raise HTTPException(
-                status_code=400,
-                detail="Each variable must have a non-empty KEY.",
-            )
-        pairs.append((key, item.value))
-
-    env_path = Path(working_dir) / ".env"
-    try:
-        _env_file.write_env_vars(env_path, pairs)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to write {env_path}: {exc}",
-        )
-    return {
-        "ok": True,
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
-
-def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
-    """Resolve project slug → (repo, working_clone_path) with traversal guard.
-
-    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
-    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
-    """
-    repo = _resolve_project_slug(slug)
-    project_root = _project_root_path(repo)
-    working_clone = _main_clone_path(project_root)
-    resolved = working_clone.resolve()
-    base_resolved = _PROJECTS_BASE.resolve()
-    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
-        )
-    return repo, working_clone
-
-
-@app.get("/api/projects/{slug}/docs/scaffold/check")
-def get_scaffold_check(slug: str):
-    """Check whether the project's working clone has the standard docs structure.
-
-    Runs scaffold_project --check (no writes). Returns:
-      { compliant, missing, stray, project_root }
-    where missing/stray are lists of relative paths.
-    """
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=True)
-    return {
-        "compliant": result["compliant"],
-        "missing": result["missing"],
-        "stray": result["stray"],
-        "project_root": str(working_clone),
-    }
-
-
-class _ScaffoldApplyBody(BaseModel):
-    confirm: bool = False
-
-
-@app.post("/api/projects/{slug}/docs/scaffold/apply")
-def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
-    """Apply the standard docs scaffold to the project's working clone.
-
-    Requires { confirm: true } in the request body; returns 400 otherwise.
-    Existing files are NEVER overwritten. Returns { created, compliant }.
-    """
-    if not body.confirm:
-        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=False)
-    return {
-        "created": result["created"],
-        "compliant": result["compliant"],
-    }
 
 
 # ── Sprint file archive maintenance (issue #735) ──────────────────────────────
@@ -3797,12 +3114,11 @@ def get_plan_usage():
 
 # ── alert banner endpoints (AC-3a from #24) ──────────────────────────────────
 
-_alerts: list[dict] = []
-
-# Pattern used to identify test/debug alerts — applied both when purging via
-# DELETE /api/events/test and when serving GET /api/alerts so that test noise
-# is never surfaced on PRD.
-_test_pat = re.compile(r"(test_|Test-|Test alert|\[CRASH\])", re.IGNORECASE)
+# _alerts and _test_pat moved to routers/logs_service.py (imported below with
+# logs_router) so the DELETE /api/events/test handler can purge test alerts
+# without a circular import. Both names are re-bound here so the alert
+# endpoints below keep working unchanged.
+from routers.logs_service import _alerts, _test_pat  # noqa: E402
 
 
 class AlertPayload(BaseModel):
@@ -4838,17 +4154,18 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     for change in body.changes:
         raw = change.sprint_label.strip()
         if raw == "" or raw == "backlog":
-            sprint_num = None
+            label_to_assign: str | None = None
+        elif _SPRINT_LABEL_RE.match(raw):
+            label_to_assign = raw
         else:
-            m = re.match(r"^sprint-(\d+)$", raw)
-            if not m:
-                errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
-                failed += 1
-                continue
-            sprint_num = int(m.group(1))
+            errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+            failed += 1
+            continue
 
         try:
-            github_client.assign_sprint(change.issue_num, sprint_num, repo_name=repo)
+            github_client.assign_sprint_by_label(
+                change.issue_num, label_to_assign, repo_name=repo,
+            )
             applied += 1
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.strip() if e.stderr else str(e)
@@ -4962,13 +4279,49 @@ def _sprint_label_sort_key(label: str) -> tuple:
     return (int(m.group(1)), int(m.group(2)) if m.group(2) else 0)
 
 
-def _next_sprint_sublabel(sprint_label: str, existing_label_names: set[str]) -> str:
+_RERUN_REUSABLE_PLAN_STATES = frozenset({"draft", "planned", "planning"})
+
+
+def _reusable_rerun_child_label(
+    project_root: Optional[Path],
+    parent_label: str,
+) -> Optional[str]:
+    """Return a draft child plan already spawned from parent_label, if any."""
+    if project_root is None:
+        return None
+    m = re.match(r"^(sprint-\d+)(?:\.(\d+))?$", parent_label)
+    if not m:
+        return None
+    base = m.group(1)
+    current_suffix = int(m.group(2)) if m.group(2) else 0
+    child = f"{base}.{current_suffix + 1}"
+    plan = _read_plan_json(project_root, child)
+    if not plan or plan.get("parent") != parent_label:
+        return None
+    state = (plan.get("state") or "").lower()
+    if state not in _RERUN_REUSABLE_PLAN_STATES:
+        return None
+    return child
+
+
+def _next_sprint_sublabel(
+    sprint_label: str,
+    existing_label_names: set[str],
+    project_root: Optional[Path] = None,
+) -> str:
     """Compute the next sibling sub-label for a sprint re-run.
 
     sprint-25   → sprint-25.1 (or sprint-25.2 if sprint-25.1 already exists)
     sprint-25.1 → sprint-25.2 (next sibling, not a child)
     sprint-25.2 → sprint-25.3
+
+    Reuses an existing draft/planned child plan (e.g. sprint-73.3 after a failed
+    sprint-73.2) even when its GitHub label already exists.
     """
+    reusable = _reusable_rerun_child_label(project_root, sprint_label)
+    if reusable:
+        return reusable
+
     m = re.match(r"^(sprint-\d+)(?:\.(\d+))?$", sprint_label)
     if not m:
         raise ValueError(f"Invalid sprint label: {sprint_label!r}")
@@ -5073,6 +4426,72 @@ def _coder_clone_path(project_root: Path) -> Path:
     if flat.exists():
         return flat
     return project_root
+
+
+def _tester_clone_path(project_root: Path) -> Path:
+    """Return the tester clone path for a project root (nested or flat layout)."""
+    nested = project_root / "tester"
+    if nested.exists():
+        return nested
+    flat = project_root.parent / f"{project_root.name}-tester"
+    if flat.exists():
+        return flat
+    return nested
+
+
+def _sprint_yaml_path(project_root: Path) -> Path:
+    return _commander_dir(project_root) / "sprint.yaml"
+
+
+def _ensure_sprint_yaml(project_root: Path, repo: str) -> Optional[Path]:
+    """Ensure project-root sprint.yaml exists for sprint_manager dispatch.
+
+    Without it sprint_manager falls back to stale ~/commander/work-* paths and
+    design-doc guards check the wrong worktree. Generated from the nested/flat
+    clone layout when missing; never overwrites an existing file.
+    """
+    path = _sprint_yaml_path(project_root)
+    if path.exists():
+        return path
+    commander = _commander_dir(project_root)
+    commander.mkdir(parents=True, exist_ok=True)
+    api_url = (os.environ.get("DASHBOARD_API_URL") or "http://localhost:8000").strip()
+    content = (
+        f"repo_name: {repo}\n\n"
+        "worktrees:\n"
+        f"  coder: { _coder_clone_path(project_root) }\n"
+        f"  tester: { _tester_clone_path(project_root) }\n"
+        "  tester_app_subdir: apps/dashboard\n\n"
+        "paths:\n"
+        f"  scripts_dir: { _REPO_ROOT / 'scripts' }\n"
+        f"  logs_dir: { commander / 'logs' }\n"
+        f"  sprints_dir: { commander / 'sprints' }\n"
+        f"  alerts_dir: { commander / 'alerts' }\n\n"
+        "dashboard:\n"
+        f"  api_url: {api_url}\n"
+    )
+    try:
+        path.write_text(content, encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def _sprint_manager_argv(sprint_label: str, repo: str, project_root: Path) -> list[str]:
+    """Build sprint_manager CLI argv with repo + config so dispatch is project-scoped."""
+    argv = [
+        sys.executable,
+        str(SPRINT_MANAGER_PATH),
+        sprint_label,
+        "--alert-mode",
+        _ALERT_MODES,
+        "--repo",
+        repo,
+    ]
+    cfg = _ensure_sprint_yaml(project_root, repo)
+    if cfg is not None:
+        argv.extend(["--config", str(cfg)])
+    return argv
 
 
 def _main_clone_path(project_root: Path) -> Path:
@@ -5392,12 +4811,14 @@ def _sprint_db_set_state(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
+                project=project or "",
             )
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
         elif state in ("needs_rework", "cancelled", "failed"):
             # cancelled/failed are legacy callers — all bad endings land in
@@ -5406,6 +4827,7 @@ def _sprint_db_set_state(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
     except Exception:
         pass
@@ -6293,10 +5715,23 @@ _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-
 
 # ── Sprint-issues helpers ─────────────────────────────────────────────────────
 
+def _primary_sprint_label(iss: dict) -> str | None:
+    """Return the sprint label used for board column grouping (first sprint-* label)."""
+    for lbl in iss.get("labels", []):
+        if _SPRINT_LABEL_RE.match(lbl["name"]):
+            return lbl["name"]
+    return None
+
+
 def _get_sprint_issues(project: str, sprint_label: str) -> list[dict]:
-    """Fetch open GitHub issues and filter to those carrying sprint_label."""
+    """Fetch open issues whose primary sprint label matches sprint_label.
+
+    Matches the sprint-management board: when an issue carries multiple sprint-*
+    labels (e.g. after a partial move), only the first sprint label in GitHub's
+    label order determines its column — not every attached sprint label.
+    """
     issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
-    return [iss for iss in issues if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))]
+    return [iss for iss in issues if _primary_sprint_label(iss) == sprint_label]
 
 
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────
@@ -7100,8 +6535,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(body.sprint_label, body.project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -7261,12 +6695,35 @@ def kill_sprint(sprint_label: str, project: str):
         except OSError:
             pass
 
+    _cancel_reason = "stopped by user"
+    _in_flight_agent = frozenset({
+        "coder_dispatched", "coder_running", "tester_dispatched", "tester_running",
+    })
+    state_path = sprints_dir / f"{sprint_label}-state.json"
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            ended_iso = datetime.now(timezone.utc).isoformat()
+            state["ended_at"] = ended_iso
+            for iss in state.get("issues", []):
+                if (
+                    iss.get("agent_status") in _in_flight_agent
+                    or iss.get("status") == "in-progress"
+                ):
+                    iss["agent_status"] = "failed"
+                    if iss.get("status") not in ("done", "skipped"):
+                        iss["status"] = "skipped"
+                    iss.setdefault("failure_reason", _cancel_reason)
+                    iss.setdefault("category", "CANCELLED")
+            state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     # A user cancel is a needs_rework ending under the unified lifecycle
     # (docs/architecture/sprint-lifecycle.md): the distinction is kept as
     # end_reason, not as a separate `cancelled` state. Tickets are NOT given
     # the need-rework GitHub label here — only tickets that actually failed
     # get it (from the sprint manager's failure paths).
-    _cancel_reason = "stopped by user"
     project_root = _project_root_path(project)
     json_path = _sprint_json_path(project_root, sprint_label)
     data = _sprint_json_read(json_path)
@@ -7570,6 +7027,105 @@ def _find_latest_sprint_log(log_dir: Path, sprint_label: str) -> Optional[Path]:
     return candidates[0] if candidates else None
 
 
+def _live_issue_size_from_labels(labels: list[dict]) -> Optional[str]:
+    for lbl in labels:
+        name = (lbl.get("name") or "") if isinstance(lbl, dict) else str(lbl)
+        m = re.match(r"^size-([SMLX]+)$", name)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _live_issue_sizes_from_github(repo: str, sprint_label: str) -> dict[int, str]:
+    """Best-effort size map from cached open issues (GitHub size-* labels)."""
+    out: dict[int, str] = {}
+    try:
+        for iss in github_client.cached_open_issues_with_body(repo_name=repo) or []:
+            label_names = {lbl.get("name") for lbl in iss.get("labels", [])}
+            if sprint_label not in label_names:
+                continue
+            sz = _live_issue_size_from_labels(iss.get("labels", []))
+            if sz:
+                out[int(iss["number"])] = sz
+    except Exception:
+        pass
+    return out
+
+
+def _live_issue_size_and_minutes(
+    commander: Path,
+    num: int,
+    estimates: dict,
+    github_sizes: dict[int, str],
+) -> tuple[Optional[str], Optional[int]]:
+    est_entry = estimates.get(str(num)) or estimates.get(num)
+    raw_size: Optional[str] = est_entry.get("size") if est_entry else None
+    raw_minutes: Optional[int] = est_entry.get("minutes") if est_entry else None
+    if not raw_size:
+        est_path = commander / "estimates" / f"issue-{num}.json"
+        if est_path.exists():
+            try:
+                file_est = json.loads(est_path.read_text(encoding="utf-8"))
+                raw_size = file_est.get("size") or raw_size
+                raw_minutes = file_est.get("minutes") or raw_minutes
+            except Exception:
+                pass
+    if not raw_size:
+        raw_size = github_sizes.get(num)
+    if raw_size and not raw_minutes:
+        raw_minutes = _minutes_from_letter(raw_size)
+    elif raw_minutes and not raw_size:
+        raw_size = _letter_from_minutes(raw_minutes)
+    return raw_size, raw_minutes
+
+
+def _live_coder_attempt_count(issue_number: int, sprint_label: str) -> int:
+    try:
+        rows = db.agent_runs_for_issue(issue_number, sprint_label)
+        return sum(1 for r in rows if (r.get("agent") or "").lower() == "coder")
+    except Exception:
+        return 0
+
+
+_PLAN_TERMINAL_LIVE_STATES = frozenset({
+    "needs_rework", "completed", "ready_to_merge", "partial_finished",
+})
+
+
+def _live_freeze_terminal_fields(payload: dict, plan: dict) -> dict:
+    """Strip in-flight agents and freeze elapsed time for ended sprints."""
+    ended_at_str = plan.get("ended_at")
+    started_at_str = payload.get("started_at") or plan.get("started_at")
+    if started_at_str and ended_at_str:
+        try:
+            start_dt = datetime.fromisoformat(str(started_at_str).rstrip("Z"))
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            end_dt = datetime.fromisoformat(str(ended_at_str).rstrip("Z"))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            payload["time_spent_sec"] = max(0, int((end_dt - start_dt).total_seconds()))
+        except Exception:
+            pass
+    payload["active_agents"] = []
+    payload["active_agent"] = None
+    payload["current_ticket"] = None
+    payload["est_remaining_minutes"] = 0
+    end_reason = (plan.get("end_reason") or "").lower()
+    payload["run_state"] = (
+        "cancelled" if "stopped by user" in end_reason else "finished"
+    )
+    if ended_at_str:
+        payload["ended_at"] = ended_at_str
+    for iss in payload.get("issues") or []:
+        if iss.get("agent_status") == "running":
+            iss["agent_status"] = None
+            iss["agent"] = None
+        if iss.get("status") == "in-progress":
+            iss["status"] = "pending"
+    return payload
+
+
 @app.get("/api/sprints/{sprint_label}/live")
 def get_sprint_live_snapshot(sprint_label: str, project: str):
     """Return a JSON snapshot of the live running sprint.
@@ -7604,6 +7160,14 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
 
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
+    plan = _read_plan_json(project_root, sprint_label) or {}
+    plan_terminal = (
+        not _sprint_pid_alive(project_root, sprint_label)
+        and (
+            plan.get("ended_at")
+            or (plan.get("state") or "").lower() in _PLAN_TERMINAL_LIVE_STATES
+        )
+    )
 
     # ── Time spent + started_at from _sprint_statuses in-memory dict ──────────
     status_key = (project, sprint_label)
@@ -7677,6 +7241,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     # Primary source: sum of per-ticket estimates (minutes) for non-terminal tickets.
     # Fallback: pending_count × avg wall-clock time per completed ticket (minutes).
     estimates: dict = status_data.get("estimates", {})
+    github_sizes = _live_issue_sizes_from_github(project, sprint_label)
+    fix_round_max = int(os.environ.get("COMMANDER_MAX_FIX_ROUNDS", "3"))
     est_remaining_minutes: Optional[int] = None
 
     if estimates and total_count > 0:
@@ -7760,14 +7326,18 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         else:
             issue_elapsed = None
 
-        # size + minutes: populate both; derive missing field from the present one
-        est_entry = estimates.get(str(num)) or estimates.get(num)
-        raw_size: Optional[str] = est_entry.get("size") if est_entry else None
-        raw_minutes: Optional[int] = est_entry.get("minutes") if est_entry else None
-        if raw_size and not raw_minutes:
-            raw_minutes = _minutes_from_letter(raw_size)
-        elif raw_minutes and not raw_size:
-            raw_size = _letter_from_minutes(raw_minutes)
+        # size + minutes: state estimates → local JSON → GitHub size-* label
+        raw_size, raw_minutes = _live_issue_size_and_minutes(
+            commander, num, estimates, github_sizes,
+        )
+
+        tac = int(iss.get("tester_attempt_count") or 0)
+        pipeline_stage = _live_metrics.pipeline_stage_from_status(
+            raw_agent_status or "", derived_status, tac,
+        )
+        coder_attempt = _live_coder_attempt_count(num, sprint_label) if num else 0
+        if coder_attempt < 1 and raw_agent_status in ("coder_dispatched", "coder_running"):
+            coder_attempt = 1
 
         issues_out.append({
             "number":         num,
@@ -7785,6 +7355,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             # Coder dispatch backend (issue #919): 'cline' or 'claude-code' so
             # the running pane can show a CLINE/CLAUDE badge on each coder node.
             "coder_backend":        iss.get("coder_backend"),
+            "tester_attempt_count": tac,
+            "coder_attempt":        coder_attempt,
+            "pipeline_stage":       pipeline_stage,
             # Surface the actual failure category/reason so the inspector shows
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
             "category":       iss.get("category"),
@@ -7793,9 +7366,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
     active_agent: Optional[dict] = None
-    m = re.search(r"(\d+)", sprint_label)
-    n = m.group(1) if m else sprint_label
-    state_path = commander / "sprints" / f"sprint-{n}-state.json"
+    state_path = commander / "sprints" / f"{sprint_label}-state.json"
     if state_path.exists():
         try:
             state_data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -7864,7 +7435,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         except OSError:
             pass
 
-    return {
+    payload = {
         "time_spent_sec": time_spent_sec,
         "started_at": started_at_str,
         "current_ticket": current_ticket,
@@ -7884,10 +7455,16 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "est_remaining_minutes": est_remaining_minutes,
         # Per-ticket snapshot (issue #306)
         "issues":               issues_out,
+        # Two-queue lane capacity + fix-round ceiling (issue #927)
+        **_live_metrics.lane_capacity(status_data),
+        "fix_round_max":        fix_round_max,
         # Running-view metric strip (issue #803) — agent_runs-derived keys are
         # present only when their source exists, so the frontend hides cards.
         **_live_metrics.running_metrics(sprint_label, project),
     }
+    if plan_terminal:
+        payload = _live_freeze_terminal_fields(payload, plan)
+    return payload
 
 
 @app.get("/api/sprints/{sprint_label}/live/stream")
@@ -8537,6 +8114,16 @@ def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     return False
 
 
+def _state_data_is_dry_run_only(state_data: dict) -> bool:
+    """True when state.json reflects a --dry-run pass (no coder/tester dispatch)."""
+    issues = state_data.get("issues") or []
+    if not issues:
+        return False
+    if any(i.get("coder_started_at") or i.get("tester_started_at") for i in issues):
+        return False
+    return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
+
+
 def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
@@ -8549,7 +8136,14 @@ def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
 
     from routers import sprint_artifact_service  # noqa: PLC0415
     sprints_dir = _commander_dir(project_root) / "sprints"
-    return sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label) is not None
+    resolved = sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label)
+    if resolved is None:
+        return False
+    try:
+        state_data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    return not _state_data_is_dry_run_only(state_data)
 
 
 def _outcome_from_ingested_row(
@@ -8591,6 +8185,32 @@ def _outcome_from_ingested_row(
             "failure_reason": fr,
         })
 
+    # Rec 2c — union agent_runs so the outcome band agrees with the History
+    # ledger. History (sprint_history_service._finalize_records) unions tickets
+    # recorded in agent_runs but absent from the ingested issues_json snapshot
+    # (e.g. merged in an EARLIER run of this sprint). Without the same union the
+    # outcome band and the History row showed different counts for one sprint.
+    # Additive only — never rewrites a ticket already in result_issues.
+    try:
+        from routers import sprint_history_service  # noqa: PLC0415
+        _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
+        for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
+            _eid = str(_extra.get("number"))
+            if not _eid or _eid in _seen:
+                continue
+            _st = (_extra.get("state") or "").lower()  # merged | closed | open
+            _oc = "done" if _st == "merged" else ("failed" if _st == "closed" else "skipped")
+            result_issues.append({
+                "number": _extra.get("number"),
+                "title": _extra.get("title", ""),
+                "outcome": _oc,
+                "elapsed_secs": None,
+                "failure_reason": None,
+            })
+            _seen.add(_eid)
+    except Exception:
+        pass
+
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"
@@ -8626,6 +8246,85 @@ def _outcome_from_ingested_row(
         "summary_issue_url": surl,
         "summary_issue_num": summary_issue_num,
     }
+
+
+def _child_sprint_labels_for_parent(project_root: Path, parent_label: str) -> list[str]:
+    """Direct child re-run labels spawned from parent_label."""
+    children: list[str] = []
+    rerun = _sprint_rerun_into_map(project_root)
+    for parent, child in rerun.items():
+        if parent == parent_label and child not in children:
+            children.append(child)
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if sprints_dir.is_dir():
+        for plan_file in sprints_dir.glob("sprint-*-plan.json"):
+            label = plan_file.name[: -len("-plan.json")]
+            plan = _read_plan_json(project_root, label)
+            if plan and plan.get("parent") == parent_label and label not in children:
+                children.append(label)
+
+    def _sub_idx(lbl: str) -> float:
+        m = re.match(r"^sprint-\d+\.(\d+)$", lbl)
+        return float(m.group(1)) if m else 0.0
+
+    return sorted(children, key=_sub_idx)
+
+
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
+_SPRINT_WORK_EXCLUDE_LABELS = frozenset({"sprint-summary", "docs", "documentation"})
+_SPRINT_UAT_LABELS = frozenset({"UAT", "UAT-approved", "released"})
+
+
+def _sprint_work_tickets_all_uat(project: str, sprint_label: str) -> bool:
+    """True when every non-summary open issue on the label is UAT (or label is empty)."""
+    try:
+        issues = _get_sprint_issues(project, sprint_label)
+    except Exception:
+        return False
+    work = [
+        iss for iss in issues
+        if not ({lbl["name"] for lbl in iss.get("labels", [])} & _SPRINT_WORK_EXCLUDE_LABELS)
+    ]
+    if not work:
+        return True
+    return all(
+        bool({lbl["name"] for lbl in iss.get("labels", [])} & _SPRINT_UAT_LABELS)
+        for iss in work
+    )
+
+
+def _child_sprint_settled(project_root: Path, project: str, child_label: str) -> bool:
+    """Child is settled when plan says so or all its work tickets are UAT on GitHub."""
+    plan = _read_plan_json(project_root, child_label)
+    plan_state = (plan.get("state") or "").lower() if plan else ""
+    if plan_state in _CHILD_SETTLED_STATES:
+        return True
+    return _sprint_work_tickets_all_uat(project, child_label)
+
+
+def _derive_outcome_lifecycle(
+    sprint_label: str,
+    project_root: Path,
+    project: str,
+    plan_state: str,
+    pane_state: str,
+    failed_count: int,
+) -> str:
+    """Board/history lifecycle — derives partial_finished when a re-run child is in flight."""
+    children = _child_sprint_labels_for_parent(project_root, sprint_label)
+    if children:
+        unsettled = [c for c in children if not _child_sprint_settled(project_root, project, c)]
+        if unsettled:
+            return "partial_finished"
+        if failed_count == 0 and pane_state == "completed":
+            return "ready_to_merge"
+        if _sprint_work_tickets_all_uat(project, sprint_label):
+            return "ready_to_merge"
+    if plan_state == "needs_rework" and failed_count > 0:
+        return "needs_rework"
+    if plan_state == "needs_rework" and failed_count == 0 and pane_state == "completed":
+        return "ready_to_merge"
+    return db.canonical_lifecycle(pane_state)
 
 
 @app.get("/api/sprints/{sprint_label}/outcome")
@@ -8683,6 +8382,28 @@ def get_sprint_outcome(sprint_label: str, project: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=f"Could not read state file: {e}")
 
+    if _state_data_is_dry_run_only(state_data):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (dry-run only)")
+
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan.get("state") or "").lower() if plan else ""
+    if plan_state in ("draft", "planned", "planning"):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
+
+    # Lazy-ingest (lifecycle P3 drift fix): a finished run reached this disk
+    # fallback because its artifacts were never ingested (run_ingested_at is
+    # null — e.g. finished pre-P3 or the end-of-run ingest was missed). Persist
+    # the disk state now so the NEXT read takes the DB path above and disk/DB
+    # counts can no longer diverge (the "0 tickets in History" class, #894).
+    # Guard: only when a sprints row already exists (UPDATE path), so we never
+    # mint a bogus draft row for a finished sprint. Best-effort — an ingest
+    # hiccup must never break outcome serving.
+    if ingested and not ingested.get("run_ingested_at"):
+        try:
+            db.ingest_sprint_run_artifact(sprint_label, state_data, project=project)
+        except Exception:
+            pass
+
     def _parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
             return None
@@ -8736,7 +8457,9 @@ def get_sprint_outcome(sprint_label: str, project: str):
         raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
 
     # Derive 4-state outcome for pane coloring
-    if is_cancelled:
+    if plan_state == "needs_rework":
+        pane_state = "has_rework"
+    elif is_cancelled:
         pane_state = "cancelled"
     elif _has_rework_tickets(sprint_label, project):
         pane_state = "has_rework"
@@ -8802,7 +8525,18 @@ def get_sprint_outcome(sprint_label: str, project: str):
         except Exception:
             pass
 
-    # Counts
+    # Issues moved to a child re-run label are not parent failures anymore.
+    on_label_nums: set[int] | None = None
+    try:
+        on_label_nums = {iss["number"] for iss in _get_sprint_issues(project, sprint_label)}
+    except Exception:
+        pass
+    if on_label_nums is not None:
+        for ri in result_issues:
+            if ri["outcome"] == "failed" and ri["number"] not in on_label_nums:
+                ri["outcome"] = "rerun"
+
+    # Counts (rerun/moved tickets are not failures on this label)
     done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
     failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
     skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
@@ -8838,8 +8572,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
         "state":             pane_state,
         # Unified lifecycle (sprint-lifecycle.md): pane vocabulary mapped to
         # the one enum shared with the History pane.
-        "lifecycle":         db.canonical_lifecycle(pane_state),
-        "end_reason":        sprint_json.get("end_reason"),
+        "lifecycle":         _derive_outcome_lifecycle(
+            sprint_label, project_root, project, plan_state, pane_state, failed_count,
+        ),
+        "end_reason":        (plan.get("end_reason") if plan else None) or sprint_json.get("end_reason"),
         "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
@@ -9867,6 +9603,17 @@ def get_sprint_finish_card(sprint_label: str, project: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=str(e))
 
+    # Rec 2d — collapse the disk-vs-DB dual path: populate the DB row from disk on
+    # read so DB-backed readers (outcome, history) converge regardless of which
+    # endpoint the UI hits first. UPDATE-only (never mints a draft row);
+    # best-effort — an ingest hiccup must never break the finish card.
+    _fc_db_row = db.get_sprint(sprint_label)
+    if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
+        try:
+            db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)
+        except Exception:
+            pass
+
     def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
             return None
@@ -10069,8 +9816,9 @@ def rerun_sprint_preview(sprint_label: str, project: str):
             "action": action,
         })
 
+    project_root = _project_root_path(project)
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
-    new_label = _next_sprint_sublabel(sprint_label, existing_label_names)
+    new_label = _next_sprint_sublabel(sprint_label, existing_label_names, project_root)
 
     return {
         "new_label": new_label,
@@ -10101,8 +9849,11 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
+    project_root = _project_root_path(project)
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
-    suggested_versioned_label = _next_sprint_sublabel(sprint_label, existing_label_names)
+    suggested_versioned_label = _next_sprint_sublabel(
+        sprint_label, existing_label_names, project_root,
+    )
 
     _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     tickets = []
@@ -10219,7 +9970,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     # Compute sub-label
     existing_label_names = {lbl["name"] for lbl in github_client.list_labels(repo_name=project)}
-    sub_label = _next_sprint_sublabel(sprint_label, existing_label_names)
+    sub_label = _next_sprint_sublabel(sprint_label, existing_label_names, project_root)
 
     # Create the sub-label on GitHub with the same color as the parent sprint label
     parent_color = github_client.get_label_color(sprint_label, repo_name=project) or "0075ca"
@@ -10375,6 +10126,10 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
                              parent=sprint_label)
     except Exception:
         pass
+    _sprint_db_set_state(
+        sub_label, project, "running",
+        started_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -10386,8 +10141,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     run_log_fh = open(run_log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(sub_label, project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=run_log_fh,
@@ -10522,6 +10276,85 @@ def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list
     return sorted(children, key=_sprint_label_sub_index)
 
 
+def _sprint_merge_parent_label(project_root: Path, label: str) -> str:
+    """Immediate parent for a sprint branch merge (plan.json parent, else base)."""
+    if not _is_child_sprint_label(label):
+        return _sprint_label_base(label)
+    plan = _read_plan_json(project_root, label)
+    parent = (plan.get("parent") or "").strip() if plan else ""
+    if parent and _SPRINT_LABEL_RE.match(parent):
+        return parent
+    return _sprint_label_base(label)
+
+
+_BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
+    "completed", "deleted", "ready_to_merge",
+})
+
+
+def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
+    """Lifecycle state for bulk-complete gating (DB + plan.json)."""
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan.get("state") or "").strip().lower() if plan else ""
+
+    db_state = ""
+    try:
+        row = db.get_sprint(sprint_label)
+        if row:
+            db_state = (row.get("state") or "").strip().lower()
+    except Exception:
+        pass
+
+    if db_state in _BULK_COMPLETE_CHILD_READY_STATES:
+        return db_state
+    if plan_state in _BULK_COMPLETE_CHILD_READY_STATES:
+        return plan_state
+    return db_state or plan_state
+
+
+def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:
+    """True when this label or a rerun child under it finished its run."""
+    if _bulk_complete_child_state(project_root, sprint_label) in _BULK_COMPLETE_CHILD_READY_STATES:
+        return True
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.is_dir():
+        return False
+    for path in sprints_dir.glob("*-plan.json"):
+        lbl = path.name.replace("-plan.json", "")
+        if lbl == sprint_label:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if (data.get("parent") or "") != sprint_label:
+            continue
+        if _bulk_complete_lineage_settled(project_root, lbl):
+            return True
+    return False
+
+
+def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
+    """Child sprint labels whose run (or rerun chain) is not yet settled."""
+    unsettled: list[str] = []
+    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+        if not _bulk_complete_lineage_settled(project_root, child_label):
+            unsettled.append(child_label)
+    return unsettled
+
+
+def _bulk_complete_assert_children_completed(project_root: Path, base_label: str) -> None:
+    unsettled = _bulk_complete_unsettled_children(project_root, base_label)
+    if unsettled:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint run to finish — "
+                f"still open: {', '.join(unsettled)}"
+            ),
+        )
+
+
 def _gh_branch_exists(repo: str, branch: str) -> bool:
     try:
         from urllib.parse import quote
@@ -10599,19 +10432,22 @@ def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
 
 
 def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str) -> list[dict]:
-    """Ordered merge steps: each child → base, then base → develop."""
+    """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    children = _child_sprint_labels_from_plans(project_root, base_label)
+    for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
+        parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
-        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
             steps.append({
                 "kind": "merge",
                 "head": child_branch,
-                "base": base_branch,
-                "label": f"{child_label} → {base_label}",
+                "base": parent_branch,
+                "label": f"{child_label} → {parent_label}",
                 "delete_branch": True,
-                "title": f"Merge Sprint: {child_label} → {base_label}",
+                "title": f"Merge Sprint: {child_label} → {parent_label}",
             })
     if _branch_has_unmerged_commits(repo, base_branch, "develop"):
         steps.append({
@@ -10625,14 +10461,27 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     return steps
 
 
+def _bulk_complete_merge_steps(project_root: Path, repo: str, base_label: str) -> list[dict]:
+    """Bulk complete runs the full lineage merge chain: each child → base, then base → develop."""
+    return _merge_steps_for_sprint_chain(project_root, repo, base_label)
+
+
+def _bulk_complete_merge_pending(project_root: Path, repo: str, base_label: str) -> list[str]:
+    """Branches still needing merge before bulk-complete settlement (full lineage chain)."""
+    return _sprint_merge_chain_pending(project_root, repo, base_label)
+
+
 def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) -> list[str]:
-    """Branches that still need merging before bulk-complete settlement."""
+    """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    children = _child_sprint_labels_from_plans(project_root, base_label)
+    for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
+        parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
-        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
-            pending.append(f"{child_branch} → {base_branch}")
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
+            pending.append(f"{child_branch} → {parent_branch}")
     if _branch_has_unmerged_commits(repo, base_branch, "develop"):
         pending.append(f"{base_branch} → develop")
     return pending
@@ -10643,6 +10492,42 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
     errors: list[str] = []
     project_root = _project_root_path(repo)
     for step in _merge_steps_for_sprint_chain(project_root, repo, base_label):
+        ok, detail = _gh_merge_branch_via_pr(
+            repo, step["head"], step["base"],
+            title=step["title"],
+            delete_branch=step["delete_branch"],
+        )
+        if not ok:
+            errors.append(f"{step['head']} → {step['base']}: {detail}")
+    return errors
+
+
+def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]:
+    """Merge steps for Merge Sprint on one label — child merges into its parent; base runs full chain."""
+    base_label = _sprint_label_base(label)
+    if _is_child_sprint_label(label):
+        steps: list[dict] = []
+        parent_label = _sprint_merge_parent_label(project_root, label)
+        child_branch = _sprint_branch_name(label)
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
+            steps.append({
+                "kind": "merge",
+                "head": child_branch,
+                "base": parent_branch,
+                "label": f"{label} → {parent_label}",
+                "delete_branch": True,
+                "title": f"Merge Sprint: {label} → {parent_label}",
+            })
+        return steps
+    return _merge_steps_for_sprint_chain(project_root, repo, base_label)
+
+
+def _merge_sprint_branches_for_label(repo: str, label: str) -> list[str]:
+    """Execute merge steps for Merge Sprint on the requested label. Returns errors."""
+    errors: list[str] = []
+    project_root = _project_root_path(repo)
+    for step in _finish_merge_steps(project_root, repo, label):
         ok, detail = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
@@ -10695,30 +10580,34 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     next_sprint_exists = next_num in existing_sprints
     conflict_error: str | None = None
 
+    is_child = _is_child_sprint_label(label)
     try:
-        sprint_issues = _get_sprint_issues(repo, base_label)
-        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-        for child_label in _child_sprint_labels_from_plans(project_root, base_label):
-            try:
-                for iss in _get_sprint_issues(repo, child_label):
-                    if iss["number"] not in seen_nums:
-                        sprint_issues.append(iss)
-                        seen_nums.add(iss["number"])
-            except subprocess.CalledProcessError:
-                pass
+        if is_child:
+            sprint_issues = _get_sprint_issues(repo, label)
+        else:
+            sprint_issues = _get_sprint_issues(repo, base_label)
+            seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+            for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+                try:
+                    for iss in _get_sprint_issues(repo, child_label):
+                        if iss["number"] not in seen_nums:
+                            sprint_issues.append(iss)
+                            seen_nums.add(iss["number"])
+                except subprocess.CalledProcessError:
+                    pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    # Open PRs for child sprint branches targeting the base branch
+    # Merge branches for this label only (child → base, or full chain on base)
     sprint_pr: Optional[dict] = None
     merge_branches: list[dict] = []
+    for step in _finish_merge_steps(project_root, repo, label):
+        merge_branches.append({
+            "head": step["head"],
+            "base": step["base"],
+            "label": step["label"],
+        })
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
-        child_branch = _sprint_branch_name(child_label)
-        if _gh_branch_exists(repo, child_branch):
-            merge_branches.append({"head": child_branch, "base": base_branch, "label": child_label})
-    if _gh_branch_exists(repo, base_branch):
-        merge_branches.append({"head": base_branch, "base": "develop", "label": base_label})
     try:
         branch_name = _sprint_branch_name(label)
         pr_res = subprocess.run(
@@ -10783,8 +10672,10 @@ class FinishSprintBody(BaseModel):
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
 async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSprintBody):
-    """Merge Sprint: merge child branches → base → develop, close issues, keep labels.
+    """Merge Sprint: merge sprint branch(es), close issues, keep labels.
 
+    Child sprint (58.2): merges only that child branch into the base sprint branch.
+    Base sprint (58): merges all children into base, then base into develop.
     Single human UAT sign-off — no per-ticket gate, no label stripping.
     """
     if not body.confirmed:
@@ -10797,9 +10688,11 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
     child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    is_child = _is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
+    finish_labels = [label] if is_child else all_labels
 
-    for lbl in all_labels:
+    for lbl in finish_labels:
         if _is_sprint_running(project_root, lbl):
             raise HTTPException(
                 409,
@@ -10807,16 +10700,19 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             )
 
     try:
-        sprint_issues = _get_sprint_issues(repo, base_label)
-        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-        for child_label in child_labels:
-            try:
-                for iss in _get_sprint_issues(repo, child_label):
-                    if iss["number"] not in seen_nums:
-                        sprint_issues.append(iss)
-                        seen_nums.add(iss["number"])
-            except subprocess.CalledProcessError:
-                pass
+        if is_child:
+            sprint_issues = _get_sprint_issues(repo, label)
+        else:
+            sprint_issues = _get_sprint_issues(repo, base_label)
+            seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+            for child_label in child_labels:
+                try:
+                    for iss in _get_sprint_issues(repo, child_label):
+                        if iss["number"] not in seen_nums:
+                            sprint_issues.append(iss)
+                            seen_nums.add(iss["number"])
+                except subprocess.CalledProcessError:
+                    pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
@@ -10824,8 +10720,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     moved = 0
     errors: list[str] = []
 
-    # 1. Merge leftover child branches → base → develop
-    errors.extend(_merge_sprint_branch_chain(repo, base_label))
+    # 1. Merge sprint branches for this label only
+    errors.extend(_merge_sprint_branches_for_label(repo, label))
 
     # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)
     if body.merge_pr and body.sprint_pr_url:
@@ -10854,8 +10750,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
             errors.append(f"#{issue_num}: {err_msg}")
 
-    # 3. Mark base + all children completed in plan.json
-    for lbl in all_labels:
+    # 3. Mark finished sprint member(s) completed in plan.json
+    for lbl in finish_labels:
         try:
             _plan_json_set_state(
                 project_root, lbl, "completed",
@@ -11003,7 +10899,18 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
 
-    merge_steps = _merge_steps_for_sprint_chain(project_root, repo, base_label)
+    unsettled_children = _bulk_complete_unsettled_children(project_root, base_label)
+    children_all_completed = not unsettled_children
+    if not children_all_completed:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint run to finish — "
+                f"still open: {', '.join(unsettled_children)}"
+            ),
+        )
+
+    merge_steps = _bulk_complete_merge_steps(project_root, repo, base_label)
 
     return {
         "all_tickets": _bulk_complete_ticket_rows(sprint_issues),
@@ -11050,7 +10957,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     """Close UAT + summary issues across a lineage and mark every member completed.
 
     Requires the sprint branch merge chain to be complete (child → base → develop)
-    before closing issues — use merge_steps from bulk-complete-preview first.
+    before closing issues — run merge_steps from bulk-complete-preview first.
     """
     if not body.confirmed:
         raise HTTPException(400, detail="Request must have confirmed=true")
@@ -11061,6 +10968,11 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
+    # Cheap local child-state gate first — a 409 here avoids N+1 GitHub calls
+    # in _bulk_complete_collect_issues. Silently passes when no children exist,
+    # so collect_issues still raises its own 400 for the "no child sprints" case.
+    _bulk_complete_assert_children_completed(project_root, base_label)
+
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
 
     for lbl in all_labels:
@@ -11070,7 +10982,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 detail=f"Sprint {lbl} is currently running — bulk complete after the run finishes",
             )
 
-    pending_merges = _sprint_merge_chain_pending(project_root, repo, base_label)
+    pending_merges = _bulk_complete_merge_pending(project_root, repo, base_label)
     if pending_merges:
         raise HTTPException(
             409,
@@ -14413,53 +14325,6 @@ def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
     config = {"tier_threshold": body.tier_threshold, "min_events": body.min_events}
     _mis_sizing.save_config(commander, config)
     return config
-
-
-# ── Per-project notes (NOTES.md) ──────────────────────────────────────────────
-
-class SaveNotesBody(BaseModel):
-    content: str
-    expected_mtime: Optional[float] = None
-
-
-def _notes_path(repo: str) -> Path:
-    return _project_root_path(repo) / "NOTES.md"
-
-
-@app.get("/api/projects/notes")
-def get_project_notes(repo: str = ""):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if not path.exists():
-        return {"content": "", "mtime": None, "exists": False}
-    try:
-        mtime = path.stat().st_mtime
-        content = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail={"error": "failed to read NOTES.md", "reason": str(exc)})
-    return {"content": content, "mtime": mtime, "exists": True}
-
-
-@app.post("/api/projects/notes")
-def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if path.exists() and body.expected_mtime is not None:
-        current_mtime = path.stat().st_mtime
-        if abs(current_mtime - body.expected_mtime) > 0.5:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "conflict",
-                    "message": "NOTES.md changed on disk since last load.",
-                    "current_mtime": current_mtime,
-                },
-            )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.content, encoding="utf-8")
-    return {"ok": True, "mtime": path.stat().st_mtime}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

@@ -14,7 +14,7 @@ Captured at dispatch time (`agent_runs` row: `model_used`, `routing_reason`, `at
 
 Timing, retries, which agent.
 
-Fix-loop history (`_fix_history` per ticket) + `RETRY_EXHAUSTED` tagging. Sprint history pane reads from multiple sources today — consolidation is part of the lifecycle redesign ([sprint-lifecycle.md](sprint-lifecycle.md)).
+Fix-loop history (`_fix_history` per ticket) + `RETRY_EXHAUSTED` tagging. Sprint history pane source-of-truth was consolidated by the lifecycle redesign (landed P0–P4 — GitHub = state truth, DB = metrics truth, disk = write-once artifact; see [sprint-lifecycle.md](sprint-lifecycle.md)).
 
 ## 13.3 Logs & events
 
@@ -39,4 +39,4 @@ Token tracking, the dropped cost dashboard.
 
 ## 13.5 Sprint history & analytics
 
-_TODO — depends on lifecycle source-of-truth consolidation (section 1 + [sprint-lifecycle.md](sprint-lifecycle.md))._
+Lifecycle source-of-truth consolidation **landed** (P0–P4), so this is unblocked. Analytics surfaces shipped sprints 72–73: run-stats, calibration, estimate-vs-actual, milestone progress (#877–880). _TODO — document the analytics surface inventory in a later prose pass._

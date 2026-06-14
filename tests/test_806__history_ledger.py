@@ -340,6 +340,8 @@ def test_bulk_complete_button_on_parent_with_children():
     assert "hist-group-actions" not in btn
     needs = _fn_body("_histGroupNeedsBulkComplete")
     assert "completed" in needs and "deleted" in needs
+    assert "_histChildSprintsAllCompleted" in _fn_body("_histBulkCompleteBtnHtml")
+    assert "Complete all child sprints before bulk completing" in btn
 
 
 def test_bulk_complete_modal_mounts():

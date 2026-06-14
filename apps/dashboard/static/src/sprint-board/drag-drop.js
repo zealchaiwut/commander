@@ -11,7 +11,7 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
-/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtData, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt,
+/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt, sprintLabelDisplay,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
 
 export function isDragBlocked(state) {
@@ -127,29 +127,46 @@ export function _smgmtPopulateSelectionDropdown() {
   // legacy no-op — replaced by _smgmtPopulateMoveToMenu
 }
 
+function _smgmtMoveTargetLabels() {
+  const partOf = lbl => {
+    const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || '');
+    return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
+  };
+  const finished = _smgmtFinishedLabels || new Set();
+  return Object.keys(_smgmtBySprint || {})
+    .filter(lbl => !finished.has(lbl))
+    .sort((a, b) => {
+      const pa = partOf(a), pb = partOf(b);
+      return pa[0] - pb[0] || pa[1] - pb[1];
+    });
+}
+
 export function _smgmtPopulateMoveToMenu() {
   const menu = document.getElementById('smgmt-move-to-menu');
   if (!menu || !_smgmtData) return;
 
-  // Sprints that contain at least one selected ticket — exclude from the target list
   const selectedNums = Array.from(_smgmtSelectedIssues);
-  const occupiedSprints = new Set(
+  const occupiedLabels = new Set(
     selectedNums.map(n => {
       const iss = (_smgmtData.issues || []).find(i => i.number === n);
-      return iss ? iss.sprint : undefined;
-    }).filter(s => s != null)
+      return iss ? iss.sprint_label : undefined;
+    }).filter(lbl => lbl != null)
   );
 
-  const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
   let html = '';
-  sprints.forEach(n => {
-    if (occupiedSprints.has(n)) return;
-    const label = `sprint-${n}`;
-    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
-    if (typeof _smgmtHotswapAvailableFor === 'function' && _smgmtHotswapAvailableFor(label)) {
+  _smgmtMoveTargetLabels().forEach(label => {
+    if (occupiedLabels.has(label)) return;
+    const running = _smgmtRunningLabels.has(label);
+    const display = typeof sprintLabelDisplay === 'function'
+      ? sprintLabelDisplay(label)
+      : label.replace('sprint-', 'Sprint ');
+    html += `<button class="smgmt-move-to-item" ${running ? 'disabled' : ''} `
+      + `onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">`
+      + `${display}${running ? ' (running)' : ''}</button>`;
+    if (!running && typeof _smgmtHotswapAvailableFor === 'function' && _smgmtHotswapAvailableFor(label)) {
       html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" `
         + `onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">`
-        + `Sprint ${n} — replace (hotswap)</button>`;
+        + `${display} — replace (hotswap)</button>`;
     }
   });
   html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;

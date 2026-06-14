@@ -71,6 +71,12 @@ DO NOT commit directly to `master`. DO NOT merge feature branches to master.
 - **The human** signs off on UAT from the dashboard, then merges develop 
   to master manually.
 
+**Coder invariants mirror in `.clinerules`:** The critical rules governing coder work
+(merge boundary, branch naming, protected-branch protection, scope discipline) are
+mirrored in `.clinerules` at the repo root so that Cline-dispatched coders are governed
+by the same invariants as Claude Code. Both `.claude/agents/coder.md` and `.clinerules`
+encode the same rules — keep them in sync when updating either file.
+
 **UAT is the "done" state for progress/completion UI.** There is no separately
 tracked "done" stage before the human sign-off, so any "X/Y done" count or
 completion percentage should use `done + uat` as the numerator (surface UAT

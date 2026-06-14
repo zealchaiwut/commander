@@ -1,56 +1,131 @@
 # Commander Cline Rules
-# Mirrors the critical invariants from .claude/agents/coder.md for Cline-dispatched coders.
-# Full content authored by issue #916 (port Commander invariants into .clinerules).
 
-## Merge boundary — NEVER merge to develop or sprint branches
+Cline is an alternate coder backend that does not read `.claude/agents/coder.md`.
+This file encodes the non-negotiable invariants that govern Cline-dispatched coder
+runs. These rules are identical to those in `.claude/agents/coder.md` — there is ONE
+set of coder invariants that applies equally to both Claude Code and Cline harnesses.
 
-You are a coder agent. Your responsibility ends at pushing the feature branch.
-You must NOT merge to the target branch (develop or any sprint branch) by any means:
-- No `git merge`
-- No `git push` directly to `develop`, `master`, or sprint branches
-- No `gh pr merge` or any PR merge command
-- Do NOT run `scripts/finish_feature.py` — that is exclusively the Tester's job
+When this file and `coder.md` diverge, both must be updated to stay in sync.
+See the note at the end of `CLAUDE.md` and `coder.md`.
+
+---
+
+## Merge Boundary — NEVER merge to develop or sprint branches (CRITICAL)
+
+Your responsibility ends at pushing the feature branch. You must NOT merge to
+the target branch by any means:
+
+- **No `git merge`** — do not run git merge commands
+- **No direct push to develop/master/sprint branches** — only push to `feature/<N>-*`
+- **No `gh pr merge`** — do not approve, merge, or interact with pull requests
+- **No `scripts/finish_feature.py`** — that is exclusively the Tester's job
 
 Merging is done by the Tester agent via `scripts/finish_feature.py` after tests pass.
+If you merge the branch yourself, the ticket will be stuck in an inconsistent state
+and the UAT label will be skipped.
 
-## Branch naming
+---
+
+## Branch Naming Convention
 
 Always create feature branches using `scripts/start_feature.py`:
+
 ```
-python3 scripts/start_feature.py --issue <N> --base-branch <sprint-or-develop>
-```
-
-Feature branch format: `feature/<N>-<slug>`
-
-## GitHub labels — NEVER touch them
-
-Do NOT modify any GitHub label on this issue or any other issue.
-Label transitions (in-progress, sit, uat, blocked) are managed exclusively by sprint_manager.
-Do not run `update_ticket.py`, `gh issue edit --add-label`, or any other label-mutation command.
-
-## No direct push to protected branches
-
-Never push directly to `develop`, `master`, or any `sprint/*` branch.
-Only push to your assigned `feature/<N>-*` branch.
-
-## Stay within assigned issue scope
-
-Work only on what the issue's Acceptance Criteria describes.
-Do not fix unrelated bugs, refactor unrelated code, or add unrequested features.
-
-## Run tests before declaring done
-
-Before pushing your final commit, verify the relevant tests pass:
-```
-python -m pytest tests/ -x -q
+python3 scripts/start_feature.py --issue <N> --base-branch <base>
 ```
 
-Do not commit test files that are skipped or xfailed to hide failures.
+Feature branch format: `feature/<N>-<slug>` (kebab-case, includes issue number)
 
-## Do not edit agent config files
+Push the branch to origin immediately after creation.
+
+---
+
+## No Direct Push to Protected Branches
+
+- Never push directly to `develop`, `master`, or any sprint branches
+- All work lives on your assigned `feature/<N>-<slug>` branch
+- After pushing the feature branch, your job is done — mark the ticket SIT and comment
+- The Tester merges it into the base branch after tests pass
+
+---
+
+## Read AGENTS.md Files Before Coding
+
+Before touching any code, identify which directories your work will touch.
+For every implicated directory that has an `AGENTS.md`, read it immediately:
+
+- `apps/dashboard/AGENTS.md`
+- `apps/dashboard/routers/AGENTS.md`
+- `apps/dashboard/static/AGENTS.md`
+- `services/sprint_manager/AGENTS.md`
+- `scripts/AGENTS.md`
+
+Log which files you loaded:
+
+```
+[AGENTS.md] Loaded: apps/dashboard/AGENTS.md, services/sprint_manager/AGENTS.md
+```
+
+These files contain directory-specific danger zones and conventions. Skipping
+this step leads to repeated mistakes.
+
+---
+
+## Stay Within Assigned Issue Scope
+
+- Implement **exactly** what the Acceptance Criteria say — nothing more
+- If an AC item requires code, implement it fully
+- If you spot unrelated bugs or refactoring opportunities, do NOT fix them
+  in this branch — file separate issues instead
+- Do not introduce new patterns unless the AC requires it — follow existing
+  conventions strictly
+
+---
+
+## Run Tests and Confirm Green Before Declaring Done
+
+Before moving the ticket to SIT:
+
+1. Run the test suite: `python -m pytest tests/ -x -q`
+2. Confirm all tests pass (newly added tests AND existing tests)
+3. Do not commit test files that are skipped or xfailed to hide failures
+4. Re-read every AC item and verify you have implemented it
+5. If something is missing, fix it and push again
+6. Only then move the ticket to SIT via `update_ticket.py`
+
+---
+
+## Do Not Edit Critical Project Files
 
 Do not modify:
-- `.claude/agents/*` (agent definitions)
-- `.commander/sprint.yaml` (sprint config)
-- Label transition logic in `sprint_manager.py`
-- Any file outside your issue's scope
+
+- `.claude/agents/*` — agent definitions (read-only)
+- `.commander/sprint.yaml` — sprint config (read-only)
+- Label/transition logic in `sprint_manager.py` — merge automation (read-only)
+- Any files outside your issue's scope
+
+Use the official scripts (`start_feature.py`, `update_ticket.py`) for label changes.
+Do not directly edit labels with `gh issue edit` or other tools.
+
+---
+
+## Self-Check Against Acceptance Criteria
+
+Step 7 of the workflow (before SIT): re-read every AC item and confirm you
+have implemented it. If you find something is missing, fix it and push again
+before marking SIT.
+
+---
+
+## Workflow Summary
+
+1. Create branch: `start_feature.py --issue <N>`
+2. Read ticket: `gh issue view <N>`
+3. Load AGENTS.md files for all implicated directories
+4. Implement exactly per AC, following existing conventions
+5. Commit in logical chunks with good messages
+6. Push to feature branch: `git push origin feature/<N>-<slug>`
+7. Re-read all AC items and verify coverage
+8. Move to SIT: `update_ticket.py --issue <N> --status sit`
+9. Comment with summary: `comment_ticket.py --issue <N> --body "..."`
+10. Stop. The Tester takes over. Do not merge, do not push again.

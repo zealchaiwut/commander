@@ -1,6 +1,6 @@
 # 2. App / Dashboard architecture
 
-> **Decision record · status: partial** — 2.2 backend split in progress (#761); 2.2b structured logging Phase 1 landed; 2.3 frontend build pipeline started (#796); **2.2a done** ([boundaries.md](boundaries.md)); **2.3a / 2.3b pending**.
+> **Decision record · status: partial** — 2.2 backend split in progress (#761); 2.2b structured logging Phase 1 landed; 2.3 frontend build pipeline started (#796); **2.2a done** ([boundaries.md](boundaries.md)); **2.3a done** ([2.3a-frontend-module-boundaries.md](2.3a-frontend-module-boundaries.md)); **2.3b pending**.
 
 [← Contents](0_content.md) · [← Prev: State & source-of-truth](1_state-and-source-of-truth.md) · [Next: Sprint flow →](3_sprint-flow.md)
 
@@ -110,9 +110,9 @@ Lives in infrastructure layer: services call `log.event(...)`, logger fans out t
 
 **Accepted cost:** Node/npm becomes a hard dependency in every clone (prd, coder, tester, uat) and the remote setup.
 
-### 2.3a Frontend module boundaries — PENDING
+### 2.3a Frontend module boundaries — DONE
 
-Define which ES modules own which concerns (board render, sprint controls, bulk-create, logs panel, settings, …). Sprint-board modules under `static/src/sprint-board/` are the seed; the bulk of `project.html` inline JS still needs a module map.
+The canonical module map lives in **[2.3a-frontend-module-boundaries.md](2.3a-frontend-module-boundaries.md)** (concern → module path, layer rules, extraction order, inline backlog). Sprint-board extraction is the seed; shell/logs/bulk-create tabs are sequenced next.
 
 ### 2.3b Frontend sitemap + page→API binding + live log — PENDING
 

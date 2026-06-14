@@ -74,7 +74,7 @@ from services.sprint_manager.pipeline import (  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     develop_merge_guard as _develop_merge_guard,
     label_transition_guard as _label_transition_guard,
-    ghost_status_labels as _ghost_status_labels,
+    ghost_status_labels as _ghost_status_labels,  # noqa: F401
 )
 
 try:
@@ -252,13 +252,13 @@ def _resolve_uat_env_for_tester(
 
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
-import github_client
+import github_client  # noqa: E402
 
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
+from services.sprint_manager import agent_browser_runner  # noqa: E402  # issue #710: live-browser UAT
 
 try:
     from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
@@ -280,8 +280,8 @@ try:
     from post_test_report import (  # type: ignore[import]
         parse_failures,
         build_failure_block,
-        write_sidecar,
-        sidecar_path,
+        write_sidecar,   # noqa: F401
+        sidecar_path,    # noqa: F401
     )
     _FAILURE_PARSING_AVAILABLE = True
 except ImportError:
@@ -2265,7 +2265,7 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
     if _FAILURE_PARSING_AVAILABLE:
         try:
-            effective_root = repo_root or REPO_ROOT
+            effective_root = repo_root or REPO_ROOT  # noqa: F841
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
             files_to_inspect = sorted({
@@ -3396,7 +3396,7 @@ def handle_post_tester(
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         else:
-            sys.stdout.write(str(f"  All gates passed -- merge already done, skipping re-merge") + "\n")
+            sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo, target_branch=target_branch)
         _delete_failure_sidecar(issue_num)
@@ -4166,7 +4166,7 @@ def _dispatch_doctor(
         dispatch_alerts(
             alert_modes,
             title=(
-                f"dispatch-blocked: environment check failed"
+                "dispatch-blocked: environment check failed"
                 + (f" (issue #{issue_num})" if issue_num else "")
             ),
             body=err,
@@ -5244,7 +5244,7 @@ def generate_sprint_summary(
 
     # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
     # which is subscription-funded — no raw API charges.
-    cost_estimate_usd = 0.0
+    cost_estimate_usd = 0.0  # noqa: F841
 
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
@@ -5478,9 +5478,9 @@ def generate_sprint_summary(
         f"The sprint branch `{effective_sprint_branch}` is ready for review.",
         "When UAT is complete, open a PR to promote it to `develop`:",
         "",
-        f"```bash",
+        "```bash",
         f"gh pr create --base develop --head {effective_sprint_branch} --repo {r}",
-        f"```",
+        "```",
         "",
     ]
 
@@ -6942,7 +6942,7 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
-    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:
+    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:  # noqa: E741
         return "HIGH"
 
     if paths_touched:
@@ -7513,8 +7513,8 @@ def _run_pipeline_dispatch(
                         alert_modes,
                         title=f"Issue #{num}: hang-redispatch",
                         body=(
-                            f"Coder hung and was idle-killed; redispatching once "
-                            f"with continuation context (attempt_kind=hang_continue)."
+                            "Coder hung and was idle-killed; redispatching once "
+                            "with continuation context (attempt_kind=hang_continue)."
                         ),
                         issue_num=num,
                         category="hang-redispatch",
@@ -7830,7 +7830,7 @@ def run_sprint(
 
     # Log config info when running against a second repo
     if cfg and cfg.repo_name:
-        sys.stdout.write(str(f"\n=== SprintConfig ===") + "\n")
+        sys.stdout.write(str("\n=== SprintConfig ===") + "\n")
         sys.stdout.write(str(f"  repo:         {cfg.repo_name}") + "\n")
         sys.stdout.write(str(f"  coder-wt:     {cfg.worktree_coder}") + "\n")
         sys.stdout.write(str(f"  tester-wt:    {cfg.worktree_tester}") + "\n")
@@ -8510,8 +8510,8 @@ def run_sprint(
                                 alert_modes,
                                 title=f"Issue #{num}: hang-redispatch",
                                 body=(
-                                    f"Coder hung and was idle-killed; redispatching once "
-                                    f"with continuation context (attempt_kind=hang_continue)."
+                                    "Coder hung and was idle-killed; redispatching once "
+                                    "with continuation context (attempt_kind=hang_continue)."
                                 ),
                                 issue_num=num,
                                 category="hang-redispatch",
@@ -8565,7 +8565,7 @@ def run_sprint(
                         "attempt": _fix_attempt, "category": category, "reason": reason,
                     })
                     if _sig == _last_failure_sig:
-                        sys.stdout.write(str(f"  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
+                        sys.stdout.write(str("  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
                         sys.stdout.flush()
                         _loop_aborted = True
                         break

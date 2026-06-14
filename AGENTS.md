@@ -36,3 +36,25 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 2. Use `detect_changes` for code review.
 3. Use `get_affected_flows` to understand impact.
 4. Use `query_graph` pattern="tests_for" to check coverage.
+
+## Cursor Cloud specific instructions
+
+Dependencies (Python venv at `venv/`, `node_modules/`) are refreshed automatically by the startup update script; you do not need to reinstall them. System package `python3.12-venv` is required for venv creation and is already present in the VM image.
+
+### Running the dashboard (the one must-run service)
+
+- The dashboard needs `apps/dashboard/.env` (gitignored, so not in the repo). It must define `DB_PATH` — the server **exits immediately** if `DB_PATH` is unset/blank. A working local `.env` is: `DB_PATH=./commander.db`, `ENVIRONMENT=prd`, `PORT=8000`, `COMMANDER_DISABLE_NEON=1`. Set `COMMANDER_DISABLE_NEON=1` so the app runs purely off SQLite + local JSON (Neon/Postgres is an optional export target with an unmigrated schema; without this flag sprint creation can 500).
+- Start it with `bash scripts/start_prd.sh` (backgrounds uvicorn on port 8000, writes `apps/dashboard/prd.pid` and `apps/dashboard/prd.log`). It auto-syncs pip and ensures `ENVIRONMENT=prd`. Stop with `bash scripts/stop_all.sh`.
+- Health check: `curl http://localhost:8000/api/health`. It reports `degraded` (not `healthy`) when the GitHub API is unreachable — see below.
+- The `claude CLI not found` warning at startup is expected here; it only blocks the agent-dispatch workflow, not the dashboard itself.
+
+### GitHub API is the main external limitation
+
+The cloud agent's `gh`/GitHub token does not have `repo` scope for `zealchaiwut/commander`, so GitHub-backed features return 403: the sprint board shows "Failed to load sprints", a yellow "missing repo scope" banner appears, and `/api/health` is `degraded`. This is expected without a scoped token and does not indicate a broken setup. Core local features (agent/event tracking via SQLite, the Logs/Activity feed, SSE) work without GitHub.
+
+### Lint / test / build
+
+- Python tests: `DB_PATH=./apps/dashboard/commander.db ./venv/bin/python -m pytest tests/<file> -q` (most tests need `DB_PATH` set).
+- Python lint: `./venv/bin/ruff check apps/dashboard` (the repo currently has pre-existing ruff findings; treat new findings only as actionable).
+- Frontend build: `npm run build` (esbuild → `apps/dashboard/static/dist/bundle.js`). Frontend lint: `npm run lint` (eslint; currently warnings only). Frontend tests: `npm test`.
+- Frontend ES-module edits under `static/src/` require `npm run build` (or `npm run watch`) to take effect; plain `static/*.html` edits apply on page refresh; Python changes need a uvicorn restart.

@@ -160,7 +160,7 @@ def init_db():
         _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
         _create_advisor_suggestions_table(conn)
-        _create_advisor_dismissed_table(conn)
+        _create_advisor_look_ahead_table(conn)
         conn.commit()
 
 
@@ -864,8 +864,7 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             worktree_sha     TEXT,
             base_sha         TEXT,
             attempt_kind     TEXT,
-            log_path         TEXT,
-            backend          TEXT
+            log_path         TEXT
         )
         """
     )
@@ -877,7 +876,7 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
-    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783/#920.
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783.
     for col, typedef in (
         ("risk_tier", "TEXT"),
         ("model_used", "TEXT"),
@@ -886,7 +885,6 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         ("base_sha", "TEXT"),
         ("attempt_kind", "TEXT"),
         ("log_path", "TEXT"),
-        ("backend", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -919,24 +917,25 @@ def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _create_advisor_dismissed_table(conn: sqlite3.Connection) -> None:
-    """Durable store for pitches the user has dismissed (issue #882).
+def _create_advisor_look_ahead_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_look_ahead store (issue #883).
 
-    Keyed by (project, pitch). Dismissed pitches are excluded from
-    get_suggestions() and injected into the advisor prompt as exclusions.
+    Ordered entries from the most recent advisor look-ahead run. Replaced
+    wholesale on every new run — no history beyond the current set per project.
     """
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS advisor_dismissed (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            project      TEXT NOT NULL,
-            pitch        TEXT NOT NULL,
-            dismissed_at TEXT NOT NULL,
-            UNIQUE(project, pitch)
+        CREATE TABLE IF NOT EXISTS advisor_look_ahead (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            position  INTEGER NOT NULL,
+            entry     TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0
         )
     """)
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS ix_advisor_dismissed_project "
-        "ON advisor_dismissed (project)"
+        "CREATE INDEX IF NOT EXISTS ix_advisor_look_ahead_project "
+        "ON advisor_look_ahead (project)"
     )
 
 
@@ -964,7 +963,6 @@ def record_agent_start(
     base_sha: str | None = None,
     attempt_kind: str | None = None,
     log_path: str | None = None,
-    backend: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -975,7 +973,6 @@ def record_agent_start(
     `base_sha` are optional forensic fields from worktree hygiene (issue #788).
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
-    `backend` is 'cline' or 'claude-code' (issue #920).
     Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
@@ -984,10 +981,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path, backend) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path, backend),
+             worktree_sha, base_sha, attempt_kind, log_path),
         )
         conn.commit()
         return cur.lastrowid

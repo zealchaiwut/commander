@@ -28,6 +28,9 @@ VALID_SCOPES = frozenset({"S", "M", "L"})
 SUGGESTION_MIN = 3
 SUGGESTION_MAX = 5
 
+LOOK_AHEAD_MIN = 2
+LOOK_AHEAD_MAX = 5
+
 
 def should_fire(
     scheduled_time: Optional[str],
@@ -113,3 +116,32 @@ def get_advisor_reset_on_demand(project: str) -> bool:
         "project", _RESET_ON_DEMAND_KEY, project
     ) or {}
     return bool(stored.get("value", False))
+
+
+def validate_look_ahead(entries: list) -> list:
+    """Validate look-ahead entries. Raises ValueError for bad count or format.
+
+    Rules (issue #883):
+    - 2-5 entries (LOOK_AHEAD_MIN..LOOK_AHEAD_MAX)
+    - Each entry is a non-empty string
+    - No multi-line entries (newline characters forbidden)
+    """
+    n = len(entries)
+    if n < LOOK_AHEAD_MIN:
+        raise ValueError(
+            f"Advisor produced {n} look-ahead entries; minimum is {LOOK_AHEAD_MIN}"
+        )
+    if n > LOOK_AHEAD_MAX:
+        raise ValueError(
+            f"Advisor produced {n} look-ahead entries; maximum is {LOOK_AHEAD_MAX}"
+        )
+    for e in entries:
+        if not isinstance(e, str):
+            raise ValueError(
+                f"Look-ahead entries must be strings; got {type(e).__name__!r}"
+            )
+        if "\n" in e:
+            raise ValueError(
+                f"Look-ahead entries must be single-line; got entry with newline"
+            )
+    return list(entries)

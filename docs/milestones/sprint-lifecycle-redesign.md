@@ -1,6 +1,9 @@
 # Milestone — Sprint Lifecycle Redesign
 
-> **Status:** P0–P4 done. Tracking file for the fixes agreed on 2026-06-12.
+> **Status: CLOSED — P0–P4 all shipped** through sprints 73.x (lifecycle
+> commits `ca32b8c`…`d9f1e54` on `develop`). Tracking file for the fixes agreed
+> on 2026-06-12; kept for history. Forward-looking work moved to
+> [`post-lifecycle-backlog.md`](post-lifecycle-backlog.md).
 > **Design contract:** [`../architecture/sprint-lifecycle.md`](../architecture/sprint-lifecycle.md)
 > — reread that doc before picking up any item here or re-opening the design
 > discussion. Code evidence (file:line) below was audited against branch

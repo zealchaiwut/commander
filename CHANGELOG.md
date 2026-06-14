@@ -1,5 +1,7 @@
 # Changelog
 
+- [#916](https://github.com/zealchaiwut/commander/issues/916) Port commander invariants into .clinerules — 2026-06-14
+
 ## Hotfix — board-history-running-ux (2026-06-14)
 
 Operator-driven UX hotfix to the Sprint-Mgmt Board / Running / History panes

@@ -34,9 +34,12 @@ SMOKE = REPO_ROOT / "tests" / "frontend" / "dragdrop.smoke.test.mjs"
 # Measured directly from `git show origin/sprint/sprint-62:apps/dashboard/static/project.html | wc -c`
 REAL_BASELINE_BYTES = 1_168_820
 
-CONCERN_MODULES = ["board-render", "drag-drop", "run-controls", "finish-modal", "rerun-modal"]
+CONCERN_MODULES = [
+    "board-render", "drag-drop", "run-controls", "finish-modal", "rerun-modal",
+    "bulk-complete-modal", "plan-next", "scheduled-run",
+]
 PUBLIC_HANDLERS = [
-    "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint",
+    "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint", "smgmtPlanNextSprint",
     "_smgmtDropOnSprint", "_smgmtTicketDragStart", "_rrConfirm", "_fsConfirm",
 ]
 

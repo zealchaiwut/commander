@@ -47,7 +47,6 @@ def _auto_install_deps() -> None:
         )
         sys.exit(_result.returncode)
 
-
 _auto_install_deps()
 
 try:
@@ -197,7 +196,6 @@ _subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 _orphans_removed_total: int = 0
 
-
 # ── Git startup metadata (issue #329) ─────────────────────────────────────────
 # Captured once at process start; never re-runs git per request.
 
@@ -206,7 +204,6 @@ def _capture_git_value(cmd: list) -> str:
         return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
     except Exception:
         return "unknown"
-
 
 _GIT_SHA: str = _capture_git_value(["git", "rev-parse", "HEAD"])
 _GIT_BRANCH: str = _capture_git_value(["git", "rev-parse", "--abbrev-ref", "HEAD"])
@@ -7768,22 +7765,24 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             raw_size = _letter_from_minutes(raw_minutes)
 
         issues_out.append({
-            "number":         num,
-            "title":          iss.get("title", ""),
-            "status":         derived_status,
-            "agent_status":   public_agent_status,
-            "agent":          active_role,
-            "elapsed_secs":   issue_elapsed,
-            "size":           raw_size,
-            "minutes":        raw_minutes,
-            "dispatch_level": iss.get("dispatch_level", 0),
+            "number":               num,
+            "title":                iss.get("title", ""),
+            "status":               derived_status,
+            "agent_status":         public_agent_status,
+            "agent":                active_role,
+            "elapsed_secs":         issue_elapsed,
+            "size":                 raw_size,
+            "minutes":              raw_minutes,
+            "dispatch_level":       iss.get("dispatch_level", 0),
             # Size-routed coder model (issue #789) so the running pane's Coder
             # badge can show which model is implementing the ticket.
-            "coder_model":    iss.get("coder_model"),
+            "coder_model":          iss.get("coder_model"),
             # Surface the actual failure category/reason so the inspector shows
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
-            "category":       iss.get("category"),
-            "failure_reason": iss.get("failure_reason"),
+            "category":             iss.get("category"),
+            "failure_reason":       iss.get("failure_reason"),
+            "pipeline_stage":       _live_metrics.pipeline_stage_from_status(raw_agent_status, derived_status, iss.get("tester_attempt_count", 0)),
+            "tester_attempt_count": iss.get("tester_attempt_count", 0),
         })
 
     # ── active_agent: derive from sprint state JSON (coder/tester transition) ──
@@ -7882,6 +7881,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         # Running-view metric strip (issue #803) — agent_runs-derived keys are
         # present only when their source exists, so the frontend hides cards.
         **_live_metrics.running_metrics(sprint_label, project),
+        **_live_metrics.lane_capacity(status_data),
     }
 
 

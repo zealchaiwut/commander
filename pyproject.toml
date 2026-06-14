@@ -1,0 +1,12 @@
+[tool.ruff.lint.per-file-ignores]
+# server.py uses a deferred import pattern (_auto_install_deps runs first)
+# and carries pre-existing legacy issues; suppress only what predates this repo.
+"apps/dashboard/server.py" = [
+    "E402",  # module-level imports after code (intentional: deps installed first)
+    "E702",  # multiple statements on one line (pre-existing)
+    "E741",  # ambiguous variable name (pre-existing)
+    "F401",  # unused imports (pre-existing)
+    "F541",  # f-string without placeholders (pre-existing)
+    "F811",  # redefinition of unused name (pre-existing)
+    "F841",  # local variable assigned but never used (pre-existing)
+]

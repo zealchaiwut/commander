@@ -1,10 +1,9 @@
 """Tests for bulk-complete migration to sprint_state.current() accessor (issue #1094)."""
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +12,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 @contextmanager
 def _stack(patches):
-    started = [p.start() for p in patches]
+    [p.start() for p in patches]
     try:
         yield
     finally:

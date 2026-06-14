@@ -4810,6 +4810,7 @@ def _dispatch_tester(
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
     pre_dispatch_risk: Optional[str] = None,
+    prior_failures: Optional[list] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -4826,6 +4827,13 @@ def _dispatch_tester(
     pre_dispatch_risk: optional pre-computed risk tier ("LOW"/"MEDIUM"/"HIGH").
     When omitted, the tier is derived from the issue's GitHub labels via
     _classify_risk_tier() (issue #790).
+
+    prior_failures: accumulated failure records from the fix-loop (mirrors
+    _dispatch_coder).  When provided, the tester receives a stronger fast-path
+    prompt that directs it to re-verify the previously-failing gate/AC first
+    before spot-checking the remaining criteria.  Also sets is_retry=True for
+    worktree hygiene so the feature branch is checked out and rebased rather
+    than being treated as a fresh ticket.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -4835,11 +4843,15 @@ def _dispatch_tester(
 
     # Worktree hygiene (issue #788 AC7): same treatment as coder — fetch, stash dirty
     # state, hard-reset — before the tester checks out any code.
+    # When prior_failures is non-empty this is a fix-round retry; set is_retry=True so
+    # the hygiene step checks out the existing feature branch and rebases rather than
+    # treating the ticket as fresh (mirrors _dispatch_coder behaviour).
+    _tester_is_retry = bool(prior_failures)
     _tester_wt_sha, _tester_base_sha, _tester_hygiene_err = _worktree_hygiene(
         worktree=_tester_wt_root,
         ticket_id=issue_num,
         merge_target=sprint_branch,
-        is_retry=False,
+        is_retry=_tester_is_retry,
     )
     if sprint_label:
         _db_update_worktree_shas_sm(issue_num, sprint_label, "tester", _tester_wt_sha, _tester_base_sha)
@@ -4929,21 +4941,41 @@ def _dispatch_tester(
 
     # Re-run fast path: if a prior attempt failed, point the tester at the
     # previously-failing AC / gate FIRST so a re-verify isn't a full from-scratch
-    # pass (resume-from-failure TODO).
-    try:
-        _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
-        if _sc.exists():
-            _scd = json.loads(_sc.read_text(encoding="utf-8"))
-            _fc = _scd.get("failure_class") or _scd.get("category")
-            if _fc:
-                prompt += (
-                    f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
-                    " acceptance criterion / gate tied to that failure FIRST; if it now"
-                    " passes, quickly confirm the remaining AC rather than re-testing"
-                    " everything from scratch."
-                )
-    except Exception:
-        pass
+    # pass.  When prior_failures is supplied (fix-loop path) inject a stronger
+    # accumulated-history prompt; fall back to the sidecar file for single-attempt
+    # re-runs where prior_failures is not passed.
+    if prior_failures:
+        # Fix-round FAST PATH: accumulated history from the fix-loop.
+        _fp_lines = [
+            f"\n\nTESTER FIX-ROUND FAST PATH: this is fix-round attempt"
+            f" {len(prior_failures) + 1}. Prior coder/gate attempts failed:"
+        ]
+        for _h in prior_failures:
+            _cat = _h.get("category", "?")
+            _detail = _h.get("reason") or _h.get("summary") or ""
+            _fp_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        _fp_lines.append(
+            "TESTER FOCUS: re-verify the acceptance criterion / gate tied to the"
+            " LAST failure above FIRST. If it now passes, quickly spot-check the"
+            " remaining AC rather than re-testing everything from scratch."
+            " Do NOT rewrite existing passing tests."
+        )
+        prompt += "\n".join(_fp_lines)
+    else:
+        try:
+            _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+            if _sc.exists():
+                _scd = json.loads(_sc.read_text(encoding="utf-8"))
+                _fc = _scd.get("failure_class") or _scd.get("category")
+                if _fc:
+                    prompt += (
+                        f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
+                        " acceptance criterion / gate tied to that failure FIRST; if it now"
+                        " passes, quickly confirm the remaining AC rather than re-testing"
+                        " everything from scratch."
+                    )
+        except Exception:
+            pass
 
     # Impeccable design context (issue #713): inject into every tester dispatch so
     # the tester verifies UI tickets against the same design rules via context.mjs.
@@ -7818,6 +7850,7 @@ def _run_pipeline_dispatch(
             num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running, sprint_label=label,
+            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
         )
         _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
         state.total_tokens_in += _ttin
@@ -8891,6 +8924,7 @@ def run_sprint(
                     chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                     on_running=_on_tester_running, sprint_label=label,
                     pre_dispatch_risk=_tester_risk,
+                    prior_failures=_fix_history if _fix_history else None,
                 )
             except SystemExit:
                 _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -9044,6 +9078,12 @@ def run_sprint(
                 sys.stdout.write(str(f"  [fix-loop] gate logic failure ({category}), "
                     f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry coder") + "\n")
                 sys.stdout.flush()
+                # Re-estimate after tester-triggered failure: bump size one tier so
+                # the next coder dispatch uses the correct model/budget routing.
+                _bumped = _bump_estimate_size(num)
+                if _bumped:
+                    sys.stdout.write(str(f"  [re-estimate] #{num}: size bumped to {_bumped} after tester gate failure") + "\n")
+                    sys.stdout.flush()
                 continue
 
             # Non-logic gate failure or _skip_coder path: final failure handling

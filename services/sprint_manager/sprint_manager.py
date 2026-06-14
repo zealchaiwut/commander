@@ -199,6 +199,15 @@ def _resolve_uat_env_for_tester(
     uat_repo: Optional[Path] = None
     if (project_dir / "uat" / "apps" / "dashboard").is_dir():
         uat_repo = project_dir / "uat"
+    elif (
+        (project_dir / "uat").is_dir()
+        and (project_dir / "uat" / ".env").is_file()
+        and not (project_dir / "uat" / repo_name).is_dir()
+    ):
+        # Nested non-Commander layout (e.g. perf-coach): uat clone beside coder/tester.
+        # Guard against a stray top-level uat/.env preempting the legacy
+        # uat/<repo_name>/ layout (which is tried in the else branch below).
+        uat_repo = project_dir / "uat"
     else:
         candidate = project_dir / "uat" / repo_name
         if candidate.is_dir():
@@ -289,7 +298,7 @@ except ImportError:
 
 # Default paths — can be overridden via env vars or CLI for testing
 WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
-                             Path.home() / "commander" / "work-tester"))
+                             Path.home() / "dev" / "commander" / "tester"))
 WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "apps" / "dashboard"
 FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
@@ -720,9 +729,10 @@ def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
 
 def _default_config() -> "SprintConfig":
     """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
+    _dev = Path.home() / "dev" / "commander"
     return SprintConfig(
         repo_name          = None,  # will use github_client.repo()
-        worktree_coder     = Path.home() / "commander" / "work-coder",
+        worktree_coder     = _dev / "coder",
         worktree_tester    = WORKTESTER_ROOT,
         tester_app_subdir  = "apps/dashboard",
         scripts_dir        = SCRIPTS_DIR,
@@ -913,17 +923,20 @@ def _sprint_db_set_state_sm(
                                    started_at=fields.get("started_at"))
         elif state == "completed":
             db.record_sprint_finish(label, ended_at=fields.get("ended_at"),
-                                    end_reason=fields.get("end_reason"))
+                                    end_reason=fields.get("end_reason"),
+                                    project=project or "")
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(label,
                                             end_reason=fields.get("end_reason"),
-                                            ended_at=fields.get("ended_at"))
+                                            ended_at=fields.get("ended_at"),
+                                            project=project or "")
         elif state in ("needs_rework", "cancelled", "failed"):
             # cancelled/failed are legacy spellings — all bad endings land in
             # needs_rework under the unified lifecycle (sprint-lifecycle.md).
             db.record_sprint_needs_rework(label,
                                           end_reason=fields.get("end_reason"),
-                                          ended_at=fields.get("ended_at"))
+                                          ended_at=fields.get("ended_at"),
+                                          project=project or "")
     except (Exception, SystemExit):
         pass
 
@@ -2466,6 +2479,90 @@ def _gate_pytest(
         return GateResult(gate="pytest", passed=False, output=combined)
 
 
+def _lint_autofix_commit(
+    issue_num: int,
+    worktester_dashboard: Path,
+    base_branch: str,
+    gate_scope: str,
+    gate_frontend_lint: bool,
+) -> None:
+    """Best-effort: auto-fix trivially-fixable lint (ruff --fix, prettier --write)
+    and commit+push it on the current feature branch BEFORE the lint check runs.
+
+    This stops formatting / unused-import churn from burning bounded coder
+    fix-rounds — only genuinely non-auto-fixable issues reach the check and fail
+    the gate. Atomic: if the push fails, the local commit is rolled back so
+    origin and local never split (merge-preview merges ``origin/<branch>``). Any
+    error is swallowed — the gate then runs exactly as before (no regression).
+    """
+    try:
+        rc_root, git_root_out, _ = _run_timed(
+            "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard)
+        git_root = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
+        # ── ruff --fix on changed Python files ──────────────────────────────
+        py_files = (["."] if gate_scope == "full"
+                    else _changed_py_files(base_branch, cwd=worktester_dashboard))
+        if py_files:
+            ok_ruff, ruff_path, _ = _try("which", "ruff")
+            if not ok_ruff:
+                venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
+                ruff_path = str(venv_ruff.resolve()) if venv_ruff.exists() else None
+            if ruff_path:
+                _run_timed(ruff_path, "check", "--fix", "--exit-zero", *py_files,
+                           cwd=worktester_dashboard)
+
+        # ── prettier --write on changed JS/TS files ─────────────────────────
+        if gate_frontend_lint:
+            js_ts = (["."] if gate_scope == "full"
+                     else _changed_js_ts_files(base_branch, cwd=worktester_dashboard))
+            if js_ts:
+                ok_prettier, prettier_bin, _ = _try("which", "prettier")
+                prefix: list[str] = []
+                if not ok_prettier:
+                    ok_npx, npx_path, _ = _try("which", "npx")
+                    prettier_bin = None
+                    if ok_npx:
+                        rc_pv, _, _ = _run_timed(npx_path, "--no", "prettier",
+                                                 "--version", cwd=git_root)
+                        if rc_pv == 0:
+                            prettier_bin, prefix = npx_path, ["--no", "prettier"]
+                if prettier_bin:
+                    _run_timed(prettier_bin, *prefix, "--write", *js_ts, cwd=git_root)
+
+        # ── commit + push only if the auto-fixers changed something ──────────
+        rc_st, st_out, _ = _run_timed("git", "status", "--porcelain", cwd=git_root)
+        if rc_st != 0 or not st_out.strip():
+            return
+        rc_br, br_out, _ = _run_timed("git", "rev-parse", "--abbrev-ref", "HEAD",
+                                      cwd=git_root)
+        branch = br_out.strip()
+        if rc_br != 0 or not branch or branch in ("HEAD", base_branch, "master", "develop"):
+            return  # detached / on a protected branch — never auto-commit here
+        _run_timed("git", "add", "-A", cwd=git_root)
+        rc_ci, _, _ = _run_timed(
+            "git", "commit", "-m", f"style: auto-fix lint (issue #{issue_num})",
+            cwd=git_root)
+        if rc_ci != 0:
+            return
+        rc_push, _, push_err = _run_timed("git", "push", "origin", "HEAD", cwd=git_root)
+        if rc_push != 0:
+            _run_timed("git", "reset", "--soft", "HEAD~1", cwd=git_root)
+            structured_log.warn(
+                "lint_autofix_push_failed",
+                f"[gate:lint] auto-fix push failed; reverted local commit: {push_err.strip()[:200]}",
+                issue_num=issue_num)
+            return
+        sys.stdout.write(str(f"  [gate:lint] auto-fixed + committed lint churn (issue #{issue_num})") + "\n")
+        structured_log.info("lint_autofix_committed",
+                            "[gate:lint] auto-fixed lint churn and pushed",
+                            gate="lint", issue_num=issue_num)
+    except Exception as e:
+        structured_log.warn("lint_autofix_error",
+                            f"[gate:lint] auto-fix pass errored (ignored): {e}",
+                            issue_num=issue_num, exc=str(e))
+
+
 def _gate_lint(
     issue_num: int,
     worktester_dashboard: Path,
@@ -2487,6 +2584,13 @@ def _gate_lint(
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
+
+    # Auto-fix trivially-fixable lint (ruff --fix / prettier --write) and commit
+    # before checking, so formatting / unused-import churn doesn't burn bounded
+    # coder fix-rounds. Best-effort; on any error the check below runs unchanged.
+    _lint_autofix_commit(issue_num, worktester_dashboard, base_branch,
+                         gate_scope, gate_frontend_lint)
+
     combined = ""
     any_ran = False
 
@@ -4376,7 +4480,13 @@ def _dispatch_coder(
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
-    cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
+    if cfg:
+        cwd_path = cfg.worktree_coder
+    else:
+        # No sprint.yaml: cwd is the coder clone when dispatched from the dashboard.
+        cwd_path = Path.cwd()
+        if not (cwd_path / "PRODUCT.md").exists() and WORKTESTER_ROOT.exists():
+            cwd_path = WORKTESTER_ROOT
 
     # Pre-dispatch doctor: check environment health before doing any work.
     doctor_err = _dispatch_doctor(cfg, alert_modes, issue_num=issue_num, eff_repo=eff_repo)
@@ -4801,6 +4911,7 @@ def _dispatch_tester(
     on_running: Optional[object] = None,
     sprint_label: Optional[str] = None,
     pre_dispatch_risk: Optional[str] = None,
+    prior_failures: Optional[list] = None,
 ) -> tuple[int, Optional[str]]:
     """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
 
@@ -4817,6 +4928,13 @@ def _dispatch_tester(
     pre_dispatch_risk: optional pre-computed risk tier ("LOW"/"MEDIUM"/"HIGH").
     When omitted, the tier is derived from the issue's GitHub labels via
     _classify_risk_tier() (issue #790).
+
+    prior_failures: accumulated failure records from the fix-loop (mirrors
+    _dispatch_coder).  When provided, the tester receives a stronger fast-path
+    prompt that directs it to re-verify the previously-failing gate/AC first
+    before spot-checking the remaining criteria.  Also sets is_retry=True for
+    worktree hygiene so the feature branch is checked out and rebased rather
+    than being treated as a fresh ticket.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
@@ -4826,11 +4944,15 @@ def _dispatch_tester(
 
     # Worktree hygiene (issue #788 AC7): same treatment as coder — fetch, stash dirty
     # state, hard-reset — before the tester checks out any code.
+    # When prior_failures is non-empty this is a fix-round retry; set is_retry=True so
+    # the hygiene step checks out the existing feature branch and rebases rather than
+    # treating the ticket as fresh (mirrors _dispatch_coder behaviour).
+    _tester_is_retry = bool(prior_failures)
     _tester_wt_sha, _tester_base_sha, _tester_hygiene_err = _worktree_hygiene(
         worktree=_tester_wt_root,
         ticket_id=issue_num,
         merge_target=sprint_branch,
-        is_retry=False,
+        is_retry=_tester_is_retry,
     )
     if sprint_label:
         _db_update_worktree_shas_sm(issue_num, sprint_label, "tester", _tester_wt_sha, _tester_base_sha)
@@ -4920,21 +5042,41 @@ def _dispatch_tester(
 
     # Re-run fast path: if a prior attempt failed, point the tester at the
     # previously-failing AC / gate FIRST so a re-verify isn't a full from-scratch
-    # pass (resume-from-failure TODO).
-    try:
-        _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
-        if _sc.exists():
-            _scd = json.loads(_sc.read_text(encoding="utf-8"))
-            _fc = _scd.get("failure_class") or _scd.get("category")
-            if _fc:
-                prompt += (
-                    f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
-                    " acceptance criterion / gate tied to that failure FIRST; if it now"
-                    " passes, quickly confirm the remaining AC rather than re-testing"
-                    " everything from scratch."
-                )
-    except Exception:
-        pass
+    # pass.  When prior_failures is supplied (fix-loop path) inject a stronger
+    # accumulated-history prompt; fall back to the sidecar file for single-attempt
+    # re-runs where prior_failures is not passed.
+    if prior_failures:
+        # Fix-round FAST PATH: accumulated history from the fix-loop.
+        _fp_lines = [
+            f"\n\nTESTER FIX-ROUND FAST PATH: this is fix-round attempt"
+            f" {len(prior_failures) + 1}. Prior coder/gate attempts failed:"
+        ]
+        for _h in prior_failures:
+            _cat = _h.get("category", "?")
+            _detail = _h.get("reason") or _h.get("summary") or ""
+            _fp_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        _fp_lines.append(
+            "TESTER FOCUS: re-verify the acceptance criterion / gate tied to the"
+            " LAST failure above FIRST. If it now passes, quickly spot-check the"
+            " remaining AC rather than re-testing everything from scratch."
+            " Do NOT rewrite existing passing tests."
+        )
+        prompt += "\n".join(_fp_lines)
+    else:
+        try:
+            _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+            if _sc.exists():
+                _scd = json.loads(_sc.read_text(encoding="utf-8"))
+                _fc = _scd.get("failure_class") or _scd.get("category")
+                if _fc:
+                    prompt += (
+                        f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
+                        " acceptance criterion / gate tied to that failure FIRST; if it now"
+                        " passes, quickly confirm the remaining AC rather than re-testing"
+                        " everything from scratch."
+                    )
+        except Exception:
+            pass
 
     # Impeccable design context (issue #713): inject into every tester dispatch so
     # the tester verifies UI tickets against the same design rules via context.mjs.
@@ -7809,6 +7951,7 @@ def _run_pipeline_dispatch(
             num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
             chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
             on_running=_on_tester_running, sprint_label=label,
+            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
         )
         _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
         state.total_tokens_in += _ttin
@@ -8882,6 +9025,7 @@ def run_sprint(
                     chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
                     on_running=_on_tester_running, sprint_label=label,
                     pre_dispatch_risk=_tester_risk,
+                    prior_failures=_fix_history if _fix_history else None,
                 )
             except SystemExit:
                 _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -9035,6 +9179,12 @@ def run_sprint(
                 sys.stdout.write(str(f"  [fix-loop] gate logic failure ({category}), "
                     f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry coder") + "\n")
                 sys.stdout.flush()
+                # Re-estimate after tester-triggered failure: bump size one tier so
+                # the next coder dispatch uses the correct model/budget routing.
+                _bumped = _bump_estimate_size(num)
+                if _bumped:
+                    sys.stdout.write(str(f"  [re-estimate] #{num}: size bumped to {_bumped} after tester gate failure") + "\n")
+                    sys.stdout.flush()
                 continue
 
             # Non-logic gate failure or _skip_coder path: final failure handling
@@ -9398,7 +9548,7 @@ def main() -> None:
             cfg = load_config(discovered)
         else:
             # Backward-compatible default (AC-6)
-            cfg = None
+            cfg = _default_config()
 
     raw_modes   = [m.strip() for m in args.alert_mode.split(",") if m.strip()]
     alert_modes = []
@@ -9518,7 +9668,7 @@ def main() -> None:
         effective_target = args.target_branch or sprint_branch
 
         # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
-        if state.issues:
+        if state.issues and not args.dry_run:
             end_reason   = "complete" if not summary.skipped else "stopped"
             summary_path = write_sprint_summary(
                 state         = state,
@@ -9533,6 +9683,14 @@ def main() -> None:
             )
         else:
             summary_path = None
+
+        if args.dry_run and state is not None:
+            try:
+                _dry_state = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+                if _dry_state.exists():
+                    _dry_state.unlink()
+            except Exception:
+                pass
 
     except SystemExit:
         if _sprint_user_cancelled.is_set():

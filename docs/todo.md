@@ -2,11 +2,13 @@
 
 > **Active milestone tracking lives in [`milestones/`](milestones/).**
 > Current focus:
+> [`milestones/post-lifecycle-backlog.md`](milestones/post-lifecycle-backlog.md)
+> — pending work grouped by topic (code-review debt, advisor, refactor, …)
+> with operator decisions flagged inline.
 > [`milestones/sprint-lifecycle-redesign.md`](milestones/sprint-lifecycle-redesign.md)
-> — the prioritized fix list (P0–P4) for the sprint lifecycle redesign. Its
-> design contract is
-> [`architecture/sprint-lifecycle.md`](architecture/sprint-lifecycle.md);
-> reread that doc before picking up items or re-opening the design discussion.
+> is now **CLOSED** (P0–P4 shipped through sprints 73.x); its design contract
+> [`architecture/sprint-lifecycle.md`](architecture/sprint-lifecycle.md) is the
+> source of truth for lifecycle behavior.
 
 A running history of what each sprint shipped — derived from sprint summaries,
 not a forward roadmap. The documentor appends one entry per finished sprint

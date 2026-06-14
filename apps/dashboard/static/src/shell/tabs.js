@@ -78,7 +78,7 @@ export function switchTab(tab, pushHistory) {
 
   const newUrl = '/project/' + encodeURIComponent(_slug) + '/' + tab;
   if (pushHistory !== false) {
-    history.pushState({ slug: _slug, tab }, '', newUrl);
+    window.history.pushState({ slug: _slug, tab }, '', newUrl);
   }
 
   if (tab === 'tickets' && !_ticketsLoaded) {

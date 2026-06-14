@@ -134,7 +134,7 @@ async def run_finish_sprint(
 
         try:
             merge_errors: list[str] = await asyncio.to_thread(
-                srv._merge_sprint_branch_chain, repo, base_label
+                srv._merge_sprint_branches_for_label, repo, label
             )
             errors.extend(merge_errors)
             for err in merge_errors:
@@ -202,8 +202,15 @@ async def run_finish_sprint(
 
         try:
             project_root = srv._project_root_path(repo)
-            all_labels = [base_label, *srv._child_sprint_labels_from_plans(project_root, base_label)]
-            for lbl in all_labels:
+            base_label = srv._sprint_label_base(label)
+            if srv._is_child_sprint_label(label):
+                finish_labels = [label]
+            else:
+                finish_labels = [
+                    base_label,
+                    *srv._child_sprint_labels_from_plans(project_root, base_label),
+                ]
+            for lbl in finish_labels:
                 try:
                     srv._plan_json_set_state(
                         project_root, lbl, "completed",

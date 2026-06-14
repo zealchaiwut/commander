@@ -13,7 +13,7 @@
  */
 
 /* eslint-disable no-unused-vars */
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, escHtml, sprintLabelDisplay, colorizeLogLine,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, escHtml, sprintLabelDisplay, colorizeLogLine,
    _smgmtAnySprintRunning:writable, _smgmtRunningLabels:writable */
 /* eslint-enable no-unused-vars */
 
@@ -59,7 +59,12 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
     }
     const data = await resp.json();
 
-    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore();
+    if (_smgmtLiveCacheRepo !== repo) {
+      _smgmtLiveCacheRepo = repo;
+      for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
+    }
+
+    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
 
     // Update running labels set; start linger when a label drops off running-all.
     const prevRunning = new Set(_smgmtRunningLabels);
@@ -112,6 +117,8 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
           ? _smgmtLingerLive(lingerLbl)
           : _smgmtLiveCache[lingerLbl] || null;
       _smgmtRunningViewUpdate(lingerLbl, live);
+    } else if (typeof _smgmtRunningViewUpdate === "function") {
+      _smgmtRunningViewUpdate(null, null);
     }
   } catch (err) {
     if (!silent) {
@@ -172,10 +179,32 @@ export function _smgmtRender(data) {
 
   const _sprintParents = data.sprint_parents || {};
   const _rerunInto = data.sprint_rerun_into || {};
+
+  const _smgmtWorkTickets = (tickets) =>
+    (tickets || []).filter((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some((n) =>
+        ["sprint-summary", "docs", "documentation"].includes(n),
+      );
+    });
+  const _smgmtTicketSettledOnBoard = (t) => {
+    const names = (t.labels || []).map((l) => l.name);
+    return names.some((n) =>
+      ["UAT", "UAT-approved", "released", "SIT"].includes(n),
+    );
+  };
+  const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
+    if (!rerunInto[label]) return false;
+    const work = _smgmtWorkTickets(tickets);
+    return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
+  };
+
   // After a re-run moves tickets to a child label, hide the empty parent card until refresh
   // would have dropped it from the order list anyway (issue #512 UX).
   const orderedLabels = orderedLabelsRaw.filter((label) => {
-    const ticketCount = (bySprint[label] || []).length;
+    const tickets = bySprint[label] || [];
+    if (_smgmtHideRerunParent(label, tickets, _rerunInto)) return false;
+    const ticketCount = tickets.length;
     if (ticketCount > 0) return true;
     if (_rerunInto[label]) return false;
     const hasChild = Object.values(_sprintParents).some(
@@ -841,6 +870,20 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
   return "";
 }
 
+/** Finished pipeline labels — only these block Run Sprint (mirrors sprint_manager._is_dispatchable). */
+const _NON_DISPATCHABLE_LABELS = new Set([
+  "UAT",
+  "UAT-approved",
+  "released",
+]);
+
+function _smgmtHasDispatchableTickets(tickets) {
+  return tickets.some((t) => {
+    const names = (t.labels || []).map((l) => l.name);
+    return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
+  });
+}
+
 export function _smgmtCardHtml(
   label,
   n,
@@ -868,6 +911,15 @@ export function _smgmtCardHtml(
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
 
+  const planState = (
+    ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label] || ""
+  ).toLowerCase();
+  const planBlocksPostRun = [
+    "planned",
+    "draft",
+    "planning",
+  ].includes(planState);
+
   const outcomeLifecycle = ((outcome && outcome.lifecycle) || "").toLowerCase();
   const outcomeState =
     outcome &&
@@ -885,10 +937,11 @@ export function _smgmtCardHtml(
     : _smgmtHasCompletedTickets(tickets);
   const isPostRun =
     !isRunningView &&
+    !planBlocksPostRun &&
     !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
-  const canRun = tickets.length >= 1 && !hasCompleted;
+  const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
 
   // Re-run Sprint button: child sprint for fully completed/stopped runs (not has_rework)
   const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
@@ -934,7 +987,9 @@ export function _smgmtCardHtml(
     // dispatched. The Run-on-schedule toggle is rendered here and nowhere else,
     // so it is hidden on running / post-run / linger cards (issue #863, AC2).
     const runDisabled = !canRun ? "disabled" : "";
-    const runTitle = !canRun ? 'title="Add at least one ticket first"' : "";
+    const runTitle = !canRun
+      ? 'title="No dispatchable tickets — remaining items are already SIT/UAT or in progress"'
+      : "";
     const schedToggle =
       typeof _smgmtSchedToggleHtml === "function"
         ? _smgmtSchedToggleHtml(label)
@@ -960,7 +1015,7 @@ export function _smgmtCardHtml(
   let ticketsContainerHtml = "";
   let rollupItems = tickets;
 
-  if (outcome && (outcome.sprint_status || outcome.state)) {
+  if (outcome && (outcome.sprint_status || outcome.state) && !planBlocksPostRun) {
     const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
     outcomeCardClass = " " + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;

@@ -36,7 +36,7 @@ REAL_BASELINE_BYTES = 1_168_820
 
 CONCERN_MODULES = [
     "board-render", "drag-drop", "run-controls", "finish-modal", "rerun-modal",
-    "bulk-complete-modal", "plan-next", "scheduled-run",
+    "bulk-complete-modal", "plan-next", "scheduled-run", "history",
 ]
 PUBLIC_HANDLERS = [
     "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint", "smgmtPlanNextSprint",
@@ -90,10 +90,13 @@ def test_sprint_board_es_modules__mount_point_and_bundle_retained():
 
 def test_sprint_board_es_modules__measurable_reduction_vs_real_baseline():
     now = PROJECT_HTML.stat().st_size
+    # Cumulative baseline: project.html size before BOTH extraction waves —
+    # history.js (~40 KB) and tabs.js (~8 KB). Post-merge both cuts apply, so the
+    # combined reduction must exceed their sum.
     PRE_WAVE_BYTES = 1_231_348
     wave_removed = PRE_WAVE_BYTES - now
-    assert wave_removed >= 8_000, (
-        f"expected >=8 KB cut this wave (tabs.js), only {wave_removed} bytes removed"
+    assert wave_removed >= 48_000, (
+        f"expected >=48 KB cut (history.js + tabs.js), only {wave_removed} bytes removed"
     )
 
 

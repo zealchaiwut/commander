@@ -99,6 +99,11 @@ class TestBoardPane:
         assert "grayscale" in _PROJECT_HTML
         assert "_smgmtLingerStart" in _BOARD_RENDER_SRC
 
+    def test_linger_scoped_to_current_project(self):
+        assert "_smgmtLingerRepoKey" in _PROJECT_HTML
+        assert "entry.project !== repo" in _PROJECT_HTML
+        assert "_smgmtLingerRestore(repo)" in _BOARD_RENDER_SRC
+
 
 # ── History: partial_finished + auto-refresh ────────────────────────────────
 

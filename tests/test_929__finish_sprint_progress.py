@@ -67,10 +67,17 @@ def test_finish_stream_endpoint_in_router():
 
 
 def test_finish_progress_router_registered():
-    """AC1 — finish_progress_router must be imported in routers/__init__.py."""
-    src = ROUTERS_INIT.read_text()
-    assert "finish_progress" in src, (
+    """AC1 — finish_progress_router must be imported and mounted on the app."""
+    init_src = ROUTERS_INIT.read_text()
+    assert "finish_progress" in init_src, (
         "finish_progress_router not imported in routers/__init__.py"
+    )
+    server_src = (REPO_ROOT / "apps" / "dashboard" / "server.py").read_text()
+    assert "finish_progress_router" in server_src, (
+        "finish_progress_router not imported in server.py"
+    )
+    assert "include_router(finish_progress_router)" in server_src, (
+        "finish_progress_router not mounted via app.include_router in server.py"
     )
 
 

@@ -6,9 +6,10 @@ multi-clone setup, agent roles, remote access — see [tutorial.md](tutorial.md)
 ## Prerequisites
 
 - Python 3.12
+- Node.js 18+ and npm — required for the esbuild frontend bundle (`npm run build`)
 - A GitHub account and a personal access token with `repo` scope
 - The GitHub CLI (`gh`) installed and authenticated
-- Claude Code CLI (`claude`) installed and logged in
+- Claude Code CLI (`claude`) installed and logged in (`npm install -g @anthropic-ai/claude-code`)
 
 ## Install
 
@@ -25,10 +26,13 @@ pip install -r requirements.txt
 cp apps/dashboard/.env.example apps/dashboard/.env
 # Set GITHUB_TOKEN and TRACKED_REPOS in .env
 
-# 4. Set up sprint manager config
+# 4. Build the frontend bundle (esbuild → static/dist/bundle.js)
+npm install && npm run build
+
+# 5. Set up sprint manager config
 ./.commander/setup.sh
 
-# 5. Install shell shortcuts and start the dashboard
+# 6. Install shell shortcuts and start the dashboard
 bash scripts/install_shell_shortcuts.sh
 source ~/.commander.zsh
 start-prd   # dashboard at http://localhost:8000
@@ -45,8 +49,9 @@ Open `http://localhost:8000` and add your first repo from the dashboard.
    them to GitHub. See [workflow.md](workflow.md).
 3. **Run a sprint** — give the tickets a `sprint-N` label, then hit Run Sprint.
    The Coder and Tester agents work each ticket in turn.
-4. **Sign off** — review the tickets that reach UAT, close the good ones, rerun
-   any that need rework.
+4. **Sign off** — review the tickets that reach UAT, close the good ones. Any
+   sprint that needs rework re-runs into a **child sprint** (`sprint-N.1`) off
+   the sprint base branch — the original label is never re-dispatched.
 
 ## Restart after machine reboot
 

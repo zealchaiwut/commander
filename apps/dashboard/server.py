@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import sprint_state
 import github_events_sync
 import live_metrics as _live_metrics
 import projects as projects_module
@@ -10115,23 +10116,8 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
 
 
 def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
-    """Lifecycle state for bulk-complete gating (DB + plan.json)."""
-    plan = _read_plan_json(project_root, sprint_label)
-    plan_state = (plan.get("state") or "").strip().lower() if plan else ""
-
-    db_state = ""
-    try:
-        row = db.get_sprint(sprint_label)
-        if row:
-            db_state = (row.get("state") or "").strip().lower()
-    except Exception:
-        pass
-
-    if db_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return db_state
-    if plan_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return plan_state
-    return db_state or plan_state
+    """Lifecycle state for bulk-complete gating (canonical accessor only)."""
+    return sprint_state.current(sprint_label)
 
 
 def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:

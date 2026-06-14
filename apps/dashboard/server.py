@@ -193,7 +193,6 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
-_subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 _orphans_removed_total: int = 0
 
@@ -944,6 +943,7 @@ from routers import (  # noqa: E402
     doctor_router,
     home_milestone_router,
     log_search_router,
+    logs_router,
     milestones_router,
     roadmap_router,
     runs_router,
@@ -954,12 +954,16 @@ from routers import (  # noqa: E402
     system_router,
     tickets_router,
 )
+# broadcast and _subscribers are now owned by routers/logs_service.py; import
+# them here so existing call sites in this file continue to work unchanged.
+from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
 app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)
 app.include_router(log_search_router)
+app.include_router(logs_router)
 app.include_router(milestones_router)
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
@@ -995,39 +999,6 @@ async def add_api_no_cache_headers(request: Request, call_next):
 
 
 # ── request models ────────────────────────────────────────────────────────────
-
-class AgentEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:  Optional[str] = None
-    agent_id:    Optional[str] = None
-    event_type:  str
-    working_dir: str = "unknown"
-    tool_name:   Optional[str] = None
-    status:      str = "working"
-    name:        Optional[str] = None
-
-    @model_validator(mode="after")
-    def resolve_session_id(self) -> "AgentEvent":
-        if not self.session_id:
-            self.session_id = self.agent_id or "unknown"
-        return self
-
-
-class TokenUsageEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:    Optional[str] = None
-    event_type:    str = "token_usage"
-    working_dir:   str = "unknown"
-    input_tokens:  int = 0
-    output_tokens: int = 0
-    agent_role:    Optional[str] = None
-    model_name:    Optional[str] = None
-    # owner/repo from COMMANDER_PROJECT (sprint-dispatched agents). Optional;
-    # interactive sessions fall back to the working-dir basename.
-    project:       Optional[str] = None
-
 
 class RejectBody(BaseModel):
     reason: str
@@ -1208,14 +1179,6 @@ def _compute_health_status(
     return "ok"
 
 
-# ── SSE broadcast ─────────────────────────────────────────────────────────────
-
-async def broadcast(data: dict):
-    msg = json.dumps(data)
-    for q in _subscribers:
-        await q.put(msg)
-
-
 # ── agent endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -1361,155 +1324,7 @@ def get_environment():
 
 
 # /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
-
-
-_seen_agent_sessions: set[str] = set()
-
-
-def _agent_project_from_name(agent_name: str | None) -> str | None:
-    """Derive the full owner/repo project key from an agent name string.
-
-    Agent names are formatted as 'role·repo·branch·#short'. We extract the
-    repo label (second component) and match it against the loaded projects list.
-    Returns None if no match is found.
-    """
-    if not agent_name:
-        return None
-    parts = agent_name.split("·")
-    if len(parts) < 2:
-        return None
-    repo_label = parts[1]
-    try:
-        all_projects = projects_module.load_projects()
-    except Exception:
-        return None
-    matched = next(
-        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
-        None,
-    )
-    return matched
-
-
-def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
-    """Extract (role, issue_num) from an agent name string (issue #719).
-
-    Names are formatted as 'role·label·branch·#short' with an optional trailing
-    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
-    The role is the first '·'-delimited component; the issue number is the
-    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
-    """
-    role = None
-    issue_num = None
-    if agent_name and "·" in agent_name:
-        role = agent_name.split("·")[0] or None
-    if agent_name:
-        m = re.search(r"issue-(\d+)", agent_name)
-        if m:
-            issue_num = int(m.group(1))
-    return role, issue_num
-
-
-@app.post("/api/agent-event")
-async def receive_event(request: Request, event: AgentEvent):
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-
-    session_id = event.session_id or "unknown"
-    project = _agent_project_from_name(event.name)
-    actor = event.name or session_id
-    role, issue_num = _parse_agent_identity(event.name)
-
-    if project:
-        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
-            _seen_agent_sessions.add(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_started",
-                target=session_id,
-                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
-                action_id=session_id,
-            )
-        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
-            _seen_agent_sessions.discard(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_finished",
-                target=session_id,
-                detail={"status": event.status, "role": role, "issue_num": issue_num},
-                action_id=session_id,
-            )
-
-    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(session_id, event.event_type, event.model_dump())
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-@app.post("/api/token-usage")
-async def receive_token_usage(event: TokenUsageEvent):
-    if not event.input_tokens and not event.output_tokens:
-        return {"ok": True}
-    # Prefer the explicit owner/repo the dispatcher tagged; the working-dir
-    # basename ("uat", "coder") can't split cost per project.
-    project = event.project or (
-        Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
-    )
-    session_id = event.session_id or "unknown"
-    db.record_token_usage(
-        session_id,
-        project,
-        event.input_tokens,
-        event.output_tokens,
-        agent_role=event.agent_role,
-        model_name=event.model_name,
-    )
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-# /api/agents and /api/events moved to routers/activity.py (issue #794)
-
-
-@app.delete("/api/events/test")
-def clear_test_events():
-    """Remove test/debug events and agents from the database and clear test alerts from memory."""
-    events_deleted = db.delete_test_events()
-    agents_deleted = db.delete_test_agents()
-    # Also purge in-memory test alerts using the module-level _test_pat pattern.
-    before = len(_alerts)
-    _alerts[:] = [
-        a for a in _alerts
-        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
-    ]
-    alerts_cleared = before - len(_alerts)
-    return {"ok": True, "events_deleted": events_deleted, "agents_deleted": agents_deleted, "alerts_cleared": alerts_cleared}
-
-
-@app.get("/events")
-async def sse_stream(request: Request):
-    queue: asyncio.Queue = asyncio.Queue()
-    _subscribers.append(queue)
-
-    async def generator():
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            if queue in _subscribers:
-                _subscribers.remove(queue)
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# /api/agent-event, /api/token-usage, /api/events/test, /events moved to routers/logs.py
 
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
@@ -3797,12 +3612,11 @@ def get_plan_usage():
 
 # ── alert banner endpoints (AC-3a from #24) ──────────────────────────────────
 
-_alerts: list[dict] = []
-
-# Pattern used to identify test/debug alerts — applied both when purging via
-# DELETE /api/events/test and when serving GET /api/alerts so that test noise
-# is never surfaced on PRD.
-_test_pat = re.compile(r"(test_|Test-|Test alert|\[CRASH\])", re.IGNORECASE)
+# _alerts and _test_pat moved to routers/logs_service.py (imported below with
+# logs_router) so the DELETE /api/events/test handler can purge test alerts
+# without a circular import. Both names are re-bound here so the alert
+# endpoints below keep working unchanged.
+from routers.logs_service import _alerts, _test_pat  # noqa: E402
 
 
 class AlertPayload(BaseModel):

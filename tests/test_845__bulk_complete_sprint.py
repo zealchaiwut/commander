@@ -246,6 +246,7 @@ def test_bulk_complete_blocks_when_children_not_completed(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
+        patch("server.db.get_sprint", return_value=None),
         patch("server._get_sprint_issues", return_value=[]),
         patch("server._open_summary_issues_for_labels", return_value=[]),
         patch.object(srv.github_client, "close_issue", close_mock),
@@ -270,7 +271,8 @@ def test_bulk_complete_preview_blocks_when_children_not_completed(srv, tmp_path)
     sprints_dir.mkdir(parents=True)
     (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "running"}))
 
-    with patch("server._project_root_path", return_value=project_root):
+    with patch("server._project_root_path", return_value=project_root), \
+         patch("server.db.get_sprint", return_value=None):
         client = TestClient(srv.app)
         resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
     assert resp.status_code == 409
@@ -307,3 +309,34 @@ def test_outcome_404_for_dry_run_state_only(srv, tmp_path):
     assert resp.status_code == 404
     detail = resp.json()["detail"].lower()
     assert "dry-run" in detail or "not run" in detail
+
+
+def test_bulk_complete_preview_allows_ready_to_merge_child_chain(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "rtm-chain"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-68.1-plan.json").write_text(
+        json.dumps({"state": "needs_rework", "parent": "sprint-68"})
+    )
+    (sprints_dir / "sprint-68.2-plan.json").write_text(
+        json.dumps({"state": "needs_rework", "parent": "sprint-68.1"})
+    )
+
+    patches = [
+        patch("server._project_root_path", return_value=project_root),
+        patch("server._get_sprint_issues", return_value=[]),
+        patch("server._open_summary_issues_for_labels", return_value=[]),
+        patch("server._merge_steps_for_sprint_chain", return_value=[]),
+        patch(
+            "server.db.get_sprint",
+            side_effect=lambda lbl: (
+                {"state": "ready_to_merge"} if lbl == "sprint-68.2" else {"state": "needs_rework"}
+            ),
+        ),
+    ]
+    with _stack(patches):
+        client = TestClient(srv.app)
+        resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
+    assert resp.status_code == 200

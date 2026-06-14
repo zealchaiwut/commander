@@ -3777,6 +3777,20 @@ ${data.errors.join("\n")}`);
     }
     return "";
   }
+  var _RERUN_STRIP_LABELS = /* @__PURE__ */ new Set([
+    "UAT",
+    "UAT-approved",
+    "released",
+    "SIT",
+    "in-progress",
+    "needs-rework"
+  ]);
+  function _smgmtHasDispatchableTickets(tickets) {
+    return tickets.some((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some((n) => _RERUN_STRIP_LABELS.has(n));
+    });
+  }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
     const isLinger = !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);

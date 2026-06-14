@@ -9833,30 +9833,58 @@ def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list
     return sorted(children, key=_sprint_label_sub_index)
 
 
-_BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({"completed", "deleted"})
+_BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
+    "completed", "deleted", "ready_to_merge",
+})
 
 
 def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
-    """Lifecycle state for bulk-complete gating (plan.json, then DB)."""
+    """Lifecycle state for bulk-complete gating (DB + plan.json)."""
     plan = _read_plan_json(project_root, sprint_label)
-    state = (plan.get("state") or "").strip().lower() if plan else ""
-    if state:
-        return state
+    plan_state = (plan.get("state") or "").strip().lower() if plan else ""
+
+    db_state = ""
     try:
         row = db.get_sprint(sprint_label)
         if row:
-            return (row.get("state") or "").strip().lower()
+            db_state = (row.get("state") or "").strip().lower()
     except Exception:
         pass
-    return ""
+
+    if db_state in _BULK_COMPLETE_CHILD_READY_STATES:
+        return db_state
+    if plan_state in _BULK_COMPLETE_CHILD_READY_STATES:
+        return plan_state
+    return db_state or plan_state
+
+
+def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:
+    """True when this label or a rerun child under it finished its run."""
+    if _bulk_complete_child_state(project_root, sprint_label) in _BULK_COMPLETE_CHILD_READY_STATES:
+        return True
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.is_dir():
+        return False
+    for path in sprints_dir.glob("*-plan.json"):
+        lbl = path.name.replace("-plan.json", "")
+        if lbl == sprint_label:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if (data.get("parent") or "") != sprint_label:
+            continue
+        if _bulk_complete_lineage_settled(project_root, lbl):
+            return True
+    return False
 
 
 def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
-    """Child sprint labels that are not yet completed or deleted."""
+    """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
     for child_label in _child_sprint_labels_from_plans(project_root, base_label):
-        state = _bulk_complete_child_state(project_root, child_label)
-        if state not in _BULK_COMPLETE_CHILD_READY_STATES:
+        if not _bulk_complete_lineage_settled(project_root, child_label):
             unsettled.append(child_label)
     return unsettled
 
@@ -9867,7 +9895,7 @@ def _bulk_complete_assert_children_completed(project_root: Path, base_label: str
         raise HTTPException(
             409,
             detail=(
-                "Bulk complete requires every child sprint to be completed — "
+                "Bulk complete requires every child sprint run to finish — "
                 f"still open: {', '.join(unsettled)}"
             ),
         )
@@ -10360,7 +10388,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         raise HTTPException(
             409,
             detail=(
-                "Bulk complete requires every child sprint to be completed — "
+                "Bulk complete requires every child sprint run to finish — "
                 f"still open: {', '.join(unsettled_children)}"
             ),
         )

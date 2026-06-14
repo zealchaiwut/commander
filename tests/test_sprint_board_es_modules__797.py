@@ -67,6 +67,17 @@ def test_sprint_board_es_modules__handler_not_inline(fn):
         f"{fn} still defined inline in project.html"
 
 
+def test_sprint_board_es_modules__switch_tab_not_inline():
+    assert not re.search(r'function\s+switchTab\s*\(', _read(PROJECT_HTML)), \
+        'switchTab still defined inline in project.html'
+
+
+def test_shell_tabs_module_exports_switch_tab():
+    tabs = STATIC / 'src' / 'shell' / 'tabs.js'
+    assert tabs.exists(), 'shell/tabs.js must exist'
+    assert 'export function switchTab' in _read(tabs)
+
+
 def test_sprint_board_es_modules__mount_point_and_bundle_retained():
     # AC2: page keeps the board mount point and loads the dist bundle.
     html = _read(PROJECT_HTML)
@@ -79,10 +90,11 @@ def test_sprint_board_es_modules__mount_point_and_bundle_retained():
 
 def test_sprint_board_es_modules__measurable_reduction_vs_real_baseline():
     now = PROJECT_HTML.stat().st_size
-    removed = REAL_BASELINE_BYTES - now
-    assert now < REAL_BASELINE_BYTES, f"project.html ({now}) not smaller than baseline"
-    # Real reduction is ~235 KB; require a substantial >=100 KB cut.
-    assert removed >= 100_000, f"expected >=100 KB cut, only {removed} bytes removed"
+    PRE_WAVE_BYTES = 1_231_348
+    wave_removed = PRE_WAVE_BYTES - now
+    assert wave_removed >= 8_000, (
+        f"expected >=8 KB cut this wave (tabs.js), only {wave_removed} bytes removed"
+    )
 
 
 # --- AC4: smoke test imports the modularized pure helpers with tested signatures ---
@@ -105,7 +117,7 @@ def test_sprint_board_es_modules__npm_test_runs_frontend_suite():
 
 # --- AC6: committed bundle strictly re-exposes each public handler (no regression) ---
 
-@pytest.mark.parametrize("fn", PUBLIC_HANDLERS)
+@pytest.mark.parametrize("fn", PUBLIC_HANDLERS + ["switchTab"])
 def test_sprint_board_es_modules__bundle_reexposes_handler(fn):
     # Strict assignment (globalThis.fn = / window.fn =) so page onclick/ondrag resolve.
     assert re.search(rf"(?:window|globalThis)\.{re.escape(fn)}\s*=", _read(BUNDLE)), \

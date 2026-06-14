@@ -9,14 +9,24 @@
  * Follow-on tickets extract additional self-contained blocks into static/src/
  * and import them here.
  */
-import { colorizeLogLine, escapeLogHtml, extractRaw, AGENT_NAMES } from './logpanel.js';
-import { renderProgressActivity, updateProgressActivityLog, paToggleLog, injectProgressActivityCss } from './progress-activity.js';
-import './sprint-board/index.js';
+import {
+  colorizeLogLine,
+  escapeLogHtml,
+  extractRaw,
+  AGENT_NAMES,
+} from "./logpanel.js";
+import {
+  renderProgressActivity,
+  updateProgressActivityLog,
+  paToggleLog,
+  injectProgressActivityCss,
+} from "./progress-activity.js";
+import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
 // these helpers on `window` (see static/AGENTS.md "What NOT to Touch"); the
 // bundle keeps that contract intact so the page loads with no ReferenceError.
-const root = typeof window !== 'undefined' ? window : globalThis;
+const root = typeof window !== "undefined" ? window : globalThis;
 root.colorizeLogLine = colorizeLogLine;
 root.escapeLogHtml = escapeLogHtml;
 root.extractRaw = extractRaw;

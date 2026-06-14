@@ -9,62 +9,143 @@
  * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal.
  */
 
-import './state.js';
+import "./state.js";
 
 import {
-  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
-} from './scheduled-run.js';
+  _smgmtSchedToggleHtml,
+  smgmtToggleRunOnSchedule,
+  _smgmtHydrateSchedToggles,
+} from "./scheduled-run.js";
 
 import {
-  _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
-  smgmtRerunSprint, _rrConfirm,
-} from './rerun-modal.js';
+  _rrOpen,
+  _rrClose,
+  _rrCatClass,
+  _rrUpdateState,
+  _rrSelectAll,
+  smgmtRerunSprint,
+  _rrConfirm,
+} from "./rerun-modal.js";
 import {
-  _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
-  smgmtFinishSprint, _fsConfirm,
-} from './finish-modal.js';
+  _fsOpen,
+  _fsClose,
+  _fsCatClass,
+  _fsSelectAll,
+  smgmtFinishSprint,
+  _fsConfirm,
+  _fsRetry,
+} from "./finish-modal.js";
 import {
-  _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
-  smgmtBulkCompleteSprint, _bcConfirm,
-} from './bulk-complete-modal.js';
+  _bcOpen,
+  _bcClose,
+  _bcCatClass,
+  _bcSelectAll,
+  smgmtBulkCompleteSprint,
+  _bcConfirm,
+} from "./bulk-complete-modal.js";
 import {
-  smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
-  _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
-  _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
-  _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
-  _pfBuildDAGHtml, _pfDrawDAGArrows, _pfToggleTicket, _pfGetSelectedTickets,
-  _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
-  _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
-  _pfStepperInit, _pfStepState, _pfStepperAnimate, _pfStepperSummary,
-} from './run-controls.js';
+  smgmtRunBlockedToast,
+  smgmtRunSprint,
+  smgmtCancelSprint,
+  _pfOpen,
+  _pfReset,
+  _pfClose,
+  _pfFetch,
+  _pfShowSuccess,
+  _pfUpdateConfirmBtn,
+  _pfBuildWarningsHtml,
+  _pfBuildCycleHtml,
+  _pfBuildFlagsHtml,
+  _pfFlagShowSizePicker,
+  _pfFlagHidePicker,
+  _pfFlagAction,
+  _pfFlagReestimate,
+  _pfBuildDAGHtml,
+  _pfDrawDAGArrows,
+  _pfToggleTicket,
+  _pfGetSelectedTickets,
+  _pfComputeConflicts,
+  _pfBuildConflictsHtml,
+  _pfBuildOrderHtml,
+  _pfUpdateSections,
+  _pfShowError,
+  _pfRetry,
+  _pfConfirm,
+  _pfStepperInit,
+  _pfStepState,
+  _pfStepperAnimate,
+  _pfStepperSummary,
+} from "./run-controls.js";
 import {
   computeDropPlan,
-  _smgmtUpdateSelectionUI, _smgmtPopulateSelectionDropdown, 
-  _smgmtPopulateMoveToMenu, _smgmtToggleMoveToMenu, _smgmtCloseMoveToMenu, 
-  _smgmtClearSelection, _smgmtSetSelected, _smgmtToggleSelect, 
-  _smgmtRowClick, _smgmtIsDeletableIssue, _smgmtDeleteSelected, 
-  _smgmtMoveSelectedTo, _smgmtTicketDragStart, _smgmtDragMovePill, 
-  _smgmtGhostComputeNextFree, _smgmtGhostShow, _smgmtGhostHide, 
-  _smgmtGhostDragOver, _smgmtGhostDragLeave, _smgmtGhostDrop, _gcClose, 
-  _gcConfirm, _smgmtTicketDragEnd, _smgmtDragOver, _smgmtDragLeave, 
-  _smgmtDropOnSprint, _smgmtTicketReorderDragOver, 
-  _smgmtTicketReorderDragLeave, _smgmtTicketReorderDrop, 
-  _smgmtBacklogTicketDragStart, _smgmtBacklogDragOver, 
-  _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock, 
-  _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
-} from './drag-drop.js';
+  _smgmtUpdateSelectionUI,
+  _smgmtPopulateSelectionDropdown,
+  _smgmtPopulateMoveToMenu,
+  _smgmtToggleMoveToMenu,
+  _smgmtCloseMoveToMenu,
+  _smgmtClearSelection,
+  _smgmtSetSelected,
+  _smgmtToggleSelect,
+  _smgmtRowClick,
+  _smgmtIsDeletableIssue,
+  _smgmtDeleteSelected,
+  _smgmtMoveSelectedTo,
+  _smgmtTicketDragStart,
+  _smgmtDragMovePill,
+  _smgmtGhostComputeNextFree,
+  _smgmtGhostShow,
+  _smgmtGhostHide,
+  _smgmtGhostDragOver,
+  _smgmtGhostDragLeave,
+  _smgmtGhostDrop,
+  _gcClose,
+  _gcConfirm,
+  _smgmtTicketDragEnd,
+  _smgmtDragOver,
+  _smgmtDragLeave,
+  _smgmtDropOnSprint,
+  _smgmtTicketReorderDragOver,
+  _smgmtTicketReorderDragLeave,
+  _smgmtTicketReorderDrop,
+  _smgmtBacklogTicketDragStart,
+  _smgmtBacklogDragOver,
+  _smgmtBacklogDragLeave,
+  _smgmtDropOnBacklog,
+  _smgmtBoardLock,
+  _smgmtBoardUnlock,
+  _smgmtBoardProgress,
+  _smgmtBoardLog,
+} from "./drag-drop.js";
 import {
-  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender, 
-  _smgmtLabelFilterRender, _smgmtLabelFilterApply, 
-  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts, 
-  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml, 
-  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
-  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
-  _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
-  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
-  _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
+  loadSprintMgmt,
+  _smgmtSprintLabelSortKey,
+  _smgmtRender,
+  _smgmtLabelFilterRender,
+  _smgmtLabelFilterApply,
+  _smgmtFetchMissingOutcomes,
+  _smgmtLoadEstimates,
+  _smgmtLoadConflicts,
+  _smgmtLoadDepOrder,
+  _smgmtLoadGoals,
+  _smgmtOutcomeBandHtml,
+  _smgmtOutcomeTicketListHtml,
+  _smgmtLoadFinishCards,
+  _smgmtRenderFinishCard,
+  _smgmtFinishCardInnerHtml,
+  _smgmtCardHtml,
+  _smgmtRunningCardHtml,
+  _smgmtRunningBoardBannerHtml,
+  _smgmtBoardBannerPatch,
+  _smgmtRunningLevelText,
+  _smgmtRollupText,
+  _smgmtTicketSize,
+  _smgmtTicketHasEstimate,
+  _smgmtUpdateColRollup,
+  _smgmtTicketRowHtml,
+  _smgmtRenderBacklog,
+  _smgmtBacklogTicketHtml,
   _smgmtApplyRerunOptimistic,
-} from './board-render.js';
+} from "./board-render.js";
 
 // Re-run modal (issue #512)
 globalThis._rrOpen = _rrOpen;
@@ -75,13 +156,14 @@ globalThis._rrSelectAll = _rrSelectAll;
 globalThis.smgmtRerunSprint = smgmtRerunSprint;
 globalThis._rrConfirm = _rrConfirm;
 
-// Finish modal (issue #367)
+// Finish modal (issue #367 / #929)
 globalThis._fsOpen = _fsOpen;
 globalThis._fsClose = _fsClose;
 globalThis._fsCatClass = _fsCatClass;
 globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
+globalThis._fsRetry = _fsRetry;
 
 // Bulk Complete modal (parent + child lineage)
 globalThis._bcOpen = _bcOpen;

@@ -18297,6 +18297,7 @@ function _setupModals() {
   document.getElementById('fs-cancel-btn').addEventListener('click', _fsClose);
   document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
   document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
+  document.getElementById('fs-retry-btn').addEventListener('click', _fsRetry);
 
   document.getElementById('bc-close-btn').addEventListener('click', _bcClose);
   document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);
@@ -23970,9 +23971,12 @@ document.addEventListener('keydown', function(e) {
       <div class="fs-actions" id="fs-actions"></div>
     </div>
     <div class="modal-error hidden" id="fs-error"></div>
+    <!-- Progress component slot (issue #929) -->
+    <div id="fs-progress" class="hidden" style="margin-top:4px"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>
+    <button class="btn-ghost hidden" id="fs-retry-btn" type="button" onclick="_fsRetry()">Retry</button>
     <button class="btn-primary" id="fs-confirm-btn" type="button" disabled>Merge Sprint</button>
   </div>
 </div>

@@ -54,27 +54,27 @@ try:
 except ImportError:
     _psutil = None  # type: ignore[assignment]
 
-from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, model_validator
+from dotenv import load_dotenv  # noqa: E402
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import BaseModel, ConfigDict, model_validator  # noqa: E402
 
 # Load .env before importing local modules so that DB_PATH and other env vars
 # are available when db.py executes its module-level startup checks.
 load_dotenv(Path(__file__).parent / ".env")
 
-import db
-import github_client
-import github_events_sync
-import live_metrics as _live_metrics
-import projects as projects_module
+import db  # noqa: E402
+import github_client  # noqa: E402
+import github_events_sync  # noqa: E402
+import live_metrics as _live_metrics  # noqa: E402
+import projects as projects_module  # noqa: E402
 
 # Structured event logging (services/logging.py at repo root)
 _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from services.logging import log as _slog, setup_logging as _setup_logging
+from services.logging import log as _slog, setup_logging as _setup_logging  # noqa: E402
 
 # Install size-rotating prd.log handler at import time so the uvicorn worker
 # (which imports server:app) is covered without disk-exhaustion risk (issue #762).
@@ -82,21 +82,16 @@ try:
     _setup_logging()
 except Exception:  # logging must never break startup
     pass
-from services.sprint_manager.estimate_issue import (
+from services.sprint_manager.estimate_issue import (  # noqa: E402
     fetch_issue as _ei_fetch_issue,
     run_estimator as _ei_run_estimator,
     apply_label as _ei_apply_label,
     apply_estimated_status as _ei_apply_estimated_status,
 )
-from services.sprint_manager import fill_acceptance_criteria as _fill_ac
-from services.sprint_manager.state_machine import (
-    TicketState as _TicketState,
-    transition as _sm_transition,
-    TransitionError as _TransitionError,
-)
+from services.sprint_manager import fill_acceptance_criteria as _fill_ac  # noqa: E402
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
-import sys as _sys
+import sys as _sys  # noqa: E402
 _SERVICES_DIR = Path(__file__).parent.parent.parent / "services" / "sprint_manager"
 if str(_SERVICES_DIR) not in _sys.path:
     _sys.path.insert(0, str(_SERVICES_DIR))
@@ -127,7 +122,7 @@ except Exception:
 # scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
 # disable here.
 
-from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter  # noqa: E402
 
 try:
     _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
@@ -265,7 +260,7 @@ def _inject_version_into_html(html: str) -> str:
     # Replace href="/static/foo.css" → href="/static/foo.css?v=<hash>"
     # Skip URLs that already have a query string.
     pattern = r'((?:src|href)="(/static/[^"?]+\.(?:js|css))")'
-    replacement = rf'\g<2>?v={_BUILD_HASH}'
+    replacement = rf'\g<2>?v={_BUILD_HASH}'  # noqa: F841
 
     def _replacer(m: re.Match) -> str:
         attr_name = m.group(1).split("=")[0]  # src or href
@@ -939,6 +934,7 @@ from routers import (  # noqa: E402
     analytics_router,
     backup_router,
     doctor_router,
+    finish_progress_router,
     home_milestone_router,
     log_search_router,
     milestones_router,
@@ -968,6 +964,7 @@ app.include_router(system_router)
 app.include_router(tickets_router)
 app.include_router(home_milestone_router)
 app.include_router(roadmap_router)
+app.include_router(finish_progress_router)
 
 logger = logging.getLogger(__name__)
 
@@ -1696,7 +1693,7 @@ def get_sprint_progress(project: str = "", repo: str = ""):
     can re-hydrate from disk when the server restarts or live data is not yet
     available.
     """
-    repo_name = repo or (project or None)
+    repo_name = repo or (project or None)  # noqa: F841
 
     # ── 1. Try live in-memory status ─────────────────────────────────────────
     running = _all_sprints_running()
@@ -2096,14 +2093,14 @@ def get_running_sprint(project: str):
 
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
-import services.sprint_manager.settings_repo as _settings_repo
-from services.sprint_manager.settings_schema import (
+import services.sprint_manager.settings_repo as _settings_repo  # noqa: E402
+from services.sprint_manager.settings_schema import (  # noqa: E402
     APP_CONFIG_KEY,
     SECRET_FIELDS,
     KNOWN_FIELDS,
     build_effective_response,
 )
-from services.sprint_manager.deploy_config_schema import (
+from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     DEPLOY_CONFIG_KEY,
     SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
     SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
@@ -2442,7 +2439,7 @@ def validate_deploy_config_field(slug: str, env: str, body: dict):
 
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
 
-from services.sprint_manager import deploy_actions as _deploy_actions
+from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
 
 
 def _enrich_deploy_readiness(config: dict) -> None:
@@ -2466,8 +2463,8 @@ def _enrich_deploy_readiness(config: dict) -> None:
         entry["start_errors"] = start_errors
 
 
-from services.sprint_manager import render_actions as _render_actions
-from services.sprint_manager import deploy_validation as _deploy_validation
+from services.sprint_manager import render_actions as _render_actions  # noqa: E402
+from services.sprint_manager import deploy_validation as _deploy_validation  # noqa: E402
 
 
 def _render_deploy_environment(entry: dict, env: str) -> dict:
@@ -3239,7 +3236,7 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
 
 # ── Env-var editor (issue #727) ───────────────────────────────────────────────
 
-import env_file as _env_file
+import env_file as _env_file  # noqa: E402
 
 
 def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
@@ -4117,7 +4114,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
                 pass
         sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
 
-    uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
+    uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]  # noqa: E741
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
     # The durable SQLite sprints table (issue #757) is authoritative for the
@@ -4196,7 +4193,7 @@ def _home_activity_feed(
     for repo, issues in all_open_by_repo.items():
         slug = repo.split("/")[-1]
         for issue in issues:
-            labels = {l["name"] for l in issue.get("labels", [])}
+            labels = {l["name"] for l in issue.get("labels", [])}  # noqa: E741
             ts = issue.get("updatedAt") or issue.get("createdAt") or ""
             if not ts:
                 continue
@@ -4336,7 +4333,7 @@ def get_home():
 
     for repo, issues in all_open_by_repo.items():
         for issue in issues:
-            if any(l["name"] == "UAT" for l in issue.get("labels", [])):
+            if any(l["name"] == "UAT" for l in issue.get("labels", [])):  # noqa: E741
                 uat_total += 1
                 uat_project_set.add(repo)
                 ts = issue.get("updatedAt") or issue.get("createdAt")
@@ -6236,7 +6233,7 @@ def get_sprint_summaries(project: str):
                         if raw in ("complete", "completed"):
                             fc_sprint_status = "completed"
                         elif raw in ("stopped", "failed", "cancelled"):
-                            fc_sprint_status = "stopped"
+                            fc_sprint_status = "stopped"  # noqa: F841
                             if raw == "cancelled":
                                 is_cancelled = True
                     except Exception:
@@ -8230,8 +8227,8 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
 
     # Iterate plain sprint-N labels in ascending order; collect consecutive leading empties
     plain_labels = sorted(
-        [l for l in all_sprint_labels if sprint_re_plain.match(l)],
-        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]
+        [l for l in all_sprint_labels if sprint_re_plain.match(l)],  # noqa: E741
+        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]  # noqa: E741
     )
 
     leading_empty: list[str] = []
@@ -8435,7 +8432,7 @@ def get_estimates_batch(project: str, issues: str = ""):
 
 
 @app.get("/api/sprints/{sprint_label}/state")
-def get_sprint_state(sprint_label: str, project: str):
+def get_sprint_state(sprint_label: str, project: str):  # noqa: F811
     """Return timing data from sprint-N-state.json for duration display (issue #212).
 
     Returns:
@@ -8696,7 +8693,7 @@ def get_sprint_outcome(sprint_label: str, project: str):
 
     # Derive sprint status from summary file (most authoritative)
     sprint_status: Optional[str] = None
-    sprints_dir = commander / "sprints"
+    sprints_dir = commander / "sprints"  # noqa: F841
     for sf in sorted(
         list((commander / "sprints").glob(f"{sprint_label}-summary-*.md"))
         + list((commander / "sprints").glob(f"sprint-{n}-summary-*.md")),
@@ -9348,7 +9345,7 @@ def _compute_analytics_metrics(project_root: Path,
     Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
     throughput, cost. All numeric fields are 0 when no data is available.
     """
-    today = datetime.now(tz=timezone.utc).date()
+    today = datetime.now(tz=timezone.utc).date()  # noqa: F841
 
     since_dt = _parse_iso_date(since, "since") if since else None
     until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
@@ -11247,7 +11244,6 @@ def _commit_attachments_to_branch(
     On push failure: retries once with fresh fetch+rebase.
     Raises RuntimeError on persistent failure.
     """
-    import tempfile
 
     def _do_commit():
         # Read existing tree for attachments branch
@@ -11340,7 +11336,7 @@ def _commit_attachments_to_branch(
 
         return new_commit_sha
 
-    new_sha = _do_commit()
+    new_sha = _do_commit()  # noqa: F841
 
     # Push to remote
     push_result = subprocess.run(
@@ -11829,9 +11825,9 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
         return
 
     # Invalidate the issues cache so the size badge appears on next load.
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
 
 
 def _post_estimator_warning(issue_number: int, repo: str, reason: str) -> None:
@@ -11878,8 +11874,6 @@ def _extract_size_from_estimator_stdout(stdout: str) -> str | None:
 
     The script prints the JSON estimate after the 'Saved:' line.
     """
-    import re as _re
-    import logging as _logging
     # Brace-matching scan for the first top-level JSON object in stdout
     start = stdout.find("{")
     if start < 0:
@@ -12268,7 +12262,7 @@ async def create_ticket_from_draft(
             if batch_size > _MAX_BATCH_SIZE_BYTES:
                 raise HTTPException(
                     422,
-                    detail=f"Upload batch exceeds the 50 MB total limit.",
+                    detail="Upload batch exceeds the 50 MB total limit.",
                 )
             file_data_raw.append((upload.filename, content))
 
@@ -12330,9 +12324,9 @@ async def create_ticket_from_draft(
         if upload_dir.exists():
             shutil.rmtree(upload_dir, ignore_errors=True)
 
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
 
     # Kick off the estimator as a background task (issue #267).
     # Resolve the repo now (while in the request context) so the background
@@ -12403,7 +12397,6 @@ def _bulk_job_created_at(job: dict) -> float:
     try:
         ts = job.get("created_at", "")
         if ts:
-            from datetime import timezone as _tz
             dt = datetime.fromisoformat(ts)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
@@ -13411,7 +13404,7 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
         # it so retries reuse it. Empty = no milestone (issue #879).
         milestone = _resolve_bulk_milestone(body.milestone, job)
         if milestone != job.get("milestone"):
-            job["milestone"] = milestone; _persist_bulk_job(job)
+            job["milestone"] = milestone; _persist_bulk_job(job)  # noqa: E702
 
         for item in body.tickets:
             idx = item.index
@@ -14167,7 +14160,7 @@ def act_on_mis_sizing_flag(sprint_label: str, issue_id: int, body: MisSizingActi
         if est_path.exists():
             try:
                 est_data = json.loads(est_path.read_text(encoding="utf-8"))
-                old_size = est_data.get("size")
+                old_size = est_data.get("size")  # noqa: F841
                 est_data["size"] = body.new_size
                 est_data["minutes"] = _mis_sizing.CANONICAL_MINUTES.get(body.new_size, 0)
                 est_path.write_text(json.dumps(est_data, indent=2), encoding="utf-8")

@@ -1600,16 +1600,27 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
 
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
 
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    """Return JS/TS files added/modified in HEAD relative to base_branch.
+
+    Excludes generated build artifacts (dist/ dirs and .map files) that
+    should never be linted — ESLint treats explicitly-passed ignored files
+    as warnings under --max-warnings=0.
+    """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
         return []
-    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+    return [
+        f for f in out.splitlines()
+        if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)
+        and not any(pat in f for pat in _JS_TS_LINT_EXCLUDE)
+    ]
 
 
 # Frontend file extensions the impeccable design detector analyses.
@@ -2429,8 +2440,13 @@ def _gate_lint(
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
                 sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                # Paths from git diff are relative to the repo root, not worktester_dashboard.
+                _rc_root, _root_out, _ = _run_timed(
+                    "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+                )
+                ruff_cwd = Path(_root_out.strip()) if _rc_root == 0 and _root_out.strip() else worktester_dashboard
                 rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
-                                                cwd=worktester_dashboard)
+                                                cwd=ruff_cwd)
                 combined += stdout + stderr
                 any_ran = True
                 if rc != 0:
@@ -2508,9 +2524,10 @@ def _gate_merge_preview(
             _run("git", "checkout", "--track", f"origin/{target_branch}",
                  cwd=worktester_root, check=False)
 
-        # Attempt dry-run merge
+        # Attempt dry-run merge. Use origin/<branch> so the ref resolves even
+        # when feature_branch was never checked out locally in this worktree.
         rc, stdout, stderr = _run_timed(
-            "git", "merge", "--no-commit", "--no-ff", feature_branch,
+            "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
             cwd=worktester_root,
         )
         combined = stdout + stderr
@@ -2639,6 +2656,12 @@ def _run_frontend_lint(
     combined = ""
     passed = True
 
+    # Paths from _changed_js_ts_files are relative to the git root.
+    rc_root, git_root_out, _ = _run_timed(
+        "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+    )
+    lint_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
     # eslint or biome (prefer biome if configured)
     ok_biome, biome_path, _ = _try("which", "biome")
     ok_eslint, eslint_path, _ = _try("which", "eslint")
@@ -2653,19 +2676,25 @@ def _run_frontend_lint(
         linter_bin = eslint_path
         linter_args = ["--max-warnings=0"]
     elif ok_npx:
-        # try biome via npx — skip if not found in project
-        rc_biome, _, _ = _run_timed(
-            npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
-        )
-        if rc_biome == 0:
-            linter_bin = npx_path
-            linter_args = ["--no", "biome", "check", "--apply=false"]
+        for _eslint_candidate in [
+            lint_cwd / "node_modules" / ".bin" / "eslint",
+            REPO_ROOT / "node_modules" / ".bin" / "eslint",
+        ]:
+            if _eslint_candidate.exists():
+                linter_bin = str(_eslint_candidate.resolve())
+                linter_args = ["--max-warnings=0"]
+                break
+        if not linter_bin:
+            _local_biome = lint_cwd / "node_modules" / ".bin" / "biome"
+            if _local_biome.exists():
+                linter_bin = npx_path
+                linter_args = ["--no", "biome", "check", "--apply=false"]
 
     if linter_bin:
         targets = ["."] if gate_scope == "full" else js_ts_files
         sys.stdout.write(str(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...") + "\n")
         rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
-                                        cwd=worktester_dashboard)
+                                        cwd=lint_cwd)
         combined += stdout + stderr
         if rc != 0:
             structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
@@ -2683,7 +2712,7 @@ def _run_frontend_lint(
         ok_prettier, prettier_bin, _ = _try("which", "prettier")
         if not ok_prettier and ok_npx:
             rc_pcheck, _, _ = _run_timed(
-                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+                npx_path, "--no", "prettier", "--version", cwd=lint_cwd
             )
             if rc_pcheck == 0:
                 prettier_bin = npx_path
@@ -2699,7 +2728,7 @@ def _run_frontend_lint(
             cmd_args = prettier_prefix + ["--check"] + targets
             sys.stdout.write(str(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...") + "\n")
             rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
-                                            cwd=worktester_dashboard)
+                                            cwd=lint_cwd)
             combined += stdout + stderr
             if rc != 0:
                 structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",

@@ -9417,22 +9417,41 @@ let _smgmtRunningLabels = new Set();
 let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
+let _smgmtLiveCacheRepo = null;
 
 // Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
 const _SMGMT_LINGER_MS = 60 * 60 * 1000;
 const _smgmtLingerLabels = new Map();
 let _smgmtLingerPollId = null;
 
-function _smgmtLingerStorageKey(label) {
-  return 'smgmtLinger_' + label;
+function _smgmtLingerRepoKey(repo) {
+  return (repo || '').replace('/', '__');
 }
 
-function _smgmtLingerRestore() {
+function _smgmtLingerStorageKey(repo, label) {
+  return 'smgmtLinger_' + _smgmtLingerRepoKey(repo) + '_' + label;
+}
+
+function _smgmtLingerRestore(repo) {
+  if (!repo) return;
+  // Drop in-memory linger from other projects (cross-project Running pane bleed).
+  for (const [label, entry] of [..._smgmtLingerLabels.entries()]) {
+    if (!entry || entry.project !== repo) {
+      _smgmtLingerLabels.delete(label);
+    }
+  }
   try {
+    const prefix = 'smgmtLinger_' + _smgmtLingerRepoKey(repo) + '_';
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('smgmtLinger_sprint-')) continue;
-      const label = key.slice('smgmtLinger_'.length);
+      if (!key) continue;
+      // Legacy keys (label-only) caused commander linger to show on other projects.
+      if (key.startsWith('smgmtLinger_sprint-')) {
+        localStorage.removeItem(key);
+        continue;
+      }
+      if (!key.startsWith(prefix)) continue;
+      const label = key.slice(prefix.length);
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const data = JSON.parse(raw);
@@ -9441,6 +9460,7 @@ function _smgmtLingerRestore() {
         localStorage.removeItem(key);
         continue;
       }
+      data.project = data.project || repo;
       _smgmtLingerLabels.set(label, data);
       if (data.live) _smgmtLiveCache[label] = data.live;
     }
@@ -9452,13 +9472,19 @@ function _smgmtLingerActive(label) {
   if (!entry) return false;
   if (Date.now() - entry.endedAt > _SMGMT_LINGER_MS) {
     _smgmtLingerLabels.delete(label);
-    try { localStorage.removeItem(_smgmtLingerStorageKey(label)); } catch (_) {}
+    const repo = entry.project || _smgmtRepo();
+    try {
+      if (repo) localStorage.removeItem(_smgmtLingerStorageKey(repo, label));
+    } catch (_) {}
     return false;
   }
   return true;
 }
 
 function _smgmtIsLinger(label) {
+  const repo = _smgmtRepo();
+  const entry = _smgmtLingerLabels.get(label);
+  if (!repo || !entry || entry.project !== repo) return false;
   return _smgmtLingerActive(label) && !_smgmtRunningLabels.has(label);
 }
 
@@ -9469,34 +9495,51 @@ function _smgmtLingerLive(label) {
 }
 
 function _smgmtLingerStart(label, opts) {
+  const repo = _smgmtRepo();
   const live = _smgmtLiveCache[label];
-  if (!live) return;
+  if (!repo || !live) return;
   const snap = JSON.parse(JSON.stringify(live));
   // Freeze terminal snapshot: no in-flight agents tick after finish/cancel.
   snap.active_agents = [];
   snap.active_agent = null;
   snap.current_ticket = null;
   if (opts && opts.cancelled) snap.run_state = 'cancelled';
-  const entry = { endedAt: Date.now(), live: snap, cancelled: !!(opts && opts.cancelled) };
+  const entry = {
+    endedAt: Date.now(),
+    live: snap,
+    cancelled: !!(opts && opts.cancelled),
+    project: repo,
+  };
   _smgmtLingerLabels.set(label, entry);
-  try { localStorage.setItem(_smgmtLingerStorageKey(label), JSON.stringify(entry)); } catch (_) {}
+  try {
+    localStorage.setItem(_smgmtLingerStorageKey(repo, label), JSON.stringify(entry));
+  } catch (_) {}
   _smgmtLingerPollRestart();
 }
 
 function _smgmtLingerExpire() {
   let changed = false;
-  for (const label of [..._smgmtLingerLabels.keys()]) {
+  const repo = _smgmtRepo();
+  for (const [label, entry] of [..._smgmtLingerLabels.entries()]) {
+    if (repo && entry && entry.project !== repo) continue;
     if (!_smgmtLingerActive(label)) changed = true;
   }
   return changed;
 }
 
 function _smgmtHasLinger() {
-  return [..._smgmtLingerLabels.keys()].some(l => _smgmtIsLinger(l));
+  const repo = _smgmtRepo();
+  if (!repo) return false;
+  for (const label of _smgmtLingerLabels.keys()) {
+    if (_smgmtIsLinger(label)) return true;
+  }
+  return false;
 }
 
 function _smgmtPrimaryRunningLabel() {
   if (_smgmtRunningLabels.size > 0) return _smgmtRunningLabels.values().next().value;
+  const repo = _smgmtRepo();
+  if (!repo) return null;
   for (const label of _smgmtLingerLabels.keys()) {
     if (_smgmtIsLinger(label)) return label;
   }
@@ -13855,6 +13898,15 @@ function _smgmtRunningViewUpdate(label, live) {
   // Post-run linger (finish or cancel): greyed frozen snapshot for 1h.
   const isLinger = !!(primary && _smgmtIsLinger(primary)) && !isLiveRun;
   // Re-run child race only: not in running-all yet but /live shows active agents.
+  const repo = _smgmtRepo();
+  const lingerEntry = primary ? _smgmtLingerLabels.get(primary) : null;
+  const primaryOnProject = !primary || _smgmtRunningLabels.has(primary)
+    || (lingerEntry && lingerEntry.project === repo);
+  if (primary && !primaryOnProject) {
+    if (emptyEl) emptyEl.style.display = '';
+    if (shellEl) shellEl.hidden = true;
+    return;
+  }
   const snapActive = !isLinger && !!(snap && (
     (Array.isArray(snap.active_agents) && snap.active_agents.length > 0) ||
     snap.current_ticket

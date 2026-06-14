@@ -59,7 +59,12 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
     }
     const data = await resp.json();
 
-    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore();
+    if (_smgmtLiveCacheRepo !== repo) {
+      _smgmtLiveCacheRepo = repo;
+      for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
+    }
+
+    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
 
     // Update running labels set; start linger when a label drops off running-all.
     const prevRunning = new Set(_smgmtRunningLabels);
@@ -112,6 +117,8 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
           ? _smgmtLingerLive(lingerLbl)
           : _smgmtLiveCache[lingerLbl] || null;
       _smgmtRunningViewUpdate(lingerLbl, live);
+    } else if (typeof _smgmtRunningViewUpdate === "function") {
+      _smgmtRunningViewUpdate(null, null);
     }
   } catch (err) {
     if (!silent) {

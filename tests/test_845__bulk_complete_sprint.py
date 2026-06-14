@@ -350,3 +350,48 @@ def test_bulk_complete_preview_allows_ready_to_merge_child_chain(srv, tmp_path):
         client = TestClient(srv.app)
         resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
     assert resp.status_code == 200
+
+
+def test_merge_steps_use_plan_parent_for_nested_child(srv, tmp_path):
+    project_root = tmp_path / "nested-merge"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-58.1-plan.json").write_text(
+        json.dumps({"state": "completed", "parent": "sprint-58"})
+    )
+    (sprints_dir / "sprint-58.2-plan.json").write_text(
+        json.dumps({"state": "ready_to_merge", "parent": "sprint-58.1"})
+    )
+
+    def fake_unmerged(repo, head, base):
+        return (head, base) in {
+            ("sprint/sprint-58.2", "sprint/sprint-58.1"),
+            ("sprint/sprint-58.1", "sprint/sprint-58"),
+            ("sprint/sprint-58", "develop"),
+        }
+
+    with patch("server._branch_has_unmerged_commits", side_effect=fake_unmerged):
+        steps = srv._merge_steps_for_sprint_chain(project_root, "owner/repo", "sprint-58")
+
+    assert [s["label"] for s in steps] == [
+        "sprint-58.2 → sprint-58.1",
+        "sprint-58.1 → sprint-58",
+        "sprint-58 → develop",
+    ]
+
+
+def test_finish_merge_steps_child_targets_plan_parent(srv, tmp_path):
+    project_root = tmp_path / "child-finish"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-58.2-plan.json").write_text(
+        json.dumps({"state": "ready_to_merge", "parent": "sprint-58.1"})
+    )
+
+    with patch("server._branch_has_unmerged_commits", return_value=True):
+        steps = srv._finish_merge_steps(project_root, "owner/repo", "sprint-58.2")
+
+    assert len(steps) == 1
+    assert steps[0]["head"] == "sprint/sprint-58.2"
+    assert steps[0]["base"] == "sprint/sprint-58.1"
+    assert steps[0]["label"] == "sprint-58.2 → sprint-58.1"

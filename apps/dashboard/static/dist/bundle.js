@@ -631,6 +631,963 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
+  // apps/dashboard/static/src/sprint-board/history.js
+  var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
+  function _histNeedsActionCount() {
+    return (_histLedgerData || []).reduce(
+      (acc, s) => acc + (_HIST_ACTION_STATES.has(s && s.lifecycle_state) ? 1 : 0),
+      0
+    );
+  }
+  var _histLedgerData = [];
+  globalThis._histLedgerData = _histLedgerData;
+  var _histExpanded = /* @__PURE__ */ new Set();
+  var _histDidAutoExpand = false;
+  var _histFoldSize = 10;
+  var _histFoldExpanded = /* @__PURE__ */ new Set();
+  var _histStaleBySprint = {};
+  var _histRunStats = {};
+  function _histIsLocked(state) {
+    const s = (state || "").toLowerCase();
+    return s === "finished" || s === "deleted" || s === "completed";
+  }
+  function _histIsChild(label) {
+    return /^sprint-\d+\.\d+/.test(label || "");
+  }
+  function _histFmtSecs(secs) {
+    if (secs == null || isNaN(secs))
+      return "\u2014";
+    secs = Math.round(secs);
+    if (secs < 60)
+      return secs + "s";
+    const m = Math.floor(secs / 60), s = secs % 60;
+    if (m < 60)
+      return s ? `${m}m ${s}s` : `${m}m`;
+    const h = Math.floor(m / 60), mm = m % 60;
+    return mm ? `${h}h ${mm}m` : `${h}h`;
+  }
+  function _histFmtTokens(n) {
+    if (n == null || isNaN(n))
+      return "0";
+    if (n >= 1e6)
+      return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3)
+      return (n / 1e3).toFixed(1) + "k";
+    return String(n);
+  }
+  function _histIssueChip(iss) {
+    const st = (iss.state || "").toLowerCase();
+    if (iss.failure_reason || (iss.agent_status || "").toLowerCase() === "failed") {
+      return { cls: "crashed", label: "CRASHED \xB7 in-progress" };
+    }
+    if (st === "merged")
+      return { cls: "merged", label: "MERGED" };
+    if (st === "closed")
+      return { cls: "crashed", label: "CRASHED" };
+    if (iss.time_spent != null)
+      return { cls: "uat", label: "OPEN \xB7 UAT" };
+    return { cls: "notrun", label: "NOT RUN" };
+  }
+  function _histIssueIcon(iss) {
+    const chip = _histIssueChip(iss);
+    if (chip.cls === "merged") {
+      return '<span class="iss-icon ok"><i class="ti ti-check"></i></span>';
+    }
+    if (chip.cls === "crashed") {
+      return '<span class="iss-icon fail"><i class="ti ti-x"></i></span>';
+    }
+    return '<span class="iss-icon idle"></span>';
+  }
+  function _histProgressText(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (!issues.length)
+      return "";
+    const done = issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
+    return `${done}/${issues.length} done`;
+  }
+  function _histEstBarMini(s) {
+    const acc = s.estimate_accuracy;
+    if (acc == null || isNaN(acc))
+      return "";
+    const accPct = acc <= 1 ? Math.round(acc * 100) : Math.round(Math.min(100, 100 / acc));
+    const tone = acc > 1.25 ? "var(--red)" : acc > 1 ? "var(--amber)" : "var(--green)";
+    const fill = Math.min(100, Math.max(10, accPct));
+    return `<span class="hist-est-mini" title="Estimate accuracy ${Number(acc).toFixed(2)}\xD7">
+    <span class="hist-est-mini-fill" style="width:${fill}%;background:${tone}"></span>
+    <span class="hist-est-mini-lbl">${accPct}%</span>
+  </span>`;
+  }
+  function _histIssueTitle(iss, s) {
+    if (iss.title)
+      return String(iss.title);
+    try {
+      const tickets = s && s.label && _smgmtBySprint[s.label] || [];
+      const hit = tickets.find((t) => String(t.number) === String(iss.ticket_id));
+      if (hit && hit.title)
+        return String(hit.title);
+    } catch (_) {
+    }
+    return "";
+  }
+  function _histIssueRowHtml(iss, isChild, s) {
+    const chip = _histIssueChip(iss);
+    const rerun = iss.is_rerun || iss.rerun || isChild;
+    const arrow = rerun ? '<span class="iss-rerun">\u21B3</span> ' : "";
+    const num = iss.ticket_id;
+    const id = num != null ? "#" + num : "#?";
+    const titleText = _histIssueTitle(iss, s);
+    const title = titleText ? `<span class="iss-title">${escHtml(titleText)}</span>` : "";
+    const repo = typeof _histRepo === "function" ? _histRepo(s) : "";
+    const clickable = num != null && repo ? ` role="link" tabindex="0" title="Open #${escHtml(String(num))} on GitHub" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
+    const cls = "iss-row" + (clickable ? " iss-row-link" : "");
+    return `<div class="${cls}"${clickable}>
+    ${_histIssueIcon(iss)}
+    <span class="iss-id">${arrow}${escHtml(String(id))}</span>
+    ${title}
+    <span class="iss-chip ${chip.cls}">${chip.label}</span>
+    <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
+  </div>`;
+  }
+  function _histFailedBlockHtml(s) {
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (state !== "needs_rework" && state !== "failed")
+      return "";
+    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+    const sprintReason = s.failure_reason || s.end_reason;
+    if (!failed.length && !sprintReason)
+      return "";
+    const items = failed.map((ft) => {
+      const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
+      const reason = ft.failure_reason || "Agent failed";
+      return `<div class="hist-fail-item"><span class="fail-id">${escHtml(String(id))}</span><span>${escHtml(String(reason))}</span></div>`;
+    }).join("");
+    const summary = !failed.length && sprintReason ? `<div class="hist-fail-item"><span>${escHtml(String(sprintReason))}</span></div>` : "";
+    return `<div class="hist-fail-block">
+    <div class="fail-head"><i class="ti ti-alert-triangle"></i> Sprint failed</div>
+    ${items}${summary}
+  </div>`;
+  }
+  function _histPartialChildrenHtml(s) {
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (state !== "partial_finished")
+      return "";
+    const children = Array.isArray(s.partial_children) ? s.partial_children : [];
+    if (!children.length)
+      return "";
+    const links = children.map((c) => {
+      const lbl = escHtml(c);
+      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(c) : c;
+      return `<button type="button" class="hist-partial-link" onclick="event.stopPropagation();_histFocusLabel('${lbl}')">${escHtml(display)}</button>`;
+    }).join("");
+    return `<div class="hist-partial-block">
+    <i class="ti ti-arrows-split"></i>
+    <span>Tickets moved to child sprint${children.length !== 1 ? "s" : ""}: ${links}</span>
+  </div>`;
+  }
+  function _histFocusLabel(label) {
+    if (!label)
+      return;
+    _histExpanded.add(label);
+    _histRenderLedger(_histLedgerData);
+    const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
+    if (el)
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function _histIssueListHtml(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const isChild = _histIsChild(s.label);
+    const failedBlock = _histFailedBlockHtml(s);
+    const partialBlock = _histPartialChildrenHtml(s);
+    if (!issues.length) {
+      if (partialBlock)
+        return `${failedBlock}${partialBlock}`;
+      const empty = failedBlock ? "" : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
+      return `${failedBlock}${empty}`;
+    }
+    return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>`;
+  }
+  function _histRepo(s) {
+    const cached = _cachedFullRepo[_slug];
+    if (cached)
+      return cached;
+    const p = s && s.project ? String(s.project) : "";
+    return p.includes("/") ? p : "";
+  }
+  function _histPrUrl(s) {
+    if (s.pr_number == null)
+      return "";
+    const repo = _histRepo(s);
+    if (!repo)
+      return "";
+    return `https://github.com/${repo}/pull/${s.pr_number}`;
+  }
+  function _histSummaryIssueUrl(s) {
+    if (s.summary_issue_url)
+      return s.summary_issue_url;
+    if (s.summary_issue_num == null)
+      return "";
+    const repo = _histRepo(s);
+    if (!repo)
+      return "";
+    return `https://github.com/${repo}/issues/${s.summary_issue_num}`;
+  }
+  function _histSummaryUrl(s) {
+    const issueUrl = _histSummaryIssueUrl(s);
+    if (issueUrl)
+      return issueUrl;
+    if (!s.summary_path)
+      return "";
+    return "/api/sprint-summary?path=" + encodeURIComponent(s.summary_path);
+  }
+  function _histLogsUrl(s) {
+    return `/project/${encodeURIComponent(_slug)}/logs?sprint=${encodeURIComponent(s.label || "")}`;
+  }
+  function _histLinksHtml(s) {
+    let html = "";
+    const pr = _histPrUrl(s);
+    if (pr) {
+      html += `<a class="hist-link link-pr" href="${escHtml(pr)}" target="_blank" rel="noopener">
+               <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
+    }
+    const sum = _histSummaryUrl(s);
+    if (sum) {
+      const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num} Summary` : "Summary";
+      html += `<a class="hist-link link-sum" href="${escHtml(sum)}" target="_blank" rel="noopener">
+               <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
+    }
+    html += `<a class="hist-link link-logs" href="${escHtml(_histLogsUrl(s))}">
+             <i class="ti ti-list-details"></i> Logs</a>`;
+    return `<div class="hist-links">${html}</div>`;
+  }
+  function _histHeadActionsHtml(s) {
+    let html = "";
+    const pr = _histPrUrl(s);
+    if (pr) {
+      html += `<a class="hist-head-btn link-pr" href="${escHtml(pr)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint PR">
+      <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
+    }
+    const sum = _histSummaryUrl(s);
+    if (sum) {
+      const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num}` : "Summary";
+      html += `<a class="hist-head-btn link-sum" href="${escHtml(sum)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint summary">
+      <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
+    }
+    html += `<a class="hist-head-btn" href="${escHtml(_histLogsUrl(s))}"
+    onclick="event.stopPropagation()" title="Open sprint logs">
+    <i class="ti ti-list-details"></i> Logs</a>`;
+    if (!_histIsLocked(s.lifecycle_state)) {
+      const state = (s.lifecycle_state || "").toLowerCase();
+      const lbl = escHtml(s.label || "");
+      const rawLabel = s.label || "";
+      if (state === "needs_rework" || state === "failed" || state === "cancelled") {
+        const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+        const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
+        const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
+        html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
+        onclick="event.stopPropagation();smgmtRerunSprint('${lbl}')">
+        <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
+      } else if (state === "completed" || state === "ready_to_merge") {
+        html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
+        onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
+        <i class="ti ti-flag-check"></i> Finish sprint</button>`;
+        html += `<button type="button" class="hist-head-btn hist-head-btn--delete"
+        onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')">
+        <i class="ti ti-trash"></i> Delete</button>`;
+      }
+    }
+    return html ? `<span class="hist-head-actions">${html}</span>` : "";
+  }
+  function _histStateChip(state, sprint) {
+    const s = (state || "unknown").toLowerCase();
+    const map = {
+      completed: ["completed", "Completed"],
+      ready_to_merge: ["completed", "Ready to merge"],
+      needs_rework: ["failed", "Failed"],
+      partial_finished: ["partial", "Partial"],
+      deleted: ["deleted", "Deleted"],
+      running: ["running", "Running"],
+      draft: ["planning", "Draft"],
+      planned: ["planning", "Planned"],
+      finished: ["finished", "Finished"],
+      failed: ["failed", "Failed"],
+      cancelled: ["failed", "Failed"],
+      planning: ["planning", "Draft"]
+    };
+    const pair = map[s] || ["unknown", s];
+    const reason = sprint && sprint.end_reason && (s === "needs_rework" || s === "failed" || s === "cancelled") ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>` : "";
+    return `<span class="hist-state ${pair[0]}">${pair[1]}</span>${reason}`;
+  }
+  function _histStatChip(icon, label, value, cls) {
+    const prefix = label ? escHtml(label) + " " : "";
+    return `<span class="stat-chip${cls ? " " + cls : ""}">
+    <i class="ti ${icon}"></i>${prefix}<b>${escHtml(value)}</b></span>`;
+  }
+  function _histSplitBarHtml(stats) {
+    const split = Array.isArray(stats.split) ? stats.split : [];
+    if (!split.length)
+      return "";
+    const segs = split.map(
+      (seg) => `<span class="split-seg split-seg--${escHtml(seg.agent)}" style="width:${seg.pct}%"
+       title="${escHtml(seg.agent)} \xB7 ${seg.pct}% (${escHtml(_histFmtSecs(seg.seconds))})">${seg.pct}%</span>`
+    ).join("");
+    const legend = split.map(
+      (seg) => `<span class="split-legend-item"><span class="split-swatch split-swatch--${escHtml(seg.agent)}"></span>
+       ${escHtml(seg.agent)} ${seg.pct}%</span>`
+    ).join("");
+    return `<div class="stats-block">
+    <div class="stats-section-label">Agent time split</div>
+    <div class="split-bar">${segs}</div>
+    <div class="split-legend">${legend}</div>
+  </div>`;
+  }
+  function _histAutoExpandRecent(groups) {
+    const _expand = (s) => {
+      if (!s || !s.label)
+        return;
+      if (_histIsLocked(s.lifecycle_state))
+        return;
+      _histExpanded.add(s.label);
+      _histLoadRunStats(s.label);
+    };
+    for (let i = 0; i < groups.length && i < _histFoldSize; i++) {
+      const g = groups[i];
+      const children = g.children || [];
+      if (children.length) {
+        _expand(children[children.length - 1]);
+      } else {
+        _expand(g.baseSprint);
+      }
+    }
+  }
+  function _histGanttHtml(s, stats) {
+    const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
+    if (!tickets.length)
+      return "";
+    const scale = Math.max(1, stats.wall_seconds || 0);
+    const _gst = (s.lifecycle_state || "").toLowerCase();
+    const failed = _gst === "needs_rework" || _gst === "failed";
+    const crash = stats.crash;
+    const rows = tickets.map((t) => {
+      const segs = (t.segments || []).map((seg) => {
+        const left = seg.start / scale * 100;
+        const width = seg.duration / scale * 100;
+        const agentCls = seg.agent === "tester" ? "g-tester" : "g-coder";
+        const cls = "g-seg " + agentCls + (seg.fix_round ? " g-fix" : "");
+        const title = `${seg.agent}${seg.fix_round ? " (fix round)" : ""} \xB7 ${_histFmtSecs(seg.duration)}`;
+        return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
+      }).join("");
+      let marker = "";
+      if (failed && crash && crash.ticket === t.ticket) {
+        const at = crash.offset / scale * 100;
+        marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">\u2715</span>`;
+      }
+      return `<div class="g-row">
+      <span class="g-label">#${escHtml(String(t.ticket))}</span>
+      <span class="g-track">${segs}${marker}</span>
+    </div>`;
+    }).join("");
+    return `<div class="stats-block">
+    <div class="stats-section-label">Timeline</div>
+    <div class="gantt">${rows}</div>
+  </div>`;
+  }
+  function _histStatsHtml(s) {
+    const stats = _histRunStats[s.label];
+    const hasRuns = !!(stats && stats.has_runs);
+    const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
+    const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
+    const _gst = (s.lifecycle_state || "").toLowerCase();
+    const sprintFailed = _gst === "needs_rework" || _gst === "failed";
+    const chips = [];
+    if (wall != null)
+      chips.push(_histStatChip("ti-clock", "wall", _histFmtSecs(wall)));
+    if (hasRuns) {
+      chips.push(_histStatChip("ti-robot", "agent time", _histFmtSecs(stats.agent_total_seconds)));
+    }
+    if (tokens != null) {
+      let tokVal = _histFmtTokens(tokens);
+      if (hasRuns && stats.token_cost_usd != null)
+        tokVal += " \u2248 $" + Number(stats.token_cost_usd).toFixed(2);
+      else
+        tokVal += " tok";
+      chips.push(_histStatChip("ti-coin", "tokens", tokVal));
+    }
+    if (hasRuns) {
+      if (stats.fix_round_count > 0) {
+        const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
+        const word = stats.fix_round_count === 1 ? "fix round" : "fix rounds";
+        chips.push(_histStatChip(
+          "ti-refresh",
+          "",
+          stats.fix_round_count + " " + word + (refs ? " (" + refs + ")" : ""),
+          "stat-chip--fix"
+        ));
+      }
+      if (stats.slowest_ticket) {
+        chips.push(_histStatChip(
+          "ti-hourglass-low",
+          "slowest",
+          "#" + stats.slowest_ticket.ticket + " \xB7 " + _histFmtSecs(stats.slowest_ticket.seconds)
+        ));
+      }
+      if (stats.parallel_saved_seconds != null) {
+        chips.push(_histStatChip(
+          "ti-arrows-split",
+          "parallel saved",
+          "~" + _histFmtSecs(stats.parallel_saved_seconds)
+        ));
+      }
+      if (stats.coder_backend_split && stats.coder_backend_split.cline_count > 0) {
+        const bs = stats.coder_backend_split;
+        const parts = [];
+        if (bs.cline_count > 0)
+          parts.push("cline: " + bs.cline_count + " \xB7 " + _histFmtSecs(bs.cline_seconds));
+        if (bs.claude_code_count > 0)
+          parts.push("claude-code: " + bs.claude_code_count + " \xB7 " + _histFmtSecs(bs.claude_code_seconds));
+        if (parts.length)
+          chips.push(_histStatChip("ti-server", "backend", parts.join(" | ")));
+      }
+      if (sprintFailed && stats.crash) {
+        const failed = (Array.isArray(s.failed_tickets) ? s.failed_tickets : []).find((ft) => ft.ticket_id === stats.crash.ticket);
+        const reason = failed ? String(failed.failure_reason || "") : "";
+        const crashAgent = /tester/i.test(reason) ? "tester" : "coder";
+        const tail = reason ? " \xB7 " + reason.split("\n")[0].slice(0, 40) : "";
+        chips.push(_histStatChip(
+          "ti-alert-triangle",
+          "crash",
+          "#" + stats.crash.ticket + " \xB7 " + crashAgent + tail,
+          "stat-chip--crash"
+        ));
+      }
+    }
+    const splitHtml = hasRuns ? _histSplitBarHtml(stats) : "";
+    const ganttHtml = hasRuns ? _histGanttHtml(s, stats) : "";
+    return `<div class="stats" data-stats-label="${escHtml(s.label || "")}">
+    <div class="stat-chips">${chips.join("")}</div>
+    ${splitHtml}
+    ${ganttHtml}
+  </div>`;
+  }
+  async function _histLoadRunStats(label) {
+    if (label in _histRunStats)
+      return;
+    const repo = _cachedFullRepo[_slug];
+    try {
+      const url = "/api/sprints/" + encodeURIComponent(label) + "/run-stats" + (repo ? "?project=" + encodeURIComponent(repo) : "");
+      const resp = await fetch(url);
+      if (!resp.ok)
+        return;
+      _histRunStats[label] = await resp.json();
+      _histRenderLedger(_histLedgerData);
+    } catch (_) {
+    }
+  }
+  function _histReconcileLabel(name) {
+    return {
+      summary_issue: "Summary issue",
+      sprint_pr: "Sprint PR",
+      stale_labels: "Status labels"
+    }[name] || name;
+  }
+  function _histPostSprintChipHtml(s) {
+    const ps = s.post_sprint;
+    if (!ps)
+      return "";
+    const doc = ps.documenter;
+    const rev = ps.reviewer;
+    const docRan = doc && doc.status && doc.status !== "skipped";
+    const revRan = rev && rev.status && rev.status !== "skipped";
+    if (!docRan && !revRan)
+      return "";
+    const parts = [];
+    if (docRan)
+      parts.push("documenter");
+    if (revRan)
+      parts.push("reviewer");
+    return `<span class="post-sprint-chip" title="${escHtml(ps.note || "Post-sprint agents")}">
+    <i class="ti ti-clock-play"></i> post-sprint</span>`;
+  }
+  function _histIssueUrl(num) {
+    if (num == null)
+      return "";
+    const repo = _cachedFullRepo[_slug] || "";
+    if (!repo)
+      return "";
+    return `https://github.com/${repo}/issues/${num}`;
+  }
+  function _histPostSprintHtml(s) {
+    const ps = s.post_sprint;
+    if (!ps)
+      return "";
+    const doc = ps.documenter;
+    const rev = ps.reviewer;
+    const docRan = doc && doc.status && doc.status !== "skipped";
+    const revRan = rev && rev.status && rev.status !== "skipped";
+    if (!docRan && !revRan)
+      return "";
+    let rows = "";
+    if (doc) {
+      let body = "";
+      if (doc.status === "skipped") {
+        body = '<span class="ps-skipped">Skipped \u2014 nothing merged</span>';
+      } else if (doc.status === "failed") {
+        body = '<span class="ps-skipped">Documenter failed</span>';
+      } else if ((doc.files_touched || []).length) {
+        body = (doc.files_touched || []).map(
+          (f) => `<code class="ps-file">${escHtml(String(f))}</code>`
+        ).join("");
+        if (doc.commit_sha) {
+          body += `<div class="ps-meta">Commit ${escHtml(String(doc.commit_sha).slice(0, 8))}</div>`;
+        }
+      } else if (doc.status === "succeeded") {
+        body = '<span class="ps-skipped">No doc files changed</span>';
+      }
+      if (body) {
+        rows += `<div class="ps-row"><span class="ps-label">Documenter</span><span class="ps-body">${body}</span></div>`;
+      }
+    }
+    if (rev) {
+      let body = "";
+      if (rev.status === "skipped") {
+        body = '<span class="ps-skipped">Skipped</span>';
+      } else if (rev.status === "failed") {
+        body = '<span class="ps-skipped">Reviewer failed</span>';
+      } else {
+        const tickets = rev.follow_up_tickets || [];
+        if (tickets.length) {
+          body = tickets.map((n) => {
+            const url = _histIssueUrl(n);
+            const inner = `#${n}`;
+            return url ? `<a class="ps-ticket" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(inner)}</a>` : `<span class="ps-ticket">${escHtml(inner)}</span>`;
+          }).join("");
+        } else {
+          body = '<span class="ps-skipped">No follow-up tickets opened</span>';
+        }
+        const counts = [];
+        if (rev.blockers)
+          counts.push(rev.blockers + " blocker" + (rev.blockers !== 1 ? "s" : ""));
+        if (rev.suggestions)
+          counts.push(rev.suggestions + " suggestion" + (rev.suggestions !== 1 ? "s" : ""));
+        if (rev.nits)
+          counts.push(rev.nits + " nit" + (rev.nits !== 1 ? "s" : ""));
+        if (counts.length)
+          body += `<div class="ps-meta">${escHtml(counts.join(" \xB7 "))}</div>`;
+        if (rev.comment_url) {
+          body += `<div class="ps-meta"><a href="${escHtml(rev.comment_url)}" target="_blank" rel="noopener">Review comment \u2197</a></div>`;
+        }
+      }
+      if (body) {
+        rows += `<div class="ps-row"><span class="ps-label">Reviewer</span><span class="ps-body">${body}</span></div>`;
+      }
+    }
+    if (!rows)
+      return "";
+    const note = ps.note || "Agents ran after ticket work finished";
+    return `<div class="hist-post-sprint">
+    <div class="ps-head"><i class="ti ti-clock-play"></i> ${escHtml(note)}</div>
+    ${rows}
+  </div>`;
+  }
+  function _histReconcileHtml(s) {
+    const r = s.reconciliation;
+    if (!r || !Array.isArray(r.checks) || !r.checks.length)
+      return "";
+    const allClear = !!r.all_clear;
+    const items = r.checks.map((c) => {
+      const ok = !!c.ok;
+      const icon = ok ? "ti-circle-check" : "ti-alert-triangle";
+      const detail = c.detail || (ok ? "OK" : "unresolved");
+      return `<div class="recon-item ${ok ? "ok" : "fail"}">
+      <i class="ti ${icon}"></i>
+      <span><span class="recon-label">${escHtml(_histReconcileLabel(c.name))}:</span>
+        <span class="recon-detail">${escHtml(detail)}</span></span>
+    </div>`;
+    }).join("");
+    const failed = r.checks.filter((c) => !c.ok).length;
+    const summary = allClear ? "All clear \u2014 no loose ends" : failed + (failed === 1 ? " item unresolved" : " items unresolved");
+    return `<div class="recon">
+    <div class="recon-head ${allClear ? "clear" : "flagged"}">
+      <i class="ti ${allClear ? "ti-checks" : "ti-alert-triangle"}"></i>
+      Reconciliation <span class="recon-summary">\xB7 ${escHtml(summary)}</span>
+    </div>
+    ${items}
+  </div>`;
+  }
+  function _histReconcileChipHtml(s) {
+    const r = s.reconciliation;
+    if (!r || !Array.isArray(r.checks) || !r.checks.length)
+      return "";
+    if (r.all_clear) {
+      return `<span class="recon-chip clear" title="Post-sprint reconciliation: all clear">
+      <i class="ti ti-checks"></i> clear</span>`;
+    }
+    const n = r.checks.filter((c) => !c.ok).length;
+    const word = n === 1 ? "loose end" : "loose ends";
+    return `<span class="recon-chip flagged" title="Post-sprint reconciliation: ${n} ${word}">
+    <i class="ti ti-alert-triangle"></i> ${n} ${word}</span>`;
+  }
+  function _histHeadHintsHtml(s, expanded) {
+    if (expanded) {
+      return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
+    }
+    let html = "";
+    const r = s.reconciliation;
+    if (r && Array.isArray(r.checks) && r.checks.length && !r.all_clear) {
+      html += _histReconcileChipHtml(s);
+    }
+    html += _histStaleChipHtml(s);
+    return html;
+  }
+  function _histCardHtml(s, opts) {
+    opts = opts || {};
+    const locked = _histIsLocked(s.lifecycle_state);
+    const child = _histIsChild(s.label);
+    const expanded = _histExpanded.has(s.label);
+    const cls = ["hist-card"];
+    if (locked)
+      cls.push("locked");
+    if (child)
+      cls.push("child");
+    if (expanded)
+      cls.push("expanded");
+    const lockNote = locked ? `<div class="lock-note"><i class="ti ti-lock"></i> This sprint is ${escHtml((s.lifecycle_state || "").toLowerCase())} and locked \u2014 links only.</div>` : "";
+    const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(s.label) : s.label || "";
+    const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
+    const lbl = escHtml(s.label || "");
+    const headCompact = locked && !expanded;
+    const progress = headCompact ? "" : _histProgressText(s);
+    const headActions = _histHeadActionsHtml(s);
+    const bulkBtn = opts.bulkCompleteBtn || "";
+    const headRight = headActions || bulkBtn ? `<span class="hist-card-head-right">${headActions}${bulkBtn}</span>` : "";
+    const hints = headCompact ? "" : _histHeadHintsHtml(s, expanded);
+    const duration = !headCompact && s.duration != null ? `<span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>` : "";
+    const midBits = headCompact ? "" : [duration, _histEstBarMini(s), hints].join("");
+    const headMid = midBits ? `<div class="hist-card-head-mid">${midBits}</div>` : "";
+    const body = expanded ? `
+      ${_histStatsHtml(s)}
+      ${_histPostSprintHtml(s)}
+      ${_histReconcileHtml(s)}
+      ${_histIssueListHtml(s)}
+      ${lockNote}
+      ${locked ? _histLinksHtml(s) : ""}` : "";
+    return `<div class="${cls.join(" ")}" data-label="${lbl}">
+    <div class="hist-card-head" onclick="_histToggleCard('${lbl}')">
+      <div class="hist-card-head-left">
+        <i class="ti ${chev} hist-chev"></i>
+        ${child ? '<span class="hist-child-arrow">\u21B3</span>' : ""}
+        <span class="hist-card-title">${escHtml(display)}</span>
+        ${_histStateChip(s.lifecycle_state, s)}
+        ${progress ? `<span class="hist-progress">${escHtml(progress)}</span>` : ""}
+      </div>
+      ${headMid}
+      ${headRight}
+    </div>
+    ${body ? `<div class="hist-card-body">${body}</div>` : ""}
+  </div>`;
+  }
+  function _histToggleCard(label) {
+    if (_histExpanded.has(label)) {
+      _histExpanded.delete(label);
+    } else {
+      _histExpanded.add(label);
+      _histLoadRunStats(label);
+    }
+    _histRenderLedger(_histLedgerData);
+  }
+  function _histLabelParts(label) {
+    const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(label || "");
+    if (!m)
+      return { base: label || "", sub: 0, baseNum: 0 };
+    return {
+      base: `sprint-${m[1]}`,
+      sub: m[2] ? parseInt(m[2], 10) : 0,
+      baseNum: parseInt(m[1], 10)
+    };
+  }
+  function _histGroupMembers(group) {
+    const out = [];
+    if (group.baseSprint)
+      out.push(group.baseSprint);
+    if (group.children)
+      out.push(...group.children);
+    return out;
+  }
+  function _histGroupSprints(sprints) {
+    const byBase = /* @__PURE__ */ new Map();
+    const groupOrder = [];
+    for (let i = 0; i < sprints.length; i++) {
+      const s = sprints[i];
+      const { base, sub } = _histLabelParts(s.label);
+      if (!byBase.has(base)) {
+        byBase.set(base, { baseSprint: null, children: [], order: i });
+        groupOrder.push(base);
+      }
+      const g = byBase.get(base);
+      if (sub === 0)
+        g.baseSprint = s;
+      else
+        g.children.push(s);
+      g.order = Math.min(g.order, i);
+    }
+    groupOrder.sort((a, b) => byBase.get(a).order - byBase.get(b).order);
+    return groupOrder.map((baseLabel) => {
+      const g = byBase.get(baseLabel);
+      g.children.sort((a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub);
+      return { baseLabel, baseSprint: g.baseSprint, children: g.children };
+    });
+  }
+  function _histGroupNeedsBulkComplete(group) {
+    const children = group.children || [];
+    if (!children.length || !group.baseSprint)
+      return false;
+    const members = [group.baseSprint, ...children];
+    return members.some((s) => {
+      const st = (s.lifecycle_state || "").toLowerCase();
+      return st !== "completed" && st !== "deleted";
+    });
+  }
+  function _histBulkCompleteBtnHtml(group) {
+    if (!_histGroupNeedsBulkComplete(group))
+      return "";
+    const lbl = escHtml(group.baseLabel || "");
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+          onclick="event.stopPropagation();smgmtBulkCompleteSprint('${lbl}')"
+          title="Complete parent and all child sprints">
+    <i class="ti ti-circle-check"></i> Bulk complete
+  </button>`;
+  }
+  function _histGroupHtml(group) {
+    const bulkBtn = _histBulkCompleteBtnHtml(group);
+    const head = group.baseSprint ? _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn }) : "";
+    const childHtml = (group.children || []).map(_histCardHtml).join("");
+    if (!childHtml)
+      return head;
+    if (!head) {
+      return `<div class="hist-sprint-group"><div class="hist-group-children">${childHtml}</div></div>`;
+    }
+    return `<div class="hist-sprint-group">${head}<div class="hist-group-children">${childHtml}</div></div>`;
+  }
+  function _histTicketsDone(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    return issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
+  }
+  function _histPartitionGroups(groups, foldSize) {
+    foldSize = Math.max(1, foldSize | 0);
+    const recent = groups.slice(0, foldSize);
+    const older = groups.slice(foldSize);
+    const folds = [];
+    for (let i = 0; i < older.length; i += foldSize) {
+      const chunk = older.slice(i, i + foldSize);
+      const nums = chunk.map((g) => _histLabelParts(g.baseLabel).baseNum).filter((n) => n > 0);
+      folds.push({
+        id: "fold-" + i,
+        groups: chunk,
+        sprints: chunk.flatMap(_histGroupMembers),
+        from: nums.length ? Math.min(...nums) : null,
+        to: nums.length ? Math.max(...nums) : null
+      });
+    }
+    return { recent, folds };
+  }
+  function _histFoldAgg(group) {
+    let done = 0, failed = 0, accSum = 0, accN = 0;
+    group.forEach((s) => {
+      done += _histTicketsDone(s);
+      const _fst = (s.lifecycle_state || "").toLowerCase();
+      if (_fst === "needs_rework" || _fst === "failed")
+        failed += 1;
+      const acc = s.estimate_accuracy;
+      if (acc != null && !isNaN(acc)) {
+        accSum += Number(acc);
+        accN += 1;
+      }
+    });
+    return { done, failed, avgAcc: accN ? accSum / accN : null, count: group.length };
+  }
+  function _histFoldAggHtml(group) {
+    const a = _histFoldAgg(group);
+    const acc = a.avgAcc != null ? Number(a.avgAcc).toFixed(2) + "\xD7" : "\u2014";
+    return `<div class="fold-agg">
+    <span class="fold-stat"><i class="ti ti-checks"></i> ${a.done} done</span>
+    <span class="fold-stat"><i class="ti ti-gauge"></i> ${escHtml(acc)} avg est</span>
+    <span class="fold-stat fold-stat--fail"><i class="ti ti-alert-triangle"></i> ${a.failed} failed</span>
+  </div>`;
+  }
+  function _histFoldHtml(fold) {
+    const open = _histFoldExpanded.has(fold.id);
+    const chev = open ? "ti-chevron-down" : "ti-chevron-right";
+    const range = fold.from != null && fold.to != null ? fold.from === fold.to ? "Sprint " + fold.from : "Sprints " + fold.from + "\u2013" + fold.to : "Sprints \xB7 " + fold.sprints.length;
+    const fid = escHtml(fold.id);
+    const body = open ? `<div class="fold-body">${(fold.groups || []).map(_histGroupHtml).join("")}</div>` : "";
+    return `<div class="fold ${open ? "expanded" : ""}" data-fold="${fid}">
+    <div class="fold-head" onclick="_histToggleFold('${fid}')">
+      <i class="ti ${chev} fold-chev"></i>
+      <span class="fold-title">${escHtml(range)}</span>
+      <span class="fold-count">${fold.sprints.length} sprints</span>
+      <span class="fold-spacer"></span>
+      ${_histFoldAggHtml(fold.sprints)}
+    </div>
+    ${body}
+  </div>`;
+  }
+  function _histToggleFold(id) {
+    if (_histFoldExpanded.has(id))
+      _histFoldExpanded.delete(id);
+    else
+      _histFoldExpanded.add(id);
+    _histRenderLedger(_histLedgerData);
+  }
+  function _histToolbarHtml() {
+    return `<div class="hist-toolbar">
+    <span class="hist-toolbar-note">
+      <i class="ti ti-stack-2"></i>
+      Showing the ${_histFoldSize} most recent sprints \u2014 older sprints are grouped into folds of ${_histFoldSize}.
+    </span>
+  </div>`;
+  }
+  function _histStaleChipHtml(s) {
+    const g = _histStaleBySprint[s.label];
+    if (!g || !g.count)
+      return "";
+    const n = g.count;
+    const word = n === 1 ? "stale branch" : "stale branches";
+    const lbl = escHtml(s.label || "");
+    return `<button class="stale-chip" title="${n} leftover feature ${n === 1 ? "branch" : "branches"} for this sprint"
+    onclick="event.stopPropagation(); _histCleanupStale('${lbl}')">
+    <i class="ti ti-git-branch"></i> ${n} ${word} \xB7 clean up</button>`;
+  }
+  async function _histScanStale() {
+    const repo = _cachedFullRepo[_slug];
+    if (!repo)
+      return;
+    const btn = document.getElementById("ps-stale-scan-btn");
+    if (btn) {
+      btn.disabled = true;
+    }
+    try {
+      const resp = await fetch("/scan-stale-branches?repo=" + encodeURIComponent(repo));
+      if (resp.ok) {
+        const data = await resp.json();
+        _histStaleBySprint = data.by_sprint || {};
+        if (_histLedgerData && _histLedgerData.length) {
+          _histRenderLedger(_histLedgerData);
+        }
+      }
+    } catch (_) {
+    } finally {
+      const b = document.getElementById("ps-stale-scan-btn");
+      if (b) {
+        b.disabled = false;
+      }
+    }
+  }
+  async function _histCleanupStale(label) {
+    const repo = _cachedFullRepo[_slug];
+    const g = _histStaleBySprint[label];
+    if (!repo || !g)
+      return;
+    const branches = g.branches || [];
+    let plan;
+    try {
+      const resp = await fetch("/cleanup-stale-branches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, branches, confirm: false })
+      });
+      if (!resp.ok)
+        return;
+      plan = await resp.json();
+    } catch (_) {
+      return;
+    }
+    const toDelete = plan.to_delete || [];
+    const skipped = plan.skipped_unmerged || [];
+    if (!toDelete.length && !skipped.length)
+      return;
+    let msg = toDelete.length ? "Delete " + toDelete.length + " merged branch" + (toDelete.length !== 1 ? "es" : "") + "?\n\n" + toDelete.join("\n") : "No merged branches to delete for this sprint.";
+    if (skipped.length) {
+      msg += "\n\nSkipped (unmerged \u2014 never deleted):\n" + skipped.join("\n");
+    }
+    if (!confirm(msg))
+      return;
+    if (!toDelete.length)
+      return;
+    try {
+      const resp = await fetch("/cleanup-stale-branches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, branches, confirm: true })
+      });
+      if (!resp.ok)
+        return;
+      const result = await resp.json();
+      const deleted = new Set(result.deleted || []);
+      const remaining = (g.branches || []).filter((b) => !deleted.has(b));
+      if (remaining.length) {
+        g.branches = remaining;
+        g.merged = (g.merged || []).filter((b) => !deleted.has(b));
+        g.unmerged = (g.unmerged || []).filter((b) => !deleted.has(b));
+        g.count = remaining.length;
+      } else {
+        delete _histStaleBySprint[label];
+      }
+      _histRenderLedger(_histLedgerData);
+    } catch (_) {
+    }
+  }
+  function _histRenderLedger(sprints) {
+    const el = document.getElementById("hist-ledger");
+    if (!el)
+      return;
+    if (!sprints || !sprints.length) {
+      el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet \u2014 finished and deleted sprints appear here.</div>`;
+      return;
+    }
+    const groups = _histGroupSprints(sprints);
+    if (!_histDidAutoExpand && groups.length) {
+      _histAutoExpandRecent(groups);
+      _histDidAutoExpand = true;
+    }
+    const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
+    const recentHtml = recent.map(_histGroupHtml).join("");
+    const foldsHtml = folds.map(_histFoldHtml).join("");
+    el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
+  }
+  async function _histLoadLedger(repo) {
+    if (!repo)
+      return;
+    const el = document.getElementById("hist-ledger");
+    try {
+      try {
+        const sresp = await fetch(`/api/projects/${encodeURIComponent(_slug)}/settings`);
+        if (sresp.ok) {
+          const settings = await sresp.json();
+          const fs = parseInt(settings.history_fold_size, 10);
+          if (!isNaN(fs) && fs > 0)
+            _histFoldSize = fs;
+        }
+      } catch (_) {
+      }
+      const resp = await fetch("/api/sprints/history?limit=50&project=" + encodeURIComponent(repo || ""));
+      if (!resp.ok)
+        return;
+      const data = await resp.json();
+      let sprints = data.sprints || [];
+      _histLedgerData = sprints;
+      globalThis._histLedgerData = sprints;
+      _histRenderLedger(sprints);
+      _smgmtUpdateSubnav();
+    } catch (_) {
+      if (el)
+        el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+    }
+  }
+  function _histNextChildLabel(parentLabel) {
+    return _nextSprintSublabel(parentLabel);
+  }
+
   // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrOpen() {
     _setBodyInert(["rr-backdrop", "rr-modal"]);
@@ -4523,6 +5480,15 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
   globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
   globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
+  globalThis._histNeedsActionCount = _histNeedsActionCount;
+  globalThis._histLoadLedger = _histLoadLedger;
+  globalThis._histScanStale = _histScanStale;
+  globalThis._histCleanupStale = _histCleanupStale;
+  globalThis._histToggleCard = _histToggleCard;
+  globalThis._histToggleFold = _histToggleFold;
+  globalThis._histFocusLabel = _histFocusLabel;
+  globalThis._histStateChip = _histStateChip;
+  globalThis._histRenderLedger = _histRenderLedger;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

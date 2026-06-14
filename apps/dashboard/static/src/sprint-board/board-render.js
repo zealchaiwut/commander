@@ -841,6 +841,23 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
   return "";
 }
 
+/** Terminal status labels — ticket with any of these is not coder-dispatchable. */
+const _RERUN_STRIP_LABELS = new Set([
+  "UAT",
+  "UAT-approved",
+  "released",
+  "SIT",
+  "in-progress",
+  "needs-rework",
+]);
+
+function _smgmtHasDispatchableTickets(tickets) {
+  return tickets.some((t) => {
+    const names = (t.labels || []).map((l) => l.name);
+    return !names.some((n) => _RERUN_STRIP_LABELS.has(n));
+  });
+}
+
 export function _smgmtCardHtml(
   label,
   n,

@@ -49,7 +49,7 @@ Refactor sprint sequence ([2.5](2_app-dashboard-architecture.md#25-sequencing--r
 
 **Resume here (pending from section 2 review):**
 
-- [ ] **2.3a** — frontend module boundaries
+- [x] **2.3a** — frontend module boundaries ([2.3a-frontend-module-boundaries.md](2.3a-frontend-module-boundaries.md))
 - [ ] **2.3b** — complete sitemap + settle file-tail vs live-stream
 - [ ] **4c–4f** — nudge-before-kill, worktree debt, doctor preflight, AGENTS.md targeting
 - [ ] Refactor sprint scoping (one vs split)

@@ -1,8 +1,16 @@
 # Changelog
 
+## Sprint 72
+
 - [#918](https://github.com/zealchaiwut/commander/issues/918) Route follow-up coder dispatches to Cline on sprint opt-in — 2026-06-14
 - [#917](https://github.com/zealchaiwut/commander/issues/917) Add Cline headless backend to coder dispatch — 2026-06-14
 - [#916](https://github.com/zealchaiwut/commander/issues/916) Port commander invariants into .clinerules — 2026-06-14
+- [#886](https://github.com/zealchaiwut/commander/issues/886) Fix schema-drift by pointing fixtures at real DDL — 2026-06-14
+- [#885](https://github.com/zealchaiwut/commander/issues/885) Add pytest-timeout and fix hanging documentor test — 2026-06-14
+- [#884](https://github.com/zealchaiwut/commander/issues/884) Add advisor suggestions section to morning brief — 2026-06-14
+- [#883](https://github.com/zealchaiwut/commander/issues/883) Advisor Maintains 2-to-5-Sprint Look-Ahead on Roadmap — 2026-06-14
+- [#882](https://github.com/zealchaiwut/commander/issues/882) Add Roadmap Suggestions Panel with Accept and Dismiss — 2026-06-14
+- [#881](https://github.com/zealchaiwut/commander/issues/881) Add daily advisor agent for next-build suggestions — 2026-06-14
 
 ## Hotfix — board-history-running-ux (2026-06-14)
 

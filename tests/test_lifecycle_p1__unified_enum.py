@@ -362,7 +362,8 @@ class TestPaneSources:
         assert "_histResumeSprint" not in _PROJECT_HTML
 
     def test_board_accepts_draft_plan_state(self):
-        assert "planState === 'draft'" in _BOARD_RENDER_SRC
+        assert ("planState === 'draft'" in _BOARD_RENDER_SRC
+                or 'planState === "draft"' in _BOARD_RENDER_SRC)
 
     def test_bundle_is_rebuilt(self):
         # esbuild normalizes quotes, so match both spellings.

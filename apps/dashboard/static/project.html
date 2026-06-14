@@ -6072,6 +6072,12 @@
       border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;
     }
 
+    /* Cline follow-up opt-in checkbox (issue #919) */
+    .pf-cline-section { margin-top: 16px; }
+    .pf-cline-label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer;
+      font-size: 13px; color: var(--text); user-select: none; }
+    .pf-cline-checkbox { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; cursor: pointer; }
+
     /* Conflicts and Proposed Order sections */
     .pf-section { margin-top: 20px; }
     .pf-model-note { font-weight: 400; color: var(--text-muted); font-size: 11px; }
@@ -6580,6 +6586,15 @@
     }
     .evl-dur-pill.warn { background: #fef3c7; color: #92400e; border-color: rgba(217,119,6,.25); }
     .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: rgba(37,99,235,.2); }
+    /* issue #920: backend label chip (cline / claude-code) in activity pills */
+    .evl-backend-chip {
+      display: inline-block;
+      font-size: 10px; font-weight: 600; text-transform: lowercase;
+      padding: 1px 6px; border-radius: 99px;
+      background: var(--purple-bg, #ede9fe); color: var(--purple, #7c3aed);
+      border: 1px solid rgba(124,58,237,.2);
+      vertical-align: middle;
+    }
 
     /* Error rows — red tint + expandable detail panel */
     .evl-log-row.evl-row-error {
@@ -6968,6 +6983,10 @@
     .node-agent-model { font-family: var(--mono); font-weight: 600; text-transform: none;
       letter-spacing: 0; opacity: .8; margin-left: 3px; }
     .node-queued-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+    .node-backend-badge { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
+    .node-backend--cline  { background: var(--green-bg); color: var(--green); }
+    .node-backend--claude { background: var(--text-sub); color: var(--bg); opacity: .65; }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
     .node.queued { opacity: .72; }
@@ -7322,6 +7341,26 @@
 
     /* ── Roadmap tab (issue #878) ──────────────────────────────────────────── */
     #pane-roadmap { padding: 16px 0; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Advisor tab (issue #881) ──────────────────────────────────────────── */
+    #pane-advisor { padding: 16px 0; }
+    .adv-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .adv-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .adv-run-btn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .adv-run-btn:disabled { opacity: .5; cursor: default; }
+    .adv-empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    .adv-card-list { display: flex; flex-direction: column; gap: 10px; }
+    .adv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .adv-card-pitch { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .adv-card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .adv-scope { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .adv-scope-S { background: #d1fae5; color: #065f46; }
+    .adv-scope-M { background: #dbeafe; color: #1e40af; }
+    .adv-scope-L { background: #fde68a; color: #92400e; }
+    .adv-milestone { font-size: 12px; color: var(--text-sub); }
+    .adv-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
+    .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+
     .rm-toolbar { display: flex; align-items: center; gap: 10px; }
     .rm-toolbar-gap { flex: 1; }
     .rm-list { display: flex; flex-direction: column; gap: 10px; }
@@ -7529,6 +7568,11 @@
         <button class="stab" role="tab" id="stab-roadmap"
                 aria-selected="false" onclick="switchTab('roadmap')">
           <i class="ti ti-map-2"></i>Roadmap
+        </button>
+        <!-- Advisor (issue #881) -->
+        <button class="stab" role="tab" id="stab-advisor"
+                aria-selected="false" onclick="switchTab('advisor')">
+          <i class="ti ti-bulb"></i>Advisor
         </button>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
@@ -8989,6 +9033,19 @@
         <div id="rm-root"></div>
       </div><!-- /pane-roadmap -->
 
+      <!-- ── Advisor tab (issue #881) ── -->
+      <div class="tab-pane" id="pane-advisor" role="tabpanel" aria-labelledby="stab-advisor">
+        <div class="adv-header">
+          <span class="adv-title"><i class="ti ti-bulb" style="margin-right:6px"></i>Next-Build Advisor</span>
+          <button class="adv-run-btn" id="adv-run-btn" onclick="advRun()">
+            <i class="ti ti-player-play"></i>Run advisor
+          </button>
+        </div>
+        <div id="adv-root">
+          <div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>
+        </div>
+      </div><!-- /pane-advisor -->
+
     </div>
   </div>
 
@@ -9513,7 +9570,7 @@ function switchTab(tab, pushHistory) {
   if (subTabsRow) subTabsRow.classList.toggle('hidden', onGlobalSettings);
 
   // Update aria-selected + active class on project sub-tabs (not global settings)
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'advisor', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = !onGlobalSettings && t === tab;
@@ -9530,7 +9587,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings', 'global-settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'advisor', 'settings', 'global-settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -11467,6 +11524,14 @@ function _histStatsHtml(s) {
     if (stats.parallel_saved_seconds != null) {
       chips.push(_histStatChip('ti-arrows-split', 'parallel saved',
         '~' + _histFmtSecs(stats.parallel_saved_seconds)));
+    }
+    // issue #920: coder backend split chip (only when Cline was used)
+    if (stats.coder_backend_split && stats.coder_backend_split.cline_count > 0) {
+      const bs = stats.coder_backend_split;
+      const parts = [];
+      if (bs.cline_count > 0) parts.push('cline: ' + bs.cline_count + ' · ' + _histFmtSecs(bs.cline_seconds));
+      if (bs.claude_code_count > 0) parts.push('claude-code: ' + bs.claude_code_count + ' · ' + _histFmtSecs(bs.claude_code_seconds));
+      if (parts.length) chips.push(_histStatChip('ti-server', 'backend', parts.join(' | ')));
     }
     if (sprintFailed && stats.crash) {
       const failed = (Array.isArray(s.failed_tickets) ? s.failed_tickets : [])
@@ -13931,6 +13996,12 @@ function _smgmtRailNodeHtml(iss, live) {
   } else if (state === 'tester-active') {
     agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
   }
+  // Backend badge (issue #919): CLINE or CLAUDE on any node where coder has run
+  let backendBadge = '';
+  if (iss.coder_backend) {
+    const isCline = iss.coder_backend === 'cline';
+    backendBadge = `<span class="node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}">${isCline ? 'CLINE' : 'CLAUDE'}</span>`;
+  }
   let queuedEst = '';
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
@@ -13941,7 +14012,7 @@ function _smgmtRailNodeHtml(iss, live) {
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
     + `<span class="node-num">#${escHtml(String(num))}</span>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
-    + sizePill + agentBadge + fixBadge + timeEl + queuedEst
+    + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
 }
 
@@ -14048,6 +14119,17 @@ function _smgmtRailPatch(label, live) {
         agentEl.textContent = 'Tester';
       }
     } else if (agentEl) { agentEl.remove(); }
+    // Backend badge in-place update (issue #919)
+    let backendEl = nodeEl.querySelector('.node-backend-badge');
+    if (iss.coder_backend) {
+      if (!backendEl) {
+        backendEl = document.createElement('span');
+        nodeEl.appendChild(backendEl);
+      }
+      const isCline = iss.coder_backend === 'cline';
+      backendEl.className = `node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}`;
+      backendEl.textContent = isCline ? 'CLINE' : 'CLAUDE';
+    } else if (backendEl) { backendEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);
     const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
@@ -16153,6 +16235,7 @@ let _pfWarnings     = null;
 let _pfCycle        = null;
 let _pfFlags        = null;  // mis-sizing flags (issue #578)
 let _pfSelectedIds  = new Set();
+let _pfUseClineFollowups = false;  // issue #919: Cline follow-up opt-in
 
 
 
@@ -23062,6 +23145,20 @@ function _evlDescHtml(ev) {
       + '</span>';
   }
 
+  // issue #920: coder backend escalation event
+  if (type === 'coder_backend_escalated') {
+    var fromBk = (detail.from_backend || ev.from_backend || 'cline');
+    var toBk = (detail.to_backend || ev.to_backend || 'claude-code');
+    var escIssue = detail.issue_num || ev.issue_num || issueNum;
+    return '<span class="lr-desc evl-agent-row">'
+      + _evlAgentChip('coder') + ' escalated '
+      + '<span class="evl-backend-chip">' + escHtml(fromBk) + '</span>'
+      + ' <span class="evl-meta">→</span> '
+      + '<span class="evl-backend-chip">' + escHtml(toBk) + '</span>'
+      + (escIssue ? ' on ' + _evlIssueChip(escIssue) : '')
+      + '</span>';
+  }
+
   var label = type.replace(/_/g, ' ');
   return '<span class="lr-desc">' + escHtml(label)
     + (target ? ' <span class="mono">' + escHtml(target) + '</span>' : '') + '</span>';
@@ -23082,7 +23179,13 @@ function _evlDurationPill(ev) {
   var txt = _evlFmtDuration(secs);
   if (!txt) return '';
   var warn = Number(secs) >= 3600;
-  return '<span class="evl-dur-pill' + (warn ? ' warn' : '') + '">' + escHtml(txt) + '</span>';
+  // issue #920: prefix coder agent_finished pills with backend label
+  var prefix = '';
+  if (type === 'agent_finished' && (detail.role || '').toLowerCase() === 'coder') {
+    var bk = ev.backend || detail.backend;
+    if (bk) prefix = '<span class="evl-backend-chip">' + escHtml(bk) + '</span> ';
+  }
+  return prefix + '<span class="evl-dur-pill' + (warn ? ' warn' : '') + '">' + escHtml(txt) + '</span>';
 }
 
 function evlRenderTimeline(events, filter) {

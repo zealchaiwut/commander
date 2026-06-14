@@ -127,6 +127,13 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
     fix_round_count = 0
     fix_round_tickets: list[int] = []
     latest_end_dt: Optional[datetime] = None
+    # issue #920: per-backend coder split (cline vs claude-code run counts and seconds)
+    coder_backend_split: dict[str, Any] = {
+        "cline_count": 0,
+        "claude_code_count": 0,
+        "cline_seconds": 0,
+        "claude_code_seconds": 0,
+    }
     # ticket_number -> list of gantt segments (coder/tester only)
     seg_by_ticket: dict[int, list[dict]] = {}
 
@@ -144,6 +151,16 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
         end_dt = finished or (started + _dt_seconds(dur) if started else None)
         if end_dt and (latest_end_dt is None or end_dt > latest_end_dt):
             latest_end_dt = end_dt
+
+        # issue #920: tally per-backend coder runs (only when backend explicitly set)
+        if agent == "coder" and r.get("backend") is not None:
+            bk = str(r["backend"]).lower()
+            if bk == "cline":
+                coder_backend_split["cline_count"] += 1
+                coder_backend_split["cline_seconds"] += dur
+            else:
+                coder_backend_split["claude_code_count"] += 1
+                coder_backend_split["claude_code_seconds"] += dur
 
         is_fix = (r.get("attempt_kind") or "").lower() == "fix_round"
         ticket = int(r.get("issue_number") or 0)
@@ -227,6 +244,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
         "slowest_ticket": slowest_ticket,
         "crash": crash,
         "tickets": tickets,
+        "coder_backend_split": coder_backend_split,  # issue #920
     }
 
     # Approximate $ only when a price map is configured; otherwise the cost chip

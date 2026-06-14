@@ -16,8 +16,10 @@ import time
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from conftest import make_sprint_db
 
 import sys
 _SM = Path(__file__).parent.parent / "services" / "sprint_manager"
@@ -41,36 +43,7 @@ from calibration import load_calibration
 @pytest.fixture(autouse=True)
 def sqlite_db(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE sprints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT UNIQUE NOT NULL,
-                goal TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                started_at TEXT,
-                completed_at TEXT,
-                cancelled_at TEXT,
-                project TEXT NOT NULL
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE sprint_tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sprint_id INTEGER NOT NULL REFERENCES sprints(id),
-                issue_number INTEGER NOT NULL,
-                position INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                started_at TEXT,
-                completed_at TEXT,
-                agent_active TEXT,
-                actual_elapsed_seconds INTEGER,
-                total_tokens INTEGER,
-                UNIQUE(sprint_id, issue_number)
-            )
-        """))
-        conn.commit()
+    make_sprint_db(engine)
     monkeypatch.setattr(sprint_repo, "_session_factory", sessionmaker(bind=engine))
     yield engine
 

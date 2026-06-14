@@ -20,6 +20,8 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
+from conftest import make_sprint_db
+
 import services.sprint_manager.settings_repo as settings_repo
 from services.sprint_manager.settings_repo import get_setting, set_setting
 
@@ -33,40 +35,13 @@ SEED_VALUE = {
 @pytest.fixture(autouse=True)
 def sqlite_db(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
+    make_sprint_db(engine)
     with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE settings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scope TEXT NOT NULL,
-                project TEXT,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(scope, project, key)
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE sprint_tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sprint_id INTEGER NOT NULL,
-                issue_number INTEGER NOT NULL,
-                position INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                started_at TEXT,
-                completed_at TEXT,
-                agent_active TEXT,
-                actual_elapsed_seconds INTEGER,
-                total_tokens INTEGER,
-                estimated_size TEXT,
-                UNIQUE(sprint_id, issue_number)
-            )
-        """))
         conn.execute(
             text("INSERT INTO settings (scope, project, key, value) VALUES ('global', NULL, 'estimation', :val)"),
             {"val": json.dumps(SEED_VALUE)},
         )
         conn.commit()
-
     SessionLocal = sessionmaker(bind=engine)
     monkeypatch.setattr(settings_repo, "_session_factory", SessionLocal)
     yield engine

@@ -2475,6 +2475,90 @@ def _gate_pytest(
         return GateResult(gate="pytest", passed=False, output=combined)
 
 
+def _lint_autofix_commit(
+    issue_num: int,
+    worktester_dashboard: Path,
+    base_branch: str,
+    gate_scope: str,
+    gate_frontend_lint: bool,
+) -> None:
+    """Best-effort: auto-fix trivially-fixable lint (ruff --fix, prettier --write)
+    and commit+push it on the current feature branch BEFORE the lint check runs.
+
+    This stops formatting / unused-import churn from burning bounded coder
+    fix-rounds — only genuinely non-auto-fixable issues reach the check and fail
+    the gate. Atomic: if the push fails, the local commit is rolled back so
+    origin and local never split (merge-preview merges ``origin/<branch>``). Any
+    error is swallowed — the gate then runs exactly as before (no regression).
+    """
+    try:
+        rc_root, git_root_out, _ = _run_timed(
+            "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard)
+        git_root = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
+        # ── ruff --fix on changed Python files ──────────────────────────────
+        py_files = (["."] if gate_scope == "full"
+                    else _changed_py_files(base_branch, cwd=worktester_dashboard))
+        if py_files:
+            ok_ruff, ruff_path, _ = _try("which", "ruff")
+            if not ok_ruff:
+                venv_ruff = worktester_dashboard / ".." / "venv" / "bin" / "ruff"
+                ruff_path = str(venv_ruff.resolve()) if venv_ruff.exists() else None
+            if ruff_path:
+                _run_timed(ruff_path, "check", "--fix", "--exit-zero", *py_files,
+                           cwd=worktester_dashboard)
+
+        # ── prettier --write on changed JS/TS files ─────────────────────────
+        if gate_frontend_lint:
+            js_ts = (["."] if gate_scope == "full"
+                     else _changed_js_ts_files(base_branch, cwd=worktester_dashboard))
+            if js_ts:
+                ok_prettier, prettier_bin, _ = _try("which", "prettier")
+                prefix: list[str] = []
+                if not ok_prettier:
+                    ok_npx, npx_path, _ = _try("which", "npx")
+                    prettier_bin = None
+                    if ok_npx:
+                        rc_pv, _, _ = _run_timed(npx_path, "--no", "prettier",
+                                                 "--version", cwd=git_root)
+                        if rc_pv == 0:
+                            prettier_bin, prefix = npx_path, ["--no", "prettier"]
+                if prettier_bin:
+                    _run_timed(prettier_bin, *prefix, "--write", *js_ts, cwd=git_root)
+
+        # ── commit + push only if the auto-fixers changed something ──────────
+        rc_st, st_out, _ = _run_timed("git", "status", "--porcelain", cwd=git_root)
+        if rc_st != 0 or not st_out.strip():
+            return
+        rc_br, br_out, _ = _run_timed("git", "rev-parse", "--abbrev-ref", "HEAD",
+                                      cwd=git_root)
+        branch = br_out.strip()
+        if rc_br != 0 or not branch or branch in ("HEAD", base_branch, "master", "develop"):
+            return  # detached / on a protected branch — never auto-commit here
+        _run_timed("git", "add", "-A", cwd=git_root)
+        rc_ci, _, _ = _run_timed(
+            "git", "commit", "-m", f"style: auto-fix lint (issue #{issue_num})",
+            cwd=git_root)
+        if rc_ci != 0:
+            return
+        rc_push, _, push_err = _run_timed("git", "push", "origin", "HEAD", cwd=git_root)
+        if rc_push != 0:
+            _run_timed("git", "reset", "--soft", "HEAD~1", cwd=git_root)
+            structured_log.warn(
+                "lint_autofix_push_failed",
+                f"[gate:lint] auto-fix push failed; reverted local commit: {push_err.strip()[:200]}",
+                issue_num=issue_num)
+            return
+        sys.stdout.write(str(f"  [gate:lint] auto-fixed + committed lint churn (issue #{issue_num})") + "\n")
+        structured_log.info("lint_autofix_committed",
+                            "[gate:lint] auto-fixed lint churn and pushed",
+                            gate="lint", issue_num=issue_num)
+    except Exception as e:
+        structured_log.warn("lint_autofix_error",
+                            f"[gate:lint] auto-fix pass errored (ignored): {e}",
+                            issue_num=issue_num, exc=str(e))
+
+
 def _gate_lint(
     issue_num: int,
     worktester_dashboard: Path,
@@ -2496,6 +2580,13 @@ def _gate_lint(
         return GateResult(gate="lint", passed=True, skipped=True)
 
     _post_agent_event("gate:lint")
+
+    # Auto-fix trivially-fixable lint (ruff --fix / prettier --write) and commit
+    # before checking, so formatting / unused-import churn doesn't burn bounded
+    # coder fix-rounds. Best-effort; on any error the check below runs unchanged.
+    _lint_autofix_commit(issue_num, worktester_dashboard, base_branch,
+                         gate_scope, gate_frontend_lint)
+
     combined = ""
     any_ran = False
 

@@ -1499,6 +1499,22 @@ def get_sprint_nav_status(repo: str = ""):
     }
 
 
+def _settled_done_from_columns(total: int, columns: dict) -> int:
+    """Canonical GitHub-derived "done" = settled work past SIT
+    (uat + done + needs-rework) = total minus the not-yet-settled columns
+    (backlog + in-progress + sit).
+
+    Single source of the GitHub-side count: mirrors the frontend
+    ``_snavSettledDone()`` and the live tier's ``done+skipped+failed`` so the nav
+    pill, sidebar badge, and board running badge can never disagree. The old
+    ``done + uat`` formula undercounted needs-rework tickets; ``total - backlog``
+    (frontend) overcounted by treating in-progress + SIT as done.
+    """
+    columns = columns or {}
+    return max(0, (total or 0) - (columns.get("backlog") or 0)
+               - (columns.get("in-progress") or 0) - (columns.get("sit") or 0))
+
+
 def _sprint_progress_file_path(project: str) -> Optional[Path]:
     """Return the path to the persisted sprint-progress JSON file for a project."""
     if not project:
@@ -1595,8 +1611,8 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         return {"has_sprint": False}
 
     sprint_num = gh_data.get("sprint", 0)
-    gh_done = (gh_data.get("done") or 0) + (gh_data.get("uat") or 0)
     gh_total = gh_data.get("total") or 0
+    gh_done = _settled_done_from_columns(gh_total, gh_data.get("columns", {}))
     gh_state = gh_data.get("state", "running")
 
     result = {
@@ -8264,6 +8280,20 @@ def get_sprint_outcome(sprint_label: str, project: str):
     plan_state = (plan.get("state") or "").lower() if plan else ""
     if plan_state in ("draft", "planned", "planning"):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
+
+    # Lazy-ingest (lifecycle P3 drift fix): a finished run reached this disk
+    # fallback because its artifacts were never ingested (run_ingested_at is
+    # null — e.g. finished pre-P3 or the end-of-run ingest was missed). Persist
+    # the disk state now so the NEXT read takes the DB path above and disk/DB
+    # counts can no longer diverge (the "0 tickets in History" class, #894).
+    # Guard: only when a sprints row already exists (UPDATE path), so we never
+    # mint a bogus draft row for a finished sprint. Best-effort — an ingest
+    # hiccup must never break outcome serving.
+    if ingested and not ingested.get("run_ingested_at"):
+        try:
+            db.ingest_sprint_run_artifact(sprint_label, state_data, project=project)
+        except Exception:
+            pass
 
     def _parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:

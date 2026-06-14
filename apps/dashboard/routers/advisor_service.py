@@ -108,6 +108,13 @@ def collect_inputs(
         logger.warning("advisor: failures fetch failed: %s", exc)
         failures = []
 
+    # ── Dismissed pitches (issue #882) ────────────────────────────────────────
+    try:
+        dismissed_pitches = get_dismissed_pitches(project)
+    except Exception as exc:
+        logger.warning("advisor: dismissed pitches fetch failed: %s", exc)
+        dismissed_pitches = []
+
     return {
         "product_md": product_md,
         "product_md_missing": product_md_missing,
@@ -116,6 +123,7 @@ def collect_inputs(
         "todos": todos,
         "briefs": briefs,
         "failures": failures,
+        "dismissed_pitches": dismissed_pitches,
     }
 
 
@@ -254,6 +262,13 @@ def build_prompt(project: str, inputs: dict) -> str:
     else:
         parts.append("Recent failures/rework: none")
 
+    parts.append("")
+    dismissed_pitches = inputs.get("dismissed_pitches") or []
+    if dismissed_pitches:
+        parts.append("Previously dismissed suggestions (do NOT re-propose these ideas):")
+        for dp in dismissed_pitches:
+            parts.append(f"  - {dp}")
+
     parts += [
         "",
         "=== OUTPUT ===",
@@ -357,19 +372,67 @@ def save_suggestions(
 
 
 def get_suggestions(project: str) -> list[dict]:
-    """Return the current draft suggestions for *project* (AC8)."""
+    """Return active (non-dismissed) draft suggestions for *project* (AC8, AC882-6).
+
+    Includes the row ``id`` so callers can reference individual suggestions for
+    dismiss/accept actions. Dismissed pitches are filtered out.
+    """
+    dismissed = set(get_dismissed_pitches(project))
     with db.get_conn() as conn:
         _ensure_table(conn)
         rows = conn.execute(
-            "SELECT pitch, rationale, milestone, scope, run_at, on_demand "
+            "SELECT id, pitch, rationale, milestone, scope, run_at, on_demand "
             "FROM advisor_suggestions WHERE project = ? ORDER BY id ASC",
             (project,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows if r["pitch"] not in dismissed]
+
+
+def get_dismissed_pitches(project: str) -> list[str]:
+    """Return pitches the user has dismissed for *project* (AC882-7, AC882-8)."""
+    with db.get_conn() as conn:
+        _ensure_dismissed_table(conn)
+        rows = conn.execute(
+            "SELECT pitch FROM advisor_dismissed WHERE project = ? ORDER BY id ASC",
+            (project,),
+        ).fetchall()
+    return [r["pitch"] for r in rows]
+
+
+def dismiss_suggestion(project: str, suggestion_id: int) -> dict:
+    """Persist the pitch of suggestion *suggestion_id* to the dismissed store.
+
+    After calling this, get_suggestions() will exclude that pitch from results.
+    Raises ValueError if suggestion not found. Idempotent: dismissing an already-
+    dismissed pitch is a no-op.
+    """
+    with db.get_conn() as conn:
+        _ensure_table(conn)
+        row = conn.execute(
+            "SELECT pitch FROM advisor_suggestions WHERE id = ? AND project = ?",
+            (suggestion_id, project),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"Suggestion {suggestion_id} not found for project {project!r}")
+    pitch = row["pitch"]
+    dismissed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    with db.get_conn() as conn:
+        _ensure_dismissed_table(conn)
+        conn.execute(
+            "INSERT OR IGNORE INTO advisor_dismissed (project, pitch, dismissed_at) "
+            "VALUES (?, ?, ?)",
+            (project, pitch, dismissed_at),
+        )
+        conn.commit()
+    return {"dismissed": True, "pitch": pitch}
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
     db._create_advisor_suggestions_table(conn)
+
+
+def _ensure_dismissed_table(conn: sqlite3.Connection) -> None:
+    db._create_advisor_dismissed_table(conn)
 
 
 # Placeholder so tests can monkeypatch it (the production path never calls this).

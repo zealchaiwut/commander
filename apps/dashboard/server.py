@@ -952,6 +952,7 @@ from routers import (  # noqa: E402
     sprint_history_router,
     sprints_router,
     status_router,
+    suggestions_router,
     system_router,
     tickets_router,
 )
@@ -973,6 +974,7 @@ app.include_router(system_router)
 app.include_router(tickets_router)
 app.include_router(home_milestone_router)
 app.include_router(roadmap_router)
+app.include_router(suggestions_router)
 
 logger = logging.getLogger(__name__)
 

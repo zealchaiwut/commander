@@ -2672,16 +2672,22 @@ def _run_frontend_lint(
         # before falling back to biome-via-npx. `npx --no biome --version`
         # exits 0 even when biome is absent because npm parses --version as its
         # own flag, producing a false-positive that then fails at invocation.
-        _local_eslint = lint_cwd / "node_modules" / ".bin" / "eslint"
-        if _local_eslint.exists():
-            linter_bin = str(_local_eslint.resolve())
-            linter_args = ["--max-warnings=0"]
+        # Also check REPO_ROOT (the sprint_manager's own clone) which always
+        # has npm packages installed even when the tester worktree does not.
+        for _eslint_candidate in [
+            lint_cwd / "node_modules" / ".bin" / "eslint",
+            REPO_ROOT / "node_modules" / ".bin" / "eslint",
+        ]:
+            if _eslint_candidate.exists():
+                linter_bin = str(_eslint_candidate.resolve())
+                linter_args = ["--max-warnings=0"]
+                break
         if not linter_bin:
-            # try biome via npx — skip if not found in project
-            rc_biome, _, _ = _run_timed(
-                npx_path, "--no", "biome", "--version", cwd=lint_cwd
-            )
-            if rc_biome == 0:
+            # Use direct file existence check instead of npx version invocation
+            # to avoid the false-positive (`npx --no biome --version` exits 0
+            # even when biome is absent because npm parses --version itself).
+            _local_biome = lint_cwd / "node_modules" / ".bin" / "biome"
+            if _local_biome.exists():
                 linter_bin = npx_path
                 linter_args = ["--no", "biome", "check", "--apply=false"]
 

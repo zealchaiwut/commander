@@ -44,6 +44,11 @@ def _make_cfg(documentor_enabled: bool = True, tmp_path: Path = None):
     cfg.sprints_dir = tmp_path / "sprints" if tmp_path else Path("/tmp/sprints")
     cfg.sprint_branch_prefix = "sprint"
     cfg.app_default_port = None
+    cfg.pipeline_mode = None  # prevent pipeline dispatch (MagicMock default is truthy → deadlock)
+    cfg.coder_model = "claude-sonnet-4-6"
+    cfg.coder_by_size = None
+    cfg.tester_model = "claude-haiku-4-5"
+    cfg.tester_by_risk = None
     cfg.documenter_prompt_template = None
     return cfg
 
@@ -67,7 +72,7 @@ def _run_sprint_with_mocks(
     def fake_dispatch_coder(issue_num, alert_modes, sprint_branch="develop",
                             repo_name=None, cfg=None, chosen_port=None,
                             rate_limit_events=None, on_running=None,
-                            sprint_label=None, prior_failures=None):
+                            sprint_label=None, prior_failures=None, **kwargs):
         if on_running:
             on_running()
         return True, None
@@ -75,7 +80,7 @@ def _run_sprint_with_mocks(
     def fake_dispatch_tester(issue_num, alert_modes, sprint_branch="develop",
                              repo_name=None, cfg=None, chosen_port=None,
                              rate_limit_events=None, on_running=None,
-                             sprint_label=None):
+                             sprint_label=None, **kwargs):
         if on_running:
             on_running()
         return 0, None
@@ -118,6 +123,12 @@ def _run_sprint_with_mocks(
         patch.object(sm, "_delete_failure_sidecar"),
         patch.object(sm, "_find_feature_branch", side_effect=lambda n: f"feature/{n}-slug"),
         patch.object(sm, "_post_agent_event"),
+        patch.object(sm, "_get_issue_labels", return_value=set()),
+        patch.object(sm, "_sweep_stale_in_progress"),
+        patch.object(sm, "_sweep_stale_status"),
+        patch.object(sm, "dispatch_alerts"),
+        patch.object(sm, "record_failure"),
+        patch.object(sm, "_resolve_coder_model", return_value=("claude-sonnet-4-6", "unestimated:default")),
     ]
     with ExitStack() as stack:
         for p in patches:

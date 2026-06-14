@@ -1,7 +1,7 @@
 name: pytest-nightly
 
-# Full non-selenium test suite — scheduled nightly. Selenium tests require a live
-# dashboard + Chrome and are run manually: pytest -m selenium
+# Full non-agent_browser test suite — scheduled nightly. Browser tests require
+# `agent-browser install` and are run manually: pytest -m agent_browser
 
 on:
   schedule:
@@ -33,6 +33,7 @@ jobs:
           COMMANDER_TEST_DB: /tmp/commander-pytest-nightly.db
         run: |
           python3 -m pytest tests/ \
-            -m "not selenium" \
+            -m "not agent_browser" \
             --ignore=tests/integration \
+            -n auto \
             -q --tb=line

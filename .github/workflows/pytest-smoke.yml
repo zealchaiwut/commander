@@ -1,6 +1,6 @@
 name: pytest-smoke
 
-# Fast Python smoke tests on every PR (P0). Selenium browser tests and the full
+# Fast Python smoke tests on every PR (P0). agent-browser tests and the full
 # suite are excluded here — see pytest-nightly.yml.
 
 on:

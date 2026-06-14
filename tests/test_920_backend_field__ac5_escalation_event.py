@@ -8,9 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
@@ -85,7 +83,7 @@ def test_escalation_event_written_to_jsonl(tmp_path, monkeypatch):
     assert jsonl_files, "expected an events-*.jsonl file to be written"
 
     lines = jsonl_files[0].read_text().strip().splitlines()
-    events = [json.loads(l) for l in lines if l.strip()]
+    events = [json.loads(line) for line in lines if line.strip()]
     escalation_events = [e for e in events if e.get("name") == "coder_backend_escalated"]
     assert escalation_events, "expected coder_backend_escalated event in JSONL"
     ev = escalation_events[0]

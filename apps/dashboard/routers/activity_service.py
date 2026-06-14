@@ -18,7 +18,6 @@ modifying): ``/api/logs/runs`` (test_419) and ``/api/logs/sync-github``
 """
 from __future__ import annotations
 
-import datetime
 import glob
 import json
 import sys as _sys

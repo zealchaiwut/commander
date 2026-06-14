@@ -471,6 +471,7 @@
   globalThis._pfCycle ??= null;
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
+  globalThis._pfUseClineFollowups ??= false;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
@@ -1384,6 +1385,7 @@ Replace the existing draft (${data.existing_label})?`
     _pfFlags = null;
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
+    _pfUseClineFollowups = false;
     _pfStepperInit();
   }
   function _pfClose() {
@@ -1398,6 +1400,7 @@ Replace the existing draft (${data.existing_label})?`
     _pfCycle = null;
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
+    _pfUseClineFollowups = false;
     _pfStepFails = 0;
   }
   async function _pfFetch() {
@@ -1443,8 +1446,17 @@ Replace the existing draft (${data.existing_label})?`
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
     const modelsHtml = _pfBuildModelsHtml();
+    const clineCheckboxHtml = `<div class="pf-section pf-cline-section">
+     <label class="pf-cline-label">
+       <input type="checkbox" id="pf-cline-checkbox" class="pf-cline-checkbox"
+         ${_pfUseClineFollowups ? "checked" : ""}
+         onchange="_pfUseClineFollowups = this.checked">
+       <span>Use Cline (Sonnet) for follow-up coder fixes \u2014 tester stays on Claude</span>
+     </label>
+   </div>`;
     document.getElementById("pf-content").innerHTML = `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${modelsHtml}
+     ${clineCheckboxHtml}
      ${warningsHtml}
      ${cycleHtml}
      ${flagsHtml}
@@ -2038,7 +2050,7 @@ Replace the existing draft (${data.existing_label})?`
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label })
+        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups })
       });
       if (!res.ok) {
         let detail = await res.text();

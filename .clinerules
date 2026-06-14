@@ -1,0 +1,56 @@
+# Commander Cline Rules
+# Mirrors the critical invariants from .claude/agents/coder.md for Cline-dispatched coders.
+# Full content authored by issue #916 (port Commander invariants into .clinerules).
+
+## Merge boundary — NEVER merge to develop or sprint branches
+
+You are a coder agent. Your responsibility ends at pushing the feature branch.
+You must NOT merge to the target branch (develop or any sprint branch) by any means:
+- No `git merge`
+- No `git push` directly to `develop`, `master`, or sprint branches
+- No `gh pr merge` or any PR merge command
+- Do NOT run `scripts/finish_feature.py` — that is exclusively the Tester's job
+
+Merging is done by the Tester agent via `scripts/finish_feature.py` after tests pass.
+
+## Branch naming
+
+Always create feature branches using `scripts/start_feature.py`:
+```
+python3 scripts/start_feature.py --issue <N> --base-branch <sprint-or-develop>
+```
+
+Feature branch format: `feature/<N>-<slug>`
+
+## GitHub labels — NEVER touch them
+
+Do NOT modify any GitHub label on this issue or any other issue.
+Label transitions (in-progress, sit, uat, blocked) are managed exclusively by sprint_manager.
+Do not run `update_ticket.py`, `gh issue edit --add-label`, or any other label-mutation command.
+
+## No direct push to protected branches
+
+Never push directly to `develop`, `master`, or any `sprint/*` branch.
+Only push to your assigned `feature/<N>-*` branch.
+
+## Stay within assigned issue scope
+
+Work only on what the issue's Acceptance Criteria describes.
+Do not fix unrelated bugs, refactor unrelated code, or add unrequested features.
+
+## Run tests before declaring done
+
+Before pushing your final commit, verify the relevant tests pass:
+```
+python -m pytest tests/ -x -q
+```
+
+Do not commit test files that are skipped or xfailed to hide failures.
+
+## Do not edit agent config files
+
+Do not modify:
+- `.claude/agents/*` (agent definitions)
+- `.commander/sprint.yaml` (sprint config)
+- Label transition logic in `sprint_manager.py`
+- Any file outside your issue's scope

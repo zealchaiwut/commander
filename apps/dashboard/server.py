@@ -5870,6 +5870,7 @@ class SprintMgmtRunBody(BaseModel):
     project: str
     sprint_label: str
     migrate_from: list[int] = []
+    use_cline_followups: bool = False
 
 
 class SprintCreateBody(BaseModel):
@@ -7083,6 +7084,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             body.sprint_label,
             "running",
             started_at=_started_at,
+            use_cline_followups=body.use_cline_followups,
         )
     except Exception:
         pass
@@ -7780,6 +7782,9 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             # Size-routed coder model (issue #789) so the running pane's Coder
             # badge can show which model is implementing the ticket.
             "coder_model":          iss.get("coder_model"),
+            # Coder dispatch backend (issue #919): 'cline' or 'claude-code' so
+            # the running pane can show a CLINE/CLAUDE badge on each coder node.
+            "coder_backend":        iss.get("coder_backend"),
             # Surface the actual failure category/reason so the inspector shows
             # the real cause (e.g. CRASH) instead of a hardcoded "gate failed".
             "category":       iss.get("category"),

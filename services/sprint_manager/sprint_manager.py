@@ -939,6 +939,7 @@ def _db_agent_start_sm(
     base_sha: Optional[str] = None,
     attempt_kind: Optional[str] = None,
     log_path: Optional[str] = None,
+    backend: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -948,6 +949,7 @@ def _db_agent_start_sm(
     `base_sha` are forensic fields from worktree hygiene (issue #788).
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
+    `backend` is 'cline' or 'claude-code' (issue #920).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -959,6 +961,7 @@ def _db_agent_start_sm(
             base_sha=base_sha,
             attempt_kind=attempt_kind,
             log_path=log_path,
+            backend=backend,
         )
     except (Exception, SystemExit):
         pass
@@ -4275,6 +4278,7 @@ def _dispatch_coder(
     prior_failures: Optional[list] = None,
     hang_continuation: Optional[dict] = None,
     attempt_kind: Optional[str] = None,
+    coder_backend_override: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -4465,9 +4469,11 @@ def _dispatch_coder(
 
     # Resolve backend and model. Keep the prompt as the last element of cmd so
     # `cmd[-1] += sprint_hint` (below) works for both backends.
+    # coder_backend_override takes precedence when supplied by the caller (issue #920:
+    # the fix-loop pre-computes the backend and escalates from cline to claude-code on failure).
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
-    coder_backend = _select_coder_backend(issue_num, cfg, repo_name=eff_repo)
+    coder_backend = coder_backend_override if coder_backend_override is not None else _select_coder_backend(issue_num, cfg, repo_name=eff_repo)
     sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
     sys.stdout.flush()
 
@@ -8383,6 +8389,7 @@ def run_sprint(
         _hang_redispatch_count = 0
         _hang_continuation: Optional[dict] = None   # context for next dispatch
         _next_attempt_kind = "initial"              # initial / fix_round / hang_continue
+        _next_coder_backend = _select_coder_backend(num, cfg, repo_name=eff_repo)  # issue #920: tracked so escalation from cline to claude-code persists across fix rounds
 
         for _fix_attempt in range(_fix_rounds):
 
@@ -8412,7 +8419,8 @@ def run_sprint(
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
                     attempt_kind=_next_attempt_kind,
                     log_path=str(_issue_log_path(num, cfg=cfg)),
-                )  # issue #764, #789, #787, #783
+                    backend=_next_coder_backend,
+                )  # issue #764, #789, #787, #783, #920
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -8448,6 +8456,7 @@ def run_sprint(
                         prior_failures=_fix_history if _fix_history else None,
                         hang_continuation=_hang_continuation,
                         attempt_kind=_next_attempt_kind,
+                        coder_backend_override=_next_coder_backend,
                     )
                 except SystemExit:
                     _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -8533,6 +8542,24 @@ def run_sprint(
                             f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry") + "\n")
                         sys.stdout.flush()
                         _next_attempt_kind = "fix_round"
+                        # issue #920: escalate from cline to claude-code after a Cline gate failure.
+                        if _next_coder_backend == "cline":
+                            _next_coder_backend = "claude-code"
+                            sys.stdout.write(str(f"  [cline-escalation] #{num}: Cline coder failed — escalating to claude-code for next fix round") + "\n")
+                            sys.stdout.flush()
+                            try:
+                                structured_log.event(
+                                    "coder_backend_escalated",
+                                    category="agent",
+                                    issue_num=num,
+                                    sprint_label=label,
+                                    project=eff_repo,
+                                    agent_role="coder",
+                                    from_backend="cline",
+                                    to_backend="claude-code",
+                                )
+                            except Exception:
+                                pass
                         continue
 
                     # Hang-redispatch path (issue #787): on first hang, redispatch once
@@ -8625,6 +8652,24 @@ def run_sprint(
                     sys.stdout.write(str(f"  [fix-loop] CODER_NO_WORK, "
                         f"attempt {_fix_attempt + 1}/{_fix_rounds}: will retry") + "\n")
                     sys.stdout.flush()
+                    # issue #920: escalate from cline to claude-code on CODER_NO_WORK too.
+                    if _next_coder_backend == "cline":
+                        _next_coder_backend = "claude-code"
+                        sys.stdout.write(str(f"  [cline-escalation] #{num}: Cline coder no-work — escalating to claude-code for next fix round") + "\n")
+                        sys.stdout.flush()
+                        try:
+                            structured_log.event(
+                                "coder_backend_escalated",
+                                category="agent",
+                                issue_num=num,
+                                sprint_label=label,
+                                project=eff_repo,
+                                agent_role="coder",
+                                from_backend="cline",
+                                to_backend="claude-code",
+                            )
+                        except Exception:
+                            pass
                     continue
 
                 # -- Lifecycle: coder_done --

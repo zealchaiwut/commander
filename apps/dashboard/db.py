@@ -159,6 +159,7 @@ def init_db():
         _create_sprint_lifecycle_tables(conn)
         _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
+        _create_advisor_suggestions_table(conn)
         conn.commit()
 
 
@@ -883,11 +884,37 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         ("base_sha", "TEXT"),
         ("attempt_kind", "TEXT"),
         ("log_path", "TEXT"),
+        ("backend", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+
+
+def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_suggestions draft store (issue #881).
+
+    One row per suggestion from the most recent advisor run. Replaced wholesale
+    on every new run (scheduled or on-demand) so there is no suggestion history
+    beyond the current draft set per project.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_suggestions (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0,
+            pitch     TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            milestone TEXT NOT NULL,
+            scope     TEXT NOT NULL CHECK(scope IN ('S', 'M', 'L'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_suggestions_project "
+        "ON advisor_suggestions (project)"
+    )
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
@@ -914,6 +941,7 @@ def record_agent_start(
     base_sha: str | None = None,
     attempt_kind: str | None = None,
     log_path: str | None = None,
+    backend: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -924,6 +952,7 @@ def record_agent_start(
     `base_sha` are optional forensic fields from worktree hygiene (issue #788).
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
+    `backend` is 'cline' or 'claude-code' (issue #920).
     Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
@@ -932,10 +961,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path, backend) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path),
+             worktree_sha, base_sha, attempt_kind, log_path, backend),
         )
         conn.commit()
         return cur.lastrowid

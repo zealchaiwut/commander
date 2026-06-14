@@ -8537,6 +8537,16 @@ def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     return False
 
 
+def _state_data_is_dry_run_only(state_data: dict) -> bool:
+    """True when state.json reflects a --dry-run pass (no coder/tester dispatch)."""
+    issues = state_data.get("issues") or []
+    if not issues:
+        return False
+    if any(i.get("coder_started_at") or i.get("tester_started_at") for i in issues):
+        return False
+    return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
+
+
 def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
@@ -8549,7 +8559,14 @@ def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
 
     from routers import sprint_artifact_service  # noqa: PLC0415
     sprints_dir = _commander_dir(project_root) / "sprints"
-    return sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label) is not None
+    resolved = sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label)
+    if resolved is None:
+        return False
+    try:
+        state_data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    return not _state_data_is_dry_run_only(state_data)
 
 
 def _outcome_from_ingested_row(
@@ -8683,6 +8700,14 @@ def get_sprint_outcome(sprint_label: str, project: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=f"Could not read state file: {e}")
 
+    if _state_data_is_dry_run_only(state_data):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (dry-run only)")
+
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan.get("state") or "").lower() if plan else ""
+    if plan_state in ("draft", "planned", "planning"):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
+
     def _parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
             return None
@@ -8736,7 +8761,9 @@ def get_sprint_outcome(sprint_label: str, project: str):
         raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
 
     # Derive 4-state outcome for pane coloring
-    if is_cancelled:
+    if plan_state == "needs_rework":
+        pane_state = "has_rework"
+    elif is_cancelled:
         pane_state = "cancelled"
     elif _has_rework_tickets(sprint_label, project):
         pane_state = "has_rework"
@@ -8838,8 +8865,11 @@ def get_sprint_outcome(sprint_label: str, project: str):
         "state":             pane_state,
         # Unified lifecycle (sprint-lifecycle.md): pane vocabulary mapped to
         # the one enum shared with the History pane.
-        "lifecycle":         db.canonical_lifecycle(pane_state),
-        "end_reason":        sprint_json.get("end_reason"),
+        "lifecycle":         (
+            "needs_rework" if plan_state == "needs_rework"
+            else db.canonical_lifecycle(pane_state)
+        ),
+        "end_reason":        (plan.get("end_reason") if plan else None) or sprint_json.get("end_reason"),
         "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
@@ -10522,6 +10552,47 @@ def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list
     return sorted(children, key=_sprint_label_sub_index)
 
 
+_BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({"completed", "deleted"})
+
+
+def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
+    """Lifecycle state for bulk-complete gating (plan.json, then DB)."""
+    plan = _read_plan_json(project_root, sprint_label)
+    if plan and (plan.get("state") or "").lower() == "deleted":
+        return "deleted"
+    if plan and (plan.get("state") or "").strip():
+        return (plan.get("state") or "").lower()
+    try:
+        row = db.get_sprint(sprint_label)
+        if row and (row.get("state") or "").strip():
+            return (row.get("state") or "").lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
+    """Child sprint labels that are not yet completed or deleted."""
+    unsettled: list[str] = []
+    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+        state = _bulk_complete_child_state(project_root, child_label)
+        if state not in _BULK_COMPLETE_CHILD_READY_STATES:
+            unsettled.append(child_label)
+    return unsettled
+
+
+def _bulk_complete_assert_children_completed(project_root: Path, base_label: str) -> None:
+    unsettled = _bulk_complete_unsettled_children(project_root, base_label)
+    if unsettled:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint to be completed — "
+                f"still open: {', '.join(unsettled)}"
+            ),
+        )
+
+
 def _gh_branch_exists(repo: str, branch: str) -> bool:
     try:
         from urllib.parse import quote
@@ -11003,6 +11074,17 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
 
+    unsettled_children = _bulk_complete_unsettled_children(project_root, base_label)
+    children_all_completed = not unsettled_children
+    if not children_all_completed:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint to be completed — "
+                f"still open: {', '.join(unsettled_children)}"
+            ),
+        )
+
     merge_steps = _merge_steps_for_sprint_chain(project_root, repo, base_label)
 
     return {
@@ -11011,6 +11093,8 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
+        "children_all_completed": children_all_completed,
+        "unsettled_children": unsettled_children,
     }
 
 
@@ -11062,6 +11146,8 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
+
+    _bulk_complete_assert_children_completed(project_root, base_label)
 
     for lbl in all_labels:
         if _is_sprint_running(project_root, lbl):

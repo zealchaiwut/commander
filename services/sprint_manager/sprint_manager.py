@@ -2297,12 +2297,15 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         f"- **{r.gate}**: {r.symbol}" for r in results
     )
     if gates_skipped:
-        header = f"Quality gates skipped (`--skip-gates`). Auto-merged to `{target_branch}`."
+        header = f"Quality gates skipped (`--skip-gates`). Tester verified, then auto-merged into the sprint base branch `{target_branch}`."
     else:
-        header = f"Quality gates passed. Auto-merged to `{target_branch}`."
+        header = f"Quality gates passed. Tester verified → gates → merged into the sprint base branch `{target_branch}`."
     comment = (
         f"{header}\n\n"
-        f"Gates:\n{gate_lines}\n\nAwaiting human UAT approval."
+        f"Gates:\n{gate_lines}\n\n"
+        f"The work now lives on `{target_branch}` (the sprint branch). It reaches "
+        f"`develop` only when you click **Merge Sprint** — that is why there is no "
+        f"per-ticket PR into develop. Awaiting human UAT approval."
     )
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)

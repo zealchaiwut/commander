@@ -19,8 +19,8 @@ AC7  Each item in 'suggested_next' has a 'slug' field; the frontend computes a
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
-import sqlite3
 import sys
 import types
 from pathlib import Path
@@ -36,7 +36,6 @@ for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import os
 os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 
 REPO = "owner/proj"

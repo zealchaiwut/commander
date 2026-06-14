@@ -65,7 +65,7 @@ import {
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
-  _smgmtApplyRerunOptimistic, _smgmtIsFreshRerunSprint,
+  _smgmtApplyRerunOptimistic,
 } from './board-render.js';
 
 // Re-run modal (issue #512)

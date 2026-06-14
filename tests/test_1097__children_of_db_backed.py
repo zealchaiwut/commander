@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -27,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 
-import db as _db_module
+import db as _db_module  # noqa: E402
 
 
 @pytest.fixture
@@ -42,7 +42,6 @@ def fresh_db(tmp_path):
 
 
 def _import_server():
-    import importlib
     import server as srv
     return srv
 

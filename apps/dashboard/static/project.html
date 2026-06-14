@@ -1915,7 +1915,9 @@
     .hist-head-btn--bulk:disabled {
       opacity: 0.45;
       cursor: not-allowed;
-      pointer-events: none;
+      /* No pointer-events:none — disabled attr already blocks activation,
+         and removing it keeps the title tooltip alive and stops clicks
+         leaking through to the card-toggle handler. */
     }
     .hist-card-head-right {
       grid-column: 2; grid-row: 1;

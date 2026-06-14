@@ -199,8 +199,14 @@ def _resolve_uat_env_for_tester(
     uat_repo: Optional[Path] = None
     if (project_dir / "uat" / "apps" / "dashboard").is_dir():
         uat_repo = project_dir / "uat"
-    elif (project_dir / "uat").is_dir() and (project_dir / "uat" / ".env").is_file():
-        # Nested non-Commander layout (e.g. perf-coach): uat clone beside coder/tester
+    elif (
+        (project_dir / "uat").is_dir()
+        and (project_dir / "uat" / ".env").is_file()
+        and not (project_dir / "uat" / repo_name).is_dir()
+    ):
+        # Nested non-Commander layout (e.g. perf-coach): uat clone beside coder/tester.
+        # Guard against a stray top-level uat/.env preempting the legacy
+        # uat/<repo_name>/ layout (which is tried in the else branch below).
         uat_repo = project_dir / "uat"
     else:
         candidate = project_dir / "uat" / repo_name

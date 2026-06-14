@@ -10,6 +10,7 @@
  * and import them here.
  */
 import { colorizeLogLine, escapeLogHtml, extractRaw, AGENT_NAMES } from './logpanel.js';
+import { renderProgressActivity, updateProgressActivityLog, paToggleLog, injectProgressActivityCss } from './progress-activity.js';
 import './sprint-board/index.js';
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -20,3 +21,9 @@ root.colorizeLogLine = colorizeLogLine;
 root.escapeLogHtml = escapeLogHtml;
 root.extractRaw = extractRaw;
 root.AGENT_NAMES = AGENT_NAMES;
+
+// ProgressActivity component (issue #928)
+root.renderProgressActivity = renderProgressActivity;
+root.updateProgressActivityLog = updateProgressActivityLog;
+root.paToggleLog = paToggleLog;
+injectProgressActivityCss();

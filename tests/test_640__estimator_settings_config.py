@@ -24,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "sprint_manager"))
 
 import services.sprint_manager.settings_repo as settings_repo
 import services.sprint_manager.sprint_repo as sprint_repo
+from conftest import make_sprint_db
 from services.sprint_manager.estimation_config import (
     DEFAULT_ESTIMATION_CFG,
     get_estimation_cfg,
@@ -45,18 +46,8 @@ SEED_ESTIMATION = {
 def settings_db(monkeypatch):
     """In-memory SQLite settings DB seeded with global estimation defaults."""
     engine = create_engine("sqlite:///:memory:")
+    make_sprint_db(engine)
     with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE settings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scope TEXT NOT NULL,
-                project TEXT,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(scope, project, key)
-            )
-        """))
         conn.execute(
             text("INSERT INTO settings (scope, project, key, value) VALUES ('global', NULL, 'estimation', :val)"),
             {"val": json.dumps(SEED_ESTIMATION)},
@@ -71,36 +62,8 @@ def settings_db(monkeypatch):
 def tickets_db(monkeypatch):
     """In-memory SQLite with sprint + sprint_tickets tables."""
     engine = create_engine("sqlite:///:memory:")
+    make_sprint_db(engine)
     with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE sprints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT UNIQUE NOT NULL,
-                goal TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                started_at TEXT,
-                completed_at TEXT,
-                cancelled_at TEXT,
-                project TEXT NOT NULL DEFAULT ''
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE sprint_tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sprint_id INTEGER NOT NULL,
-                issue_number INTEGER NOT NULL,
-                position INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                started_at TEXT,
-                completed_at TEXT,
-                agent_active TEXT,
-                actual_elapsed_seconds INTEGER,
-                total_tokens INTEGER,
-                estimated_size TEXT,
-                UNIQUE(sprint_id, issue_number)
-            )
-        """))
         conn.execute(text("INSERT INTO sprints (id, label, goal, project) VALUES (1, 'sprint-99', 'test', 'test-proj')"))
         conn.execute(text("INSERT INTO sprint_tickets (sprint_id, issue_number, position) VALUES (1, 101, 0)"))
         conn.commit()

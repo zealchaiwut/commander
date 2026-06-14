@@ -14,3 +14,6 @@ _SPRINT_MGR_DIR = _REPO_ROOT / "services" / "sprint_manager"
 for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR), str(_SPRINT_MGR_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+
+from services.sprint_manager.testing import make_sprint_db  # noqa: F401  re-exported for fixtures

@@ -10,8 +10,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from conftest import make_sprint_db
 
 import services.sprint_manager.sprint_repo as sprint_repo
 from services.sprint_manager.sprint_repo import (
@@ -29,38 +31,8 @@ from services.sprint_manager.sprint_repo import (
 @pytest.fixture(autouse=True)
 def sqlite_db(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE sprints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                label TEXT UNIQUE NOT NULL,
-                goal TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                started_at TEXT,
-                completed_at TEXT,
-                cancelled_at TEXT,
-                project TEXT NOT NULL
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE sprint_tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sprint_id INTEGER NOT NULL REFERENCES sprints(id),
-                issue_number INTEGER NOT NULL,
-                position INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                started_at TEXT,
-                completed_at TEXT,
-                agent_active TEXT,
-                elapsed_seconds INTEGER,
-                UNIQUE(sprint_id, issue_number)
-            )
-        """))
-        conn.commit()
-
-    SessionLocal = sessionmaker(bind=engine)
-    monkeypatch.setattr(sprint_repo, "_session_factory", SessionLocal)
+    make_sprint_db(engine)
+    monkeypatch.setattr(sprint_repo, "_session_factory", sessionmaker(bind=engine))
     yield engine
 
 
@@ -150,7 +122,7 @@ def test_ticket_done_neon_and_json_are_consistent():
         t = list_tickets(label)[0]
         assert t.status == "done"
         assert t.completed_at is not None
-        assert t.elapsed_seconds is not None and t.elapsed_seconds >= 0
+        assert t.actual_elapsed_seconds is not None and t.actual_elapsed_seconds >= 0
 
         # Assert JSON
         json_data = _read_sprint_json(json_path)

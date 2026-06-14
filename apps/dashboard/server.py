@@ -193,7 +193,6 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
-_subscribers: list[asyncio.Queue] = []
 _start_time: float = 0.0
 _orphans_removed_total: int = 0
 
@@ -944,9 +943,11 @@ from routers import (  # noqa: E402
     doctor_router,
     home_milestone_router,
     log_search_router,
+    logs_router,
     milestones_router,
     roadmap_router,
     runs_router,
+    settings_router,
     signoff_router,
     sprint_history_router,
     sprints_router,
@@ -954,12 +955,17 @@ from routers import (  # noqa: E402
     system_router,
     tickets_router,
 )
+# broadcast and _subscribers are now owned by routers/logs_service.py; import
+# them here so existing call sites in this file continue to work unchanged.
+from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
 app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)
 app.include_router(log_search_router)
+app.include_router(logs_router)
+app.include_router(settings_router)
 app.include_router(milestones_router)
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
@@ -995,39 +1001,6 @@ async def add_api_no_cache_headers(request: Request, call_next):
 
 
 # ── request models ────────────────────────────────────────────────────────────
-
-class AgentEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:  Optional[str] = None
-    agent_id:    Optional[str] = None
-    event_type:  str
-    working_dir: str = "unknown"
-    tool_name:   Optional[str] = None
-    status:      str = "working"
-    name:        Optional[str] = None
-
-    @model_validator(mode="after")
-    def resolve_session_id(self) -> "AgentEvent":
-        if not self.session_id:
-            self.session_id = self.agent_id or "unknown"
-        return self
-
-
-class TokenUsageEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    session_id:    Optional[str] = None
-    event_type:    str = "token_usage"
-    working_dir:   str = "unknown"
-    input_tokens:  int = 0
-    output_tokens: int = 0
-    agent_role:    Optional[str] = None
-    model_name:    Optional[str] = None
-    # owner/repo from COMMANDER_PROJECT (sprint-dispatched agents). Optional;
-    # interactive sessions fall back to the working-dir basename.
-    project:       Optional[str] = None
-
 
 class RejectBody(BaseModel):
     reason: str
@@ -1208,14 +1181,6 @@ def _compute_health_status(
     return "ok"
 
 
-# ── SSE broadcast ─────────────────────────────────────────────────────────────
-
-async def broadcast(data: dict):
-    msg = json.dumps(data)
-    for q in _subscribers:
-        await q.put(msg)
-
-
 # ── agent endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -1361,155 +1326,7 @@ def get_environment():
 
 
 # /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
-
-
-_seen_agent_sessions: set[str] = set()
-
-
-def _agent_project_from_name(agent_name: str | None) -> str | None:
-    """Derive the full owner/repo project key from an agent name string.
-
-    Agent names are formatted as 'role·repo·branch·#short'. We extract the
-    repo label (second component) and match it against the loaded projects list.
-    Returns None if no match is found.
-    """
-    if not agent_name:
-        return None
-    parts = agent_name.split("·")
-    if len(parts) < 2:
-        return None
-    repo_label = parts[1]
-    try:
-        all_projects = projects_module.load_projects()
-    except Exception:
-        return None
-    matched = next(
-        (p["repo"] for p in all_projects if p["repo"].split("/")[-1] == repo_label),
-        None,
-    )
-    return matched
-
-
-def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | None]:
-    """Extract (role, issue_num) from an agent name string (issue #719).
-
-    Names are formatted as 'role·label·branch·#short' with an optional trailing
-    '·issue-<N>' component appended when the dispatcher set CLAUDE_AGENT_ISSUE.
-    The role is the first '·'-delimited component; the issue number is the
-    'issue-<N>' token if present. Either may be None for legacy/raw-UUID names.
-    """
-    role = None
-    issue_num = None
-    if agent_name and "·" in agent_name:
-        role = agent_name.split("·")[0] or None
-    if agent_name:
-        m = re.search(r"issue-(\d+)", agent_name)
-        if m:
-            issue_num = int(m.group(1))
-    return role, issue_num
-
-
-@app.post("/api/agent-event")
-async def receive_event(request: Request, event: AgentEvent):
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/agent-event", method="POST", event_type=event.event_type)
-
-    session_id = event.session_id or "unknown"
-    project = _agent_project_from_name(event.name)
-    actor = event.name or session_id
-    role, issue_num = _parse_agent_identity(event.name)
-
-    if project:
-        if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
-            _seen_agent_sessions.add(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_started",
-                target=session_id,
-                detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
-                action_id=session_id,
-            )
-        if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
-            _seen_agent_sessions.discard(session_id)
-            db.record_event(
-                project=project,
-                source="agent",
-                actor=actor,
-                type="agent_finished",
-                target=session_id,
-                detail={"status": event.status, "role": role, "issue_num": issue_num},
-                action_id=session_id,
-            )
-
-    db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
-    db.add_event(session_id, event.event_type, event.model_dump())
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-@app.post("/api/token-usage")
-async def receive_token_usage(event: TokenUsageEvent):
-    if not event.input_tokens and not event.output_tokens:
-        return {"ok": True}
-    # Prefer the explicit owner/repo the dispatcher tagged; the working-dir
-    # basename ("uat", "coder") can't split cost per project.
-    project = event.project or (
-        Path(event.working_dir).name if event.working_dir != "unknown" else "unknown"
-    )
-    session_id = event.session_id or "unknown"
-    db.record_token_usage(
-        session_id,
-        project,
-        event.input_tokens,
-        event.output_tokens,
-        agent_role=event.agent_role,
-        model_name=event.model_name,
-    )
-    await broadcast({"type": "update", "event": event.model_dump()})
-    return {"ok": True}
-
-
-# /api/agents and /api/events moved to routers/activity.py (issue #794)
-
-
-@app.delete("/api/events/test")
-def clear_test_events():
-    """Remove test/debug events and agents from the database and clear test alerts from memory."""
-    events_deleted = db.delete_test_events()
-    agents_deleted = db.delete_test_agents()
-    # Also purge in-memory test alerts using the module-level _test_pat pattern.
-    before = len(_alerts)
-    _alerts[:] = [
-        a for a in _alerts
-        if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
-    ]
-    alerts_cleared = before - len(_alerts)
-    return {"ok": True, "events_deleted": events_deleted, "agents_deleted": agents_deleted, "alerts_cleared": alerts_cleared}
-
-
-@app.get("/events")
-async def sse_stream(request: Request):
-    queue: asyncio.Queue = asyncio.Queue()
-    _subscribers.append(queue)
-
-    async def generator():
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            if queue in _subscribers:
-                _subscribers.remove(queue)
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# /api/agent-event, /api/token-usage, /api/events/test, /events moved to routers/logs.py
 
 
 # ── github / sprint endpoints ─────────────────────────────────────────────────
@@ -1976,22 +1793,6 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
-@app.delete("/api/projects/{slug}/settings")
-def delete_project_settings(slug: str):
-    """Clear the project-level settings override.
-
-    After deletion GET /api/projects/{slug}/settings returns global defaults.
-    Returns 404 if the project slug is not found.
-    Must be registered before DELETE /api/projects/{owner}/{repo_name} to avoid
-    first-match routing collision on two-segment paths.
-    """
-    repo = _resolve_project_slug(slug)
-    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    return build_effective_response(effective)
-
-
 @app.delete("/api/projects/{owner}/{repo_name}")
 async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     import shutil
@@ -2102,18 +1903,12 @@ def get_running_sprint(project: str):
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
-    SECRET_FIELDS,
-    KNOWN_FIELDS,
     build_effective_response,
 )
 from services.sprint_manager.deploy_config_schema import (
     DEPLOY_CONFIG_KEY,
-    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
-    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
-    merge_for_put as _deploy_merge_for_put,
-    build_deploy_config_response as _build_deploy_config_response,
     known_deploy_slugs as _deploy_known_slugs,
     overview_entries_for as _deploy_overview_entries_for,
 )
@@ -2146,212 +1941,8 @@ def _resolve_project_slug(slug: str) -> str:
     return matched["repo"]
 
 
-def _validate_settings_body(body: dict) -> None:
-    """Validate a PUT settings request body.
-
-    Raises HTTPException 422 for secret fields, 400 for unknown fields.
-    """
-    for key in body:
-        if key in SECRET_FIELDS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Field '{key}' is a secret and cannot be written via this endpoint. "
-                    "Use the dedicated secret management endpoint."
-                ),
-            )
-    unknown = [k for k in body if k not in KNOWN_FIELDS]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown settings field(s): {', '.join(sorted(unknown))}. "
-                   f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}",
-        )
-
-
-@app.get("/api/settings")
-def get_global_settings():
-    """Return effective global settings.
-
-    Non-secret fields are returned as-is with defaults applied.
-    Secret fields appear as boolean presence flags (<field>_set).
-    """
-    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    return build_effective_response(stored)
-
-
-_AGENT_MODEL_KEYS = (
-    "default_model", "coder_model", "tester_model",
-    "estimator_model", "documentor_model",
-)
-
-
-def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
-    """Write any agent-model fields from a settings Save into each project's
-    sprint.yaml ``agent_config`` — the single source ``sprint_manager`` reads at
-    dispatch. Without this the Save only updated the settings DB while the run
-    kept using the stale sprint.yaml model (coder/estimator stayed opus despite
-    a sonnet Save). Returns the repos updated."""
-    model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if not model_cfg:
-        return []
-    try:
-        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-    except Exception:
-        return []
-    updated: list[str] = []
-    for proj in projects_module.load_projects():
-        repo = (proj.get("repo") or "").strip()
-        if not repo:
-            continue
-        try:
-            sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if sy.exists():
-                _update_sprint_yaml_agent_config(sy, model_cfg)
-                updated.append(repo)
-        except Exception:
-            continue
-    return updated
-
-
-@app.put("/api/settings")
-def put_global_settings(body: dict):
-    """Persist a global settings override.
-
-    Only the supplied keys are written; existing keys not in the body are preserved.
-    Returns 400 for unknown keys, 422 for secret fields.
-    """
-    _validate_settings_body(body)
-    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    merged = {**current, **body}
-    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
-    # Single source: agent-model fields also land in each project's sprint.yaml
-    # so the dispatcher (reads sprint.yaml, not the settings DB) applies them.
-    _propagate_models_to_sprint_yaml(body)
-    return build_effective_response(merged)
-
-
-def _project_json_for_repo(repo: str) -> dict | None:
-    return next(
-        (p for p in projects_module.load_projects() if p.get("repo") == repo),
-        None,
-    )
-
-
-def _apply_project_identity_defaults(
-    resp: dict,
-    repo: str,
-    proj_override: dict,
-) -> dict:
-    """Use projects.json identity when the project override has no explicit value.
-
-    Schema defaults (ti-folder / gray) must not mask projects.json — only keys
-    stored in the project-scoped override win over the JSON file.
-    """
-    proj_json = _project_json_for_repo(repo)
-    if not proj_json:
-        return resp
-    if "icon" not in proj_override:
-        resp["icon"] = proj_json.get("icon", resp.get("icon", "ti-folder"))
-    if "color" not in proj_override:
-        resp["color"] = proj_json.get("color", resp.get("color", "gray"))
-    if not proj_override.get("display_name"):
-        resp["display_name"] = proj_json.get("name", resp.get("display_name", ""))
-    return resp
-
-
-@app.get("/api/projects/{slug}/settings")
-def get_project_settings(slug: str):
-    """Return effective project settings (project overrides merged over global).
-
-    Non-secret fields returned with defaults applied; secrets as boolean flags.
-    Returns 404 when the project slug does not exist.
-    """
-    repo = _resolve_project_slug(slug)
-    proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(stored)
-    return _apply_project_identity_defaults(resp, repo, proj_override)
-
-
-@app.put("/api/projects/{slug}/settings")
-def put_project_settings(slug: str, body: dict):
-    """Persist a project-level settings override.
-
-    Only the supplied keys are written as a project override.
-    Global settings are not affected.
-    Returns 400 for unknown keys, 422 for secret fields, 404 if project not found.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_settings_body(body)
-    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    merged = {**current_project_override, **body}
-    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
-    # Single source: write agent-model fields into THIS project's sprint.yaml so
-    # the dispatcher applies them (settings DB alone is not read by the run).
-    _model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if _model_cfg:
-        try:
-            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-            _sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if _sy.exists():
-                _update_sprint_yaml_agent_config(_sy, _model_cfg)
-        except Exception:
-            pass
-    display_patch: dict = {}
-    if "icon" in body:
-        display_patch["icon"] = body["icon"]
-    if "color" in body:
-        display_patch["color"] = body["color"]
-    if "display_name" in body:
-        display_patch["name"] = body["display_name"]
-    if "tracked" in body:
-        display_patch["tracked"] = body["tracked"]
-    if display_patch:
-        projects_module.save_project_display_fields(repo, **display_patch)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(effective)
-    return _apply_project_identity_defaults(resp, repo, merged)
-
-
-# ── Deploy config API (issue #722) ───────────────────────────────────────────
-
-
-def _validate_deploy_config_body(body: dict) -> None:
-    """Validate a PUT deploy-config body.
-
-    Raises HTTPException 400 for unsupported environments, non-object entries,
-    or invalid host values.
-    """
-    if not isinstance(body, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="Deploy config body must be an object keyed by environment.",
-        )
-    for env, entry in body.items():
-        if env not in _DEPLOY_SUPPORTED_ENVS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported environment '{env}'. "
-                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
-                ),
-            )
-        if not isinstance(entry, dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Environment '{env}' config must be an object.",
-            )
-        host = entry.get("host")
-        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Environment '{env}': host must be one of "
-                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
-                ),
-            )
+# Settings/deploy-config/fs/env-vars/scaffold/notes endpoints moved to
+# routers/settings.py + routers/settings_service.py
 
 
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
@@ -2367,80 +1958,6 @@ def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
         if entry.get("host") == "local" and not entry.get("working_dir"):
             if env in envs:
                 entry["working_dir"] = envs[env]
-
-
-def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
-    """Build the GET-shaped response: seed defaults merged with stored, masked."""
-    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
-    resp = _build_deploy_config_response(merged)
-    _enrich_local_working_dirs(repo, resp)
-    return resp
-
-
-@app.get("/api/projects/{slug}/deploy-config")
-def get_project_deploy_config(slug: str):
-    """Return per-environment deploy config (seed defaults merged with overrides).
-
-    render_api_key is never returned in cleartext — each render entry carries
-    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
-    unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    resp = _deploy_config_response(slug, repo, stored)
-    _enrich_deploy_readiness(resp)
-    return resp
-
-
-@app.put("/api/projects/{slug}/deploy-config")
-def put_project_deploy_config(slug: str, body: dict):
-    """Persist a per-environment deploy config override.
-
-    Merges per environment over the stored config; a new render_api_key replaces
-    the stored secret, while an omitted/null key leaves it unchanged. Returns
-    400 for unsupported envs/hosts, 404 for an unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_deploy_config_body(body)
-    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    merged = _deploy_merge_for_put(current or {}, body)
-    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
-    return _deploy_config_response(slug, repo, merged)
-
-
-@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
-def validate_deploy_config_field(slug: str, env: str, body: dict):
-    """Validate an inline working_dir / port edit before it is persisted (#769).
-
-    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
-    returns 400 with a user-visible message so the Deploy card can surface an
-    inline error and skip the PUT:
-
-      - working_dir → must exist on disk AND be a git clone.
-      - port        → must be an integer 1–65535 AND not already in use on host.
-
-    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
-    fields are valid.
-    """
-    _resolve_project_slug(slug)
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Validation body must be an object.")
-    if "working_dir" in body:
-        try:
-            _deploy_validation.validate_working_dir(body["working_dir"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if "port" in body:
-        try:
-            port = _deploy_validation.validate_port(body["port"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if _deploy_validation.port_in_use(port):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Port {port} is already in use on this host.",
-            )
-    return {"ok": True, "env": env}
 
 
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
@@ -3056,73 +2573,6 @@ def post_settings_sync_commit(body: _SyncCommitBody):
     return {"ok": True, "synced_at": synced_at}
 
 
-# ── Filesystem browser (issue #643) ──────────────────────────────────────────
-
-_FS_BROWSE_ROOT: Path = Path.home()
-
-
-@app.get("/api/fs/list")
-def fs_list(path: str = ""):
-    """Return immediate subdirectories of the given path.
-
-    The path must resolve to within _FS_BROWSE_ROOT.  Traversal attempts
-    (../, symlinks escaping root, absolute paths outside root) return 403.
-    Returns {"entries": [{"name": str, "path": str}], "current": str}.
-    """
-    root = _FS_BROWSE_ROOT.resolve()
-
-    if not path or path.strip() in ("~", ""):
-        target = root
-    else:
-        # Handle ~ prefix
-        if path.startswith("~/"):
-            path = str(root / path[2:])
-        elif path == "~":
-            path = str(root)
-
-        candidate = Path(path)
-        # Normalize ../ etc without following symlinks
-        normalized = Path(os.path.normpath(str(candidate)))
-
-        # Must be under browse root before any symlink resolution
-        if not normalized.is_relative_to(root):
-            raise HTTPException(status_code=403, detail="Forbidden")
-
-        # Walk each component; reject if any symlink escapes root.
-        # This catches escape-then-reenter chains that resolve() misses.
-        cur = root
-        for part in normalized.relative_to(root).parts:
-            cur = cur / part
-            if cur.is_symlink():
-                try:
-                    link_resolved = cur.resolve()
-                    if not link_resolved.is_relative_to(root):
-                        raise HTTPException(status_code=403, detail="Forbidden")
-                except OSError:
-                    raise HTTPException(status_code=403, detail="Forbidden")
-
-        target = normalized
-
-    if not target.exists() or not target.is_dir():
-        return {"entries": [], "current": str(target)}
-
-    entries = []
-    try:
-        for item in sorted(target.iterdir()):
-            if item.is_symlink():
-                continue  # never follow symlinks out of browse root
-            if not item.is_dir():
-                continue
-            # Skip hidden dirs
-            if item.name.startswith("."):
-                continue
-            entries.append({"name": item.name, "path": str(item)})
-    except OSError as exc:
-        logger.info("[fs_list] error listing %s: %s", target, exc)
-
-    return {"entries": entries, "current": str(target)}
-
-
 # ── Environment paths (issue #643) ────────────────────────────────────────────
 
 def _derive_project_environments(repo: str) -> dict[str, str]:
@@ -3238,174 +2688,6 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
-
-
-# ── Env-var editor (issue #727) ───────────────────────────────────────────────
-
-import env_file as _env_file
-
-
-def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
-    """Resolve the on-disk directory holding an environment's `.env` file.
-
-    Prefers the stored/derived environment path (the working clone), and falls
-    back to a host=local deploy-config working_dir. Returns None when nothing is
-    configured for the requested env.
-    """
-    envs = projects_module.get_project_environments(repo)
-    if not envs:
-        envs = _derive_project_environments(repo)
-    if env in envs and envs[env]:
-        return envs[env]
-    merged = _merged_deploy_config(slug, repo)
-    entry = (merged or {}).get(env) or {}
-    return entry.get("working_dir") or None
-
-
-@app.get("/api/projects/{slug}/environments/{env}/env-vars")
-def get_env_vars(slug: str, env: str):
-    """Read the environment's `.env` file and return parsed key/value pairs.
-
-    Pairs are returned in file order. Values are plaintext — masking is a
-    display-only concern handled client-side. Returns 404 for an unknown slug or
-    an env with no configured directory.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-    env_path = Path(working_dir) / ".env"
-    return {
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-class _EnvVarItem(BaseModel):
-    key: str
-    value: str = ""
-
-
-class _PutEnvVarsBody(BaseModel):
-    vars: list[_EnvVarItem]
-
-
-@app.put("/api/projects/{slug}/environments/{env}/env-vars")
-def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
-    """Write env-var changes back to the environment's `.env` file.
-
-    Preserves original line order and inline comments for unchanged keys,
-    rewrites changed keys in place, appends new keys at the end, and drops
-    removed keys. An empty KEY is rejected (400) before any write. A filesystem
-    failure (e.g. read-only `.env`) returns 500 so the client can keep the
-    user's edits. Returns 404 for an unknown slug or unconfigured env.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-
-    pairs: list[tuple[str, str]] = []
-    for item in body.vars:
-        key = item.key.strip()
-        if not key:
-            raise HTTPException(
-                status_code=400,
-                detail="Each variable must have a non-empty KEY.",
-            )
-        pairs.append((key, item.value))
-
-    env_path = Path(working_dir) / ".env"
-    try:
-        _env_file.write_env_vars(env_path, pairs)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to write {env_path}: {exc}",
-        )
-    return {
-        "ok": True,
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
-
-def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
-    """Resolve project slug → (repo, working_clone_path) with traversal guard.
-
-    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
-    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
-    """
-    repo = _resolve_project_slug(slug)
-    project_root = _project_root_path(repo)
-    working_clone = _main_clone_path(project_root)
-    resolved = working_clone.resolve()
-    base_resolved = _PROJECTS_BASE.resolve()
-    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
-        )
-    return repo, working_clone
-
-
-@app.get("/api/projects/{slug}/docs/scaffold/check")
-def get_scaffold_check(slug: str):
-    """Check whether the project's working clone has the standard docs structure.
-
-    Runs scaffold_project --check (no writes). Returns:
-      { compliant, missing, stray, project_root }
-    where missing/stray are lists of relative paths.
-    """
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=True)
-    return {
-        "compliant": result["compliant"],
-        "missing": result["missing"],
-        "stray": result["stray"],
-        "project_root": str(working_clone),
-    }
-
-
-class _ScaffoldApplyBody(BaseModel):
-    confirm: bool = False
-
-
-@app.post("/api/projects/{slug}/docs/scaffold/apply")
-def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
-    """Apply the standard docs scaffold to the project's working clone.
-
-    Requires { confirm: true } in the request body; returns 400 otherwise.
-    Existing files are NEVER overwritten. Returns { created, compliant }.
-    """
-    if not body.confirm:
-        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=False)
-    return {
-        "created": result["created"],
-        "compliant": result["compliant"],
-    }
 
 
 # ── Sprint file archive maintenance (issue #735) ──────────────────────────────
@@ -3797,12 +3079,11 @@ def get_plan_usage():
 
 # ── alert banner endpoints (AC-3a from #24) ──────────────────────────────────
 
-_alerts: list[dict] = []
-
-# Pattern used to identify test/debug alerts — applied both when purging via
-# DELETE /api/events/test and when serving GET /api/alerts so that test noise
-# is never surfaced on PRD.
-_test_pat = re.compile(r"(test_|Test-|Test alert|\[CRASH\])", re.IGNORECASE)
+# _alerts and _test_pat moved to routers/logs_service.py (imported below with
+# logs_router) so the DELETE /api/events/test handler can purge test alerts
+# without a circular import. Both names are re-bound here so the alert
+# endpoints below keep working unchanged.
+from routers.logs_service import _alerts, _test_pat  # noqa: E402
 
 
 class AlertPayload(BaseModel):
@@ -14499,53 +13780,6 @@ def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
     config = {"tier_threshold": body.tier_threshold, "min_events": body.min_events}
     _mis_sizing.save_config(commander, config)
     return config
-
-
-# ── Per-project notes (NOTES.md) ──────────────────────────────────────────────
-
-class SaveNotesBody(BaseModel):
-    content: str
-    expected_mtime: Optional[float] = None
-
-
-def _notes_path(repo: str) -> Path:
-    return _project_root_path(repo) / "NOTES.md"
-
-
-@app.get("/api/projects/notes")
-def get_project_notes(repo: str = ""):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if not path.exists():
-        return {"content": "", "mtime": None, "exists": False}
-    try:
-        mtime = path.stat().st_mtime
-        content = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail={"error": "failed to read NOTES.md", "reason": str(exc)})
-    return {"content": content, "mtime": mtime, "exists": True}
-
-
-@app.post("/api/projects/notes")
-def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if path.exists() and body.expected_mtime is not None:
-        current_mtime = path.stat().st_mtime
-        if abs(current_mtime - body.expected_mtime) > 0.5:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "conflict",
-                    "message": "NOTES.md changed on disk since last load.",
-                    "current_mtime": current_mtime,
-                },
-            )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.content, encoding="utf-8")
-    return {"ok": True, "mtime": path.stat().st_mtime}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

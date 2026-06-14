@@ -7,6 +7,7 @@ forbidden and is rejected by the COMMANDER_GATE_MONOLITH gate.
 """
 from .activity import router as activity_router
 from .analytics import router as analytics_router
+from .logs import router as logs_router
 from .backup import router as backup_router
 from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
@@ -20,12 +21,14 @@ from .signoff import router as signoff_router
 from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
 from .status import router as status_router
+from .settings import router as settings_router
 from .system import router as system_router
 from .tickets import router as tickets_router
 
 __all__ = [
     "activity_router",
     "analytics_router",
+    "logs_router",
     "backup_router",
     "doctor_router",
     "finish_progress_router",
@@ -38,6 +41,7 @@ __all__ = [
     "signoff_router",
     "sprint_history_router",
     "sprints_router",
+    "settings_router",
     "status_router",
     "system_router",
     "tickets_router",

@@ -21871,7 +21871,10 @@ function _snavDonutHtml(cols, total) {
   } else {
     circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="14"></circle>`;
   }
-  // UAT counts as done (project tracks UAT as the completed state).
+  // Donut center shows COMPLETED % = done + uat (CLAUDE.md: UAT is the done
+  // state for completion UI). This is deliberately a different metric from the
+  // nav pill's PROCESSED count (settled-past-SIT incl. failed/needs-rework via
+  // _snavSettledDone) — completion vs throughput. Do not unify them.
   const donePct = total > 0 ? Math.round(((cols.done || 0) + (cols.uat || 0)) / total * 100) : 0;
   const legend = segs.filter(s => (cols[s.key] || 0) > 0).map(s => {
     const v = cols[s.key] || 0;

@@ -8102,6 +8102,32 @@ def _outcome_from_ingested_row(
             "failure_reason": fr,
         })
 
+    # Rec 2c — union agent_runs so the outcome band agrees with the History
+    # ledger. History (sprint_history_service._finalize_records) unions tickets
+    # recorded in agent_runs but absent from the ingested issues_json snapshot
+    # (e.g. merged in an EARLIER run of this sprint). Without the same union the
+    # outcome band and the History row showed different counts for one sprint.
+    # Additive only — never rewrites a ticket already in result_issues.
+    try:
+        from routers import sprint_history_service  # noqa: PLC0415
+        _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
+        for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
+            _eid = str(_extra.get("number"))
+            if not _eid or _eid in _seen:
+                continue
+            _st = (_extra.get("state") or "").lower()  # merged | closed | open
+            _oc = "done" if _st == "merged" else ("failed" if _st == "closed" else "skipped")
+            result_issues.append({
+                "number": _extra.get("number"),
+                "title": _extra.get("title", ""),
+                "outcome": _oc,
+                "elapsed_secs": None,
+                "failure_reason": None,
+            })
+            _seen.add(_eid)
+    except Exception:
+        pass
+
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"
@@ -9493,6 +9519,17 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=str(e))
+
+    # Rec 2d — collapse the disk-vs-DB dual path: populate the DB row from disk on
+    # read so DB-backed readers (outcome, history) converge regardless of which
+    # endpoint the UI hits first. UPDATE-only (never mints a draft row);
+    # best-effort — an ingest hiccup must never break the finish card.
+    _fc_db_row = db.get_sprint(sprint_label)
+    if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
+        try:
+            db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)
+        except Exception:
+            pass
 
     def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:

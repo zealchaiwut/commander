@@ -1,5 +1,6 @@
 # Changelog
 
+- [#917](https://github.com/zealchaiwut/commander/issues/917) Add Cline headless backend to coder dispatch — 2026-06-14
 - [#916](https://github.com/zealchaiwut/commander/issues/916) Port commander invariants into .clinerules — 2026-06-14
 
 ## Hotfix — board-history-running-ux (2026-06-14)

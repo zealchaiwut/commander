@@ -15,15 +15,13 @@ import json
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 
-from apps.dashboard import server
+from apps.dashboard import server  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

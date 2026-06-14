@@ -3098,6 +3098,13 @@
     }
     .smgmt-selection-bar-delete.show { display: inline-flex; }
     .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-sel-reest-btn {
+      padding: 5px 10px; font-size: 12px; font-weight: 600;
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -3973,6 +3980,60 @@
     .smgmt-op-log-line--ok { color: var(--green); }
     .smgmt-op-log-line--err { color: var(--red); }
     .smgmt-op-log-line--step { color: var(--blue); }
+    /* Batch reestimate overlay extensions (issue #930) */
+    .smgmt-op-bg-btn {
+      margin-left: auto; flex-shrink: 0;
+      background: none; border: none; cursor: pointer;
+      font-size: 16px; color: var(--text-muted); padding: 2px 6px;
+      border-radius: 4px; line-height: 1;
+    }
+    .smgmt-op-bg-btn:hover { background: var(--surface-2); color: var(--text); }
+    .smgmt-op-bg-btn[hidden] { display: none !important; }
+    .smgmt-op-current {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      margin-top: 2px;
+    }
+    .smgmt-op-current[hidden] { display: none !important; }
+    .smgmt-op-done {
+      font-size: 12px; font-weight: 600; color: var(--green);
+      margin-top: 4px;
+    }
+    .smgmt-op-done[hidden] { display: none !important; }
+    .smgmt-op-error {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--red); margin-top: 4px;
+    }
+    .smgmt-op-error[hidden] { display: none !important; }
+    .smgmt-op-retry-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer;
+    }
+    .smgmt-op-retry-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .smgmt-op-close-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); cursor: pointer; margin-left: auto;
+    }
+    .smgmt-op-close-btn:hover { background: var(--surface-3); }
+    .smgmt-op-close-btn[hidden] { display: none !important; }
+    /* Background indicator pill when batch runs in background */
+    .smgmt-reest-bg-pill {
+      display: none; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; color: var(--text);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 999px; padding: 4px 10px;
+      cursor: pointer; position: fixed; bottom: 16px; right: 16px;
+      z-index: 900; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .smgmt-reest-bg-pill.show { display: flex; }
+    .smgmt-reest-bg-pill:hover { border-color: var(--blue); color: var(--blue); }
+    .smgmt-bulk-reest-btn {
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer;
+    }
+    .smgmt-bulk-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
     .smgmt-move-spinner {
       display: inline-block; width: 16px; height: 16px;
       border: 2px solid var(--border); border-top-color: var(--blue);
@@ -5536,6 +5597,51 @@
     .bc-ticket-list::-webkit-scrollbar { width: 4px; }
     .bc-ticket-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+    /* Posting-progress component (shared ProgressActivity — bar mode) */
+    .bc-pg-wrap {
+      padding: 20px 28px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .bc-pg-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 600; color: var(--text);
+    }
+    .bc-pg-count { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+    .bc-pg-bar-track {
+      height: 6px; background: var(--border); border-radius: 999px; overflow: hidden;
+    }
+    .bc-pg-bar {
+      height: 100%; background: var(--green); border-radius: 999px;
+      transition: width .4s ease;
+    }
+    .bc-pg-current {
+      font-size: 12px; color: var(--text-sub); min-height: 16px;
+    }
+    .bc-pg-log {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 320px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-pg-log::-webkit-scrollbar { width: 4px; }
+    .bc-pg-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .bc-pg-entry {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border);
+    }
+    .bc-pg-entry:last-child { border-bottom: none; }
+    .bc-pg-entry-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .bc-pg-entry--success .bc-pg-entry-dot { background: var(--green); }
+    .bc-pg-entry--error   .bc-pg-entry-dot { background: var(--red); }
+    .bc-pg-entry--skipped .bc-pg-entry-dot { background: var(--text-muted); }
+    .bc-pg-entry-title { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bc-pg-entry--error .bc-pg-entry-title { color: var(--red); }
+    .bc-pg-entry--skipped .bc-pg-entry-title { color: var(--text-muted); }
+    .bc-pg-entry-badge {
+      font-size: 11px; color: var(--text-muted); flex-shrink: 0;
+    }
+    .bc-pg-entry--success .bc-pg-entry-badge { color: var(--green); }
+
     /* Ticket card */
     .bc-card {
       display: flex; align-items: flex-start; gap: 10px;
@@ -6085,6 +6191,93 @@
     .pf-flag-resolved-note {
       font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
     }
+
+    /* ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ── */
+    .pf-stepper { display: flex; flex-direction: column; gap: 0; padding: 4px 0; }
+    .pf-step-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 11px 0; border-bottom: 1px solid var(--border);
+    }
+    .pf-step-item:last-child { border-bottom: none; }
+    .pf-step-icon {
+      width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; margin-top: 1px;
+    }
+    .pf-step-content { flex: 1; min-width: 0; }
+    .pf-step-name { font-size: 13px; font-weight: 600; color: var(--text); display: block; }
+    .pf-step-note {
+      display: block; font-size: 12px; color: var(--text-muted);
+      margin-top: 2px; min-height: 0;
+    }
+    /* Pending: grey dot */
+    .pf-step-item--pending .pf-step-icon {
+      background: var(--surface-2); border: 1.5px solid var(--border);
+    }
+    .pf-step-item--pending .pf-step-name { color: var(--text-muted); font-weight: 500; }
+    /* Checking: spinner ring */
+    .pf-step-item--checking .pf-step-icon {
+      background: transparent; border: 2px solid var(--border);
+      border-top-color: var(--blue); animation: pf-spin 0.7s linear infinite;
+    }
+    /* Pass: green check */
+    .pf-step-item--pass .pf-step-icon {
+      background: rgba(34,197,94,.12); border: 1.5px solid rgba(34,197,94,.4);
+      color: #166534;
+    }
+    .pf-step-item--pass .pf-step-icon::before { content: "✓"; font-size: 12px; font-weight: 700; }
+    /* Fixed: blue wrench */
+    .pf-step-item--fixed .pf-step-icon {
+      background: rgba(59,130,246,.1); border: 1.5px solid rgba(59,130,246,.4);
+      color: var(--blue);
+    }
+    .pf-step-item--fixed .pf-step-icon::before { content: "✓"; font-size: 12px; font-weight: 700; }
+    .pf-step-item--fixed .pf-step-name { color: var(--blue); }
+    .pf-step-item--fixed .pf-step-note { color: var(--blue); opacity: .8; }
+    /* Fail: red X */
+    .pf-step-item--fail .pf-step-icon {
+      background: rgba(220,38,38,.08); border: 1.5px solid rgba(220,38,38,.4);
+      color: var(--red);
+    }
+    .pf-step-item--fail .pf-step-icon::before { content: "✕"; font-size: 11px; font-weight: 700; }
+    .pf-step-item--fail .pf-step-name { color: var(--red); }
+    .pf-step-item--fail .pf-step-note { color: #b91c1c; }
+    /* Summary line under steps */
+    .pf-stepper-summary {
+      margin-top: 12px; padding: 8px 12px; border-radius: 6px;
+      font-size: 13px; font-weight: 600;
+    }
+    .pf-stepper-summary--blocking {
+      background: rgba(220,38,38,.08); border: 1px solid rgba(220,38,38,.3);
+      color: #b91c1c;
+    }
+    .pf-stepper-summary--clear {
+      background: rgba(34,197,94,.06); border: 1px solid rgba(34,197,94,.3);
+      color: #166534;
+    }
+
+    /* ── Kickoff stepper (issue #932) ── */
+    .smgmt-kickoff-wrap {
+      padding: 24px 20px; max-width: 480px; margin: 0 auto;
+    }
+    .smgmt-kickoff-title {
+      font-size: 13px; font-weight: 600; color: var(--text-muted);
+      margin: 0 0 14px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    #smgmt-kickoff-error {
+      margin-top: 12px; padding: 10px 12px;
+      background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.25);
+      border-radius: 6px; display: flex; align-items: center; gap: 10px;
+    }
+    #smgmt-kickoff-error-msg {
+      flex: 1; font-size: 12px; color: #b91c1c;
+    }
+    .smgmt-kickoff-retry-btn {
+      flex-shrink: 0; padding: 4px 10px; font-size: 12px; font-weight: 600;
+      border: 1px solid rgba(239,68,68,.4); border-radius: 5px;
+      background: rgba(239,68,68,.08); color: #b91c1c; cursor: pointer;
+    }
+    .smgmt-kickoff-retry-btn:hover { background: rgba(239,68,68,.14); }
 
     /* ── Logs tab (issue #420) ── */
     .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -6834,6 +7027,55 @@
     .metric.amber .metric-value { color: var(--amber); }
     @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
 
+    /* ── Two-queue coder/tester lane view (issue #927) ───────────────────────
+       Two side-by-side lanes (Coder / Tester). Each lane has a capacity header
+       showing slot-dot indicators and Working + Waiting groups. Done fold and
+       Upcoming fold sit below the lanes. Emphasis uses full-border + tint fill;
+       no coloured side-stripes (impeccable gate). Spacing on the 4px scale. */
+    .lanes-wrap { display: flex; flex-direction: column; gap: 12px; }
+    .lanes-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .lane { border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+      overflow: hidden; min-width: 0; }
+    .lane-head {
+      padding: 10px 14px 8px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .lane-title { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--text-sub); display: flex; align-items: center; gap: 8px; }
+    .lane-title-coder { color: var(--purple); }
+    .lane-title-tester { color: var(--amber); }
+    .lane-capacity { font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .lane-dots { display: flex; gap: 4px; align-items: center; }
+    .lane-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+    .lane-dot.filled { background: var(--purple); }
+    .lane-dot.filled-tester { background: var(--amber); }
+    .lane-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+    .lane-group-label { font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub); padding: 2px 4px; }
+    .lane-group { display: flex; flex-direction: column; gap: 6px; }
+    .lane-group.empty .lane-group-label { color: var(--text-muted); opacity: .7; }
+    /* CODED badge — tester-waiting items that finished coding */
+    .node-coded-badge { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 7px; border-radius: 999px; text-transform: uppercase;
+      background: var(--green-bg); color: var(--green); }
+    /* Done fold and Upcoming fold */
+    .lane-fold { border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+      overflow: hidden; }
+    .lane-fold-toggle { display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 9px 12px; background: none; border: none; font: inherit; cursor: pointer;
+      color: var(--text-sub); font-size: 12px; font-weight: 700; text-align: left; }
+    .lane-fold-toggle:hover { background: var(--surface-hover); }
+    .lane-fold-toggle .ti { font-size: 11px; transition: transform .15s ease; }
+    .lane-fold-body { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+    /* Upcoming items are dimmed — they are gated, not slot-waiting */
+    .lane-upcoming-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border: 1px dashed var(--border); border-radius: 8px; background: var(--bg);
+      font-size: 12px; color: var(--text-muted); opacity: .85; }
+    .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
+    @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
+
     /* ── Node inspector panel (issue #804) ───────────────────────────────────
        Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
        .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
@@ -7329,15 +7571,27 @@
         <div class="smgmt-move-overlay" id="smgmt-move-overlay" role="alertdialog" aria-busy="true" aria-live="assertive" aria-label="Working, please wait">
           <div class="smgmt-move-overlay-pill">
             <div class="smgmt-op-head">
-              <span class="smgmt-move-spinner"></span>
+              <span class="smgmt-move-spinner" id="smgmt-move-spinner"></span>
               <span id="smgmt-move-overlay-msg">Working…</span>
+              <button class="smgmt-op-bg-btn" id="smgmt-op-bg-btn"
+                      onclick="_smgmtBulkReEstBackground()" title="Background — keep running" hidden>×</button>
             </div>
+            <div class="smgmt-op-current" id="smgmt-op-current" hidden></div>
             <div class="smgmt-op-progress-wrap" id="smgmt-op-progress-wrap" hidden>
               <div class="smgmt-op-progress-bar"><div class="smgmt-op-progress-fill" id="smgmt-op-progress-fill"></div></div>
               <span class="smgmt-op-progress-pct" id="smgmt-op-progress-pct">0%</span>
             </div>
             <div class="smgmt-op-log" id="smgmt-op-log" hidden></div>
+            <div class="smgmt-op-done" id="smgmt-op-done" hidden></div>
+            <div class="smgmt-op-error" id="smgmt-op-error" hidden></div>
           </div>
+        </div>
+
+        <!-- Background-mode indicator for batch reestimate (issue #930) -->
+        <div class="smgmt-reest-bg-pill" id="smgmt-reest-bg-pill"
+             onclick="_smgmtBulkReEstReopen()" title="Click to return to batch reestimate">
+          <span class="smgmt-move-spinner" style="width:10px;height:10px;border-width:2px"></span>
+          <span id="smgmt-reest-bg-text">Reestimating…</span>
         </div>
 
         <!-- Sprint sub-nav: Board / Running / History (issue #798) -->
@@ -7520,12 +7774,25 @@
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
           </div>
+          <!-- Kickoff stepper (issue #932) — shown while sprint is being launched -->
+          <div id="smgmt-kickoff-shell" hidden>
+            <div class="smgmt-kickoff-wrap">
+              <p class="smgmt-kickoff-title">Starting sprint…</p>
+              <div class="pf-stepper" id="smgmt-kickoff-steps"></div>
+              <div id="smgmt-kickoff-error" hidden>
+                <span id="smgmt-kickoff-error-msg"></span>
+                <button class="smgmt-kickoff-retry-btn" onclick="smgmtKickoffRetry()">Retry</button>
+              </div>
+            </div>
+          </div>
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
             <!-- Running metrics strip (issue #803) -->
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics"></div>
             <!-- Level-rail node board (issue #802) -->
             <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail"></div>
+            <!-- Two-queue coder/tester lane view (issue #927) -->
+            <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
             <!-- Node inspector panel (issue #804) -->
             <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
           </div>
@@ -7944,6 +8211,21 @@
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
+
+          <!-- Posting-progress component (shared ProgressActivity — bar mode, issue #931) -->
+          <div id="bc-posting-progress" class="hidden">
+            <div class="bc-pg-wrap">
+              <div class="bc-pg-header">
+                <span>Posting to GitHub</span>
+                <span class="bc-pg-count" id="bc-pg-count">0 / 0</span>
+              </div>
+              <div class="bc-pg-bar-track">
+                <div class="bc-pg-bar" id="bc-pg-bar" style="width:0%"></div>
+              </div>
+              <div class="bc-pg-current" id="bc-pg-current"></div>
+              <div class="bc-pg-log" id="bc-pg-log"></div>
+            </div>
+          </div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
           <div id="bc-review-overlay" class="bc-review-overlay hidden">
@@ -13276,16 +13558,15 @@ function _smgmtLiveLogLinesHtml(logLines) {
   }).join('');
 }
 
-/** Update the live log panel for a running sprint card (header agent info + log stream). */
+/** Update the live log panel for a running sprint card (header agent info + log stream).
+ *  Agent badges are patched directly; log stream is updated via ProgressActivity (issue #928). */
 function _smgmtLiveLogPatch(label, live) {
-  const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
-  const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
+  const agentEl = document.getElementById(`smgmt-live-agent-${label}`);
   if (agentEl) {
     agentEl.innerHTML = _smgmtLiveAgentBadgesHtml(live);
   }
-  if (streamEl) {
-    streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
-    streamEl.scrollTop = streamEl.scrollHeight;
+  if (typeof updateProgressActivityLog === 'function') {
+    updateProgressActivityLog(`running-${label}`, live.recent_log_lines || [], colorizeLogLine);
   }
 }
 
@@ -13470,6 +13751,7 @@ function _smgmtRunningViewUpdate(label, live) {
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
   _smgmtRailUpdate(primary, snap);
+  _smgmtLanesUpdate(primary, snap);
 }
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
@@ -13842,6 +14124,260 @@ function _smgmtRailSelectNode(num) {
   if (typeof _smgmtInspectorFeed === 'function') {
     try { _smgmtInspectorFeed(ticket || { number: num }, label); } catch (_) { /* inspector not mounted yet */ }
   }
+}
+
+// ── Two-queue coder/tester lane view (issue #927) ────────────────────────────
+// Renders a Coder lane and a Tester lane in the Running sub-view. Each lane
+// shows a capacity header (slot dots, N of MAX working, M waiting) and two
+// groups: Working (active agents) and Waiting (queued for a slot). Below the
+// lanes sit a Done fold (collapsed) and an Upcoming fold (collapsed) for
+// level-gated issues not yet eligible.
+
+/** Classify an issue from the /live snapshot into its pipeline stage.
+ *  Falls back to the pipeline_stage field when present (backend #927). */
+function _smgmtLaneStage(iss) {
+  if (!iss) return 'pending';
+  // Use backend-derived pipeline_stage when available
+  if (iss.pipeline_stage) return iss.pipeline_stage;
+  // Fallback: derive from agent field (pre-#927 snapshots)
+  if (iss.agent === 'coder') return 'coding';
+  if (iss.agent === 'tester') return 'testing';
+  if (iss.status === 'done' || iss.status === 'skipped' || iss.agent_status === 'failed') return 'done';
+  const tac = iss.tester_attempt_count || 0;
+  return tac > 0 ? 'rework' : 'pending';
+}
+
+/** HTML for a single capacity-dot indicator strip. */
+function _smgmtLaneDotsHtml(working, max, roleClass) {
+  let html = '';
+  for (let i = 0; i < max; i++) {
+    const filled = i < working;
+    html += `<span class="lane-dot${filled ? ' ' + roleClass : ''}"></span>`;
+  }
+  return `<span class="lane-dots">${html}</span>`;
+}
+
+/** Capacity header text: "N of MAX working · M waiting". */
+function _smgmtLaneCapacityText(working, max, waiting) {
+  const wTxt = `${working} of ${max} working`;
+  return waiting > 0 ? `${wTxt} · ${waiting} waiting` : wTxt;
+}
+
+/** One card inside a lane — reuses the existing .node markup for card primitives. */
+function _smgmtLaneCardHtml(iss, stage, live) {
+  const num = iss.number;
+  const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
+  const issueUrl = iss.url || (repo ? `https://github.com/${repo}/issues/${num}` : '#');
+  const sizePill = iss.size
+    ? `<span class="node-size" title="≈${iss.minutes || _sizeMinutes(iss.size)} min">${escHtml(iss.size)}</span>`
+    : '';
+  const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
+  const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
+
+  // CODED badge for awaiting_tester items (coder finished, tester not started)
+  const codedBadge = stage === 'awaiting_tester'
+    ? '<span class="node-coded-badge">CODED</span>' : '';
+
+  // FIX n/2 badge for rework items or coding items that are a fix attempt
+  const tac = iss.tester_attempt_count || 0;
+  const maxAttempts = (live && live.fix_round_max) || 2;
+  const fixBadge = tac > 0
+    ? `<span class="node-fix-badge">FIX ${tac}/${maxAttempts}</span>` : '';
+
+  // Agent badge for actively working items
+  let agentBadge = '';
+  if (stage === 'coding' || stage === 'rework') {
+    if (iss.agent === 'coder') {
+      const cm = (typeof _shortModelName === 'function') ? _shortModelName(iss.coder_model) : '';
+      const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
+      agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}</span>`;
+    }
+  } else if (stage === 'testing') {
+    if (iss.agent === 'tester') {
+      agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
+    }
+  }
+
+  // Node state class matches existing rail node conventions
+  let nodeClass = 'queued';
+  if (stage === 'coding' && iss.agent === 'coder') nodeClass = 'coder-active';
+  else if (stage === 'testing' && iss.agent === 'tester') nodeClass = 'tester-active';
+  else if (stage === 'done') nodeClass = 'done';
+
+  const icon = stage === 'done' ? '&#10003;' : '&#9679;';
+  return `<button type="button" class="node ${nodeClass}" role="listitem"`
+    + ` data-issue="${num}" aria-selected="false"`
+    + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
+    + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
+    + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${num}</a>`
+    + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+    + sizePill + codedBadge + fixBadge + agentBadge + timeEl
+    + `</button>`;
+}
+
+/** Full lanes HTML from a /live snapshot. */
+function _smgmtLanesHtml(label, live) {
+  const issues = (live && live.issues) || [];
+  const maxCoder = (live && live.max_coder_slots) || 1;
+  const maxTester = (live && live.max_tester_slots) || 1;
+
+  // Identify the current active dispatch_level so level-gated issues
+  // show in the Upcoming fold rather than the lane waiting groups.
+  const levels = (live && live.levels) || [];
+  const activeLevelNums = new Set(
+    levels.filter(l => l.state === 'active' || l.state === 'complete').map(l => l.level),
+  );
+  const maxActive = activeLevelNums.size > 0 ? Math.max(...activeLevelNums) : 0;
+  const isUpcoming = iss => {
+    const lvl = iss.dispatch_level || 0;
+    return lvl > 0 && maxActive > 0 && lvl > maxActive;
+  };
+
+  // Partition issues by stage
+  const coderWorking = [];
+  const coderWaiting = [];
+  const testerWaiting = [];
+  const testerWorking = [];
+  const done = [];
+  const upcoming = [];
+
+  issues.forEach(iss => {
+    const stage = _smgmtLaneStage(iss);
+    if (stage === 'done') { done.push({ iss, stage }); return; }
+    if (isUpcoming(iss)) { upcoming.push(iss); return; }
+    if (stage === 'coding') {
+      if (iss.agent === 'coder') coderWorking.push({ iss, stage });
+      else coderWaiting.push({ iss, stage });
+    } else if (stage === 'rework') {
+      if (iss.agent === 'coder') coderWorking.push({ iss, stage });
+      else coderWaiting.push({ iss, stage });
+    } else if (stage === 'awaiting_tester') {
+      testerWaiting.push({ iss, stage });
+    } else if (stage === 'testing') {
+      testerWorking.push({ iss, stage });
+    } else {
+      // pending — waiting for coder slot
+      coderWaiting.push({ iss, stage });
+    }
+  });
+
+  const renderGroup = (items, label, role, live) => {
+    const cls = items.length === 0 ? ' empty' : '';
+    const cards = items.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+    const placeholder = items.length === 0
+      ? `<div style="font-size:12px;color:var(--text-muted);padding:4px 4px 2px;font-style:italic;">—</div>`
+      : '';
+    return `<div class="lane-group${cls}">`
+      + `<div class="lane-group-label">${escHtml(label)}</div>`
+      + cards + placeholder
+      + `</div>`;
+  };
+
+  const coderLane = `<div class="lane" data-lane="coder">
+    <div class="lane-head">
+      <div class="lane-title"><span class="lane-title-coder">Coder</span></div>
+      <div class="lane-capacity">
+        ${_smgmtLaneDotsHtml(coderWorking.length, maxCoder, 'filled')}
+        <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
+      </div>
+    </div>
+    <div class="lane-body">
+      ${renderGroup(coderWorking, 'Working', 'coder', live)}
+      ${renderGroup(coderWaiting, 'Waiting', 'coder', live)}
+    </div>
+  </div>`;
+
+  const testerLane = `<div class="lane" data-lane="tester">
+    <div class="lane-head">
+      <div class="lane-title"><span class="lane-title-tester">Tester</span></div>
+      <div class="lane-capacity">
+        ${_smgmtLaneDotsHtml(testerWorking.length, maxTester, 'filled-tester')}
+        <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
+      </div>
+    </div>
+    <div class="lane-body">
+      ${renderGroup(testerWorking, 'Working', 'tester', live)}
+      ${renderGroup(testerWaiting, 'Waiting', 'tester', live)}
+    </div>
+  </div>`;
+
+  // Done fold — collapsed by default
+  const doneFoldId = 'smgmt-lanes-done-fold';
+  const doneBadge = done.length > 0 ? ` (${done.length})` : '';
+  const doneCards = done.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+  const doneFold = `<div class="lane-fold" id="${doneFoldId}">
+    <button type="button" class="lane-fold-toggle"
+            onclick="_smgmtLaneFoldToggle('${doneFoldId}')"
+            aria-expanded="false">
+      <i class="ti ti-chevron-right"></i>
+      Done${escHtml(doneBadge)}
+    </button>
+    <div class="lane-fold-body" hidden>${doneCards}</div>
+  </div>`;
+
+  // Upcoming fold — collapsed by default
+  const upcomingFoldId = 'smgmt-lanes-upcoming-fold';
+  const upBadge = upcoming.length > 0 ? ` (${upcoming.length})` : '';
+  const upItems = upcoming.map(iss => {
+    const lvl = iss.dispatch_level || 0;
+    const dep = lvl > 0 ? `start after Level ${lvl - 1}` : 'upcoming';
+    return `<div class="lane-upcoming-item">`
+      + `<span class="node-num">#${iss.number}</span>`
+      + `<span class="node-title">${escHtml(iss.title || '')}</span>`
+      + `<span class="lane-upcoming-dep">${escHtml(dep)}</span>`
+      + `</div>`;
+  }).join('');
+  const upcomingFold = `<div class="lane-fold" id="${upcomingFoldId}">
+    <button type="button" class="lane-fold-toggle"
+            onclick="_smgmtLaneFoldToggle('${upcomingFoldId}')"
+            aria-expanded="false">
+      <i class="ti ti-chevron-right"></i>
+      Upcoming${escHtml(upBadge)}
+    </button>
+    <div class="lane-fold-body" hidden>${upItems}</div>
+  </div>`;
+
+  return `<div class="lanes-row">${coderLane}${testerLane}</div>`
+    + doneFold
+    + upcomingFold;
+}
+
+/** Toggle a lane fold open/closed. */
+function _smgmtLaneFoldToggle(foldId) {
+  const foldEl = document.getElementById(foldId);
+  if (!foldEl) return;
+  const btn = foldEl.querySelector('.lane-fold-toggle');
+  const body = foldEl.querySelector('.lane-fold-body');
+  if (!btn || !body) return;
+  const expanded = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  body.hidden = expanded;
+  const icon = btn.querySelector('.ti');
+  if (icon) {
+    icon.classList.toggle('ti-chevron-right', expanded);
+    icon.classList.toggle('ti-chevron-down', !expanded);
+  }
+}
+
+/** Update the lanes pane from a live snapshot. Full re-render each tick
+ *  (lane view is simpler than the rail — no flicker risk at 2s poll). */
+function _smgmtLanesUpdate(label, live) {
+  const lanesEl = document.getElementById('smgmt-lanes');
+  if (!lanesEl) return;
+  const issues = (live && live.issues) || [];
+  if (!issues.length || !label) {
+    lanesEl.hidden = true;
+    return;
+  }
+  lanesEl.hidden = false;
+  // Preserve fold-open state across re-renders
+  const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
+    && document.querySelector('#smgmt-lanes-done-fold .lane-fold-toggle[aria-expanded="true"]'));
+  const upOpen = !!(document.getElementById('smgmt-lanes-upcoming-fold')
+    && document.querySelector('#smgmt-lanes-upcoming-fold .lane-fold-toggle[aria-expanded="true"]'));
+  lanesEl.innerHTML = _smgmtLanesHtml(label, live);
+  if (doneOpen) _smgmtLaneFoldToggle('smgmt-lanes-done-fold');
+  if (upOpen)   _smgmtLaneFoldToggle('smgmt-lanes-upcoming-fold');
 }
 
 // ── Node inspector panel (issue #804) ────────────────────────────────────────
@@ -15010,6 +15546,191 @@ async function _smgmtReEstimateRun(issueNum, rowBtn) {
     }
     if (tdpBtn) { tdpBtn.disabled = false; tdpBtn.textContent = 'Re-estimate'; }
   }
+}
+
+// ── Batch reestimate with shared progress component bar mode (issue #930) ─────
+
+let _bulkReEst = { running: false, done: 0, total: 0, failed: [], finished: false };
+
+/** Called by the selection bar "Reestimate" button — routes to batch or single flow. */
+function _smgmtReEstimateSelected() {
+  const nums = Array.from(_smgmtSelectedIssues);
+  if (!nums.length) return;
+  _smgmtClearSelection();
+  _smgmtBulkReEstimate(nums);
+}
+
+/**
+ * Entrypoint for batch or single-ticket reestimate.
+ * Single ticket (<2): delegates to lightweight _smgmtReEstimateRun.
+ * Batch (>=2): opens shared progress component in bar mode.
+ */
+function _smgmtBulkReEstimate(issueNums) {
+  if (!issueNums || issueNums.length === 0) return;
+  if (issueNums.length === 1) {
+    _smgmtReEstimateRun(issueNums[0], null);
+    return;
+  }
+  _smgmtBulkReEstRun(issueNums);
+}
+
+async function _smgmtBulkReEstRun(issueNums) {
+  const total = issueNums.length;
+  _bulkReEst = { running: true, done: 0, total, failed: [], finished: false };
+
+  // Open shared progress component in bar mode
+  _smgmtBoardLock(`0 of ${total}`, { progress: true, total, clearLog: true });
+
+  // Show batch-reestimate extras (background button, current ticket)
+  const bgBtn    = document.getElementById('smgmt-op-bg-btn');
+  const currentEl = document.getElementById('smgmt-op-current');
+  const doneEl   = document.getElementById('smgmt-op-done');
+  const errorEl  = document.getElementById('smgmt-op-error');
+  if (bgBtn)    bgBtn.hidden    = false;
+  if (currentEl) currentEl.hidden = false;
+  if (doneEl)   doneEl.hidden   = true;
+  if (errorEl)  errorEl.hidden  = true;
+
+  const repo = _smgmtRepo() || '';
+
+  for (const issueNum of issueNums) {
+    if (!_bulkReEst.running) break;
+
+    // Show current ticket
+    if (currentEl) currentEl.textContent = `Estimating #${issueNum}…`;
+
+    try {
+      const resp = await fetch(
+        `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
+        { method: 'POST' }
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.ok || !data.size) throw new Error('no size returned');
+
+      _bulkReEst.done++;
+      const timeLabel = data.minutes ? `, ~${data.minutes}m` : '';
+      _smgmtBoardLog(`#${issueNum} -> ${data.size}${timeLabel}`, 'ok');
+
+      // Patch the ticket row in the board
+      _smgmtBulkReEstPatchRow(issueNum, data);
+    } catch (err) {
+      _bulkReEst.failed.push(issueNum);
+      _smgmtBoardLog(`#${issueNum} failed: ${err.message}`, 'err');
+    }
+
+    const progress = _bulkReEst.done + _bulkReEst.failed.length;
+    const msgEl = document.getElementById('smgmt-move-overlay-msg');
+    if (msgEl) msgEl.textContent = `${progress} of ${total}`;
+    _smgmtBoardProgress(progress, total);
+  }
+
+  _bulkReEst.running  = false;
+  _bulkReEst.finished = true;
+
+  if (currentEl) currentEl.hidden = true;
+  if (bgBtn) bgBtn.hidden = true;
+
+  if (_bulkReEst.failed.length > 0) {
+    _smgmtBulkReEstShowError(_bulkReEst.failed, _bulkReEst.done);
+  } else {
+    _smgmtBulkReEstShowDone(_bulkReEst.done);
+  }
+}
+
+function _smgmtBulkReEstPatchRow(issueNum, data) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return;
+  row.dataset.size = data.size;
+  let pill = row.querySelector('.smgmt-ticket-size-pill, .smgmt-est-detail-btn');
+  if (!pill) {
+    pill = document.createElement('span');
+    pill.className = 'smgmt-ticket-size-pill';
+    const titleEl = row.querySelector('.smgmt-ticket-title');
+    if (titleEl) titleEl.after(pill);
+  } else if (pill.tagName === 'BUTTON') {
+    const span = document.createElement('span');
+    span.className = 'smgmt-ticket-size-pill';
+    pill.replaceWith(span);
+    pill = span;
+  }
+  pill.textContent = data.size;
+  pill.title = `≈${data.minutes || _sizeMinutes(data.size)} min`;
+  if (_estDataCache[issueNum]) _estDataCache[issueNum].size = data.size;
+}
+
+function _smgmtBulkReEstShowDone(doneCount) {
+  const doneEl = document.getElementById('smgmt-op-done');
+  const msgEl  = document.getElementById('smgmt-move-overlay-msg');
+  if (msgEl)  msgEl.textContent = 'Done';
+  if (doneEl) {
+    doneEl.textContent = `${doneCount} reestimated`;
+    doneEl.hidden = false;
+  }
+  // Replace spinner with close affordance
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = 'none';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'smgmt-op-close-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = _smgmtBulkReEstClose;
+  const head = document.querySelector('.smgmt-op-head');
+  if (head) head.appendChild(closeBtn);
+}
+
+function _smgmtBulkReEstShowError(failed, doneCount) {
+  const errorEl = document.getElementById('smgmt-op-error');
+  const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+  if (msgEl) msgEl.textContent = `Done — ${failed.length} failed`;
+  if (errorEl) {
+    errorEl.hidden = false;
+    errorEl.innerHTML = `<span>${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed</span>
+      <button class="smgmt-op-retry-btn" onclick="_smgmtBulkReEstRetry()">Retry failed</button>
+      <button class="smgmt-op-close-btn" style="margin-left:auto" onclick="_smgmtBulkReEstClose()">Close</button>`;
+  }
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = 'none';
+}
+
+function _smgmtBulkReEstRetry() {
+  const failed = _bulkReEst.failed.slice();
+  if (!failed.length) return;
+  _smgmtBulkReEstimate(failed);
+}
+
+function _smgmtBulkReEstBackground() {
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.remove('active');
+  const pill = document.getElementById('smgmt-reest-bg-pill');
+  const bgText = document.getElementById('smgmt-reest-bg-text');
+  if (pill) pill.classList.add('show');
+  if (bgText) bgText.textContent = `Reestimating… ${_bulkReEst.done + _bulkReEst.failed.length} of ${_bulkReEst.total}`;
+}
+
+function _smgmtBulkReEstReopen() {
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.classList.add('active');
+  const pill = document.getElementById('smgmt-reest-bg-pill');
+  if (pill) pill.classList.remove('show');
+}
+
+function _smgmtBulkReEstClose() {
+  _bulkReEst = { running: false, done: 0, total: 0, failed: [], finished: false };
+  // Restore spinner visibility
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = '';
+  // Hide extra elements
+  const bgBtn     = document.getElementById('smgmt-op-bg-btn');
+  const currentEl = document.getElementById('smgmt-op-current');
+  const doneEl    = document.getElementById('smgmt-op-done');
+  const errorEl   = document.getElementById('smgmt-op-error');
+  if (bgBtn)     bgBtn.hidden    = true;
+  if (currentEl) currentEl.hidden = true;
+  if (doneEl)    doneEl.hidden   = true;
+  if (errorEl)   errorEl.hidden  = true;
+  // Remove any dynamically added close buttons
+  document.querySelectorAll('.smgmt-op-close-btn').forEach(b => b.remove());
+  _smgmtBoardUnlock();
 }
 
 // ── Ticket row context menu (issue #500) ──────────────────────────────────
@@ -17713,6 +18434,7 @@ function _setupModals() {
   document.getElementById('fs-cancel-btn').addEventListener('click', _fsClose);
   document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
   document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
+  document.getElementById('fs-retry-btn').addEventListener('click', _fsRetry);
 
   document.getElementById('bc-close-btn').addEventListener('click', _bcClose);
   document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);
@@ -18027,6 +18749,7 @@ let _bcTouchGhost    = null;        // floating ghost element during touch drag
 let _bcEstimateGatePassed = false;  // Draft/Estimate stage → Sprint stage gate (user-triggered)
 let _bcSprintConfirmed = false;     // Sprint stage → Post stage gate
 let _bcPosting         = false;     // true while posting to GitHub (→ jump to Sprint Mgmt on done)
+let _bcPostingIndices  = [];        // indices of tickets submitted to post-selected (issue #931)
 let _bcSprintsLoadedFor = null;     // repo the Sprint dropdown was last populated for
 let _bcReestimateTimers = {};       // index -> debounce timer for auto re-estimate on edit
 let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
@@ -19154,6 +19877,8 @@ function _bcRenderStep2() {
 
   // Hide every right-side control, then reveal only the ones for this stage.
   [stopBtn, doneBtn, reviewPostBtn, continueBtn, estimateBtn, skipEstBtn, sprintSel].forEach(el => el && el.classList.add('hidden'));
+  // Hide posting-progress unless we're in the posting stage (issue #931)
+  if (stage !== 'posting') _bcHidePostingProgress();
 
   const activeTickets = tickets.filter(t => !_bcRemovedRows.has(t.index));
   if (stage === 1) {                                    // ① Draft (auto)
@@ -19188,8 +19913,10 @@ function _bcRenderStep2() {
       reviewPostBtn.disabled = selCount === 0;
       reviewPostBtn.classList.remove('hidden');
     }
-  } else if (stage === 'posting') {                     // posting to GitHub
+  } else if (stage === 'posting') {                     // posting to GitHub — show shared progress component
+    if (stopBtn) { stopBtn.disabled = false; stopBtn.classList.remove('hidden'); }
     if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = 'Posting…'; doneBtn.classList.remove('hidden'); }
+    _bcRenderPostingProgress(tickets, _bcPostingIndices);
   } else if (stage === 'cancelled') {                   // interrupted by server restart
     if (doneBtn) {
       doneBtn.disabled = false;
@@ -19228,6 +19955,111 @@ function _bcRenderStep2() {
   });
 
   _bcSyncBulkControls();
+}
+
+/**
+ * _bcRenderPostingProgress — update the shared ProgressActivity component (bar mode)
+ * for the posting stage. Called from _bcRenderStep2 when stage === 'posting' or 'done'.
+ *
+ * Ticket state mapping (issue #931 AC3):
+ *   drafting     → current item in progress (shown in label)
+ *   created      → success log entry
+ *   failed       → error log entry
+ *   draft_ready  → skipped log entry (not selected or queue halted)
+ *   size_warning → skipped log entry (body too large, not posted)
+ */
+function _bcRenderPostingProgress(tickets, postingTicketIndices) {
+  const pgWrap    = document.getElementById('bc-posting-progress');
+  const pgCount   = document.getElementById('bc-pg-count');
+  const pgBar     = document.getElementById('bc-pg-bar');
+  const pgCurrent = document.getElementById('bc-pg-current');
+  const pgLog     = document.getElementById('bc-pg-log');
+  if (!pgWrap || !pgCount || !pgBar || !pgCurrent || !pgLog) return;
+
+  // Only operate on the tickets that were selected for posting
+  const postingSet = new Set(postingTicketIndices || []);
+  const posting = postingSet.size > 0
+    ? tickets.filter(t => postingSet.has(t.index))
+    : tickets.filter(t => t.state !== 'pending' && t.state !== 'draft_ready' || postingSet.has(t.index));
+
+  // For initial call where postingTicketIndices is unknown, use all non-pending tickets
+  const relevant = postingSet.size > 0
+    ? tickets.filter(t => postingSet.has(t.index))
+    : tickets;
+
+  const total      = relevant.length;
+  const created    = relevant.filter(t => t.state === 'created').length;
+  const inProgress = relevant.filter(t => t.state === 'drafting').length;
+
+  // Progress fraction: count of resolved tickets (created + failed + skipped)
+  const resolved = relevant.filter(t =>
+    t.state === 'created' || t.state === 'failed' ||
+    t.state === 'size_warning'
+  ).length;
+
+  const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
+  pgCount.textContent = `${resolved} / ${total}`;
+  pgBar.style.width   = `${pct}%`;
+
+  // Current item label
+  const draftingTicket = relevant.find(t => t.state === 'drafting');
+  if (draftingTicket) {
+    pgCurrent.textContent = `Posting: ${draftingTicket.title || `ticket ${draftingTicket.index + 1}`}`;
+  } else if (resolved === total && total > 0) {
+    pgCurrent.textContent = 'All done.';
+  } else if (inProgress === 0 && resolved < total) {
+    pgCurrent.textContent = 'Waiting…';
+  } else {
+    pgCurrent.textContent = '';
+  }
+
+  // Log entries: created → success, failed → error, size_warning/draft_ready after stop → skipped
+  const logEntries = relevant
+    .filter(t => t.state === 'created' || t.state === 'failed' || t.state === 'size_warning')
+    .map(t => {
+      if (t.state === 'created') {
+        const link = t.issue_url
+          ? `<a class="bc-pg-entry-badge" href="${escHtml(t.issue_url)}" target="_blank" rel="noopener">#${t.issue_num}</a>`
+          : `<span class="bc-pg-entry-badge">Created</span>`;
+        return `<div class="bc-pg-entry bc-pg-entry--success">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
+          ${link}
+        </div>`;
+      } else if (t.state === 'failed') {
+        return `<div class="bc-pg-entry bc-pg-entry--error">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title" title="${escHtml(t.error || '')}">${escHtml(t.title || '')} — ${escHtml((t.error || 'Failed').slice(0, 60))}</span>
+          <span class="bc-pg-entry-badge">Failed</span>
+        </div>`;
+      } else {
+        return `<div class="bc-pg-entry bc-pg-entry--skipped">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
+          <span class="bc-pg-entry-badge">Skipped</span>
+        </div>`;
+      }
+    });
+  pgLog.innerHTML = logEntries.join('');
+
+  // Show component, hide ticket list and parallel banner
+  pgWrap.classList.remove('hidden');
+  const list   = document.getElementById('bc-ticket-list');
+  const banner = document.getElementById('bc-parallel-banner');
+  const bulk   = document.getElementById('bc-bulk-controls');
+  if (list)   list.classList.add('hidden');
+  if (banner) banner.classList.add('hidden');
+  if (bulk)   bulk.classList.add('hidden');
+}
+
+function _bcHidePostingProgress() {
+  const pgWrap = document.getElementById('bc-posting-progress');
+  const list   = document.getElementById('bc-ticket-list');
+  const banner = document.getElementById('bc-parallel-banner');
+  const bulk   = document.getElementById('bc-bulk-controls');
+  if (pgWrap) pgWrap.classList.add('hidden');
+  if (list)   list.classList.remove('hidden');
+  if (banner) banner.classList.remove('hidden');
 }
 
 function _bcRenderCard(t) {
@@ -19996,6 +20828,7 @@ async function bcPostSelected() {
   // Milestone chosen at the Sprint stage applies to every ticket (issue #879).
   const milestone = (document.getElementById('bc-milestone') || {}).value || '';
   _bcPosting = true;  // → footer shows "Posting…", and we jump to Sprint Mgmt on done
+  _bcPostingIndices = toPost.map(t => t.index);  // track which tickets are being posted (issue #931)
 
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
@@ -23275,9 +24108,12 @@ document.addEventListener('keydown', function(e) {
       <div class="fs-actions" id="fs-actions"></div>
     </div>
     <div class="modal-error hidden" id="fs-error"></div>
+    <!-- Progress component slot (issue #929) -->
+    <div id="fs-progress" class="hidden" style="margin-top:4px"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>
+    <button class="btn-ghost hidden" id="fs-retry-btn" type="button" onclick="_fsRetry()">Retry</button>
     <button class="btn-primary" id="fs-confirm-btn" type="button" disabled>Merge Sprint</button>
   </div>
 </div>
@@ -23607,9 +24443,14 @@ document.addEventListener('keydown', function(e) {
     <button class="modal-close" id="pf-close-btn" onclick="_pfClose()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="pf-body">
-    <div id="pf-loading" style="text-align:center;padding:24px 0;">
+    <div id="pf-loading" class="hidden" style="text-align:center;padding:24px 0;">
       <span class="pf-spinner" aria-label="Loading…"></span>
       <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Checking sprint…</p>
+    </div>
+    <!-- Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) -->
+    <div id="pf-stepper" class="hidden">
+      <div class="pf-stepper" id="pf-stepper-steps"></div>
+      <div class="pf-stepper-summary hidden" id="pf-stepper-summary"></div>
     </div>
     <div id="pf-content" class="hidden"></div>
     <div id="pf-error" class="hidden">

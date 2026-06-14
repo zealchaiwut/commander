@@ -8,7 +8,7 @@
  */
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
-   escHtml, _smgmtShowToast, loadSprintMgmt, _smgmtOutcomeCache,
+   escHtml, _smgmtShowToast, loadSprintMgmt,
    _smgmtApplyRerunOptimistic, smgmtRunSprint,
    _rrLabel:writable, _rrVersionedLabel:writable */
 

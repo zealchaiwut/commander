@@ -10964,6 +10964,19 @@ function _smgmtUpdateSubnav() {
   }
 }
 
+async function _smgmtLoadSummaries(repo) {
+  if (!repo) return;
+  try {
+    const resp = await fetch('/api/sprints/summaries?project=' + encodeURIComponent(repo));
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const summaries = data.summaries || [];
+    _smgmtSummaryOpenData   = summaries.filter(s => s.state !== 'closed');
+    _smgmtSummaryClosedData = summaries.filter(s => s.state === 'closed');
+    _smgmtSummaryRender(_smgmtSummaryOpenData, _smgmtSummaryClosedData);
+  } catch (_) {}
+}
+
 // Sprint history ledger — extracted to static/src/sprint-board/history.js (issue #797)
 
 // Dashboard SSE: refresh History (and board) when a sprint finishes or reconcile

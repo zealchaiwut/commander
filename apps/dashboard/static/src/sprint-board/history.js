@@ -5,7 +5,7 @@
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
           _smgmtBySprint, _smgmtUpdateSubnav, smgmtRerunSprint, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel */
+          smgmtDeleteSprint, _nextSprintSublabel, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
@@ -20,19 +20,6 @@ export function _histNeedsActionCount() {
     (acc, s) => acc + (_HIST_ACTION_STATES.has(s && s.lifecycle_state) ? 1 : 0),
     0,
   );
-}
-
-async function _smgmtLoadSummaries(repo) {
-  if (!repo) return;
-  try {
-    const resp = await fetch('/api/sprints/summaries?project=' + encodeURIComponent(repo));
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const summaries = data.summaries || [];
-    _smgmtSummaryOpenData   = summaries.filter(s => s.state !== 'closed');
-    _smgmtSummaryClosedData = summaries.filter(s => s.state === 'closed');
-    _smgmtSummaryRender(_smgmtSummaryOpenData, _smgmtSummaryClosedData);
-  } catch (_) {}
 }
 
 // ── Sprint history ledger (issue #806) ──────────────────────────────────────

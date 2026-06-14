@@ -36,20 +36,21 @@ def client_ctx(tmp_path):
 
     import server as srv
     import projects as projects_module
+    from routers import settings_service
 
     projects_module.PROJECTS_FILE = projects_file
 
     from fastapi.testclient import TestClient
     with patch.object(srv, "projects_module", projects_module):
         client = TestClient(srv.app, raise_server_exceptions=False)
-        yield client, srv, projects_module, projects_file
+        yield client, srv, projects_module, projects_file, settings_service
 
 
 # ── AC1: Symlink not shown in directory listing ────────────────────────────────
 
 def test_fs_list_symlink_escape_not_in_listing(client_ctx, tmp_path):
     """Symlink inside browse root pointing outside MUST NOT appear as an entry."""
-    client, srv, _, _ = client_ctx
+    client, srv, _, _, settings_service = client_ctx
 
     browse_root = tmp_path / "home"
     browse_root.mkdir()
@@ -62,7 +63,7 @@ def test_fs_list_symlink_escape_not_in_listing(client_ctx, tmp_path):
     link = browse_root / "escape_link"
     os.symlink(outside, link)
 
-    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+    with patch.object(settings_service, "_FS_BROWSE_ROOT", browse_root):
         resp = client.get(f"/api/fs/list?path={browse_root}")
 
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
@@ -84,7 +85,7 @@ def test_fs_list_intermediate_symlink_escape_blocked(client_ctx, tmp_path):
     Requesting /root/link_out/subdir must return 403 even though the
     subdir itself may not exist; the symlink escapes root.
     """
-    client, srv, _, _ = client_ctx
+    client, srv, _, _, settings_service = client_ctx
 
     browse_root = tmp_path / "home"
     browse_root.mkdir()
@@ -95,7 +96,7 @@ def test_fs_list_intermediate_symlink_escape_blocked(client_ctx, tmp_path):
     link_out = browse_root / "link_out"
     os.symlink(outside, link_out)
 
-    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+    with patch.object(settings_service, "_FS_BROWSE_ROOT", browse_root):
         resp = client.get(f"/api/fs/list?path={link_out / 'subdir'}")
 
     assert resp.status_code == 403, (
@@ -114,7 +115,7 @@ def test_fs_list_escape_reenter_via_chained_symlinks_blocked(client_ctx, tmp_pat
     so the old resolve()-only check passes — but the path traversed /outside,
     which is outside root. The new component-wise check must block it.
     """
-    client, srv, _, _ = client_ctx
+    client, srv, _, _, settings_service = client_ctx
 
     browse_root = tmp_path / "home"
     browse_root.mkdir()
@@ -131,7 +132,7 @@ def test_fs_list_escape_reenter_via_chained_symlinks_blocked(client_ctx, tmp_pat
     link_back = outside / "link_back"
     os.symlink(safe, link_back)
 
-    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+    with patch.object(settings_service, "_FS_BROWSE_ROOT", browse_root):
         resp = client.get(f"/api/fs/list?path={link_out / 'link_back'}")
 
     assert resp.status_code == 403, (
@@ -143,7 +144,7 @@ def test_fs_list_escape_reenter_via_chained_symlinks_blocked(client_ctx, tmp_pat
 
 def test_fs_list_normal_dirs_unaffected(client_ctx, tmp_path):
     """Normal subdirectories still listed and navigable after the security fix."""
-    client, srv, _, _ = client_ctx
+    client, srv, _, _, settings_service = client_ctx
 
     browse_root = tmp_path / "home"
     browse_root.mkdir()
@@ -152,7 +153,7 @@ def test_fs_list_normal_dirs_unaffected(client_ctx, tmp_path):
     nested = subdir / "myapp"
     nested.mkdir()
 
-    with patch.object(srv, "_FS_BROWSE_ROOT", browse_root):
+    with patch.object(settings_service, "_FS_BROWSE_ROOT", browse_root):
         # Root listing
         resp = client.get(f"/api/fs/list?path={browse_root}")
         assert resp.status_code == 200

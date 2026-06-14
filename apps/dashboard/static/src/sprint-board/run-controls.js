@@ -7,7 +7,8 @@
  */
 
 /* global _smgmtRepo, _smgmtShowToast, escHtml, sprintLabelDisplay, loadSprintMgmt,
-   _smgmtShowSubView, _smgmtRunningLabels, _smgmtLivePollRestart,
+   _smgmtShowSubView, _smgmtRunningLabels, _smgmtAnySprintRunning, _smgmtLivePollRestart,
+   _smgmtLingerStart, _smgmtLingerLive, _smgmtRunningViewUpdate,
    _pfCurrentLabel:writable, _pfCurrentRepo:writable, _pfState:writable,
    _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
    _pfFlags:writable, _pfSelectedIds:writable, _pfUseClineFollowups:writable */
@@ -79,6 +80,16 @@ export async function smgmtCancelSprint(label) {
       _smgmtShowToast(`Cancel failed: ${err.detail || res.status}`);
     } else {
       _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} cancel signal sent`);
+      _smgmtRunningLabels.delete(label);
+      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      if (typeof _smgmtLingerStart === 'function') {
+        _smgmtLingerStart(label, { cancelled: true });
+      }
+      if (typeof _smgmtLivePollRestart === 'function') _smgmtLivePollRestart();
+      if (typeof _smgmtRunningViewUpdate === 'function') {
+        const snap = typeof _smgmtLingerLive === 'function' ? _smgmtLingerLive(label) : null;
+        _smgmtRunningViewUpdate(label, snap);
+      }
       setTimeout(() => loadSprintMgmt(), 2000);
     }
   } catch (e) {

@@ -172,10 +172,32 @@ export function _smgmtRender(data) {
 
   const _sprintParents = data.sprint_parents || {};
   const _rerunInto = data.sprint_rerun_into || {};
+
+  const _smgmtWorkTickets = (tickets) =>
+    (tickets || []).filter((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some((n) =>
+        ["sprint-summary", "docs", "documentation"].includes(n),
+      );
+    });
+  const _smgmtTicketSettledOnBoard = (t) => {
+    const names = (t.labels || []).map((l) => l.name);
+    return names.some((n) =>
+      ["UAT", "UAT-approved", "released", "SIT"].includes(n),
+    );
+  };
+  const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
+    if (!rerunInto[label]) return false;
+    const work = _smgmtWorkTickets(tickets);
+    return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
+  };
+
   // After a re-run moves tickets to a child label, hide the empty parent card until refresh
   // would have dropped it from the order list anyway (issue #512 UX).
   const orderedLabels = orderedLabelsRaw.filter((label) => {
-    const ticketCount = (bySprint[label] || []).length;
+    const tickets = bySprint[label] || [];
+    if (_smgmtHideRerunParent(label, tickets, _rerunInto)) return false;
+    const ticketCount = tickets.length;
     if (ticketCount > 0) return true;
     if (_rerunInto[label]) return false;
     const hasChild = Object.values(_sprintParents).some(
@@ -841,20 +863,17 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
   return "";
 }
 
-/** Terminal status labels — ticket with any of these is not coder-dispatchable. */
-const _RERUN_STRIP_LABELS = new Set([
+/** Finished pipeline labels — only these block Run Sprint (mirrors sprint_manager._is_dispatchable). */
+const _NON_DISPATCHABLE_LABELS = new Set([
   "UAT",
   "UAT-approved",
   "released",
-  "SIT",
-  "in-progress",
-  "needs-rework",
 ]);
 
 function _smgmtHasDispatchableTickets(tickets) {
   return tickets.some((t) => {
     const names = (t.labels || []).map((l) => l.name);
-    return !names.some((n) => _RERUN_STRIP_LABELS.has(n));
+    return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
   });
 }
 
@@ -889,7 +908,6 @@ export function _smgmtCardHtml(
     ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label] || ""
   ).toLowerCase();
   const planBlocksPostRun = [
-    "needs_rework",
     "planned",
     "draft",
     "planning",

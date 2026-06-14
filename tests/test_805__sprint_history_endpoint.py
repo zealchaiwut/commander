@@ -498,3 +498,37 @@ def test_post_sprint_agents_from_state_file(client, fresh_db, tmp_path, monkeypa
     assert ps["documenter"]["files_touched"] == ["CHANGELOG.md", "README.md"]
     assert ps["reviewer"]["follow_up_tickets"] == [901, 902]
     assert ps["reviewer"]["suggestions"] == 2
+
+
+def test_child_sprint_with_empty_project_inferred_from_parent(fresh_db, tmp_path, client, monkeypatch):
+    """Re-run children (e.g. sprint-72.2) must appear in scoped history when project was blank."""
+    sprints_dir = tmp_path / "sprints"
+    monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
+
+    _insert_lifecycle(
+        fresh_db, "sprint-72.1", "ready_to_merge",
+        project="owner/commander", ended_at="2026-06-14T15:49:48Z",
+    )
+    _insert_lifecycle(
+        fresh_db, "sprint-72.2", "needs_rework",
+        project="", ended_at="2026-06-14T15:53:10Z",
+    )
+    _write_plan_file(sprints_dir, "sprint-72.2", {
+        "state": "needs_rework",
+        "parent": "sprint-72.1",
+        "tickets": [881, 884],
+    })
+    fresh_db.ingest_sprint_run_artifact(
+        "sprint-72.2",
+        {"issues": [{"number": 881, "status": "done", "agent_status": "merged"}]},
+        project="",
+    )
+
+    result = svc.get_sprint_history(
+        sprints_dir=sprints_dir, project="owner/commander", limit=0,
+    )
+    labels = [s["label"] for s in result["sprints"]]
+    assert "sprint-72.2" in labels
+    child = _by_label(result, "sprint-72.2")
+    assert child["lifecycle_state"] == "needs_rework"
+    assert len(child.get("issues") or []) >= 1

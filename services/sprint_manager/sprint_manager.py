@@ -4065,24 +4065,40 @@ def _worktree_hygiene(
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
 
     if not is_retry:
-        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
+        # 5a — fresh-ticket: a pre-existing feature branch at a divergent SHA is a
+        # stale leftover from a prior interrupted run (a genuinely fresh ticket has
+        # no branch, or one already at base). Delete the stale LOCAL branch so the
+        # coder recreates it cleanly off base, instead of aborting the whole ticket
+        # as 'divergent-branch' — that false abort cascaded sprint-73's
+        # #928/929/932/933. Uncommitted work was already quarantine-stashed in
+        # step 3; a remote-only ref (origin/...) never blocks a fresh checkout, so
+        # only a local branch needs clearing and the remote is left untouched.
         if feature_branch is not None and base_sha:
             ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
             branch_sha = branch_sha.strip() if ok else None
             if branch_sha and branch_sha != base_sha:
-                detail = (
-                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
-                    f"but base is {base_sha[:8]}"
+                ok_local, _, _ = _try(
+                    "git", "show-ref", "--verify", "--quiet",
+                    f"refs/heads/{feature_branch}", cwd=worktree,
                 )
-                sys.stdout.write(str(f"  [hygiene] ERROR: {detail}") + "\n")
-                sys.stdout.flush()
-                record_failure(
-                    int(ticket_id),
-                    "divergent-branch",
-                    detail=detail,
-                    repo_root=effective_root,
-                )
-                return worktree_sha, base_sha, "divergent-branch"
+                if ok_local:
+                    detail = (
+                        f"Stale feature branch {feature_branch} at {branch_sha[:8]} "
+                        f"(base {base_sha[:8]}) — deleting so the coder recreates it "
+                        f"fresh off base"
+                    )
+                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+                    sys.stdout.flush()
+                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
+                    try:
+                        structured_log.warn(
+                            "stale_feature_branch_cleared",
+                            f"deleted stale local {feature_branch} before fresh dispatch of #{ticket_id}",
+                            issue_num=int(ticket_id), branch=feature_branch,
+                            stale_sha=branch_sha, base_sha=base_sha,
+                        )
+                    except Exception:
+                        pass
     else:
         # 5b — retry-round: checkout feature branch and rebase onto base
         if feature_branch is not None:

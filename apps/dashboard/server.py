@@ -490,7 +490,8 @@ def _restore_sprint_statuses_on_startup() -> None:
     in-memory _sprint_statuses dict — the dashboard resumes tracking without a
     gap.  Stale status files (process dead) are skipped and logged.
 
-    Logs one line per file indicating whether we re-attached or skipped.
+    Logs a one-line summary. Per-file skip lines are omitted — hundreds of
+    stale *-status.json files are normal for finished sprints (issue #735).
     Uses a file-level lock (os.O_EXCL create of a .lock file) to prevent two
     server instances from running the restore simultaneously.
     """
@@ -525,10 +526,6 @@ def _restore_sprint_statuses_on_startup() -> None:
 
                 # Check whether the sprint process is still alive.
                 if not _is_sprint_running(project_root, sprint_label):
-                    print(
-                        f"[startup-restore] skipped {status_file.name}"
-                        f" — sprint '{sprint_label}' process no longer running"
-                    )
                     skipped += 1
                     continue
 
@@ -579,10 +576,12 @@ def _restore_sprint_statuses_on_startup() -> None:
             print(f"[startup-restore] error scanning project {proj.get('repo')}: {exc}")
 
     if archived_total:
-        print(f"[startup-restore] Skipped {archived_total} archived sprint files")
+        print(
+            f"[startup-restore] {archived_total} file(s) in archive/ (not scanned)"
+        )
     print(
         f"[startup-restore] completed — {attached} sprint(s) re-attached,"
-        f" {skipped} skipped"
+        f" {skipped} stale status file(s) skipped"
     )
 
 
@@ -9646,7 +9645,11 @@ def _compute_calibration(
                     continue
 
             for issue in state_data.get("issues", []):
-                if issue.get("status") != "done":
+                # Count any lifecycle "done-equivalent" status, not just literal
+                # "done": the sprint-lifecycle redesign settles passed tickets as
+                # uat/merged/passed, so a "done"-only filter silently blanked the
+                # est-vs-actual plot for newer sprints (hotfix #3).
+                if issue.get("status") not in ("done", "uat", "merged", "passed"):
                     continue
 
                 issue_num = issue.get("number")

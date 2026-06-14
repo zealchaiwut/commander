@@ -2005,6 +2005,9 @@
       padding: 4px 0; font-size: 11.5px;
     }
     .iss-row + .iss-row { border-top: 1px solid var(--border); }
+    .iss-row-link { cursor: pointer; border-radius: 4px; margin: 0 -6px; padding-left: 6px; padding-right: 6px; transition: background .12s; }
+    .iss-row-link:hover { background: var(--hover-bg, rgba(127,127,127,.08)); }
+    .iss-row-link:hover .iss-title { text-decoration: underline; }
     .iss-icon {
       width: 14px; height: 14px; border-radius: 3px; flex: none;
       display: inline-flex; align-items: center; justify-content: center; font-size: 9px;
@@ -2562,6 +2565,22 @@
        interactive; buttons/links inside stopPropagation via the onclick guard). */
     .smgmt-sprint-card.smgmt-running-clickable { cursor: pointer; }
     .smgmt-sprint-card.smgmt-running-clickable:hover { border-color: var(--green); }
+    .smgmt-hist-link {
+      display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+      padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--steel, #475569); background: var(--steel-bg, rgba(71,85,105,.1));
+      border: 1px solid var(--steel, #475569); border-radius: 999px;
+    }
+    .smgmt-hist-link:hover { filter: brightness(.97); }
+    .smgmt-hist-link i { font-size: 12px; }
+    .smgmt-running-link {
+      display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;
+      padding: 2px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--green, #16a34a); background: var(--green-bg, rgba(22,163,74,.1));
+      border: 1px solid var(--green, #16a34a); border-radius: 999px;
+    }
+    .smgmt-running-link:hover { filter: brightness(.97); }
+    .smgmt-running-link i { font-size: 12px; }
     .smgmt-rename-wrap {
       display: inline-flex; align-items: center; gap: 2px;
     }
@@ -9534,7 +9553,7 @@ function switchTab(tab, pushHistory) {
   // _applyDeepLinkSubView; on a cold load the repo arrives after this call.
   if (tab === 'sprint-mgmt') {
     if (_deepLinkSprintSubView()) _applyDeepLinkSubView();
-    else _smgmtShowSubView('board');
+    else _smgmtShowSubView(_smgmtSavedSubView() || 'board');
   }
 
   // Lazy-load sprint mgmt (only if _cachedFullRepo is already populated)
@@ -9733,15 +9752,12 @@ function updateProjectHeader(proj) {
   }
   if (nameEl) nameEl.textContent = proj.name || _slug;
 
-  // Status pill
+  // Status pill. The "Sprint X running" label is intentionally NOT rendered here
+  // (hotfix #2): it duplicated the sprint-nav status pill and the sub-nav running
+  // dot, and the Sprint-Mgmt auto-refresh pill already governs the Board / Running
+  // / History sub-views. UAT-pending stays — it's a distinct, actionable signal.
   if (pillEl) {
-    if (proj.status === 'running' && proj.sprint_running) {
-      const label = proj.sprint_running.label || '';
-      pillEl.innerHTML = `<span class="proj-header-pill pill-running">
-        <span class="pill-dot"></span>
-        Sprint ${escHtml(label.replace('sprint-', ''))} running
-      </span>`;
-    } else if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
+    if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
       const count = proj.uat_count || 0;
       pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
         <span class="pill-dot"></span>
@@ -10558,10 +10574,29 @@ async function _prefetchFullRepo() {
     const r = await fetch('/api/projects');
     if (!r.ok) return;
     const d = await r.json();
-    (d.projects || []).forEach(p => {
+    const projects = d.projects || [];
+    const sidebarRows = [];
+    projects.forEach(p => {
       const s = (p.repo || '').split('/').pop();
-      if (s) _cachedFullRepo[s] = p.repo;
+      if (!s) return;
+      _cachedFullRepo[s] = p.repo;
+      sidebarRows.push({
+        slug: s,
+        name: p.name || s,
+        icon: p.icon || 'ti-folder',
+        color: p.color,
+      });
     });
+    // Paint header + sidebar from the lighter projects payload — don't wait on /api/home.
+    if (sidebarRows.length) buildSidebar(sidebarRows);
+    const cur = projects.find(p => (p.repo || '').split('/').pop() === _slug);
+    if (cur) {
+      updateProjectHeader({
+        name: cur.name || _slug,
+        icon: cur.icon || 'ti-folder',
+        color: cur.color,
+      });
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -10634,10 +10669,28 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
-  // Load data in parallel
+  // Parallel cold load: projects prefetch unlocks header + sprint board without
+  // blocking on the heavier /api/home payload.
+  const homePromise = loadHomeData(false);
+  const prefetchPromise = _prefetchFullRepo();
+  const sprintMgmtPromise =
+    _activeTab === 'sprint-mgmt'
+      ? prefetchPromise.then(async () => {
+          if (!_cachedFullRepo[_slug] || _sprintMgmtLoaded) return;
+          _sprintMgmtLoaded = true;
+          if (typeof loadSprintMgmt !== 'function') return;
+          await loadSprintMgmt();
+          if (typeof _smgmtArInit === 'function') _smgmtArInit();
+          // Repo is ready now — re-apply the deck sub-view so its loader runs (the
+          // first switchTab fired before _cachedFullRepo was populated).
+          if (typeof _applyDeepLinkSubView === 'function') _applyDeepLinkSubView();
+        })
+      : null;
+
   await Promise.all([
-    loadHomeData(false),
-    _prefetchFullRepo(),
+    homePromise,
+    prefetchPromise,
+    sprintMgmtPromise || Promise.resolve(),
   ]);
 
   // Start 30s sidebar refresh
@@ -10661,16 +10714,6 @@ async function init() {
 
   // Live dashboard updates (sprint_finished / sprint_reconciled → refresh panes)
   _projConnectSse();
-
-  // Load sprint-mgmt data if on that tab
-  if (_activeTab === 'sprint-mgmt') {
-    _sprintMgmtLoaded = true;
-    await loadSprintMgmt();
-    _smgmtArInit();
-    // Repo is ready now — re-apply the deck sub-view so its loader runs (the
-    // first switchTab fired before _cachedFullRepo was populated).
-    _applyDeepLinkSubView();
-  }
 
   // If logs tab was active before _projectData was available, now fetch runs
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {
@@ -10812,8 +10855,15 @@ function _smgmtSummaryRender(openData, closedData) {
 // ── Sprint Mgmt Board|History sub-view toggle (issue #716) ─────────────────
 // Current sub-view within the Sprint Mgmt tab ('board' | 'history').
 let _smgmtSubView = 'board';
+function _smgmtSubViewStorageKey() { return 'smgmt-subview-' + _slug; }
+// Persisted so a page refresh / auto-refresh returns the user to the sub-view
+// they were on (Board / Running / History), not always Board (hotfix #6).
+function _smgmtSavedSubView() {
+  try { return sessionStorage.getItem(_smgmtSubViewStorageKey()); } catch (_) { return null; }
+}
 function _smgmtShowSubView(view) {
   _smgmtSubView = view;
+  try { sessionStorage.setItem(_smgmtSubViewStorageKey(), view); } catch (_) {}
   ['board', 'running', 'history'].forEach(v => {
     const btn = document.getElementById('smgmt-subtab-' + v);
     if (btn) {
@@ -10985,13 +11035,36 @@ function _histEstBarMini(s) {
   </span>`;
 }
 
-function _histIssueRowHtml(iss, isChild) {
+// Resolve an issue title from the ledger row, falling back to the board's
+// per-sprint ticket cache so History rows show titles even when the ledger
+// (e.g. agent_runs-synthesized rows) carries only the number (hotfix #1).
+function _histIssueTitle(iss, s) {
+  if (iss.title) return String(iss.title);
+  try {
+    const tickets = (s && s.label && _smgmtBySprint[s.label]) || [];
+    const hit = tickets.find(t => String(t.number) === String(iss.ticket_id));
+    if (hit && hit.title) return String(hit.title);
+  } catch (_) {}
+  return '';
+}
+
+function _histIssueRowHtml(iss, isChild, s) {
   const chip = _histIssueChip(iss);
   const rerun = iss.is_rerun || iss.rerun || isChild;
   const arrow = rerun ? '<span class="iss-rerun">↳</span> ' : '';
-  const id = iss.ticket_id != null ? ('#' + iss.ticket_id) : '#?';
-  const title = iss.title ? `<span class="iss-title">${escHtml(String(iss.title))}</span>` : '';
-  return `<div class="iss-row">
+  const num = iss.ticket_id;
+  const id = num != null ? ('#' + num) : '#?';
+  const titleText = _histIssueTitle(iss, s);
+  const title = titleText ? `<span class="iss-title">${escHtml(titleText)}</span>` : '';
+  // Clickable like the board: open the GitHub issue in a new tab. Guard
+  // stopPropagation so it doesn't toggle the history card's expand state.
+  const repo = (typeof _histRepo === 'function') ? _histRepo(s) : '';
+  const clickable = (num != null && repo)
+    ? ` role="link" tabindex="0" title="Open #${escHtml(String(num))} on GitHub"`
+      + ` onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"`
+    : '';
+  const cls = 'iss-row' + (clickable ? ' iss-row-link' : '');
+  return `<div class="${cls}"${clickable}>
     ${_histIssueIcon(iss)}
     <span class="iss-id">${arrow}${escHtml(String(id))}</span>
     ${title}
@@ -11056,7 +11129,7 @@ function _histIssueListHtml(s) {
       : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
     return `${failedBlock}${empty}`;
   }
-  return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild)).join('')}</div>`;
+  return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map(i => _histIssueRowHtml(i, isChild, s)).join('')}</div>`;
 }
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
@@ -12957,6 +13030,23 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     else headerLeft.appendChild(badge);
   }
 
+  // Finished sprints deep-link into the History sub-view (hotfix #7) — same
+  // affordance as a running sprint linking to Running. Skip needs_rework (it
+  // keeps the planning layout with its own Re-run path).
+  const _finishedStates = ['completed', 'ready_to_merge', 'partial_finished'];
+  if (headerLeft && _finishedStates.indexOf(meta.state) !== -1
+      && !headerLeft.querySelector('.smgmt-hist-link')) {
+    const safeLabel = String(label).replace(/'/g, "\\'");
+    const link = document.createElement('button');
+    link.className = 'smgmt-hist-link';
+    link.type = 'button';
+    link.title = 'View this sprint in History';
+    link.innerHTML = '<i class="ti ti-history"></i> History';
+    link.setAttribute('onclick',
+      `event.stopPropagation();_smgmtShowSubView('history');_histFocusLabel('${safeLabel}')`);
+    headerLeft.appendChild(link);
+  }
+
   // needs_rework sprints keep the planning layout (budget + run preview + tickets).
   if (meta.state === 'needs_rework') return;
 
@@ -13637,8 +13727,18 @@ function _smgmtRunningViewUpdate(label, live) {
   const shellEl = document.getElementById('smgmt-run-shell');
   const primary = label || _smgmtPrimaryRunningLabel();
   const isLiveRun = !!(primary && _smgmtRunningLabels.has(primary));
-  const isLinger = !!(primary && _smgmtIsLinger(primary));
-  const showShell = isLiveRun || isLinger;
+  const snap = live || _smgmtLingerLive(primary);
+  // A re-run child (e.g. sprint-73.1) can be actively running before the
+  // running-labels set catches up, so _smgmtIsLinger alone wrongly paints the
+  // header "Finished/snapshot" while a coder is mid-dispatch. Trust the rendered
+  // snapshot: if it shows active agents or a current ticket, the sprint is NOT
+  // finished — never show the linger/Finished state for it (persistent bug fix).
+  const snapActive = !!(snap && (
+    (Array.isArray(snap.active_agents) && snap.active_agents.length > 0) ||
+    snap.current_ticket
+  ));
+  const isLinger = !!(primary && _smgmtIsLinger(primary)) && !isLiveRun && !snapActive;
+  const showShell = isLiveRun || isLinger || snapActive;
   if (emptyEl) emptyEl.style.display = showShell ? 'none' : '';
   if (shellEl) {
     shellEl.hidden = !showShell;
@@ -13648,7 +13748,6 @@ function _smgmtRunningViewUpdate(label, live) {
     if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
     return;
   }
-  const snap = live || _smgmtLingerLive(primary);
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
   _smgmtRailUpdate(primary, snap);
@@ -14586,17 +14685,23 @@ function _smgmtMetricsHtml(live) {
     + '<div class="metric-value">' + active + '</div>'
     + '<div class="metric-sub">' + escHtml(mode) + ' · ' + escHtml(agentNames) + '</div></div>');
 
+  // Fix rounds are per-issue (each ticket retries independently up to its own
+  // cap), so a sprint-level "fix rounds X/2" tile is meaningless and could read
+  // e.g. 9/2 by summing across tickets (hotfix #8). The per-issue fix-round
+  // badge lives on each rail node instead. Here we surface only how many
+  // tickets are *currently* in a fix round — a real sprint-level signal.
   if (live.agent_runs_present) {
-    const fr = Number(live.fix_rounds || 0);
-    const maxFr = live.fix_round_max || 2;
-    const retryIss = (live.issues || []).find(i => _smgmtRailFixRound(i));
-    const fixSub = retryIss
-      ? `#${retryIss.number} retrying with failure context` : '';
-    cards.push('<div class="metric metric-fix' + (fr > 0 ? ' amber' : '') + '">'
-      + '<div class="metric-label">Fix rounds</div>'
-      + '<div class="metric-value">' + fr + '<span class="metric-unit">/ ' + maxFr + '</span></div>'
-      + (fixSub ? `<div class="metric-sub">${escHtml(fixSub)}</div>` : '')
-      + '</div>');
+    const retrying = (live.issues || []).filter(i => _smgmtRailFixRound(i)).length;
+    if (retrying > 0) {
+      const retryIss = (live.issues || []).find(i => _smgmtRailFixRound(i));
+      const fixSub = retryIss ? `#${retryIss.number} retrying with failure context` : '';
+      cards.push('<div class="metric metric-fix amber">'
+        + '<div class="metric-label">Retrying</div>'
+        + '<div class="metric-value">' + retrying
+        + '<span class="metric-unit">ticket' + (retrying === 1 ? '' : 's') + '</span></div>'
+        + (fixSub ? `<div class="metric-sub">${escHtml(fixSub)}</div>` : '')
+        + '</div>');
+    }
   }
 
   if (live.token_cost_usd != null) {
@@ -16417,11 +16522,9 @@ function smgmtToggleCollapse(label) {
   if (btn) btn.setAttribute('aria-label', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
   if (btn) btn.setAttribute('title', (isCollapsed ? 'Expand ' : 'Collapse ') + displayName);
   try {
-    if (isCollapsed) {
-      localStorage.setItem('sprintColumn_' + label + '_collapsed', '1');
-    } else {
-      localStorage.removeItem('sprintColumn_' + label + '_collapsed');
-    }
+    // Tri-state so a running sprint's default-collapse (hotfix #5) doesn't fight
+    // a manual expand: '1' = collapsed, '0' = explicitly expanded.
+    localStorage.setItem('sprintColumn_' + label + '_collapsed', isCollapsed ? '1' : '0');
   } catch (_) {}
 }
 

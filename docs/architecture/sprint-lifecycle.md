@@ -92,6 +92,17 @@ Rules:
   written to the run log, and posted to the sprint summary issue. Tickets do
   **not** receive the `need-rework` GitHub label on a user cancel — only
   tickets that actually failed get it.
+- **Per-ticket failure → `needs-rework` label is mandatory and immediate.** When
+  a ticket fails for a real reason — coder crash, `divergent-branch`, idle/wall
+  hang kill, retry cap exhausted, or a final tester rejection — the orchestrator
+  MUST transition that ticket from `in-progress`/`SIT` to the `needs-rework`
+  label at the point of failure (single writer: `state_machine.transition()`),
+  not leave it lingering in `in-progress`/`SIT` for the end-of-run reconcile to
+  flag as "stale status labels remain". A *gate* failure that sends the ticket
+  back to the coder for a fix-round is the one exception: it stays `SIT` (retry
+  in flight), and only flips to `needs-rework` once the fix-round budget is
+  exhausted. Sprint-73 shipped five tickets stuck on `in-progress`/`SIT` after
+  `divergent-branch` crashes — that is the bug this rule forbids.
 - `partial_finished` is computed at read time from children's states, so a
   parent flips to `completed` automatically when its last child completes.
 - **Migration is forward-only.** Existing rows render through a display

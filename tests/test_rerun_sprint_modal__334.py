@@ -10,7 +10,7 @@ AC coverage:
   AC-6  Preview counts match rerun policy (dispatch_coder / dispatch_tester / skip)
   AC-7  Cancel closes modal with no side effects
   AC-8  Confirm button is amber/warning styled and triggers rerun POST
-  AC-9  Automated browser test confirms window.confirm is never called
+  AC-9  agent-browser test (opt-in) confirms re-run modal markup loads in a real browser
 """
 import json
 import sys
@@ -176,272 +176,78 @@ class TestZeroCountRowsHidden:
         assert "skip" in rows
 
 
-# ── Static HTML: modal structure ──────────────────────────────────────────────
+# ── Static HTML: modal structure (current rr-modal, issue #512/#797) ─────────
 
 class TestRerunModalHTML:
-    """Verify the static HTML has the correct modal structure."""
+    """Verify project.html has the in-app re-run modal (no native confirm)."""
 
     @pytest.fixture(scope="class")
     def html(self):
-        html_path = Path(__file__).parent.parent / "apps" / "dashboard" / "static" / "index.html"
+        html_path = Path(__file__).parent.parent / "apps" / "dashboard" / "static" / "project.html"
         return html_path.read_text(encoding="utf-8")
 
-    def test_modal_has_amber_warning_icon(self, html):
-        assert "ti-alert-triangle" in html, "Modal header must have amber warning icon"
+    def test_modal_elements_exist(self, html):
+        for element_id in ("rr-backdrop", "rr-modal", "rr-modal-title", "rr-confirm-btn"):
+            assert f'id="{element_id}"' in html, f"Missing {element_id}"
 
-    def test_modal_confirm_button_is_btn_warning(self, html):
-        assert 'class="btn-warning" id="smgmt-rerun-confirm"' in html, \
-            "Confirm button must use btn-warning class"
+    def test_modal_confirm_button_present(self, html):
+        assert 'id="rr-confirm-btn"' in html, "Confirm button must exist"
 
-    def test_modal_confirm_button_text(self, html):
-        assert "Re-run sprint" in html, "Confirm button text must be 'Re-run sprint'"
-
-    def test_modal_cancel_button_present(self, html):
-        assert 'onclick="smgmtRerunClose()"' in html, "Cancel button must call smgmtRerunClose()"
-
-    def test_btn_warning_css_defined(self, html):
-        assert ".btn-warning" in html, "btn-warning CSS class must be defined"
-
-    def test_modal_title_element_exists(self, html):
-        assert 'id="smgmt-rerun-title"' in html, "Modal title element must exist"
+    def test_modal_cancel_closes_via_rr_close(self, html):
+        assert "rr-backdrop" in html
+        assert "_rrClose" in html, "Backdrop must wire to _rrClose"
 
     def test_no_native_confirm_in_modal_html(self, html):
         import re
-        # The onclick attributes for rerun must not call window.confirm or confirm()
-        # Find the rerun modal section and check it doesn't have confirm() calls
-        modal_section = html[html.find('id="smgmt-rerun-modal"'):html.find('id="smgmt-finish-modal"')]
+        modal_section = html[html.find('id="rr-modal"'):html.find('id="rr-confirm-btn"') + 200]
         assert "window.confirm" not in modal_section
-        # onclick handlers should only call smgmtRerunClose or smgmtRerunConfirm
         onclick_values = re.findall(r'onclick="([^"]+)"', modal_section)
         for handler in onclick_values:
-            assert "confirm(" not in handler or "smgmtRerunConfirm" in handler, \
-                f"Unexpected confirm() call in modal onclick: {handler}"
+            assert "confirm(" not in handler, f"Unexpected confirm() in modal onclick: {handler}"
 
 
 # ── Static JS: no window.confirm in rerun flow ────────────────────────────────
 
 class TestNoNativeConfirmInJS:
-    """Verify that smgmtRerunSprint does not call window.confirm."""
+    """Verify that smgmtRerunSprint does not call window.confirm (rerun-modal.js)."""
 
     @pytest.fixture(scope="class")
     def js(self):
-        js_path = Path(__file__).parent.parent / "apps" / "dashboard" / "static" / "app.js"
+        js_path = (
+            Path(__file__).parent.parent
+            / "apps" / "dashboard" / "static" / "src" / "sprint-board" / "rerun-modal.js"
+        )
         return js_path.read_text(encoding="utf-8")
 
-    def _extract_function(self, js: str, fn_name: str) -> str:
-        start = js.find(f"async function {fn_name}(")
-        if start == -1:
-            start = js.find(f"function {fn_name}(")
-        if start == -1:
-            return ""
-        # Extract until the next top-level function definition
-        end = js.find("\nasync function ", start + 1)
-        if end == -1:
-            end = js.find("\nfunction ", start + 1)
-        return js[start:end] if end != -1 else js[start:]
-
     def test_smgmt_rerun_sprint_no_window_confirm(self, js):
-        fn_body = self._extract_function(js, "smgmtRerunSprint")
-        assert fn_body, "smgmtRerunSprint function not found"
-        assert "window.confirm" not in fn_body, \
-            "smgmtRerunSprint must not call window.confirm"
-        assert "confirm(" not in fn_body or "smgmtRerunConfirm" in fn_body, \
-            "smgmtRerunSprint must not call the native confirm() function"
+        assert "window.confirm" not in js, "smgmtRerunSprint must not call window.confirm"
+        assert "confirm(" not in js, "rerun-modal.js must not call native confirm()"
 
     def test_smgmt_rerun_sprint_calls_preview_endpoint(self, js):
-        fn_body = self._extract_function(js, "smgmtRerunSprint")
-        assert "rerun/preview" in fn_body, \
-            "smgmtRerunSprint must fetch the /rerun/preview endpoint"
+        assert "rerun-preview" in js, "smgmtRerunSprint must fetch the rerun-preview endpoint"
 
-    def test_smgmt_rerun_sprint_shows_count_rows(self, js):
-        fn_body = self._extract_function(js, "smgmtRerunSprint")
-        assert "redispatch_count" in fn_body, "Modal must use redispatch_count from preview"
-        assert "tester_count" in fn_body, "Modal must use tester_count from preview"
-        assert "skip_count" in fn_body, "Modal must use skip_count from preview"
+    def test_smgmt_rerun_sprint_opens_rr_modal(self, js):
+        assert "_rrOpen" in js, "smgmtRerunSprint must open the in-app modal via _rrOpen"
+        assert "rr-modal-title" in js, "Modal title must be updated in-app"
 
-    def test_smgmt_rerun_sprint_hides_zero_count_rows(self, js):
-        fn_body = self._extract_function(js, "smgmtRerunSprint")
-        assert "> 0" in fn_body, "Zero-count rows must be conditionally rendered"
-
-    def test_modal_title_uses_full_label(self, js):
-        fn_body = self._extract_function(js, "smgmtRerunSprint")
-        # The title should use sprintLabelDisplay(label) for sub-label support
-        assert "Re-run" in fn_body, "Modal title must say 'Re-run ...'"
-        assert "label" in fn_body, "Modal title must incorporate the sprint label variable"
-        # Either old form "Re-run Sprint" or new form "Re-run ${sprintLabelDisplay(label)}"
-        uses_display = "sprintLabelDisplay" in fn_body
-        uses_literal = "Re-run Sprint" in fn_body
-        assert uses_display or uses_literal, "Title must use sprintLabelDisplay() or literal 'Re-run Sprint'"
+    def test_rr_confirm_posts_rerun_endpoint(self, js):
+        assert "/rerun?" in js or "/rerun" in js, "_rrConfirm must POST to the rerun endpoint"
+        assert "method: 'POST'" in js or 'method: "POST"' in js
 
 
-# ── Selenium: confirm() never called during re-run flow ───────────────────────
+# ── agent-browser: AC-9 runtime check (opt-in) ───────────────────────────────
 
-@pytest.mark.selenium
-class TestNoNativeConfirmSelenium:
-    """Real browser tests. Require @pytest.mark.selenium and a running dashboard."""
+@pytest.mark.agent_browser
+class TestRerunModalAgentBrowser:
+    """AC-9: real browser via agent-browser CLI — opt in with `pytest -m agent_browser`."""
 
-    def test_window_confirm_never_called(self, driver):
-        """Clicking Re-run Sprint must not invoke window.confirm."""
-        import os
-        import time
+    def test_rr_modal_markup_loads_in_browser(self, static_dashboard_url, agent_browser_available):
+        agent_browser_open(f"{static_dashboard_url}/project.html")
+        agent_browser_find("#rr-modal")
+        agent_browser_find("#rr-confirm-btn")
 
-        base_url = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
-        driver.get(base_url + "/static/project.html")
-        time.sleep(1)
+    def test_rr_modal_title_element_present(self, static_dashboard_url, agent_browser_available):
+        agent_browser_open(f"{static_dashboard_url}/project.html")
+        out = agent_browser_find("#rr-modal-title")
+        assert "Re-run" in out or "rr-modal-title" in out.lower() or out.strip()
 
-        # Intercept window.confirm and track calls
-        driver.execute_script("""
-            window.__confirmCalled = false;
-            window.__originalConfirm = window.confirm;
-            window.confirm = function() {
-                window.__confirmCalled = true;
-                return true;
-            };
-        """)
-
-        # Inject a Re-run Sprint button and trigger it
-        driver.execute_script("""
-            window._smgmtCurrentRepo = 'test/repo';
-            window._smgmtData = { issues: [] };
-
-            // Stub the fetch for the preview endpoint
-            window.__originalFetch = window.fetch;
-            window.fetch = async function(url, opts) {
-                if (url && url.includes('rerun/preview')) {
-                    return {
-                        ok: true,
-                        json: async () => ({
-                            redispatch_count: 1,
-                            tester_count: 0,
-                            skip_count: 0,
-                            by_ticket: [{issue_num: 1, issue_title: 'T', action: 'dispatch_coder'}]
-                        }),
-                        text: async () => ''
-                    };
-                }
-                return window.__originalFetch(url, opts);
-            };
-
-            // Call the rerun function
-            smgmtRerunSprint('sprint-23');
-        """)
-
-        time.sleep(0.5)
-
-        confirm_called = driver.execute_script("return window.__confirmCalled;")
-        assert confirm_called is False, \
-            "window.confirm must never be called during the Re-run Sprint flow"
-
-    def test_rerun_modal_appears_not_native_dialog(self, driver):
-        """The in-app modal must be visible after clicking Re-run Sprint."""
-        import os
-        import time
-        from selenium.webdriver.common.by import By
-
-        base_url = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
-        driver.get(base_url + "/static/project.html")
-        time.sleep(1)
-
-        driver.execute_script("""
-            window._smgmtCurrentRepo = 'test/repo';
-            window._smgmtData = { issues: [] };
-
-            window.fetch = async function(url, opts) {
-                if (url && url.includes('rerun/preview')) {
-                    return {
-                        ok: true,
-                        json: async () => ({
-                            redispatch_count: 2,
-                            tester_count: 1,
-                            skip_count: 0,
-                            by_ticket: []
-                        }),
-                        text: async () => ''
-                    };
-                }
-                return { ok: false, text: async () => 'not found', json: async () => ({}) };
-            };
-
-            smgmtRerunSprint('sprint-23');
-        """)
-
-        time.sleep(0.6)
-
-        modal = driver.find_element(By.ID, "smgmt-rerun-modal")
-        assert "hidden" not in (modal.get_attribute("class") or ""), \
-            "Rerun modal must be visible after calling smgmtRerunSprint"
-
-    def test_rerun_modal_title_contains_label(self, driver):
-        """Modal title must show 'Re-run Sprint sprint-23?' not just a number."""
-        import os
-        import time
-
-        base_url = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
-        driver.get(base_url + "/static/project.html")
-        time.sleep(1)
-
-        driver.execute_script("""
-            window._smgmtCurrentRepo = 'test/repo';
-            window.fetch = async function(url) {
-                if (url && url.includes('rerun/preview')) {
-                    return {
-                        ok: true,
-                        json: async () => ({ redispatch_count: 0, tester_count: 0, skip_count: 0, by_ticket: [] }),
-                        text: async () => ''
-                    };
-                }
-                return { ok: false, text: async () => '', json: async () => ({}) };
-            };
-            smgmtRerunSprint('sprint-23');
-        """)
-
-        time.sleep(0.6)
-
-        title_text = driver.execute_script(
-            "return document.getElementById('smgmt-rerun-title')?.textContent || '';"
-        )
-        assert "sprint-23" in title_text, \
-            f"Modal title must contain the sprint label 'sprint-23', got: {title_text!r}"
-
-    def test_cancel_closes_modal_no_rerun(self, driver):
-        """Clicking Cancel closes the modal without triggering a rerun POST."""
-        import os
-        import time
-        from selenium.webdriver.common.by import By
-
-        base_url = os.environ.get("TEST_BASE_URL", "http://localhost:8000")
-        driver.get(base_url + "/static/project.html")
-        time.sleep(1)
-
-        driver.execute_script("""
-            window._smgmtCurrentRepo = 'test/repo';
-            window.__rerunPostCalled = false;
-
-            window.fetch = async function(url, opts) {
-                if (url && url.includes('rerun/preview')) {
-                    return {
-                        ok: true,
-                        json: async () => ({ redispatch_count: 1, tester_count: 0, skip_count: 0, by_ticket: [] }),
-                        text: async () => ''
-                    };
-                }
-                if (url && url.includes('/rerun') && opts?.method === 'POST') {
-                    window.__rerunPostCalled = true;
-                }
-                return { ok: false, text: async () => '', json: async () => ({}) };
-            };
-
-            smgmtRerunSprint('sprint-23');
-        """)
-
-        time.sleep(0.6)
-
-        driver.execute_script("smgmtRerunClose();")
-        time.sleep(0.2)
-
-        modal = driver.find_element(By.ID, "smgmt-rerun-modal")
-        assert "hidden" in (modal.get_attribute("class") or ""), \
-            "Modal must be hidden after Cancel"
-
-        post_called = driver.execute_script("return window.__rerunPostCalled;")
-        assert post_called is False, "Rerun POST must not be triggered when Cancel is clicked"

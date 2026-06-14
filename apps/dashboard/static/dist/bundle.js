@@ -474,6 +474,104 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
+  // apps/dashboard/static/src/sprint-board/plan-next.js
+  async function _planNextRequest(repo, replace) {
+    let res;
+    try {
+      res = await fetch("/api/sprints/plan-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, replace })
+      });
+    } catch (e) {
+      _smgmtShowToast("Plan next sprint failed: " + e.message);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _smgmtShowToast("Plan next sprint failed: " + (data.detail || "HTTP " + res.status));
+      return;
+    }
+    switch (data.status) {
+      case "ok":
+        await loadSprintMgmt();
+        _smgmtShowToast(
+          `Planned ${data.sprint_label} \xB7 ${(data.tickets || []).length} tickets (${data.total_minutes}m) \u2014 pending sign-off`
+        );
+        break;
+      case "no_milestone":
+        _smgmtShowToast("No active milestone \u2014 nothing to plan.");
+        break;
+      case "empty":
+        _smgmtShowToast(data.reason || "No eligible tickets to plan.");
+        break;
+      case "conflict":
+        if (window.confirm(
+          `${data.reason}
+
+Replace the existing draft (${data.existing_label})?`
+        )) {
+          await _planNextRequest(repo, true);
+        }
+        break;
+      default:
+        _smgmtShowToast("Plan next sprint: unexpected response.");
+    }
+  }
+  async function smgmtPlanNextSprint() {
+    const repo = _smgmtRepo();
+    if (!repo) {
+      _smgmtShowToast("No project selected.");
+      return;
+    }
+    const btn = document.getElementById("smgmt-plan-next-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+    }
+    try {
+      await _planNextRequest(repo, false);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("is-loading");
+      }
+    }
+  }
+  async function _smgmtLoadPendingSignoff() {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    let labels = [];
+    try {
+      const res = await fetch(
+        `/api/sprints/pending-signoff?project=${encodeURIComponent(repo)}`
+      );
+      if (!res.ok)
+        return;
+      const data = await res.json();
+      labels = data.labels || [];
+    } catch {
+      return;
+    }
+    for (const label of labels) {
+      const card = document.getElementById(`smgmt-card-${label}`);
+      if (!card)
+        continue;
+      card.classList.add("smgmt-pending-signoff");
+      if (card.querySelector(".smgmt-pending-signoff-badge"))
+        continue;
+      const header = card.querySelector(".smgmt-sprint-header, .sc-header");
+      if (!header)
+        continue;
+      const badge = document.createElement("span");
+      badge.className = "smgmt-pending-signoff-badge";
+      badge.textContent = "Pending sign-off";
+      badge.setAttribute("title", "Awaiting sign-off before this sprint goes live");
+      header.appendChild(badge);
+    }
+  }
+
   // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
@@ -2057,6 +2155,7 @@
       bar.classList.add("show");
       if (listEl)
         listEl.classList.add("has-selection");
+      _smgmtPositionSelectionBar(bar, listEl);
       const countEl = document.getElementById("smgmt-sel-count");
       if (countEl)
         countEl.textContent = count === 1 ? "1 ticket selected" : `${count} tickets selected`;
@@ -2071,6 +2170,33 @@
         bar.classList.remove("show");
       if (listEl)
         listEl.classList.remove("has-selection");
+    }
+  }
+  function _smgmtPositionSelectionBar(bar, listEl) {
+    if (!bar || !listEl)
+      return;
+    try {
+      const labels = /* @__PURE__ */ new Set();
+      (_smgmtData && _smgmtData.issues || []).forEach((i) => {
+        if (_smgmtSelectedIssues.has(i.number) && i.sprint_label)
+          labels.add(i.sprint_label);
+      });
+      let target = null;
+      if (labels.size === 1) {
+        const lbl = [...labels][0];
+        const card = document.getElementById("smgmt-card-" + lbl);
+        if (card && card.parentNode === listEl)
+          target = card;
+      }
+      if (target) {
+        if (bar.nextElementSibling !== target)
+          listEl.insertBefore(bar, target);
+      } else if (listEl.firstChild !== bar) {
+        listEl.insertBefore(bar, listEl.firstChild);
+      }
+    } catch (_) {
+      if (listEl.firstChild !== bar)
+        listEl.insertBefore(bar, listEl.firstChild);
     }
   }
   function _smgmtPopulateSelectionDropdown() {
@@ -3539,9 +3665,13 @@ ${data.errors.join("\n")}`);
     const isRunning = _smgmtRunningLabels.has(label);
     const isLinger = !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
     const isRunningView = isRunning || isLinger;
-    let isCollapsed = false;
+    let isCollapsed = isRunning;
     try {
-      isCollapsed = localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
+      const _pref = localStorage.getItem("sprintColumn_" + label + "_collapsed");
+      if (_pref === "1")
+        isCollapsed = true;
+      else if (_pref === "0")
+        isCollapsed = false;
     } catch (_) {
     }
     const isFreshRerun = _smgmtIsFreshRerunSprint(label);
@@ -3679,6 +3809,7 @@ ${data.errors.join("\n")}`);
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
           ${runningBadgeHtml}
+          ${isRunningView ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
           ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
@@ -4273,6 +4404,8 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
+  globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+  globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

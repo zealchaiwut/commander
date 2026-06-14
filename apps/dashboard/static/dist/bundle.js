@@ -1363,8 +1363,6 @@
     const flags = _pfFlags && (_pfFlags.flags || []);
     if (!flags || !flags.length)
       return "";
-    const label = _pfCurrentLabel;
-    const repo = _pfCurrentRepo;
     const rows = flags.map((f) => {
       const num = f.issue_number;
       const resolved = f.status !== "pending";
@@ -1420,7 +1418,7 @@
     ${rows.join("")}
   </div>`;
   }
-  function _pfFlagShowSizePicker(num, currentSize) {
+  function _pfFlagShowSizePicker(num, _currentSize) {
     const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
     const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
     if (actionsEl)
@@ -1863,6 +1861,10 @@
                   onclick="_smgmtDeleteSelected()">
             <i class="ti ti-trash"></i> Delete
           </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
           </button>
@@ -2275,7 +2277,6 @@ ${data.errors.join("\n")}`);
     const modal = document.getElementById("gc-modal");
     const issueNum = parseInt(modal.dataset.issueNum, 10);
     const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-    const fromSprint = modal.dataset.fromSprint;
     const repo = modal.dataset.repo;
     const sprintLabel = `sprint-${sprintNum}`;
     const confirmBtn = document.getElementById("gc-confirm-btn");
@@ -2311,7 +2312,7 @@ ${data.errors.join("\n")}`);
       confirmBtn.textContent = `Create ${sprintLabel} & move`;
     }
   }
-  function _smgmtTicketDragEnd(event) {
+  function _smgmtTicketDragEnd(_event) {
     if (_smgmtDragTicket) {
       if (_smgmtDragTicket.multi) {
         _smgmtDragTicket.multi.forEach((n) => {

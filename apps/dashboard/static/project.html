@@ -5578,6 +5578,51 @@
     .bc-ticket-list::-webkit-scrollbar { width: 4px; }
     .bc-ticket-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+    /* Posting-progress component (shared ProgressActivity — bar mode) */
+    .bc-pg-wrap {
+      padding: 20px 28px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .bc-pg-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 600; color: var(--text);
+    }
+    .bc-pg-count { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+    .bc-pg-bar-track {
+      height: 6px; background: var(--border); border-radius: 999px; overflow: hidden;
+    }
+    .bc-pg-bar {
+      height: 100%; background: var(--green); border-radius: 999px;
+      transition: width .4s ease;
+    }
+    .bc-pg-current {
+      font-size: 12px; color: var(--text-sub); min-height: 16px;
+    }
+    .bc-pg-log {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 320px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .bc-pg-log::-webkit-scrollbar { width: 4px; }
+    .bc-pg-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .bc-pg-entry {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border);
+    }
+    .bc-pg-entry:last-child { border-bottom: none; }
+    .bc-pg-entry-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .bc-pg-entry--success .bc-pg-entry-dot { background: var(--green); }
+    .bc-pg-entry--error   .bc-pg-entry-dot { background: var(--red); }
+    .bc-pg-entry--skipped .bc-pg-entry-dot { background: var(--text-muted); }
+    .bc-pg-entry-title { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bc-pg-entry--error .bc-pg-entry-title { color: var(--red); }
+    .bc-pg-entry--skipped .bc-pg-entry-title { color: var(--text-muted); }
+    .bc-pg-entry-badge {
+      font-size: 11px; color: var(--text-muted); flex-shrink: 0;
+    }
+    .bc-pg-entry--success .bc-pg-entry-badge { color: var(--green); }
+
     /* Ticket card */
     .bc-card {
       display: flex; align-items: flex-start; gap: 10px;
@@ -8062,6 +8107,21 @@
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
+
+          <!-- Posting-progress component (shared ProgressActivity — bar mode, issue #931) -->
+          <div id="bc-posting-progress" class="hidden">
+            <div class="bc-pg-wrap">
+              <div class="bc-pg-header">
+                <span>Posting to GitHub</span>
+                <span class="bc-pg-count" id="bc-pg-count">0 / 0</span>
+              </div>
+              <div class="bc-pg-bar-track">
+                <div class="bc-pg-bar" id="bc-pg-bar" style="width:0%"></div>
+              </div>
+              <div class="bc-pg-current" id="bc-pg-current"></div>
+              <div class="bc-pg-log" id="bc-pg-log"></div>
+            </div>
+          </div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
           <div id="bc-review-overlay" class="bc-review-overlay hidden">
@@ -18246,6 +18306,7 @@ let _bcTouchGhost    = null;        // floating ghost element during touch drag
 let _bcEstimateGatePassed = false;  // Draft/Estimate stage → Sprint stage gate (user-triggered)
 let _bcSprintConfirmed = false;     // Sprint stage → Post stage gate
 let _bcPosting         = false;     // true while posting to GitHub (→ jump to Sprint Mgmt on done)
+let _bcPostingIndices  = [];        // indices of tickets submitted to post-selected (issue #931)
 let _bcSprintsLoadedFor = null;     // repo the Sprint dropdown was last populated for
 let _bcReestimateTimers = {};       // index -> debounce timer for auto re-estimate on edit
 let _bcWarnDismissed = false;       // true after user dismisses the prompt-size warning (issue #568)
@@ -19373,6 +19434,8 @@ function _bcRenderStep2() {
 
   // Hide every right-side control, then reveal only the ones for this stage.
   [stopBtn, doneBtn, reviewPostBtn, continueBtn, estimateBtn, skipEstBtn, sprintSel].forEach(el => el && el.classList.add('hidden'));
+  // Hide posting-progress unless we're in the posting stage (issue #931)
+  if (stage !== 'posting') _bcHidePostingProgress();
 
   const activeTickets = tickets.filter(t => !_bcRemovedRows.has(t.index));
   if (stage === 1) {                                    // ① Draft (auto)
@@ -19407,8 +19470,10 @@ function _bcRenderStep2() {
       reviewPostBtn.disabled = selCount === 0;
       reviewPostBtn.classList.remove('hidden');
     }
-  } else if (stage === 'posting') {                     // posting to GitHub
+  } else if (stage === 'posting') {                     // posting to GitHub — show shared progress component
+    if (stopBtn) { stopBtn.disabled = false; stopBtn.classList.remove('hidden'); }
     if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = 'Posting…'; doneBtn.classList.remove('hidden'); }
+    _bcRenderPostingProgress(tickets, _bcPostingIndices);
   } else if (stage === 'cancelled') {                   // interrupted by server restart
     if (doneBtn) {
       doneBtn.disabled = false;
@@ -19447,6 +19512,111 @@ function _bcRenderStep2() {
   });
 
   _bcSyncBulkControls();
+}
+
+/**
+ * _bcRenderPostingProgress — update the shared ProgressActivity component (bar mode)
+ * for the posting stage. Called from _bcRenderStep2 when stage === 'posting' or 'done'.
+ *
+ * Ticket state mapping (issue #931 AC3):
+ *   drafting     → current item in progress (shown in label)
+ *   created      → success log entry
+ *   failed       → error log entry
+ *   draft_ready  → skipped log entry (not selected or queue halted)
+ *   size_warning → skipped log entry (body too large, not posted)
+ */
+function _bcRenderPostingProgress(tickets, postingTicketIndices) {
+  const pgWrap    = document.getElementById('bc-posting-progress');
+  const pgCount   = document.getElementById('bc-pg-count');
+  const pgBar     = document.getElementById('bc-pg-bar');
+  const pgCurrent = document.getElementById('bc-pg-current');
+  const pgLog     = document.getElementById('bc-pg-log');
+  if (!pgWrap || !pgCount || !pgBar || !pgCurrent || !pgLog) return;
+
+  // Only operate on the tickets that were selected for posting
+  const postingSet = new Set(postingTicketIndices || []);
+  const posting = postingSet.size > 0
+    ? tickets.filter(t => postingSet.has(t.index))
+    : tickets.filter(t => t.state !== 'pending' && t.state !== 'draft_ready' || postingSet.has(t.index));
+
+  // For initial call where postingTicketIndices is unknown, use all non-pending tickets
+  const relevant = postingSet.size > 0
+    ? tickets.filter(t => postingSet.has(t.index))
+    : tickets;
+
+  const total      = relevant.length;
+  const created    = relevant.filter(t => t.state === 'created').length;
+  const inProgress = relevant.filter(t => t.state === 'drafting').length;
+
+  // Progress fraction: count of resolved tickets (created + failed + skipped)
+  const resolved = relevant.filter(t =>
+    t.state === 'created' || t.state === 'failed' ||
+    t.state === 'size_warning'
+  ).length;
+
+  const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
+  pgCount.textContent = `${resolved} / ${total}`;
+  pgBar.style.width   = `${pct}%`;
+
+  // Current item label
+  const draftingTicket = relevant.find(t => t.state === 'drafting');
+  if (draftingTicket) {
+    pgCurrent.textContent = `Posting: ${draftingTicket.title || `ticket ${draftingTicket.index + 1}`}`;
+  } else if (resolved === total && total > 0) {
+    pgCurrent.textContent = 'All done.';
+  } else if (inProgress === 0 && resolved < total) {
+    pgCurrent.textContent = 'Waiting…';
+  } else {
+    pgCurrent.textContent = '';
+  }
+
+  // Log entries: created → success, failed → error, size_warning/draft_ready after stop → skipped
+  const logEntries = relevant
+    .filter(t => t.state === 'created' || t.state === 'failed' || t.state === 'size_warning')
+    .map(t => {
+      if (t.state === 'created') {
+        const link = t.issue_url
+          ? `<a class="bc-pg-entry-badge" href="${escHtml(t.issue_url)}" target="_blank" rel="noopener">#${t.issue_num}</a>`
+          : `<span class="bc-pg-entry-badge">Created</span>`;
+        return `<div class="bc-pg-entry bc-pg-entry--success">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
+          ${link}
+        </div>`;
+      } else if (t.state === 'failed') {
+        return `<div class="bc-pg-entry bc-pg-entry--error">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title" title="${escHtml(t.error || '')}">${escHtml(t.title || '')} — ${escHtml((t.error || 'Failed').slice(0, 60))}</span>
+          <span class="bc-pg-entry-badge">Failed</span>
+        </div>`;
+      } else {
+        return `<div class="bc-pg-entry bc-pg-entry--skipped">
+          <span class="bc-pg-entry-dot"></span>
+          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
+          <span class="bc-pg-entry-badge">Skipped</span>
+        </div>`;
+      }
+    });
+  pgLog.innerHTML = logEntries.join('');
+
+  // Show component, hide ticket list and parallel banner
+  pgWrap.classList.remove('hidden');
+  const list   = document.getElementById('bc-ticket-list');
+  const banner = document.getElementById('bc-parallel-banner');
+  const bulk   = document.getElementById('bc-bulk-controls');
+  if (list)   list.classList.add('hidden');
+  if (banner) banner.classList.add('hidden');
+  if (bulk)   bulk.classList.add('hidden');
+}
+
+function _bcHidePostingProgress() {
+  const pgWrap = document.getElementById('bc-posting-progress');
+  const list   = document.getElementById('bc-ticket-list');
+  const banner = document.getElementById('bc-parallel-banner');
+  const bulk   = document.getElementById('bc-bulk-controls');
+  if (pgWrap) pgWrap.classList.add('hidden');
+  if (list)   list.classList.remove('hidden');
+  if (banner) banner.classList.remove('hidden');
 }
 
 function _bcRenderCard(t) {
@@ -20215,6 +20385,7 @@ async function bcPostSelected() {
   // Milestone chosen at the Sprint stage applies to every ticket (issue #879).
   const milestone = (document.getElementById('bc-milestone') || {}).value || '';
   _bcPosting = true;  // → footer shows "Posting…", and we jump to Sprint Mgmt on done
+  _bcPostingIndices = toPost.map(t => t.index);  // track which tickets are being posted (issue #931)
 
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {

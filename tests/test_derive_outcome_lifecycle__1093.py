@@ -12,8 +12,8 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
 
 os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 
-import db as _db_module
-from server import _derive_outcome_lifecycle, _OUTCOME_TERMINAL_STATES, _CHILD_SETTLED_STATES
+import db as _db_module  # noqa: E402
+from server import _derive_outcome_lifecycle  # noqa: E402
 
 
 @pytest.fixture

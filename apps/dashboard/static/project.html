@@ -10292,10 +10292,29 @@ async function _prefetchFullRepo() {
     const r = await fetch('/api/projects');
     if (!r.ok) return;
     const d = await r.json();
-    (d.projects || []).forEach(p => {
+    const projects = d.projects || [];
+    const sidebarRows = [];
+    projects.forEach(p => {
       const s = (p.repo || '').split('/').pop();
-      if (s) _cachedFullRepo[s] = p.repo;
+      if (!s) return;
+      _cachedFullRepo[s] = p.repo;
+      sidebarRows.push({
+        slug: s,
+        name: p.name || s,
+        icon: p.icon || 'ti-folder',
+        color: p.color,
+      });
     });
+    // Paint header + sidebar from the lighter projects payload — don't wait on /api/home.
+    if (sidebarRows.length) buildSidebar(sidebarRows);
+    const cur = projects.find(p => (p.repo || '').split('/').pop() === _slug);
+    if (cur) {
+      updateProjectHeader({
+        name: cur.name || _slug,
+        icon: cur.icon || 'ti-folder',
+        color: cur.color,
+      });
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -10368,10 +10387,28 @@ async function init() {
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
 
-  // Load data in parallel
+  // Parallel cold load: projects prefetch unlocks header + sprint board without
+  // blocking on the heavier /api/home payload.
+  const homePromise = loadHomeData(false);
+  const prefetchPromise = _prefetchFullRepo();
+  const sprintMgmtPromise =
+    _activeTab === 'sprint-mgmt'
+      ? prefetchPromise.then(async () => {
+          if (!_cachedFullRepo[_slug] || _sprintMgmtLoaded) return;
+          _sprintMgmtLoaded = true;
+          if (typeof loadSprintMgmt !== 'function') return;
+          await loadSprintMgmt();
+          if (typeof _smgmtArInit === 'function') _smgmtArInit();
+          // Repo is ready now — re-apply the deck sub-view so its loader runs (the
+          // first switchTab fired before _cachedFullRepo was populated).
+          if (typeof _applyDeepLinkSubView === 'function') _applyDeepLinkSubView();
+        })
+      : null;
+
   await Promise.all([
-    loadHomeData(false),
-    _prefetchFullRepo(),
+    homePromise,
+    prefetchPromise,
+    sprintMgmtPromise || Promise.resolve(),
   ]);
 
   // Start 30s sidebar refresh
@@ -10395,16 +10432,6 @@ async function init() {
 
   // Live dashboard updates (sprint_finished / sprint_reconciled → refresh panes)
   _projConnectSse();
-
-  // Load sprint-mgmt data if on that tab
-  if (_activeTab === 'sprint-mgmt') {
-    _sprintMgmtLoaded = true;
-    await loadSprintMgmt();
-    _smgmtArInit();
-    // Repo is ready now — re-apply the deck sub-view so its loader runs (the
-    // first switchTab fired before _cachedFullRepo was populated).
-    _applyDeepLinkSubView();
-  }
 
   // If logs tab was active before _projectData was available, now fetch runs
   if (_activeTab === 'logs' && _logsState.runs.length === 0) {

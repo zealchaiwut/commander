@@ -54,7 +54,11 @@ The cloud agent's `gh`/GitHub token does not have `repo` scope for `zealchaiwut/
 
 ### Lint / test / build
 
-- Python tests: `DB_PATH=./apps/dashboard/commander.db ./venv/bin/python -m pytest tests/<file> -q` (most tests need `DB_PATH` set).
+- Python tests: run with `DB_PATH` set as the safe default — `DB_PATH=./apps/dashboard/commander.db ./venv/bin/python -m pytest tests/<file> -q`. Some suites (e.g. DB/endpoint tests like `test_631`) need it; others set up their own temp DB. Exclude browser tests with `-m "not selenium"` (selenium/webdriver-manager tests need a browser + network). Note: a few tests on `master` are pre-existing failures (stale references / live-DB assumptions), and at least one test hangs, so do not expect a fully green full-suite run — scope to the files relevant to your change.
 - Python lint: `./venv/bin/ruff check apps/dashboard` (the repo currently has pre-existing ruff findings; treat new findings only as actionable).
 - Frontend build: `npm run build` (esbuild → `apps/dashboard/static/dist/bundle.js`). Frontend lint: `npm run lint` (eslint; currently warnings only). Frontend tests: `npm test`.
 - Frontend ES-module edits under `static/src/` require `npm run build` (or `npm run watch`) to take effect; plain `static/*.html` edits apply on page refresh; Python changes need a uvicorn restart.
+
+### code-review-graph (MCP tools the rules require)
+
+The `.cursorrules`/`AGENTS.md` mandate the `code-review-graph` MCP tools, registered in `.cursor/mcp.json` as `./venv/bin/code-review-graph serve`. The graph DB lives at `.code-review-graph/graph.db` (gitignored, so not in the repo). Build/refresh it with `./venv/bin/code-review-graph build` (a fast local parse — no network) before relying on `query_graph`/`detect_changes`/`get_impact_radius`; `semantic_search_nodes` works off the FTS index after a build (vector embeddings via `crg embed` need an API key and are optional). The `.claude/settings.json` auto-update hook targets a hardcoded macOS path and no-ops on this Linux VM, so refresh manually with `code-review-graph update` after large edits.

@@ -150,7 +150,6 @@ def test_helpers_in_sprint_manager_module():
 
 
 def test_dashboard_db_module_unchanged():
-    import importlib
     import apps.dashboard.db as db_mod
     assert not hasattr(db_mod, "get_setting"), (
         "get_setting should NOT be in apps/dashboard/db — it belongs in sprint_manager"

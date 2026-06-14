@@ -12,7 +12,6 @@ AC coverage:
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -26,16 +25,15 @@ _SM = Path(__file__).parent.parent / "services" / "sprint_manager"
 if str(_SM) not in sys.path:
     sys.path.insert(0, str(_SM))
 
-import services.sprint_manager.sprint_repo as sprint_repo
-from services.sprint_manager.sprint_repo import (
-    SprintNotFound,
+import services.sprint_manager.sprint_repo as sprint_repo  # noqa: E402
+from services.sprint_manager.sprint_repo import (  # noqa: E402
     add_ticket,
     create_sprint,
     get_sprint_rollup,
     list_tickets,
     update_ticket_status,
 )
-from calibration import load_calibration
+from calibration import load_calibration  # noqa: E402
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

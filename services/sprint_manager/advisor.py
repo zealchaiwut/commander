@@ -142,6 +142,6 @@ def validate_look_ahead(entries: list) -> list:
             )
         if "\n" in e:
             raise ValueError(
-                f"Look-ahead entries must be single-line; got entry with newline"
+                "Look-ahead entries must be single-line; got entry with newline"
             )
     return list(entries)

@@ -5,7 +5,6 @@ Uses an in-memory SQLite database (same pattern as test_sprint_repo.py) so these
 tests never touch a real Neon connection.
 """
 import json
-import os
 import tempfile
 from pathlib import Path
 

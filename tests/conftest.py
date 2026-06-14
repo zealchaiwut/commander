@@ -16,4 +16,4 @@ for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR), str(_SPRINT_MGR_DIR)):
         sys.path.insert(0, _p)
 
 
-from services.sprint_manager.testing import make_sprint_db  # noqa: F401  re-exported for fixtures
+from services.sprint_manager.testing import make_sprint_db  # noqa: E402, F401

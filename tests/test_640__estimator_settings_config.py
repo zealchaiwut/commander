@@ -22,15 +22,15 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "services" / "sprint_manager"))
 
-import services.sprint_manager.settings_repo as settings_repo
-import services.sprint_manager.sprint_repo as sprint_repo
-from conftest import make_sprint_db
-from services.sprint_manager.estimation_config import (
+import services.sprint_manager.settings_repo as settings_repo  # noqa: E402
+import services.sprint_manager.sprint_repo as sprint_repo  # noqa: E402
+from conftest import make_sprint_db  # noqa: E402
+from services.sprint_manager.estimation_config import (  # noqa: E402
     DEFAULT_ESTIMATION_CFG,
     get_estimation_cfg,
 )
-from services.sprint_manager.estimate_issue import run_estimator
-from services.sprint_manager.sprint_repo import write_estimated_size
+from services.sprint_manager.estimate_issue import run_estimator  # noqa: E402
+from services.sprint_manager.sprint_repo import write_estimated_size  # noqa: E402
 
 
 # ── shared fixtures ────────────────────────────────────────────────────────────

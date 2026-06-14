@@ -24,7 +24,7 @@ from typing import Callable, Optional
 import db
 import projects as projects_module
 from services.sprint_manager import advisor as adv
-from services.sprint_manager import settings_repo, todo_repo
+from services.sprint_manager import todo_repo
 
 logger = logging.getLogger(__name__)
 

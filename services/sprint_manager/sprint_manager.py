@@ -8789,6 +8789,18 @@ def run_sprint(
             continue
 
         if _infra_exit:
+            # Terminal per-ticket failure (coder crash, divergent-branch, final
+            # hang kill, retry-exhausted): surface it as needs-rework on GitHub
+            # instead of leaving the ticket stuck on in-progress/SIT for the
+            # end-of-run reconcile to flag as "stale status labels"
+            # (sprint-lifecycle.md). The TESTER_REJECTED merge-detection race is
+            # the documented exception — a re-run resolves it, so it must not be
+            # mislabelled needs-rework.
+            if getattr(issue_state, "category", None) != FailureCategory.TESTER_REJECTED:
+                _transition_safe(
+                    num, _TicketState.NEEDS_REWORK,
+                    actor="sprint_manager:infra_fail", repo_name=eff_repo,
+                )
             continue
 
         elapsed = time.monotonic() - start_time

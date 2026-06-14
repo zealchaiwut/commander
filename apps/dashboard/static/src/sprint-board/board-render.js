@@ -899,7 +899,7 @@ export function _smgmtCardHtml(
     !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
-  const canRun = tickets.length >= 1 && !hasCompleted;
+  const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
 
   // Re-run Sprint button: child sprint for fully completed/stopped runs (not has_rework)
   const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
@@ -945,7 +945,9 @@ export function _smgmtCardHtml(
     // dispatched. The Run-on-schedule toggle is rendered here and nowhere else,
     // so it is hidden on running / post-run / linger cards (issue #863, AC2).
     const runDisabled = !canRun ? "disabled" : "";
-    const runTitle = !canRun ? 'title="Add at least one ticket first"' : "";
+    const runTitle = !canRun
+      ? 'title="No dispatchable tickets — remaining items are already SIT/UAT or in progress"'
+      : "";
     const schedToggle =
       typeof _smgmtSchedToggleHtml === "function"
         ? _smgmtSchedToggleHtml(label)

@@ -13337,6 +13337,14 @@ function _smgmtHasCompletedTickets(tickets) {
   return tickets.some(t => (t.labels || []).some(l => RERUN_STRIP_LABELS.has(l.name)));
 }
 
+/** True when at least one ticket can still be coder-dispatched (no terminal status label). */
+function _smgmtHasDispatchableTickets(tickets) {
+  return tickets.some(t => {
+    const names = (t.labels || []).map(l => l.name);
+    return !names.some(n => RERUN_STRIP_LABELS.has(n));
+  });
+}
+
 // ── 4-state outcome + sprint label display (sprint-26 parity port) ───────────
 
 /** Convert a sprint label to its display name: sprint-26 → "Sprint 26", sprint-26.1 → "Sprint 26.1". */

@@ -3806,7 +3806,7 @@ ${data.errors.join("\n")}`);
     const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
     const isPostRun = !isRunningView && !planBlocksPostRun && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
-    const canRun = tickets.length >= 1 && !hasCompleted;
+    const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const childLabel = _smgmtNextChildLabel(label);
@@ -3835,7 +3835,7 @@ ${data.errors.join("\n")}`);
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
     } else {
       const runDisabled = !canRun ? "disabled" : "";
-      const runTitle = !canRun ? 'title="Add at least one ticket first"' : "";
+      const runTitle = !canRun ? 'title="No dispatchable tickets \u2014 remaining items are already SIT/UAT or in progress"' : "";
       const schedToggle = typeof _smgmtSchedToggleHtml === "function" ? _smgmtSchedToggleHtml(label) : "";
       actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
                   onclick="smgmtRunSprint('${label}')">

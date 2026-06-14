@@ -614,37 +614,10 @@ export async function _pfConfirm() {
   if (!label || !repo) return;
   const confirmBtn = document.getElementById('pf-confirm-btn');
   confirmBtn.disabled = true;
-  confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running…';
-  try {
-    const res = await fetch('/api/sprints/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: repo, sprint_label: label }),
-    });
-    if (!res.ok) {
-      let detail = await res.text();
-      try {
-        const parsed = JSON.parse(detail);
-        detail = parsed.detail || detail;
-      } catch (_) { /* plain-text error body */ }
-      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-    }
-    _pfClose();
-    const n = parseInt(label.split('-')[1], 10);
-    _smgmtShowToast(`Sprint ${n} dispatched.`);
-    if (typeof _smgmtShowSubView === 'function') _smgmtShowSubView('running');
-    await loadSprintMgmt(true, label);
-    if (typeof _smgmtLivePollRestart === 'function') _smgmtLivePollRestart();
-    // Poll until running-all confirms dispatch (avoids stale planning card).
-    for (let i = 0; i < 8; i++) {
-      if (_smgmtRunningLabels && _smgmtRunningLabels.has(label)) break;
-      await new Promise(r => setTimeout(r, 600));
-      await loadSprintMgmt(true, label);
-    }
-  } catch (e) {
-    _pfState = 'error';
-    _pfShowError('Failed to run sprint: ' + e.message);
-  }
+  confirmBtn.textContent = 'Starting…';
+  _pfClose();
+  // Kickoff stepper drives the run from here (issue #932)
+  await smgmtKickoffRun(label, repo);
 }
 
 
@@ -811,4 +784,251 @@ export function _pfStepperSummary() {
     summaryEl.textContent = 'All checks passed — ready to run';
     summaryEl.className = 'pf-stepper-summary pf-stepper-summary--clear';
   }
+}
+
+
+// ── Kickoff stepper (issue #932) ─────────────────────────────────────────────
+// Shows live progress for the three-phase sprint launch: lock acquisition →
+// branch creation → agent dispatch. Uses the shared pf-step-item component
+// (same CSS classes as the pre-flight stepper). Appears in the Running subview
+// immediately when the operator confirms the preflight modal, replacing the
+// bare "Starting…" button state.
+
+/** Step definitions for the kickoff flow. */
+const KS_STEPS = [
+  { key: 'lock',     label: 'Validate and acquire lock' },
+  { key: 'branch',   label: 'Create sprint branch'      },
+  { key: 'dispatch', label: 'Dispatch first agents'     },
+];
+
+/** Which step index failed (-1 = none). Used by retry logic (AC7). */
+let _ksFailedStep = -1;
+let _ksLabel = null;
+let _ksRepo  = null;
+
+/** Render kickoff steps in pending state. */
+function _ksInit() {
+  const stepsEl = document.getElementById('smgmt-kickoff-steps');
+  if (!stepsEl) return;
+  stepsEl.innerHTML = KS_STEPS.map(s =>
+    `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
+      <span class="pf-step-icon" aria-hidden="true"></span>
+      <div class="pf-step-content">
+        <span class="pf-step-name">${escHtml(s.label)}</span>
+        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
+      </div>
+    </div>`
+  ).join('');
+  const errEl = document.getElementById('smgmt-kickoff-error');
+  if (errEl) errEl.hidden = true;
+}
+
+/** Transition a kickoff step to a new state with an optional note. */
+function _ksSetStep(key, state, note) {
+  const item = document.getElementById(`ks-step-${key}`);
+  if (!item) return;
+  item.className = `pf-step-item pf-step-item--${state}`;
+  const noteEl = document.getElementById(`ks-step-note-${key}`);
+  if (noteEl) noteEl.textContent = note || '';
+}
+
+/** Show the kickoff stepper in the Running subview. */
+function _ksShow(label, repo) {
+  _ksLabel = label;
+  _ksRepo  = repo;
+  _ksFailedStep = -1;
+  _ksInit();
+  const shell   = document.getElementById('smgmt-kickoff-shell');
+  const runShell = document.getElementById('smgmt-run-shell');
+  const emptyEl  = document.getElementById('smgmt-running-empty');
+  if (emptyEl)  emptyEl.hidden  = true;
+  if (runShell) runShell.hidden = true;
+  if (shell)    shell.hidden    = false;
+  if (typeof _smgmtShowSubView === 'function') _smgmtShowSubView('running');
+}
+
+/** Hide the kickoff stepper. */
+function _ksHide() {
+  const shell = document.getElementById('smgmt-kickoff-shell');
+  if (shell) shell.hidden = true;
+}
+
+/** Display the error state for a failed step (AC5). */
+function _ksShowError(stepKey, msg) {
+  _ksSetStep(stepKey, 'fail', msg);
+  const errEl = document.getElementById('smgmt-kickoff-error');
+  if (!errEl) return;
+  const msgEl = document.getElementById('smgmt-kickoff-error-msg');
+  if (msgEl) msgEl.textContent = msg || 'An error occurred';
+  errEl.hidden = false;
+}
+
+/** True if the given sprint label is currently in the running-all list. */
+async function _ksIsRunning(label) {
+  try {
+    const res = await fetch('/api/sprints/running-all');
+    if (!res.ok) return false;
+    const data = await res.json();
+    return (data.running || []).some(r => r.sprint_label === label);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Step 1: POST /api/sprints/run. Returns true on 202, false on error.
+ * On failure the error message is shown inline at the lock step (AC5/AC6).
+ */
+async function _ksStep1Post() {
+  const label = _ksLabel;
+  const repo  = _ksRepo;
+  _ksSetStep('lock', 'checking', '');
+  try {
+    const res = await fetch('/api/sprints/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo, sprint_label: label }),
+    });
+    if (!res.ok) {
+      let detail = await res.text();
+      try { const p = JSON.parse(detail); detail = typeof p.detail === 'string' ? p.detail : JSON.stringify(p.detail); }
+      catch (_) { /* plain-text body */ }
+      _ksShowError('lock', detail || `HTTP ${res.status}`);
+      _ksFailedStep = 0;
+      return false;
+    }
+    _ksSetStep('lock', 'pass', '');
+    return true;
+  } catch (e) {
+    _ksShowError('lock', e.message);
+    _ksFailedStep = 0;
+    return false;
+  }
+}
+
+/**
+ * Step 2: Poll until sprint appears in running-all (branch created / process alive).
+ * Returns true on success, false on timeout.
+ */
+async function _ksStep2Branch() {
+  _ksSetStep('branch', 'checking', '');
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1000));
+    if (await _ksIsRunning(_ksLabel)) {
+      _ksSetStep('branch', 'pass', '');
+      return true;
+    }
+  }
+  _ksShowError('branch', 'Timed out waiting for sprint process to start');
+  _ksFailedStep = 1;
+  return false;
+}
+
+/**
+ * Step 3: Poll /api/sprint-status until the first agents are dispatched.
+ * Transitions to running pane after success. Returns true on success.
+ */
+async function _ksStep3Dispatch() {
+  const label = _ksLabel;
+  const repo  = _ksRepo;
+  _ksSetStep('dispatch', 'checking', '');
+  const deadline = Date.now() + 90000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const res = await fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const sprint = (data.running_sprints || []).find(s => s.sprint_label === label);
+        // Agents dispatched when status has been posted with at least one issue
+        if (sprint && sprint.issues && sprint.issues.length > 0) {
+          _ksSetStep('dispatch', 'pass', '');
+          return true;
+        }
+        // Sprint disappeared from running — it terminated before dispatching
+        if (!sprint && !(await _ksIsRunning(label))) {
+          _ksShowError('dispatch', 'Sprint terminated before agents were dispatched');
+          _ksFailedStep = 2;
+          return false;
+        }
+      }
+    } catch (_) { /* ignore transient errors — keep polling */ }
+  }
+  // Timed out but sprint is still running — advance optimistically (slow dispatch)
+  _ksSetStep('dispatch', 'pass', '');
+  return true;
+}
+
+/** Finish the kickoff: hide stepper, reload board, start live poll. */
+async function _ksFinish(label) {
+  _ksHide();
+  _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} dispatched`);
+  if (typeof _smgmtShowSubView === 'function') _smgmtShowSubView('running');
+  await loadSprintMgmt(true, label);
+  if (typeof _smgmtLivePollRestart === 'function') _smgmtLivePollRestart();
+  for (let i = 0; i < 8; i++) {
+    if (_smgmtRunningLabels && _smgmtRunningLabels.has(label)) break;
+    await new Promise(r => setTimeout(r, 600));
+    await loadSprintMgmt(true, label);
+  }
+}
+
+/**
+ * Drive the three-step kickoff flow. Called from _pfConfirm() for both initial
+ * run and re-run (via the preflight modal). Shows the Running subview immediately
+ * so the stepper is visible while the POST and polls complete (AC1).
+ */
+export async function smgmtKickoffRun(label, repo) {
+  _ksShow(label, repo);
+
+  // Step 1: validate/acquire lock
+  if (!await _ksStep1Post()) return;   // AC6: return early on failure
+
+  // Step 2: create sprint branch
+  if (!await _ksStep2Branch()) return; // AC6: return early on failure
+
+  // Step 3: dispatch first agents
+  if (!await _ksStep3Dispatch()) return; // AC6: return early on failure
+
+  // All steps succeeded → transition to running pane (AC4)
+  await _ksFinish(label);
+}
+
+/**
+ * Retry from the step that failed, not from step 1 (AC7).
+ * - Step 0 (lock) failed: re-run the full flow
+ * - Step 1 (branch) failed: re-poll from step 2, then step 3
+ * - Step 2 (dispatch) failed: re-poll from step 3
+ */
+export async function smgmtKickoffRetry() {
+  if (!_ksLabel || !_ksRepo) return;
+  const failedStep = _ksFailedStep;
+  const label = _ksLabel;
+
+  const errEl = document.getElementById('smgmt-kickoff-error');
+  if (errEl) errEl.hidden = true;
+  _ksFailedStep = -1;
+
+  if (failedStep <= 0) {
+    // Lock failed — re-run full kickoff (new POST needed)
+    _ksSetStep('lock',     'pending', '');
+    _ksSetStep('branch',   'pending', '');
+    _ksSetStep('dispatch', 'pending', '');
+    if (!await _ksStep1Post()) return;
+    if (!await _ksStep2Branch()) return;
+    if (!await _ksStep3Dispatch()) return;
+  } else if (failedStep === 1) {
+    // Branch failed — sprint POST already succeeded; re-poll from step 2
+    _ksSetStep('branch',   'pending', '');
+    _ksSetStep('dispatch', 'pending', '');
+    if (!await _ksStep2Branch()) return;
+    if (!await _ksStep3Dispatch()) return;
+  } else {
+    // Dispatch failed — re-poll from step 3
+    _ksSetStep('dispatch', 'pending', '');
+    if (!await _ksStep3Dispatch()) return;
+  }
+
+  await _ksFinish(label);
 }

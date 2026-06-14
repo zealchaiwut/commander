@@ -826,52 +826,6 @@
         _fsActiveJob.es = null;
     };
   }
-  async function _fsRetry() {
-    if (!_fsActiveJob)
-      return;
-    const { owner, repoName, label, params } = _fsActiveJob;
-    const emptySnap = {
-      status: "running",
-      mode: "bar",
-      done: 0,
-      total: params.total || 2,
-      current: "Retrying\u2026",
-      log_tail: []
-    };
-    _fsEnterProgressView(emptySnap);
-    _fsActiveJob.snapshot = emptySnap;
-    try {
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...params, confirmed: true })
-        }
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${res.status}`);
-      }
-      _fsConnectStream(owner, repoName, label);
-    } catch (e) {
-      const slot = _fsProgressSlot();
-      if (slot) {
-        slot.innerHTML = renderProgressActivity(
-          {
-            status: "error",
-            mode: "bar",
-            error: "Retry failed: " + e.message,
-            log_tail: []
-          },
-          { id: "fs-pa", retryFn: "_fsRetry" }
-        );
-      }
-      const retryBtn = document.getElementById("fs-retry-btn");
-      if (retryBtn)
-        retryBtn.classList.remove("hidden");
-    }
-  }
   async function smgmtFinishSprint(label) {
     const repo = _smgmtRepo();
     if (!repo)
@@ -1705,40 +1659,9 @@
       return;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running\u2026';
-    try {
-      const res = await fetch("/api/sprints/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label })
-      });
-      if (!res.ok) {
-        let detail = await res.text();
-        try {
-          const parsed = JSON.parse(detail);
-          detail = parsed.detail || detail;
-        } catch (_) {
-        }
-        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
-      }
-      _pfClose();
-      const n = parseInt(label.split("-")[1], 10);
-      _smgmtShowToast(`Sprint ${n} dispatched.`);
-      if (typeof _smgmtShowSubView === "function")
-        _smgmtShowSubView("running");
-      await loadSprintMgmt(true, label);
-      if (typeof _smgmtLivePollRestart === "function")
-        _smgmtLivePollRestart();
-      for (let i = 0; i < 8; i++) {
-        if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
-          break;
-        await new Promise((r) => setTimeout(r, 600));
-        await loadSprintMgmt(true, label);
-      }
-    } catch (e) {
-      _pfState = "error";
-      _pfShowError("Failed to run sprint: " + e.message);
-    }
+    confirmBtn.textContent = "Starting\u2026";
+    _pfClose();
+    await smgmtKickoffRun(label, repo);
   }
   function _pfStepperInit() {
     _pfStepFails = 0;
@@ -1873,6 +1796,212 @@
       summaryEl.textContent = "All checks passed \u2014 ready to run";
       summaryEl.className = "pf-stepper-summary pf-stepper-summary--clear";
     }
+  }
+  var KS_STEPS = [
+    { key: "lock", label: "Validate and acquire lock" },
+    { key: "branch", label: "Create sprint branch" },
+    { key: "dispatch", label: "Dispatch first agents" }
+  ];
+  var _ksFailedStep = -1;
+  var _ksLabel = null;
+  var _ksRepo = null;
+  function _ksInit() {
+    const stepsEl = document.getElementById("smgmt-kickoff-steps");
+    if (!stepsEl)
+      return;
+    stepsEl.innerHTML = KS_STEPS.map(
+      (s) => `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
+      <span class="pf-step-icon" aria-hidden="true"></span>
+      <div class="pf-step-content">
+        <span class="pf-step-name">${escHtml(s.label)}</span>
+        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
+      </div>
+    </div>`
+    ).join("");
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (errEl)
+      errEl.hidden = true;
+  }
+  function _ksSetStep(key, state, note) {
+    const item = document.getElementById(`ks-step-${key}`);
+    if (!item)
+      return;
+    item.className = `pf-step-item pf-step-item--${state}`;
+    const noteEl = document.getElementById(`ks-step-note-${key}`);
+    if (noteEl)
+      noteEl.textContent = note || "";
+  }
+  function _ksShow(label, repo) {
+    _ksLabel = label;
+    _ksRepo = repo;
+    _ksFailedStep = -1;
+    _ksInit();
+    const shell = document.getElementById("smgmt-kickoff-shell");
+    const runShell = document.getElementById("smgmt-run-shell");
+    const emptyEl = document.getElementById("smgmt-running-empty");
+    if (emptyEl)
+      emptyEl.hidden = true;
+    if (runShell)
+      runShell.hidden = true;
+    if (shell)
+      shell.hidden = false;
+    if (typeof _smgmtShowSubView === "function")
+      _smgmtShowSubView("running");
+  }
+  function _ksHide() {
+    const shell = document.getElementById("smgmt-kickoff-shell");
+    if (shell)
+      shell.hidden = true;
+  }
+  function _ksShowError(stepKey, msg) {
+    _ksSetStep(stepKey, "fail", msg);
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (!errEl)
+      return;
+    const msgEl = document.getElementById("smgmt-kickoff-error-msg");
+    if (msgEl)
+      msgEl.textContent = msg || "An error occurred";
+    errEl.hidden = false;
+  }
+  async function _ksIsRunning(label) {
+    try {
+      const res = await fetch("/api/sprints/running-all");
+      if (!res.ok)
+        return false;
+      const data = await res.json();
+      return (data.running || []).some((r) => r.sprint_label === label);
+    } catch (_) {
+      return false;
+    }
+  }
+  async function _ksStep1Post() {
+    const label = _ksLabel;
+    const repo = _ksRepo;
+    _ksSetStep("lock", "checking", "");
+    try {
+      const res = await fetch("/api/sprints/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, sprint_label: label })
+      });
+      if (!res.ok) {
+        let detail = await res.text();
+        try {
+          const p = JSON.parse(detail);
+          detail = typeof p.detail === "string" ? p.detail : JSON.stringify(p.detail);
+        } catch (_) {
+        }
+        _ksShowError("lock", detail || `HTTP ${res.status}`);
+        _ksFailedStep = 0;
+        return false;
+      }
+      _ksSetStep("lock", "pass", "");
+      return true;
+    } catch (e) {
+      _ksShowError("lock", e.message);
+      _ksFailedStep = 0;
+      return false;
+    }
+  }
+  async function _ksStep2Branch() {
+    _ksSetStep("branch", "checking", "");
+    const deadline = Date.now() + 3e4;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1e3));
+      if (await _ksIsRunning(_ksLabel)) {
+        _ksSetStep("branch", "pass", "");
+        return true;
+      }
+    }
+    _ksShowError("branch", "Timed out waiting for sprint process to start");
+    _ksFailedStep = 1;
+    return false;
+  }
+  async function _ksStep3Dispatch() {
+    const label = _ksLabel;
+    const repo = _ksRepo;
+    _ksSetStep("dispatch", "checking", "");
+    const deadline = Date.now() + 9e4;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2e3));
+      try {
+        const res = await fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const sprint = (data.running_sprints || []).find((s) => s.sprint_label === label);
+          if (sprint && sprint.issues && sprint.issues.length > 0) {
+            _ksSetStep("dispatch", "pass", "");
+            return true;
+          }
+          if (!sprint && !await _ksIsRunning(label)) {
+            _ksShowError("dispatch", "Sprint terminated before agents were dispatched");
+            _ksFailedStep = 2;
+            return false;
+          }
+        }
+      } catch (_) {
+      }
+    }
+    _ksSetStep("dispatch", "pass", "");
+    return true;
+  }
+  async function _ksFinish(label) {
+    _ksHide();
+    _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} dispatched`);
+    if (typeof _smgmtShowSubView === "function")
+      _smgmtShowSubView("running");
+    await loadSprintMgmt(true, label);
+    if (typeof _smgmtLivePollRestart === "function")
+      _smgmtLivePollRestart();
+    for (let i = 0; i < 8; i++) {
+      if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
+        break;
+      await new Promise((r) => setTimeout(r, 600));
+      await loadSprintMgmt(true, label);
+    }
+  }
+  async function smgmtKickoffRun(label, repo) {
+    _ksShow(label, repo);
+    if (!await _ksStep1Post())
+      return;
+    if (!await _ksStep2Branch())
+      return;
+    if (!await _ksStep3Dispatch())
+      return;
+    await _ksFinish(label);
+  }
+  async function smgmtKickoffRetry() {
+    if (!_ksLabel || !_ksRepo)
+      return;
+    const failedStep = _ksFailedStep;
+    const label = _ksLabel;
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (errEl)
+      errEl.hidden = true;
+    _ksFailedStep = -1;
+    if (failedStep <= 0) {
+      _ksSetStep("lock", "pending", "");
+      _ksSetStep("branch", "pending", "");
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep1Post())
+        return;
+      if (!await _ksStep2Branch())
+        return;
+      if (!await _ksStep3Dispatch())
+        return;
+    } else if (failedStep === 1) {
+      _ksSetStep("branch", "pending", "");
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep2Branch())
+        return;
+      if (!await _ksStep3Dispatch())
+        return;
+    } else {
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep3Dispatch())
+        return;
+    }
+    await _ksFinish(label);
   }
 
   // apps/dashboard/static/src/sprint-board/drag-drop.js
@@ -4036,7 +4165,6 @@ ${data.errors.join("\n")}`);
   globalThis._fsSelectAll = _fsSelectAll;
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
-  globalThis._fsRetry = _fsRetry;
   globalThis._bcOpen = _bcOpen;
   globalThis._bcClose = _bcClose;
   globalThis._bcCatClass = _bcCatClass;
@@ -4074,6 +4202,8 @@ ${data.errors.join("\n")}`);
   globalThis._pfStepState = _pfStepState;
   globalThis._pfStepperAnimate = _pfStepperAnimate;
   globalThis._pfStepperSummary = _pfStepperSummary;
+  globalThis.smgmtKickoffRun = smgmtKickoffRun;
+  globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
   globalThis.computeDropPlan = computeDropPlan;
   globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI2;
   globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;

@@ -6902,7 +6902,11 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
+<<<<<<< HEAD
     if label_set & {lbl_r.lower() for lbl_r in _HIGH_RISK_LABELS}:
+=======
+    if label_set & {lbl2.lower() for lbl2 in _HIGH_RISK_LABELS}:
+>>>>>>> origin/feature/932-sprint-kickoff-stepper-for-run-re-run-fl
         return "HIGH"
 
     if paths_touched:

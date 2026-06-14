@@ -110,7 +110,7 @@ class TestMergeSprintEndpoint:
         block = _SERVER_SRC.split("async def finish_sprint")[1].split("@app.")[0]
         assert "Merge Sprint" in block
         assert "remove=[label]" not in block
-        assert "_merge_sprint_branch_chain" in block
+        assert "_merge_sprint_branches_for_label" in block
 
     def test_finish_preview_exposes_merge_branches(self):
         block = _SERVER_SRC.split("def get_sprint_finish_preview")[1].split("@app.")[0]

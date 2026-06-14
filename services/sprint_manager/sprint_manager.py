@@ -467,6 +467,8 @@ class SprintConfig:
     coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
     # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
     coder_backend:     str  = "claude-code"
+    # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
+    use_cline_followups: bool = False
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -650,6 +652,13 @@ def load_config(path: Path) -> "SprintConfig":
         if isinstance(_coder_sub_b, dict) and _coder_sub_b.get("backend"):
             coder_backend = str(_coder_sub_b["backend"])
 
+    # ── agent_config.use_cline_followups (issue #918) ────────────────────────
+    use_cline_followups: bool = False
+    if isinstance(agent_cfg, dict):
+        _ucf = agent_cfg.get("use_cline_followups")
+        if _ucf is not None:
+            use_cline_followups = bool(_ucf)
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -676,6 +685,7 @@ def load_config(path: Path) -> "SprintConfig":
         tester_by_risk              = tester_by_risk,
         coder_by_size               = coder_by_size,
         coder_backend               = coder_backend,
+        use_cline_followups         = use_cline_followups,
     )
 
 
@@ -4210,6 +4220,48 @@ def _dispatch_doctor(
     return None  # all checks passed
 
 
+def _select_coder_backend(
+    issue_num: int,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str] = None,
+) -> str:
+    """Resolve the effective coder backend for this dispatch (issue #918).
+
+    Returns 'cline' when all three conditions hold:
+      1. sprint.use_cline_followups is True
+      2. The ticket carries the 'follow-up' label
+      3. .clinerules exists in cfg.worktree_coder
+
+    Falls back to 'claude-code' (with a warning) when the first two conditions
+    are met but .clinerules is absent — so the sprint is never blocked.
+
+    For all other cases (explicit coder_backend override, no flag, no label)
+    returns cfg.coder_backend unchanged.
+    """
+    if cfg is None:
+        return "claude-code"
+
+    if getattr(cfg, "use_cline_followups", False) is not True:
+        return cfg.coder_backend
+
+    labels = _get_issue_labels(issue_num, repo_name=repo_name)
+    if "follow-up" not in labels:
+        return cfg.coder_backend
+
+    cwd_path: Path = cfg.worktree_coder
+    if not (cwd_path / ".clinerules").exists():
+        structured_log.warn(
+            "cline_followup_fallback",
+            f"[coder] follow-up routing to Cline requested but .clinerules absent in "
+            f"{cwd_path} — falling back to claude-code (issue #918)",
+            issue_num=issue_num,
+            worktree=str(cwd_path),
+        )
+        return "claude-code"
+
+    return "cline"
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -4415,7 +4467,7 @@ def _dispatch_coder(
     # `cmd[-1] += sprint_hint` (below) works for both backends.
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
-    coder_backend = cfg.coder_backend if cfg is not None else "claude-code"
+    coder_backend = _select_coder_backend(issue_num, cfg, repo_name=eff_repo)
     sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
     sys.stdout.flush()
 

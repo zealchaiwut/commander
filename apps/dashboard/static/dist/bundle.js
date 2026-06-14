@@ -7,10 +7,12 @@
   var TOKEN_RE = /(#\d+)|\b(coder|tester|reviewer|documenter|estimator|BA)\b/gi;
   function extractRaw(text) {
     const s = String(text == null ? "" : text).trim();
-    if (s.length === 0 || s[0] !== "{") return s;
+    if (s.length === 0 || s[0] !== "{")
+      return s;
     try {
       const obj = JSON.parse(s);
-      if (typeof obj.raw === "string") return obj.raw;
+      if (typeof obj.raw === "string")
+        return obj.raw;
     } catch (_) {
     }
     return s;
@@ -43,6 +45,7 @@
   globalThis._pfCycle ??= null;
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
+  globalThis._pfUseClineFollowups ??= false;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
@@ -60,7 +63,8 @@
   }
   async function smgmtToggleRunOnSchedule(label, el) {
     const repo = typeof _smgmtRepo === "function" ? _smgmtRepo() : null;
-    if (!repo) return;
+    if (!repo)
+      return;
     const enabled = !!(el && el.checked);
     _schedMap[label] = enabled;
     try {
@@ -69,29 +73,35 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: repo, sprint_label: label, enabled })
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok)
+        throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       _schedMap[label] = !enabled;
-      if (el) el.checked = !enabled;
+      if (el)
+        el.checked = !enabled;
       if (typeof _smgmtShowToast === "function") {
         _smgmtShowToast("Could not update schedule: " + (e.message || e));
       }
     }
   }
   async function _smgmtHydrateSchedToggles2(repo) {
-    if (!repo) return;
+    if (!repo)
+      return;
     try {
       const res = await fetch(`/api/scheduler/sprints?project=${encodeURIComponent(repo)}`);
-      if (!res.ok) return;
+      if (!res.ok)
+        return;
       const data = await res.json();
       const map = data.run_on_schedule || {};
-      for (const k of Object.keys(_schedMap)) delete _schedMap[k];
+      for (const k of Object.keys(_schedMap))
+        delete _schedMap[k];
       Object.keys(map).forEach((k) => {
         _schedMap[k] = !!map[k];
       });
       Object.keys(map).forEach((label) => {
         const cb = document.getElementById(`sched-toggle-${label}`);
-        if (cb) cb.checked = !!map[label];
+        if (cb)
+          cb.checked = !!map[label];
       });
     } catch (_) {
     }
@@ -111,9 +121,12 @@
     _rrVersionedLabel = null;
   }
   function _rrCatClass(cat) {
-    if (cat === "UAT") return "rr-cat-uat";
-    if (cat === "SIT") return "rr-cat-sit";
-    if (cat === "needs-rework") return "rr-cat-rework";
+    if (cat === "UAT")
+      return "rr-cat-uat";
+    if (cat === "SIT")
+      return "rr-cat-sit";
+    if (cat === "needs-rework")
+      return "rr-cat-rework";
     return "rr-cat-queued";
   }
   function _rrUpdateState() {
@@ -121,7 +134,8 @@
     const checked = Array.from(checkboxes).filter((c) => c.checked);
     const uatChecked = Array.from(checkboxes).filter((c) => c.checked && c.dataset.cat === "UAT").length;
     const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn) confirmBtn.disabled = checked.length === 0;
+    if (confirmBtn)
+      confirmBtn.disabled = checked.length === 0;
     const warnEl = document.getElementById("rr-uat-warning");
     if (warnEl) {
       if (uatChecked > 0) {
@@ -139,7 +153,8 @@
   }
   async function smgmtRerunSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     _rrLabel = label;
     _rrVersionedLabel = null;
     document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
@@ -157,11 +172,13 @@
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
       );
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(await res.text());
       const preview = await res.json();
       _rrVersionedLabel = preview.suggested_versioned_label;
       document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
-      if (confirmBtn) confirmBtn.textContent = `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`;
+      if (confirmBtn)
+        confirmBtn.textContent = `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`;
       const listEl = document.getElementById("rr-ticket-list");
       if ((preview.tickets || []).length === 0) {
         listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No tickets in this sprint.</div>';
@@ -189,11 +206,13 @@
   }
   async function _rrConfirm() {
     const repo = _smgmtRepo();
-    if (!_rrLabel || !repo) return;
+    if (!_rrLabel || !repo)
+      return;
     const parentLabel = _rrLabel;
     const checkboxes = Array.from(document.querySelectorAll("#rr-ticket-list input[type=checkbox]"));
     const ticketNumbers = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
-    if (ticketNumbers.length === 0) return;
+    if (ticketNumbers.length === 0)
+      return;
     const confirmBtn = document.getElementById("rr-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
@@ -258,10 +277,14 @@
     _fsPreview = null;
   }
   function _fsCatClass(cat) {
-    if (cat === "UAT") return "rr-cat-uat";
-    if (cat === "SIT") return "rr-cat-sit";
-    if (cat === "needs-rework") return "rr-cat-rework";
-    if (cat === "sprint-summary") return "rr-cat-summary";
+    if (cat === "UAT")
+      return "rr-cat-uat";
+    if (cat === "SIT")
+      return "rr-cat-sit";
+    if (cat === "needs-rework")
+      return "rr-cat-rework";
+    if (cat === "sprint-summary")
+      return "rr-cat-summary";
     return "rr-cat-queued";
   }
   function _fsSelectAll(checked) {
@@ -271,7 +294,8 @@
   }
   async function smgmtFinishSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     _fsLabel = label;
     _fsPreview = null;
     const parts = repo.split("/");
@@ -333,7 +357,8 @@
       actionsEl.innerHTML = actionRows.join("");
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
-      if (confirmBtn) confirmBtn.disabled = false;
+      if (confirmBtn)
+        confirmBtn.disabled = false;
     } catch (e) {
       document.getElementById("fs-loading").classList.add("hidden");
       const errEl = document.getElementById("fs-error");
@@ -343,7 +368,8 @@
   }
   async function _fsConfirm() {
     const repo = _smgmtRepo();
-    if (!_fsLabel || !repo || !_fsPreview) return;
+    if (!_fsLabel || !repo || !_fsPreview)
+      return;
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
@@ -379,7 +405,8 @@
         _smgmtShowToast(`Merged with errors \u2014 ${data.closed} closed.`);
       } else {
         let msg = `${sprintLabelDisplay(_fsLabel || "")} merged \u2014 ${data.closed} closed`;
-        if (data.moved > 0) msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
+        if (data.moved > 0)
+          msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
         _smgmtShowToast(msg + ".");
       }
       await loadSprintMgmt();
@@ -408,10 +435,14 @@
     _bcPreview = null;
   }
   function _bcCatClass(cat) {
-    if (cat === "UAT") return "rr-cat-uat";
-    if (cat === "SIT") return "rr-cat-sit";
-    if (cat === "needs-rework") return "rr-cat-rework";
-    if (cat === "sprint-summary") return "rr-cat-summary";
+    if (cat === "UAT")
+      return "rr-cat-uat";
+    if (cat === "SIT")
+      return "rr-cat-sit";
+    if (cat === "needs-rework")
+      return "rr-cat-rework";
+    if (cat === "sprint-summary")
+      return "rr-cat-summary";
     return "rr-cat-queued";
   }
   function _bcSelectAll(checked) {
@@ -421,7 +452,8 @@
   }
   async function smgmtBulkCompleteSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     _bcLabel = label;
     _bcPreview = null;
     const parts = repo.split("/");
@@ -472,7 +504,8 @@
       ].join("");
       document.getElementById("bc-loading").classList.add("hidden");
       document.getElementById("bc-content").classList.remove("hidden");
-      if (confirmBtn) confirmBtn.disabled = false;
+      if (confirmBtn)
+        confirmBtn.disabled = false;
     } catch (e) {
       document.getElementById("bc-loading").classList.add("hidden");
       const errEl = document.getElementById("bc-error");
@@ -482,7 +515,8 @@
   }
   async function _bcConfirm() {
     const repo = _smgmtRepo();
-    if (!_bcLabel || !repo || !_bcPreview) return;
+    if (!_bcLabel || !repo || !_bcPreview)
+      return;
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
@@ -538,7 +572,8 @@
   }
   function _pfBuildModelsHtml() {
     const m = _pfModels;
-    if (!m) return "";
+    if (!m)
+      return "";
     const rows = [];
     rows.push(`<span class="pf-model-pill"><b>Coder</b> ${escHtml(_pfModelShort(m.coder))}</span>`);
     const br = m.tester_by_risk || {};
@@ -561,8 +596,10 @@
   }
   async function smgmtCancelSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo) return;
-    if (!confirm(`Cancel sprint ${sprintLabelDisplay(label)}? The sprint will stop and tickets will not be modified.`)) return;
+    if (!repo)
+      return;
+    if (!confirm(`Cancel sprint ${sprintLabelDisplay(label)}? The sprint will stop and tickets will not be modified.`))
+      return;
     try {
       const res = await fetch(`/api/sprints/run/${encodeURIComponent(label)}?project=${encodeURIComponent(repo)}`, { method: "DELETE" });
       if (!res.ok) {
@@ -578,7 +615,8 @@
   }
   function _pfOpen(label) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     _pfCurrentLabel = label;
     _pfCurrentRepo = repo;
     _pfReset();
@@ -600,6 +638,7 @@
     _pfFlags = null;
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
+    _pfUseClineFollowups = false;
   }
   function _pfClose() {
     document.getElementById("pf-backdrop").classList.add("hidden");
@@ -612,6 +651,7 @@
     _pfCycle = null;
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
+    _pfUseClineFollowups = false;
   }
   async function _pfFetch() {
     _pfState = "loading";
@@ -621,8 +661,10 @@
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
       );
-      if (!res.ok) throw new Error(await res.text());
-      if (_pfCurrentLabel !== label) return;
+      if (!res.ok)
+        throw new Error(await res.text());
+      if (_pfCurrentLabel !== label)
+        return;
       const data = await res.json();
       _pfDagData = data.dag || null;
       _pfWarnings = data.warnings || null;
@@ -630,12 +672,14 @@
       _pfFlags = data.mis_sizing_flags || null;
       _pfModels = data.models || null;
       if (_pfDagData) {
-        for (const t of _pfDagData.tickets || []) _pfSelectedIds.add(t.id);
+        for (const t of _pfDagData.tickets || [])
+          _pfSelectedIds.add(t.id);
       }
       _pfState = "success";
       _pfShowSuccess();
     } catch (e) {
-      if (_pfCurrentLabel !== label) return;
+      if (_pfCurrentLabel !== label)
+        return;
       _pfState = "error";
       _pfShowError(e.message || "Preflight check failed.");
     }
@@ -651,8 +695,17 @@
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
     const modelsHtml = _pfBuildModelsHtml();
+    const clineCheckboxHtml = `<div class="pf-section pf-cline-section">
+     <label class="pf-cline-label">
+       <input type="checkbox" id="pf-cline-checkbox" class="pf-cline-checkbox"
+         ${_pfUseClineFollowups ? "checked" : ""}
+         onchange="_pfUseClineFollowups = this.checked">
+       <span>Use Cline (Sonnet) for follow-up coder fixes \u2014 tester stays on Claude</span>
+     </label>
+   </div>`;
     document.getElementById("pf-content").innerHTML = `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${modelsHtml}
+     ${clineCheckboxHtml}
      ${warningsHtml}
      ${cycleHtml}
      ${flagsHtml}
@@ -678,7 +731,8 @@
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
     const hasPending = pendingFlags.length > 0;
     const confirmBtn = document.getElementById("pf-confirm-btn");
-    if (!confirmBtn) return;
+    if (!confirmBtn)
+      return;
     confirmBtn.disabled = hasCycle || hasPending;
     if (hasCycle) {
       confirmBtn.title = "Cannot run: dependency cycle detected. Resolve the cycle first.";
@@ -692,7 +746,8 @@
     }
   }
   function _pfBuildWarningsHtml() {
-    if (!_pfWarnings) return "";
+    if (!_pfWarnings)
+      return "";
     const chips = [];
     const unestimated = _pfWarnings.unestimated || [];
     const staleEstimates = _pfWarnings.stale_estimates || [];
@@ -706,21 +761,24 @@
     if (missingAc.length) {
       chips.push(`<span class="pf-warning-chip">${missingAc.length} missing AC: ${escHtml(missingAc.join(", "))}</span>`);
     }
-    if (!chips.length) return "";
+    if (!chips.length)
+      return "";
     return `<div class="pf-warnings-section">
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join("")}</div>
   </div>`;
   }
   function _pfBuildCycleHtml() {
-    if (!_pfCycle || !_pfCycle.length) return "";
+    if (!_pfCycle || !_pfCycle.length)
+      return "";
     return `<div class="pf-cycle-banner">
     <strong>Cycle detected:</strong> ${escHtml(_pfCycle.join(" \u2192 "))}
   </div>`;
   }
   function _pfBuildFlagsHtml() {
     const flags = _pfFlags && (_pfFlags.flags || []);
-    if (!flags || !flags.length) return "";
+    if (!flags || !flags.length)
+      return "";
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
     const rows = flags.map((f) => {
@@ -781,26 +839,33 @@
   function _pfFlagShowSizePicker(num, currentSize) {
     const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
     const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl) actionsEl.style.display = "none";
-    if (pickerEl) pickerEl.style.display = "block";
+    if (actionsEl)
+      actionsEl.style.display = "none";
+    if (pickerEl)
+      pickerEl.style.display = "block";
   }
   function _pfFlagHidePicker(num) {
     const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
     const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl) actionsEl.style.display = "";
-    if (pickerEl) pickerEl.style.display = "none";
+    if (actionsEl)
+      actionsEl.style.display = "";
+    if (pickerEl)
+      pickerEl.style.display = "none";
   }
   async function _pfFlagAction(num, action, newSize) {
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
-    if (!label || !repo) return;
+    if (!label || !repo)
+      return;
     const itemEl = document.getElementById(`pf-flag-item-${num}`);
-    if (itemEl) itemEl.querySelectorAll("button").forEach((b) => {
-      b.disabled = true;
-    });
+    if (itemEl)
+      itemEl.querySelectorAll("button").forEach((b) => {
+        b.disabled = true;
+      });
     try {
       const body = { action };
-      if (newSize) body.new_size = newSize;
+      if (newSize)
+        body.new_size = newSize;
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/mis-sizing-flags/${num}/action?project=${encodeURIComponent(repo)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
@@ -808,9 +873,10 @@
       if (!res.ok) {
         const err = await res.text();
         _smgmtShowToast(`Flag action failed: ${err}`, "error");
-        if (itemEl) itemEl.querySelectorAll("button").forEach((b) => {
-          b.disabled = false;
-        });
+        if (itemEl)
+          itemEl.querySelectorAll("button").forEach((b) => {
+            b.disabled = false;
+          });
         return;
       }
       const data = await res.json();
@@ -823,9 +889,10 @@
       _pfUpdateConfirmBtn();
     } catch (e) {
       _smgmtShowToast("Flag action failed: " + e.message, "error");
-      if (itemEl) itemEl.querySelectorAll("button").forEach((b) => {
-        b.disabled = false;
-      });
+      if (itemEl)
+        itemEl.querySelectorAll("button").forEach((b) => {
+          b.disabled = false;
+        });
     }
   }
   function _pfFlagReestimate(num, newSize) {
@@ -834,9 +901,11 @@
   }
   function _pfBuildDAGHtml(dag) {
     const ticketMap = {};
-    for (const t of dag.tickets || []) ticketMap[t.id] = t;
+    for (const t of dag.tickets || [])
+      ticketMap[t.id] = t;
     const layers = dag.layers || [];
-    if (!layers.length) return "";
+    if (!layers.length)
+      return "";
     let colsHtml = "";
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
@@ -875,11 +944,13 @@
   </div>`;
   }
   function _pfDrawDAGArrows(edges) {
-    if (!edges || !edges.length) return;
+    if (!edges || !edges.length)
+      return;
     const wrap = document.getElementById("pf-dag-wrap");
     const svg = document.getElementById("pf-dag-svg");
     const levels = document.getElementById("pf-dag-levels");
-    if (!wrap || !svg || !levels) return;
+    if (!wrap || !svg || !levels)
+      return;
     const wrapRect = wrap.getBoundingClientRect();
     const h = levels.getBoundingClientRect().height;
     svg.setAttribute("width", String(wrapRect.width));
@@ -901,7 +972,8 @@
     for (const [fromId, toId] of edges) {
       const fromEl = wrap.querySelector(`[data-dag-id="${fromId}"]`);
       const toEl = wrap.querySelector(`[data-dag-id="${toId}"]`);
-      if (!fromEl || !toEl) continue;
+      if (!fromEl || !toEl)
+        continue;
       const fr = fromEl.getBoundingClientRect();
       const tr = toEl.getBoundingClientRect();
       const x1 = fr.right - wrapRect.left;
@@ -925,11 +997,13 @@
       _pfSelectedIds.add(id);
     }
     const card = document.getElementById(`pf-card-${id}`);
-    if (card) card.classList.toggle("pf-deselected", !_pfSelectedIds.has(id));
+    if (card)
+      card.classList.toggle("pf-deselected", !_pfSelectedIds.has(id));
     _pfUpdateSections();
   }
   function _pfGetSelectedTickets() {
-    if (!_pfDagData) return [];
+    if (!_pfDagData)
+      return [];
     return (_pfDagData.tickets || []).filter((t) => _pfSelectedIds.has(t.id));
   }
   function _pfComputeConflicts(tickets) {
@@ -957,9 +1031,11 @@
     ).join("");
   }
   function _pfBuildOrderHtml() {
-    if (!_pfDagData) return '<p class="pf-no-conflict">No order data available.</p>';
+    if (!_pfDagData)
+      return '<p class="pf-no-conflict">No order data available.</p>';
     const layers = (_pfDagData.layers || []).map((layer) => layer.filter((id) => _pfSelectedIds.has(id))).filter((l) => l.length > 0);
-    if (!layers.length) return '<p class="pf-no-conflict">No tickets selected.</p>';
+    if (!layers.length)
+      return '<p class="pf-no-conflict">No tickets selected.</p>';
     let html = '<ol class="pf-order-list">';
     for (let i = 0; i < layers.length; i++) {
       const nums = layers[i].map((id) => id);
@@ -972,8 +1048,10 @@
   function _pfUpdateSections() {
     const conflictsEl = document.getElementById("pf-conflicts");
     const orderEl = document.getElementById("pf-order");
-    if (conflictsEl) conflictsEl.innerHTML = _pfBuildConflictsHtml();
-    if (orderEl) orderEl.innerHTML = _pfBuildOrderHtml();
+    if (conflictsEl)
+      conflictsEl.innerHTML = _pfBuildConflictsHtml();
+    if (orderEl)
+      orderEl.innerHTML = _pfBuildOrderHtml();
   }
   function _pfShowError(msg) {
     document.getElementById("pf-loading").classList.add("hidden");
@@ -989,10 +1067,12 @@
     _pfFetch();
   }
   async function _pfConfirm() {
-    if (_pfState !== "success") return;
+    if (_pfState !== "success")
+      return;
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
-    if (!label || !repo) return;
+    if (!label || !repo)
+      return;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     confirmBtn.disabled = true;
     confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running\u2026';
@@ -1000,7 +1080,7 @@
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label })
+        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups })
       });
       if (!res.ok) {
         let detail = await res.text();
@@ -1014,11 +1094,14 @@
       _pfClose();
       const n = parseInt(label.split("-")[1], 10);
       _smgmtShowToast(`Sprint ${n} dispatched.`);
-      if (typeof _smgmtShowSubView === "function") _smgmtShowSubView("running");
+      if (typeof _smgmtShowSubView === "function")
+        _smgmtShowSubView("running");
       await loadSprintMgmt(true, label);
-      if (typeof _smgmtLivePollRestart === "function") _smgmtLivePollRestart();
+      if (typeof _smgmtLivePollRestart === "function")
+        _smgmtLivePollRestart();
       for (let i = 0; i < 8; i++) {
-        if (_smgmtRunningLabels && _smgmtRunningLabels.has(label)) break;
+        if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
+          break;
         await new Promise((r) => setTimeout(r, 600));
         await loadSprintMgmt(true, label);
       }
@@ -1033,7 +1116,8 @@
     return !!(state && state.moveLock);
   }
   function computeDropPlan(dragInfo, targetLabel) {
-    if (!dragInfo) return { mode: "none", tickets: [], targetLabel, noop: true };
+    if (!dragInfo)
+      return { mode: "none", tickets: [], targetLabel, noop: true };
     if (dragInfo.multi && dragInfo.multi.length > 1) {
       return { mode: "multi", tickets: dragInfo.multi.slice(), targetLabel, noop: false };
     }
@@ -1070,13 +1154,16 @@
           </button>
           <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
         </div>`;
-        if (listEl) listEl.insertBefore(bar, listEl.firstChild);
+        if (listEl)
+          listEl.insertBefore(bar, listEl.firstChild);
       }
       bar.classList.add("show");
-      if (listEl) listEl.classList.add("has-selection");
+      if (listEl)
+        listEl.classList.add("has-selection");
       _smgmtPositionSelectionBar(bar, listEl);
       const countEl = document.getElementById("smgmt-sel-count");
-      if (countEl) countEl.textContent = count === 1 ? "1 ticket selected" : `${count} tickets selected`;
+      if (countEl)
+        countEl.textContent = count === 1 ? "1 ticket selected" : `${count} tickets selected`;
       _smgmtPopulateMoveToMenu();
       const deleteBtn = document.getElementById("smgmt-sel-delete-btn");
       if (deleteBtn) {
@@ -1084,37 +1171,45 @@
         deleteBtn.classList.toggle("show", showDelete);
       }
     } else {
-      if (bar) bar.classList.remove("show");
-      if (listEl) listEl.classList.remove("has-selection");
+      if (bar)
+        bar.classList.remove("show");
+      if (listEl)
+        listEl.classList.remove("has-selection");
     }
   }
   function _smgmtPositionSelectionBar(bar, listEl) {
-    if (!bar || !listEl) return;
+    if (!bar || !listEl)
+      return;
     try {
       const labels = /* @__PURE__ */ new Set();
       (_smgmtData && _smgmtData.issues || []).forEach((i) => {
-        if (_smgmtSelectedIssues.has(i.number) && i.sprint_label) labels.add(i.sprint_label);
+        if (_smgmtSelectedIssues.has(i.number) && i.sprint_label)
+          labels.add(i.sprint_label);
       });
       let target = null;
       if (labels.size === 1) {
         const lbl = [...labels][0];
         const card = document.getElementById("smgmt-card-" + lbl);
-        if (card && card.parentNode === listEl) target = card;
+        if (card && card.parentNode === listEl)
+          target = card;
       }
       if (target) {
-        if (bar.nextElementSibling !== target) listEl.insertBefore(bar, target);
+        if (bar.nextElementSibling !== target)
+          listEl.insertBefore(bar, target);
       } else if (listEl.firstChild !== bar) {
         listEl.insertBefore(bar, listEl.firstChild);
       }
     } catch (_) {
-      if (listEl.firstChild !== bar) listEl.insertBefore(bar, listEl.firstChild);
+      if (listEl.firstChild !== bar)
+        listEl.insertBefore(bar, listEl.firstChild);
     }
   }
   function _smgmtPopulateSelectionDropdown() {
   }
   function _smgmtPopulateMoveToMenu() {
     const menu = document.getElementById("smgmt-move-to-menu");
-    if (!menu || !_smgmtData) return;
+    if (!menu || !_smgmtData)
+      return;
     const selectedNums = Array.from(_smgmtSelectedIssues);
     const occupiedSprints = new Set(
       selectedNums.map((n) => {
@@ -1125,7 +1220,8 @@
     const sprints = (_smgmtData.sprints || []).sort((a, b) => a - b);
     let html = "";
     sprints.forEach((n) => {
-      if (occupiedSprints.has(n)) return;
+      if (occupiedSprints.has(n))
+        return;
       const label = `sprint-${n}`;
       html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">Sprint ${n}</button>`;
       if (typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
@@ -1138,13 +1234,15 @@
   function _smgmtToggleMoveToMenu(event) {
     event.stopPropagation();
     const menu = document.getElementById("smgmt-move-to-menu");
-    if (!menu) return;
+    if (!menu)
+      return;
     _smgmtPopulateMoveToMenu();
     menu.classList.toggle("open");
   }
   function _smgmtCloseMoveToMenu() {
     const menu = document.getElementById("smgmt-move-to-menu");
-    if (menu) menu.classList.remove("open");
+    if (menu)
+      menu.classList.remove("open");
   }
   function _smgmtClearSelection() {
     _smgmtSelectedIssues.forEach((num) => {
@@ -1152,25 +1250,30 @@
       if (el) {
         el.classList.remove("is-selected");
         const cb = el.querySelector(".smgmt-ticket-cb");
-        if (cb) cb.checked = false;
+        if (cb)
+          cb.checked = false;
       }
     });
     _smgmtSelectedIssues.clear();
     _smgmtUpdateSelectionUI2();
   }
   function _smgmtSetSelected(number, selected) {
-    if (selected) _smgmtSelectedIssues.add(number);
-    else _smgmtSelectedIssues.delete(number);
+    if (selected)
+      _smgmtSelectedIssues.add(number);
+    else
+      _smgmtSelectedIssues.delete(number);
     const el = document.getElementById(`smgmt-ticket-${number}`);
     if (el) {
       el.classList.toggle("is-selected", selected);
       const cb = el.querySelector(".smgmt-ticket-cb");
-      if (cb) cb.checked = selected;
+      if (cb)
+        cb.checked = selected;
     }
   }
   function _smgmtTicketSprintKey(number) {
     const iss = (_smgmtData?.issues || []).find((i) => i.number === number);
-    if (!iss) return void 0;
+    if (!iss)
+      return void 0;
     return iss.sprint == null ? "backlog" : iss.sprint;
   }
   function _smgmtSelectionSprintKey() {
@@ -1178,7 +1281,8 @@
     return first == null ? void 0 : _smgmtTicketSprintKey(first);
   }
   function _smgmtEnforceSelectionScope(number) {
-    if (_smgmtSelectedIssues.size === 0) return;
+    if (_smgmtSelectedIssues.size === 0)
+      return;
     const cur = _smgmtSelectionSprintKey();
     const next = _smgmtTicketSprintKey(number);
     if (cur !== void 0 && next !== void 0 && cur !== next) {
@@ -1186,7 +1290,8 @@
     }
   }
   function _smgmtToggleSelect(number, checked) {
-    if (checked) _smgmtEnforceSelectionScope(number);
+    if (checked)
+      _smgmtEnforceSelectionScope(number);
     _smgmtSetSelected(number, checked);
     _smgmtLastSelectedNum = checked ? number : null;
     _smgmtUpdateSelectionUI2();
@@ -1199,45 +1304,55 @@
       const b = nums.indexOf(number);
       if (a !== -1 && b !== -1) {
         const [lo, hi] = a <= b ? [a, b] : [b, a];
-        for (let i = lo; i <= hi; i++) _smgmtSetSelected(nums[i], true);
+        for (let i = lo; i <= hi; i++)
+          _smgmtSetSelected(nums[i], true);
         _smgmtLastSelectedNum = number;
         _smgmtUpdateSelectionUI2();
         const sel = window.getSelection && window.getSelection();
-        if (sel) sel.removeAllRanges();
+        if (sel)
+          sel.removeAllRanges();
         return;
       }
     }
     if (event.ctrlKey || event.metaKey) {
       const nowSelected2 = !_smgmtSelectedIssues.has(number);
-      if (nowSelected2) _smgmtEnforceSelectionScope(number);
+      if (nowSelected2)
+        _smgmtEnforceSelectionScope(number);
       _smgmtSetSelected(number, nowSelected2);
       _smgmtLastSelectedNum = nowSelected2 ? number : null;
       _smgmtUpdateSelectionUI2();
       return;
     }
     const nowSelected = !_smgmtSelectedIssues.has(number);
-    if (nowSelected) _smgmtEnforceSelectionScope(number);
+    if (nowSelected)
+      _smgmtEnforceSelectionScope(number);
     _smgmtSetSelected(number, nowSelected);
     _smgmtLastSelectedNum = nowSelected ? number : null;
     _smgmtUpdateSelectionUI2();
   }
   function _smgmtIsDeletableIssue(num) {
-    if (!_smgmtData) return false;
+    if (!_smgmtData)
+      return false;
     const iss = _smgmtData.issues.find((i) => i.number === num);
-    if (!iss) return false;
+    if (!iss)
+      return false;
     return iss.status === "done" || iss.sprint === null;
   }
   async function _smgmtDeleteSelected() {
-    if (_smgmtSelectedIssues.size !== 1) return;
+    if (_smgmtSelectedIssues.size !== 1)
+      return;
     const num = [..._smgmtSelectedIssues][0];
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     const iss = _smgmtData?.issues.find((i) => i.number === num);
     const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
     if (!confirm(`Delete ${label}?
 
-This will close the issue on GitHub. This cannot be undone.`)) return;
-    if (_smgmtData) _smgmtData.issues = _smgmtData.issues.filter((i) => i.number !== num);
+This will close the issue on GitHub. This cannot be undone.`))
+      return;
+    if (_smgmtData)
+      _smgmtData.issues = _smgmtData.issues.filter((i) => i.number !== num);
     _smgmtClearSelection();
     _smgmtRender(_smgmtData);
     _smgmtBoardLock(`Deleting #${num}\u2026`);
@@ -1245,7 +1360,8 @@ This will close the issue on GitHub. This cannot be undone.`)) return;
       const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
         method: "POST"
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(await res.text());
       _smgmtShowToast(`Issue #${num} closed.`);
     } catch (e) {
       alert("Failed to delete issue: " + e.message);
@@ -1255,9 +1371,11 @@ This will close the issue on GitHub. This cannot be undone.`)) return;
     }
   }
   async function _smgmtMoveSelectedTo(targetLabel) {
-    if (!targetLabel || _smgmtSelectedIssues.size === 0) return;
+    if (!targetLabel || _smgmtSelectedIssues.size === 0)
+      return;
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     const nums = Array.from(_smgmtSelectedIssues);
     const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel }));
     const dest = targetLabel === "backlog" ? "Backlog" : `Sprint ${targetLabel.split("-")[1]}`;
@@ -1265,7 +1383,8 @@ This will close the issue on GitHub. This cannot be undone.`)) return;
       const targetNum = targetLabel === "backlog" ? null : parseInt(targetLabel.split("-")[1], 10);
       nums.forEach((n) => {
         const iss = _smgmtData.issues.find((i) => i.number === n);
-        if (iss) iss.sprint = targetNum;
+        if (iss)
+          iss.sprint = targetNum;
       });
       _smgmtClearSelection();
       _smgmtRender(_smgmtData);
@@ -1277,7 +1396,8 @@ This will close the issue on GitHub. This cannot be undone.`)) return;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changes, project: repo })
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(await res.text());
       const data = await res.json();
       if (data.failed > 0 && data.errors && data.errors.length > 0) {
         _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? "s" : ""} failed to move:
@@ -1326,7 +1446,8 @@ ${data.errors.join("\n")}`);
       setTimeout(() => {
         nums.forEach((n) => {
           const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el) el.classList.add("dragging-ticket");
+          if (el)
+            el.classList.add("dragging-ticket");
         });
       }, 0);
     } else {
@@ -1334,7 +1455,8 @@ ${data.errors.join("\n")}`);
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(issueNum));
       const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el) setTimeout(() => el.classList.add("dragging-ticket"), 0);
+      if (el)
+        setTimeout(() => el.classList.add("dragging-ticket"), 0);
     }
     _smgmtGhostShow();
   }
@@ -1363,50 +1485,63 @@ ${data.errors.join("\n")}`);
     const ghost = document.getElementById("smgmt-ghost-pane");
     const titleEl = document.getElementById("smgmt-ghost-title");
     const subEl = document.getElementById("smgmt-ghost-sub");
-    if (!ghost) return;
+    if (!ghost)
+      return;
     titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
     subEl.textContent = "next sprint number";
     ghost.classList.add("ghost-visible");
   }
   function _smgmtGhostHide() {
     const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost) return;
+    if (!ghost)
+      return;
     ghost.classList.remove("ghost-visible", "ghost-hot");
     _smgmtGhostNextNum = null;
   }
   function _smgmtGhostDragOver(event) {
-    if (!_smgmtDragTicket) return;
-    if (_smgmtRunningLabels.size > 0) return;
+    if (!_smgmtDragTicket)
+      return;
+    if (_smgmtRunningLabels.size > 0)
+      return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost) return;
+    if (!ghost)
+      return;
     const titleEl = document.getElementById("smgmt-ghost-title");
     const subEl = document.getElementById("smgmt-ghost-sub");
     ghost.classList.add("ghost-hot");
-    if (titleEl) titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
-    if (subEl) subEl.textContent = "you'll be asked to confirm";
+    if (titleEl)
+      titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
+    if (subEl)
+      subEl.textContent = "you'll be asked to confirm";
   }
   function _smgmtGhostDragLeave(event) {
     const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost) return;
+    if (!ghost)
+      return;
     if (!ghost.contains(event.relatedTarget)) {
       ghost.classList.remove("ghost-hot");
       const titleEl = document.getElementById("smgmt-ghost-title");
       const subEl = document.getElementById("smgmt-ghost-sub");
-      if (titleEl) titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
+      if (titleEl)
+        titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
       const existing = new Set((_smgmtData?.sprints || []).map((n) => Number(n)));
       const skipped = [];
       for (let i = 1; i < _smgmtGhostNextNum; i++) {
-        if (!existing.has(i)) skipped.push(i);
+        if (!existing.has(i))
+          skipped.push(i);
       }
-      if (subEl) subEl.textContent = skipped.length > 0 ? `next free number \xB7 skipped empty ${skipped.map((s) => `Sprint ${s}`).join(", ")}` : "next free number";
+      if (subEl)
+        subEl.textContent = skipped.length > 0 ? `next free number \xB7 skipped empty ${skipped.map((s) => `Sprint ${s}`).join(", ")}` : "next free number";
     }
   }
   async function _smgmtGhostDrop(event) {
     event.preventDefault();
-    if (!_smgmtDragTicket) return;
-    if (_smgmtRunningLabels.size > 0) return;
+    if (!_smgmtDragTicket)
+      return;
+    if (_smgmtRunningLabels.size > 0)
+      return;
     const dragInfo = _smgmtDragTicket;
     const nextNum = _smgmtGhostNextNum;
     _smgmtGhostHide();
@@ -1414,11 +1549,14 @@ ${data.errors.join("\n")}`);
       return;
     }
     const dragEl = document.getElementById(`smgmt-ticket-${dragInfo.number}`);
-    if (dragEl) dragEl.classList.remove("dragging-ticket");
+    if (dragEl)
+      dragEl.classList.remove("dragging-ticket");
     _smgmtDragTicket = null;
-    if (nextNum == null) return;
+    if (nextNum == null)
+      return;
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     const sprintLabel = `sprint-${nextNum}`;
     const issue = (_smgmtData?.issues || []).find((i) => i.number === dragInfo.number);
     const fromLabel = dragInfo.fromSprint || "backlog";
@@ -1488,11 +1626,13 @@ ${data.errors.join("\n")}`);
       if (_smgmtDragTicket.multi) {
         _smgmtDragTicket.multi.forEach((n) => {
           const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el) el.classList.remove("dragging-ticket");
+          if (el)
+            el.classList.remove("dragging-ticket");
         });
       } else {
         const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
-        if (el) el.classList.remove("dragging-ticket");
+        if (el)
+          el.classList.remove("dragging-ticket");
       }
     }
     const pill = document.getElementById("smgmt-drag-pill");
@@ -1513,7 +1653,8 @@ ${data.errors.join("\n")}`);
       document.querySelectorAll(".smgmt-sprint-card").forEach((b) => b.classList.remove("drag-over-sprint"));
       document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
       const target = document.getElementById(`smgmt-card-${sprintLabel}`);
-      if (target) target.classList.add("drag-over-sprint");
+      if (target)
+        target.classList.add("drag-over-sprint");
     }
   }
   function _smgmtDragLeave(event) {
@@ -1525,23 +1666,28 @@ ${data.errors.join("\n")}`);
     event.preventDefault();
     document.querySelectorAll(".smgmt-sprint-card").forEach((el) => el.classList.remove("drag-over-sprint"));
     document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock })) return;
-    if (!_smgmtDragTicket) return;
+    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
+      return;
+    if (!_smgmtDragTicket)
+      return;
     const dragInfo = _smgmtDragTicket;
     _smgmtDragTicket = null;
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     if (dragInfo.multi && dragInfo.multi.length > 1) {
       const nums = dragInfo.multi;
       const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
       if (_smgmtData) {
         nums.forEach((n) => {
           const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss) iss.sprint = targetNum;
+          if (iss)
+            iss.sprint = targetNum;
         });
       }
       _smgmtClearSelection();
-      if (_smgmtData) _smgmtRender(_smgmtData);
+      if (_smgmtData)
+        _smgmtRender(_smgmtData);
       const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel || "backlog" }));
       _smgmtBoardLock();
       try {
@@ -1550,7 +1696,8 @@ ${data.errors.join("\n")}`);
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ changes, project: repo })
         });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok)
+          throw new Error(await res.text());
         await loadSprintMgmt();
       } catch (e) {
         alert(`Failed to move tickets: ${e.message}`);
@@ -1560,11 +1707,13 @@ ${data.errors.join("\n")}`);
       }
     } else {
       const { number, fromSprint } = dragInfo;
-      if (fromSprint === targetLabel) return;
+      if (fromSprint === targetLabel)
+        return;
       const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
       if (_smgmtData) {
         const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss) iss.sprint = targetNum;
+        if (iss)
+          iss.sprint = targetNum;
         _smgmtRender(_smgmtData);
       }
       _smgmtClearSelection();
@@ -1575,12 +1724,14 @@ ${data.errors.join("\n")}`);
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sprint_label: targetLabel || "backlog", project: repo })
         });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok)
+          throw new Error(await res.text());
         await loadSprintMgmt();
       } catch (e) {
         if (_smgmtData) {
           const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
+          if (iss)
+            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
           _smgmtRender(_smgmtData);
         }
         alert(`Failed to move ticket #${number}: ${e.message}`);
@@ -1590,11 +1741,13 @@ ${data.errors.join("\n")}`);
     }
   }
   function _smgmtTicketReorderDragOver(event) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1) return;
+    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
+      return;
     const target = event.currentTarget;
     const targetSprint = target.dataset.sprint;
     const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
-    if (targetSprint !== dragSprint) return;
+    if (targetSprint !== dragSprint)
+      return;
     event.preventDefault();
     event.stopPropagation();
     const rect = target.getBoundingClientRect();
@@ -1606,9 +1759,11 @@ ${data.errors.join("\n")}`);
     event.currentTarget.classList.remove("drag-before", "drag-after");
   }
   async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1) return;
+    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
+      return;
     const dragInfo = _smgmtDragTicket;
-    if (dragInfo.fromSprint !== sprintLabel) return;
+    if (dragInfo.fromSprint !== sprintLabel)
+      return;
     const dragIssue = dragInfo.number;
     if (dragIssue === targetIssue) {
       event.currentTarget.classList.remove("drag-before", "drag-after");
@@ -1620,9 +1775,11 @@ ${data.errors.join("\n")}`);
     const insertAfter = event.clientY >= rect.top + rect.height / 2;
     event.currentTarget.classList.remove("drag-before", "drag-after");
     const repo = _smgmtRepo();
-    if (!repo || !_smgmtData) return;
+    if (!repo || !_smgmtData)
+      return;
     const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
-    if (!container) return;
+    if (!container)
+      return;
     const rows = Array.from(container.querySelectorAll(".smgmt-ticket[data-issue]"));
     let order = rows.map((r) => parseInt(r.dataset.issue, 10)).filter((n) => !isNaN(n));
     order = order.filter((n) => n !== dragIssue);
@@ -1638,7 +1795,8 @@ ${data.errors.join("\n")}`);
           body: JSON.stringify(order)
         }
       );
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok)
+        throw new Error(await res.text());
       await loadSprintMgmt();
     } catch (e) {
       alert(`Failed to reorder tickets: ${e.message}`);
@@ -1661,7 +1819,8 @@ ${data.errors.join("\n")}`);
       setTimeout(() => {
         nums.forEach((n) => {
           const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el) el.classList.add("dragging-ticket");
+          if (el)
+            el.classList.add("dragging-ticket");
         });
       }, 0);
     } else {
@@ -1669,7 +1828,8 @@ ${data.errors.join("\n")}`);
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(issueNum));
       const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el) setTimeout(() => el.classList.add("dragging-ticket"), 0);
+      if (el)
+        setTimeout(() => el.classList.add("dragging-ticket"), 0);
     }
     _smgmtGhostShow();
   }
@@ -1689,23 +1849,29 @@ ${data.errors.join("\n")}`);
   async function _smgmtDropOnBacklog(event) {
     event.preventDefault();
     document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock })) return;
-    if (!_smgmtDragTicket) return;
+    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
+      return;
+    if (!_smgmtDragTicket)
+      return;
     const dragInfo = _smgmtDragTicket;
     _smgmtDragTicket = null;
-    if (!dragInfo.fromSprint) return;
+    if (!dragInfo.fromSprint)
+      return;
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     if (dragInfo.multi && dragInfo.multi.length > 1) {
       const nums = dragInfo.multi;
       if (_smgmtData) {
         nums.forEach((n) => {
           const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss) iss.sprint = null;
+          if (iss)
+            iss.sprint = null;
         });
       }
       _smgmtClearSelection();
-      if (_smgmtData) _smgmtRender(_smgmtData);
+      if (_smgmtData)
+        _smgmtRender(_smgmtData);
       const changes = nums.map((n) => ({ issue_num: n, sprint_label: "backlog" }));
       _smgmtBoardLock();
       try {
@@ -1714,7 +1880,8 @@ ${data.errors.join("\n")}`);
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ changes, project: repo })
         });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok)
+          throw new Error(await res.text());
         await loadSprintMgmt();
       } catch (e) {
         alert(`Failed to move tickets to backlog: ${e.message}`);
@@ -1726,7 +1893,8 @@ ${data.errors.join("\n")}`);
       const { number, fromSprint } = dragInfo;
       if (_smgmtData) {
         const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss) iss.sprint = null;
+        if (iss)
+          iss.sprint = null;
         _smgmtRender(_smgmtData);
       }
       _smgmtClearSelection();
@@ -1737,12 +1905,14 @@ ${data.errors.join("\n")}`);
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sprint_label: "backlog", project: repo })
         });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok)
+          throw new Error(await res.text());
         await loadSprintMgmt();
       } catch (e) {
         if (_smgmtData) {
           const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
+          if (iss)
+            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
           _smgmtRender(_smgmtData);
         }
         alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
@@ -1759,16 +1929,19 @@ ${data.errors.join("\n")}`);
     const progWrap = document.getElementById("smgmt-op-progress-wrap");
     const logEl = document.getElementById("smgmt-op-log");
     const text = message || "Moving\u2026";
-    if (msgEl) msgEl.textContent = text;
+    if (msgEl)
+      msgEl.textContent = text;
     if (overlay) {
       overlay.setAttribute("aria-label", text.replace(/…$/, "") + ", please wait");
       overlay.classList.add("active");
     }
     const showProgress = !!(opts && opts.progress);
-    if (progWrap) progWrap.hidden = !showProgress;
+    if (progWrap)
+      progWrap.hidden = !showProgress;
     if (logEl) {
       logEl.hidden = !showProgress;
-      if (showProgress && opts.clearLog) logEl.innerHTML = "";
+      if (showProgress && opts.clearLog)
+        logEl.innerHTML = "";
     }
     if (showProgress && opts.total != null) {
       _smgmtBoardProgress(0, opts.total);
@@ -1780,12 +1953,15 @@ ${data.errors.join("\n")}`);
     const fill = document.getElementById("smgmt-op-progress-fill");
     const pctEl = document.getElementById("smgmt-op-progress-pct");
     const pct = total > 0 ? Math.round(done / total * 100) : 0;
-    if (fill) fill.style.width = pct + "%";
-    if (pctEl) pctEl.textContent = pct + "%";
+    if (fill)
+      fill.style.width = pct + "%";
+    if (pctEl)
+      pctEl.textContent = pct + "%";
   }
   function _smgmtBoardLog(line, kind) {
     const logEl = document.getElementById("smgmt-op-log");
-    if (!logEl) return;
+    if (!logEl)
+      return;
     const row = document.createElement("div");
     row.className = "smgmt-op-log-line" + (kind ? ` smgmt-op-log-line--${kind}` : "");
     row.textContent = line;
@@ -1795,22 +1971,26 @@ ${data.errors.join("\n")}`);
   function _smgmtBoardUnlock() {
     _smgmtMoveLock = false;
     const overlay = document.getElementById("smgmt-move-overlay");
-    if (overlay) overlay.classList.remove("active");
+    if (overlay)
+      overlay.classList.remove("active");
     const progWrap = document.getElementById("smgmt-op-progress-wrap");
     const logEl = document.getElementById("smgmt-op-log");
-    if (progWrap) progWrap.hidden = true;
+    if (progWrap)
+      progWrap.hidden = true;
     if (logEl) {
       logEl.hidden = true;
       logEl.innerHTML = "";
     }
     _smgmtBoardProgress(0, 1);
-    if (_arInterval > 0) _smgmtArStartTicker();
+    if (_arInterval > 0)
+      _smgmtArStartTicker();
   }
 
   // apps/dashboard/static/src/sprint-board/board-render.js
   async function loadSprintMgmt2(silent, optimisticRunningLabel) {
     const listEl = document.getElementById("smgmt-sprint-list");
-    if (!listEl) return;
+    if (!listEl)
+      return;
     const repo = _cachedFullRepo[_slug] || null;
     if (!repo) {
       listEl.innerHTML = '<div class="loading-msg">Project not found.</div>';
@@ -1818,7 +1998,8 @@ ${data.errors.join("\n")}`);
     }
     if (!silent) {
       listEl.innerHTML = '<div class="loading-msg">Loading sprints\u2026</div>';
-      for (const k of Object.keys(_smgmtFinishCards)) delete _smgmtFinishCards[k];
+      for (const k of Object.keys(_smgmtFinishCards))
+        delete _smgmtFinishCards[k];
     }
     try {
       if (typeof _smgmtEnsureCapData === "function") {
@@ -1838,7 +2019,8 @@ ${data.errors.join("\n")}`);
         throw new Error(msg);
       }
       const data = await resp.json();
-      if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore();
+      if (typeof _smgmtLingerRestore === "function")
+        _smgmtLingerRestore();
       const prevRunning = new Set(_smgmtRunningLabels);
       _smgmtRunningLabels = /* @__PURE__ */ new Set();
       _smgmtAnySprintRunning = false;
@@ -1880,12 +2062,14 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtSprintLabelSortKey(label) {
     const m = String(label).match(/^sprint-(\d+(?:\.\d+)*)$/);
-    if (!m) return [Infinity];
+    if (!m)
+      return [Infinity];
     return m[1].split(".").map((n) => parseInt(n, 10));
   }
   function _smgmtRender2(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
-    if (!listEl) return;
+    if (!listEl)
+      return;
     _smgmtData = data;
     _smgmtUpdateSubnav();
     const sprints = data.sprints || [];
@@ -1896,7 +2080,8 @@ ${data.errors.join("\n")}`);
     issues.forEach((iss) => {
       const key = iss.sprint_label || null;
       if (key != null) {
-        if (!bySprint[key]) bySprint[key] = [];
+        if (!bySprint[key])
+          bySprint[key] = [];
         bySprint[key].push(iss);
       } else {
         unassigned.push(iss);
@@ -1913,8 +2098,10 @@ ${data.errors.join("\n")}`);
     const _rerunInto = data.sprint_rerun_into || {};
     const orderedLabels = orderedLabelsRaw.filter((label) => {
       const ticketCount = (bySprint[label] || []).length;
-      if (ticketCount > 0) return true;
-      if (_rerunInto[label]) return false;
+      if (ticketCount > 0)
+        return true;
+      if (_rerunInto[label])
+        return false;
       const hasChild = Object.values(_sprintParents).some((parent) => parent === label);
       return !hasChild;
     });
@@ -1925,14 +2112,18 @@ ${data.errors.join("\n")}`);
       const kb = _smgmtSprintLabelSortKey(b);
       for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
         const d = (ka[i] ?? Infinity) - (kb[i] ?? Infinity);
-        if (d !== 0) return d;
+        if (d !== 0)
+          return d;
       }
       return 0;
     });
     for (const lbl of sortedForNext) {
-      if (_smgmtRunningLabels.has(lbl)) continue;
-      if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl)) continue;
-      if (_smgmtFinishedLabels.has(lbl)) continue;
+      if (_smgmtRunningLabels.has(lbl))
+        continue;
+      if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl))
+        continue;
+      if (_smgmtFinishedLabels.has(lbl))
+        continue;
       if ((bySprint[lbl] || []).length >= 1) {
         _smgmtNextUpLabel = lbl;
         break;
@@ -1940,7 +2131,8 @@ ${data.errors.join("\n")}`);
     }
     const cards = orderedLabels.map((label) => {
       const tickets = bySprint[label] || [];
-      if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
+      if (_smgmtIsFreshRerunSprint(label))
+        delete _smgmtOutcomeCache[label];
       const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
       const outcome = _smgmtRunningLabels.has(label) || inLinger ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
@@ -1951,9 +2143,11 @@ ${data.errors.join("\n")}`);
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
     _smgmtEnsureCapData(false);
-    if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
+    if (_smgmtSelectedIssues.size > 0)
+      _smgmtUpdateSelectionUI();
     for (const [lbl, fc] of Object.entries(_smgmtFinishCards)) {
-      if (fc) _smgmtRenderFinishCard(lbl, fc.card, fc.branch, _smgmtRepo());
+      if (fc)
+        _smgmtRenderFinishCard(lbl, fc.card, fc.branch, _smgmtRepo());
     }
     _smgmtLoadFinishCards();
     _smgmtFetchMissingOutcomes(orderedLabels, bySprint);
@@ -1974,12 +2168,14 @@ ${data.errors.join("\n")}`);
   function _smgmtLabelFilterRender(issues) {
     _smgmtLastLabelIssues = issues || [];
     const row = document.getElementById("smgmt-label-filter-row");
-    if (!row) return;
+    if (!row)
+      return;
     const seen = /* @__PURE__ */ new Set();
     (issues || []).forEach((iss) => {
       (iss.labels || []).forEach((l) => {
         seen.add(l.name);
-        if (l.color) _smgmtLabelColors[l.name] = "#" + l.color;
+        if (l.color)
+          _smgmtLabelColors[l.name] = "#" + l.color;
       });
     });
     const priority = _SMGMT_FILTER_PRIORITY.filter((n) => seen.has(n));
@@ -2028,28 +2224,37 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtIsFreshRerunSprint(label) {
     const parents = _smgmtData && _smgmtData.sprint_parents || {};
-    if (!parents[label]) return false;
+    if (!parents[label])
+      return false;
     const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
     return planState === "draft" || planState === "planning";
   }
   function _smgmtApplyRerunOptimistic2(parentLabel, subLabel, ticketNumbers) {
-    if (!_smgmtData || !parentLabel || !subLabel) return;
+    if (!_smgmtData || !parentLabel || !subLabel)
+      return;
     const nums = new Set(ticketNumbers || []);
     const issues = _smgmtData.issues || [];
     for (const iss of issues) {
-      if (nums.has(iss.number)) iss.sprint_label = subLabel;
+      if (nums.has(iss.number))
+        iss.sprint_label = subLabel;
     }
-    if (!_smgmtData.order) _smgmtData.order = [];
+    if (!_smgmtData.order)
+      _smgmtData.order = [];
     if (!_smgmtData.order.includes(subLabel)) {
       const parentIdx = _smgmtData.order.indexOf(parentLabel);
-      if (parentIdx >= 0) _smgmtData.order.splice(parentIdx + 1, 0, subLabel);
-      else _smgmtData.order.push(subLabel);
+      if (parentIdx >= 0)
+        _smgmtData.order.splice(parentIdx + 1, 0, subLabel);
+      else
+        _smgmtData.order.push(subLabel);
     }
-    if (!_smgmtData.sprint_parents) _smgmtData.sprint_parents = {};
+    if (!_smgmtData.sprint_parents)
+      _smgmtData.sprint_parents = {};
     _smgmtData.sprint_parents[subLabel] = parentLabel;
-    if (!_smgmtData.sprint_rerun_into) _smgmtData.sprint_rerun_into = {};
+    if (!_smgmtData.sprint_rerun_into)
+      _smgmtData.sprint_rerun_into = {};
     _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
-    if (!_smgmtData.sprint_plan_states) _smgmtData.sprint_plan_states = {};
+    if (!_smgmtData.sprint_plan_states)
+      _smgmtData.sprint_plan_states = {};
     _smgmtData.sprint_plan_states[subLabel] = "draft";
     delete _smgmtOutcomeCache[parentLabel];
     delete _smgmtOutcomeCache[subLabel];
@@ -2061,16 +2266,21 @@ ${data.errors.join("\n")}`);
   }
   async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     const toFetch = [];
     for (const label of orderedLabels) {
-      if (_smgmtRunningLabels.has(label)) continue;
-      if (_smgmtIsFreshRerunSprint(label)) continue;
-      if (_smgmtOutcomeCache[label] !== void 0) continue;
+      if (_smgmtRunningLabels.has(label))
+        continue;
+      if (_smgmtIsFreshRerunSprint(label))
+        continue;
+      if (_smgmtOutcomeCache[label] !== void 0)
+        continue;
       const tickets = bySprint[label] || [];
       const hasRework = tickets.some((t) => (t.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework"));
       const hasCompleted = _smgmtHasCompletedTickets(tickets);
-      if (tickets.length > 0 && !hasRework && !hasCompleted) continue;
+      if (tickets.length > 0 && !hasRework && !hasCompleted)
+        continue;
       toFetch.push(label);
     }
     await Promise.all(toFetch.map(async (label) => {
@@ -2092,17 +2302,21 @@ ${data.errors.join("\n")}`);
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     for (const label of orderedLabels) {
       const tickets = bySprint[label] || [];
-      if (tickets.length === 0) continue;
-      for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
+      if (tickets.length === 0)
+        continue;
+      for (const t of tickets)
+        _smgmtTicketToSprint[t.number] = label;
       const issueNums = tickets.map((t) => t.number).join(",");
       try {
         const resp = await fetch(
           `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
         );
-        if (!resp.ok) continue;
+        if (!resp.ok)
+          continue;
         const data = await resp.json();
         const estEl = document.getElementById(`smgmt-est-${label}`);
         if (estEl && data.complete && data.total_hours !== null) {
@@ -2127,46 +2341,61 @@ ${data.errors.join("\n")}`);
   }
   async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     for (const label of orderedLabels) {
-      if (_smgmtRunningLabels.has(label)) continue;
-      if (_smgmtFinishedLabels.has(label)) continue;
+      if (_smgmtRunningLabels.has(label))
+        continue;
+      if (_smgmtFinishedLabels.has(label))
+        continue;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
-      if (pending.length < 2) continue;
-      for (const t of pending) delete _smgmtConflictsByIssue[t.number];
+      if (pending.length < 2)
+        continue;
+      for (const t of pending)
+        delete _smgmtConflictsByIssue[t.number];
       try {
         const resp = await fetch(
           `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
         );
-        if (!resp.ok) continue;
+        if (!resp.ok)
+          continue;
         const data = await resp.json();
         for (const c of data.conflicts || []) {
-          if (!_smgmtConflictsByIssue[c.ticket1_id]) _smgmtConflictsByIssue[c.ticket1_id] = [];
-          if (!_smgmtConflictsByIssue[c.ticket2_id]) _smgmtConflictsByIssue[c.ticket2_id] = [];
+          if (!_smgmtConflictsByIssue[c.ticket1_id])
+            _smgmtConflictsByIssue[c.ticket1_id] = [];
+          if (!_smgmtConflictsByIssue[c.ticket2_id])
+            _smgmtConflictsByIssue[c.ticket2_id] = [];
           _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
           _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
         }
-        for (const t of pending) _smgmtUpdateConflictBadge(t.number);
+        for (const t of pending)
+          _smgmtUpdateConflictBadge(t.number);
       } catch (_) {
       }
     }
   }
   async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     for (const label of orderedLabels) {
-      if (_smgmtRunningLabels.has(label)) continue;
-      if (_smgmtFinishedLabels.has(label)) continue;
+      if (_smgmtRunningLabels.has(label))
+        continue;
+      if (_smgmtFinishedLabels.has(label))
+        continue;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
-      if (pending.length < 2) continue;
-      for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+      if (pending.length < 2)
+        continue;
+      for (const t of pending)
+        delete _smgmtDepOrderByIssue[t.number];
       try {
         const resp = await fetch(
           `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
         );
-        if (!resp.ok) continue;
+        if (!resp.ok)
+          continue;
         const data = await resp.json();
         if (data.has_cycle) {
           const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
@@ -2185,22 +2414,26 @@ ${data.errors.join("\n")}`);
             };
           }
         }
-        for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
+        for (const t of pending)
+          _smgmtUpdateDepOrderBadge(t.number);
       } catch (_) {
       }
     }
   }
   async function _smgmtLoadGoals(orderedLabels) {
     const repo = _smgmtRepo();
-    if (!repo) return;
+    if (!repo)
+      return;
     for (const label of orderedLabels) {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
-      if (!goalEl) continue;
+      if (!goalEl)
+        continue;
       try {
         const resp = await fetch(
           `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
         );
-        if (!resp.ok) continue;
+        if (!resp.ok)
+          continue;
         const data = await resp.json();
         const goal = (data.goal || "").trim();
         if (goal) {
@@ -2224,9 +2457,12 @@ ${data.errors.join("\n")}`);
       const blocks = issues.map((iss) => {
         const o = iss.outcome || "skipped";
         let blockClass = "seg-pending";
-        if (o === "done") blockClass = "seg-done";
-        else if (o === "failed") blockClass = "seg-failed";
-        else if (o === "skipped") blockClass = "seg-skipped";
+        if (o === "done")
+          blockClass = "seg-done";
+        else if (o === "failed")
+          blockClass = "seg-failed";
+        else if (o === "skipped")
+          blockClass = "seg-skipped";
         return `<div class="seg-block ${blockClass}"></div>`;
       }).join("");
       segBarHtml = `<div class="smgmt-seg-bar">${blocks}</div>`;
@@ -2254,15 +2490,19 @@ ${data.errors.join("\n")}`);
   </div>`;
   }
   function _smgmtOutcomeTicketListHtml(issues, label, repo) {
-    if (!issues || issues.length === 0) return "";
+    if (!issues || issues.length === 0)
+      return "";
     const safeLabel = label ? escHtml(label) : "";
     const safeRepo = repo ? escHtml(repo) : "";
     return issues.map((iss) => {
       const o = iss.outcome || "skipped";
       let circle = "";
-      if (o === "done") circle = '<div class="smgmt-ticket-circle done">\u2713</div>';
-      else if (o === "failed") circle = '<div class="smgmt-ticket-circle failed">\u2715</div>';
-      else circle = '<div class="smgmt-ticket-circle skipped">\u2212</div>';
+      if (o === "done")
+        circle = '<div class="smgmt-ticket-circle done">\u2713</div>';
+      else if (o === "failed")
+        circle = '<div class="smgmt-ticket-circle failed">\u2715</div>';
+      else
+        circle = '<div class="smgmt-ticket-circle skipped">\u2212</div>';
       const elapsed = `<span class="smgmt-ticket-elapsed">${escHtml(_fmtElapsed(iss.elapsed_secs))}</span>`;
       const rejLabel = o === "failed" ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : "";
       const viewLogBtn = safeLabel && safeRepo ? `<button class="btn-view-log" title="View issue log"
@@ -2298,10 +2538,12 @@ ${data.errors.join("\n")}`);
   }
   async function _smgmtLoadFinishCards() {
     const repo = _smgmtRepo();
-    if (!repo || !_smgmtData) return;
+    if (!repo || !_smgmtData)
+      return;
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
     await Promise.allSettled(order.map(async (label) => {
-      if (_smgmtIsFreshRerunSprint(label)) return;
+      if (_smgmtIsFreshRerunSprint(label))
+        return;
       try {
         const [cardRes, branchRes] = await Promise.all([
           fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
@@ -2312,7 +2554,8 @@ ${data.errors.join("\n")}`);
           return;
         }
         const cardData = await cardRes.json();
-        if (cardData.state === "no_data") return;
+        if (cardData.state === "no_data")
+          return;
         const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
         _smgmtFinishCards[label] = { card: cardData, branch: branchData };
         _smgmtRenderFinishCard(label, cardData, branchData, repo);
@@ -2345,10 +2588,12 @@ ${data.errors.join("\n")}`);
         }
       }
     }
-    if (cardData.state === "no_data") return;
+    if (cardData.state === "no_data")
+      return;
     const cardEl = document.getElementById(`smgmt-finish-card-${label}`);
     const blockEl = document.getElementById(`smgmt-card-${label}`);
-    if (!cardEl || !blockEl) return;
+    if (!cardEl || !blockEl)
+      return;
     const isFinished = cardData.state === "completed" || cardData.state === "has_rework";
     const hasPr = !!(branchData && branchData.pr_url);
     const hasSummary = !!cardData.summary_issue_num;
@@ -2367,8 +2612,10 @@ ${data.errors.join("\n")}`);
     const branchName = `sprint/sprint-${n}`;
     const branchUrl = `https://github.com/${escHtml(repo)}/tree/${branchName}`;
     const branchLink = branchData && branchData.exists ? `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link"><i class="ti ti-git-branch"></i> ${escHtml(branchName)}</a>` : `<a href="${branchUrl}" target="_blank" rel="noopener" class="sfc-branch-link sfc-branch-link--warn" title="Could not verify branch exists on GitHub"><i class="ti ti-alert-triangle"></i> ${escHtml(branchName)}</a>`;
-    if (state === "running") return _sfcRunningHtml(cardData, branchLink, n);
-    if (state === "completed") return _sfcCompletedHtml(cardData, branchLink, n, branchData);
+    if (state === "running")
+      return _sfcRunningHtml(cardData, branchLink, n);
+    if (state === "completed")
+      return _sfcCompletedHtml(cardData, branchLink, n, branchData);
     if (state === "has_rework" || state === "cancelled") {
       return _sfcHasReworkHtml(cardData, branchLink, n, branchData);
     }
@@ -2381,12 +2628,15 @@ ${data.errors.join("\n")}`);
     let isCollapsed = isRunning;
     try {
       const _pref = localStorage.getItem("sprintColumn_" + label + "_collapsed");
-      if (_pref === "1") isCollapsed = true;
-      else if (_pref === "0") isCollapsed = false;
+      if (_pref === "1")
+        isCollapsed = true;
+      else if (_pref === "0")
+        isCollapsed = false;
     } catch (_) {
     }
     const isFreshRerun = _smgmtIsFreshRerunSprint(label);
-    if (isFreshRerun) outcome = null;
+    if (isFreshRerun)
+      outcome = null;
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
@@ -2447,13 +2697,17 @@ ${data.errors.join("\n")}`);
         const _metaSecs = outcome.wall_clock_secs;
         const _metaStopped = outcome.ended_at ? _fmtStoppedAt(outcome.ended_at) : null;
         const _metaParts = [];
-        if (_metaSecs != null) _metaParts.push(_fmtRunningTime(_metaSecs));
-        if (_metaStopped) _metaParts.push(`stopped ${_metaStopped}`);
-        if (_metaParts.length) headerMetaHtml = `<span class="smgmt-sprint-meta">${escHtml(_metaParts.join(" \xB7 "))}</span>`;
+        if (_metaSecs != null)
+          _metaParts.push(_fmtRunningTime(_metaSecs));
+        if (_metaStopped)
+          _metaParts.push(`stopped ${_metaStopped}`);
+        if (_metaParts.length)
+          headerMetaHtml = `<span class="smgmt-sprint-meta">${escHtml(_metaParts.join(" \xB7 "))}</span>`;
         const _elapsedByNum = {};
         if (outcome.issues) {
           for (const _oi of outcome.issues) {
-            if (_oi.elapsed_secs != null) _elapsedByNum[_oi.number] = _oi.elapsed_secs;
+            if (_oi.elapsed_secs != null)
+              _elapsedByNum[_oi.number] = _oi.elapsed_secs;
           }
         }
         ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
@@ -2575,7 +2829,8 @@ ${data.errors.join("\n")}`);
         <span class="level-sep-desc">\xB7 runs after level ${prevLevel} completes</span>
       </div>`;
       }
-      if (ticketLevel > 0) prevLevel = ticketLevel;
+      if (ticketLevel > 0)
+        prevLevel = ticketLevel;
       const isActiveAgent = agentStatus && (agentStatus.endsWith("_running") || agentStatus.endsWith("_dispatched"));
       let indicator = "";
       if (liveStatus === "done") {
@@ -2615,7 +2870,8 @@ ${data.errors.join("\n")}`);
     const levelNums = [...new Set(
       issues.map((i) => i.dispatch_level || 0 || 1)
     )].filter((l) => l > 0).sort((a, b) => a - b);
-    if (levelNums.length <= 1) return null;
+    if (levelNums.length <= 1)
+      return null;
     let current = levelNums[0];
     for (const lvl of levelNums) {
       const group = issues.filter((i) => (i.dispatch_level || 0 || 1) === lvl);
@@ -2657,7 +2913,8 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtBoardBannerPatch(label, live) {
     const textEl = document.getElementById(`smgmt-board-banner-text-${label}`);
-    if (!textEl) return;
+    if (!textEl)
+      return;
     const doneCount = live.done_count || 0;
     const failedCount = live.failed_count || 0;
     const skippedCount = live.skipped_count || 0;
@@ -2702,9 +2959,12 @@ ${data.errors.join("\n")}`);
       const liveStatus = liveIss ? liveIss.status : null;
       const agentStatus = liveIss ? liveIss.agent_status : null;
       let blockClass = "seg-pending";
-      if (liveStatus === "done") blockClass = "seg-done";
-      else if (agentStatus === "failed" || liveStatus === "skipped") blockClass = "seg-failed";
-      else if (liveStatus === "in-progress" || agentStatus === "running" || currentTicket && t.number === currentTicket.number) blockClass = "seg-running";
+      if (liveStatus === "done")
+        blockClass = "seg-done";
+      else if (agentStatus === "failed" || liveStatus === "skipped")
+        blockClass = "seg-failed";
+      else if (liveStatus === "in-progress" || agentStatus === "running" || currentTicket && t.number === currentTicket.number)
+        blockClass = "seg-running";
       return `<div class="seg-block ${blockClass}" data-issue="${t.number}"></div>`;
     }).join("")}</div>` : "";
     const ticketRowsHtml = _smgmtRunningTicketRowsHtml(label, tickets);
@@ -2759,22 +3019,27 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtRollupText(items) {
     const count = items.length;
-    if (count === 0) return "0 tickets";
+    if (count === 0)
+      return "0 tickets";
     let totalMins = 0, unestimated = 0;
     for (const t of items) {
       const size = _smgmtTicketSize(t);
       const mins = size ? _sizeMinutes(size) : 0;
-      if (mins > 0) totalMins += mins;
-      else unestimated++;
+      if (mins > 0)
+        totalMins += mins;
+      else
+        unestimated++;
     }
     const countStr = `${count} ticket${count !== 1 ? "s" : ""}`;
-    if (unestimated === count) return countStr;
+    if (unestimated === count)
+      return countStr;
     const h = totalMins / 60;
     const timeStr = h < 1 ? `~${totalMins}m` : `~${parseFloat((Math.round(h * 10) / 10).toFixed(1))}h`;
     return `${countStr} \xB7 ${timeStr}`;
   }
   function _smgmtTicketSize(t) {
-    if (!t) return null;
+    if (!t)
+      return null;
     const cached = Object.prototype.hasOwnProperty.call(_estDataCache, t.number) ? _estDataCache[t.number] : void 0;
     let size = cached && cached.size ? cached.size : t.size || null;
     if (!size && t.labels) {
@@ -2792,7 +3057,8 @@ ${data.errors.join("\n")}`);
     return _smgmtTicketSize(t) !== null;
   }
   function _smgmtRunningBlockerShort() {
-    if (!_smgmtRunningLabels || _smgmtRunningLabels.size === 0) return "";
+    if (!_smgmtRunningLabels || _smgmtRunningLabels.size === 0)
+      return "";
     const lbl = [..._smgmtRunningLabels][0];
     const m = String(lbl).match(/sprint-(\d+(?:\.\d+)?)/);
     return m ? `S${m[1]}` : sprintLabelDisplay(lbl);
@@ -2812,7 +3078,8 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtUpdateColRollup(label, items) {
     const el = document.getElementById(`smgmt-col-rollup-${label}`);
-    if (el) el.textContent = _smgmtRollupText(items);
+    if (el)
+      el.textContent = _smgmtRollupText(items);
   }
   function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
     const hasRework = (ticket.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework");
@@ -2910,7 +3177,8 @@ ${data.errors.join("\n")}`);
     _blBacklogAll = tickets || [];
     const countEl = document.getElementById("smgmt-backlog-count");
     const ticketsEl = document.getElementById("smgmt-backlog-tickets");
-    if (!ticketsEl) return;
+    if (!ticketsEl)
+      return;
     const filtered = _blApplyFilters(_blBacklogAll);
     if (countEl) {
       const total = _blBacklogAll.length, shown = filtered.length;

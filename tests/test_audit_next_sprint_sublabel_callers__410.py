@@ -89,11 +89,13 @@ class TestInvalidLabels:
 # ── AC-3: production call site passes existing_label_names ───────────────────
 
 class TestCallSiteAudit:
-    def test_only_one_call_site(self):
+    def test_all_call_sites_pass_existing_label_names(self):
         source = SERVER_PY.read_text(encoding="utf-8")
-        calls = re.findall(r"_next_sprint_sublabel\s*\(", source)
-        # definition line + one call site
-        assert len(calls) == 2, f"Expected 1 call site + definition, found {len(calls) - 1} call sites"
+        calls = re.findall(
+            r"_next_sprint_sublabel\s*\(\s*sprint_label",
+            source,
+        )
+        assert len(calls) == 3, f"Expected 3 call sites, found {len(calls)}"
 
     def test_call_site_passes_existing_label_names(self):
         source = SERVER_PY.read_text(encoding="utf-8")

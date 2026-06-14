@@ -1399,6 +1399,17 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtShowToast(`Cancel failed: ${err.detail || res.status}`);
       } else {
         _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} cancel signal sent`);
+        _smgmtRunningLabels.delete(label);
+        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+        if (typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label, { cancelled: true });
+        }
+        if (typeof _smgmtLivePollRestart === "function")
+          _smgmtLivePollRestart();
+        if (typeof _smgmtRunningViewUpdate === "function") {
+          const snap = typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null;
+          _smgmtRunningViewUpdate(label, snap);
+        }
         setTimeout(() => loadSprintMgmt(), 2e3);
       }
     } catch (e) {
@@ -3206,8 +3217,29 @@ ${data.errors.join("\n")}`);
     const orderedLabelsRaw = order.length > 0 ? order.filter((l) => /^sprint-\d+(\.\d+)*$/.test(l)) : [...sprints].sort((a, b) => a - b).map((n) => `sprint-${n}`);
     const _sprintParents = data.sprint_parents || {};
     const _rerunInto = data.sprint_rerun_into || {};
+    const _smgmtWorkTickets = (tickets) => (tickets || []).filter((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some(
+        (n) => ["sprint-summary", "docs", "documentation"].includes(n)
+      );
+    });
+    const _smgmtTicketSettledOnBoard = (t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return names.some(
+        (n) => ["UAT", "UAT-approved", "released", "SIT"].includes(n)
+      );
+    };
+    const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
+      if (!rerunInto[label])
+        return false;
+      const work = _smgmtWorkTickets(tickets);
+      return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
+    };
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      const ticketCount = (bySprint[label] || []).length;
+      const tickets = bySprint[label] || [];
+      if (_smgmtHideRerunParent(label, tickets, _rerunInto))
+        return false;
+      const ticketCount = tickets.length;
       if (ticketCount > 0)
         return true;
       if (_rerunInto[label])
@@ -3777,18 +3809,15 @@ ${data.errors.join("\n")}`);
     }
     return "";
   }
-  var _RERUN_STRIP_LABELS = /* @__PURE__ */ new Set([
+  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set([
     "UAT",
     "UAT-approved",
-    "released",
-    "SIT",
-    "in-progress",
-    "needs-rework"
+    "released"
   ]);
   function _smgmtHasDispatchableTickets(tickets) {
     return tickets.some((t) => {
       const names = (t.labels || []).map((l) => l.name);
-      return !names.some((n) => _RERUN_STRIP_LABELS.has(n));
+      return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
     });
   }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
@@ -3809,7 +3838,6 @@ ${data.errors.join("\n")}`);
       outcome = null;
     const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
     const planBlocksPostRun = [
-      "needs_rework",
       "planned",
       "draft",
       "planning"

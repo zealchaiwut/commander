@@ -179,14 +179,24 @@ def test_bulk_complete_preview_includes_merge_steps(srv, tmp_path):
     sprints_dir.mkdir(parents=True)
     (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
 
-    fake_steps = [{
-        "kind": "merge",
-        "head": "sprint/sprint-68",
-        "base": "develop",
-        "label": "sprint-68 → develop",
-        "delete_branch": False,
-        "title": "Merge Sprint: sprint-68 → develop",
-    }]
+    fake_steps = [
+        {
+            "kind": "merge",
+            "head": "sprint/sprint-68.1",
+            "base": "sprint/sprint-68",
+            "label": "sprint-68.1 → sprint-68",
+            "delete_branch": True,
+            "title": "Merge Sprint: sprint-68.1 → sprint-68",
+        },
+        {
+            "kind": "merge",
+            "head": "sprint/sprint-68",
+            "base": "develop",
+            "label": "sprint-68 → develop",
+            "delete_branch": False,
+            "title": "Merge Sprint: sprint-68 → develop",
+        },
+    ]
 
     patches = [
         patch("server._project_root_path", return_value=project_root),
@@ -216,7 +226,7 @@ def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
         patch("server._is_sprint_running", return_value=False),
         patch(
             "server._bulk_complete_merge_pending",
-            return_value=["sprint/sprint-68 → develop"],
+            return_value=["sprint/sprint-68.1 → sprint/sprint-68", "sprint/sprint-68 → develop"],
         ),
         patch("server._get_sprint_issues", return_value=[]),
         patch("server._open_summary_issues_for_labels", return_value=[]),

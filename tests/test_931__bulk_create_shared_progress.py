@@ -17,7 +17,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,7 +38,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("COMMANDER_BASE", str(tmp_path))
     monkeypatch.setenv("COMMANDER_DISABLE_NEON", "1")
 
-    import importlib
     import server
     import projects as projects_module
     import github_client as gc
@@ -146,8 +145,6 @@ class TestNoCustomProgressBarDuringPosting:
         """During posting stage, bc-posting-progress is shown (remove hidden)."""
         assert "bc-posting-progress" in project_html
         # The function should show the posting progress container
-        pg_ctx = project_html[project_html.find("bc-posting-progress"):]
-        first_2k = pg_ctx[:3000]
         # The component is referenced in JS rendering logic
         assert "bc-posting-progress" in project_html[project_html.find("_bcRenderStep2"):
                                                       project_html.find("_bcRenderStep2") + 8000] or \
@@ -347,7 +344,6 @@ class TestStopAfterCurrent:
         if posting_pos == -1:
             posting_pos = fn_body.find('"posting"')
         assert posting_pos != -1, "posting stage must be handled in _bcRenderStep2"
-        posting_branch = fn_body[posting_pos: posting_pos + 600]
         # Stop button should NOT be hidden during posting
         assert "bc-stop-btn" in fn_body, "bc-stop-btn must be referenced in _bcRenderStep2"
 

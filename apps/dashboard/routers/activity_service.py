@@ -155,6 +155,7 @@ def _read_jsonl_lifecycle_events(
                         "issue_num", "agent_role", "sprint_label", "run_id",
                         "attempt", "exit_code", "duration_s", "gate", "reason",
                         "stderr_tail", "sidecar", "error",
+                        "backend", "from_backend", "to_backend",
                     ):
                         val = rec.get(fld)
                         if val is not None:
@@ -297,6 +298,7 @@ def get_project_events(
     # from agent_runs so the Activity tab can show a Duration column. Matched by
     # issue number + agent role; falls back to the duration already carried in
     # the event detail when no agent_runs row is found.
+    # issue #920: also enrich with backend from the most recent closed agent_runs row.
     _agent_finished = [
         d for d in db_result
         if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
@@ -308,14 +310,18 @@ def get_project_events(
             if d["detail"].get("issue_num") is not None
         }
         _runs_by_key: dict = {}
+        _backend_by_key: dict = {}
         try:
             for _num in _issue_nums:
                 for _r in db.agent_runs_for_issue(int(_num)):
-                    if _r.get("duration_seconds") is None:
-                        continue
-                    _runs_by_key[(int(_num), str(_r.get("agent", "")).lower())] = _r["duration_seconds"]
+                    _key = (int(_num), str(_r.get("agent", "")).lower())
+                    if _r.get("duration_seconds") is not None:
+                        _runs_by_key[_key] = _r["duration_seconds"]
+                    if _r.get("backend") is not None:
+                        _backend_by_key[_key] = _r["backend"]
         except Exception:
             _runs_by_key = {}
+            _backend_by_key = {}
         for d in _agent_finished:
             det = d["detail"]
             num = det.get("issue_num")
@@ -327,6 +333,11 @@ def get_project_events(
                 dur = det.get("duration")
             if dur is not None:
                 d["duration_seconds"] = dur
+            # Enrich with backend (issue #920)
+            if num is not None:
+                bk = _backend_by_key.get((int(num), role))
+                if bk is not None:
+                    d["backend"] = bk
 
     # ------------------------------------------------------------------
     # 3. Union, deduplicate, and sort (issue #902)

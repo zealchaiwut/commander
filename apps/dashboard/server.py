@@ -7969,7 +7969,15 @@ def get_sprint_state(sprint_label: str, project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
+    """Pure read-only signal: True when the sprint has open work tickets with rework labels.
+
+    This function is a pure GitHub-label-derived signal. It is read-only and
+    must never trigger a sprint state write directly. Its return value is valid
+    only as input to reconcile proposals (e.g. fed into
+    ``_github_reconcile_row`` which feeds ``transition_sprint_state`` via the
+    reconcile actor). Call sites that consume this signal may only set local
+    display variables — they must not pass the result directly to a
+    state-writing function.
 
     A finished sprint is rework when any open work ticket either carries a
     rework/rejected label (needs-rework or tester-rejected — a tester rejection
@@ -8670,35 +8678,6 @@ def get_calibration(project: str):
         }
 
     return {"buckets": result_buckets}
-
-
-def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
-
-    A finished sprint is rework when any open work ticket either carries a
-    rework/rejected label (needs-rework or tester-rejected — a tester rejection
-    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
-    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
-    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
-    closed) reads as completed.
-    """
-    NON_WORK = {"sprint-summary", "docs", "documentation"}
-    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
-    DONE = {"UAT", "UAT-approved", "released"}
-    try:
-        issues = _get_sprint_issues(project, sprint_label)
-    except Exception:
-        return False
-    for iss in issues:
-        labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        if labels & NON_WORK:
-            continue
-        if labels & REWORK:
-            return True
-        if not (labels & DONE):
-            # open work ticket that never reached a done/UAT state → unfinished/failed
-            return True
-    return False
 
 
 def _count_rework_tickets(sprint_label: str, project: str) -> int:

@@ -149,7 +149,8 @@ SQLite is the **authoritative, only live** store. As of sprint 57 it also holds 
 | `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
 | `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
 | `sprint_history` | Append-only ledger of terminal sprint events (notably deletions) for the History feed; snapshots the ticket list before label-strip so deleted sprints stay visible (issue #805) |
-| `advisor_suggestions` | Draft store for the next-build advisor — one row per suggestion from the most recent run per project; replaced wholesale each run, no history (issue #881) |
+| `advisor_suggestions` | Current draft suggestions from the most recent advisor run per project; replaced wholesale on each run (issue #881) |
+| `advisor_look_ahead` | Ordered look-ahead entries (2–5 sprints) from the most recent advisor run per project; replaced wholesale on each run (issue #883) |
 
 ### ticket_status (issue #755)
 
@@ -237,15 +238,8 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `base_sha` | text | Git SHA of the expected base branch at dispatch; nullable (issue #788) |
 | `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
-| `backend` | text | Coder dispatch backend: `cline` or `claude-code`; nullable (set only for coder runs) (issue #920) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
-
-The `backend` column lets the Activity tab prefix coder run pills with a backend
-chip and the History run-stats block report a per-backend coder split
-(`coder_backend_split`: `cline_count` / `claude_code_count` and matching
-`*_seconds`). A `coder_backend_escalated` event is emitted when a Cline run hits
-a gate failure and the fix loop escalates to `claude-code` (issue #920).
 
 ### sprint_history (issue #805)
 
@@ -277,24 +271,44 @@ Index: `(created_at DESC)`.
 
 ### advisor_suggestions (issue #881)
 
-Draft store for the next-build advisor agent. Holds one row per suggestion from
-the **most recent** advisor run per project; every new run (scheduled or
-on-demand) replaces the project's rows wholesale, so there is no suggestion
-history beyond the current draft set. Created by
-`_create_advisor_suggestions_table` in `apps/dashboard/db.py`.
+Current draft suggestions from the most recent daily advisor run per project.
+Replaced wholesale on every new run — no suggestion history beyond the current
+set. Created by `_create_advisor_suggestions_table` in `apps/dashboard/db.py`.
 
 | Column | Type | Description |
 |---|---|---|
 | `id` | integer PK | Auto-increment |
 | `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
-| `run_at` | text NOT NULL | ISO 8601 timestamp of the advisor run |
-| `on_demand` | integer NOT NULL DEFAULT 0 | 1 if triggered manually (Run advisor), 0 if scheduled |
-| `pitch` | text NOT NULL | One-line suggestion headline |
-| `rationale` | text NOT NULL | Why this is worth building next |
-| `milestone` | text NOT NULL | Milestone the suggestion belongs to |
-| `scope` | text NOT NULL | Size estimate; CHECK `IN ('S','M','L')` |
+| `run_at` | text NOT NULL | ISO 8601 UTC timestamp of the advisor run |
+| `on_demand` | integer NOT NULL DEFAULT 0 | 1 if triggered via the on-demand API endpoint, 0 for scheduled |
+| `pitch` | text NOT NULL | One-line suggestion title |
+| `rationale` | text NOT NULL | Why the advisor recommends this suggestion |
+| `milestone` | text NOT NULL | Target milestone label |
+| `scope` | text NOT NULL | Effort size: `S`, `M`, or `L` |
 
-Index: `(project)`.
+Index: `ix_advisor_suggestions_project` on `(project)`.
+
+Endpoints: `GET /api/projects/{project}/advisor/suggestions`, `POST /api/projects/{project}/advisor/run`, `POST /api/advisor/tick`.
+
+### advisor_look_ahead (issue #883)
+
+Ordered 2-to-5-sprint look-ahead entries from the most recent advisor run per project.
+Replaced wholesale on every new run. Created by `_create_advisor_look_ahead_table`
+in `apps/dashboard/db.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
+| `run_at` | text NOT NULL | ISO 8601 UTC timestamp of the advisor run |
+| `position` | integer NOT NULL | Sort order within the look-ahead list |
+| `entry` | text NOT NULL | Look-ahead entry text |
+| `on_demand` | integer NOT NULL DEFAULT 0 | 1 if triggered on-demand, 0 for scheduled |
+
+Index: `ix_advisor_look_ahead_project` on `(project)`.
+
+Endpoint: `GET /api/projects/{project}/advisor/look-ahead`.
+
 
 ## API Endpoints
 
@@ -418,7 +432,7 @@ add zero GitHub API calls.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, `reconciliation`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls. The `reconciliation` field (issue #856) carries the post-sprint loose-ends result `{all_clear, checks[], ...}` read verbatim from `<label>-state.json`, or `null` for sprints that closed before the feature was deployed |
-| `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Includes `coder_backend_split` (`cline_count` / `claude_code_count` + matching `*_seconds`) for the backend chip (issue #920). Optional `project` query param |
+| `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Optional `project` query param |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, and flag merged vs unmerged (issue #808). Query params: `repo` (required), `target` (optional base branch). Returns branches plus a `by_sprint` grouping |
 | `POST` | `/cleanup-stale-branches` | Dry-run, then (with `confirm: true`) delete only merged stale branches — never unmerged (issue #808). Body `{repo, branches, target?, confirm}`; returns `{dry_run, target_branch, to_delete, deleted, skipped_unmerged, failed}` |

@@ -938,6 +938,7 @@ app = FastAPI(lifespan=lifespan)
 # in this file — the COMMANDER_GATE_MONOLITH gate rejects server.py growth.
 from routers import (  # noqa: E402
     activity_router,
+    advisor_router,
     analytics_router,
     backup_router,
     doctor_router,
@@ -961,6 +962,7 @@ from routers import (  # noqa: E402
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
 app.include_router(activity_router)
+app.include_router(advisor_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)

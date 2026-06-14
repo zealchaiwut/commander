@@ -847,6 +847,38 @@ def _plan_json_set_state_sm(
         pass
 
 
+def _plan_json_use_cline_followups(
+    sprint_label: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> bool:
+    """Return True when the sprint's plan.json has use_cline_followups=true (issue #919)."""
+    try:
+        path = _plan_json_path(sprint_label, cfg)
+        if not path.exists():
+            return False
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return bool(raw.get("use_cline_followups", False) if isinstance(raw, dict) else False)
+    except Exception:
+        return False
+
+
+def _effective_coder_backend(
+    sprint_label: Optional[str],
+    cfg: Optional["SprintConfig"],
+    prior_failures: Optional[list],
+) -> str:
+    """Return the effective coder backend for a dispatch (issue #919).
+
+    Follow-up dispatches (prior_failures non-empty) route to Cline when the
+    sprint's plan.json has use_cline_followups=true.  Initial dispatches and
+    all dispatches when the flag is absent/false use cfg.coder_backend.
+    """
+    base = cfg.coder_backend if cfg is not None else "claude-code"
+    if prior_failures and sprint_label and _plan_json_use_cline_followups(sprint_label, cfg):
+        return "cline"
+    return base
+
+
 # ── end plan.json helpers ─────────────────────────────────────────────────────
 
 # ── DB lifecycle helpers (issue #757) ────────────────────────────────────────
@@ -1322,6 +1354,7 @@ class IssueState:
     dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
     tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
     coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
+    coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
 
     def to_dict(self) -> dict:
         return {
@@ -1342,6 +1375,7 @@ class IssueState:
             "dispatch_level":     self.dispatch_level,
             "tester_attempt_count": self.tester_attempt_count,
             "coder_model":        self.coder_model,
+            "coder_backend":      self.coder_backend,
         }
 
     @staticmethod
@@ -1365,6 +1399,7 @@ class IssueState:
         iss.dispatch_level = d.get("dispatch_level", 0)
         iss.tester_attempt_count = d.get("tester_attempt_count", 0)
         iss.coder_model = d.get("coder_model")
+        iss.coder_backend = d.get("coder_backend")
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -4473,7 +4508,7 @@ def _dispatch_coder(
     # the fix-loop pre-computes the backend and escalates from cline to claude-code on failure).
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
-    coder_backend = coder_backend_override if coder_backend_override is not None else _select_coder_backend(issue_num, cfg, repo_name=eff_repo)
+    coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
     sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
     sys.stdout.flush()
 
@@ -7489,6 +7524,7 @@ def _run_pipeline_dispatch(
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
         ist.coder_model = _coder_model_sel  # surface size-routed model on the live running pane (bug: coder badge had no model)
+        ist.coder_backend = _effective_coder_backend(label, cfg, ctx["fix_history"] if ctx["fix_history"] else None)
         # Determine attempt_kind for this dispatch (issue #787).
         _pipe_attempt_kind = ctx.get("attempt_kind", "initial")
         _db_agent_start_sm(
@@ -8414,6 +8450,7 @@ def run_sprint(
                 _ser_est = _load_estimate(num)
                 _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
+                issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,

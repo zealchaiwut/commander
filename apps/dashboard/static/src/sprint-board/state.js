@@ -32,6 +32,8 @@ globalThis._pfWarnings ??= null;
 globalThis._pfCycle ??= null;
 globalThis._pfFlags ??= null;
 globalThis._pfSelectedIds ??= new Set();
+// Cline follow-up opt-in (issue #919)
+globalThis._pfUseClineFollowups ??= false;
 
 // Drag/drop local locks
 globalThis._smgmtMoveLock ??= false;
@@ -43,5 +45,6 @@ export const SPRINT_BOARD_STATE_KEYS = [
   "_bcLabel", "_bcPreview",
   "_pfCurrentLabel", "_pfCurrentRepo", "_pfState", "_pfDagData",
   "_pfWarnings", "_pfCycle", "_pfFlags", "_pfSelectedIds",
+  "_pfUseClineFollowups",
   "_smgmtMoveLock", "_smgmtGhostNextNum",
 ];

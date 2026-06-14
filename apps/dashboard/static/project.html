@@ -5966,6 +5966,12 @@
       border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;
     }
 
+    /* Cline follow-up opt-in checkbox (issue #919) */
+    .pf-cline-section { margin-top: 16px; }
+    .pf-cline-label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer;
+      font-size: 13px; color: var(--text); user-select: none; }
+    .pf-cline-checkbox { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; cursor: pointer; }
+
     /* Conflicts and Proposed Order sections */
     .pf-section { margin-top: 20px; }
     .pf-model-note { font-weight: 400; color: var(--text-muted); font-size: 11px; }
@@ -6784,6 +6790,10 @@
     .node-agent-model { font-family: var(--mono); font-weight: 600; text-transform: none;
       letter-spacing: 0; opacity: .8; margin-left: 3px; }
     .node-queued-est { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+    .node-backend-badge { flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
+    .node-backend--cline  { background: var(--green-bg); color: var(--green); }
+    .node-backend--claude { background: var(--text-sub); color: var(--bg); opacity: .65; }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
     .node.queued { opacity: .72; }
@@ -13668,6 +13678,12 @@ function _smgmtRailNodeHtml(iss, live) {
   } else if (state === 'tester-active') {
     agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
   }
+  // Backend badge (issue #919): CLINE or CLAUDE on any node where coder has run
+  let backendBadge = '';
+  if (iss.coder_backend) {
+    const isCline = iss.coder_backend === 'cline';
+    backendBadge = `<span class="node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}">${isCline ? 'CLINE' : 'CLAUDE'}</span>`;
+  }
   let queuedEst = '';
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
@@ -13678,7 +13694,7 @@ function _smgmtRailNodeHtml(iss, live) {
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
     + `<span class="node-num">#${escHtml(String(num))}</span>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
-    + sizePill + agentBadge + fixBadge + timeEl + queuedEst
+    + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
 }
 
@@ -13785,6 +13801,17 @@ function _smgmtRailPatch(label, live) {
         agentEl.textContent = 'Tester';
       }
     } else if (agentEl) { agentEl.remove(); }
+    // Backend badge in-place update (issue #919)
+    let backendEl = nodeEl.querySelector('.node-backend-badge');
+    if (iss.coder_backend) {
+      if (!backendEl) {
+        backendEl = document.createElement('span');
+        nodeEl.appendChild(backendEl);
+      }
+      const isCline = iss.coder_backend === 'cline';
+      backendEl.className = `node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}`;
+      backendEl.textContent = isCline ? 'CLINE' : 'CLAUDE';
+    } else if (backendEl) { backendEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);
     const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
@@ -15451,6 +15478,7 @@ let _pfWarnings     = null;
 let _pfCycle        = null;
 let _pfFlags        = null;  // mis-sizing flags (issue #578)
 let _pfSelectedIds  = new Set();
+let _pfUseClineFollowups = false;  // issue #919: Cline follow-up opt-in
 
 
 

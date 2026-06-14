@@ -37,6 +37,7 @@ def _make_cfg(tmp_path: Path, backend: str = "claude-code") -> MagicMock:
 
     cfg = MagicMock()
     cfg.coder_backend = backend
+    cfg.use_cline_followups = False  # issue #918: disable follow-up routing by default
     cfg.coder_model = "claude-sonnet-4-6"
     cfg.coder_by_size = {
         "S": "claude-haiku-4-5",

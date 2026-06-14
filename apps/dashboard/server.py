@@ -4121,17 +4121,18 @@ async def batch_sprint_labels(body: BatchLabelsBody):
     for change in body.changes:
         raw = change.sprint_label.strip()
         if raw == "" or raw == "backlog":
-            sprint_num = None
+            label_to_assign: str | None = None
+        elif _SPRINT_LABEL_RE.match(raw):
+            label_to_assign = raw
         else:
-            m = re.match(r"^sprint-(\d+)$", raw)
-            if not m:
-                errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
-                failed += 1
-                continue
-            sprint_num = int(m.group(1))
+            errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+            failed += 1
+            continue
 
         try:
-            github_client.assign_sprint(change.issue_num, sprint_num, repo_name=repo)
+            github_client.assign_sprint_by_label(
+                change.issue_num, label_to_assign, repo_name=repo,
+            )
             applied += 1
         except subprocess.CalledProcessError as e:
             err_msg = e.stderr.strip() if e.stderr else str(e)
@@ -5612,10 +5613,23 @@ _MIGRATION_STATUS_LABELS = {"UAT", "UAT-approved", "SIT", "in-progress", "needs-
 
 # ── Sprint-issues helpers ─────────────────────────────────────────────────────
 
+def _primary_sprint_label(iss: dict) -> str | None:
+    """Return the sprint label used for board column grouping (first sprint-* label)."""
+    for lbl in iss.get("labels", []):
+        if _SPRINT_LABEL_RE.match(lbl["name"]):
+            return lbl["name"]
+    return None
+
+
 def _get_sprint_issues(project: str, sprint_label: str) -> list[dict]:
-    """Fetch open GitHub issues and filter to those carrying sprint_label."""
+    """Fetch open issues whose primary sprint label matches sprint_label.
+
+    Matches the sprint-management board: when an issue carries multiple sprint-*
+    labels (e.g. after a partial move), only the first sprint label in GitHub's
+    label order determines its column — not every attached sprint label.
+    """
     issues = github_client.list_open_issues_with_body(repo_name=project, limit=200)
-    return [iss for iss in issues if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))]
+    return [iss for iss in issues if _primary_sprint_label(iss) == sprint_label]
 
 
 # ── Estimate-summary helpers (issue #211) ────────────────────────────────────

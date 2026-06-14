@@ -662,8 +662,24 @@ def ingest_sprint_run_artifact(
             "SELECT label FROM sprints WHERE label = ?", (label,)
         ).fetchone()
         if existing:
+            updates = [
+                fields["issues_json"],
+                fields["tokens"],
+                fields["wall_clock_secs"],
+                fields["reconciliation_json"],
+                fields["summary_issue_url"],
+                fields["summary_path"],
+                fields["pr_number"],
+                fields["post_sprint_json"],
+                fields["estimate_accuracy"],
+                ingested_at,
+            ]
+            project_sql = ""
+            if (project or "").strip():
+                project_sql = ", project = ?"
+                updates.append(project.strip())
             conn.execute(
-                """
+                f"""
                 UPDATE sprints SET
                     issues_json = ?,
                     tokens = ?,
@@ -674,22 +690,10 @@ def ingest_sprint_run_artifact(
                     pr_number = ?,
                     post_sprint_json = ?,
                     estimate_accuracy = ?,
-                    run_ingested_at = ?
+                    run_ingested_at = ?{project_sql}
                 WHERE label = ?
                 """,
-                (
-                    fields["issues_json"],
-                    fields["tokens"],
-                    fields["wall_clock_secs"],
-                    fields["reconciliation_json"],
-                    fields["summary_issue_url"],
-                    fields["summary_path"],
-                    fields["pr_number"],
-                    fields["post_sprint_json"],
-                    fields["estimate_accuracy"],
-                    ingested_at,
-                    label,
-                ),
+                tuple(updates) + (label,),
             )
         else:
             conn.execute(

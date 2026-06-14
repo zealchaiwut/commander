@@ -406,7 +406,7 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
     # Find existing sprint labels on the issue
     issue = get_issue(issue_id, repo_name=repo_name)
     current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
-    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_RE.match(lbl)]
+    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_LABEL_RE_ALL.match(lbl)]
 
     if sprint_num is None:
         # Remove all sprint labels (ticket moves to backlog)

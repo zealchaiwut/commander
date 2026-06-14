@@ -431,6 +431,11 @@ class SprintConfig:
     repo_name:             Optional[str]  = None
     worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
     worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
+    # Dedicated clone for non-coding sprint agents (documenter, reviewer) so they
+    # never check out feature branches in the coder/tester worktrees (which are
+    # mid-sprint) or — worse — the serving uat clone. Optional; falls back to the
+    # tester/coder worktree when unset.
+    worktree_agents:       Optional[Path] = None
     tester_app_subdir:     str            = "apps/dashboard"
     scripts_dir:           Path           = field(default_factory=lambda: SCRIPTS_DIR)
     logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
@@ -528,6 +533,10 @@ def load_config(path: Path) -> "SprintConfig":
 
     worktree_coder  = _resolve_path(coder_raw, base_dir)
     worktree_tester = _resolve_path(tester_raw, base_dir)
+    # Optional dedicated agents clone (documenter/reviewer). Falls back to None
+    # (→ tester/coder worktree) when not configured.
+    agents_raw = (wt.get("agents") or "").strip()
+    worktree_agents = _resolve_path(agents_raw, base_dir) if agents_raw else None
     tester_app_subdir = (wt.get("tester_app_subdir") or "")
 
     # ── validate worktree paths ────────────────────────────────────────────────
@@ -644,6 +653,7 @@ def load_config(path: Path) -> "SprintConfig":
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
         worktree_tester       = worktree_tester,
+        worktree_agents       = worktree_agents,
         tester_app_subdir     = tester_app_subdir,
         scripts_dir           = scripts_dir,
         logs_dir              = logs_dir,
@@ -3139,7 +3149,9 @@ def _call_finish_feature(
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
         finish_script = cfg.finish_feature_script
-        wt_root = worktester_root or cfg.worktree_tester
+        # Prefer the dedicated agents clone for the documentor (falls back to the
+        # tester worktree when not configured).
+        wt_root = worktester_root or cfg.worktree_agents or cfg.worktree_tester
     else:
         finish_script = FINISH_FEATURE_SCRIPT
         wt_root = worktester_root or WORKTESTER_ROOT
@@ -6372,7 +6384,9 @@ def _dispatch_documenter(
             "check documenter_prompt_template in sprint.yaml or DEFAULT_DOCUMENTER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_tester if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so the documenter never commits in the
+    # tester worktree (mid-sprint) or the serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_tester) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-documenter.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6593,7 +6607,10 @@ def _dispatch_reviewer(
             "check reviewer_prompt_template in sprint.yaml or DEFAULT_REVIEWER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-reviewer.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6758,7 +6775,10 @@ def _dispatch_ba_for_followup(
     Returns True on success, False on failure.  Failures are printed but not raised
     so callers can continue processing other tickets.
     """
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"ba-rewrite-{issue_num}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)

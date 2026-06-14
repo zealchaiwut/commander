@@ -947,6 +947,7 @@ from routers import (  # noqa: E402
     milestones_router,
     roadmap_router,
     runs_router,
+    settings_router,
     signoff_router,
     sprint_history_router,
     sprints_router,
@@ -964,6 +965,7 @@ app.include_router(backup_router)
 app.include_router(doctor_router)
 app.include_router(log_search_router)
 app.include_router(logs_router)
+app.include_router(settings_router)
 app.include_router(milestones_router)
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 app.include_router(runs_router)
@@ -1791,22 +1793,6 @@ def add_project(body: NewProjectBody):
         raise _gh_error(e)
 
 
-@app.delete("/api/projects/{slug}/settings")
-def delete_project_settings(slug: str):
-    """Clear the project-level settings override.
-
-    After deletion GET /api/projects/{slug}/settings returns global defaults.
-    Returns 404 if the project slug is not found.
-    Must be registered before DELETE /api/projects/{owner}/{repo_name} to avoid
-    first-match routing collision on two-segment paths.
-    """
-    repo = _resolve_project_slug(slug)
-    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    return build_effective_response(effective)
-
-
 @app.delete("/api/projects/{owner}/{repo_name}")
 async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
     import shutil
@@ -1917,18 +1903,12 @@ def get_running_sprint(project: str):
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY,
-    SECRET_FIELDS,
-    KNOWN_FIELDS,
     build_effective_response,
 )
 from services.sprint_manager.deploy_config_schema import (
     DEPLOY_CONFIG_KEY,
-    SUPPORTED_ENVS as _DEPLOY_SUPPORTED_ENVS,
-    SUPPORTED_HOSTS as _DEPLOY_SUPPORTED_HOSTS,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
-    merge_for_put as _deploy_merge_for_put,
-    build_deploy_config_response as _build_deploy_config_response,
     known_deploy_slugs as _deploy_known_slugs,
     overview_entries_for as _deploy_overview_entries_for,
 )
@@ -1961,212 +1941,8 @@ def _resolve_project_slug(slug: str) -> str:
     return matched["repo"]
 
 
-def _validate_settings_body(body: dict) -> None:
-    """Validate a PUT settings request body.
-
-    Raises HTTPException 422 for secret fields, 400 for unknown fields.
-    """
-    for key in body:
-        if key in SECRET_FIELDS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Field '{key}' is a secret and cannot be written via this endpoint. "
-                    "Use the dedicated secret management endpoint."
-                ),
-            )
-    unknown = [k for k in body if k not in KNOWN_FIELDS]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown settings field(s): {', '.join(sorted(unknown))}. "
-                   f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}",
-        )
-
-
-@app.get("/api/settings")
-def get_global_settings():
-    """Return effective global settings.
-
-    Non-secret fields are returned as-is with defaults applied.
-    Secret fields appear as boolean presence flags (<field>_set).
-    """
-    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    return build_effective_response(stored)
-
-
-_AGENT_MODEL_KEYS = (
-    "default_model", "coder_model", "tester_model",
-    "estimator_model", "documentor_model",
-)
-
-
-def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
-    """Write any agent-model fields from a settings Save into each project's
-    sprint.yaml ``agent_config`` — the single source ``sprint_manager`` reads at
-    dispatch. Without this the Save only updated the settings DB while the run
-    kept using the stale sprint.yaml model (coder/estimator stayed opus despite
-    a sonnet Save). Returns the repos updated."""
-    model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if not model_cfg:
-        return []
-    try:
-        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-    except Exception:
-        return []
-    updated: list[str] = []
-    for proj in projects_module.load_projects():
-        repo = (proj.get("repo") or "").strip()
-        if not repo:
-            continue
-        try:
-            sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if sy.exists():
-                _update_sprint_yaml_agent_config(sy, model_cfg)
-                updated.append(repo)
-        except Exception:
-            continue
-    return updated
-
-
-@app.put("/api/settings")
-def put_global_settings(body: dict):
-    """Persist a global settings override.
-
-    Only the supplied keys are written; existing keys not in the body are preserved.
-    Returns 400 for unknown keys, 422 for secret fields.
-    """
-    _validate_settings_body(body)
-    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
-    merged = {**current, **body}
-    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
-    # Single source: agent-model fields also land in each project's sprint.yaml
-    # so the dispatcher (reads sprint.yaml, not the settings DB) applies them.
-    _propagate_models_to_sprint_yaml(body)
-    return build_effective_response(merged)
-
-
-def _project_json_for_repo(repo: str) -> dict | None:
-    return next(
-        (p for p in projects_module.load_projects() if p.get("repo") == repo),
-        None,
-    )
-
-
-def _apply_project_identity_defaults(
-    resp: dict,
-    repo: str,
-    proj_override: dict,
-) -> dict:
-    """Use projects.json identity when the project override has no explicit value.
-
-    Schema defaults (ti-folder / gray) must not mask projects.json — only keys
-    stored in the project-scoped override win over the JSON file.
-    """
-    proj_json = _project_json_for_repo(repo)
-    if not proj_json:
-        return resp
-    if "icon" not in proj_override:
-        resp["icon"] = proj_json.get("icon", resp.get("icon", "ti-folder"))
-    if "color" not in proj_override:
-        resp["color"] = proj_json.get("color", resp.get("color", "gray"))
-    if not proj_override.get("display_name"):
-        resp["display_name"] = proj_json.get("name", resp.get("display_name", ""))
-    return resp
-
-
-@app.get("/api/projects/{slug}/settings")
-def get_project_settings(slug: str):
-    """Return effective project settings (project overrides merged over global).
-
-    Non-secret fields returned with defaults applied; secrets as boolean flags.
-    Returns 404 when the project slug does not exist.
-    """
-    repo = _resolve_project_slug(slug)
-    proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(stored)
-    return _apply_project_identity_defaults(resp, repo, proj_override)
-
-
-@app.put("/api/projects/{slug}/settings")
-def put_project_settings(slug: str, body: dict):
-    """Persist a project-level settings override.
-
-    Only the supplied keys are written as a project override.
-    Global settings are not affected.
-    Returns 400 for unknown keys, 422 for secret fields, 404 if project not found.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_settings_body(body)
-    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    merged = {**current_project_override, **body}
-    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
-    # Single source: write agent-model fields into THIS project's sprint.yaml so
-    # the dispatcher applies them (settings DB alone is not read by the run).
-    _model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if _model_cfg:
-        try:
-            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
-            _sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if _sy.exists():
-                _update_sprint_yaml_agent_config(_sy, _model_cfg)
-        except Exception:
-            pass
-    display_patch: dict = {}
-    if "icon" in body:
-        display_patch["icon"] = body["icon"]
-    if "color" in body:
-        display_patch["color"] = body["color"]
-    if "display_name" in body:
-        display_patch["name"] = body["display_name"]
-    if "tracked" in body:
-        display_patch["tracked"] = body["tracked"]
-    if display_patch:
-        projects_module.save_project_display_fields(repo, **display_patch)
-    _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
-    resp = build_effective_response(effective)
-    return _apply_project_identity_defaults(resp, repo, merged)
-
-
-# ── Deploy config API (issue #722) ───────────────────────────────────────────
-
-
-def _validate_deploy_config_body(body: dict) -> None:
-    """Validate a PUT deploy-config body.
-
-    Raises HTTPException 400 for unsupported environments, non-object entries,
-    or invalid host values.
-    """
-    if not isinstance(body, dict):
-        raise HTTPException(
-            status_code=400,
-            detail="Deploy config body must be an object keyed by environment.",
-        )
-    for env, entry in body.items():
-        if env not in _DEPLOY_SUPPORTED_ENVS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported environment '{env}'. "
-                    f"Allowed: {', '.join(_DEPLOY_SUPPORTED_ENVS)}"
-                ),
-            )
-        if not isinstance(entry, dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Environment '{env}' config must be an object.",
-            )
-        host = entry.get("host")
-        if host is not None and host not in _DEPLOY_SUPPORTED_HOSTS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Environment '{env}': host must be one of "
-                    f"{', '.join(_DEPLOY_SUPPORTED_HOSTS)}; got '{host}'."
-                ),
-            )
+# Settings/deploy-config/fs/env-vars/scaffold/notes endpoints moved to
+# routers/settings.py + routers/settings_service.py
 
 
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
@@ -2182,80 +1958,6 @@ def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
         if entry.get("host") == "local" and not entry.get("working_dir"):
             if env in envs:
                 entry["working_dir"] = envs[env]
-
-
-def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
-    """Build the GET-shaped response: seed defaults merged with stored, masked."""
-    merged = _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
-    resp = _build_deploy_config_response(merged)
-    _enrich_local_working_dirs(repo, resp)
-    return resp
-
-
-@app.get("/api/projects/{slug}/deploy-config")
-def get_project_deploy_config(slug: str):
-    """Return per-environment deploy config (seed defaults merged with overrides).
-
-    render_api_key is never returned in cleartext — each render entry carries
-    render_api_key_set (bool) and render_api_key_masked. Returns 404 for an
-    unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    resp = _deploy_config_response(slug, repo, stored)
-    _enrich_deploy_readiness(resp)
-    return resp
-
-
-@app.put("/api/projects/{slug}/deploy-config")
-def put_project_deploy_config(slug: str, body: dict):
-    """Persist a per-environment deploy config override.
-
-    Merges per environment over the stored config; a new render_api_key replaces
-    the stored secret, while an omitted/null key leaves it unchanged. Returns
-    400 for unsupported envs/hosts, 404 for an unknown slug.
-    """
-    repo = _resolve_project_slug(slug)
-    _validate_deploy_config_body(body)
-    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
-    merged = _deploy_merge_for_put(current or {}, body)
-    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
-    return _deploy_config_response(slug, repo, merged)
-
-
-@app.post("/api/projects/{slug}/environments/{env}/deploy-config/validate")
-def validate_deploy_config_field(slug: str, env: str, body: dict):
-    """Validate an inline working_dir / port edit before it is persisted (#769).
-
-    Body may carry ``working_dir`` and/or ``port``. Each is checked and a failure
-    returns 400 with a user-visible message so the Deploy card can surface an
-    inline error and skip the PUT:
-
-      - working_dir → must exist on disk AND be a git clone.
-      - port        → must be an integer 1–65535 AND not already in use on host.
-
-    Returns 404 for an unknown slug, 200 ``{"ok": true}`` when all supplied
-    fields are valid.
-    """
-    _resolve_project_slug(slug)
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Validation body must be an object.")
-    if "working_dir" in body:
-        try:
-            _deploy_validation.validate_working_dir(body["working_dir"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if "port" in body:
-        try:
-            port = _deploy_validation.validate_port(body["port"])
-        except _deploy_validation.DeployValidationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if _deploy_validation.port_in_use(port):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Port {port} is already in use on this host.",
-            )
-    return {"ok": True, "env": env}
 
 
 # ── Local deploy / restart actions (issue #723) ──────────────────────────────
@@ -2871,73 +2573,6 @@ def post_settings_sync_commit(body: _SyncCommitBody):
     return {"ok": True, "synced_at": synced_at}
 
 
-# ── Filesystem browser (issue #643) ──────────────────────────────────────────
-
-_FS_BROWSE_ROOT: Path = Path.home()
-
-
-@app.get("/api/fs/list")
-def fs_list(path: str = ""):
-    """Return immediate subdirectories of the given path.
-
-    The path must resolve to within _FS_BROWSE_ROOT.  Traversal attempts
-    (../, symlinks escaping root, absolute paths outside root) return 403.
-    Returns {"entries": [{"name": str, "path": str}], "current": str}.
-    """
-    root = _FS_BROWSE_ROOT.resolve()
-
-    if not path or path.strip() in ("~", ""):
-        target = root
-    else:
-        # Handle ~ prefix
-        if path.startswith("~/"):
-            path = str(root / path[2:])
-        elif path == "~":
-            path = str(root)
-
-        candidate = Path(path)
-        # Normalize ../ etc without following symlinks
-        normalized = Path(os.path.normpath(str(candidate)))
-
-        # Must be under browse root before any symlink resolution
-        if not normalized.is_relative_to(root):
-            raise HTTPException(status_code=403, detail="Forbidden")
-
-        # Walk each component; reject if any symlink escapes root.
-        # This catches escape-then-reenter chains that resolve() misses.
-        cur = root
-        for part in normalized.relative_to(root).parts:
-            cur = cur / part
-            if cur.is_symlink():
-                try:
-                    link_resolved = cur.resolve()
-                    if not link_resolved.is_relative_to(root):
-                        raise HTTPException(status_code=403, detail="Forbidden")
-                except OSError:
-                    raise HTTPException(status_code=403, detail="Forbidden")
-
-        target = normalized
-
-    if not target.exists() or not target.is_dir():
-        return {"entries": [], "current": str(target)}
-
-    entries = []
-    try:
-        for item in sorted(target.iterdir()):
-            if item.is_symlink():
-                continue  # never follow symlinks out of browse root
-            if not item.is_dir():
-                continue
-            # Skip hidden dirs
-            if item.name.startswith("."):
-                continue
-            entries.append({"name": item.name, "path": str(item)})
-    except OSError as exc:
-        logger.info("[fs_list] error listing %s: %s", target, exc)
-
-    return {"entries": entries, "current": str(target)}
-
-
 # ── Environment paths (issue #643) ────────────────────────────────────────────
 
 def _derive_project_environments(repo: str) -> dict[str, str]:
@@ -3053,174 +2688,6 @@ def put_project_environments(slug: str, body: _PutEnvironmentsBody):
     envs_dict = {e.env.strip(): e.local_directory.strip() for e in body.environments}
     projects_module.save_project_environments(repo, envs_dict)
     return {"ok": True, "environments": envs_dict}
-
-
-# ── Env-var editor (issue #727) ───────────────────────────────────────────────
-
-import env_file as _env_file
-
-
-def _env_working_dir(slug: str, repo: str, env: str) -> str | None:
-    """Resolve the on-disk directory holding an environment's `.env` file.
-
-    Prefers the stored/derived environment path (the working clone), and falls
-    back to a host=local deploy-config working_dir. Returns None when nothing is
-    configured for the requested env.
-    """
-    envs = projects_module.get_project_environments(repo)
-    if not envs:
-        envs = _derive_project_environments(repo)
-    if env in envs and envs[env]:
-        return envs[env]
-    merged = _merged_deploy_config(slug, repo)
-    entry = (merged or {}).get(env) or {}
-    return entry.get("working_dir") or None
-
-
-@app.get("/api/projects/{slug}/environments/{env}/env-vars")
-def get_env_vars(slug: str, env: str):
-    """Read the environment's `.env` file and return parsed key/value pairs.
-
-    Pairs are returned in file order. Values are plaintext — masking is a
-    display-only concern handled client-side. Returns 404 for an unknown slug or
-    an env with no configured directory.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-    env_path = Path(working_dir) / ".env"
-    return {
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-class _EnvVarItem(BaseModel):
-    key: str
-    value: str = ""
-
-
-class _PutEnvVarsBody(BaseModel):
-    vars: list[_EnvVarItem]
-
-
-@app.put("/api/projects/{slug}/environments/{env}/env-vars")
-def put_env_vars(slug: str, env: str, body: _PutEnvVarsBody):
-    """Write env-var changes back to the environment's `.env` file.
-
-    Preserves original line order and inline comments for unchanged keys,
-    rewrites changed keys in place, appends new keys at the end, and drops
-    removed keys. An empty KEY is rejected (400) before any write. A filesystem
-    failure (e.g. read-only `.env`) returns 500 so the client can keep the
-    user's edits. Returns 404 for an unknown slug or unconfigured env.
-    """
-    repo = _resolve_project_slug(slug)
-    working_dir = _env_working_dir(slug, repo, env)
-    if not working_dir:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No directory configured for environment '{env}'",
-        )
-
-    pairs: list[tuple[str, str]] = []
-    for item in body.vars:
-        key = item.key.strip()
-        if not key:
-            raise HTTPException(
-                status_code=400,
-                detail="Each variable must have a non-empty KEY.",
-            )
-        pairs.append((key, item.value))
-
-    env_path = Path(working_dir) / ".env"
-    try:
-        _env_file.write_env_vars(env_path, pairs)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to write {env_path}: {exc}",
-        )
-    return {
-        "ok": True,
-        "env": env,
-        "working_dir": working_dir,
-        "vars": _env_file.read_env_vars(env_path),
-    }
-
-
-# ── Scaffold docs (issue #681) ────────────────────────────────────────────────
-
-def _scaffold_resolve_working_clone(slug: str) -> tuple[str, Path]:
-    """Resolve project slug → (repo, working_clone_path) with traversal guard.
-
-    Returns the main working clone directory and validates it is inside _PROJECTS_BASE.
-    Raises HTTPException 404 for unknown slug, 400 if path escapes _PROJECTS_BASE.
-    """
-    repo = _resolve_project_slug(slug)
-    project_root = _project_root_path(repo)
-    working_clone = _main_clone_path(project_root)
-    resolved = working_clone.resolve()
-    base_resolved = _PROJECTS_BASE.resolve()
-    if not str(resolved).startswith(str(base_resolved) + "/") and resolved != base_resolved:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Resolved project root '{resolved}' is outside the configured projects directory '{base_resolved}'",
-        )
-    return repo, working_clone
-
-
-@app.get("/api/projects/{slug}/docs/scaffold/check")
-def get_scaffold_check(slug: str):
-    """Check whether the project's working clone has the standard docs structure.
-
-    Runs scaffold_project --check (no writes). Returns:
-      { compliant, missing, stray, project_root }
-    where missing/stray are lists of relative paths.
-    """
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=True)
-    return {
-        "compliant": result["compliant"],
-        "missing": result["missing"],
-        "stray": result["stray"],
-        "project_root": str(working_clone),
-    }
-
-
-class _ScaffoldApplyBody(BaseModel):
-    confirm: bool = False
-
-
-@app.post("/api/projects/{slug}/docs/scaffold/apply")
-def post_scaffold_apply(slug: str, body: _ScaffoldApplyBody):
-    """Apply the standard docs scaffold to the project's working clone.
-
-    Requires { confirm: true } in the request body; returns 400 otherwise.
-    Existing files are NEVER overwritten. Returns { created, compliant }.
-    """
-    if not body.confirm:
-        raise HTTPException(status_code=400, detail="confirm must be true to apply scaffold")
-    if not _SCAFFOLD_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scaffold_project module unavailable")
-    repo, working_clone = _scaffold_resolve_working_clone(slug)
-    project_name = working_clone.name
-    if project_name in ("main", "prd") and working_clone.parent != working_clone:
-        project_name = working_clone.parent.name
-    result = _scaffold_data(working_clone, project_name, check=False)
-    return {
-        "created": result["created"],
-        "compliant": result["compliant"],
-    }
 
 
 # ── Sprint file archive maintenance (issue #735) ──────────────────────────────
@@ -8351,6 +7818,16 @@ def _has_rework_tickets(sprint_label: str, project: str) -> bool:
     return False
 
 
+def _state_data_is_dry_run_only(state_data: dict) -> bool:
+    """True when state.json reflects a --dry-run pass (no coder/tester dispatch)."""
+    issues = state_data.get("issues") or []
+    if not issues:
+        return False
+    if any(i.get("coder_started_at") or i.get("tester_started_at") for i in issues):
+        return False
+    return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
+
+
 def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
@@ -8363,7 +7840,14 @@ def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
 
     from routers import sprint_artifact_service  # noqa: PLC0415
     sprints_dir = _commander_dir(project_root) / "sprints"
-    return sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label) is not None
+    resolved = sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label)
+    if resolved is None:
+        return False
+    try:
+        state_data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    return not _state_data_is_dry_run_only(state_data)
 
 
 def _outcome_from_ingested_row(
@@ -8497,6 +7981,14 @@ def get_sprint_outcome(sprint_label: str, project: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=f"Could not read state file: {e}")
 
+    if _state_data_is_dry_run_only(state_data):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (dry-run only)")
+
+    plan = _read_plan_json(project_root, sprint_label)
+    plan_state = (plan.get("state") or "").lower() if plan else ""
+    if plan_state in ("draft", "planned", "planning"):
+        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
+
     def _parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
             return None
@@ -8550,7 +8042,9 @@ def get_sprint_outcome(sprint_label: str, project: str):
         raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
 
     # Derive 4-state outcome for pane coloring
-    if is_cancelled:
+    if plan_state == "needs_rework":
+        pane_state = "has_rework"
+    elif is_cancelled:
         pane_state = "cancelled"
     elif _has_rework_tickets(sprint_label, project):
         pane_state = "has_rework"
@@ -8652,8 +8146,11 @@ def get_sprint_outcome(sprint_label: str, project: str):
         "state":             pane_state,
         # Unified lifecycle (sprint-lifecycle.md): pane vocabulary mapped to
         # the one enum shared with the History pane.
-        "lifecycle":         db.canonical_lifecycle(pane_state),
-        "end_reason":        sprint_json.get("end_reason"),
+        "lifecycle":         (
+            "needs_rework" if plan_state == "needs_rework"
+            else db.canonical_lifecycle(pane_state)
+        ),
+        "end_reason":        (plan.get("end_reason") if plan else None) or sprint_json.get("end_reason"),
         "sprint_status":     sprint_status,
         "counts": {
             "done":    done_count,
@@ -10336,6 +9833,47 @@ def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list
     return sorted(children, key=_sprint_label_sub_index)
 
 
+_BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({"completed", "deleted"})
+
+
+def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
+    """Lifecycle state for bulk-complete gating (plan.json, then DB)."""
+    plan = _read_plan_json(project_root, sprint_label)
+    if plan and (plan.get("state") or "").lower() == "deleted":
+        return "deleted"
+    if plan and (plan.get("state") or "").strip():
+        return (plan.get("state") or "").lower()
+    try:
+        row = db.get_sprint(sprint_label)
+        if row and (row.get("state") or "").strip():
+            return (row.get("state") or "").lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
+    """Child sprint labels that are not yet completed or deleted."""
+    unsettled: list[str] = []
+    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+        state = _bulk_complete_child_state(project_root, child_label)
+        if state not in _BULK_COMPLETE_CHILD_READY_STATES:
+            unsettled.append(child_label)
+    return unsettled
+
+
+def _bulk_complete_assert_children_completed(project_root: Path, base_label: str) -> None:
+    unsettled = _bulk_complete_unsettled_children(project_root, base_label)
+    if unsettled:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint to be completed — "
+                f"still open: {', '.join(unsettled)}"
+            ),
+        )
+
+
 def _gh_branch_exists(repo: str, branch: str) -> bool:
     try:
         from urllib.parse import quote
@@ -10817,6 +10355,17 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
 
+    unsettled_children = _bulk_complete_unsettled_children(project_root, base_label)
+    children_all_completed = not unsettled_children
+    if not children_all_completed:
+        raise HTTPException(
+            409,
+            detail=(
+                "Bulk complete requires every child sprint to be completed — "
+                f"still open: {', '.join(unsettled_children)}"
+            ),
+        )
+
     merge_steps = _merge_steps_for_sprint_chain(project_root, repo, base_label)
 
     return {
@@ -10825,6 +10374,8 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
+        "children_all_completed": children_all_completed,
+        "unsettled_children": unsettled_children,
     }
 
 
@@ -10876,6 +10427,8 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
     all_labels, sprint_issues = _bulk_complete_collect_issues(repo, project_root, base_label)
+
+    _bulk_complete_assert_children_completed(project_root, base_label)
 
     for lbl in all_labels:
         if _is_sprint_running(project_root, lbl):
@@ -14227,53 +13780,6 @@ def update_mis_sizing_config(body: MisSizingConfigBody, project: str):
     config = {"tier_threshold": body.tier_threshold, "min_events": body.min_events}
     _mis_sizing.save_config(commander, config)
     return config
-
-
-# ── Per-project notes (NOTES.md) ──────────────────────────────────────────────
-
-class SaveNotesBody(BaseModel):
-    content: str
-    expected_mtime: Optional[float] = None
-
-
-def _notes_path(repo: str) -> Path:
-    return _project_root_path(repo) / "NOTES.md"
-
-
-@app.get("/api/projects/notes")
-def get_project_notes(repo: str = ""):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if not path.exists():
-        return {"content": "", "mtime": None, "exists": False}
-    try:
-        mtime = path.stat().st_mtime
-        content = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail={"error": "failed to read NOTES.md", "reason": str(exc)})
-    return {"content": content, "mtime": mtime, "exists": True}
-
-
-@app.post("/api/projects/notes")
-def save_project_notes(repo: str = "", body: SaveNotesBody = ...):
-    if not repo:
-        raise HTTPException(status_code=400, detail="repo required")
-    path = _notes_path(repo)
-    if path.exists() and body.expected_mtime is not None:
-        current_mtime = path.stat().st_mtime
-        if abs(current_mtime - body.expected_mtime) > 0.5:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "conflict",
-                    "message": "NOTES.md changed on disk since last load.",
-                    "current_mtime": current_mtime,
-                },
-            )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.content, encoding="utf-8")
-    return {"ok": True, "mtime": path.stat().st_mtime}
 
 
 # ── Static asset routes with long-lived cache headers (issue #249) ────────────

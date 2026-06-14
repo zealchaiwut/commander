@@ -1,0 +1,45 @@
+name: pytest-smoke
+
+# Fast Python smoke tests on every PR (P0). Selenium browser tests and the full
+# suite are excluded here — see pytest-nightly.yml.
+
+on:
+  pull_request:
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - 'pytest.ini'
+      - 'tests/**'
+      - 'apps/**'
+      - 'services/**'
+      - 'scripts/run_pytest_smoke.sh'
+      - '.github/workflows/pytest-smoke.yml'
+  push:
+    branches:
+      - develop
+      - master
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run smoke tests
+        env:
+          COMMANDER_DISABLE_NEON: '1'
+          COMMANDER_TEST_DB: /tmp/commander-pytest-ci.db
+        run: bash scripts/run_pytest_smoke.sh

@@ -1,0 +1,38 @@
+name: pytest-nightly
+
+# Full non-selenium test suite — scheduled nightly. Selenium tests require a live
+# dashboard + Chrome and are run manually: pytest -m selenium
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # 06:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run full test suite (no selenium, no integration)
+        env:
+          COMMANDER_DISABLE_NEON: '1'
+          COMMANDER_TEST_DB: /tmp/commander-pytest-nightly.db
+        run: |
+          python3 -m pytest tests/ \
+            -m "not selenium" \
+            --ignore=tests/integration \
+            -q --tb=line

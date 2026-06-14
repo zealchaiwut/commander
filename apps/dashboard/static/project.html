@@ -21596,7 +21596,7 @@ function _snavRenderSidebarBadge(slug, d) {
     ? store.done
     : (runState === 'finished')
       ? (d.done || 0) + (d.uat || 0)
-      : (d.total || 0) - (cols.backlog || 0);
+      : _snavSettledDone(d.total, cols);
 
   // Trigger a fresh fetch if the store is missing or stale (> 60s)
   if (isCurrentProject && (!_sprintProgressStore || (Date.now() - (_sprintProgressStore.fetched_at || 0)) > 60000)) {
@@ -21635,6 +21635,18 @@ async function _snavRefreshAll() {
   }
 }
 
+/** GitHub-derived "done" = settled work past SIT (uat + done + needs-rework),
+ *  i.e. total minus the not-yet-settled columns. Single canonical definition
+ *  shared by every pill fallback so the nav pill, sidebar badge, and board
+ *  badge can't disagree — matches the backend /api/sprint-progress settled
+ *  count and the live snapshot's done+failed+skipped. The old `total - backlog`
+ *  formula wrongly counted in-progress + SIT tickets as done. */
+function _snavSettledDone(total, cols) {
+  cols = cols || {};
+  return Math.max(0, (total || 0) - (cols.backlog || 0)
+    - (cols['in-progress'] || 0) - (cols.sit || 0));
+}
+
 async function snavRefresh() {
   const repo = _snavRepo();
   if (!repo) return;
@@ -21657,7 +21669,7 @@ async function snavRefresh() {
       const cols = _snavState.columns || {};
       const ghDone = (_snavState.state === 'finished')
         ? (_snavState.done || 0) + (_snavState.uat || 0)
-        : (_snavState.total || 0) - (cols.backlog || 0);
+        : _snavSettledDone(_snavState.total, cols);
       _sprintProgressStore = {
         has_sprint: true,
         sprint_label: `sprint-${_snavState.sprint}`,
@@ -21716,7 +21728,7 @@ function _snavRenderPill() {
             const lc = _snavColsFromLive(liveData);
             return lc.done + lc.failed + lc.skipped;
           }
-          return (d.total || 0) - (cols.backlog || 0);
+          return _snavSettledDone(d.total, cols);
         })();
     const total = (store && store.has_sprint && store.sprint === d.sprint)
       ? store.total

@@ -89,6 +89,13 @@ class RanOvernightEntry(BaseModel):
     project: Optional[str] = None  # set in the home roll-up
 
 
+class SuggestedNextItem(BaseModel):
+    """One advisor suggestion or look-ahead entry for the brief (issue #884)."""
+    text: str = ""
+    type: str = "suggestion"  # "suggestion" | "look_ahead"
+    slug: str = ""
+
+
 class WaitingSprint(BaseModel):
     """A sprint pending human sign-off (issue #864)."""
     label: Optional[str] = None
@@ -108,6 +115,7 @@ class ProjectBrief(BaseModel):
     recent_activity: list[ActivityItem] = []
     ran_overnight: list[RanOvernightEntry] = []
     waiting_on_you: list[WaitingSprint] = []
+    suggested_next: list[SuggestedNextItem] = []
 
 
 class GlobalKpis(BaseModel):
@@ -132,6 +140,7 @@ class HomeBrief(BaseModel):
     projects: list[ProjectBrief] = []
     ran_overnight: list[RanOvernightEntry] = []
     waiting_on_you: list[WaitingSprint] = []
+    suggested_next: list[SuggestedNextItem] = []
 
 
 class ProjectSummary(BaseModel):

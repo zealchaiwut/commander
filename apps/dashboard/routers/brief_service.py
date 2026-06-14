@@ -45,6 +45,9 @@ if str(_SPRINT_MANAGER_ROOT) not in _sys.path:
 # How many recent events to include in recent_activity (no pagination — AC scope).
 RECENT_ACTIVITY_LIMIT = 10
 
+# Max lines in the "Suggested Next" brief section (suggestions + look-ahead, issue #884).
+SUGGESTED_NEXT_MAX = 5
+
 # Label vocabularies (GitHub labels are the source of truth for ticket state).
 _DONE_LABELS = {"done", "uat"}
 _SKIPPED_LABELS = {"skipped", "wontfix"}
@@ -516,6 +519,49 @@ def _build_ran_overnight(db, project_key: str, slug: str,
     return out
 
 
+# ── advisor suggestions section (issue #884) ─────────────────────────────────
+
+def _build_suggested_next(db, project_key: str, slug: str) -> list[dict]:
+    """Read advisor suggestions and first look-ahead entry for the brief.
+
+    Returns at most SUGGESTED_NEXT_MAX items total: suggestions first, then
+    the first look-ahead entry as the final item. Returns [] when both sources
+    are empty so the "Suggested Next" section is omitted from the rendered brief.
+    Gracefully returns [] if the advisor tables are absent (before issues #881/#883
+    are merged).
+    """
+    try:
+        with db.get_conn() as conn:
+            sug_rows = conn.execute(
+                "SELECT pitch FROM advisor_suggestions "
+                "WHERE project = ? ORDER BY id ASC",
+                (project_key,),
+            ).fetchall()
+    except Exception:
+        sug_rows = []
+
+    try:
+        with db.get_conn() as conn:
+            la_rows = conn.execute(
+                "SELECT entry FROM advisor_look_ahead "
+                "WHERE project = ? ORDER BY position ASC LIMIT 1",
+                (project_key,),
+            ).fetchall()
+    except Exception:
+        la_rows = []
+
+    look_ahead_entry: Optional[str] = la_rows[0]["entry"] if la_rows else None
+    max_sugs = (SUGGESTED_NEXT_MAX - 1) if look_ahead_entry else SUGGESTED_NEXT_MAX
+    pitches = [r["pitch"] for r in sug_rows][:max_sugs]
+
+    items: list[dict] = [
+        {"text": p, "type": "suggestion", "slug": slug} for p in pitches
+    ]
+    if look_ahead_entry:
+        items.append({"text": look_ahead_entry, "type": "look_ahead", "slug": slug})
+    return items
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def build_project_brief(slug: str, date: Optional[str] = None,
@@ -541,6 +587,7 @@ def build_project_brief(slug: str, date: Optional[str] = None,
     recent_activity = _build_recent_activity(db, project_key, start, end)
     ran_overnight = _build_ran_overnight(db, project_key, slug, start, end)
     waiting_on_you = _build_waiting_on_you(db, project_key, slug)
+    suggested_next = _build_suggested_next(db, project_key, slug)
 
     kpis = {
         "sprints_shipped": len(shipped),
@@ -561,6 +608,7 @@ def build_project_brief(slug: str, date: Optional[str] = None,
         "recent_activity": recent_activity,
         "ran_overnight": ran_overnight,
         "waiting_on_you": waiting_on_you,
+        "suggested_next": suggested_next,
     }
 
 
@@ -616,6 +664,7 @@ def build_home_brief(date: Optional[str] = None,
     decisions: list[dict] = []
     ran_overnight: list[dict] = []
     waiting_on_you: list[dict] = []
+    suggested_next_all: list[dict] = []
     try:
         project_list = _load_projects()
     except Exception:
@@ -633,6 +682,10 @@ def build_home_brief(date: Optional[str] = None,
         # source of truth (AC8).
         ran_overnight.extend({**e, "project": slug} for e in brief.get("ran_overnight", []))
         waiting_on_you.extend({**w, "project": slug} for w in brief.get("waiting_on_you", []))
+        suggested_next_all.extend(brief.get("suggested_next", []))
+
+    # Cap the home roll-up at SUGGESTED_NEXT_MAX (issue #884 AC2).
+    suggested_next = suggested_next_all[:SUGGESTED_NEXT_MAX]
 
     global_kpis = {
         "sprints_shipped": sum(b["kpis"]["sprints_shipped"] for b in projects),
@@ -650,4 +703,5 @@ def build_home_brief(date: Optional[str] = None,
         "projects": projects,
         "ran_overnight": ran_overnight,
         "waiting_on_you": waiting_on_you,
+        "suggested_next": suggested_next,
     }

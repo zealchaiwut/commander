@@ -2508,9 +2508,10 @@ def _gate_merge_preview(
             _run("git", "checkout", "--track", f"origin/{target_branch}",
                  cwd=worktester_root, check=False)
 
-        # Attempt dry-run merge
+        # Attempt dry-run merge using the remote tracking ref so the branch
+        # resolves even when it was never checked out locally in this worktree.
         rc, stdout, stderr = _run_timed(
-            "git", "merge", "--no-commit", "--no-ff", feature_branch,
+            "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
             cwd=worktester_root,
         )
         combined = stdout + stderr

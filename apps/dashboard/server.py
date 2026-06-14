@@ -9978,7 +9978,7 @@ def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
 
 
 def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str) -> list[dict]:
-    """Ordered merge steps: each child → base, then base → develop."""
+    """Ordered merge steps: each child → base, then base → develop (Finish sprint)."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
     for child_label in _child_sprint_labels_from_plans(project_root, base_label):
@@ -10004,8 +10004,36 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     return steps
 
 
+def _bulk_complete_merge_steps(project_root: Path, repo: str, base_label: str) -> list[dict]:
+    """Bulk complete merges only the base sprint branch into develop.
+
+    Child sprint branches (58.1, 58.2, …) are not merged here — use Finish sprint
+    on each child or merge them into the base branch separately before bulk complete.
+    """
+    steps: list[dict] = []
+    base_branch = _sprint_branch_name(base_label)
+    if _branch_has_unmerged_commits(repo, base_branch, "develop"):
+        steps.append({
+            "kind": "merge",
+            "head": base_branch,
+            "base": "develop",
+            "label": f"{base_label} → develop",
+            "delete_branch": False,
+            "title": f"Merge Sprint: {base_label} → develop",
+        })
+    return steps
+
+
+def _bulk_complete_merge_pending(project_root: Path, repo: str, base_label: str) -> list[str]:
+    """Branches still needing merge before bulk-complete settlement (base → develop only)."""
+    base_branch = _sprint_branch_name(base_label)
+    if _branch_has_unmerged_commits(repo, base_branch, "develop"):
+        return [f"{base_branch} → develop"]
+    return []
+
+
 def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) -> list[str]:
-    """Branches that still need merging before bulk-complete settlement."""
+    """Branches that still need merging before base-sprint finish (full child → base → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
     for child_label in _child_sprint_labels_from_plans(project_root, base_label):
@@ -10022,6 +10050,41 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
     errors: list[str] = []
     project_root = _project_root_path(repo)
     for step in _merge_steps_for_sprint_chain(project_root, repo, base_label):
+        ok, detail = _gh_merge_branch_via_pr(
+            repo, step["head"], step["base"],
+            title=step["title"],
+            delete_branch=step["delete_branch"],
+        )
+        if not ok:
+            errors.append(f"{step['head']} → {step['base']}: {detail}")
+    return errors
+
+
+def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]:
+    """Merge steps for Merge Sprint on one label — child merges into base only; base runs full chain."""
+    base_label = _sprint_label_base(label)
+    if _is_child_sprint_label(label):
+        steps: list[dict] = []
+        child_branch = _sprint_branch_name(label)
+        base_branch = _sprint_branch_name(base_label)
+        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
+            steps.append({
+                "kind": "merge",
+                "head": child_branch,
+                "base": base_branch,
+                "label": f"{label} → {base_label}",
+                "delete_branch": True,
+                "title": f"Merge Sprint: {label} → {base_label}",
+            })
+        return steps
+    return _merge_steps_for_sprint_chain(project_root, repo, base_label)
+
+
+def _merge_sprint_branches_for_label(repo: str, label: str) -> list[str]:
+    """Execute merge steps for Merge Sprint on the requested label. Returns errors."""
+    errors: list[str] = []
+    project_root = _project_root_path(repo)
+    for step in _finish_merge_steps(project_root, repo, label):
         ok, detail = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
@@ -10074,30 +10137,34 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     next_sprint_exists = next_num in existing_sprints
     conflict_error: str | None = None
 
+    is_child = _is_child_sprint_label(label)
     try:
-        sprint_issues = _get_sprint_issues(repo, base_label)
-        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-        for child_label in _child_sprint_labels_from_plans(project_root, base_label):
-            try:
-                for iss in _get_sprint_issues(repo, child_label):
-                    if iss["number"] not in seen_nums:
-                        sprint_issues.append(iss)
-                        seen_nums.add(iss["number"])
-            except subprocess.CalledProcessError:
-                pass
+        if is_child:
+            sprint_issues = _get_sprint_issues(repo, label)
+        else:
+            sprint_issues = _get_sprint_issues(repo, base_label)
+            seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+            for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+                try:
+                    for iss in _get_sprint_issues(repo, child_label):
+                        if iss["number"] not in seen_nums:
+                            sprint_issues.append(iss)
+                            seen_nums.add(iss["number"])
+                except subprocess.CalledProcessError:
+                    pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
-    # Open PRs for child sprint branches targeting the base branch
+    # Merge branches for this label only (child → base, or full chain on base)
     sprint_pr: Optional[dict] = None
     merge_branches: list[dict] = []
+    for step in _finish_merge_steps(project_root, repo, label):
+        merge_branches.append({
+            "head": step["head"],
+            "base": step["base"],
+            "label": step["label"],
+        })
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
-        child_branch = _sprint_branch_name(child_label)
-        if _gh_branch_exists(repo, child_branch):
-            merge_branches.append({"head": child_branch, "base": base_branch, "label": child_label})
-    if _gh_branch_exists(repo, base_branch):
-        merge_branches.append({"head": base_branch, "base": "develop", "label": base_label})
     try:
         branch_name = _sprint_branch_name(label)
         pr_res = subprocess.run(
@@ -10162,8 +10229,10 @@ class FinishSprintBody(BaseModel):
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
 async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSprintBody):
-    """Merge Sprint: merge child branches → base → develop, close issues, keep labels.
+    """Merge Sprint: merge sprint branch(es), close issues, keep labels.
 
+    Child sprint (58.2): merges only that child branch into the base sprint branch.
+    Base sprint (58): merges all children into base, then base into develop.
     Single human UAT sign-off — no per-ticket gate, no label stripping.
     """
     if not body.confirmed:
@@ -10176,9 +10245,11 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
     child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    is_child = _is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
+    finish_labels = [label] if is_child else all_labels
 
-    for lbl in all_labels:
+    for lbl in finish_labels:
         if _is_sprint_running(project_root, lbl):
             raise HTTPException(
                 409,
@@ -10186,16 +10257,19 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             )
 
     try:
-        sprint_issues = _get_sprint_issues(repo, base_label)
-        seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-        for child_label in child_labels:
-            try:
-                for iss in _get_sprint_issues(repo, child_label):
-                    if iss["number"] not in seen_nums:
-                        sprint_issues.append(iss)
-                        seen_nums.add(iss["number"])
-            except subprocess.CalledProcessError:
-                pass
+        if is_child:
+            sprint_issues = _get_sprint_issues(repo, label)
+        else:
+            sprint_issues = _get_sprint_issues(repo, base_label)
+            seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+            for child_label in child_labels:
+                try:
+                    for iss in _get_sprint_issues(repo, child_label):
+                        if iss["number"] not in seen_nums:
+                            sprint_issues.append(iss)
+                            seen_nums.add(iss["number"])
+                except subprocess.CalledProcessError:
+                    pass
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
 
@@ -10203,8 +10277,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     moved = 0
     errors: list[str] = []
 
-    # 1. Merge leftover child branches → base → develop
-    errors.extend(_merge_sprint_branch_chain(repo, base_label))
+    # 1. Merge sprint branches for this label only
+    errors.extend(_merge_sprint_branches_for_label(repo, label))
 
     # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)
     if body.merge_pr and body.sprint_pr_url:
@@ -10233,8 +10307,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
             errors.append(f"#{issue_num}: {err_msg}")
 
-    # 3. Mark base + all children completed in plan.json
-    for lbl in all_labels:
+    # 3. Mark finished sprint member(s) completed in plan.json
+    for lbl in finish_labels:
         try:
             _plan_json_set_state(
                 project_root, lbl, "completed",
@@ -10393,7 +10467,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
             ),
         )
 
-    merge_steps = _merge_steps_for_sprint_chain(project_root, repo, base_label)
+    merge_steps = _bulk_complete_merge_steps(project_root, repo, base_label)
 
     return {
         "all_tickets": _bulk_complete_ticket_rows(sprint_issues),
@@ -10439,8 +10513,9 @@ class BulkCompleteSprintBody(BaseModel):
 async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: BulkCompleteSprintBody):
     """Close UAT + summary issues across a lineage and mark every member completed.
 
-    Requires the sprint branch merge chain to be complete (child → base → develop)
-    before closing issues — use merge_steps from bulk-complete-preview first.
+    Requires the base sprint branch to be merged into develop before closing issues —
+    use merge_steps from bulk-complete-preview first. Child sprint branches are not
+    merged by bulk complete (finish each child sprint separately).
     """
     if not body.confirmed:
         raise HTTPException(400, detail="Request must have confirmed=true")
@@ -10465,7 +10540,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 detail=f"Sprint {lbl} is currently running — bulk complete after the run finishes",
             )
 
-    pending_merges = _sprint_merge_chain_pending(project_root, repo, base_label)
+    pending_merges = _bulk_complete_merge_pending(project_root, repo, base_label)
     if pending_merges:
         raise HTTPException(
             409,

@@ -13323,16 +13323,15 @@ function _smgmtLiveLogLinesHtml(logLines) {
   }).join('');
 }
 
-/** Update the live log panel for a running sprint card (header agent info + log stream). */
+/** Update the live log panel for a running sprint card (header agent info + log stream).
+ *  Agent badges are patched directly; log stream is updated via ProgressActivity (issue #928). */
 function _smgmtLiveLogPatch(label, live) {
-  const agentEl  = document.getElementById(`smgmt-live-agent-${label}`);
-  const streamEl = document.getElementById(`smgmt-live-log-stream-${label}`);
+  const agentEl = document.getElementById(`smgmt-live-agent-${label}`);
   if (agentEl) {
     agentEl.innerHTML = _smgmtLiveAgentBadgesHtml(live);
   }
-  if (streamEl) {
-    streamEl.innerHTML = _smgmtLiveLogLinesHtml(live.recent_log_lines || []);
-    streamEl.scrollTop = streamEl.scrollHeight;
+  if (typeof updateProgressActivityLog === 'function') {
+    updateProgressActivityLog(`running-${label}`, live.recent_log_lines || [], colorizeLogLine);
   }
 }
 

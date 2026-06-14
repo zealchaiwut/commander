@@ -21,6 +21,7 @@ import {
   paToggleLog,
   injectProgressActivityCss,
 } from "./progress-activity.js";
+import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -37,3 +38,9 @@ root.renderProgressActivity = renderProgressActivity;
 root.updateProgressActivityLog = updateProgressActivityLog;
 root.paToggleLog = paToggleLog;
 injectProgressActivityCss();
+root.switchTab = switchTab;
+root.toggleStabDropdown = toggleStabDropdown;
+root.closeAllStabDropdowns = closeAllStabDropdowns;
+globalThis.switchTab = switchTab;
+globalThis.toggleStabDropdown = toggleStabDropdown;
+globalThis.closeAllStabDropdowns = closeAllStabDropdowns;

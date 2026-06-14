@@ -14,6 +14,9 @@ import './state.js';
 import {
   _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
 } from './scheduled-run.js';
+import {
+  smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
+} from './plan-next.js';
 
 import {
   _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
@@ -195,3 +198,7 @@ globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
 globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
 globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
+
+// Plan-next sprint + pending-signoff decoration (issues #861, #883)
+globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;

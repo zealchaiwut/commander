@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 import github_client as gh  # sibling on path (apps/dashboard)
 import settings_repo as _settings  # sibling on path (services/sprint_manager)
+from . import advisor_service as _advisor  # look-ahead (issue #883)
 
 try:  # structured logging is best-effort; never let its absence break a render
     from services.logging import log as _log
@@ -169,12 +170,20 @@ def get_roadmap(repo: str) -> dict:
         card = _to_card(milestone, by_milestone.get(milestone["number"], []), active)
         (closed_cards if card["state"] == "closed" else open_cards).append(card)
 
+    # Include look-ahead from the advisor (issue #883). Best-effort: if the
+    # advisor has never run, an empty list is returned and the UI shows nothing.
+    try:
+        look_ahead = _advisor.get_look_ahead(repo)
+    except Exception:
+        look_ahead = []
+
     payload: dict = {
         "milestones": _apply_order(open_cards, order),
         "closed_milestones": closed_cards,
         "active_milestone": active,
         "order": order,
         "stale": stale,
+        "look_ahead": look_ahead,
     }
     if error:
         payload["error"] = error

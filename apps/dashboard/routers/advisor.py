@@ -46,6 +46,16 @@ def run_advisor_on_demand(project: str):
     return {"suggestions": suggestions, "on_demand": True}
 
 
+@router.get("/api/projects/{project}/advisor/look-ahead")
+def get_advisor_look_ahead(project: str):
+    """Return the current look-ahead entries for *project* (issue #883).
+
+    Returns an empty list when the advisor has not yet produced a look-ahead.
+    Never creates any GitHub objects.
+    """
+    return {"look_ahead": advisor_service.get_look_ahead(project)}
+
+
 @router.post("/api/advisor/tick", status_code=202)
 def advisor_tick(body: TickBody):
     """Fire the daily advisor for *project* if it is due right now (AC1, AC10).

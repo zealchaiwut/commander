@@ -56,12 +56,38 @@ async function _planNextRequest(repo, replace) {
   }
 }
 
+/** Fetch the advisor look-ahead for *repo* and return first entry or null (issue #883). */
+async function _fetchLookAheadHint(repo) {
+  try {
+    const res = await fetch(
+      '/api/projects/' + encodeURIComponent(repo) + '/advisor/look-ahead'
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const entries = (data && data.look_ahead) || [];
+    return entries.length > 0 ? entries[0] : null;
+  } catch {
+    // Look-ahead is advisory; never block plan-next on a fetch failure.
+    return null;
+  }
+}
+
 export async function smgmtPlanNextSprint() {
   const repo = _smgmtRepo();
   if (!repo) { _smgmtShowToast('No project selected.'); return; }
   const btn = document.getElementById('smgmt-plan-next-btn');
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
   try {
+    // Pre-fill with first look-ahead entry when available (AC6, issue #883).
+    // AC7: when no look-ahead exists, scopeHint is null and behaviour is unchanged.
+    const scopeHint = await _fetchLookAheadHint(repo);
+    if (scopeHint !== null) {
+      const confirmed = window.prompt(
+        'Plan next sprint — advisor look-ahead for default scope:',
+        scopeHint
+      );
+      if (confirmed === null) return; // user cancelled
+    }
     await _planNextRequest(repo, false);
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }

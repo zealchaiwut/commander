@@ -372,9 +372,158 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     db._create_advisor_suggestions_table(conn)
 
 
+def _ensure_look_ahead_table(conn: sqlite3.Connection) -> None:
+    db._create_advisor_look_ahead_table(conn)
+
+
 # Placeholder so tests can monkeypatch it (the production path never calls this).
 def _gh_post(*args, **kwargs):  # pragma: no cover
     raise NotImplementedError("advisor_service._gh_post is a test-only stub target")
+
+
+# ── Look-ahead prompt and agent ───────────────────────────────────────────────
+
+def build_look_ahead_prompt(project: str, inputs: dict, suggestions: list[dict]) -> str:
+    """Build the prompt that asks the advisor to produce a 2-5-sprint look-ahead."""
+    ms_lines = []
+    for ms in (inputs.get("milestones") or [])[:10]:
+        title = ms.get("title") or ms.get("name", "?")
+        open_count = ms.get("open_issues", "?")
+        ms_lines.append(f"  - {title} ({open_count} open tickets)")
+
+    suggestion_pitches = "\n".join(
+        f"  {i + 1}. {s.get('pitch', '')}" for i, s in enumerate(suggestions)
+    )
+
+    parts = [
+        f"You are a sprint planning advisor for the project: {project}.",
+        "Given the context below, produce a short ordered look-ahead of 2 to 5 future "
+        "sprints. Each entry is one line describing which milestone slice or themes "
+        "that sprint would address.",
+        "",
+        "Output ONLY a JSON array of 2-5 strings. No markdown, no extra text.",
+        "Format example: [\"Sprint 73: Auth layer — User Auth milestone\", \"Sprint 74: ...\"]",
+        "",
+        "=== CONTEXT ===",
+        "",
+        "Open milestones:",
+    ]
+    if ms_lines:
+        parts.extend(ms_lines)
+    else:
+        parts.append("  (none)")
+
+    parts += [
+        "",
+        "Current advisor suggestions (top priorities):",
+        suggestion_pitches or "  (none)",
+        "",
+        "=== OUTPUT ===",
+        "Return ONLY a JSON array of 2-5 one-line strings. No markdown, no commentary.",
+    ]
+    return "\n".join(parts)
+
+
+def run_look_ahead_agent(
+    prompt: str,
+    model: str = _MODEL,
+    cwd: Optional[Path] = None,
+) -> list[str]:
+    """Call ``claude -p`` with the look-ahead prompt; parse and validate the result.
+
+    Raises ValueError when output cannot be parsed or fails validation.
+    No GitHub objects are created or modified.
+    """
+    cmd = ["claude", "--model", model, "-p", prompt]
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env["CLAUDE_AGENT_ROLE"] = "advisor"
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=str(cwd) if cwd else None,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise ValueError("Look-ahead agent timed out after 180 s")
+    except FileNotFoundError:
+        raise ValueError("claude CLI not found; install Claude Code CLI")
+
+    raw = result.stdout.strip()
+    if not raw:
+        stderr = result.stderr.strip()
+        raise ValueError(f"Look-ahead agent produced no output. stderr: {stderr[:500]}")
+
+    return _parse_look_ahead(raw)
+
+
+def _parse_look_ahead(raw: str) -> list[str]:
+    """Strip markdown fences and parse the JSON array from look-ahead output."""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        inner = []
+        in_fence = False
+        for line in lines:
+            if line.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence or not inner:
+                inner.append(line)
+        text = "\n".join(inner).strip()
+
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"No JSON array found in look-ahead output: {text[:300]!r}")
+    entries = json.loads(text[start : end + 1])
+    return adv.validate_look_ahead(entries)
+
+
+# ── Look-ahead DB operations ──────────────────────────────────────────────────
+
+def save_look_ahead(
+    project: str,
+    entries: list[str],
+    on_demand: bool = False,
+) -> None:
+    """Replace the look-ahead for *project* with *entries* (AC1, issue #883).
+
+    Passing an empty list clears the look-ahead without affecting suggestions or
+    any GitHub objects. At most LOOK_AHEAD_MAX entries are persisted.
+    """
+    from services.sprint_manager.advisor import LOOK_AHEAD_MAX  # noqa: PLC0415
+    run_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    safe = list(entries)[:LOOK_AHEAD_MAX]
+    with db.get_conn() as conn:
+        _ensure_look_ahead_table(conn)
+        conn.execute(
+            "DELETE FROM advisor_look_ahead WHERE project = ?", (project,)
+        )
+        for pos, entry in enumerate(safe, start=1):
+            conn.execute(
+                "INSERT INTO advisor_look_ahead "
+                "(project, run_at, position, entry, on_demand) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (project, run_at, pos, str(entry), 1 if on_demand else 0),
+            )
+        conn.commit()
+
+
+def get_look_ahead(project: str) -> list[str]:
+    """Return the current look-ahead entries for *project*, ordered by position."""
+    with db.get_conn() as conn:
+        _ensure_look_ahead_table(conn)
+        rows = conn.execute(
+            "SELECT entry FROM advisor_look_ahead "
+            "WHERE project = ? ORDER BY position ASC",
+            (project,),
+        ).fetchall()
+    return [r["entry"] for r in rows]
 
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
@@ -384,11 +533,20 @@ def run_advisor(
     on_demand: bool = False,
     repo_root: Optional[Path] = None,
 ) -> list[dict]:
-    """Run the advisor agent, save suggestions, and return them."""
+    """Run the advisor agent, save suggestions and look-ahead, return suggestions."""
     inputs = collect_inputs(project, repo_root=repo_root)
     prompt = build_prompt(project, inputs)
     suggestions = run_advisor_agent(prompt)
     save_suggestions(project, suggestions, on_demand=on_demand)
+
+    # Generate look-ahead alongside the normal suggestion flow (AC1, issue #883).
+    try:
+        la_prompt = build_look_ahead_prompt(project, inputs, suggestions)
+        look_ahead = run_look_ahead_agent(la_prompt)
+        save_look_ahead(project, look_ahead, on_demand=on_demand)
+    except Exception as exc:
+        logger.warning("advisor: look-ahead generation failed: %s", exc)
+
     if on_demand and adv.get_advisor_reset_on_demand(project):
         from datetime import date  # noqa: PLC0415
         adv.set_advisor_last_fired(project, date.today().isoformat())

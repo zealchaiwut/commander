@@ -8,7 +8,6 @@ import pytest
 import sqlite3
 import tempfile
 import os
-from pathlib import Path
 
 
 # Minimal in-process DB setup for testing
@@ -20,7 +19,7 @@ def _test_db_path():
     if os.path.exists(test_db):
         try:
             os.remove(test_db)
-        except:
+        except Exception:
             pass
     return test_db
 
@@ -50,7 +49,7 @@ def test_db():
     if os.path.exists(db_path):
         try:
             os.remove(db_path)
-        except:
+        except Exception:
             pass
 
 
@@ -151,7 +150,6 @@ def transition_sprint_state(db_path, label, to_state, actor, end_reason=None):
 
     # All checks passed; apply transition
     conn = sqlite3.connect(db_path)
-    ended_at = end_reason is not None  # Simplified for test
     conn.execute(
         """
         UPDATE sprints SET state = ?, end_reason = ? WHERE label = ?

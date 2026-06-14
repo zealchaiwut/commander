@@ -12,13 +12,10 @@ AC4 — A True return from _has_rework_tickets does NOT by itself flip a running
 from __future__ import annotations
 
 import ast
-import os
 import re
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).parent.parent
 DASH = REPO_ROOT / "apps" / "dashboard"

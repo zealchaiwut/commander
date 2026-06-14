@@ -63,6 +63,7 @@ def _bulk_complete(srv, tmp_path, owner="owner", repo_name="proj-bc", label="spr
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
+        patch("server._sprint_merge_chain_pending", return_value=[]),
         patch("server._get_sprint_issues", side_effect=fake_get_issues),
         patch("server._open_summary_issues_for_labels", side_effect=fake_summary),
         patch("server._plan_json_set_state", return_value=None),
@@ -120,6 +121,7 @@ def test_bulk_complete_mirrors_completed_into_lifecycle_db(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
+        patch("server._sprint_merge_chain_pending", return_value=[]),
         patch("server._get_sprint_issues", return_value=[]),
         patch("server._open_summary_issues_for_labels", return_value=[]),
         patch("server._plan_json_set_state", return_value=None),
@@ -167,3 +169,63 @@ def test_bulk_complete_preview_lists_summary_category(srv, tmp_path):
     assert resp.status_code == 200
     tickets = resp.json()["all_tickets"]
     assert any(t["category"] == "sprint-summary" for t in tickets)
+
+
+def test_bulk_complete_preview_includes_merge_steps(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "merge-prev"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-68.1-plan.json").write_text("{}")
+
+    fake_steps = [{
+        "kind": "merge",
+        "head": "sprint/sprint-68.1",
+        "base": "sprint/sprint-68",
+        "label": "sprint-68.1 → sprint-68",
+        "delete_branch": True,
+        "title": "Merge Sprint: sprint-68.1 → sprint-68",
+    }]
+
+    patches = [
+        patch("server._project_root_path", return_value=project_root),
+        patch("server._get_sprint_issues", return_value=[]),
+        patch("server._open_summary_issues_for_labels", return_value=[]),
+        patch("server._merge_steps_for_sprint_chain", return_value=fake_steps),
+    ]
+    with _stack(patches):
+        client = TestClient(srv.app)
+        resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
+    assert resp.status_code == 200
+    assert resp.json()["merge_steps"] == fake_steps
+
+
+def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "pending"
+    (project_root / ".commander" / "sprints").mkdir(parents=True)
+    (project_root / ".commander" / "sprints" / "sprint-68.1-plan.json").write_text("{}")
+
+    close_mock = MagicMock(return_value=None)
+    patches = [
+        patch("server._project_root_path", return_value=project_root),
+        patch("server._is_sprint_running", return_value=False),
+        patch(
+            "server._sprint_merge_chain_pending",
+            return_value=["sprint/sprint-68 → develop"],
+        ),
+        patch("server._get_sprint_issues", return_value=[]),
+        patch("server._open_summary_issues_for_labels", return_value=[]),
+        patch.object(srv.github_client, "close_issue", close_mock),
+    ]
+    with _stack(patches):
+        client = TestClient(srv.app)
+        resp = client.post(
+            "/api/projects/owner/proj/sprints/sprint-68/bulk-complete",
+            json={"confirmed": True, "selected_ticket_numbers": []},
+        )
+    assert resp.status_code == 409
+    assert "merge" in resp.json()["detail"].lower()
+    close_mock.assert_not_called()

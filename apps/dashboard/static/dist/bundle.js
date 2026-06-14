@@ -3140,8 +3140,13 @@ ${data.errors.join("\n")}`);
         throw new Error(msg);
       }
       const data = await resp.json();
+      if (_smgmtLiveCacheRepo !== repo) {
+        _smgmtLiveCacheRepo = repo;
+        for (const k of Object.keys(_smgmtLiveCache))
+          delete _smgmtLiveCache[k];
+      }
       if (typeof _smgmtLingerRestore === "function")
-        _smgmtLingerRestore();
+        _smgmtLingerRestore(repo);
       const prevRunning = new Set(_smgmtRunningLabels);
       _smgmtRunningLabels = /* @__PURE__ */ new Set();
       _smgmtAnySprintRunning = false;
@@ -3173,6 +3178,8 @@ ${data.errors.join("\n")}`);
       if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
         const live = typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(lingerLbl) : _smgmtLiveCache[lingerLbl] || null;
         _smgmtRunningViewUpdate(lingerLbl, live);
+      } else if (typeof _smgmtRunningViewUpdate === "function") {
+        _smgmtRunningViewUpdate(null, null);
       }
     } catch (err) {
       if (!silent) {

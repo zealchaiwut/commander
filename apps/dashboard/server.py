@@ -941,6 +941,7 @@ from routers import (  # noqa: E402
     analytics_router,
     backup_router,
     doctor_router,
+    finish_progress_router,
     home_milestone_router,
     log_search_router,
     logs_router,
@@ -963,6 +964,7 @@ app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)
+app.include_router(finish_progress_router)
 app.include_router(log_search_router)
 app.include_router(logs_router)
 app.include_router(settings_router)
@@ -10105,6 +10107,17 @@ def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list
     return sorted(children, key=_sprint_label_sub_index)
 
 
+def _sprint_merge_parent_label(project_root: Path, label: str) -> str:
+    """Immediate parent for a sprint branch merge (plan.json parent, else base)."""
+    if not _is_child_sprint_label(label):
+        return _sprint_label_base(label)
+    plan = _read_plan_json(project_root, label)
+    parent = (plan.get("parent") or "").strip() if plan else ""
+    if parent and _SPRINT_LABEL_RE.match(parent):
+        return parent
+    return _sprint_label_base(label)
+
+
 _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
     "completed", "deleted", "ready_to_merge",
 })
@@ -10250,19 +10263,22 @@ def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
 
 
 def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str) -> list[dict]:
-    """Ordered merge steps: each child → base, then base → develop (Finish sprint)."""
+    """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    children = _child_sprint_labels_from_plans(project_root, base_label)
+    for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
+        parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
-        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
             steps.append({
                 "kind": "merge",
                 "head": child_branch,
-                "base": base_branch,
-                "label": f"{child_label} → {base_label}",
+                "base": parent_branch,
+                "label": f"{child_label} → {parent_label}",
                 "delete_branch": True,
-                "title": f"Merge Sprint: {child_label} → {base_label}",
+                "title": f"Merge Sprint: {child_label} → {parent_label}",
             })
     if _branch_has_unmerged_commits(repo, base_branch, "develop"):
         steps.append({
@@ -10287,13 +10303,16 @@ def _bulk_complete_merge_pending(project_root: Path, repo: str, base_label: str)
 
 
 def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) -> list[str]:
-    """Branches that still need merging before base-sprint finish (full child → base → develop chain)."""
+    """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    children = _child_sprint_labels_from_plans(project_root, base_label)
+    for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
+        parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
-        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
-            pending.append(f"{child_branch} → {base_branch}")
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
+            pending.append(f"{child_branch} → {parent_branch}")
     if _branch_has_unmerged_commits(repo, base_branch, "develop"):
         pending.append(f"{base_branch} → develop")
     return pending
@@ -10315,20 +10334,21 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
 
 
 def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]:
-    """Merge steps for Merge Sprint on one label — child merges into base only; base runs full chain."""
+    """Merge steps for Merge Sprint on one label — child merges into its parent; base runs full chain."""
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
         steps: list[dict] = []
+        parent_label = _sprint_merge_parent_label(project_root, label)
         child_branch = _sprint_branch_name(label)
-        base_branch = _sprint_branch_name(base_label)
-        if _branch_has_unmerged_commits(repo, child_branch, base_branch):
+        parent_branch = _sprint_branch_name(parent_label)
+        if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
             steps.append({
                 "kind": "merge",
                 "head": child_branch,
-                "base": base_branch,
-                "label": f"{label} → {base_label}",
+                "base": parent_branch,
+                "label": f"{label} → {parent_label}",
                 "delete_branch": True,
-                "title": f"Merge Sprint: {label} → {base_label}",
+                "title": f"Merge Sprint: {label} → {parent_label}",
             })
         return steps
     return _merge_steps_for_sprint_chain(project_root, repo, base_label)

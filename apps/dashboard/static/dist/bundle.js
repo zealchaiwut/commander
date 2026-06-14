@@ -925,6 +925,52 @@ Replace the existing draft (${data.existing_label})?`
         _fsActiveJob.es = null;
     };
   }
+  async function _fsRetry() {
+    if (!_fsActiveJob)
+      return;
+    const { owner, repoName, label, params } = _fsActiveJob;
+    const emptySnap = {
+      status: "running",
+      mode: "bar",
+      done: 0,
+      total: params.total || 2,
+      current: "Retrying\u2026",
+      log_tail: []
+    };
+    _fsEnterProgressView(emptySnap);
+    _fsActiveJob.snapshot = emptySnap;
+    try {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...params, confirmed: true })
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      _fsConnectStream(owner, repoName, label);
+    } catch (e) {
+      const slot = _fsProgressSlot();
+      if (slot) {
+        slot.innerHTML = renderProgressActivity(
+          {
+            status: "error",
+            mode: "bar",
+            error: "Retry failed: " + e.message,
+            log_tail: []
+          },
+          { id: "fs-pa", retryFn: "_fsRetry" }
+        );
+      }
+      const retryBtn = document.getElementById("fs-retry-btn");
+      if (retryBtn)
+        retryBtn.classList.remove("hidden");
+    }
+  }
   async function smgmtFinishSprint(label) {
     const repo = _smgmtRepo();
     if (!repo)
@@ -4366,6 +4412,7 @@ ${data.errors.join("\n")}`);
   globalThis._fsSelectAll = _fsSelectAll;
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
+  globalThis._fsRetry = _fsRetry;
   globalThis._bcOpen = _bcOpen;
   globalThis._bcClose = _bcClose;
   globalThis._bcCatClass = _bcCatClass;

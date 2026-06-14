@@ -18517,7 +18517,10 @@ function _setupModals() {
   document.getElementById('fs-cancel-btn').addEventListener('click', _fsClose);
   document.getElementById('fs-backdrop').addEventListener('click', _fsClose);
   document.getElementById('fs-confirm-btn').addEventListener('click', _fsConfirm);
-  document.getElementById('fs-retry-btn').addEventListener('click', _fsRetry);
+  const fsRetryBtn = document.getElementById('fs-retry-btn');
+  if (fsRetryBtn && typeof _fsRetry === 'function') {
+    fsRetryBtn.addEventListener('click', _fsRetry);
+  }
 
   document.getElementById('bc-close-btn').addEventListener('click', _bcClose);
   document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);

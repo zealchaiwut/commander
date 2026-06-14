@@ -40,7 +40,7 @@ CONCERN_MODULES = [
 ]
 PUBLIC_HANDLERS = [
     "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint", "smgmtPlanNextSprint",
-    "_smgmtDropOnSprint", "_smgmtTicketDragStart", "_rrConfirm", "_fsConfirm",
+    "_smgmtDropOnSprint", "_smgmtTicketDragStart", "_rrConfirm", "_fsConfirm", "_fsRetry",
 ]
 
 
@@ -116,5 +116,5 @@ def test_sprint_board_es_modules__bundle_in_sync_with_source():
     # Sanity that the bundle was rebuilt from the extracted modules (it is the
     # artifact served at runtime; a stale bundle would mean broken board JS).
     bundle = _read(BUNDLE)
-    for anchor in ("_smgmtRender", "_smgmtDropOnSprint", "computeDropPlan", "_fsConfirm"):
+    for anchor in ("_smgmtRender", "_smgmtDropOnSprint", "computeDropPlan", "_fsConfirm", "_fsRetry"):
         assert anchor in bundle, f"committed bundle missing extracted symbol {anchor}"

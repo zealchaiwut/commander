@@ -19,10 +19,11 @@ run a sprint, the manager works through each ticket in order:
 2. **Tester** — checks out the branch, writes pytest tests against each AC item,
    runs them, posts a test report, merges to `develop` if tests pass, moves label
    to `UAT`
-3. **Gate check** — if the tester rejects the ticket, it is marked failed and
-   the next ticket is processed
+3. **Gate check** — if the tester rejects the ticket, the sprint manager labels
+   it `needs-rework` (with an `end_reason`) and moves to the next ticket
 4. When all tickets are done, a sprint summary issue is filed on GitHub and the
-   sprint state JSON is written to `.commander/sprints/`
+   sprint state JSON is written to `.commander/sprints/` (per-label
+   `{label}-state.json` / `{label}-summary-*.md`)
 
 ---
 
@@ -54,20 +55,28 @@ show live progress.
 ### From the CLI
 
 ```bash
-python3 apps/dashboard/sprint_manager/sprint_manager.py \
-  --sprint sprint-8 --repo zealchaiwut/commander
+# label is positional; --repo is optional when sprint.yaml sets repo_name
+python3 services/sprint_manager/sprint_manager.py sprint-8 \
+  --repo zealchaiwut/commander
 ```
 
 The sprint manager reads worktree paths from `.commander/sprint.yaml` (see
-[Sprint Manager Config](../../.commander/README.md)).
+[Sprint Manager Config](../../.commander/README.md)). It auto-discovers the
+config by walking up from the current directory, so it runs from inside any
+clone.
 
 ---
 
 ## Rerunning a Sprint
 
-Click **Rerun sprint** on the Sprint Mgmt tab to reset all ticket labels back
-to `backlog` and restart the sprint from the beginning. Useful when a full
-sprint failed or when you want to re-verify tickets that were previously skipped.
+A finished sprint label is **terminal** — it is never re-dispatched under the
+same label (`POST /api/sprints/run` rejects terminal labels with 409). To
+re-attempt failed tickets, click **Re-run** on the sprint card: this creates a
+**child sprint** (`sprint-N.1`, `sprint-N.2`, …) branched off the sprint base
+branch (`sprint/sprint-N`), moves the unsettled tickets into it, and runs only
+those. Original labels are kept; nothing is reset to `backlog`. When the last
+child completes, the parent flips from `partial_finished` to `completed`. See
+[`sprint-lifecycle.md`](../architecture/sprint-lifecycle.md).
 
 ---
 
@@ -81,12 +90,18 @@ the partial results.
 
 ## Sprint States
 
+The lifecycle redesign unified the state enum (`db.LIFECYCLE_STATES` +
+`canonical_lifecycle()` display mapping). Legacy `cancelled`/`failed` now map to
+`needs_rework`; `finished` → `completed`; `planning` → `draft`.
+
 | State | What it means |
 |---|---|
-| `planned` | Sprint label assigned, not yet running |
+| `draft` | Sprint created, not yet preflighted/dispatched |
+| `planned` | Preflight confirmed, not yet running |
 | `running` | Manager subprocess active |
-| `stopped` | Killed or timed out before completion |
-| `completed` | All tickets reached UAT or were skipped/failed |
+| `completed` | All tickets reached UAT/done |
+| `needs_rework` | A ticket failed, the run was stopped, or the process was lost (carries `end_reason`) — re-run into a child sprint |
+| `partial_finished` | **Derived, never stored** — this sprint's tickets moved to a child sprint not yet completed |
 
 ---
 
@@ -108,16 +123,21 @@ and `.commander/sprints/sprint-N-summary-YYYY-MM-DD.md`.
 
 ## Quality Gates
 
-After the tester exits 0, the sprint manager runs five gates in this order
+After the tester exits 0, the sprint manager runs seven gates in this order
 (cheap/deterministic first so bad tickets fail before expensive gates):
 
-| # | Gate | Tool | Skip env var |
+| # | Gate | Tool | Skip flag / env var |
 |---|------|------|-------------|
-| 1 | **typecheck** | mypy (Python), tsc --noEmit (TypeScript) | `COMMANDER_GATE_TYPECHECK=0` |
+| 1 | **typecheck** | mypy (Python), tsc --noEmit (TypeScript) | `--no-gate-typecheck` / `COMMANDER_GATE_TYPECHECK=0` |
 | 2 | **lint** | ruff (Python), eslint/biome + prettier (JS/TS) | `--no-gate-lint` |
-| 3 | **design** | `npx impeccable detect` — UI anti-pattern detector, no LLM | `COMMANDER_GATE_DESIGN=0` |
-| 4 | **pytest** | pytest -x on changed test files | `--no-gate-pytest` |
-| 5 | **merge-preview** | `git merge --no-commit --no-ff` dry run | `--no-gate-merge-preview` |
+| 3 | **frontend-lint** | eslint/biome + prettier on JS/TS only | `--no-gate-frontend-lint` / `COMMANDER_GATE_FRONTEND_LINT=0` |
+| 4 | **design** | `npx impeccable detect` — UI anti-pattern detector, no LLM | `COMMANDER_GATE_DESIGN=0` |
+| 5 | **pytest** | pytest -x on changed test files | `--no-gate-pytest` |
+| 6 | **monolith** | blocks new routes added to `server.py` (`COMMANDER_GATE_MONOLITH`) | `--no-gate-monolith` |
+| 7 | **merge-preview** | `git merge --no-commit --no-ff` dry run | `--no-gate-merge-preview` |
+
+Gate scope (`--gate-scope changed\|full`) controls whether gates run on changed
+files only or the full tree.
 
 Gates stop on first failure — the issue is reverted to SIT and a structured
 comment is posted. All gates are individually skippable via CLI flags or env

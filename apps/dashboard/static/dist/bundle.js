@@ -1393,7 +1393,6 @@
       return;
     const failedStep = _ksFailedStep;
     const label = _ksLabel;
-    const repo = _ksRepo;
     const errEl = document.getElementById("smgmt-kickoff-error");
     if (errEl)
       errEl.hidden = true;

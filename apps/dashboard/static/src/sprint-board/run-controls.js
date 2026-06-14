@@ -1005,7 +1005,6 @@ export async function smgmtKickoffRetry() {
   if (!_ksLabel || !_ksRepo) return;
   const failedStep = _ksFailedStep;
   const label = _ksLabel;
-  const repo  = _ksRepo;
 
   const errEl = document.getElementById('smgmt-kickoff-error');
   if (errEl) errEl.hidden = true;

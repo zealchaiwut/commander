@@ -5178,7 +5178,20 @@ def generate_sprint_summary(
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = _to_bangkok(state.start_timestamp) if state.start_timestamp else _bangkok_now()
-    end_ts   = _bangkok_now()
+    # End = start + wall-clock, in Bangkok time. Previously this used
+    # _bangkok_now() (the moment the summary was generated), so a regenerated
+    # summary drifted past the real sprint end. Hotfix S1.
+    end_ts = _bangkok_now()
+    if state.start_timestamp:
+        try:
+            _start_dt = datetime.strptime(
+                state.start_timestamp, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            end_ts = (_start_dt + timedelta(seconds=int(elapsed_secs))).astimezone(
+                _BANGKOK_TZ
+            ).strftime("%Y-%m-%dT%H:%M:%S+07:00")
+        except (ValueError, TypeError):
+            end_ts = _bangkok_now()
 
     h, rem   = divmod(int(elapsed_secs), 3600)
     m_int, s = divmod(rem, 60)
@@ -5187,6 +5200,14 @@ def generate_sprint_summary(
     completed = [i for i in state.issues if i.status == "done"]
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
+    # A "failed" ticket is a skipped one that actually failed (has a failure
+    # category or agent_status=failed) — distinct from a legitimately-skipped
+    # ticket (e.g. already merged in a prior run). Previously the summary printed
+    # len(skipped) for BOTH Skipped and Failed. Hotfix S2.
+    failed = [
+        i for i in skipped
+        if (getattr(i, "agent_status", None) == "failed") or getattr(i, "category", None)
+    ]
 
     # Per-ticket metrics come from in-memory sprint state. The Neon-backed rollup
     # was removed in issue #758 (Neon is export-only now).
@@ -5201,13 +5222,35 @@ def generate_sprint_summary(
     # which is subscription-funded — no raw API charges.
     cost_estimate_usd = 0.0
 
+    # Avg ticket time = mean of per-ticket wall durations (coder + tester), NOT
+    # wall_clock / completed — the old formula collapsed to the whole run wall
+    # time when only one ticket completed (sprint-73 showed "26m" avg). Hotfix S3.
+    def _summary_ts_secs(a, b):
+        if not a or not b:
+            return None
+        try:
+            _s = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+            _e = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+            return max(0.0, (_e - _s).total_seconds())
+        except (ValueError, TypeError):
+            return None
+    _ticket_durs: list[float] = []
+    for _i in state.issues:
+        _c = _summary_ts_secs(getattr(_i, "coder_started_at", None),
+                              getattr(_i, "coder_finished_at", None)) or 0.0
+        _t = _summary_ts_secs(getattr(_i, "tester_started_at", None),
+                              getattr(_i, "tester_finished_at", None)) or 0.0
+        if _c or _t:
+            _ticket_durs.append(_c + _t)
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
+    elif _ticket_durs:
+        avg_ticket_secs = sum(_ticket_durs) / len(_ticket_durs)
     else:
-        avg_ticket_secs = (elapsed_secs / len(completed)) if completed else 0
+        avg_ticket_secs = 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
-    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
+    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if _ticket_durs else "--"
 
     tester_rejections = sum(
         1 for i in state.issues
@@ -5228,21 +5271,27 @@ def generate_sprint_summary(
     lines: list[str] = []
 
     # -- Header section --
-    attempted = len(completed) + len(skipped)
+    # Roster = the full set of tickets this sprint owns this run. With the
+    # already-merged guard (E2), tickets that passed in a prior run stay in
+    # state.issues marked done, so this counts the whole sprint rather than a
+    # trimmed re-run subset. Hotfix S4.
+    attempted = len(state.issues)
+    # Outcome counts lead the table — that is the data the operator scans first
+    # (table-reorder request). Failed counts real failures, not len(skipped). S2.
     lines += [
         f"## Sprint {n} -- {end_reason}",
         "",
         "| Field | Value |",
         "|---|---|",
         f"| Sprint number | {n} |",
+        f"| Completed | {len(completed)} |",
+        f"| Failed | {len(failed)} |",
+        f"| Skipped | {len(skipped) - len(failed)} |",
+        f"| Attempted | {attempted} |",
         f"| Start | {start_ts} |",
         f"| End | {end_ts} |",
         f"| Duration | {duration_str} |",
         f"| End reason | {end_reason} |",
-        f"| Attempted | {attempted} |",
-        f"| Completed | {len(completed)} |",
-        f"| Skipped | {len(skipped)} |",
-        f"| Failed | {len(skipped)} |",
         "",
     ]
 

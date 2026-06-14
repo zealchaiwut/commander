@@ -4887,11 +4887,14 @@ def _live_manager_pid(project_root: Path, sprint_label: str) -> Optional[int]:
 
 
 def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
-    """Re-assert a sprint's lifecycle state as running across DB + plan.json.
+    """Re-assert a sprint's lifecycle state as running in the DB.
 
     Called when a live manager PID is found for a sprint whose stored state was
     wrongly flipped to a terminal value. record_sprint_start clears the stale
     ended_at/end_reason as part of the transition.
+
+    plan.json is NOT written here — GET endpoints call this indirectly and must
+    not mutate plan.json (issue #1096).  The sprint manager owns plan.json writes.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
@@ -4904,11 +4907,6 @@ def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
     started_at = (row or {}).get("started_at")
     try:
         _sprint_db_set_state(sprint_label, project, "running", started_at=started_at)
-    except Exception:
-        pass
-    try:
-        _plan_json_set_state(project_root, sprint_label, "running",
-                             started_at=started_at)
     except Exception:
         pass
     _log.warning(
@@ -4959,18 +4957,15 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
-        # DB=running but PID dead — reconcile both stores to needs_rework.
+        # DB=running but PID dead — reconcile DB to needs_rework.
+        # plan.json is NOT written here (issue #1096): GET endpoints call
+        # _is_sprint_running and must not mutate plan.json.
         _log.warning(
             "Sprint %s: DB state=running but no alive PID — reconciling to needs_rework",
             sprint_label,
         )
         try:
             db.record_sprint_needs_rework(sprint_label, end_reason="process lost")
-        except Exception:
-            pass
-        try:
-            _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                 end_reason="process lost")
         except Exception:
             pass
         return False
@@ -5024,16 +5019,15 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
                     return True
                 except OSError:
                     pass
-            # plan.json=running but no alive PID — reconcile to needs_rework
+            # plan.json=running but no alive PID — log and return False.
+            # plan.json is NOT written here (issue #1096): GET endpoints call
+            # _is_sprint_running and must not mutate plan.json.  The startup
+            # sweep (_sweep_plan_json_states) handles the reconcile at boot time.
             _log.warning(
-                "Sprint %s: plan.json=running but no alive PID — reconciling to needs_rework",
+                "Sprint %s: plan.json=running but no alive PID — not running "
+                "(startup sweep will reconcile plan.json)",
                 sprint_label,
             )
-            try:
-                _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                     end_reason="process lost")
-            except Exception:
-                pass
             return False
         # Unknown state value — fall through to PID check below
 
@@ -5082,18 +5076,9 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         except OSError:
             pass
 
-    if plan is None:
-        # Lazy migration: create plan.json for this legacy sprint
-        try:
-            if pid_alive:
-                _plan_json_set_state(project_root, sprint_label, "running",
-                                     started_at=datetime.now(timezone.utc).isoformat())
-                _log.info("[plan-migrate] %s: created plan.json state=running (legacy PID)", sprint_label)
-            else:
-                _plan_json_set_state(project_root, sprint_label, "completed")
-                _log.info("[plan-migrate] %s: created plan.json state=completed (no PID, historical)", sprint_label)
-        except Exception:
-            pass
+    # plan.json is NOT created here for legacy sprints (issue #1096):
+    # _is_sprint_running is called from GET endpoints and must not write files.
+    # The sprint manager owns plan.json creation.
 
     return pid_alive
 
@@ -6521,32 +6506,15 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
 def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
 
-    Creates plan.json lazily on first access for legacy sprints that pre-date
-    this feature.  State values: see _VALID_PLAN_STATES (unified lifecycle).
+    GET endpoints must not write plan.json (issue #1096): the sprint manager
+    is the sole writer.  Returns 404 when plan.json does not exist.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
     project_root = _project_root_path(project)
     plan = _read_plan_json(project_root, sprint_label)
     if plan is None:
-        # Lazy migration for legacy sprint (issue #507)
-        sprints_dir = _commander_dir(project_root) / "sprints"
-        has_pid = (sprints_dir / f"{sprint_label}-pid").exists() or \
-                  (sprints_dir / f"{sprint_label}-pid.pending").exists()
-        if has_pid and _is_sprint_running(project_root, sprint_label):
-            new_state = "running"
-        else:
-            new_state = "completed"
-        try:
-            _plan_json_set_state(project_root, sprint_label, new_state)
-            _log.info("[plan-migrate] %s: created plan.json state=%s (lazy, first state access)", sprint_label, new_state)
-        except Exception:
-            pass
-        plan = _read_plan_json(project_root, sprint_label)
-    if plan is None:
-        raise HTTPException(404, detail=f"Could not read or create plan.json for {sprint_label}")
+        raise HTTPException(404, detail=f"plan.json not found for {sprint_label!r}")
     return plan
 
 

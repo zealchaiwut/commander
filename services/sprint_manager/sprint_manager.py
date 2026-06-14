@@ -2297,12 +2297,15 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         f"- **{r.gate}**: {r.symbol}" for r in results
     )
     if gates_skipped:
-        header = f"Quality gates skipped (`--skip-gates`). Auto-merged to `{target_branch}`."
+        header = f"Quality gates skipped (`--skip-gates`). Tester verified, then auto-merged into the sprint base branch `{target_branch}`."
     else:
-        header = f"Quality gates passed. Auto-merged to `{target_branch}`."
+        header = f"Quality gates passed. Tester verified → gates → merged into the sprint base branch `{target_branch}`."
     comment = (
         f"{header}\n\n"
-        f"Gates:\n{gate_lines}\n\nAwaiting human UAT approval."
+        f"Gates:\n{gate_lines}\n\n"
+        f"The work now lives on `{target_branch}` (the sprint branch). It reaches "
+        f"`develop` only when you click **Merge Sprint** — that is why there is no "
+        f"per-ticket PR into develop. Awaiting human UAT approval."
     )
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
@@ -4062,24 +4065,40 @@ def _worktree_hygiene(
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
 
     if not is_retry:
-        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
+        # 5a — fresh-ticket: a pre-existing feature branch at a divergent SHA is a
+        # stale leftover from a prior interrupted run (a genuinely fresh ticket has
+        # no branch, or one already at base). Delete the stale LOCAL branch so the
+        # coder recreates it cleanly off base, instead of aborting the whole ticket
+        # as 'divergent-branch' — that false abort cascaded sprint-73's
+        # #928/929/932/933. Uncommitted work was already quarantine-stashed in
+        # step 3; a remote-only ref (origin/...) never blocks a fresh checkout, so
+        # only a local branch needs clearing and the remote is left untouched.
         if feature_branch is not None and base_sha:
             ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
             branch_sha = branch_sha.strip() if ok else None
             if branch_sha and branch_sha != base_sha:
-                detail = (
-                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
-                    f"but base is {base_sha[:8]}"
+                ok_local, _, _ = _try(
+                    "git", "show-ref", "--verify", "--quiet",
+                    f"refs/heads/{feature_branch}", cwd=worktree,
                 )
-                sys.stdout.write(str(f"  [hygiene] ERROR: {detail}") + "\n")
-                sys.stdout.flush()
-                record_failure(
-                    int(ticket_id),
-                    "divergent-branch",
-                    detail=detail,
-                    repo_root=effective_root,
-                )
-                return worktree_sha, base_sha, "divergent-branch"
+                if ok_local:
+                    detail = (
+                        f"Stale feature branch {feature_branch} at {branch_sha[:8]} "
+                        f"(base {base_sha[:8]}) — deleting so the coder recreates it "
+                        f"fresh off base"
+                    )
+                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+                    sys.stdout.flush()
+                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
+                    try:
+                        structured_log.warn(
+                            "stale_feature_branch_cleared",
+                            f"deleted stale local {feature_branch} before fresh dispatch of #{ticket_id}",
+                            issue_num=int(ticket_id), branch=feature_branch,
+                            stale_sha=branch_sha, base_sha=base_sha,
+                        )
+                    except Exception:
+                        pass
     else:
         # 5b — retry-round: checkout feature branch and rebase onto base
         if feature_branch is not None:
@@ -8118,6 +8137,41 @@ def run_sprint(
             summary.merged.append(f"#{num}")
             continue
 
+        # Already-merged guard (hotfix E2): if this ticket's feature branch is
+        # already merged into the sprint base branch, it passed in a prior run —
+        # never re-dispatch it, even if its UAT label was stripped. That is
+        # exactly how sprint-73's #931 (merged at 19:35, UAT stripped at 19:50)
+        # got re-run into a divergent-branch crash. Trust git, not the label, and
+        # re-apply UAT so the board reflects reality.
+        if issue_state.status not in ("done", "skipped"):
+            _e2_fb = _find_feature_branch(num)
+            _e2_merged = (
+                _is_branch_merged_into(_e2_fb, target_branch) if _e2_fb
+                else _was_feature_merged_via_log(num, target_branch)
+            )
+            if _e2_merged:
+                sys.stdout.write(str(
+                    f"\n--- {progress} Issue #{num}: {title} --- "
+                    f"[SKIP: already merged into {target_branch} in a prior run]") + "\n")
+                try:
+                    structured_log.event(
+                        "issue.skip", run_id=_run_id, issue_num=num,
+                        sprint_label=label, agent_role="sprint",
+                        skip_reason=f"already merged into {target_branch}",
+                    )
+                except Exception:
+                    pass
+                issue_state.status = "done"
+                issue_state.set_agent_status("merged")
+                _transition_safe(
+                    num, _TicketState.UAT,
+                    actor="sprint_manager:already_merged", repo_name=eff_repo,
+                )
+                summary.processed.append(f"#{num}")
+                summary.merged.append(f"#{num}")
+                state.save(state_path)
+                continue
+
         sys.stdout.write(str(f"\n--- {progress} Issue #{num}: {title} ---") + "\n")
         try:
             structured_log.event(
@@ -8789,6 +8843,18 @@ def run_sprint(
             continue
 
         if _infra_exit:
+            # Terminal per-ticket failure (coder crash, divergent-branch, final
+            # hang kill, retry-exhausted): surface it as needs-rework on GitHub
+            # instead of leaving the ticket stuck on in-progress/SIT for the
+            # end-of-run reconcile to flag as "stale status labels"
+            # (sprint-lifecycle.md). The TESTER_REJECTED merge-detection race is
+            # the documented exception — a re-run resolves it, so it must not be
+            # mislabelled needs-rework.
+            if getattr(issue_state, "category", None) != FailureCategory.TESTER_REJECTED:
+                _transition_safe(
+                    num, _TicketState.NEEDS_REWORK,
+                    actor="sprint_manager:infra_fail", repo_name=eff_repo,
+                )
             continue
 
         elapsed = time.monotonic() - start_time

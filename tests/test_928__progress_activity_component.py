@@ -15,11 +15,8 @@ All JS tests run via Node.js (node --test tests/frontend/progress-activity.test.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 COMPONENT_SRC = REPO_ROOT / "apps" / "dashboard" / "static" / "src" / "progress-activity.js"

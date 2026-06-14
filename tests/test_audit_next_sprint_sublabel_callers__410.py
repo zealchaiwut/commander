@@ -92,7 +92,7 @@ class TestCallSiteAudit:
     def test_all_call_sites_pass_existing_label_names(self):
         source = SERVER_PY.read_text(encoding="utf-8")
         calls = re.findall(
-            r"_next_sprint_sublabel\s*\(\s*sprint_label",
+            r"_next_sprint_sublabel\s*\(\s*sprint_label,\s*existing_label_names",
             source,
         )
         assert len(calls) == 3, f"Expected 3 call sites, found {len(calls)}"

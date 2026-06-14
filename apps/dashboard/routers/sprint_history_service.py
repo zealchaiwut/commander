@@ -183,6 +183,9 @@ def _normalize_issue(iss: dict) -> dict:
         "time_spent": iss.get("time_spent", _issue_time_spent(iss)),
         "pr_number": pr,
     }
+    title = iss.get("title")
+    if title:
+        out["title"] = str(title)
     if agent_status:
         out["agent_status"] = agent_status
     if failure_reason:

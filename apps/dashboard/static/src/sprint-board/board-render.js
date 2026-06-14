@@ -733,8 +733,16 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
   const isRunning = _smgmtRunningLabels.has(label);
   const isLinger = !isRunning && typeof _smgmtIsLinger === 'function' && _smgmtIsLinger(label);
   const isRunningView = isRunning || isLinger;
-  let isCollapsed = false;
-  try { isCollapsed = localStorage.getItem('sprintColumn_' + label + '_collapsed') === '1'; } catch (_) {}
+  // Running sprints default to collapsed on the Board — their live detail lives
+  // in the Running pane, reachable via the header deep-link (hotfix #5). The
+  // collapse pref is tri-state: '1' = collapsed, '0' = explicitly expanded,
+  // absent = default (collapsed for running, expanded otherwise).
+  let isCollapsed = isRunning;
+  try {
+    const _pref = localStorage.getItem('sprintColumn_' + label + '_collapsed');
+    if (_pref === '1') isCollapsed = true;
+    else if (_pref === '0') isCollapsed = false;
+  } catch (_) {}
 
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
@@ -928,6 +936,7 @@ export function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finis
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
           ${runningBadgeHtml}
+          ${isRunningView ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ''}
           ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ''}
           ${plannedBadge}
           ${outcomeBadgeHtml}

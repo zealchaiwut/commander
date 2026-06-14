@@ -347,9 +347,16 @@ class TestSprintManagerSource:
 
 class TestPaneSources:
     def test_history_chip_map_has_new_states(self):
-        for needle in ("needs_rework", "ready_to_merge", "partial_finished",
-                       "Needs rework", "Ready to merge", "Partial finished"):
+        # Enum keys in board/history lifecycle maps (sprint-lifecycle.md).
+        for needle in ("needs_rework", "ready_to_merge", "partial_finished"):
             assert needle in _PROJECT_HTML
+        # Human-readable labels in history chips and sprint card badges.
+        # History chips use short labels ('Partial'); card badges use ALL CAPS.
+        for needle in (
+            "Ready to merge", "Partial", "PARTIAL FINISHED",
+            "NEEDS REWORK", "Needs rework",
+        ):
+            assert needle in _PROJECT_HTML, f"missing lifecycle label: {needle!r}"
 
     def test_resume_verb_removed(self):
         assert "_histResumeSprint" not in _PROJECT_HTML

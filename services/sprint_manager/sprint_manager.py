@@ -74,7 +74,6 @@ from services.sprint_manager.pipeline import (  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     develop_merge_guard as _develop_merge_guard,
     label_transition_guard as _label_transition_guard,
-    ghost_status_labels as _ghost_status_labels,
 )
 
 try:
@@ -252,13 +251,13 @@ def _resolve_uat_env_for_tester(
 
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
-import github_client
+import github_client  # noqa: E402
 
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
+from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
 
 try:
     from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
@@ -280,8 +279,6 @@ try:
     from post_test_report import (  # type: ignore[import]
         parse_failures,
         build_failure_block,
-        write_sidecar,
-        sidecar_path,
     )
     _FAILURE_PARSING_AVAILABLE = True
 except ImportError:
@@ -431,6 +428,11 @@ class SprintConfig:
     repo_name:             Optional[str]  = None
     worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
     worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
+    # Dedicated clone for non-coding sprint agents (documenter, reviewer) so they
+    # never check out feature branches in the coder/tester worktrees (which are
+    # mid-sprint) or — worse — the serving uat clone. Optional; falls back to the
+    # tester/coder worktree when unset.
+    worktree_agents:       Optional[Path] = None
     tester_app_subdir:     str            = "apps/dashboard"
     scripts_dir:           Path           = field(default_factory=lambda: SCRIPTS_DIR)
     logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
@@ -528,6 +530,10 @@ def load_config(path: Path) -> "SprintConfig":
 
     worktree_coder  = _resolve_path(coder_raw, base_dir)
     worktree_tester = _resolve_path(tester_raw, base_dir)
+    # Optional dedicated agents clone (documenter/reviewer). Falls back to None
+    # (→ tester/coder worktree) when not configured.
+    agents_raw = (wt.get("agents") or "").strip()
+    worktree_agents = _resolve_path(agents_raw, base_dir) if agents_raw else None
     tester_app_subdir = (wt.get("tester_app_subdir") or "")
 
     # ── validate worktree paths ────────────────────────────────────────────────
@@ -644,6 +650,7 @@ def load_config(path: Path) -> "SprintConfig":
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
         worktree_tester       = worktree_tester,
+        worktree_agents       = worktree_agents,
         tester_app_subdir     = tester_app_subdir,
         scripts_dir           = scripts_dir,
         logs_dir              = logs_dir,
@@ -1600,16 +1607,30 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
 
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
+
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
 
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    """Return JS/TS files added/modified in HEAD relative to base_branch.
+
+    Excludes generated build artifacts (dist/ dirs and .map files) that
+    should never be linted — ESLint treats explicitly-passed ignored files
+    as warnings under --max-warnings=0.
+    """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
         return []
-    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+    return [
+        f for f in out.splitlines()
+        if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)
+        and not any(pat in f for pat in _JS_TS_LINT_EXCLUDE)
+    ]
 
 
 # Frontend file extensions the impeccable design detector analyses.
@@ -2254,7 +2275,6 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
     if _FAILURE_PARSING_AVAILABLE:
         try:
-            effective_root = repo_root or REPO_ROOT
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
             files_to_inspect = sorted({
@@ -2297,12 +2317,15 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         f"- **{r.gate}**: {r.symbol}" for r in results
     )
     if gates_skipped:
-        header = f"Quality gates skipped (`--skip-gates`). Auto-merged to `{target_branch}`."
+        header = f"Quality gates skipped (`--skip-gates`). Tester verified, then auto-merged into the sprint base branch `{target_branch}`."
     else:
-        header = f"Quality gates passed. Auto-merged to `{target_branch}`."
+        header = f"Quality gates passed. Tester verified → gates → merged into the sprint base branch `{target_branch}`."
     comment = (
         f"{header}\n\n"
-        f"Gates:\n{gate_lines}\n\nAwaiting human UAT approval."
+        f"Gates:\n{gate_lines}\n\n"
+        f"The work now lives on `{target_branch}` (the sprint branch). It reaches "
+        f"`develop` only when you click **Merge Sprint** — that is why there is no "
+        f"per-ticket PR into develop. Awaiting human UAT approval."
     )
     try:
         github_client.add_comment(issue_num, comment, repo_name=repo_name)
@@ -2429,8 +2452,13 @@ def _gate_lint(
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
                 sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                # Paths from git diff are relative to the repo root, not worktester_dashboard.
+                _rc_root, _root_out, _ = _run_timed(
+                    "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+                )
+                ruff_cwd = Path(_root_out.strip()) if _rc_root == 0 and _root_out.strip() else worktester_dashboard
                 rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
-                                                cwd=worktester_dashboard)
+                                                cwd=ruff_cwd)
                 combined += stdout + stderr
                 any_ran = True
                 if rc != 0:
@@ -2508,9 +2536,10 @@ def _gate_merge_preview(
             _run("git", "checkout", "--track", f"origin/{target_branch}",
                  cwd=worktester_root, check=False)
 
-        # Attempt dry-run merge
+        # Attempt dry-run merge using the remote tracking ref so the branch
+        # resolves even when it was never checked out locally in this worktree.
         rc, stdout, stderr = _run_timed(
-            "git", "merge", "--no-commit", "--no-ff", feature_branch,
+            "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
             cwd=worktester_root,
         )
         combined = stdout + stderr
@@ -2639,6 +2668,13 @@ def _run_frontend_lint(
     combined = ""
     passed = True
 
+    # Paths from _changed_js_ts_files are relative to the git root.
+    # Resolve the git root so linters run from there, not worktester_dashboard.
+    rc_root, git_root_out, _ = _run_timed(
+        "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+    )
+    lint_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
     # eslint or biome (prefer biome if configured)
     ok_biome, biome_path, _ = _try("which", "biome")
     ok_eslint, eslint_path, _ = _try("which", "eslint")
@@ -2653,19 +2689,25 @@ def _run_frontend_lint(
         linter_bin = eslint_path
         linter_args = ["--max-warnings=0"]
     elif ok_npx:
-        # try biome via npx — skip if not found in project
-        rc_biome, _, _ = _run_timed(
-            npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
-        )
-        if rc_biome == 0:
-            linter_bin = npx_path
-            linter_args = ["--no", "biome", "check", "--apply=false"]
+        for _eslint_candidate in [
+            lint_cwd / "node_modules" / ".bin" / "eslint",
+            REPO_ROOT / "node_modules" / ".bin" / "eslint",
+        ]:
+            if _eslint_candidate.exists():
+                linter_bin = str(_eslint_candidate.resolve())
+                linter_args = ["--max-warnings=0"]
+                break
+        if not linter_bin:
+            _local_biome = lint_cwd / "node_modules" / ".bin" / "biome"
+            if _local_biome.exists():
+                linter_bin = npx_path
+                linter_args = ["--no", "biome", "check", "--apply=false"]
 
     if linter_bin:
         targets = ["."] if gate_scope == "full" else js_ts_files
         sys.stdout.write(str(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...") + "\n")
         rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
-                                        cwd=worktester_dashboard)
+                                        cwd=lint_cwd)
         combined += stdout + stderr
         if rc != 0:
             structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
@@ -2683,7 +2725,7 @@ def _run_frontend_lint(
         ok_prettier, prettier_bin, _ = _try("which", "prettier")
         if not ok_prettier and ok_npx:
             rc_pcheck, _, _ = _run_timed(
-                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+                npx_path, "--no", "prettier", "--version", cwd=lint_cwd
             )
             if rc_pcheck == 0:
                 prettier_bin = npx_path
@@ -2699,7 +2741,7 @@ def _run_frontend_lint(
             cmd_args = prettier_prefix + ["--check"] + targets
             sys.stdout.write(str(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...") + "\n")
             rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
-                                            cwd=worktester_dashboard)
+                                            cwd=lint_cwd)
             combined += stdout + stderr
             if rc != 0:
                 structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",
@@ -3135,7 +3177,9 @@ def _call_finish_feature(
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
         finish_script = cfg.finish_feature_script
-        wt_root = worktester_root or cfg.worktree_tester
+        # Prefer the dedicated agents clone for the documentor (falls back to the
+        # tester worktree when not configured).
+        wt_root = worktester_root or cfg.worktree_agents or cfg.worktree_tester
     else:
         finish_script = FINISH_FEATURE_SCRIPT
         wt_root = worktester_root or WORKTESTER_ROOT
@@ -3381,7 +3425,7 @@ def handle_post_tester(
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         else:
-            sys.stdout.write(str(f"  All gates passed -- merge already done, skipping re-merge") + "\n")
+            sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo, target_branch=target_branch)
         _delete_failure_sidecar(issue_num)
@@ -4061,24 +4105,40 @@ def _worktree_hygiene(
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
 
     if not is_retry:
-        # 5a — fresh-ticket: abort if feature branch exists at a divergent SHA
+        # 5a — fresh-ticket: a pre-existing feature branch at a divergent SHA is a
+        # stale leftover from a prior interrupted run (a genuinely fresh ticket has
+        # no branch, or one already at base). Delete the stale LOCAL branch so the
+        # coder recreates it cleanly off base, instead of aborting the whole ticket
+        # as 'divergent-branch' — that false abort cascaded sprint-73's
+        # #928/929/932/933. Uncommitted work was already quarantine-stashed in
+        # step 3; a remote-only ref (origin/...) never blocks a fresh checkout, so
+        # only a local branch needs clearing and the remote is left untouched.
         if feature_branch is not None and base_sha:
             ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
             branch_sha = branch_sha.strip() if ok else None
             if branch_sha and branch_sha != base_sha:
-                detail = (
-                    f"Feature branch {feature_branch} exists at {branch_sha[:8]} "
-                    f"but base is {base_sha[:8]}"
+                ok_local, _, _ = _try(
+                    "git", "show-ref", "--verify", "--quiet",
+                    f"refs/heads/{feature_branch}", cwd=worktree,
                 )
-                sys.stdout.write(str(f"  [hygiene] ERROR: {detail}") + "\n")
-                sys.stdout.flush()
-                record_failure(
-                    int(ticket_id),
-                    "divergent-branch",
-                    detail=detail,
-                    repo_root=effective_root,
-                )
-                return worktree_sha, base_sha, "divergent-branch"
+                if ok_local:
+                    detail = (
+                        f"Stale feature branch {feature_branch} at {branch_sha[:8]} "
+                        f"(base {base_sha[:8]}) — deleting so the coder recreates it "
+                        f"fresh off base"
+                    )
+                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+                    sys.stdout.flush()
+                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
+                    try:
+                        structured_log.warn(
+                            "stale_feature_branch_cleared",
+                            f"deleted stale local {feature_branch} before fresh dispatch of #{ticket_id}",
+                            issue_num=int(ticket_id), branch=feature_branch,
+                            stale_sha=branch_sha, base_sha=base_sha,
+                        )
+                    except Exception:
+                        pass
     else:
         # 5b — retry-round: checkout feature branch and rebase onto base
         if feature_branch is not None:
@@ -4123,7 +4183,7 @@ def _dispatch_doctor(
         dispatch_alerts(
             alert_modes,
             title=(
-                f"dispatch-blocked: environment check failed"
+                "dispatch-blocked: environment check failed"
                 + (f" (issue #{issue_num})" if issue_num else "")
             ),
             body=err,
@@ -5158,7 +5218,20 @@ def generate_sprint_summary(
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = _to_bangkok(state.start_timestamp) if state.start_timestamp else _bangkok_now()
-    end_ts   = _bangkok_now()
+    # End = start + wall-clock, in Bangkok time. Previously this used
+    # _bangkok_now() (the moment the summary was generated), so a regenerated
+    # summary drifted past the real sprint end. Hotfix S1.
+    end_ts = _bangkok_now()
+    if state.start_timestamp:
+        try:
+            _start_dt = datetime.strptime(
+                state.start_timestamp, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            end_ts = (_start_dt + timedelta(seconds=int(elapsed_secs))).astimezone(
+                _BANGKOK_TZ
+            ).strftime("%Y-%m-%dT%H:%M:%S+07:00")
+        except (ValueError, TypeError):
+            end_ts = _bangkok_now()
 
     h, rem   = divmod(int(elapsed_secs), 3600)
     m_int, s = divmod(rem, 60)
@@ -5167,6 +5240,14 @@ def generate_sprint_summary(
     completed = [i for i in state.issues if i.status == "done"]
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
+    # A "failed" ticket is a skipped one that actually failed (has a failure
+    # category or agent_status=failed) — distinct from a legitimately-skipped
+    # ticket (e.g. already merged in a prior run). Previously the summary printed
+    # len(skipped) for BOTH Skipped and Failed. Hotfix S2.
+    failed = [
+        i for i in skipped
+        if (getattr(i, "agent_status", None) == "failed") or getattr(i, "category", None)
+    ]
 
     # Per-ticket metrics come from in-memory sprint state. The Neon-backed rollup
     # was removed in issue #758 (Neon is export-only now).
@@ -5181,13 +5262,35 @@ def generate_sprint_summary(
     # which is subscription-funded — no raw API charges.
     cost_estimate_usd = 0.0
 
+    # Avg ticket time = mean of per-ticket wall durations (coder + tester), NOT
+    # wall_clock / completed — the old formula collapsed to the whole run wall
+    # time when only one ticket completed (sprint-73 showed "26m" avg). Hotfix S3.
+    def _summary_ts_secs(a, b):
+        if not a or not b:
+            return None
+        try:
+            _s = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+            _e = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+            return max(0.0, (_e - _s).total_seconds())
+        except (ValueError, TypeError):
+            return None
+    _ticket_durs: list[float] = []
+    for _i in state.issues:
+        _c = _summary_ts_secs(getattr(_i, "coder_started_at", None),
+                              getattr(_i, "coder_finished_at", None)) or 0.0
+        _t = _summary_ts_secs(getattr(_i, "tester_started_at", None),
+                              getattr(_i, "tester_finished_at", None)) or 0.0
+        if _c or _t:
+            _ticket_durs.append(_c + _t)
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
+    elif _ticket_durs:
+        avg_ticket_secs = sum(_ticket_durs) / len(_ticket_durs)
     else:
-        avg_ticket_secs = (elapsed_secs / len(completed)) if completed else 0
+        avg_ticket_secs = 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
-    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
+    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if _ticket_durs else "--"
 
     tester_rejections = sum(
         1 for i in state.issues
@@ -5208,21 +5311,27 @@ def generate_sprint_summary(
     lines: list[str] = []
 
     # -- Header section --
-    attempted = len(completed) + len(skipped)
+    # Roster = the full set of tickets this sprint owns this run. With the
+    # already-merged guard (E2), tickets that passed in a prior run stay in
+    # state.issues marked done, so this counts the whole sprint rather than a
+    # trimmed re-run subset. Hotfix S4.
+    attempted = len(state.issues)
+    # Outcome counts lead the table — that is the data the operator scans first
+    # (table-reorder request). Failed counts real failures, not len(skipped). S2.
     lines += [
         f"## Sprint {n} -- {end_reason}",
         "",
         "| Field | Value |",
         "|---|---|",
         f"| Sprint number | {n} |",
+        f"| Completed | {len(completed)} |",
+        f"| Failed | {len(failed)} |",
+        f"| Skipped | {len(skipped) - len(failed)} |",
+        f"| Attempted | {attempted} |",
         f"| Start | {start_ts} |",
         f"| End | {end_ts} |",
         f"| Duration | {duration_str} |",
         f"| End reason | {end_reason} |",
-        f"| Attempted | {attempted} |",
-        f"| Completed | {len(completed)} |",
-        f"| Skipped | {len(skipped)} |",
-        f"| Failed | {len(skipped)} |",
         "",
     ]
 
@@ -5413,9 +5522,9 @@ def generate_sprint_summary(
         f"The sprint branch `{effective_sprint_branch}` is ready for review.",
         "When UAT is complete, open a PR to promote it to `develop`:",
         "",
-        f"```bash",
+        "```bash",
         f"gh pr create --base develop --head {effective_sprint_branch} --repo {r}",
-        f"```",
+        "```",
         "",
     ]
 
@@ -6303,7 +6412,9 @@ def _dispatch_documenter(
             "check documenter_prompt_template in sprint.yaml or DEFAULT_DOCUMENTER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_tester if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so the documenter never commits in the
+    # tester worktree (mid-sprint) or the serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_tester) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-documenter.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6524,7 +6635,10 @@ def _dispatch_reviewer(
             "check reviewer_prompt_template in sprint.yaml or DEFAULT_REVIEWER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-reviewer.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6689,7 +6803,10 @@ def _dispatch_ba_for_followup(
     Returns True on success, False on failure.  Failures are printed but not raised
     so callers can continue processing other tickets.
     """
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"ba-rewrite-{issue_num}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6877,7 +6994,7 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
-    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:
+    if label_set & {lbl_r.lower() for lbl_r in _HIGH_RISK_LABELS}:
         return "HIGH"
 
     if paths_touched:
@@ -7448,8 +7565,8 @@ def _run_pipeline_dispatch(
                         alert_modes,
                         title=f"Issue #{num}: hang-redispatch",
                         body=(
-                            f"Coder hung and was idle-killed; redispatching once "
-                            f"with continuation context (attempt_kind=hang_continue)."
+                            "Coder hung and was idle-killed; redispatching once "
+                            "with continuation context (attempt_kind=hang_continue)."
                         ),
                         issue_num=num,
                         category="hang-redispatch",
@@ -7765,7 +7882,7 @@ def run_sprint(
 
     # Log config info when running against a second repo
     if cfg and cfg.repo_name:
-        sys.stdout.write(str(f"\n=== SprintConfig ===") + "\n")
+        sys.stdout.write(str("\n=== SprintConfig ===") + "\n")
         sys.stdout.write(str(f"  repo:         {cfg.repo_name}") + "\n")
         sys.stdout.write(str(f"  coder-wt:     {cfg.worktree_coder}") + "\n")
         sys.stdout.write(str(f"  tester-wt:    {cfg.worktree_tester}") + "\n")
@@ -8117,6 +8234,41 @@ def run_sprint(
             summary.merged.append(f"#{num}")
             continue
 
+        # Already-merged guard (hotfix E2): if this ticket's feature branch is
+        # already merged into the sprint base branch, it passed in a prior run —
+        # never re-dispatch it, even if its UAT label was stripped. That is
+        # exactly how sprint-73's #931 (merged at 19:35, UAT stripped at 19:50)
+        # got re-run into a divergent-branch crash. Trust git, not the label, and
+        # re-apply UAT so the board reflects reality.
+        if issue_state.status not in ("done", "skipped"):
+            _e2_fb = _find_feature_branch(num)
+            _e2_merged = (
+                _is_branch_merged_into(_e2_fb, target_branch) if _e2_fb
+                else _was_feature_merged_via_log(num, target_branch)
+            )
+            if _e2_merged:
+                sys.stdout.write(str(
+                    f"\n--- {progress} Issue #{num}: {title} --- "
+                    f"[SKIP: already merged into {target_branch} in a prior run]") + "\n")
+                try:
+                    structured_log.event(
+                        "issue.skip", run_id=_run_id, issue_num=num,
+                        sprint_label=label, agent_role="sprint",
+                        skip_reason=f"already merged into {target_branch}",
+                    )
+                except Exception:
+                    pass
+                issue_state.status = "done"
+                issue_state.set_agent_status("merged")
+                _transition_safe(
+                    num, _TicketState.UAT,
+                    actor="sprint_manager:already_merged", repo_name=eff_repo,
+                )
+                summary.processed.append(f"#{num}")
+                summary.merged.append(f"#{num}")
+                state.save(state_path)
+                continue
+
         sys.stdout.write(str(f"\n--- {progress} Issue #{num}: {title} ---") + "\n")
         try:
             structured_log.event(
@@ -8410,8 +8562,8 @@ def run_sprint(
                                 alert_modes,
                                 title=f"Issue #{num}: hang-redispatch",
                                 body=(
-                                    f"Coder hung and was idle-killed; redispatching once "
-                                    f"with continuation context (attempt_kind=hang_continue)."
+                                    "Coder hung and was idle-killed; redispatching once "
+                                    "with continuation context (attempt_kind=hang_continue)."
                                 ),
                                 issue_num=num,
                                 category="hang-redispatch",
@@ -8465,7 +8617,7 @@ def run_sprint(
                         "attempt": _fix_attempt, "category": category, "reason": reason,
                     })
                     if _sig == _last_failure_sig:
-                        sys.stdout.write(str(f"  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
+                        sys.stdout.write(str("  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
                         sys.stdout.flush()
                         _loop_aborted = True
                         break
@@ -8788,6 +8940,18 @@ def run_sprint(
             continue
 
         if _infra_exit:
+            # Terminal per-ticket failure (coder crash, divergent-branch, final
+            # hang kill, retry-exhausted): surface it as needs-rework on GitHub
+            # instead of leaving the ticket stuck on in-progress/SIT for the
+            # end-of-run reconcile to flag as "stale status labels"
+            # (sprint-lifecycle.md). The TESTER_REJECTED merge-detection race is
+            # the documented exception — a re-run resolves it, so it must not be
+            # mislabelled needs-rework.
+            if getattr(issue_state, "category", None) != FailureCategory.TESTER_REJECTED:
+                _transition_safe(
+                    num, _TicketState.NEEDS_REWORK,
+                    actor="sprint_manager:infra_fail", repo_name=eff_repo,
+                )
             continue
 
         elapsed = time.monotonic() - start_time

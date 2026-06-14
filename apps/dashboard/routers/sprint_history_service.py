@@ -183,6 +183,9 @@ def _normalize_issue(iss: dict) -> dict:
         "time_spent": iss.get("time_spent", _issue_time_spent(iss)),
         "pr_number": pr,
     }
+    title = iss.get("title")
+    if title:
+        out["title"] = str(title)
     if agent_status:
         out["agent_status"] = agent_status
     if failure_reason:
@@ -252,30 +255,51 @@ def _read_plan_file(sprints_dirs: Path | list[Path], label: str) -> dict | None:
     return None
 
 
+# agent_runs.outcome values that indicate a ticket's work landed / was rejected.
+_AGENT_RUN_MERGED = {"merged", "pass", "passed", "success", "done", "complete",
+                     "completed", "uat", "shipped"}
+_AGENT_RUN_FAILED = {"fail", "failed", "reject", "rejected", "crash", "crashed",
+                     "skipped", "error"}
+
+
 def _issues_from_agent_runs(label: str) -> list[dict]:
-    """Synthesize issue rows from agent_runs when state.json has no tickets."""
+    """Synthesize issue rows from agent_runs, deriving each ticket's disposition
+    from its run outcomes.
+
+    Used both as a fallback when state.json has no tickets AND to UNION in
+    tickets that ran under this sprint but were dropped from the latest state
+    file (e.g. merged in an earlier run of the same sprint) so the History ledger
+    matches the Board rather than hiding successes.
+    """
     try:
         rows = _db().agent_runs_for_sprint(label)
     except Exception:
         return []
-    seen: set[int] = set()
-    issues: list[dict] = []
+    agg: dict[int, dict] = {}
     for row in rows:
         num = row.get("issue_number")
-        if num is None:
-            continue
         try:
             tid = int(num)
         except (TypeError, ValueError):
             continue
-        if tid in seen or tid <= 0:
+        if tid <= 0:
             continue
-        seen.add(tid)
+        outcome = (row.get("outcome") or "").strip().lower()
+        rec = agg.setdefault(tid, {"merged": False, "failed": False})
+        if outcome in _AGENT_RUN_MERGED:
+            rec["merged"] = True
+        elif outcome in _AGENT_RUN_FAILED:
+            rec["failed"] = True
+    issues: list[dict] = []
+    for tid in sorted(agg):
+        rec = agg[tid]
+        state = "merged" if rec["merged"] else ("closed" if rec["failed"] else "open")
         issues.append({
             "ticket_id": tid,
-            "state": "open",
+            "state": state,
             "time_spent": None,
             "pr_number": None,
+            "from_agent_runs": True,
         })
     return issues
 
@@ -321,8 +345,16 @@ def _enrich_from_state(label: str, sprints_dirs: Path | list[Path]) -> dict:
     issues_raw = state.get("issues", [])
     out["issues_raw"] = issues_raw
     out["issues"] = [_normalize_issue(i) for i in issues_raw]
-    if not out["issues"]:
-        out["issues"] = _issues_from_agent_runs(label)
+    # Union with tickets recorded in agent_runs but missing from the current state
+    # file — e.g. tickets that merged in an EARLIER run of this sprint and were
+    # dropped from the latest state. Without this the History ledger shows fewer
+    # tickets than the Board (sprint-73 showed 7 vs the board's 10, hiding the
+    # already-merged #901/#903/#926). Hotfix B.
+    _have = {i.get("ticket_id") for i in out["issues"]}
+    for _extra in _issues_from_agent_runs(label):
+        if _extra.get("ticket_id") not in _have:
+            out["issues"].append(_extra)
+            _have.add(_extra.get("ticket_id"))
     out["failed_tickets"] = _failed_tickets_from_raw(issues_raw)
     tin = state.get("total_tokens_in") or 0
     tout = state.get("total_tokens_out") or 0

@@ -107,7 +107,7 @@ def _run_sprint_with_mocks(
         env.update(env_overrides)
 
     with (
-        patch.object(sm, "_create_sprint_branch", lambda b: None),
+        patch.object(sm, "_create_sprint_branch", lambda b, parent_ref="develop": None),
         patch.object(sm, "list_backlog_issues",
                      lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
         patch.object(sm, "_dispatch_coder", fake_coder),
@@ -118,6 +118,11 @@ def _run_sprint_with_mocks(
         patch.object(sm, "_warn_file_conflicts", lambda i: None),
         patch.object(sm, "_setup_pid_file", lambda n: None),
         patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"),
+        # The already-merged dispatch guard (hotfix E2) checks git merge state;
+        # stub it to "not merged" so these unit tests exercise the dispatch /
+        # fix-loop path rather than the merge-skip short-circuit.
+        patch.object(sm, "_is_branch_merged_into", lambda *a, **kw: False),
+        patch.object(sm, "_was_feature_merged_via_log", lambda *a, **kw: False),
         patch.object(sm, "_transition_safe", fake_transition),
         patch.object(sm, "record_failure", fake_record),
         patch.object(sm, "dispatch_alerts", lambda *a, **kw: None),
@@ -263,7 +268,11 @@ class TestAC3GatePassExitsLoop:
 
     def test_issue_in_merged_after_gate_pass(self, tmp_path):
         """Issue appears in summary.merged when gate passes."""
-        logic_fail = (False, sm.FailureCategory.TESTER_REJECTED)
+        # A retryable LOGIC failure (MERGE_CONFLICT) must re-enter the fix loop;
+        # TESTER_REJECTED is classified infra (no retry), so it would skip the
+        # ticket instead of merging on the second attempt — wrong category for
+        # this AC3 "gate pass exits loop" scenario.
+        logic_fail = (False, sm.FailureCategory.MERGE_CONFLICT)
         summary, _, _, _ = _run_sprint_with_mocks(
             tmp_path,
             coder_sequence=[logic_fail, (True, None)],
@@ -288,8 +297,15 @@ class TestAC4InfraFailureBypass:
             f"CRASH (infra) must not retry; expected 1 dispatch, got {len(dispatch_calls)}"
         )
 
-    def test_crash_failure_does_not_tag_needs_rework(self, tmp_path):
-        """CRASH is infra — must NOT trigger needs-rework transition."""
+    def test_crash_failure_tags_needs_rework(self, tmp_path):
+        """A terminal CRASH must transition the ticket to needs-rework.
+
+        Updated contract (sprint-lifecycle.md, hotfix C): a real per-ticket
+        failure — coder crash, divergent-branch, final hang, retry-exhausted —
+        must surface as needs-rework at the point of failure instead of leaving
+        the ticket stuck on in-progress/SIT for the reconcile to flag. (Sprint-73
+        left #927/928/929/931/932/933 stuck on in-progress; this is the fix.)
+        """
         _, transition_calls, _, _ = _run_sprint_with_mocks(
             tmp_path,
             coder_sequence=[(False, sm.FailureCategory.CRASH)],
@@ -299,8 +315,9 @@ class TestAC4InfraFailureBypass:
             (n, t) for n, t in transition_calls
             if t is not None and hasattr(t, "value") and "needs" in t.value.lower()
         ]
-        assert not needs_rework_calls, (
-            "CRASH (infra) must not trigger needs-rework transition"
+        assert needs_rework_calls, (
+            "CRASH (terminal infra failure) must transition the ticket to "
+            "needs-rework so it does not linger on in-progress/SIT"
         )
 
     def test_hang_tester_bypasses_fix_loop(self, tmp_path):
@@ -326,7 +343,7 @@ class TestAC4InfraFailureBypass:
             return 1, sm.FailureCategory.HANG
 
         with (
-            patch.object(sm, "_create_sprint_branch", lambda b: None),
+            patch.object(sm, "_create_sprint_branch", lambda b, parent_ref="develop": None),
             patch.object(sm, "list_backlog_issues",
                          lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
             patch.object(sm, "_dispatch_coder", fake_coder2),

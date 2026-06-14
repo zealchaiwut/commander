@@ -298,7 +298,7 @@ except ImportError:
 
 # Default paths — can be overridden via env vars or CLI for testing
 WORKTESTER_ROOT      = Path(os.environ.get("WORKTESTER_ROOT",
-                             Path.home() / "commander" / "work-tester"))
+                             Path.home() / "dev" / "commander" / "tester"))
 WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "apps" / "dashboard"
 FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
@@ -729,9 +729,10 @@ def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
 
 def _default_config() -> "SprintConfig":
     """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
+    _dev = Path.home() / "dev" / "commander"
     return SprintConfig(
         repo_name          = None,  # will use github_client.repo()
-        worktree_coder     = Path.home() / "commander" / "work-coder",
+        worktree_coder     = _dev / "coder",
         worktree_tester    = WORKTESTER_ROOT,
         tester_app_subdir  = "apps/dashboard",
         scripts_dir        = SCRIPTS_DIR,
@@ -922,17 +923,20 @@ def _sprint_db_set_state_sm(
                                    started_at=fields.get("started_at"))
         elif state == "completed":
             db.record_sprint_finish(label, ended_at=fields.get("ended_at"),
-                                    end_reason=fields.get("end_reason"))
+                                    end_reason=fields.get("end_reason"),
+                                    project=project or "")
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(label,
                                             end_reason=fields.get("end_reason"),
-                                            ended_at=fields.get("ended_at"))
+                                            ended_at=fields.get("ended_at"),
+                                            project=project or "")
         elif state in ("needs_rework", "cancelled", "failed"):
             # cancelled/failed are legacy spellings — all bad endings land in
             # needs_rework under the unified lifecycle (sprint-lifecycle.md).
             db.record_sprint_needs_rework(label,
                                           end_reason=fields.get("end_reason"),
-                                          ended_at=fields.get("ended_at"))
+                                          ended_at=fields.get("ended_at"),
+                                          project=project or "")
     except (Exception, SystemExit):
         pass
 
@@ -4476,7 +4480,13 @@ def _dispatch_coder(
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
-    cwd_path = cfg.worktree_coder if cfg else WORKTESTER_DASHBOARD
+    if cfg:
+        cwd_path = cfg.worktree_coder
+    else:
+        # No sprint.yaml: cwd is the coder clone when dispatched from the dashboard.
+        cwd_path = Path.cwd()
+        if not (cwd_path / "PRODUCT.md").exists() and WORKTESTER_ROOT.exists():
+            cwd_path = WORKTESTER_ROOT
 
     # Pre-dispatch doctor: check environment health before doing any work.
     doctor_err = _dispatch_doctor(cfg, alert_modes, issue_num=issue_num, eff_repo=eff_repo)
@@ -9538,7 +9548,7 @@ def main() -> None:
             cfg = load_config(discovered)
         else:
             # Backward-compatible default (AC-6)
-            cfg = None
+            cfg = _default_config()
 
     raw_modes   = [m.strip() for m in args.alert_mode.split(",") if m.strip()]
     alert_modes = []

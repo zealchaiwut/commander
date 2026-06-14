@@ -395,13 +395,18 @@ def step4_clones(
     repo_name: str,
     projects_dir: Path,
     nested: bool = False,
-) -> tuple[Path, Path]:
-    """Clone repo into coder and tester worktrees.
+) -> tuple[Path, Path, Path]:
+    """Clone repo into coder, tester, and agents worktrees.
 
-    Flat layout:   ~/dev/<project>-coder/  and  ~/dev/<project>-tester/
-    Nested layout: ~/dev/<project>/coder/  and  ~/dev/<project>/tester/
+    Flat layout:   ~/dev/<project>-coder/ , -tester/ , -agents/
+    Nested layout: ~/dev/<project>/coder/ , tester/ , agents/
 
-    Returns (coder_dir, tester_dir).
+    The ``agents`` clone is the dedicated home for non-coding sprint agents
+    (documentor, reviewer, follow-up BA/estimator) so they never check out
+    feature branches in the coder/tester worktrees (mid-sprint) or the serving
+    uat clone.
+
+    Returns (coder_dir, tester_dir, agents_dir).
     """
     full_repo = f"{owner}/{repo_name}"
     repo_url = f"https://github.com/{full_repo}.git"
@@ -410,11 +415,13 @@ def step4_clones(
         project_root = projects_dir / repo_name
         coder_dir  = project_root / "coder"
         tester_dir = project_root / "tester"
+        agents_dir = project_root / "agents"
     else:
         coder_dir  = projects_dir / f"{repo_name}-coder"
         tester_dir = projects_dir / f"{repo_name}-tester"
+        agents_dir = projects_dir / f"{repo_name}-agents"
 
-    for clone_dir in (coder_dir, tester_dir):
+    for clone_dir in (coder_dir, tester_dir, agents_dir):
         if clone_dir.exists():
             info(f"{clone_dir} already exists — skipping")
             continue
@@ -427,7 +434,7 @@ def step4_clones(
 
         info(f"cloned into {clone_dir}")
 
-    return coder_dir, tester_dir
+    return coder_dir, tester_dir, agents_dir
 
 
 def step4b_uat_clone(
@@ -502,6 +509,7 @@ def step5_sprint_config(
     nested: bool = False,
     coder_dir: Optional[Path] = None,
     tester_dir: Optional[Path] = None,
+    agents_dir: Optional[Path] = None,
 ) -> None:
     """Write .commander/sprint.yaml with project-specific fields.
 
@@ -534,6 +542,9 @@ def step5_sprint_config(
         coder_dir = projects_dir / f"{repo_name}-coder"
     if tester_dir is None:
         tester_dir = projects_dir / f"{repo_name}-tester"
+    if agents_dir is None:
+        agents_dir = (projects_dir / repo_name / "agents") if nested \
+            else projects_dir / f"{repo_name}-agents"
 
     if nested:
         # In nested layout, uat/ is a sibling of main/, coder/, tester/ at project root
@@ -561,6 +572,7 @@ def step5_sprint_config(
 worktrees:
   coder:             {coder_dir}
   tester:            {tester_dir}
+  agents:            {agents_dir}
   tester_app_subdir: "{tester_app_subdir}"
 
 paths:
@@ -981,7 +993,7 @@ def main() -> None:
 
     # ── Step 4: Clone coder + tester ──────────────────────────────────────────
     step(4, TOTAL_STEPS, "Cloning coder and tester worktrees...")
-    coder_dir, tester_dir = step4_clones(owner, repo_name, projects_dir, nested=nested)
+    coder_dir, tester_dir, agents_dir = step4_clones(owner, repo_name, projects_dir, nested=nested)
     info("done")
 
     # ── Step 4b: UAT clone ────────────────────────────────────────────────────
@@ -1010,6 +1022,7 @@ def main() -> None:
         nested=nested,
         coder_dir=coder_dir,
         tester_dir=tester_dir,
+        agents_dir=agents_dir,
     )
     info("done")
 

@@ -13419,8 +13419,18 @@ function _smgmtRunningViewUpdate(label, live) {
   const shellEl = document.getElementById('smgmt-run-shell');
   const primary = label || _smgmtPrimaryRunningLabel();
   const isLiveRun = !!(primary && _smgmtRunningLabels.has(primary));
-  const isLinger = !!(primary && _smgmtIsLinger(primary));
-  const showShell = isLiveRun || isLinger;
+  const snap = live || _smgmtLingerLive(primary);
+  // A re-run child (e.g. sprint-73.1) can be actively running before the
+  // running-labels set catches up, so _smgmtIsLinger alone wrongly paints the
+  // header "Finished/snapshot" while a coder is mid-dispatch. Trust the rendered
+  // snapshot: if it shows active agents or a current ticket, the sprint is NOT
+  // finished — never show the linger/Finished state for it (persistent bug fix).
+  const snapActive = !!(snap && (
+    (Array.isArray(snap.active_agents) && snap.active_agents.length > 0) ||
+    snap.current_ticket
+  ));
+  const isLinger = !!(primary && _smgmtIsLinger(primary)) && !isLiveRun && !snapActive;
+  const showShell = isLiveRun || isLinger || snapActive;
   if (emptyEl) emptyEl.style.display = showShell ? 'none' : '';
   if (shellEl) {
     shellEl.hidden = !showShell;
@@ -13430,7 +13440,6 @@ function _smgmtRunningViewUpdate(label, live) {
     if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
     return;
   }
-  const snap = live || _smgmtLingerLive(primary);
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
   _smgmtRailUpdate(primary, snap);

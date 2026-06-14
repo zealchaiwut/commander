@@ -7100,6 +7100,26 @@
     .adv-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
     .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
 
+    /* ── Roadmap Suggestions panel (issue #882) ─────────────────────────────── */
+    #sug-root { margin-top: 24px; }
+    .sug-section-title { font-size: 13px; font-weight: 700; color: var(--text-sub); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .sug-card-list { display: flex; flex-direction: column; gap: 12px; }
+    .sug-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .sug-card-pitch { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .sug-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .sug-scope { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .sug-scope-S { background: var(--green-bg); color: var(--green); }
+    .sug-scope-M { background: var(--purple-bg); color: var(--purple); }
+    .sug-scope-L { background: var(--amber-bg); color: var(--amber); }
+    .sug-milestone { font-size: 12px; color: var(--text-sub); display: flex; align-items: center; gap: 3px; }
+    .sug-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.55; }
+    .sug-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .sug-accept-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .sug-accept-btn:disabled { opacity: .45; cursor: default; }
+    .sug-dismiss-btn { display: flex; align-items: center; gap: 5px; padding: 6px 12px; background: transparent; color: var(--text-sub); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+    .sug-dismiss-btn:disabled { opacity: .45; cursor: default; }
+    .sug-empty { padding: 24px 0; text-align: center; color: var(--text-muted); font-size: 13px; }
+
     .rm-toolbar { display: flex; align-items: center; gap: 10px; }
     .rm-toolbar-gap { flex: 1; }
     .rm-list { display: flex; flex-direction: column; gap: 10px; }
@@ -8730,6 +8750,8 @@
       <!-- Roadmap tab (issue #878) -->
       <div class="tab-pane" id="pane-roadmap" role="tabpanel" aria-labelledby="stab-roadmap">
         <div id="rm-root"></div>
+        <!-- Suggestions panel (issue #882) -->
+        <div id="sug-root"></div>
       </div><!-- /pane-roadmap -->
 
       <!-- ── Advisor tab (issue #881) ── -->
@@ -9378,9 +9400,10 @@ function switchTab(tab, pushHistory) {
     notesInit();
   }
 
-  // Init roadmap tab (issue #878)
+  // Init roadmap tab (issue #878) + suggestions panel (issue #882)
   if (tab === 'roadmap') {
     roadmapInit();
+    sugInit();
   }
 
   // Init advisor tab (issue #881)
@@ -27222,6 +27245,146 @@ function _rmPersistOrder() {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({order: order})
   }).catch(function() {});
+}
+
+// ── Roadmap Suggestions panel (issue #882) ────────────────────────────────────
+var _sugLoaded = false;
+var _sugInFlight = {};  // suggestion_id → true while action pending
+
+function sugInit() {
+  _sugLoaded = false;
+  _sugInFlight = {};
+  _sugFetch();
+}
+
+function _sugFetch() {
+  var root = document.getElementById('sug-root');
+  if (!root) return;
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/projects/' + encodeURIComponent(repo) + '/advisor/suggestions')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { _sugLoaded = true; _sugRender(Array.isArray(data) ? data : []); })
+    .catch(function() {
+      var r2 = document.getElementById('sug-root');
+      if (r2) r2.innerHTML = '<div class="sug-empty">Failed to load suggestions.</div>';
+    });
+}
+
+function _sugRender(suggestions) {
+  var root = document.getElementById('sug-root');
+  if (!root) return;
+  var h = '<div class="sug-section-title"><i class="ti ti-bulb"></i>Advisor Suggestions</div>';
+  if (!suggestions || suggestions.length === 0) {
+    h += '<div class="sug-empty">No active suggestions — run the advisor to generate recommendations.</div>';
+    root.innerHTML = h;
+    return;
+  }
+  h += '<div class="sug-card-list">';
+  suggestions.forEach(function(s) {
+    var sid = s.id;
+    var scopeCls = 'sug-scope sug-scope-' + (s.scope || 'M');
+    h += '<div class="sug-card" id="sug-card-' + sid + '">';
+    h += '<div class="sug-card-pitch">' + escHtml(s.pitch || '') + '</div>';
+    h += '<div class="sug-card-meta">';
+    h += '<span class="' + scopeCls + '">' + escHtml(s.scope || '?') + '</span>';
+    h += '<span class="sug-milestone"><i class="ti ti-flag-3"></i>' + escHtml(s.milestone || '') + '</span>';
+    h += '</div>';
+    h += '<div class="sug-rationale">' + escHtml(s.rationale || '') + '</div>';
+    h += '<div class="sug-card-actions">';
+    h += '<button class="sug-accept-btn" id="sug-accept-' + sid + '" onclick="sugAccept(' + sid + ')" title="Accept — expand into tickets via BA"><i class="ti ti-check"></i>Accept</button>';
+    h += '<button class="sug-dismiss-btn" id="sug-dismiss-' + sid + '" onclick="sugDismiss(' + sid + ')" title="Dismiss — hide and never re-suggest"><i class="ti ti-x"></i>Dismiss</button>';
+    h += '</div>';
+    h += '</div>';
+  });
+  h += '</div>';
+  root.innerHTML = h;
+}
+
+function _sugSetLoading(sid, loading) {
+  var acceptBtn = document.getElementById('sug-accept-' + sid);
+  var dismissBtn = document.getElementById('sug-dismiss-' + sid);
+  if (acceptBtn) acceptBtn.disabled = loading;
+  if (dismissBtn) dismissBtn.disabled = loading;
+  if (loading) {
+    _sugInFlight[sid] = true;
+  } else {
+    delete _sugInFlight[sid];
+  }
+}
+
+function sugDismiss(sid) {
+  if (_sugInFlight[sid]) return;
+  _sugSetLoading(sid, true);
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/projects/' + encodeURIComponent(repo) + '/advisor/suggestions/' + sid + '/dismiss', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+      // Remove card immediately (AC6: hides card right away)
+      var card = document.getElementById('sug-card-' + sid);
+      if (card) card.remove();
+      // If no cards left, show empty state
+      var list = document.querySelector('.sug-card-list');
+      if (list && list.children.length === 0) {
+        var root = document.getElementById('sug-root');
+        if (root) _sugRender([]);
+      }
+    })
+    .catch(function() {
+      _sugSetLoading(sid, false);
+    });
+}
+
+function sugAccept(sid) {
+  if (_sugInFlight[sid]) return;
+  _sugSetLoading(sid, true);
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/projects/' + encodeURIComponent(repo) + '/advisor/suggestions/' + sid + '/accept', { method: 'POST' })
+    .then(function(r) {
+      if (!r.ok) throw new Error('accept failed: ' + r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      // Start a bulk-create job with the seed prompt (AC3)
+      var formData = new FormData();
+      formData.append('repo', repo);
+      formData.append('prompts', JSON.stringify([data.seed_prompt]));
+      formData.append('default_labels', JSON.stringify([]));
+      formData.append('concurrency', '1');
+      formData.append('sprint_label', '');
+      return fetch('/api/tickets/bulk', { method: 'POST', body: formData })
+        .then(function(r2) {
+          if (!r2.ok) throw new Error('bulk create failed: ' + r2.status);
+          return r2.json();
+        })
+        .then(function(jobData) {
+          // Store the milestone_name on the job for use at post time (AC5)
+          // The bulk-create UI will pick up the job_id from localStorage
+          if (typeof _bcJobId !== 'undefined') {
+            _bcJobId = jobData.job_id;
+            localStorage.setItem('bc_job_id', _bcJobId);
+            if (typeof _bcStartTimes !== 'undefined') _bcStartTimes = {};
+            if (typeof _bcAvgMs !== 'undefined') _bcAvgMs = null;
+            if (typeof _bcDraftSelections !== 'undefined') _bcDraftSelections = new Set();
+            if (typeof _bcRemovedRows !== 'undefined') _bcRemovedRows = new Set();
+            if (typeof _bcPromptOrder !== 'undefined') _bcPromptOrder = [];
+            if (typeof _bcEstimateGatePassed !== 'undefined') _bcEstimateGatePassed = false;
+            if (typeof _bcSprintConfirmed !== 'undefined') _bcSprintConfirmed = false;
+            if (typeof _bcPosting !== 'undefined') _bcPosting = false;
+            if (typeof _bcSprintsLoadedFor !== 'undefined') _bcSprintsLoadedFor = null;
+            // Store suggested milestone for the post step (AC5)
+            if (data.milestone_name) {
+              localStorage.setItem('bc_suggestion_milestone', data.milestone_name);
+            }
+            if (typeof _bcShowStep !== 'undefined') _bcShowStep(2);
+            if (typeof _bcConnectSSE !== 'undefined') _bcConnectSSE(_bcJobId);
+          }
+          switchTab('bulk-create');
+        });
+    })
+    .catch(function(err) {
+      console.error('sugAccept failed:', err);
+      _sugSetLoading(sid, false);
+    });
 }
 </script>
 

@@ -74,7 +74,7 @@ from services.sprint_manager.pipeline import (  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     develop_merge_guard as _develop_merge_guard,
     label_transition_guard as _label_transition_guard,
-    ghost_status_labels as _ghost_status_labels,
+    ghost_status_labels as _ghost_status_labels,  # noqa: F401
 )
 
 try:
@@ -252,13 +252,13 @@ def _resolve_uat_env_for_tester(
 
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
-import github_client
+import github_client  # noqa: E402
 
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
+from services.sprint_manager import agent_browser_runner  # noqa: E402  # issue #710: live-browser UAT
 
 try:
     from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
@@ -280,8 +280,8 @@ try:
     from post_test_report import (  # type: ignore[import]
         parse_failures,
         build_failure_block,
-        write_sidecar,
-        sidecar_path,
+        write_sidecar,   # noqa: F401
+        sidecar_path,    # noqa: F401
     )
     _FAILURE_PARSING_AVAILABLE = True
 except ImportError:
@@ -314,6 +314,7 @@ _DEFAULT_CODER_BY_SIZE: dict = {
 
 # Doctor auth probe cache — at most one real probe per TTL seconds (issue #789).
 _DOCTOR_AUTH_LAST_PROBE: float = 0.0
+_DOCTOR_CLINE_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
 DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
 
@@ -464,6 +465,10 @@ class SprintConfig:
     })
     # Size-tier model routing for coder (issue #789)
     coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
+    # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
+    coder_backend:     str  = "claude-code"
+    # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
+    use_cline_followups: bool = False
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -640,6 +645,20 @@ def load_config(path: Path) -> "SprintConfig":
             if isinstance(_from_yaml_size, dict):
                 coder_by_size.update({str(k).upper(): str(v) for k, v in _from_yaml_size.items()})
 
+    # ── agent_config.coder.backend (issue #917) ───────────────────────────────
+    coder_backend: str = "claude-code"
+    if isinstance(agent_cfg, dict):
+        _coder_sub_b = agent_cfg.get("coder") or {}
+        if isinstance(_coder_sub_b, dict) and _coder_sub_b.get("backend"):
+            coder_backend = str(_coder_sub_b["backend"])
+
+    # ── agent_config.use_cline_followups (issue #918) ────────────────────────
+    use_cline_followups: bool = False
+    if isinstance(agent_cfg, dict):
+        _ucf = agent_cfg.get("use_cline_followups")
+        if _ucf is not None:
+            use_cline_followups = bool(_ucf)
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -665,6 +684,8 @@ def load_config(path: Path) -> "SprintConfig":
         documentor_model            = documentor_model,
         tester_by_risk              = tester_by_risk,
         coder_by_size               = coder_by_size,
+        coder_backend               = coder_backend,
+        use_cline_followups         = use_cline_followups,
     )
 
 
@@ -2254,7 +2275,7 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
     if _FAILURE_PARSING_AVAILABLE:
         try:
-            effective_root = repo_root or REPO_ROOT
+            effective_root = repo_root or REPO_ROOT  # noqa: F841
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
             files_to_inspect = sorted({
@@ -3385,7 +3406,7 @@ def handle_post_tester(
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
             _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
         else:
-            sys.stdout.write(str(f"  All gates passed -- merge already done, skipping re-merge") + "\n")
+            sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
         _post_success_comment(issue_num, results, repo_name=eff_repo, target_branch=target_branch)
         _delete_failure_sidecar(issue_num)
@@ -3934,36 +3955,48 @@ def _resolve_coder_model(
 
 # ── Pre-dispatch doctor (issue #789) ─────────────────────────────────────────
 
-def _doctor_probe_auth() -> Optional[str]:
-    """Probe Claude CLI auth. Returns None on success, error string on failure.
+def _doctor_probe_auth(backend: str = "claude-code") -> Optional[str]:
+    """Probe coder CLI auth. Returns None on success, error string on failure.
 
-    Result is cached for _DOCTOR_AUTH_PROBE_TTL seconds so at most one real
-    subprocess call is made per TTL window across all dispatches.
+    backend selects which CLI to probe: 'cline' for Cline headless, anything
+    else probes the 'claude' CLI (existing behaviour). Result is cached per
+    backend for _DOCTOR_AUTH_PROBE_TTL seconds.
     """
-    global _DOCTOR_AUTH_LAST_PROBE
+    global _DOCTOR_AUTH_LAST_PROBE, _DOCTOR_CLINE_AUTH_LAST_PROBE
     now = time.monotonic()
-    if now - _DOCTOR_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
-        return None  # cache hit — skip re-probe
+
+    if backend == "cline":
+        cli = "cline"
+        if now - _DOCTOR_CLINE_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
+            return None
+    else:
+        cli = "claude"
+        if now - _DOCTOR_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
+            return None
+
     try:
         result = subprocess.run(
-            ["claude", "--version"],
+            [cli, "--version"],
             capture_output=True,
             timeout=10,
             text=True,
         )
         if result.returncode != 0:
             return (
-                f"claude CLI returned non-zero exit on version check "
+                f"{cli} CLI returned non-zero exit on version check "
                 f"(rc={result.returncode}): {result.stderr.strip()}"
             )
-        _DOCTOR_AUTH_LAST_PROBE = now
+        if backend == "cline":
+            _DOCTOR_CLINE_AUTH_LAST_PROBE = now
+        else:
+            _DOCTOR_AUTH_LAST_PROBE = now
         return None
     except FileNotFoundError:
-        return "claude CLI not found during auth probe"
+        return f"{cli} CLI not found during auth probe"
     except subprocess.TimeoutExpired:
-        return "claude CLI timed out during auth probe (>10 s)"
+        return f"{cli} CLI timed out during auth probe (>10 s)"
     except Exception as exc:
-        return f"claude CLI auth probe failed: {exc}"
+        return f"{cli} CLI auth probe failed: {exc}"
 
 
 def _stash_to_quarantine(
@@ -4143,7 +4176,7 @@ def _dispatch_doctor(
         dispatch_alerts(
             alert_modes,
             title=(
-                f"dispatch-blocked: environment check failed"
+                "dispatch-blocked: environment check failed"
                 + (f" (issue #{issue_num})" if issue_num else "")
             ),
             body=err,
@@ -4154,12 +4187,14 @@ def _dispatch_doctor(
         )
         return err
 
-    # 1. Claude CLI present
-    if shutil.which("claude") is None:
-        return _fail("dispatch-blocked: claude CLI not found in PATH")
+    # 1. Coder CLI present (backend-aware: cline or claude)
+    _backend = cfg.coder_backend if cfg is not None else "claude-code"
+    _coder_cli = "cline" if _backend == "cline" else "claude"
+    if shutil.which(_coder_cli) is None:
+        return _fail(f"dispatch-blocked: {_coder_cli} CLI not found in PATH")
 
-    # 2. Auth alive (cached probe)
-    auth_err = _doctor_probe_auth()
+    # 2. Auth alive (cached probe, backend-specific)
+    auth_err = _doctor_probe_auth(backend=_backend)
     if auth_err:
         return _fail(f"dispatch-blocked: auth check failed — {auth_err}")
 
@@ -4183,6 +4218,48 @@ def _dispatch_doctor(
         pass  # can't stat path — don't block on it
 
     return None  # all checks passed
+
+
+def _select_coder_backend(
+    issue_num: int,
+    cfg: Optional["SprintConfig"],
+    repo_name: Optional[str] = None,
+) -> str:
+    """Resolve the effective coder backend for this dispatch (issue #918).
+
+    Returns 'cline' when all three conditions hold:
+      1. sprint.use_cline_followups is True
+      2. The ticket carries the 'follow-up' label
+      3. .clinerules exists in cfg.worktree_coder
+
+    Falls back to 'claude-code' (with a warning) when the first two conditions
+    are met but .clinerules is absent — so the sprint is never blocked.
+
+    For all other cases (explicit coder_backend override, no flag, no label)
+    returns cfg.coder_backend unchanged.
+    """
+    if cfg is None:
+        return "claude-code"
+
+    if getattr(cfg, "use_cline_followups", False) is not True:
+        return cfg.coder_backend
+
+    labels = _get_issue_labels(issue_num, repo_name=repo_name)
+    if "follow-up" not in labels:
+        return cfg.coder_backend
+
+    cwd_path: Path = cfg.worktree_coder
+    if not (cwd_path / ".clinerules").exists():
+        structured_log.warn(
+            "cline_followup_fallback",
+            f"[coder] follow-up routing to Cline requested but .clinerules absent in "
+            f"{cwd_path} — falling back to claude-code (issue #918)",
+            issue_num=issue_num,
+            worktree=str(cwd_path),
+        )
+        return "claude-code"
+
+    return "cline"
 
 
 def _dispatch_coder(
@@ -4386,31 +4463,50 @@ def _dispatch_coder(
             sys.stdout.write(str(f"  [re-estimate] #{issue_num}: size bumped to {_bumped} after prior failure") + "\n")
             sys.stdout.flush()
 
-    # Give the headless run the same coder persona an interactive /coder session
-    # would (subagents/slash-commands don't load in `claude -p`). Keep `-p PROMPT`
-    # last so the later `cmd[-1] += sprint_hint` append still targets the prompt.
+    # Resolve backend and model. Keep the prompt as the last element of cmd so
+    # `cmd[-1] += sprint_hint` (below) works for both backends.
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
-    sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}") + "\n")
+    coder_backend = _select_coder_backend(issue_num, cfg, repo_name=eff_repo)
+    sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
     sys.stdout.flush()
-    cmd = [
-        "claude",
-        "--model", coder_model,
-        "--dangerously-skip-permissions",
-    ]
-    coder_persona = _load_agent_persona("coder", cwd_path)
-    if coder_persona:
-        cmd += ["--append-system-prompt", coder_persona]
-    cmd += ["-p", prompt]
 
-    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
-    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
-    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
-    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
+    # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
     sub_env = os.environ.copy()
-    sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = coder_model  # hook records model_name on token_usage rows
+
+    if coder_backend == "cline":
+        # Cline headless backend (issue #917).
+        # -y skips tool-approval prompts (analogous to --dangerously-skip-permissions).
+        # Cline has no --append-system-prompt; prepend persona to the prompt string instead.
+        # Metered API path: keep ANTHROPIC_API_KEY so Cline can authenticate.
+        if not (cwd_path / ".clinerules").exists():
+            structured_log.warn(
+                "clinerules_missing",
+                f"[coder] .clinerules not found in {cwd_path} — Cline won't load Commander workflow invariants (issue #916 must merge first)",
+                issue_num=issue_num,
+                worktree=str(cwd_path),
+            )
+        coder_persona = _load_agent_persona("coder", cwd_path)
+        full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
+        cmd = ["cline", "-y", "-m", coder_model, full_prompt]
+        # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
+    else:
+        # Claude Code (existing default behavior, byte-for-byte unchanged).
+        cmd = [
+            "claude",
+            "--model", coder_model,
+            "--dangerously-skip-permissions",
+        ]
+        coder_persona = _load_agent_persona("coder", cwd_path)
+        if coder_persona:
+            cmd += ["--append-system-prompt", coder_persona]
+        cmd += ["-p", prompt]
+        # Claude Code uses subscription auth; strip API key to avoid metered billing.
+        sub_env.pop("ANTHROPIC_API_KEY", None)
+
+    # Build remaining subprocess environment keys.
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -4454,8 +4550,9 @@ def _dispatch_coder(
                 )
         except FileNotFoundError:
             _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            _cli_name = "cline" if coder_backend == "cline" else "claude"
             if _allow_stub:
-                sys.stdout.write(str("  [coder] claude CLI not found -- stub success") + "\n")
+                sys.stdout.write(str(f"  [coder] {_cli_name} CLI not found -- stub success") + "\n")
                 if on_running is not None:
                     try:
                         on_running()
@@ -4463,13 +4560,13 @@ def _dispatch_coder(
                         pass
                 return True, None
             # Production: log the error and return a real failure so the stall
-            # warning shows "claude CLI not found" instead of silently succeeding.
+            # warning shows which CLI was not found instead of silently succeeding.
             err_msg = (
-                f"[coder] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"[coder] ERROR: {_cli_name} CLI not found for issue #{issue_num}.\n"
                 f"PATH={sub_env.get('PATH', '<empty>')}\n"
-                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+                f"Sprint cannot proceed. Install {_cli_name} CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
             )
-            structured_log.error("claude_cli_not_found", f"claude CLI not found for issue #{issue_num}", issue_num=issue_num, subprocess="coder", path=sub_env.get("PATH", ""))
+            structured_log.error(f"{_cli_name}_cli_not_found", f"{_cli_name} CLI not found for issue #{issue_num}", issue_num=issue_num, subprocess="coder", path=sub_env.get("PATH", ""))
             try:
                 with log_path.open("a") as lf:
                     lf.write(err_msg)
@@ -4477,8 +4574,8 @@ def _dispatch_coder(
                 pass
             dispatch_alerts(
                 alert_modes,
-                title=f"Issue #{issue_num}: claude CLI not found",
-                body=f"_dispatch_coder failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                title=f"Issue #{issue_num}: {_cli_name} CLI not found",
+                body=f"_dispatch_coder failed to spawn '{_cli_name}' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
                 issue_num=issue_num,
                 category=FailureCategory.CRASH,
                 cfg=cfg,
@@ -5199,7 +5296,7 @@ def generate_sprint_summary(
 
     # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
     # which is subscription-funded — no raw API charges.
-    cost_estimate_usd = 0.0
+    cost_estimate_usd = 0.0  # noqa: F841
 
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
@@ -5433,9 +5530,9 @@ def generate_sprint_summary(
         f"The sprint branch `{effective_sprint_branch}` is ready for review.",
         "When UAT is complete, open a PR to promote it to `develop`:",
         "",
-        f"```bash",
+        "```bash",
         f"gh pr create --base develop --head {effective_sprint_branch} --repo {r}",
-        f"```",
+        "```",
         "",
     ]
 
@@ -6897,7 +6994,7 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
-    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:
+    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:  # noqa: E741
         return "HIGH"
 
     if paths_touched:
@@ -7468,8 +7565,8 @@ def _run_pipeline_dispatch(
                         alert_modes,
                         title=f"Issue #{num}: hang-redispatch",
                         body=(
-                            f"Coder hung and was idle-killed; redispatching once "
-                            f"with continuation context (attempt_kind=hang_continue)."
+                            "Coder hung and was idle-killed; redispatching once "
+                            "with continuation context (attempt_kind=hang_continue)."
                         ),
                         issue_num=num,
                         category="hang-redispatch",
@@ -7785,7 +7882,7 @@ def run_sprint(
 
     # Log config info when running against a second repo
     if cfg and cfg.repo_name:
-        sys.stdout.write(str(f"\n=== SprintConfig ===") + "\n")
+        sys.stdout.write(str("\n=== SprintConfig ===") + "\n")
         sys.stdout.write(str(f"  repo:         {cfg.repo_name}") + "\n")
         sys.stdout.write(str(f"  coder-wt:     {cfg.worktree_coder}") + "\n")
         sys.stdout.write(str(f"  tester-wt:    {cfg.worktree_tester}") + "\n")
@@ -8465,8 +8562,8 @@ def run_sprint(
                                 alert_modes,
                                 title=f"Issue #{num}: hang-redispatch",
                                 body=(
-                                    f"Coder hung and was idle-killed; redispatching once "
-                                    f"with continuation context (attempt_kind=hang_continue)."
+                                    "Coder hung and was idle-killed; redispatching once "
+                                    "with continuation context (attempt_kind=hang_continue)."
                                 ),
                                 issue_num=num,
                                 category="hang-redispatch",
@@ -8520,7 +8617,7 @@ def run_sprint(
                         "attempt": _fix_attempt, "category": category, "reason": reason,
                     })
                     if _sig == _last_failure_sig:
-                        sys.stdout.write(str(f"  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
+                        sys.stdout.write(str("  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
                         sys.stdout.flush()
                         _loop_aborted = True
                         break

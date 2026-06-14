@@ -736,7 +736,10 @@
     document.getElementById("fs-error").classList.add("hidden");
     const slot = _fsProgressSlot();
     if (slot) {
-      slot.innerHTML = renderProgressActivity(snap, { id: "fs-pa", retryFn: "_fsRetry" });
+      slot.innerHTML = renderProgressActivity(snap, {
+        id: "fs-pa",
+        retryFn: "_fsRetry"
+      });
       slot.classList.remove("hidden");
     }
     const confirmBtn = document.getElementById("fs-confirm-btn");
@@ -755,7 +758,10 @@
       return;
     const logEl = document.getElementById("pa-log-stream-fs-pa");
     const atBottom = !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
-    slot.innerHTML = renderProgressActivity(snap, { id: "fs-pa", retryFn: "_fsRetry" });
+    slot.innerHTML = renderProgressActivity(snap, {
+      id: "fs-pa",
+      retryFn: "_fsRetry"
+    });
     if (atBottom) {
       const newLog = document.getElementById("pa-log-stream-fs-pa");
       if (newLog)
@@ -822,13 +828,24 @@
     if (!_fsActiveJob)
       return;
     const { owner, repoName, label, params } = _fsActiveJob;
-    const emptySnap = { status: "running", mode: "bar", done: 0, total: params.total || 2, current: "Retrying\u2026", log_tail: [] };
+    const emptySnap = {
+      status: "running",
+      mode: "bar",
+      done: 0,
+      total: params.total || 2,
+      current: "Retrying\u2026",
+      log_tail: []
+    };
     _fsEnterProgressView(emptySnap);
     _fsActiveJob.snapshot = emptySnap;
     try {
       const res = await fetch(
         `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...params, confirmed: true }) }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...params, confirmed: true })
+        }
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -838,7 +855,15 @@
     } catch (e) {
       const slot = _fsProgressSlot();
       if (slot) {
-        slot.innerHTML = renderProgressActivity({ status: "error", mode: "bar", error: "Retry failed: " + e.message, log_tail: [] }, { id: "fs-pa", retryFn: "_fsRetry" });
+        slot.innerHTML = renderProgressActivity(
+          {
+            status: "error",
+            mode: "bar",
+            error: "Retry failed: " + e.message,
+            log_tail: []
+          },
+          { id: "fs-pa", retryFn: "_fsRetry" }
+        );
       }
       const retryBtn = document.getElementById("fs-retry-btn");
       if (retryBtn)
@@ -933,7 +958,9 @@
         actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge open PR
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
       }
-      actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>');
+      actionRows.push(
+        '<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>'
+      );
       actionsEl.innerHTML = actionRows.join("");
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
@@ -953,8 +980,13 @@
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
-    const checkboxes = Array.from(document.querySelectorAll("#fs-ticket-list input[type=checkbox]"));
-    const selectedTickets = checkboxes.filter((c) => c.checked).map((c) => ({ number: parseInt(c.dataset.issue, 10), title: c.dataset.title || `#${c.dataset.issue}` }));
+    const checkboxes = Array.from(
+      document.querySelectorAll("#fs-ticket-list input[type=checkbox]")
+    );
+    const selectedTickets = checkboxes.filter((c) => c.checked).map((c) => ({
+      number: parseInt(c.dataset.issue, 10),
+      title: c.dataset.title || `#${c.dataset.issue}`
+    }));
     const selectedNums = selectedTickets.map((t) => t.number);
     const confirmBtn = document.getElementById("fs-confirm-btn");
     if (confirmBtn) {
@@ -983,8 +1015,22 @@
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       await res.json();
-      const initialSnap = { status: "running", mode: "bar", done: 0, total: bgParams.total, current: "Starting\u2026", log_tail: [] };
-      _fsActiveJob = { label: _fsLabel, owner, repoName, params: bgParams, snapshot: initialSnap, es: null };
+      const initialSnap = {
+        status: "running",
+        mode: "bar",
+        done: 0,
+        total: bgParams.total,
+        current: "Starting\u2026",
+        log_tail: []
+      };
+      _fsActiveJob = {
+        label: _fsLabel,
+        owner,
+        repoName,
+        params: bgParams,
+        snapshot: initialSnap,
+        es: null
+      };
       document.getElementById("fs-modal-title").textContent = `Merging ${sprintLabelDisplay(_fsLabel)}\u2026`;
       _fsEnterProgressView(initialSnap);
       _fsConnectStream(owner, repoName, _fsLabel);
@@ -2793,7 +2839,9 @@ ${data.errors.join("\n")}`);
         return true;
       if (_rerunInto[label])
         return false;
-      const hasChild = Object.values(_sprintParents).some((parent) => parent === label);
+      const hasChild = Object.values(_sprintParents).some(
+        (parent) => parent === label
+      );
       return !hasChild;
     });
     _smgmtFinishedLabels = new Set(data.finished_sprints || []);
@@ -2827,7 +2875,15 @@ ${data.errors.join("\n")}`);
       const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
       const outcome = _smgmtRunningLabels.has(label) || inLinger ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
-      const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
+      const cardHtml = _smgmtCardHtml(
+        label,
+        null,
+        tickets,
+        outcome,
+        label === _smgmtNextUpLabel,
+        parent,
+        _smgmtFinishedLabels.has(label)
+      );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     }).join("");
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
@@ -2909,7 +2965,9 @@ ${data.errors.join("\n")}`);
         el.style.display = "";
         return;
       }
-      const allDeactivated = ticketLabels.every((n) => _smgmtDeactivatedLabels.has(n));
+      const allDeactivated = ticketLabels.every(
+        (n) => _smgmtDeactivatedLabels.has(n)
+      );
       el.style.display = allDeactivated ? "none" : "";
     });
   }
@@ -2950,9 +3008,13 @@ ${data.errors.join("\n")}`);
     delete _smgmtOutcomeCache[parentLabel];
     delete _smgmtOutcomeCache[subLabel];
     if (_smgmtBySprint) {
-      const moved = (_smgmtBySprint[parentLabel] || []).filter((t) => nums.has(t.number));
+      const moved = (_smgmtBySprint[parentLabel] || []).filter(
+        (t) => nums.has(t.number)
+      );
       _smgmtBySprint[subLabel] = [..._smgmtBySprint[subLabel] || [], ...moved];
-      _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter((t) => !nums.has(t.number));
+      _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter(
+        (t) => !nums.has(t.number)
+      );
     }
   }
   async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -2968,28 +3030,34 @@ ${data.errors.join("\n")}`);
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
       const tickets = bySprint[label] || [];
-      const hasRework = tickets.some((t) => (t.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework"));
+      const hasRework = tickets.some(
+        (t) => (t.labels || []).some(
+          (l) => l.name === "need-rework" || l.name === "needs-rework"
+        )
+      );
       const hasCompleted = _smgmtHasCompletedTickets(tickets);
       if (tickets.length > 0 && !hasRework && !hasCompleted)
         continue;
       toFetch.push(label);
     }
-    await Promise.all(toFetch.map(async (label) => {
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
-        );
-        if (resp.ok) {
-          const outcome = await resp.json();
-          _smgmtOutcomeCache[label] = outcome;
-          _smgmtInjectOutcomeBand(label, outcome);
-        } else {
+    await Promise.all(
+      toFetch.map(async (label) => {
+        try {
+          const resp = await fetch(
+            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
+          );
+          if (resp.ok) {
+            const outcome = await resp.json();
+            _smgmtOutcomeCache[label] = outcome;
+            _smgmtInjectOutcomeBand(label, outcome);
+          } else {
+            _smgmtOutcomeCache[label] = null;
+          }
+        } catch (_) {
           _smgmtOutcomeCache[label] = null;
         }
-      } catch (_) {
-        _smgmtOutcomeCache[label] = null;
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
@@ -3040,7 +3108,9 @@ ${data.errors.join("\n")}`);
       if (_smgmtFinishedLabels.has(label))
         continue;
       const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog"
+      );
       if (pending.length < 2)
         continue;
       for (const t of pending)
@@ -3057,8 +3127,16 @@ ${data.errors.join("\n")}`);
             _smgmtConflictsByIssue[c.ticket1_id] = [];
           if (!_smgmtConflictsByIssue[c.ticket2_id])
             _smgmtConflictsByIssue[c.ticket2_id] = [];
-          _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
-          _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
+          _smgmtConflictsByIssue[c.ticket1_id].push({
+            partnerId: c.ticket2_id,
+            partnerTitle: c.ticket2_title,
+            sharedFiles: c.shared_files
+          });
+          _smgmtConflictsByIssue[c.ticket2_id].push({
+            partnerId: c.ticket1_id,
+            partnerTitle: c.ticket1_title,
+            sharedFiles: c.shared_files
+          });
         }
         for (const t of pending)
           _smgmtUpdateConflictBadge(t.number);
@@ -3076,7 +3154,9 @@ ${data.errors.join("\n")}`);
       if (_smgmtFinishedLabels.has(label))
         continue;
       const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog"
+      );
       if (pending.length < 2)
         continue;
       for (const t of pending)
@@ -3092,7 +3172,11 @@ ${data.errors.join("\n")}`);
           const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
           for (const t of pending) {
             if (cycleSet.has(String(t.number))) {
-              _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+              _smgmtDepOrderByIssue[t.number] = {
+                upstream: [],
+                downstream: [],
+                inCycle: true
+              };
             }
           }
         } else {
@@ -3232,28 +3316,36 @@ ${data.errors.join("\n")}`);
     if (!repo || !_smgmtData)
       return;
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
-    await Promise.allSettled(order.map(async (label) => {
-      if (_smgmtIsFreshRerunSprint(label))
-        return;
-      try {
-        const [cardRes, branchRes] = await Promise.all([
-          fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
-          fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null)
-        ]);
-        if (!cardRes.ok) {
-          console.warn(`finish-card: unexpected ${cardRes.status} for ${label}`);
+    await Promise.allSettled(
+      order.map(async (label) => {
+        if (_smgmtIsFreshRerunSprint(label))
           return;
+        try {
+          const [cardRes, branchRes] = await Promise.all([
+            fetch(
+              `/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`
+            ),
+            fetch(
+              `/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`
+            ).catch(() => null)
+          ]);
+          if (!cardRes.ok) {
+            console.warn(
+              `finish-card: unexpected ${cardRes.status} for ${label}`
+            );
+            return;
+          }
+          const cardData = await cardRes.json();
+          if (cardData.state === "no_data")
+            return;
+          const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
+          _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+          _smgmtRenderFinishCard(label, cardData, branchData, repo);
+        } catch (e) {
+          console.warn("finish-card load error for", label, e);
         }
-        const cardData = await cardRes.json();
-        if (cardData.state === "no_data")
-          return;
-        const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
-        _smgmtFinishCards[label] = { card: cardData, branch: branchData };
-        _smgmtRenderFinishCard(label, cardData, branchData, repo);
-      } catch (e) {
-        console.warn("finish-card load error for", label, e);
-      }
-    }));
+      })
+    );
   }
   function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
     if (branchData && branchData.pr_url && branchData.pr_number) {
@@ -3395,11 +3487,17 @@ ${data.errors.join("\n")}`);
               _elapsedByNum[_oi.number] = _oi.elapsed_secs;
           }
         }
-        ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        ticketsContainerHtml = tickets.length > 0 ? tickets.map(
+          (t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)
+        ).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const issueList = outcome.issues || [];
-        ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
+        ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
+          issueList,
+          label,
+          _smgmtRepo()
+        );
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
     } else if (isRunningView) {
@@ -3525,7 +3623,9 @@ ${data.errors.join("\n")}`);
       const agentTagHtml = liveIss && liveIss.agent ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>` : "";
       const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
       const elapsedHtml = elapsedStr ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>` : "";
-      const runTicketLabels = escHtml((t.labels || []).map((l) => l.name).join(","));
+      const runTicketLabels = escHtml(
+        (t.labels || []).map((l) => l.name).join(",")
+      );
       return sepHtml + `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
@@ -3543,9 +3643,7 @@ ${data.errors.join("\n")}`);
       return `level ${cur} of ${levels.length}`;
     }
     const issues = live && live.issues || [];
-    const levelNums = [...new Set(
-      issues.map((i) => i.dispatch_level || 0 || 1)
-    )].filter((l) => l > 0).sort((a, b) => a - b);
+    const levelNums = [...new Set(issues.map((i) => i.dispatch_level || 0 || 1))].filter((l) => l > 0).sort((a, b) => a - b);
     if (levelNums.length <= 1)
       return null;
     let current = levelNums[0];
@@ -3681,19 +3779,22 @@ ${data.errors.join("\n")}`);
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
-      ${renderProgressActivity2({
-      status: "running",
-      mode: totalCount > 0 ? "bar" : "indeterminate",
-      current: currentTicket ? `#${currentTicket.number}` : "",
-      done: completeCount,
-      total: totalCount,
-      est_remaining_minutes: estRemMins != null ? estRemMins : void 0,
-      log_tail: recentLogLines
-    }, {
-      id: `running-${escHtml(label)}`,
-      colorize: typeof colorizeLogLine === "function" ? colorizeLogLine : null,
-      logHeaderAgentHtml: `<span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>`
-    })}
+      ${renderProgressActivity2(
+      {
+        status: "running",
+        mode: totalCount > 0 ? "bar" : "indeterminate",
+        current: currentTicket ? `#${currentTicket.number}` : "",
+        done: completeCount,
+        total: totalCount,
+        est_remaining_minutes: estRemMins != null ? estRemMins : void 0,
+        log_tail: recentLogLines
+      },
+      {
+        id: `running-${escHtml(label)}`,
+        colorize: typeof colorizeLogLine === "function" ? colorizeLogLine : null,
+        logHeaderAgentHtml: `<span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>`
+      }
+    )}
     </div>`;
   }
   function _smgmtRollupText(items) {
@@ -3761,22 +3862,24 @@ ${data.errors.join("\n")}`);
       el.textContent = _smgmtRollupText(items);
   }
   function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
-    const hasRework = (ticket.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework");
+    const hasRework = (ticket.labels || []).some(
+      (l) => l.name === "need-rework" || l.name === "needs-rework"
+    );
     const statusClass = hasRework ? "smgmt-status-need-rework" : {
-      "backlog": "smgmt-status-backlog",
+      backlog: "smgmt-status-backlog",
       "in-progress": "smgmt-status-in-progress",
-      "sit": "smgmt-status-sit",
-      "uat": "smgmt-status-uat",
-      "done": "smgmt-status-done"
+      sit: "smgmt-status-sit",
+      uat: "smgmt-status-uat",
+      done: "smgmt-status-done"
     }[ticket.status] || "smgmt-status-backlog";
     const statusLabel = hasRework ? "needs rework" : ticket.status || "backlog";
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const _outcomeMap = {
-      "done": ["ti-circle-check", "outcome-success"],
-      "uat": ["ti-circle-check", "outcome-success"],
+      done: ["ti-circle-check", "outcome-success"],
+      uat: ["ti-circle-check", "outcome-success"],
       "needs-rework": ["ti-circle-x", "outcome-rework"],
       "in-progress": ["ti-circle-dot", "outcome-active"],
-      "sit": ["ti-circle-dot", "outcome-active"]
+      sit: ["ti-circle-dot", "outcome-active"]
     };
     const _oc = hasRework ? ["ti-circle-x", "outcome-rework"] : _outcomeMap[ticket.status] || ["ti-circle", "outcome-backlog"];
     const outcomeIconHtml = `<i class="ti ${_oc[0]} smgmt-outcome-icon ${_oc[1]}" title="${escHtml(statusLabel)}"></i>`;
@@ -3784,7 +3887,10 @@ ${data.errors.join("\n")}`);
     const hasEstimate = sizeValue !== "";
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
-    const _cachedEst = Object.prototype.hasOwnProperty.call(_estDataCache, ticket.number) ? _estDataCache[ticket.number] : void 0;
+    const _cachedEst = Object.prototype.hasOwnProperty.call(
+      _estDataCache,
+      ticket.number
+    ) ? _estDataCache[ticket.number] : void 0;
     const sizePillHtml = sizeValue && !(_cachedEst && _cachedEst.size) ? `<span class="smgmt-ticket-size-pill" title="\u2248${_sizeMinutes(sizeValue)} min">${escHtml(sizeValue)}</span>` : "";
     const staleBadgeHtml = ticket.estimate_stale && hasEstimate ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
          title="Estimate may be outdated \u2014 issue body changed since last estimate"

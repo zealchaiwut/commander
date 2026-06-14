@@ -25,54 +25,57 @@
 // ── HTML escaping ─────────────────────────────────────────────────────────────
 
 function _e(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ── Mode detection ────────────────────────────────────────────────────────────
 
 function _detectMode(payload) {
   if (payload.mode) return payload.mode;
-  if (Array.isArray(payload.steps) && payload.steps.length > 0) return 'stepper';
-  if (payload.total != null) return 'bar';
-  return 'indeterminate';
+  if (Array.isArray(payload.steps) && payload.steps.length > 0)
+    return "stepper";
+  if (payload.total != null) return "bar";
+  return "indeterminate";
 }
 
 // ── Step icon glyphs ──────────────────────────────────────────────────────────
 
 const _STEP_ICON = {
-  pending:  '○',
-  checking: '…',
-  running:  '●',
-  done:     '✓',
-  pass:     '✓',
-  fixed:    '✓',
-  failed:   '✗',
+  pending: "○",
+  checking: "…",
+  running: "●",
+  done: "✓",
+  pass: "✓",
+  fixed: "✓",
+  failed: "✗",
 };
 
 // ── Log type → CSS class ──────────────────────────────────────────────────────
 
 const _LOG_CLASS = {
-  dispatch: 'pa-log-dispatch',
-  success:  'pa-log-success',
-  warn:     'pa-log-warn',
-  fail:     'pa-log-fail',
+  dispatch: "pa-log-dispatch",
+  success: "pa-log-success",
+  warn: "pa-log-warn",
+  fail: "pa-log-fail",
 };
 
 // ── Section builders ──────────────────────────────────────────────────────────
 
 function _barHtml(p) {
-  const done  = Number(p.done  ?? 0);
+  const done = Number(p.done ?? 0);
   const total = Number(p.total ?? 0);
-  const pct   = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const shimmer = pct < 100 ? '<div class="pa-bar-shimmer"></div>' : '';
-  const countsHtml = total > 0
-    ? `<span class="pa-counts">${done} of ${total}</span>` : '';
-  const estHtml = p.est_remaining_minutes != null
-    ? `<span class="pa-est-rem">~${_e(p.est_remaining_minutes)}m remaining</span>` : '';
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const shimmer = pct < 100 ? '<div class="pa-bar-shimmer"></div>' : "";
+  const countsHtml =
+    total > 0 ? `<span class="pa-counts">${done} of ${total}</span>` : "";
+  const estHtml =
+    p.est_remaining_minutes != null
+      ? `<span class="pa-est-rem">~${_e(p.est_remaining_minutes)}m remaining</span>`
+      : "";
   return `<div class="pa-bar-track">
     <div class="pa-bar-fill" style="width:${pct}%">${shimmer}</div>
   </div>
@@ -85,25 +88,29 @@ function _barHtml(p) {
 
 function _stepperHtml(p) {
   const steps = Array.isArray(p.steps) ? p.steps : [];
-  const rows = steps.map(s => {
-    const state = _e(s.state || 'pending');
-    const icon  = _STEP_ICON[s.state] || '○';
-    const note  = s.note
-      ? `<span class="pa-step-note">${_e(s.note)}</span>` : '';
-    return `<div class="pa-step pa-step--${state}" id="pa-step-${_e(s.key || '')}">
+  const rows = steps
+    .map((s) => {
+      const state = _e(s.state || "pending");
+      const icon = _STEP_ICON[s.state] || "○";
+      const note = s.note
+        ? `<span class="pa-step-note">${_e(s.note)}</span>`
+        : "";
+      return `<div class="pa-step pa-step--${state}" id="pa-step-${_e(s.key || "")}">
       <span class="pa-step-icon" aria-hidden="true">${icon}</span>
       <div class="pa-step-content">
-        <span class="pa-step-name">${_e(s.label || s.key || '')}</span>
+        <span class="pa-step-name">${_e(s.label || s.key || "")}</span>
         ${note}
       </div>
     </div>`;
-  }).join('');
+    })
+    .join("");
   return `<div class="pa-steps">${rows}</div>`;
 }
 
 function _indeterminateHtml(p) {
   const cur = p.current
-    ? `<span class="pa-current">${_e(p.current)}</span>` : '';
+    ? `<span class="pa-current">${_e(p.current)}</span>`
+    : "";
   return `<div class="pa-indeterminate">
     <div class="pa-spinner"></div>
     ${cur}
@@ -112,7 +119,7 @@ function _indeterminateHtml(p) {
 }
 
 function _doneHtml(p) {
-  const txt = p.result ? _e(p.result) : 'Done';
+  const txt = p.result ? _e(p.result) : "Done";
   return `<div class="pa-done">
     <span class="pa-done-icon" aria-hidden="true">✓</span>
     <span class="pa-result">${txt}</span>
@@ -120,8 +127,8 @@ function _doneHtml(p) {
 }
 
 function _errorHtml(p, opts) {
-  const msg = p.error || 'An error occurred.';
-  const fn  = opts.retryFn || '';
+  const msg = p.error || "An error occurred.";
+  const fn = opts.retryFn || "";
   const retryBtn = fn
     ? `<button class="pa-retry-btn" type="button" onclick="${_e(fn)}()">Retry</button>`
     : `<button class="pa-retry-btn" type="button">Retry</button>`;
@@ -132,31 +139,34 @@ function _errorHtml(p, opts) {
 }
 
 function _logLineHtml(line, colorize) {
-  if (!line) return '';
-  if (typeof line === 'string') {
-    const msg = colorize ? colorize(line, '') : _e(line);
+  if (!line) return "";
+  if (typeof line === "string") {
+    const msg = colorize ? colorize(line, "") : _e(line);
     return `<div class="pa-log-line"><span class="pa-log-msg">${msg}</span></div>`;
   }
-  const cls  = _LOG_CLASS[line.type] || '';
-  const tsHtml = line.timestamp && line.timestamp !== '—'
-    ? `<span class="pa-log-time">${_e(line.timestamp)}</span>` : '';
+  const cls = _LOG_CLASS[line.type] || "";
+  const tsHtml =
+    line.timestamp && line.timestamp !== "—"
+      ? `<span class="pa-log-time">${_e(line.timestamp)}</span>`
+      : "";
   const msg = colorize
-    ? colorize(String(line.message || ''), '')
-    : _e(line.message || '');
-  return `<div class="pa-log-line${cls ? ' ' + cls : ''}">${tsHtml}<span class="pa-log-msg">${msg}</span></div>`;
+    ? colorize(String(line.message || ""), "")
+    : _e(line.message || "");
+  return `<div class="pa-log-line${cls ? " " + cls : ""}">${tsHtml}<span class="pa-log-msg">${msg}</span></div>`;
 }
 
 function _logSectionHtml(p, rootId, opts) {
-  const lines     = Array.isArray(p.log_tail) ? p.log_tail : [];
-  const colorize  = opts.colorize || null;
-  const collapsed = opts.logCollapsed ? ' pa-log-collapsed' : '';
-  const streamId  = rootId ? ` id="pa-log-stream-${_e(rootId)}"` : '';
+  const lines = Array.isArray(p.log_tail) ? p.log_tail : [];
+  const colorize = opts.colorize || null;
+  const collapsed = opts.logCollapsed ? " pa-log-collapsed" : "";
+  const streamId = rootId ? ` id="pa-log-stream-${_e(rootId)}"` : "";
   const toggleArg = rootId ? `'${_e(rootId)}'` : "''";
-  const agentSlot = opts.logHeaderAgentHtml || '';
+  const agentSlot = opts.logHeaderAgentHtml || "";
 
-  const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
+  const emptyMsg =
+    '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   const linesHtml = lines.length
-    ? lines.map(l => _logLineHtml(l, colorize)).join('')
+    ? lines.map((l) => _logLineHtml(l, colorize)).join("")
     : emptyMsg;
 
   return `<div class="pa-log">
@@ -187,32 +197,33 @@ function _logSectionHtml(p, rootId, opts) {
  * @returns {string}
  */
 export function renderProgressActivity(payload, opts) {
-  if (!payload || typeof payload !== 'object') payload = {};
+  if (!payload || typeof payload !== "object") payload = {};
   opts = opts || {};
 
-  const status = payload.status || 'running';
-  const mode   = _detectMode(payload);
-  const rootId = opts.id || '';
-  const idAttr = rootId ? ` id="${_e(rootId)}"` : '';
+  const status = payload.status || "running";
+  const mode = _detectMode(payload);
+  const rootId = opts.id || "";
+  const idAttr = rootId ? ` id="${_e(rootId)}"` : "";
 
   let bodyHtml;
-  if (status === 'done') {
+  if (status === "done") {
     bodyHtml = _doneHtml(payload);
-  } else if (status === 'error') {
+  } else if (status === "error") {
     bodyHtml = _errorHtml(payload, opts);
-  } else if (mode === 'stepper') {
+  } else if (mode === "stepper") {
     bodyHtml = _stepperHtml(payload);
-  } else if (mode === 'bar') {
+  } else if (mode === "bar") {
     bodyHtml = _barHtml(payload);
   } else {
     bodyHtml = _indeterminateHtml(payload);
   }
 
-  const showLog = !opts.hideLog
-    && status !== 'done'
-    && status !== 'error'
-    && (status === 'running' || Array.isArray(payload.log_tail));
-  const logHtml = showLog ? _logSectionHtml(payload, rootId, opts) : '';
+  const showLog =
+    !opts.hideLog &&
+    status !== "done" &&
+    status !== "error" &&
+    (status === "running" || Array.isArray(payload.log_tail));
+  const logHtml = showLog ? _logSectionHtml(payload, rootId, opts) : "";
 
   return `<div class="pa-root pa-mode-${_e(mode)} pa-status-${_e(status)}"${idAttr}>${bodyHtml}${logHtml}</div>`;
 }
@@ -226,13 +237,14 @@ export function renderProgressActivity(payload, opts) {
  * @param {Function} [colorize] Log colorizer: (message, repo) → html.
  */
 export function updateProgressActivityLog(rootId, logTail, colorize) {
-  if (typeof document === 'undefined') return;
-  const streamEl = document.getElementById('pa-log-stream-' + rootId);
+  if (typeof document === "undefined") return;
+  const streamEl = document.getElementById("pa-log-stream-" + rootId);
   if (!streamEl) return;
   const lines = Array.isArray(logTail) ? logTail : [];
-  const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
+  const emptyMsg =
+    '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log…</div>';
   streamEl.innerHTML = lines.length
-    ? lines.map(l => _logLineHtml(l, colorize || null)).join('')
+    ? lines.map((l) => _logLineHtml(l, colorize || null)).join("")
     : emptyMsg;
   streamEl.scrollTop = streamEl.scrollHeight;
 }
@@ -244,9 +256,9 @@ export function updateProgressActivityLog(rootId, logTail, colorize) {
  * @param {string} rootId
  */
 export function paToggleLog(rootId) {
-  if (typeof document === 'undefined') return;
-  const el = document.getElementById('pa-log-stream-' + rootId);
-  if (el) el.classList.toggle('pa-log-collapsed');
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("pa-log-stream-" + rootId);
+  if (el) el.classList.toggle("pa-log-collapsed");
 }
 
 // ── Component CSS (AC8: all colors via design tokens — no hardcoded hex) ─────
@@ -509,10 +521,10 @@ export const PA_CSS = `
 /** Inject PA_CSS into the document head (idempotent). */
 let _cssInjected = false;
 export function injectProgressActivityCss() {
-  if (_cssInjected || typeof document === 'undefined') return;
+  if (_cssInjected || typeof document === "undefined") return;
   _cssInjected = true;
-  const style = document.createElement('style');
-  style.dataset.paStyle = '1';
+  const style = document.createElement("style");
+  style.dataset.paStyle = "1";
   style.textContent = PA_CSS;
   document.head.appendChild(style);
 }

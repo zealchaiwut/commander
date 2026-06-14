@@ -1912,6 +1912,11 @@
     .hist-head-btn--delete:hover { background: var(--red-bg); }
     .hist-head-btn--bulk { color: var(--green); border-color: var(--green-bg); }
     .hist-head-btn--bulk:hover { background: var(--green-bg); }
+    .hist-head-btn--bulk:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
     .hist-card-head-right {
       grid-column: 2; grid-row: 1;
       display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap;
@@ -11838,6 +11843,15 @@ function _histGroupSprints(sprints) {
   });
 }
 
+function _histChildSprintsAllCompleted(group) {
+  const children = group.children || [];
+  if (!children.length) return false;
+  return children.every(s => {
+    const st = (s.lifecycle_state || '').toLowerCase();
+    return st === 'completed' || st === 'deleted';
+  });
+}
+
 function _histGroupNeedsBulkComplete(group) {
   const children = group.children || [];
   if (!children.length || !group.baseSprint) return false;
@@ -11849,8 +11863,16 @@ function _histGroupNeedsBulkComplete(group) {
 }
 
 function _histBulkCompleteBtnHtml(group) {
+  if (!group.children?.length || !group.baseSprint) return '';
   if (!_histGroupNeedsBulkComplete(group)) return '';
   const lbl = escHtml(group.baseLabel || '');
+  const childrenReady = _histChildSprintsAllCompleted(group);
+  if (!childrenReady) {
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Complete all child sprints before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+  }
   return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
           onclick="event.stopPropagation();smgmtBulkCompleteSprint('${lbl}')"
           title="Complete parent and all child sprints">
@@ -13373,8 +13395,9 @@ function _smgmtStateMeta(outcome, ticketCount) {
     completed:        { state: 'completed',        cardClass: 'smgmt-completed',        badge: 'COMPLETED',        badgeCls: 'state-finished' },
     needs_rework:     { state: 'needs_rework',     cardClass: 'smgmt-needs-rework',     badge: 'NEEDS REWORK',     badgeCls: 'state-rework'   },
     partial_finished: { state: 'partial_finished', cardClass: 'smgmt-partial-finished', badge: 'PARTIAL FINISHED', badgeCls: 'state-partial'  },
+    planned:          { state: 'planned',          cardClass: '',                       badge: 'PLANNED',          badgeCls: 'state-planned'  },
   };
-  const meta = META[lifecycle] || META.ready_to_merge;
+  const meta = META[lifecycle] || { state: lifecycle, cardClass: '', badge: lifecycle.toUpperCase().replace(/_/g, ' '), badgeCls: 'state-planned' };
   const count = ticketCount != null ? ticketCount
     : (outcome && Array.isArray(outcome.issues) ? outcome.issues.length : null);
   if (lifecycle === 'ready_to_merge' && count === 0) {

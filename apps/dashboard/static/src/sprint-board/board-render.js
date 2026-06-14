@@ -868,6 +868,16 @@ export function _smgmtCardHtml(
   const isFreshRerun = _smgmtIsFreshRerunSprint(label);
   if (isFreshRerun) outcome = null;
 
+  const planState = (
+    ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label] || ""
+  ).toLowerCase();
+  const planBlocksPostRun = [
+    "needs_rework",
+    "planned",
+    "draft",
+    "planning",
+  ].includes(planState);
+
   const outcomeLifecycle = ((outcome && outcome.lifecycle) || "").toLowerCase();
   const outcomeState =
     outcome &&
@@ -885,6 +895,7 @@ export function _smgmtCardHtml(
     : _smgmtHasCompletedTickets(tickets);
   const isPostRun =
     !isRunningView &&
+    !planBlocksPostRun &&
     !!((outcome && (outcome.sprint_status || outcome.state)) || hasCompleted);
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
@@ -960,7 +971,7 @@ export function _smgmtCardHtml(
   let ticketsContainerHtml = "";
   let rollupItems = tickets;
 
-  if (outcome && (outcome.sprint_status || outcome.state)) {
+  if (outcome && (outcome.sprint_status || outcome.state) && !planBlocksPostRun) {
     const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
     outcomeCardClass = " " + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;

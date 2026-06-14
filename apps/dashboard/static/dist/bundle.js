@@ -3793,12 +3793,19 @@ ${data.errors.join("\n")}`);
     const isFreshRerun = _smgmtIsFreshRerunSprint(label);
     if (isFreshRerun)
       outcome = null;
+    const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
+    const planBlocksPostRun = [
+      "needs_rework",
+      "planned",
+      "draft",
+      "planning"
+    ].includes(planState);
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
     const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
     const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
-    const isPostRun = !isRunningView && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const isPostRun = !isRunningView && !planBlocksPostRun && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
     const canRun = tickets.length >= 1 && !hasCompleted;
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
@@ -3843,7 +3850,7 @@ ${data.errors.join("\n")}`);
     let headerMetaHtml = "";
     let ticketsContainerHtml = "";
     let rollupItems = tickets;
-    if (outcome && (outcome.sprint_status || outcome.state)) {
+    if (outcome && (outcome.sprint_status || outcome.state) && !planBlocksPostRun) {
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
       outcomeCardClass = " " + meta.cardClass;
       outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;

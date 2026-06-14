@@ -199,6 +199,9 @@ def _resolve_uat_env_for_tester(
     uat_repo: Optional[Path] = None
     if (project_dir / "uat" / "apps" / "dashboard").is_dir():
         uat_repo = project_dir / "uat"
+    elif (project_dir / "uat").is_dir() and (project_dir / "uat" / ".env").is_file():
+        # Nested non-Commander layout (e.g. perf-coach): uat clone beside coder/tester
+        uat_repo = project_dir / "uat"
     else:
         candidate = project_dir / "uat" / repo_name
         if candidate.is_dir():
@@ -9518,7 +9521,7 @@ def main() -> None:
         effective_target = args.target_branch or sprint_branch
 
         # AC-1/2/3: write extended summary, create GitHub issue, prompt for learnings
-        if state.issues:
+        if state.issues and not args.dry_run:
             end_reason   = "complete" if not summary.skipped else "stopped"
             summary_path = write_sprint_summary(
                 state         = state,
@@ -9533,6 +9536,14 @@ def main() -> None:
             )
         else:
             summary_path = None
+
+        if args.dry_run and state is not None:
+            try:
+                _dry_state = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
+                if _dry_state.exists():
+                    _dry_state.unlink()
+            except Exception:
+                pass
 
     except SystemExit:
         if _sprint_user_cancelled.is_set():

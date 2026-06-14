@@ -38,8 +38,8 @@ def _bulk_complete(srv, tmp_path, owner="owner", repo_name="proj-bc", label="spr
     project_root = tmp_path / "proot-bc"
     sprints_dir = project_root / ".commander" / "sprints"
     sprints_dir.mkdir(parents=True, exist_ok=True)
-    (sprints_dir / "sprint-68.1-plan.json").write_text("{}")
-    (sprints_dir / "sprint-68.2-plan.json").write_text("{}")
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
+    (sprints_dir / "sprint-68.2-plan.json").write_text(json.dumps({"state": "completed"}))
 
     uat_issue = {
         "number": 10,
@@ -111,7 +111,7 @@ def test_bulk_complete_mirrors_completed_into_lifecycle_db(srv, tmp_path):
     project_root = tmp_path / "proot-db"
     sprints_dir = project_root / ".commander" / "sprints"
     sprints_dir.mkdir(parents=True, exist_ok=True)
-    (sprints_dir / "sprint-68.1-plan.json").write_text("{}")
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
 
     db_calls: list[tuple] = []
 
@@ -149,7 +149,7 @@ def test_bulk_complete_preview_lists_summary_category(srv, tmp_path):
     project_root = tmp_path / "prev"
     sprints_dir = project_root / ".commander" / "sprints"
     sprints_dir.mkdir(parents=True)
-    (sprints_dir / "sprint-68.1-plan.json").write_text("{}")
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
 
     patches = [
         patch("server._project_root_path", return_value=project_root),
@@ -177,7 +177,7 @@ def test_bulk_complete_preview_includes_merge_steps(srv, tmp_path):
     project_root = tmp_path / "merge-prev"
     sprints_dir = project_root / ".commander" / "sprints"
     sprints_dir.mkdir(parents=True)
-    (sprints_dir / "sprint-68.1-plan.json").write_text("{}")
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
 
     fake_steps = [{
         "kind": "merge",
@@ -206,7 +206,9 @@ def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
 
     project_root = tmp_path / "pending"
     (project_root / ".commander" / "sprints").mkdir(parents=True)
-    (project_root / ".commander" / "sprints" / "sprint-68.1-plan.json").write_text("{}")
+    (project_root / ".commander" / "sprints" / "sprint-68.1-plan.json").write_text(
+        json.dumps({"state": "completed"})
+    )
 
     close_mock = MagicMock(return_value=None)
     patches = [
@@ -229,3 +231,79 @@ def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
     assert resp.status_code == 409
     assert "merge" in resp.json()["detail"].lower()
     close_mock.assert_not_called()
+
+
+def test_bulk_complete_blocks_when_children_not_completed(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "open-children"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "needs_rework"}))
+    (sprints_dir / "sprint-68.2-plan.json").write_text(json.dumps({"state": "completed"}))
+
+    close_mock = MagicMock(return_value=None)
+    patches = [
+        patch("server._project_root_path", return_value=project_root),
+        patch("server._is_sprint_running", return_value=False),
+        patch("server._get_sprint_issues", return_value=[]),
+        patch("server._open_summary_issues_for_labels", return_value=[]),
+        patch.object(srv.github_client, "close_issue", close_mock),
+    ]
+    with _stack(patches):
+        client = TestClient(srv.app)
+        resp = client.post(
+            "/api/projects/owner/proj/sprints/sprint-68/bulk-complete",
+            json={"confirmed": True, "selected_ticket_numbers": []},
+        )
+    assert resp.status_code == 409
+    assert "child sprint" in resp.json()["detail"].lower()
+    assert "sprint-68.1" in resp.json()["detail"]
+    close_mock.assert_not_called()
+
+
+def test_bulk_complete_preview_blocks_when_children_not_completed(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "prev-open-children"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "running"}))
+
+    with patch("server._project_root_path", return_value=project_root):
+        client = TestClient(srv.app)
+        resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
+    assert resp.status_code == 409
+    assert "child sprint" in resp.json()["detail"].lower()
+    assert "sprint-68.1" in resp.json()["detail"]
+
+
+def test_outcome_404_for_dry_run_state_only(srv, tmp_path):
+    from fastapi.testclient import TestClient
+
+    project_root = tmp_path / "dry-outcome"
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True)
+    state = {
+        "issues": [
+            {
+                "number": 499,
+                "status": "skipped",
+                "skip_reason": "dry-run",
+                "agent_status": "queued",
+            },
+        ],
+    }
+    (sprints_dir / "sprint-68.2-state.json").write_text(json.dumps(state))
+    (sprints_dir / "sprint-68.2-plan.json").write_text(
+        json.dumps({"state": "needs_rework", "end_reason": "process lost"})
+    )
+
+    with patch("server._project_root_path", return_value=project_root):
+        client = TestClient(srv.app)
+        resp = client.get(
+            "/api/sprints/sprint-68.2/outcome?project=owner/proj",
+        )
+    assert resp.status_code == 404
+    detail = resp.json()["detail"].lower()
+    assert "dry-run" in detail or "not run" in detail

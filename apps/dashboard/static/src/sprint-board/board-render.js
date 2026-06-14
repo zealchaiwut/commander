@@ -89,6 +89,11 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
       _smgmtHydrateSchedToggles(repo);
     }
 
+    // Mark pending-sign-off sprint cards (issue #861).
+    if (typeof _smgmtLoadPendingSignoff === 'function') {
+      _smgmtLoadPendingSignoff();
+    }
+
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
 

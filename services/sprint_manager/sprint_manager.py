@@ -74,7 +74,6 @@ from services.sprint_manager.pipeline import (  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     develop_merge_guard as _develop_merge_guard,
     label_transition_guard as _label_transition_guard,
-    ghost_status_labels as _ghost_status_labels,  # noqa: F401
 )
 
 try:
@@ -280,8 +279,6 @@ try:
     from post_test_report import (  # type: ignore[import]
         parse_failures,
         build_failure_block,
-        write_sidecar,   # noqa: F401
-        sidecar_path,    # noqa: F401
     )
     _FAILURE_PARSING_AVAILABLE = True
 except ImportError:
@@ -2275,7 +2272,6 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
     if _FAILURE_PARSING_AVAILABLE:
         try:
-            effective_root = repo_root or REPO_ROOT  # noqa: F841
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
             files_to_inspect = sorted({
@@ -2453,8 +2449,14 @@ def _gate_lint(
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
                 sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                # Paths from git diff are relative to the repo root, not worktester_dashboard.
+                # Resolve the git root so files outside apps/dashboard (e.g. tests/) are found.
+                _rc_root, _root_out, _ = _run_timed(
+                    "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+                )
+                ruff_cwd = Path(_root_out.strip()) if _rc_root == 0 and _root_out.strip() else worktester_dashboard
                 rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
-                                                cwd=worktester_dashboard)
+                                                cwd=ruff_cwd)
                 combined += stdout + stderr
                 any_ran = True
                 if rc != 0:
@@ -5294,10 +5296,6 @@ def generate_sprint_summary(
     else:
         total_tokens = state.total_tokens_in + state.total_tokens_out
 
-    # cost_estimate: all agents (coder, tester, preflight) run via Claude Code CLI
-    # which is subscription-funded — no raw API charges.
-    cost_estimate_usd = 0.0  # noqa: F841
-
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
     else:
@@ -6994,7 +6992,7 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
-    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:  # noqa: E741
+    if label_set & {lbl.lower() for lbl in _HIGH_RISK_LABELS}:
         return "HIGH"
 
     if paths_touched:

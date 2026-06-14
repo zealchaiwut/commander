@@ -17,7 +17,7 @@
     }
     return s;
   }
-  function colorizeLogLine(text, repo) {
+  function colorizeLogLine2(text, repo) {
     const escaped = escapeLogHtml(extractRaw(text));
     return escaped.replace(TOKEN_RE, function(match, issue, agent) {
       if (issue) {
@@ -30,11 +30,437 @@
     });
   }
 
+  // apps/dashboard/static/src/progress-activity.js
+  function _e(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _detectMode(payload) {
+    if (payload.mode)
+      return payload.mode;
+    if (Array.isArray(payload.steps) && payload.steps.length > 0)
+      return "stepper";
+    if (payload.total != null)
+      return "bar";
+    return "indeterminate";
+  }
+  var _STEP_ICON = {
+    pending: "\u25CB",
+    checking: "\u2026",
+    running: "\u25CF",
+    done: "\u2713",
+    pass: "\u2713",
+    fixed: "\u2713",
+    failed: "\u2717"
+  };
+  var _LOG_CLASS = {
+    dispatch: "pa-log-dispatch",
+    success: "pa-log-success",
+    warn: "pa-log-warn",
+    fail: "pa-log-fail"
+  };
+  function _barHtml(p) {
+    const done = Number(p.done ?? 0);
+    const total = Number(p.total ?? 0);
+    const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+    const shimmer = pct < 100 ? '<div class="pa-bar-shimmer"></div>' : "";
+    const countsHtml = total > 0 ? `<span class="pa-counts">${done} of ${total}</span>` : "";
+    const estHtml = p.est_remaining_minutes != null ? `<span class="pa-est-rem">~${_e(p.est_remaining_minutes)}m remaining</span>` : "";
+    return `<div class="pa-bar-track">
+    <div class="pa-bar-fill" style="transform:scaleX(${pct / 100})">${shimmer}</div>
+  </div>
+  <div class="pa-bar-meta">
+    <span class="pa-current">${_e(p.current)}</span>
+    ${countsHtml}
+    ${estHtml}
+  </div>`;
+  }
+  function _stepperHtml(p) {
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const rows = steps.map((s) => {
+      const state = _e(s.state || "pending");
+      const icon = _STEP_ICON[s.state] || "\u25CB";
+      const note = s.note ? `<span class="pa-step-note">${_e(s.note)}</span>` : "";
+      return `<div class="pa-step pa-step--${state}" id="pa-step-${_e(s.key || "")}">
+      <span class="pa-step-icon" aria-hidden="true">${icon}</span>
+      <div class="pa-step-content">
+        <span class="pa-step-name">${_e(s.label || s.key || "")}</span>
+        ${note}
+      </div>
+    </div>`;
+    }).join("");
+    return `<div class="pa-steps">${rows}</div>`;
+  }
+  function _indeterminateHtml(p) {
+    const cur = p.current ? `<span class="pa-current">${_e(p.current)}</span>` : "";
+    return `<div class="pa-indeterminate">
+    <div class="pa-spinner"></div>
+    ${cur}
+    <div class="pa-indet-shimmer"></div>
+  </div>`;
+  }
+  function _doneHtml(p) {
+    const txt = p.result ? _e(p.result) : "Done";
+    return `<div class="pa-done">
+    <span class="pa-done-icon" aria-hidden="true">\u2713</span>
+    <span class="pa-result">${txt}</span>
+  </div>`;
+  }
+  function _errorHtml(p, opts) {
+    const msg = p.error || "An error occurred.";
+    const fn = opts.retryFn || "";
+    const retryBtn = fn ? `<button class="pa-retry-btn" type="button" onclick="${_e(fn)}()">Retry</button>` : `<button class="pa-retry-btn" type="button">Retry</button>`;
+    return `<div class="pa-error">
+    <div class="pa-error-msg">${_e(msg)}</div>
+    ${retryBtn}
+  </div>`;
+  }
+  function _logLineHtml(line, colorize) {
+    if (!line)
+      return "";
+    if (typeof line === "string") {
+      const msg2 = colorize ? colorize(line, "") : _e(line);
+      return `<div class="pa-log-line"><span class="pa-log-msg">${msg2}</span></div>`;
+    }
+    const cls = _LOG_CLASS[line.type] || "";
+    const tsHtml = line.timestamp && line.timestamp !== "\u2014" ? `<span class="pa-log-time">${_e(line.timestamp)}</span>` : "";
+    const msg = colorize ? colorize(String(line.message || ""), "") : _e(line.message || "");
+    return `<div class="pa-log-line${cls ? " " + cls : ""}">${tsHtml}<span class="pa-log-msg">${msg}</span></div>`;
+  }
+  function _logSectionHtml(p, rootId, opts) {
+    const lines = Array.isArray(p.log_tail) ? p.log_tail : [];
+    const colorize = opts.colorize || null;
+    const collapsed = opts.logCollapsed ? " pa-log-collapsed" : "";
+    const streamId = rootId ? ` id="pa-log-stream-${_e(rootId)}"` : "";
+    const toggleArg = rootId ? `'${_e(rootId)}'` : "''";
+    const agentSlot = opts.logHeaderAgentHtml || "";
+    const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log\u2026</div>';
+    const linesHtml = lines.length ? lines.map((l) => _logLineHtml(l, colorize)).join("") : emptyMsg;
+    return `<div class="pa-log">
+    <div class="pa-log-header" onclick="paToggleLog(${toggleArg})" role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();paToggleLog(${toggleArg})}">
+      <span class="pa-log-indicator" aria-hidden="true"></span>
+      <span class="pa-log-label">live</span>
+      ${agentSlot}
+      <button class="pa-log-toggle-btn" type="button" aria-label="Toggle log" tabindex="-1">&#9650;</button>
+    </div>
+    <div class="pa-log-stream${collapsed}"${streamId}>${linesHtml}</div>
+  </div>`;
+  }
+  function renderProgressActivity2(payload, opts) {
+    if (!payload || typeof payload !== "object")
+      payload = {};
+    opts = opts || {};
+    const status = payload.status || "running";
+    const mode = _detectMode(payload);
+    const rootId = opts.id || "";
+    const idAttr = rootId ? ` id="${_e(rootId)}"` : "";
+    let bodyHtml;
+    if (status === "done") {
+      bodyHtml = _doneHtml(payload);
+    } else if (status === "error") {
+      bodyHtml = _errorHtml(payload, opts);
+    } else if (mode === "stepper") {
+      bodyHtml = _stepperHtml(payload);
+    } else if (mode === "bar") {
+      bodyHtml = _barHtml(payload);
+    } else {
+      bodyHtml = _indeterminateHtml(payload);
+    }
+    const showLog = !opts.hideLog && status !== "done" && status !== "error" && (status === "running" || Array.isArray(payload.log_tail));
+    const logHtml = showLog ? _logSectionHtml(payload, rootId, opts) : "";
+    return `<div class="pa-root pa-mode-${_e(mode)} pa-status-${_e(status)}"${idAttr}>${bodyHtml}${logHtml}</div>`;
+  }
+  function updateProgressActivityLog(rootId, logTail, colorize) {
+    if (typeof document === "undefined")
+      return;
+    const streamEl = document.getElementById("pa-log-stream-" + rootId);
+    if (!streamEl)
+      return;
+    const lines = Array.isArray(logTail) ? logTail : [];
+    const emptyMsg = '<div class="pa-log-line" style="color:var(--text-sub)">Waiting for log\u2026</div>';
+    streamEl.innerHTML = lines.length ? lines.map((l) => _logLineHtml(l, colorize || null)).join("") : emptyMsg;
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+  function paToggleLog(rootId) {
+    if (typeof document === "undefined")
+      return;
+    const el = document.getElementById("pa-log-stream-" + rootId);
+    if (el)
+      el.classList.toggle("pa-log-collapsed");
+  }
+  var PA_CSS = `
+@keyframes pa-shimmer {
+  0%   { left: -40%; }
+  100% { left: 110%; }
+}
+@keyframes pa-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pa-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .4; }
+}
+
+.pa-root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* \u2500\u2500 Bar mode \u2500\u2500 */
+.pa-bar-track {
+  height: 4px;
+  background: rgba(22,163,74,.18);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  margin: 0 16px;
+}
+.pa-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--green);
+  border-radius: 2px;
+  transform-origin: left;
+  transition: transform .6s ease;
+  position: relative;
+  overflow: hidden;
+}
+.pa-bar-shimmer {
+  position: absolute;
+  top: 0; left: -40%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.55) 50%, transparent 100%);
+  animation: pa-shimmer 1.8s ease-in-out infinite;
+}
+.pa-bar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 22px;
+}
+.pa-current {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pa-counts {
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.pa-est-rem {
+  color: var(--text-sub);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* \u2500\u2500 Stepper mode \u2500\u2500 */
+.pa-steps {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px;
+}
+.pa-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  min-height: 28px;
+}
+.pa-step-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pa-step--pending  .pa-step-icon { color: var(--text-sub); }
+.pa-step--checking .pa-step-icon { color: var(--blue); }
+.pa-step--running  .pa-step-icon { color: var(--blue); }
+.pa-step--done     .pa-step-icon { color: var(--green); }
+.pa-step--pass     .pa-step-icon { color: var(--green); }
+.pa-step--fixed    .pa-step-icon { color: var(--amber); }
+.pa-step--failed   .pa-step-icon { color: var(--red); }
+.pa-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pa-step-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.pa-step-note {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+/* \u2500\u2500 Indeterminate mode \u2500\u2500 */
+.pa-indeterminate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+}
+.pa-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid rgba(22,163,74,.2);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: pa-spin .8s linear infinite;
+}
+.pa-indet-shimmer {
+  height: 4px;
+  flex: 1;
+  background: rgba(22,163,74,.15);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.pa-indet-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -40%;
+  width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(22,163,74,.45) 50%, transparent 100%);
+  animation: pa-shimmer 1.8s ease-in-out infinite;
+}
+
+/* \u2500\u2500 Done end state \u2500\u2500 */
+.pa-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.pa-done-icon {
+  color: var(--green);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.pa-result {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* \u2500\u2500 Error end state \u2500\u2500 */
+.pa-error {
+  padding: 10px 16px;
+}
+.pa-error-msg {
+  font-size: 13px;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+.pa-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--red);
+  border: 1px solid var(--red);
+  background: var(--surface);
+  transition: background .12s;
+  font-family: inherit;
+}
+.pa-retry-btn:hover { background: var(--red-bg); }
+
+/* \u2500\u2500 Live-log slot \u2500\u2500 */
+.pa-log {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.pa-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.pa-log-header:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+.pa-log-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  animation: pa-pulse 2s ease-in-out infinite;
+}
+.pa-log-label { flex: 1; }
+.pa-log-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-sub);
+  cursor: pointer;
+  font-family: inherit;
+}
+.pa-log-stream {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  padding: 0 16px 10px;
+}
+.pa-log-stream.pa-log-collapsed { display: none; }
+.pa-log-line {
+  display: flex;
+  gap: 6px;
+}
+.pa-log-time {
+  color: var(--text-sub);
+  flex-shrink: 0;
+}
+.pa-log-msg {
+  color: var(--text);
+  flex: 1;
+  word-break: break-all;
+}
+.pa-log-line.pa-log-dispatch .pa-log-msg { color: var(--blue); }
+.pa-log-line.pa-log-success  .pa-log-msg { color: var(--green); }
+.pa-log-line.pa-log-warn     .pa-log-msg { color: var(--amber); }
+.pa-log-line.pa-log-fail     .pa-log-msg { color: var(--red); }
+`;
+  var _cssInjected = false;
+  function injectProgressActivityCss() {
+    if (_cssInjected || typeof document === "undefined")
+      return;
+    _cssInjected = true;
+    const style = document.createElement("style");
+    style.dataset.paStyle = "1";
+    style.textContent = PA_CSS;
+    document.head.appendChild(style);
+  }
+
   // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
   globalThis._fsPreview ??= null;
+  globalThis._fsActiveJob ??= null;
   globalThis._bcLabel ??= null;
   globalThis._bcPreview ??= null;
   globalThis._pfCurrentLabel ??= null;
@@ -48,6 +474,104 @@
   globalThis._pfUseClineFollowups ??= false;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
+
+  // apps/dashboard/static/src/sprint-board/plan-next.js
+  async function _planNextRequest(repo, replace) {
+    let res;
+    try {
+      res = await fetch("/api/sprints/plan-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, replace })
+      });
+    } catch (e) {
+      _smgmtShowToast("Plan next sprint failed: " + e.message);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _smgmtShowToast("Plan next sprint failed: " + (data.detail || "HTTP " + res.status));
+      return;
+    }
+    switch (data.status) {
+      case "ok":
+        await loadSprintMgmt();
+        _smgmtShowToast(
+          `Planned ${data.sprint_label} \xB7 ${(data.tickets || []).length} tickets (${data.total_minutes}m) \u2014 pending sign-off`
+        );
+        break;
+      case "no_milestone":
+        _smgmtShowToast("No active milestone \u2014 nothing to plan.");
+        break;
+      case "empty":
+        _smgmtShowToast(data.reason || "No eligible tickets to plan.");
+        break;
+      case "conflict":
+        if (window.confirm(
+          `${data.reason}
+
+Replace the existing draft (${data.existing_label})?`
+        )) {
+          await _planNextRequest(repo, true);
+        }
+        break;
+      default:
+        _smgmtShowToast("Plan next sprint: unexpected response.");
+    }
+  }
+  async function smgmtPlanNextSprint() {
+    const repo = _smgmtRepo();
+    if (!repo) {
+      _smgmtShowToast("No project selected.");
+      return;
+    }
+    const btn = document.getElementById("smgmt-plan-next-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+    }
+    try {
+      await _planNextRequest(repo, false);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("is-loading");
+      }
+    }
+  }
+  async function _smgmtLoadPendingSignoff() {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    let labels = [];
+    try {
+      const res = await fetch(
+        `/api/sprints/pending-signoff?project=${encodeURIComponent(repo)}`
+      );
+      if (!res.ok)
+        return;
+      const data = await res.json();
+      labels = data.labels || [];
+    } catch {
+      return;
+    }
+    for (const label of labels) {
+      const card = document.getElementById(`smgmt-card-${label}`);
+      if (!card)
+        continue;
+      card.classList.add("smgmt-pending-signoff");
+      if (card.querySelector(".smgmt-pending-signoff-badge"))
+        continue;
+      const header = card.querySelector(".smgmt-sprint-header, .sc-header");
+      if (!header)
+        continue;
+      const badge = document.createElement("span");
+      badge.className = "smgmt-pending-signoff-badge";
+      badge.textContent = "Pending sign-off";
+      badge.setAttribute("title", "Awaiting sign-off before this sprint goes live");
+      header.appendChild(badge);
+    }
+  }
 
   // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
@@ -271,8 +795,17 @@
   }
   function _fsClose() {
     document.getElementById("fs-backdrop").classList.add("hidden");
+    document.getElementById("fs-modal").classList.remove("hidden");
     document.getElementById("fs-modal").classList.add("hidden");
     _clearBodyInert();
+    if (_fsActiveJob && _fsActiveJob.es) {
+      _fsActiveJob.es.close();
+      _fsActiveJob.es = null;
+    }
+    const snap = _fsActiveJob && _fsActiveJob.snapshot;
+    if (!snap || snap.status === "done" || snap.status === "error") {
+      _fsActiveJob = null;
+    }
     _fsLabel = null;
     _fsPreview = null;
   }
@@ -292,25 +825,152 @@
       cb.checked = checked;
     });
   }
+  function _fsProgressSlot() {
+    return document.getElementById("fs-progress");
+  }
+  function _fsPreviewSlot() {
+    return document.getElementById("fs-content");
+  }
+  function _fsEnterProgressView(snap) {
+    document.getElementById("fs-loading").classList.add("hidden");
+    _fsPreviewSlot() && _fsPreviewSlot().classList.add("hidden");
+    document.getElementById("fs-error").classList.add("hidden");
+    const slot = _fsProgressSlot();
+    if (slot) {
+      slot.innerHTML = renderProgressActivity(snap, {
+        id: "fs-pa",
+        retryFn: "_fsRetry"
+      });
+      slot.classList.remove("hidden");
+    }
+    const confirmBtn = document.getElementById("fs-confirm-btn");
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (confirmBtn)
+      confirmBtn.classList.add("hidden");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+  }
+  function _fsUpdateProgress(snap) {
+    const slot = _fsProgressSlot();
+    if (!slot || slot.classList.contains("hidden"))
+      return;
+    const logEl = document.getElementById("pa-log-stream-fs-pa");
+    const atBottom = !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
+    slot.innerHTML = renderProgressActivity(snap, {
+      id: "fs-pa",
+      retryFn: "_fsRetry"
+    });
+    if (atBottom) {
+      const newLog = document.getElementById("pa-log-stream-fs-pa");
+      if (newLog)
+        newLog.scrollTop = newLog.scrollHeight;
+    }
+  }
+  function _fsDone(snap) {
+    _fsUpdateProgress(snap);
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+    _fsActiveJob = null;
+    setTimeout(() => loadSprintMgmt(), 1500);
+  }
+  function _fsHandleError(snap) {
+    _fsUpdateProgress(snap);
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
+    if (cancelBtn)
+      cancelBtn.textContent = "Close";
+    if (retryBtn)
+      retryBtn.classList.remove("hidden");
+  }
+  function _fsConnectStream(owner, repoName, label) {
+    const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+    const es = new EventSource(url);
+    if (_fsActiveJob)
+      _fsActiveJob.es = es;
+    es.onmessage = (e) => {
+      let snap;
+      try {
+        snap = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (snap.ping)
+        return;
+      if (_fsActiveJob)
+        _fsActiveJob.snapshot = snap;
+      if (snap.status === "done") {
+        es.close();
+        if (_fsActiveJob)
+          _fsActiveJob.es = null;
+        _fsDone(snap);
+      } else if (snap.status === "error") {
+        es.close();
+        if (_fsActiveJob)
+          _fsActiveJob.es = null;
+        _fsHandleError(snap);
+      } else {
+        _fsUpdateProgress(snap);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      if (_fsActiveJob)
+        _fsActiveJob.es = null;
+    };
+  }
   async function smgmtFinishSprint(label) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    _fsLabel = label;
-    _fsPreview = null;
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
+    if (_fsActiveJob && _fsActiveJob.label === label) {
+      _fsLabel = label;
+      document.getElementById("fs-modal-title").textContent = `Merging ${sprintLabelDisplay(label)}\u2026`;
+      _fsOpen();
+      const snap = _fsActiveJob.snapshot;
+      if (snap) {
+        _fsEnterProgressView(snap);
+        if (snap.status === "done") {
+          _fsDone(snap);
+        } else if (snap.status === "error") {
+          _fsHandleError(snap);
+        } else {
+          _fsConnectStream(owner, repoName, label);
+        }
+      }
+      return;
+    }
+    _fsLabel = label;
+    _fsPreview = null;
     document.getElementById("fs-modal-title").textContent = `Merge ${sprintLabelDisplay(label)}?`;
     document.getElementById("fs-loading").classList.remove("hidden");
     document.getElementById("fs-content").classList.add("hidden");
     document.getElementById("fs-error").classList.add("hidden");
     document.getElementById("fs-error").textContent = "";
     const confirmBtn = document.getElementById("fs-confirm-btn");
+    const cancelBtn = document.getElementById("fs-cancel-btn");
+    const retryBtn = document.getElementById("fs-retry-btn");
     if (confirmBtn) {
+      confirmBtn.classList.remove("hidden");
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Merge Sprint";
     }
+    if (cancelBtn)
+      cancelBtn.textContent = "Cancel";
+    if (retryBtn)
+      retryBtn.classList.add("hidden");
+    const progSlot = _fsProgressSlot();
+    if (progSlot)
+      progSlot.classList.add("hidden");
     _fsOpen();
     try {
       const res = await fetch(
@@ -334,7 +994,7 @@
           const catClass = _fsCatClass(t.category);
           const catLabel = t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
           return `<label class="rr-ticket-row">
-          <input type="checkbox" checked data-issue="${t.number}" onchange="">
+          <input type="checkbox" checked data-issue="${t.number}" data-title="${escHtml(t.title)}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
           <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
           <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
@@ -353,7 +1013,9 @@
         actionRows.push(`<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge open PR
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
       }
-      actionRows.push('<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>');
+      actionRows.push(
+        '<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>'
+      );
       actionsEl.innerHTML = actionRows.join("");
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
@@ -373,48 +1035,66 @@
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
-    const checkboxes = Array.from(document.querySelectorAll("#fs-ticket-list input[type=checkbox]"));
-    const selectedNums = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
+    const checkboxes = Array.from(
+      document.querySelectorAll("#fs-ticket-list input[type=checkbox]")
+    );
+    const selectedTickets = checkboxes.filter((c) => c.checked).map((c) => ({
+      number: parseInt(c.dataset.issue, 10),
+      title: c.dataset.title || `#${c.dataset.issue}`
+    }));
+    const selectedNums = selectedTickets.map((t) => t.number);
     const confirmBtn = document.getElementById("fs-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "Merging\u2026";
+      confirmBtn.textContent = "Starting\u2026";
     }
+    const bgParams = {
+      move_non_uat_to: _fsPreview.next_sprint_label || "",
+      selected_ticket_numbers: selectedNums,
+      selected_tickets: selectedTickets,
+      merge_pr: !!_fsPreview.sprint_pr,
+      sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
+      total: selectedNums.length + 2
+    };
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish`,
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(_fsLabel)}/finish-bg`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirmed: true,
-            move_non_uat_to: _fsPreview.next_sprint_label,
-            selected_ticket_numbers: selectedNums,
-            merge_pr: !!_fsPreview.sprint_pr,
-            sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null
-          })
+          body: JSON.stringify({ confirmed: true, ...bgParams })
         }
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
-      const data = await res.json();
-      _fsClose();
-      if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`Merged with errors \u2014 ${data.closed} closed.`);
-      } else {
-        let msg = `${sprintLabelDisplay(_fsLabel || "")} merged \u2014 ${data.closed} closed`;
-        if (data.moved > 0)
-          msg += `, ${data.moved} moved to ${data.next_sprint_label}`;
-        _smgmtShowToast(msg + ".");
-      }
-      await loadSprintMgmt();
+      await res.json();
+      const initialSnap = {
+        status: "running",
+        mode: "bar",
+        done: 0,
+        total: bgParams.total,
+        current: "Starting\u2026",
+        log_tail: []
+      };
+      _fsActiveJob = {
+        label: _fsLabel,
+        owner,
+        repoName,
+        params: bgParams,
+        snapshot: initialSnap,
+        es: null
+      };
+      document.getElementById("fs-modal-title").textContent = `Merging ${sprintLabelDisplay(_fsLabel)}\u2026`;
+      _fsEnterProgressView(initialSnap);
+      _fsConnectStream(owner, repoName, _fsLabel);
     } catch (e) {
       const errEl = document.getElementById("fs-error");
-      errEl.textContent = "Failed to finish sprint: " + e.message;
+      errEl.textContent = "Failed to start finish: " + e.message;
       errEl.classList.remove("hidden");
       if (confirmBtn) {
+        confirmBtn.classList.remove("hidden");
         confirmBtn.disabled = false;
         confirmBtn.textContent = "Merge Sprint";
       }
@@ -565,6 +1245,14 @@
   }
 
   // apps/dashboard/static/src/sprint-board/run-controls.js
+  var PF_STEPS = [
+    { key: "ac", label: "Acceptance criteria", autoFixable: true },
+    { key: "estimates", label: "Estimate coverage", autoFixable: true },
+    { key: "cycle", label: "Dependency graph", autoFixable: false },
+    { key: "missizing", label: "Mis-sizing review", autoFixable: false },
+    { key: "conflicts", label: "Conflict analysis", autoFixable: false }
+  ];
+  var _pfStepFails = 0;
   var _pfModels = null;
   function _pfModelShort(m) {
     const s = String(m || "");
@@ -626,10 +1314,11 @@
     _pfFetch();
   }
   function _pfReset() {
-    document.getElementById("pf-loading").classList.remove("hidden");
+    document.getElementById("pf-loading").classList.add("hidden");
+    document.getElementById("pf-stepper").classList.remove("hidden");
     document.getElementById("pf-content").classList.add("hidden");
     document.getElementById("pf-error").classList.add("hidden");
-    document.getElementById("pf-footer").classList.add("hidden");
+    document.getElementById("pf-footer").classList.remove("hidden");
     document.getElementById("pf-confirm-btn").disabled = true;
     document.getElementById("pf-confirm-btn").textContent = "Run Sprint";
     _pfDagData = null;
@@ -639,10 +1328,12 @@
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfStepperInit();
   }
   function _pfClose() {
     document.getElementById("pf-backdrop").classList.add("hidden");
     document.getElementById("pf-modal").classList.add("hidden");
+    document.getElementById("pf-stepper").classList.add("hidden");
     _pfCurrentLabel = null;
     _pfCurrentRepo = null;
     _pfState = "idle";
@@ -652,6 +1343,7 @@
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfStepFails = 0;
   }
   async function _pfFetch() {
     _pfState = "loading";
@@ -677,6 +1369,7 @@
       }
       _pfState = "success";
       _pfShowSuccess();
+      _pfStepperAnimate(data);
     } catch (e) {
       if (_pfCurrentLabel !== label)
         return;
@@ -720,7 +1413,6 @@
      </div>`;
     document.getElementById("pf-content").classList.remove("hidden");
     document.getElementById("pf-footer").classList.remove("hidden");
-    _pfUpdateConfirmBtn();
     document.getElementById("pf-cancel-btn").focus();
     if (_pfDagData && (_pfDagData.edges || []).length > 0) {
       requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
@@ -730,16 +1422,20 @@
     const hasCycle = !!(_pfCycle && _pfCycle.length);
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
     const hasPending = pendingFlags.length > 0;
+    const hasFail = _pfStepFails > 0;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     if (!confirmBtn)
       return;
-    confirmBtn.disabled = hasCycle || hasPending;
+    confirmBtn.disabled = hasCycle || hasPending || hasFail;
     if (hasCycle) {
       confirmBtn.title = "Cannot run: dependency cycle detected. Resolve the cycle first.";
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: dependency cycle detected");
     } else if (hasPending) {
       confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? "s" : ""} need review.`;
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: mis-sizing flags need review");
+    } else if (hasFail) {
+      confirmBtn.title = `Cannot run: ${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} detected.`;
+      confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: ${_pfStepFails} blocking issue(s)`);
     } else {
       confirmBtn.title = "";
       confirmBtn.setAttribute("aria-label", "Run Sprint");
@@ -779,8 +1475,6 @@
     const flags = _pfFlags && (_pfFlags.flags || []);
     if (!flags || !flags.length)
       return "";
-    const label = _pfCurrentLabel;
-    const repo = _pfCurrentRepo;
     const rows = flags.map((f) => {
       const num = f.issue_number;
       const resolved = f.status !== "pending";
@@ -836,7 +1530,7 @@
     ${rows.join("")}
   </div>`;
   }
-  function _pfFlagShowSizePicker(num, currentSize) {
+  function _pfFlagShowSizePicker(num, _currentSize) {
     const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
     const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
     if (actionsEl)
@@ -1075,7 +1769,225 @@
       return;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="pf-spinner" style="width:12px;height:12px;border-width:2px;"></span> Running\u2026';
+    confirmBtn.textContent = "Starting\u2026";
+    _pfClose();
+    await smgmtKickoffRun(label, repo);
+  }
+  function _pfStepperInit() {
+    _pfStepFails = 0;
+    const stepsEl = document.getElementById("pf-stepper-steps");
+    if (!stepsEl)
+      return;
+    stepsEl.innerHTML = PF_STEPS.map(
+      (s) => `<div class="pf-step-item pf-step-item--pending" id="pf-step-${s.key}">
+      <span class="pf-step-icon" aria-hidden="true"></span>
+      <div class="pf-step-content">
+        <span class="pf-step-name">${escHtml(s.label)}</span>
+        <span class="pf-step-note" id="pf-step-note-${s.key}"></span>
+      </div>
+    </div>`
+    ).join("");
+    const summaryEl = document.getElementById("pf-stepper-summary");
+    if (summaryEl) {
+      summaryEl.textContent = "";
+      summaryEl.className = "pf-stepper-summary hidden";
+    }
+  }
+  function _pfStepState(key, state, note) {
+    const item = document.getElementById(`pf-step-${key}`);
+    if (!item)
+      return;
+    item.className = `pf-step-item pf-step-item--${state}`;
+    const noteEl = document.getElementById(`pf-step-note-${key}`);
+    if (noteEl)
+      noteEl.textContent = note || "";
+  }
+  async function _pfRunAutoFix(label, repo) {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+      { method: "POST" }
+    );
+    if (!resp.ok)
+      throw new Error(`preflight-fix ${resp.status}`);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", filled = 0, estimated = 0, errors = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done)
+        break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
+        if (!m)
+          continue;
+        if (m[1] === "done") {
+          try {
+            const d = JSON.parse(m[2]);
+            filled = d.filled || 0;
+            estimated = d.estimated || 0;
+            errors = d.errors || [];
+          } catch (_) {
+          }
+        }
+      }
+    }
+    return { filled, estimated, errors };
+  }
+  async function _pfStepperAnimate(data) {
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const label = _pfCurrentLabel;
+    const repo = _pfCurrentRepo;
+    _pfStepState("ac", "checking", "");
+    _pfStepState("estimates", "checking", "");
+    await delay(350);
+    const missingAc = data.warnings && data.warnings.missing_ac || [];
+    const unestimated = data.warnings && data.warnings.unestimated || [];
+    const hasAcIssues = missingAc.length > 0;
+    const hasEstIssues = unestimated.length > 0;
+    if ((hasAcIssues || hasEstIssues) && label && repo) {
+      try {
+        const fix = await _pfRunAutoFix(label, repo);
+        const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "";
+        const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "";
+        _pfStepState("ac", fix.filled > 0 ? "fixed" : "pass", acNote);
+        _pfStepState("estimates", fix.estimated > 0 ? "fixed" : "pass", estNote);
+      } catch (_) {
+        _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "");
+        _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "");
+      }
+    } else {
+      _pfStepState("ac", "pass", "");
+      _pfStepState("estimates", "pass", "");
+    }
+    await delay(300);
+    _pfStepState("cycle", "checking", "");
+    await delay(350);
+    if (data.cycle && data.cycle.length) {
+      _pfStepState("cycle", "fail", `Cycle: ${data.cycle.join(" \u2192 ")}`);
+      _pfStepFails++;
+    } else {
+      _pfStepState("cycle", "pass", "");
+    }
+    await delay(300);
+    _pfStepState("missizing", "checking", "");
+    await delay(350);
+    const pendingFlags = (data.mis_sizing_flags && data.mis_sizing_flags.flags || []).filter((f) => f.status === "pending");
+    if (pendingFlags.length > 0) {
+      _pfStepState("missizing", "fail", `${pendingFlags.length} flag(s) require review`);
+      _pfStepFails++;
+    } else {
+      _pfStepState("missizing", "pass", "");
+    }
+    await delay(300);
+    _pfStepState("conflicts", "checking", "");
+    await delay(350);
+    const selectedTickets = _pfGetSelectedTickets();
+    const conflicts = _pfComputeConflicts(selectedTickets);
+    if (conflicts.length > 0) {
+      _pfStepState("conflicts", "pass", `${conflicts.length} conflict(s) \u2014 execution order planned`);
+    } else {
+      _pfStepState("conflicts", "pass", "");
+    }
+    _pfStepperSummary();
+    _pfUpdateConfirmBtn();
+  }
+  function _pfStepperSummary() {
+    const summaryEl = document.getElementById("pf-stepper-summary");
+    if (!summaryEl)
+      return;
+    summaryEl.classList.remove("hidden");
+    if (_pfStepFails > 0) {
+      summaryEl.textContent = `${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} \u2014 cannot run`;
+      summaryEl.className = "pf-stepper-summary pf-stepper-summary--blocking";
+    } else {
+      summaryEl.textContent = "All checks passed \u2014 ready to run";
+      summaryEl.className = "pf-stepper-summary pf-stepper-summary--clear";
+    }
+  }
+  var KS_STEPS = [
+    { key: "lock", label: "Validate and acquire lock" },
+    { key: "branch", label: "Create sprint branch" },
+    { key: "dispatch", label: "Dispatch first agents" }
+  ];
+  var _ksFailedStep = -1;
+  var _ksLabel = null;
+  var _ksRepo = null;
+  function _ksInit() {
+    const stepsEl = document.getElementById("smgmt-kickoff-steps");
+    if (!stepsEl)
+      return;
+    stepsEl.innerHTML = KS_STEPS.map(
+      (s) => `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
+      <span class="pf-step-icon" aria-hidden="true"></span>
+      <div class="pf-step-content">
+        <span class="pf-step-name">${escHtml(s.label)}</span>
+        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
+      </div>
+    </div>`
+    ).join("");
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (errEl)
+      errEl.hidden = true;
+  }
+  function _ksSetStep(key, state, note) {
+    const item = document.getElementById(`ks-step-${key}`);
+    if (!item)
+      return;
+    item.className = `pf-step-item pf-step-item--${state}`;
+    const noteEl = document.getElementById(`ks-step-note-${key}`);
+    if (noteEl)
+      noteEl.textContent = note || "";
+  }
+  function _ksShow(label, repo) {
+    _ksLabel = label;
+    _ksRepo = repo;
+    _ksFailedStep = -1;
+    _ksInit();
+    const shell = document.getElementById("smgmt-kickoff-shell");
+    const runShell = document.getElementById("smgmt-run-shell");
+    const emptyEl = document.getElementById("smgmt-running-empty");
+    if (emptyEl)
+      emptyEl.hidden = true;
+    if (runShell)
+      runShell.hidden = true;
+    if (shell)
+      shell.hidden = false;
+    if (typeof _smgmtShowSubView === "function")
+      _smgmtShowSubView("running");
+  }
+  function _ksHide() {
+    const shell = document.getElementById("smgmt-kickoff-shell");
+    if (shell)
+      shell.hidden = true;
+  }
+  function _ksShowError(stepKey, msg) {
+    _ksSetStep(stepKey, "fail", msg);
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (!errEl)
+      return;
+    const msgEl = document.getElementById("smgmt-kickoff-error-msg");
+    if (msgEl)
+      msgEl.textContent = msg || "An error occurred";
+    errEl.hidden = false;
+  }
+  async function _ksIsRunning(label) {
+    try {
+      const res = await fetch("/api/sprints/running-all");
+      if (!res.ok)
+        return false;
+      const data = await res.json();
+      return (data.running || []).some((r) => r.sprint_label === label);
+    } catch (_) {
+      return false;
+    }
+  }
+  async function _ksStep1Post() {
+    const label = _ksLabel;
+    const repo = _ksRepo;
+    _ksSetStep("lock", "checking", "");
     try {
       const res = await fetch("/api/sprints/run", {
         method: "POST",
@@ -1085,30 +1997,121 @@
       if (!res.ok) {
         let detail = await res.text();
         try {
-          const parsed = JSON.parse(detail);
-          detail = parsed.detail || detail;
+          const p = JSON.parse(detail);
+          detail = typeof p.detail === "string" ? p.detail : JSON.stringify(p.detail);
         } catch (_) {
         }
-        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        _ksShowError("lock", detail || `HTTP ${res.status}`);
+        _ksFailedStep = 0;
+        return false;
       }
-      _pfClose();
-      const n = parseInt(label.split("-")[1], 10);
-      _smgmtShowToast(`Sprint ${n} dispatched.`);
-      if (typeof _smgmtShowSubView === "function")
-        _smgmtShowSubView("running");
-      await loadSprintMgmt(true, label);
-      if (typeof _smgmtLivePollRestart === "function")
-        _smgmtLivePollRestart();
-      for (let i = 0; i < 8; i++) {
-        if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
-          break;
-        await new Promise((r) => setTimeout(r, 600));
-        await loadSprintMgmt(true, label);
-      }
+      _ksSetStep("lock", "pass", "");
+      return true;
     } catch (e) {
-      _pfState = "error";
-      _pfShowError("Failed to run sprint: " + e.message);
+      _ksShowError("lock", e.message);
+      _ksFailedStep = 0;
+      return false;
     }
+  }
+  async function _ksStep2Branch() {
+    _ksSetStep("branch", "checking", "");
+    const deadline = Date.now() + 3e4;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1e3));
+      if (await _ksIsRunning(_ksLabel)) {
+        _ksSetStep("branch", "pass", "");
+        return true;
+      }
+    }
+    _ksShowError("branch", "Timed out waiting for sprint process to start");
+    _ksFailedStep = 1;
+    return false;
+  }
+  async function _ksStep3Dispatch() {
+    const label = _ksLabel;
+    const repo = _ksRepo;
+    _ksSetStep("dispatch", "checking", "");
+    const deadline = Date.now() + 9e4;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2e3));
+      try {
+        const res = await fetch(`/api/sprint-status?project=${encodeURIComponent(repo)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const sprint = (data.running_sprints || []).find((s) => s.sprint_label === label);
+          if (sprint && sprint.issues && sprint.issues.length > 0) {
+            _ksSetStep("dispatch", "pass", "");
+            return true;
+          }
+          if (!sprint && !await _ksIsRunning(label)) {
+            _ksShowError("dispatch", "Sprint terminated before agents were dispatched");
+            _ksFailedStep = 2;
+            return false;
+          }
+        }
+      } catch (_) {
+      }
+    }
+    _ksSetStep("dispatch", "pass", "");
+    return true;
+  }
+  async function _ksFinish(label) {
+    _ksHide();
+    _smgmtShowToast(`Sprint ${sprintLabelDisplay(label)} dispatched`);
+    if (typeof _smgmtShowSubView === "function")
+      _smgmtShowSubView("running");
+    await loadSprintMgmt(true, label);
+    if (typeof _smgmtLivePollRestart === "function")
+      _smgmtLivePollRestart();
+    for (let i = 0; i < 8; i++) {
+      if (_smgmtRunningLabels && _smgmtRunningLabels.has(label))
+        break;
+      await new Promise((r) => setTimeout(r, 600));
+      await loadSprintMgmt(true, label);
+    }
+  }
+  async function smgmtKickoffRun(label, repo) {
+    _ksShow(label, repo);
+    if (!await _ksStep1Post())
+      return;
+    if (!await _ksStep2Branch())
+      return;
+    if (!await _ksStep3Dispatch())
+      return;
+    await _ksFinish(label);
+  }
+  async function smgmtKickoffRetry() {
+    if (!_ksLabel || !_ksRepo)
+      return;
+    const failedStep = _ksFailedStep;
+    const label = _ksLabel;
+    const errEl = document.getElementById("smgmt-kickoff-error");
+    if (errEl)
+      errEl.hidden = true;
+    _ksFailedStep = -1;
+    if (failedStep <= 0) {
+      _ksSetStep("lock", "pending", "");
+      _ksSetStep("branch", "pending", "");
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep1Post())
+        return;
+      if (!await _ksStep2Branch())
+        return;
+      if (!await _ksStep3Dispatch())
+        return;
+    } else if (failedStep === 1) {
+      _ksSetStep("branch", "pending", "");
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep2Branch())
+        return;
+      if (!await _ksStep3Dispatch())
+        return;
+    } else {
+      _ksSetStep("dispatch", "pending", "");
+      if (!await _ksStep3Dispatch())
+        return;
+    }
+    await _ksFinish(label);
   }
 
   // apps/dashboard/static/src/sprint-board/drag-drop.js
@@ -1144,6 +2147,10 @@
           <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
                   onclick="_smgmtDeleteSelected()">
             <i class="ti ti-trash"></i> Delete
+          </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
           </button>
           <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
             <i class="ti ti-x"></i> Deselect all
@@ -1585,7 +2592,6 @@ ${data.errors.join("\n")}`);
     const modal = document.getElementById("gc-modal");
     const issueNum = parseInt(modal.dataset.issueNum, 10);
     const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-    const fromSprint = modal.dataset.fromSprint;
     const repo = modal.dataset.repo;
     const sprintLabel = `sprint-${sprintNum}`;
     const confirmBtn = document.getElementById("gc-confirm-btn");
@@ -1621,7 +2627,7 @@ ${data.errors.join("\n")}`);
       confirmBtn.textContent = `Create ${sprintLabel} & move`;
     }
   }
-  function _smgmtTicketDragEnd(event) {
+  function _smgmtTicketDragEnd(_event) {
     if (_smgmtDragTicket) {
       if (_smgmtDragTicket.multi) {
         _smgmtDragTicket.multi.forEach((n) => {
@@ -2102,7 +3108,9 @@ ${data.errors.join("\n")}`);
         return true;
       if (_rerunInto[label])
         return false;
-      const hasChild = Object.values(_sprintParents).some((parent) => parent === label);
+      const hasChild = Object.values(_sprintParents).some(
+        (parent) => parent === label
+      );
       return !hasChild;
     });
     _smgmtFinishedLabels = new Set(data.finished_sprints || []);
@@ -2136,7 +3144,15 @@ ${data.errors.join("\n")}`);
       const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
       const outcome = _smgmtRunningLabels.has(label) || inLinger ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
-      const cardHtml = _smgmtCardHtml(label, null, tickets, outcome, label === _smgmtNextUpLabel, parent, _smgmtFinishedLabels.has(label));
+      const cardHtml = _smgmtCardHtml(
+        label,
+        null,
+        tickets,
+        outcome,
+        label === _smgmtNextUpLabel,
+        parent,
+        _smgmtFinishedLabels.has(label)
+      );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     }).join("");
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
@@ -2218,7 +3234,9 @@ ${data.errors.join("\n")}`);
         el.style.display = "";
         return;
       }
-      const allDeactivated = ticketLabels.every((n) => _smgmtDeactivatedLabels.has(n));
+      const allDeactivated = ticketLabels.every(
+        (n) => _smgmtDeactivatedLabels.has(n)
+      );
       el.style.display = allDeactivated ? "none" : "";
     });
   }
@@ -2259,9 +3277,13 @@ ${data.errors.join("\n")}`);
     delete _smgmtOutcomeCache[parentLabel];
     delete _smgmtOutcomeCache[subLabel];
     if (_smgmtBySprint) {
-      const moved = (_smgmtBySprint[parentLabel] || []).filter((t) => nums.has(t.number));
+      const moved = (_smgmtBySprint[parentLabel] || []).filter(
+        (t) => nums.has(t.number)
+      );
       _smgmtBySprint[subLabel] = [..._smgmtBySprint[subLabel] || [], ...moved];
-      _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter((t) => !nums.has(t.number));
+      _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter(
+        (t) => !nums.has(t.number)
+      );
     }
   }
   async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
@@ -2277,28 +3299,34 @@ ${data.errors.join("\n")}`);
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
       const tickets = bySprint[label] || [];
-      const hasRework = tickets.some((t) => (t.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework"));
+      const hasRework = tickets.some(
+        (t) => (t.labels || []).some(
+          (l) => l.name === "need-rework" || l.name === "needs-rework"
+        )
+      );
       const hasCompleted = _smgmtHasCompletedTickets(tickets);
       if (tickets.length > 0 && !hasRework && !hasCompleted)
         continue;
       toFetch.push(label);
     }
-    await Promise.all(toFetch.map(async (label) => {
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
-        );
-        if (resp.ok) {
-          const outcome = await resp.json();
-          _smgmtOutcomeCache[label] = outcome;
-          _smgmtInjectOutcomeBand(label, outcome);
-        } else {
+    await Promise.all(
+      toFetch.map(async (label) => {
+        try {
+          const resp = await fetch(
+            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
+          );
+          if (resp.ok) {
+            const outcome = await resp.json();
+            _smgmtOutcomeCache[label] = outcome;
+            _smgmtInjectOutcomeBand(label, outcome);
+          } else {
+            _smgmtOutcomeCache[label] = null;
+          }
+        } catch (_) {
           _smgmtOutcomeCache[label] = null;
         }
-      } catch (_) {
-        _smgmtOutcomeCache[label] = null;
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
@@ -2349,7 +3377,9 @@ ${data.errors.join("\n")}`);
       if (_smgmtFinishedLabels.has(label))
         continue;
       const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog"
+      );
       if (pending.length < 2)
         continue;
       for (const t of pending)
@@ -2366,8 +3396,16 @@ ${data.errors.join("\n")}`);
             _smgmtConflictsByIssue[c.ticket1_id] = [];
           if (!_smgmtConflictsByIssue[c.ticket2_id])
             _smgmtConflictsByIssue[c.ticket2_id] = [];
-          _smgmtConflictsByIssue[c.ticket1_id].push({ partnerId: c.ticket2_id, partnerTitle: c.ticket2_title, sharedFiles: c.shared_files });
-          _smgmtConflictsByIssue[c.ticket2_id].push({ partnerId: c.ticket1_id, partnerTitle: c.ticket1_title, sharedFiles: c.shared_files });
+          _smgmtConflictsByIssue[c.ticket1_id].push({
+            partnerId: c.ticket2_id,
+            partnerTitle: c.ticket2_title,
+            sharedFiles: c.shared_files
+          });
+          _smgmtConflictsByIssue[c.ticket2_id].push({
+            partnerId: c.ticket1_id,
+            partnerTitle: c.ticket1_title,
+            sharedFiles: c.shared_files
+          });
         }
         for (const t of pending)
           _smgmtUpdateConflictBadge(t.number);
@@ -2385,7 +3423,9 @@ ${data.errors.join("\n")}`);
       if (_smgmtFinishedLabels.has(label))
         continue;
       const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog"
+      );
       if (pending.length < 2)
         continue;
       for (const t of pending)
@@ -2401,7 +3441,11 @@ ${data.errors.join("\n")}`);
           const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
           for (const t of pending) {
             if (cycleSet.has(String(t.number))) {
-              _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+              _smgmtDepOrderByIssue[t.number] = {
+                upstream: [],
+                downstream: [],
+                inCycle: true
+              };
             }
           }
         } else {
@@ -2541,28 +3585,36 @@ ${data.errors.join("\n")}`);
     if (!repo || !_smgmtData)
       return;
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
-    await Promise.allSettled(order.map(async (label) => {
-      if (_smgmtIsFreshRerunSprint(label))
-        return;
-      try {
-        const [cardRes, branchRes] = await Promise.all([
-          fetch(`/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`),
-          fetch(`/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`).catch(() => null)
-        ]);
-        if (!cardRes.ok) {
-          console.warn(`finish-card: unexpected ${cardRes.status} for ${label}`);
+    await Promise.allSettled(
+      order.map(async (label) => {
+        if (_smgmtIsFreshRerunSprint(label))
           return;
+        try {
+          const [cardRes, branchRes] = await Promise.all([
+            fetch(
+              `/api/sprints/${encodeURIComponent(label)}/finish-card?project=${encodeURIComponent(repo)}`
+            ),
+            fetch(
+              `/api/sprints/${encodeURIComponent(label)}/branch-status?project=${encodeURIComponent(repo)}`
+            ).catch(() => null)
+          ]);
+          if (!cardRes.ok) {
+            console.warn(
+              `finish-card: unexpected ${cardRes.status} for ${label}`
+            );
+            return;
+          }
+          const cardData = await cardRes.json();
+          if (cardData.state === "no_data")
+            return;
+          const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
+          _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+          _smgmtRenderFinishCard(label, cardData, branchData, repo);
+        } catch (e) {
+          console.warn("finish-card load error for", label, e);
         }
-        const cardData = await cardRes.json();
-        if (cardData.state === "no_data")
-          return;
-        const branchData = branchRes && branchRes.ok ? await branchRes.json() : { exists: false };
-        _smgmtFinishCards[label] = { card: cardData, branch: branchData };
-        _smgmtRenderFinishCard(label, cardData, branchData, repo);
-      } catch (e) {
-        console.warn("finish-card load error for", label, e);
-      }
-    }));
+      })
+    );
   }
   function _smgmtRenderFinishCard(label, cardData, branchData, repo) {
     if (branchData && branchData.pr_url && branchData.pr_number) {
@@ -2685,9 +3737,7 @@ ${data.errors.join("\n")}`);
     let outcomeCardClass = "";
     let outcomeBadgeHtml = "";
     let headerMetaHtml = "";
-    let ticketCount = tickets.length;
     let ticketsContainerHtml = "";
-    let isOutcomeView = false;
     let rollupItems = tickets;
     if (outcome && (outcome.sprint_status || outcome.state)) {
       const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
@@ -2710,13 +3760,17 @@ ${data.errors.join("\n")}`);
               _elapsedByNum[_oi.number] = _oi.elapsed_secs;
           }
         }
-        ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        ticketsContainerHtml = tickets.length > 0 ? tickets.map(
+          (t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)
+        ).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const issueList = outcome.issues || [];
-        ticketCount = issueList.length;
-        ticketsContainerHtml = _smgmtOutcomeTicketListHtml(issueList, label, _smgmtRepo());
-        isOutcomeView = true;
+        ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
+          issueList,
+          label,
+          _smgmtRepo()
+        );
         rollupItems = issueList.map((i) => ({ number: i.number }));
       }
     } else if (isRunningView) {
@@ -2738,12 +3792,6 @@ ${data.errors.join("\n")}`);
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
     const logHtml = "";
     const cancelBannerHtml = "";
-    const hasUnsizedTickets = tickets.length > 0 && tickets.some((t) => !_smgmtTicketHasEstimate(t));
-    const bulkEstBtnHtml = `<button class="smgmt-bulk-est-btn${hasUnsizedTickets ? "" : " hidden"}"
-                    onclick="event.stopPropagation();_smgmtBulkEstimate('${escHtml(label)}',this)"
-                    title="Estimate all unsized tickets in this sprint">
-                    <i class="ti ti-calculator"></i> Estimate all unsized</button>
-                   <span class="smgmt-bulk-est-progress"></span>`;
     const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
@@ -2849,7 +3897,9 @@ ${data.errors.join("\n")}`);
       const agentTagHtml = liveIss && liveIss.agent ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(liveIss.agent)}">${escHtml(liveIss.agent.toUpperCase())}</span>` : "";
       const elapsedStr = liveIss ? _fmtTicketElapsed(liveIss.elapsed_secs) : null;
       const elapsedHtml = elapsedStr ? `<span class="smgmt-ticket-elapsed">${elapsedStr}</span>` : "";
-      const runTicketLabels = escHtml((t.labels || []).map((l) => l.name).join(","));
+      const runTicketLabels = escHtml(
+        (t.labels || []).map((l) => l.name).join(",")
+      );
       return sepHtml + `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
@@ -2867,9 +3917,7 @@ ${data.errors.join("\n")}`);
       return `level ${cur} of ${levels.length}`;
     }
     const issues = live && live.issues || [];
-    const levelNums = [...new Set(
-      issues.map((i) => i.dispatch_level || 0 || 1)
-    )].filter((l) => l > 0).sort((a, b) => a - b);
+    const levelNums = [...new Set(issues.map((i) => i.dispatch_level || 0 || 1))].filter((l) => l > 0).sort((a, b) => a - b);
     if (levelNums.length <= 1)
       return null;
     let current = levelNums[0];
@@ -2945,9 +3993,7 @@ ${data.errors.join("\n")}`);
     const estRemMins = live ? live.est_remaining_minutes : null;
     const timeSpentSec = live ? live.time_spent_sec || 0 : 0;
     const currentTicket = live ? live.current_ticket : null;
-    const activeAgent = live ? live.active_agent : null;
     const recentLogLines = live ? live.recent_log_lines || [] : [];
-    const pct = totalCount > 0 ? Math.round(completeCount / totalCount * 100) : 0;
     const liveIssues = live && live.issues && live.issues.length > 0 ? live.issues : [];
     const liveByNum = {};
     liveIssues.forEach((i) => {
@@ -3007,14 +4053,22 @@ ${data.errors.join("\n")}`);
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
         ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
       </div>
-      <div class="smgmt-live-log" id="smgmt-live-log-${escHtml(label)}">
-        <div class="smgmt-live-log-bar">
-          <span class="smgmt-live-indicator"></span>
-          <span>live</span>
-          <span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>
-        </div>
-        <div class="smgmt-live-log-stream" id="smgmt-live-log-stream-${escHtml(label)}">${_smgmtLiveLogLinesHtml(recentLogLines)}</div>
-      </div>
+      ${renderProgressActivity2(
+      {
+        status: "running",
+        mode: totalCount > 0 ? "bar" : "indeterminate",
+        current: currentTicket ? `#${currentTicket.number}` : "",
+        done: completeCount,
+        total: totalCount,
+        est_remaining_minutes: estRemMins != null ? estRemMins : void 0,
+        log_tail: recentLogLines
+      },
+      {
+        id: `running-${escHtml(label)}`,
+        colorize: typeof colorizeLogLine === "function" ? colorizeLogLine : null,
+        logHeaderAgentHtml: `<span class="smgmt-live-log-agent" id="smgmt-live-agent-${escHtml(label)}">${_smgmtLiveAgentBadgesHtml(live)}</span>`
+      }
+    )}
     </div>`;
   }
   function _smgmtRollupText(items) {
@@ -3082,22 +4136,24 @@ ${data.errors.join("\n")}`);
       el.textContent = _smgmtRollupText(items);
   }
   function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
-    const hasRework = (ticket.labels || []).some((l) => l.name === "need-rework" || l.name === "needs-rework");
+    const hasRework = (ticket.labels || []).some(
+      (l) => l.name === "need-rework" || l.name === "needs-rework"
+    );
     const statusClass = hasRework ? "smgmt-status-need-rework" : {
-      "backlog": "smgmt-status-backlog",
+      backlog: "smgmt-status-backlog",
       "in-progress": "smgmt-status-in-progress",
-      "sit": "smgmt-status-sit",
-      "uat": "smgmt-status-uat",
-      "done": "smgmt-status-done"
+      sit: "smgmt-status-sit",
+      uat: "smgmt-status-uat",
+      done: "smgmt-status-done"
     }[ticket.status] || "smgmt-status-backlog";
     const statusLabel = hasRework ? "needs rework" : ticket.status || "backlog";
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const _outcomeMap = {
-      "done": ["ti-circle-check", "outcome-success"],
-      "uat": ["ti-circle-check", "outcome-success"],
+      done: ["ti-circle-check", "outcome-success"],
+      uat: ["ti-circle-check", "outcome-success"],
       "needs-rework": ["ti-circle-x", "outcome-rework"],
       "in-progress": ["ti-circle-dot", "outcome-active"],
-      "sit": ["ti-circle-dot", "outcome-active"]
+      sit: ["ti-circle-dot", "outcome-active"]
     };
     const _oc = hasRework ? ["ti-circle-x", "outcome-rework"] : _outcomeMap[ticket.status] || ["ti-circle", "outcome-backlog"];
     const outcomeIconHtml = `<i class="ti ${_oc[0]} smgmt-outcome-icon ${_oc[1]}" title="${escHtml(statusLabel)}"></i>`;
@@ -3105,7 +4161,10 @@ ${data.errors.join("\n")}`);
     const hasEstimate = sizeValue !== "";
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const estimateBadgeHtml = _smgmtEstimateBadgeHtml(ticket.number);
-    const _cachedEst = Object.prototype.hasOwnProperty.call(_estDataCache, ticket.number) ? _estDataCache[ticket.number] : void 0;
+    const _cachedEst = Object.prototype.hasOwnProperty.call(
+      _estDataCache,
+      ticket.number
+    ) ? _estDataCache[ticket.number] : void 0;
     const sizePillHtml = sizeValue && !(_cachedEst && _cachedEst.size) ? `<span class="smgmt-ticket-size-pill" title="\u2248${_sizeMinutes(sizeValue)} min">${escHtml(sizeValue)}</span>` : "";
     const staleBadgeHtml = ticket.estimate_stale && hasEstimate ? `<button class="smgmt-stale-badge" data-stale="true" tabindex="0"
          title="Estimate may be outdated \u2014 issue body changed since last estimate"
@@ -3200,7 +4259,7 @@ ${data.errors.join("\n")}`);
     _blSyncFilterPills();
     _blUpdateActions();
   }
-  function _smgmtBacklogTicketHtml(ticket, sprintNums) {
+  function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -3282,6 +4341,12 @@ ${data.errors.join("\n")}`);
   globalThis._pfShowError = _pfShowError;
   globalThis._pfRetry = _pfRetry;
   globalThis._pfConfirm = _pfConfirm;
+  globalThis._pfStepperInit = _pfStepperInit;
+  globalThis._pfStepState = _pfStepState;
+  globalThis._pfStepperAnimate = _pfStepperAnimate;
+  globalThis._pfStepperSummary = _pfStepperSummary;
+  globalThis.smgmtKickoffRun = smgmtKickoffRun;
+  globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
   globalThis.computeDropPlan = computeDropPlan;
   globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI2;
   globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
@@ -3351,12 +4416,18 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
+  globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+  globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
-  root.colorizeLogLine = colorizeLogLine;
+  root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;
   root.extractRaw = extractRaw;
   root.AGENT_NAMES = AGENT_NAMES;
+  root.renderProgressActivity = renderProgressActivity2;
+  root.updateProgressActivityLog = updateProgressActivityLog;
+  root.paToggleLog = paToggleLog;
+  injectProgressActivityCss();
 })();
 //# sourceMappingURL=bundle.js.map

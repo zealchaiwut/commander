@@ -1,8 +1,8 @@
-"""Live-snapshot metric helpers (issue #803), extracted from server.py.
+"""Live-snapshot metric helpers (issue #803, #927), extracted from server.py.
 
-Two pure helpers that the ``/api/sprints/{label}/live`` endpoint composes. They
-live here, not in the ``server.py`` monolith, so the endpoint can gain the
-Running-view metric strip without growing the guarded file (COMMANDER_GATE_MONOLITH).
+Pure helpers that the ``/api/sprints/{label}/live`` endpoint composes. They
+live here, not in the ``server.py`` monolith, so the endpoint can grow its
+response without growing the guarded file (COMMANDER_GATE_MONOLITH).
 
 * ``compute_levels(issues)`` — per dispatch-level progress for the pipeline
   board, extracted verbatim from the live endpoint.
@@ -181,3 +181,26 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
         metrics["token_cost_usd"] = round(token_total * rate, 4)
 
     return metrics
+
+
+def pipeline_stage_from_status(raw_agent_status: str, derived_status: str, tac: int) -> str:
+    """Two-queue lane assignment for the running pane (issue #927)."""
+    if raw_agent_status in ("coder_dispatched", "coder_running"):
+        return "coding"
+    if raw_agent_status == "coder_done":
+        return "awaiting_tester"
+    if raw_agent_status in ("tester_dispatched", "tester_running"):
+        return "testing"
+    if derived_status in ("done", "skipped") or raw_agent_status in ("tester_done", "completed", "failed"):
+        return "done"
+    if tac > 0:
+        return "rework"
+    return "pending"
+
+
+def lane_capacity(status_data: dict) -> dict:
+    """Max concurrent slots per lane for the two-queue view (issue #927)."""
+    return {
+        "max_coder_slots":  int(status_data.get("max_coder_slots", 1)),
+        "max_tester_slots": int(status_data.get("max_tester_slots", 1)),
+    }

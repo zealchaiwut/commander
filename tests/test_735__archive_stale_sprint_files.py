@@ -312,8 +312,8 @@ def test_startup_emits_single_archive_summary_line(tmp_path, monkeypatch, capsys
 
     out = capsys.readouterr().out
     summary_lines = [ln for ln in out.splitlines()
-                     if "archived sprint file" in ln]
-    assert len(summary_lines) == 1, f"expected one summary line, got: {summary_lines}"
+                     if "in archive/" in ln]
+    assert len(summary_lines) == 1, f"expected one archive summary line, got: {summary_lines}"
     assert "3" in summary_lines[0]
     # No per-file line for any archived file.
     assert "sprint-0-plan.json" not in out

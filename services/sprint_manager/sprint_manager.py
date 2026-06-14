@@ -258,7 +258,7 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
-from services.sprint_manager import agent_browser_runner  # noqa: E402  # issue #710: live-browser UAT
+from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
 
 try:
     from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
@@ -432,6 +432,11 @@ class SprintConfig:
     repo_name:             Optional[str]  = None
     worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
     worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
+    # Dedicated clone for non-coding sprint agents (documenter, reviewer) so they
+    # never check out feature branches in the coder/tester worktrees (which are
+    # mid-sprint) or — worse — the serving uat clone. Optional; falls back to the
+    # tester/coder worktree when unset.
+    worktree_agents:       Optional[Path] = None
     tester_app_subdir:     str            = "apps/dashboard"
     scripts_dir:           Path           = field(default_factory=lambda: SCRIPTS_DIR)
     logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
@@ -533,6 +538,10 @@ def load_config(path: Path) -> "SprintConfig":
 
     worktree_coder  = _resolve_path(coder_raw, base_dir)
     worktree_tester = _resolve_path(tester_raw, base_dir)
+    # Optional dedicated agents clone (documenter/reviewer). Falls back to None
+    # (→ tester/coder worktree) when not configured.
+    agents_raw = (wt.get("agents") or "").strip()
+    worktree_agents = _resolve_path(agents_raw, base_dir) if agents_raw else None
     tester_app_subdir = (wt.get("tester_app_subdir") or "")
 
     # ── validate worktree paths ────────────────────────────────────────────────
@@ -663,6 +672,7 @@ def load_config(path: Path) -> "SprintConfig":
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
         worktree_tester       = worktree_tester,
+        worktree_agents       = worktree_agents,
         tester_app_subdir     = tester_app_subdir,
         scripts_dir           = scripts_dir,
         logs_dir              = logs_dir,
@@ -1659,16 +1669,30 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
 
 _JS_TS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
+
+_JS_TS_LINT_EXCLUDE = ("/dist/", ".map")
+
 
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
-    """Return JS/TS files added/modified in HEAD relative to base_branch."""
+    """Return JS/TS files added/modified in HEAD relative to base_branch.
+
+    Excludes generated build artifacts (dist/ dirs and .map files) that
+    should never be linted — ESLint treats explicitly-passed ignored files
+    as warnings under --max-warnings=0.
+    """
     rc, out, _ = _run_timed(
         "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
         return []
-    return [f for f in out.splitlines() if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)]
+    return [
+        f for f in out.splitlines()
+        if any(f.endswith(ext) for ext in _JS_TS_EXTENSIONS)
+        and not any(pat in f for pat in _JS_TS_LINT_EXCLUDE)
+    ]
 
 
 # Frontend file extensions the impeccable design detector analyses.
@@ -2313,7 +2337,6 @@ def _revert_to_sit(issue_num: int, gate_name: str, output: str,
 
     if _FAILURE_PARSING_AVAILABLE:
         try:
-            effective_root = repo_root or REPO_ROOT  # noqa: F841
             failures = parse_failures(gate_name, output)
             comment += build_failure_block(gate_name, failures)
             files_to_inspect = sorted({
@@ -2491,8 +2514,13 @@ def _gate_lint(
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
                 sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                # Paths from git diff are relative to the repo root, not worktester_dashboard.
+                _rc_root, _root_out, _ = _run_timed(
+                    "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+                )
+                ruff_cwd = Path(_root_out.strip()) if _rc_root == 0 and _root_out.strip() else worktester_dashboard
                 rc, stdout, stderr = _run_timed(ruff_bin, "check", *py_files,
-                                                cwd=worktester_dashboard)
+                                                cwd=ruff_cwd)
                 combined += stdout + stderr
                 any_ran = True
                 if rc != 0:
@@ -2702,6 +2730,13 @@ def _run_frontend_lint(
     combined = ""
     passed = True
 
+    # Paths from _changed_js_ts_files are relative to the git root.
+    # Resolve the git root so linters run from there, not worktester_dashboard.
+    rc_root, git_root_out, _ = _run_timed(
+        "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
+    )
+    lint_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
+
     # eslint or biome (prefer biome if configured)
     ok_biome, biome_path, _ = _try("which", "biome")
     ok_eslint, eslint_path, _ = _try("which", "eslint")
@@ -2716,19 +2751,25 @@ def _run_frontend_lint(
         linter_bin = eslint_path
         linter_args = ["--max-warnings=0"]
     elif ok_npx:
-        # try biome via npx — skip if not found in project
-        rc_biome, _, _ = _run_timed(
-            npx_path, "--no", "biome", "--version", cwd=worktester_dashboard
-        )
-        if rc_biome == 0:
-            linter_bin = npx_path
-            linter_args = ["--no", "biome", "check", "--apply=false"]
+        for _eslint_candidate in [
+            lint_cwd / "node_modules" / ".bin" / "eslint",
+            REPO_ROOT / "node_modules" / ".bin" / "eslint",
+        ]:
+            if _eslint_candidate.exists():
+                linter_bin = str(_eslint_candidate.resolve())
+                linter_args = ["--max-warnings=0"]
+                break
+        if not linter_bin:
+            _local_biome = lint_cwd / "node_modules" / ".bin" / "biome"
+            if _local_biome.exists():
+                linter_bin = npx_path
+                linter_args = ["--no", "biome", "check", "--apply=false"]
 
     if linter_bin:
         targets = ["."] if gate_scope == "full" else js_ts_files
         sys.stdout.write(str(f"  [gate:lint-fe] running frontend linter on {len(targets)} target(s) ...") + "\n")
         rc, stdout, stderr = _run_timed(linter_bin, *linter_args, *targets,
-                                        cwd=worktester_dashboard)
+                                        cwd=lint_cwd)
         combined += stdout + stderr
         if rc != 0:
             structured_log.error("gate_failed", f"[gate:lint-fe] FAIL (exit {rc})",
@@ -2746,7 +2787,7 @@ def _run_frontend_lint(
         ok_prettier, prettier_bin, _ = _try("which", "prettier")
         if not ok_prettier and ok_npx:
             rc_pcheck, _, _ = _run_timed(
-                npx_path, "--no", "prettier", "--version", cwd=worktester_dashboard
+                npx_path, "--no", "prettier", "--version", cwd=lint_cwd
             )
             if rc_pcheck == 0:
                 prettier_bin = npx_path
@@ -2762,7 +2803,7 @@ def _run_frontend_lint(
             cmd_args = prettier_prefix + ["--check"] + targets
             sys.stdout.write(str(f"  [gate:lint-fe] running prettier --check on {len(targets)} target(s) ...") + "\n")
             rc, stdout, stderr = _run_timed(prettier_bin, *cmd_args,
-                                            cwd=worktester_dashboard)
+                                            cwd=lint_cwd)
             combined += stdout + stderr
             if rc != 0:
                 structured_log.error("gate_failed", f"[gate:lint-fe] prettier FAIL (exit {rc})",
@@ -3198,7 +3239,9 @@ def _call_finish_feature(
     """Call finish_feature.py as a subprocess from the worktester root."""
     if cfg is not None:
         finish_script = cfg.finish_feature_script
-        wt_root = worktester_root or cfg.worktree_tester
+        # Prefer the dedicated agents clone for the documentor (falls back to the
+        # tester worktree when not configured).
+        wt_root = worktester_root or cfg.worktree_agents or cfg.worktree_tester
     else:
         finish_script = FINISH_FEATURE_SCRIPT
         wt_root = worktester_root or WORKTESTER_ROOT
@@ -5316,7 +5359,20 @@ def generate_sprint_summary(
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
     start_ts = _to_bangkok(state.start_timestamp) if state.start_timestamp else _bangkok_now()
-    end_ts   = _bangkok_now()
+    # End = start + wall-clock, in Bangkok time. Previously this used
+    # _bangkok_now() (the moment the summary was generated), so a regenerated
+    # summary drifted past the real sprint end. Hotfix S1.
+    end_ts = _bangkok_now()
+    if state.start_timestamp:
+        try:
+            _start_dt = datetime.strptime(
+                state.start_timestamp, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            end_ts = (_start_dt + timedelta(seconds=int(elapsed_secs))).astimezone(
+                _BANGKOK_TZ
+            ).strftime("%Y-%m-%dT%H:%M:%S+07:00")
+        except (ValueError, TypeError):
+            end_ts = _bangkok_now()
 
     h, rem   = divmod(int(elapsed_secs), 3600)
     m_int, s = divmod(rem, 60)
@@ -5325,6 +5381,14 @@ def generate_sprint_summary(
     completed = [i for i in state.issues if i.status == "done"]
     skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
+    # A "failed" ticket is a skipped one that actually failed (has a failure
+    # category or agent_status=failed) — distinct from a legitimately-skipped
+    # ticket (e.g. already merged in a prior run). Previously the summary printed
+    # len(skipped) for BOTH Skipped and Failed. Hotfix S2.
+    failed = [
+        i for i in skipped
+        if (getattr(i, "agent_status", None) == "failed") or getattr(i, "category", None)
+    ]
 
     # Per-ticket metrics come from in-memory sprint state. The Neon-backed rollup
     # was removed in issue #758 (Neon is export-only now).
@@ -5339,13 +5403,35 @@ def generate_sprint_summary(
     # which is subscription-funded — no raw API charges.
     cost_estimate_usd = 0.0  # noqa: F841
 
+    # Avg ticket time = mean of per-ticket wall durations (coder + tester), NOT
+    # wall_clock / completed — the old formula collapsed to the whole run wall
+    # time when only one ticket completed (sprint-73 showed "26m" avg). Hotfix S3.
+    def _summary_ts_secs(a, b):
+        if not a or not b:
+            return None
+        try:
+            _s = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+            _e = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+            return max(0.0, (_e - _s).total_seconds())
+        except (ValueError, TypeError):
+            return None
+    _ticket_durs: list[float] = []
+    for _i in state.issues:
+        _c = _summary_ts_secs(getattr(_i, "coder_started_at", None),
+                              getattr(_i, "coder_finished_at", None)) or 0.0
+        _t = _summary_ts_secs(getattr(_i, "tester_started_at", None),
+                              getattr(_i, "tester_finished_at", None)) or 0.0
+        if _c or _t:
+            _ticket_durs.append(_c + _t)
     if _db_rollup is not None and _db_rollup["avg_elapsed_seconds"] is not None:
         avg_ticket_secs = _db_rollup["avg_elapsed_seconds"]
+    elif _ticket_durs:
+        avg_ticket_secs = sum(_ticket_durs) / len(_ticket_durs)
     else:
-        avg_ticket_secs = (elapsed_secs / len(completed)) if completed else 0
+        avg_ticket_secs = 0
     avg_h, avg_r     = divmod(int(avg_ticket_secs), 3600)
     avg_m, avg_s     = divmod(avg_r, 60)
-    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if completed else "--"
+    avg_ticket_str   = f"{avg_h}h {avg_m}m {avg_s}s" if _ticket_durs else "--"
 
     tester_rejections = sum(
         1 for i in state.issues
@@ -5366,21 +5452,27 @@ def generate_sprint_summary(
     lines: list[str] = []
 
     # -- Header section --
-    attempted = len(completed) + len(skipped)
+    # Roster = the full set of tickets this sprint owns this run. With the
+    # already-merged guard (E2), tickets that passed in a prior run stay in
+    # state.issues marked done, so this counts the whole sprint rather than a
+    # trimmed re-run subset. Hotfix S4.
+    attempted = len(state.issues)
+    # Outcome counts lead the table — that is the data the operator scans first
+    # (table-reorder request). Failed counts real failures, not len(skipped). S2.
     lines += [
         f"## Sprint {n} -- {end_reason}",
         "",
         "| Field | Value |",
         "|---|---|",
         f"| Sprint number | {n} |",
+        f"| Completed | {len(completed)} |",
+        f"| Failed | {len(failed)} |",
+        f"| Skipped | {len(skipped) - len(failed)} |",
+        f"| Attempted | {attempted} |",
         f"| Start | {start_ts} |",
         f"| End | {end_ts} |",
         f"| Duration | {duration_str} |",
         f"| End reason | {end_reason} |",
-        f"| Attempted | {attempted} |",
-        f"| Completed | {len(completed)} |",
-        f"| Skipped | {len(skipped)} |",
-        f"| Failed | {len(skipped)} |",
         "",
     ]
 
@@ -6461,7 +6553,9 @@ def _dispatch_documenter(
             "check documenter_prompt_template in sprint.yaml or DEFAULT_DOCUMENTER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_tester if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so the documenter never commits in the
+    # tester worktree (mid-sprint) or the serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_tester) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-documenter.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6682,7 +6776,10 @@ def _dispatch_reviewer(
             "check reviewer_prompt_template in sprint.yaml or DEFAULT_REVIEWER_PROMPT"
         ) from e
 
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"sprint-{state.sprint_label}-reviewer.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6847,7 +6944,10 @@ def _dispatch_ba_for_followup(
     Returns True on success, False on failure.  Failures are printed but not raised
     so callers can continue processing other tickets.
     """
-    cwd_path = cfg.worktree_coder if cfg else Path.cwd()
+    # Prefer the dedicated agents clone so post-sprint agents (reviewer / BA /
+    # estimator follow-ups) never run in the coder worktree (mid-sprint) or the
+    # serving uat clone.
+    cwd_path = (cfg.worktree_agents or cfg.worktree_coder) if cfg else Path.cwd()
     logs_dir = cfg.logs_dir if cfg else Path.cwd()
     log_path = logs_dir / f"ba-rewrite-{issue_num}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -7035,7 +7135,7 @@ def _classify_risk_tier(
     5. Otherwise → LOW
     """
     label_set = {lbl.lower() for lbl in labels}
-    if label_set & {l.lower() for l in _HIGH_RISK_LABELS}:  # noqa: E741
+    if label_set & {lbl_r.lower() for lbl_r in _HIGH_RISK_LABELS}:
         return "HIGH"
 
     if paths_touched:

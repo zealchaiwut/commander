@@ -7080,6 +7080,26 @@
 
     /* ── Roadmap tab (issue #878) ──────────────────────────────────────────── */
     #pane-roadmap { padding: 16px 0; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Advisor tab (issue #881) ──────────────────────────────────────────── */
+    #pane-advisor { padding: 16px 0; }
+    .adv-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .adv-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .adv-run-btn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .adv-run-btn:disabled { opacity: .5; cursor: default; }
+    .adv-empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    .adv-card-list { display: flex; flex-direction: column; gap: 10px; }
+    .adv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .adv-card-pitch { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .adv-card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .adv-scope { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+    .adv-scope-S { background: #d1fae5; color: #065f46; }
+    .adv-scope-M { background: #dbeafe; color: #1e40af; }
+    .adv-scope-L { background: #fde68a; color: #92400e; }
+    .adv-milestone { font-size: 12px; color: var(--text-sub); }
+    .adv-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
+    .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+
     .rm-toolbar { display: flex; align-items: center; gap: 10px; }
     .rm-toolbar-gap { flex: 1; }
     .rm-list { display: flex; flex-direction: column; gap: 10px; }
@@ -7287,6 +7307,11 @@
         <button class="stab" role="tab" id="stab-roadmap"
                 aria-selected="false" onclick="switchTab('roadmap')">
           <i class="ti ti-map-2"></i>Roadmap
+        </button>
+        <!-- Advisor (issue #881) -->
+        <button class="stab" role="tab" id="stab-advisor"
+                aria-selected="false" onclick="switchTab('advisor')">
+          <i class="ti ti-bulb"></i>Advisor
         </button>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
@@ -8707,6 +8732,19 @@
         <div id="rm-root"></div>
       </div><!-- /pane-roadmap -->
 
+      <!-- ── Advisor tab (issue #881) ── -->
+      <div class="tab-pane" id="pane-advisor" role="tabpanel" aria-labelledby="stab-advisor">
+        <div class="adv-header">
+          <span class="adv-title"><i class="ti ti-bulb" style="margin-right:6px"></i>Next-Build Advisor</span>
+          <button class="adv-run-btn" id="adv-run-btn" onclick="advRun()">
+            <i class="ti ti-player-play"></i>Run advisor
+          </button>
+        </div>
+        <div id="adv-root">
+          <div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>
+        </div>
+      </div><!-- /pane-advisor -->
+
     </div>
   </div>
 
@@ -9231,7 +9269,7 @@ function switchTab(tab, pushHistory) {
   if (subTabsRow) subTabsRow.classList.toggle('hidden', onGlobalSettings);
 
   // Update aria-selected + active class on project sub-tabs (not global settings)
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'advisor', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = !onGlobalSettings && t === tab;
@@ -9248,7 +9286,7 @@ function switchTab(tab, pushHistory) {
   });
 
   // Show/hide panes
-  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'settings', 'global-settings'].forEach(t => {
+  ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'advisor', 'settings', 'global-settings'].forEach(t => {
     const pane = document.getElementById('pane-' + t);
     if (pane) pane.classList.toggle('active', t === tab);
   });
@@ -9343,6 +9381,11 @@ function switchTab(tab, pushHistory) {
   // Init roadmap tab (issue #878)
   if (tab === 'roadmap') {
     roadmapInit();
+  }
+
+  // Init advisor tab (issue #881)
+  if (tab === 'advisor') {
+    advInit();
   }
 
   // Init project settings tab
@@ -26891,6 +26934,72 @@ async function sprintCleanupConfirm() {
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
   }
+}
+
+// ── Advisor tab (issue #881) ──────────────────────────────────────────────────
+var _advLoaded = false;
+
+function advInit() {
+  if (_advLoaded) return;
+  _advLoaded = true;
+  _advFetch();
+}
+
+function _advFetch() {
+  var root = document.getElementById('adv-root');
+  if (!root) return;
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/projects/' + encodeURIComponent(repo) + '/advisor/suggestions')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { _advRender(data); })
+    .catch(function() {
+      if (root) root.innerHTML = '<div class="adv-empty">Failed to load suggestions.</div>';
+    });
+}
+
+function _advRender(suggestions) {
+  var root = document.getElementById('adv-root');
+  if (!root) return;
+  if (!suggestions || suggestions.length === 0) {
+    root.innerHTML = '<div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>';
+    return;
+  }
+  var runAt = suggestions[0] && suggestions[0].run_at ? suggestions[0].run_at.slice(0, 16).replace('T', ' ') + ' UTC' : '';
+  var h = '<div class="adv-card-list">';
+  suggestions.forEach(function(s) {
+    var scopeCls = 'adv-scope adv-scope-' + (s.scope || 'M');
+    h += '<div class="adv-card">';
+    h += '<div class="adv-card-pitch">' + escHtml(s.pitch || '') + '</div>';
+    h += '<div class="adv-card-meta">';
+    h += '<span class="' + scopeCls + '">' + escHtml(s.scope || '?') + '</span>';
+    h += '<span class="adv-milestone"><i class="ti ti-flag-3" style="margin-right:3px"></i>' + escHtml(s.milestone || '') + '</span>';
+    h += '</div>';
+    h += '<div class="adv-rationale">' + escHtml(s.rationale || '') + '</div>';
+    h += '</div>';
+  });
+  h += '</div>';
+  if (runAt) h += '<div class="adv-run-at">Last run: ' + escHtml(runAt) + '</div>';
+  root.innerHTML = h;
+}
+
+function advRun() {
+  var btn = document.getElementById('adv-run-btn');
+  var root = document.getElementById('adv-root');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>Running…'; }
+  if (root) root.innerHTML = '<div class="adv-empty">Running advisor agent…</div>';
+  var repo = _cachedFullRepo[_slug] || _slug;
+  fetch('/api/projects/' + encodeURIComponent(repo) + '/advisor/run', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _advLoaded = false;
+      _advRender(data.suggestions || []);
+    })
+    .catch(function() {
+      if (root) root.innerHTML = '<div class="adv-empty">Advisor run failed. Check the dashboard logs.</div>';
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-player-play"></i>Run advisor'; }
+    });
 }
 
 // ── Roadmap tab (issue #878) ──────────────────────────────────────────────────

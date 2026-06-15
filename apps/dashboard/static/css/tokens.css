@@ -1,0 +1,398 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Commander Design Tokens  (issue #1045)
+   Single source of truth for colors, spacing, type, radii, shadows, z-index.
+
+   Values sampled from project.html, home.html, and analytics.html — no value
+   is invented.  Pages define their own :root overrides in <style> blocks loaded
+   AFTER this file; those overrides win, so existing pages are never restyled.
+   ─────────────────────────────────────────────────────────────────────────────*/
+
+/* ── Light theme defaults ─────────────────────────────────────────────────── */
+:root {
+  /* Color palette — backgrounds, surfaces, borders */
+  --color-bg:           #f9fafb;
+  --color-surface:      #ffffff;
+  --color-surface-2:    #f3f4f6;
+  --color-surface-hover:#f5f6f8;
+  --color-border:       #e5e7eb;
+
+  /* Aliases matching the short-form variables already used across all pages */
+  --bg:           #f9fafb;
+  --surface:      #ffffff;
+  --surface-2:    #f3f4f6;
+  --surface-hover:#f5f6f8;
+  --border:       #e5e7eb;
+
+  /* Text */
+  --color-text:      #111827;
+  --color-text-muted:#6b7280;
+  --color-text-sub:  #9ca3af;
+  --text:      #111827;
+  --text-muted:#6b7280;
+  --text-sub:  #9ca3af;
+
+  /* Accent green */
+  --color-green:    #16a34a;
+  --color-green-bg: #dcfce7;
+  --green:    #16a34a;
+  --green-bg: #dcfce7;
+
+  /* Palette — amber */
+  --color-amber:    #d97706;
+  --color-amber-bg: #fef3c7;
+  --amber:    #d97706;
+  --amber-bg: #fef3c7;
+
+  /* Palette — red */
+  --color-red:    #dc2626;
+  --color-red-bg: #fee2e2;
+  --red:    #dc2626;
+  --red-bg: #fee2e2;
+
+  /* Palette — blue */
+  --color-blue:    #2563eb;
+  --color-blue-bg: #dbeafe;
+  --blue:    #2563eb;
+  --blue-bg: #dbeafe;
+
+  /* Palette — purple */
+  --color-purple:    #7c3aed;
+  --color-purple-bg: #ede9fe;
+  --purple:    #7c3aed;
+  --purple-bg: #ede9fe;
+
+  /* Extended palette (from analytics.html) */
+  --indigo:    #6d28d9;
+  --indigo-bg: #ede9fe;
+  --steel:     #4f7ab8;
+  --steel-bg:  #e0eaf8;
+  --yellow:    #a16207;
+  --yellow-bg: #fefce8;
+  --teal:      #0f766e;
+  --teal-bg:   #ccfbf1;
+  --pink:      #be185d;
+  --pink-bg:   #fce7f3;
+
+  /* Monospace font stack */
+  --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+
+  /* Semantic — success / warn / fail */
+  --color-success:    #dcfce7;
+  --color-success-fg: #16a34a;
+  --color-warn:       #fef3c7;
+  --color-warn-fg:    #d97706;
+  --color-warning:    #fef3c7;
+  --color-warning-fg: #d97706;
+  --color-fail:       #fee2e2;
+  --color-fail-fg:    #dc2626;
+  --color-error:      #fee2e2;
+  --color-error-fg:   #dc2626;
+  --color-info:       #dbeafe;
+  --color-info-fg:    #2563eb;
+
+  /* Role colors: ba=pink, coder=purple, tester=amber, dispatch=blue, system=steel */
+  --role-ba:          #be185d;
+  --role-ba-bg:       #fce7f3;
+  --role-coder:       #7c3aed;
+  --role-coder-bg:    #ede9fe;
+  --role-tester:      #d97706;
+  --role-tester-bg:   #fef3c7;
+  --role-dispatch:    #2563eb;
+  --role-dispatch-bg: #dbeafe;
+  --role-system:      #4f7ab8;
+  --role-system-bg:   #e0eaf8;
+
+  /* 8pt spacing scale */
+  --space-px: 1px;
+  --space-0:  0px;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Type scale — font sizes */
+  --font-size-2xs: 9px;
+  --font-size-xs:  10px;
+  --font-size-sm:  11px;
+  --font-size-md:  12px;
+  --font-size-base:13px;
+  --font-size-lg:  14px;
+  --font-size-xl:  16px;
+  --font-size-2xl: 18px;
+
+  /* Type scale — font weights */
+  --font-weight-normal:   400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
+
+  /* Type scale — line heights */
+  --line-height-tight:  1.2;
+  --line-height-snug:   1.4;
+  --line-height-normal: 1.5;
+  --line-height-relaxed:1.6;
+
+  /* Border radii */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl:12px;
+  --radius-full:999px;
+
+  /* Box shadows (sampled from project.html) */
+  --shadow-card:   0 8px 24px rgba(0,0,0,.12);
+  --shadow-panel:  0 8px 28px rgba(0,0,0,.18);
+
+  /* Z-index layers */
+  --z-base:   0;
+  --z-nav:    30;
+  --z-panel:  60;
+  --z-modal:  100;
+}
+
+/* ── Dark theme overrides ─────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --color-bg:           #0d0d0d;
+  --color-surface:      #161616;
+  --color-surface-2:    #1e1e1e;
+  --color-surface-hover:#222222;
+  --color-border:       #2a2a2a;
+  --bg:           #0d0d0d;
+  --surface:      #161616;
+  --surface-2:    #1e1e1e;
+  --surface-hover:#222222;
+  --border:       #2a2a2a;
+
+  --color-text:      #e5e7eb;
+  --color-text-muted:#9ca3af;
+  --color-text-sub:  #6b7280;
+  --text:      #e5e7eb;
+  --text-muted:#9ca3af;
+  --text-sub:  #6b7280;
+
+  --color-green:    #22c55e;
+  --color-green-bg: rgba(34,197,94,.13);
+  --green:    #22c55e;
+  --green-bg: rgba(34,197,94,.13);
+
+  --color-amber:    #eab308;
+  --color-amber-bg: rgba(234,179,8,.13);
+  --amber:    #eab308;
+  --amber-bg: rgba(234,179,8,.13);
+
+  --color-red:    #f87171;
+  --color-red-bg: rgba(239,68,68,.13);
+  --red:    #f87171;
+  --red-bg: rgba(239,68,68,.13);
+
+  --color-blue:    #60a5fa;
+  --color-blue-bg: rgba(96,165,250,.13);
+  --blue:    #60a5fa;
+  --blue-bg: rgba(96,165,250,.13);
+
+  --color-purple:    #a78bfa;
+  --color-purple-bg: rgba(167,139,250,.13);
+  --purple:    #a78bfa;
+  --purple-bg: rgba(167,139,250,.13);
+
+  --indigo:    #a78bfa;
+  --indigo-bg: rgba(167,139,250,.13);
+  --steel:     #7aa3d4;
+  --steel-bg:  rgba(122,163,212,.13);
+  --yellow:    #facc15;
+  --yellow-bg: rgba(250,204,21,.13);
+  --teal:      #2dd4bf;
+  --teal-bg:   rgba(45,212,191,.15);
+  --pink:      #f472b6;
+  --pink-bg:   rgba(244,114,182,.15);
+
+  --color-success:    rgba(34,197,94,.15);
+  --color-success-fg: #22c55e;
+  --color-warn:       rgba(234,179,8,.15);
+  --color-warn-fg:    #eab308;
+  --color-warning:    rgba(234,179,8,.15);
+  --color-warning-fg: #eab308;
+  --color-fail:       rgba(239,68,68,.15);
+  --color-fail-fg:    #f87171;
+  --color-error:      rgba(239,68,68,.15);
+  --color-error-fg:   #f87171;
+  --color-info:       rgba(96,165,250,.15);
+  --color-info-fg:    #60a5fa;
+
+  --role-ba:          #f472b6;
+  --role-ba-bg:       rgba(244,114,182,.15);
+  --role-coder:       #a78bfa;
+  --role-coder-bg:    rgba(167,139,250,.13);
+  --role-tester:      #eab308;
+  --role-tester-bg:   rgba(234,179,8,.13);
+  --role-dispatch:    #60a5fa;
+  --role-dispatch-bg: rgba(96,165,250,.13);
+  --role-system:      #7aa3d4;
+  --role-system-bg:   rgba(122,163,212,.13);
+
+  --shadow-card:  0 8px 24px rgba(0,0,0,.35);
+  --shadow-panel: 0 8px 28px rgba(0,0,0,.45);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Reusable component classes
+   These replicate patterns that appear across multiple pages so future tickets
+   can reference class names rather than raw token values.
+   ─────────────────────────────────────────────────────────────────────────────*/
+
+/* ── Button variants ─────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.btn:hover {
+  background: var(--surface-hover);
+}
+.btn-primary {
+  background: var(--text);
+  color: var(--surface);
+  border-color: var(--text);
+}
+.btn-primary:hover {
+  opacity: .9;
+}
+.btn-ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ── Chips / pills ───────────────────────────────────────────────────────── */
+.chip,
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.chip.success, .pill.success { background: var(--color-success);    color: var(--color-success-fg); }
+.chip.warn,    .pill.warn    { background: var(--color-warn);       color: var(--color-warn-fg);    }
+.chip.fail,    .pill.fail    { background: var(--color-fail);       color: var(--color-fail-fg);    }
+.chip.info,    .pill.info    { background: var(--color-info);       color: var(--color-info-fg);    }
+
+/* ── Card ────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.card-body {
+  padding: var(--space-4);
+}
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+.table th,
+.table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  color: var(--text);
+}
+.table th {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-sub);
+}
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── Badge ───────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-sub);
+}
+.badge.success { background: var(--color-success);    color: var(--color-success-fg); }
+.badge.warn    { background: var(--color-warn);       color: var(--color-warn-fg);    }
+.badge.fail    { background: var(--color-fail);       color: var(--color-fail-fg);    }
+.badge.info    { background: var(--color-info);       color: var(--color-info-fg);    }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-10) var(--space-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-base);
+}
+.empty-state i,
+.empty-state .empty-icon {
+  font-size: 28px;
+  color: var(--text-sub);
+}
+
+/* ── Section header ──────────────────────────────────────────────────────── */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+.section-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-sub);
+}

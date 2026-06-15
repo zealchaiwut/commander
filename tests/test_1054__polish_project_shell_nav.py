@@ -14,7 +14,6 @@ apps/dashboard/static/src/shell/tabs.js for:
   AC8 — Vanilla JS/CSS only (no new framework imports)
 """
 import re
-import pytest
 from pathlib import Path
 
 HTML_FILE = Path("apps/dashboard/static/project.html")
@@ -320,9 +319,6 @@ class TestCondensedHeader:
 
     def test_scroll_handler_in_js(self):
         """project.html JS must have a scroll handler that toggles the condensed class."""
-        js_section = re.search(
-            r"<script>(.*?)</script>", HTML, re.DOTALL
-        )
         all_scripts = re.findall(r"<script[^>]*>(.*?)</script>", HTML, re.DOTALL)
         combined_js = "\n".join(all_scripts)
         # Look for scroll event listener that references condensed class

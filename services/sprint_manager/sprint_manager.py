@@ -277,6 +277,13 @@ except ImportError:  # pragma: no cover
     _BRIEF_GENERATOR_AVAILABLE = False
 
 try:
+    from services.sprint_manager import suite_health_gate as _suite_health_gate
+    _SUITE_HEALTH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _suite_health_gate = None  # type: ignore[assignment]
+    _SUITE_HEALTH_AVAILABLE = False
+
+try:
     from db import record_event as _db_record_event  # type: ignore[import]
     _RECORD_EVENT_AVAILABLE = True
 except ImportError:
@@ -5931,7 +5938,30 @@ def generate_sprint_summary(
     r = _r(repo_name)
     sprint_filter_url = f"https://github.com/{r}/issues?q=label%3A{state.sprint_label}"
 
+    # -- Suite health gate (issue #888) --
+    # Load health result from JSON; if absent, retroactively mark as not recorded.
+    _health_result = None
+    if _SUITE_HEALTH_AVAILABLE and sprints_dir is not None:
+        _health_result = _suite_health_gate.load_gate_result(state.sprint_label, sprints_dir)
+
     lines: list[str] = []
+
+    # -- Suite health warning banners (prepended before all other content) --
+    if _health_result is None:
+        lines += [
+            "> ⚠ SUITE HEALTH NOT RECORDED — health gate has not run for this sprint.",
+            "",
+        ]
+    elif _health_result.timed_out:
+        lines += [
+            "> ⚠ SUITE TIMEOUT — the test suite exceeded the configured time limit.",
+            "",
+        ]
+    elif _health_result.failed > 0:
+        lines += [
+            f"> ⚠ SUITE FAILING — {_health_result.failed} test(s) failed.",
+            "",
+        ]
 
     # -- Header section --
     # Roster = the full set of tickets this sprint owns this run. With the
@@ -6006,6 +6036,26 @@ def generate_sprint_summary(
 
     # -- Stats --
     cost_str = "$0.00 (all agents subscription-funded via Claude Code)"
+
+    # Suite Health row (issue #888)
+    if _health_result is None:
+        _suite_health_row = "| Suite Health | ⚠ not recorded |"
+    elif _health_result.timed_out:
+        _suite_health_row = "| Suite Health | ⚠ timeout |"
+    elif _health_result.failed > 0:
+        _suite_health_row = (
+            f"| Suite Health | ⚠ {_health_result.failed} failed,"
+            f" {_health_result.passed} passed,"
+            f" {_health_result.skipped} skipped,"
+            f" {_health_result.duration_seconds}s |"
+        )
+    else:
+        _suite_health_row = (
+            f"| Suite Health | ✅ {_health_result.passed} passed,"
+            f" {_health_result.skipped} skipped,"
+            f" {_health_result.duration_seconds}s |"
+        )
+
     lines += [
         "## Stats",
         "",
@@ -6017,6 +6067,7 @@ def generate_sprint_summary(
         f"| Tester rejections | {tester_rejections} |",
         f"| Merge conflicts | {merge_conflicts} |",
         f"| Cost estimate | {cost_str} |",
+        _suite_health_row,
         "",
     ]
 
@@ -6460,6 +6511,7 @@ def write_sprint_summary(
     dry_run: bool = False,
     force_summary: bool = False,
     merge_target: Optional[str] = None,
+    run_health_gate: bool = False,
 ) -> Optional[Path]:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
 
@@ -6470,6 +6522,9 @@ def write_sprint_summary(
 
     When merge_target is provided, git-verified counts are used in the summary
     and any done-but-unverified tickets are flagged in the not-shipped table.
+
+    ``run_health_gate=True`` (issue #888): triggers the full pytest suite
+    before generating the summary so health metrics appear in the Stats table.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
 
@@ -6482,6 +6537,25 @@ def write_sprint_summary(
         _log_shipped_status_git_mismatch(state, merge_target)
         _fail_loud_shipped_reconciliation(state, merge_target, "Sprint summary")
 
+    eff_sprints_dir: Path = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
+
+    # AC-1 (issue #888): auto-run suite health gate when requested.
+    if run_health_gate and _SUITE_HEALTH_AVAILABLE:
+        sys.stdout.write(str("  [health-gate] Running full test suite...") + "\n")
+        try:
+            _suite_health_gate.run_gate(
+                sprint_label=state.sprint_label,
+                sprints_dir=eff_sprints_dir,
+            )
+            sys.stdout.write(str("  [health-gate] Done.") + "\n")
+        except Exception as _hg_exc:
+            structured_log.warn(
+                "health_gate_failed",
+                f"suite health gate raised: {_hg_exc}",
+                exc=str(_hg_exc),
+                sprint_label=state.sprint_label,
+            )
+
     content = generate_sprint_summary(
         state,
         elapsed_secs,
@@ -6489,7 +6563,7 @@ def write_sprint_summary(
         open_issues=open_issues,
         repo_name=eff_repo,
         sprint_branch=sprint_branch,
-        sprints_dir=(cfg.sprints_dir if cfg is not None else SPRINTS_DIR),
+        sprints_dir=eff_sprints_dir,
         merge_target=merge_target,
     )
     path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)

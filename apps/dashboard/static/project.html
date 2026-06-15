@@ -3589,6 +3589,103 @@
     }
 
     /* ── Backlog pane (issue #274) ── */
+    /* ── Planning board layout (issue #1044) ── */
+    .smgmt-focus-guide {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .smgmt-focus-guide-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      margin-bottom: 8px;
+    }
+    .smgmt-focus-step {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; padding: 3px 0;
+    }
+    .smgmt-focus-num {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--text); color: var(--surface);
+      font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-family: var(--mono);
+    }
+    .smgmt-focus-num--med  { background: var(--amber); }
+    .smgmt-focus-num--low  { background: var(--surface-2); color: var(--text-muted); }
+    .smgmt-section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      margin: 20px 2px 8px; display: flex; align-items: center; gap: 6px;
+    }
+    .smgmt-planning-section { }
+    /* Draft sprint card */
+    .smgmt-draft-card {
+      background: var(--surface);
+      border: 1px solid var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      border-radius: 11px; overflow: hidden; margin-bottom: 12px;
+    }
+    .smgmt-draft-card .smgmt-card-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-draft-badge {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px; text-transform: uppercase;
+      letter-spacing: .03em;
+      background: var(--blue-bg); color: var(--blue);
+    }
+    .smgmt-sprint-name { font-weight: 700; font-size: 15px; }
+    .smgmt-card-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+    /* Goal slot */
+    .smgmt-goal-slot { padding: 12px 16px 0; }
+    .smgmt-goal-input {
+      width: 100%; padding: 8px 11px; border: 1px solid var(--border);
+      border-radius: 7px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+    }
+    .smgmt-goal-input:focus { outline: none; border-color: var(--blue); background: var(--surface); }
+    /* Budget bar */
+    .smgmt-budget-bar { padding: 10px 16px 0; }
+    .smgmt-budget-bar-top {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 4px;
+    }
+    .smgmt-budget-label { font-weight: 700; }
+    .smgmt-budget-headroom { color: var(--text-sub); }
+    .smgmt-budget-headroom--over { color: var(--amber); font-weight: 700; }
+    .smgmt-budget-track {
+      height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+    }
+    .smgmt-budget-fill { height: 100%; background: var(--blue); border-radius: 999px; }
+    .smgmt-budget-fill--over { background: var(--amber); }
+    /* Planning ticket rows (no drag) */
+    .smgmt-plan-tickets { padding: 8px 0; }
+    .smgmt-plan-ticket { cursor: default; }
+    .smgmt-plan-ticket .smgmt-ticket-grip { display: none; }
+    .smgmt-plan-empty { padding: 14px 18px; color: var(--text-sub); font-size: 13px; }
+    .smgmt-plan-row-menu .smgmt-ctx-item--remove { color: var(--red); }
+    /* + Add ticket affordance */
+    .smgmt-add-ticket-row { padding: 8px 16px 12px; }
+    .smgmt-add-ticket-btn {
+      font-size: 13px; color: var(--blue); background: none; border: none;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 0;
+    }
+    .smgmt-add-ticket-btn:hover { text-decoration: underline; }
+    /* Add to sprint button on backlog rows */
+    .smgmt-add-to-sprint-btn {
+      font-size: 11px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-muted);
+      border-radius: 5px; padding: 3px 8px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .smgmt-add-to-sprint-btn:hover { border-color: var(--blue); color: var(--blue); }
+    /* ── end planning board layout ── */
     .smgmt-backlog-pane {
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -8089,27 +8186,24 @@
         <!-- Sprint list -->
         <div class="smgmt-content">
 
+          <!-- Focus Guide (issue #1044) — synthesized from board state by _smgmtFocusGuideHtml -->
+          <div class="smgmt-focus-guide" id="smgmt-focus-guide" aria-live="polite"></div>
+
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
 
-          <!-- Ghost pane — drag below last sprint to create next sprint (issue #364) -->
-          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane"
-               ondragover="_smgmtGhostDragOver(event)"
-               ondragleave="_smgmtGhostDragLeave(event)"
-               ondrop="_smgmtGhostDrop(event)">
-            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Drop here to create Sprint 1</div>
+          <!-- Ghost pane — create next sprint (issue #364); drag removed (issue #1044) -->
+          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane">
+            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Create Sprint 1</div>
             <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
           <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
-               checkbox multi-select picker, and a live what-if delta line. Keeps
-               id smgmt-backlog-pane and the drag-back-to-backlog drop target. -->
+               checkbox multi-select picker, and a live what-if delta line.
+               Drag-and-drop removed from board (issue #1044). -->
           <div class="panel bl-panel smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
-               role="region" aria-label="Backlog"
-               ondragover="_smgmtBacklogDragOver(event)"
-               ondragleave="_smgmtBacklogDragLeave(event)"
-               ondrop="_smgmtDropOnBacklog(event)">
+               role="region" aria-label="Backlog">
             <span class="bl-eyebrow">Backlog</span>
             <div class="bl-header-row" id="smgmt-backlog-header-row"
                  onclick="_smgmtBacklogToggle()"
@@ -8152,7 +8246,6 @@
                 </select>
               </div>
               <div id="smgmt-backlog-tickets" class="bl-grid">
-                <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
               </div>
             </div>
             <div class="bl-whatif-bar" id="bl-whatif-bar" hidden aria-live="polite"></div>

@@ -501,6 +501,17 @@
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       padding: var(--space-4) var(--space-8) 0;
+      transition: padding .15s;
+    }
+    /* ── Condensed header state on scroll (AC6/#1054) ── */
+    .proj-header--condensed {
+      padding-top: var(--space-2);
+    }
+    .proj-header--condensed .proj-header-row {
+      padding-bottom: var(--space-2);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .proj-header { transition: none; }
     }
     .proj-header-row {
       display: flex; align-items: center; gap: var(--space-3);
@@ -656,6 +667,11 @@
     .bc-tab-badge--ready { background: var(--blue); }
     @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
     .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
+    /* ── Shell nav: suppress transitions for reduced-motion users (AC1/#1054) ── */
+    @media (prefers-reduced-motion: reduce) {
+      .stab { transition: none; }
+      .btn-icon { transition: none; }
+    }
 
     /* ── Tab content ── */
     .tab-content { flex: 1; }
@@ -8167,17 +8183,17 @@
       <div class="sub-tabs-row">
       <nav class="sub-tabs" role="tablist" aria-label="Project sections" id="sub-tabs">
         <button class="stab active" role="tab" id="stab-sprint-mgmt"
-                aria-selected="true" onclick="switchTab('sprint-mgmt')">
+                aria-selected="true" tabindex="0" onclick="switchTab('sprint-mgmt')">
           <i class="ti ti-layout-kanban"></i>Sprint
         </button>
         <button class="stab" role="tab" id="stab-tickets"
-                aria-selected="false" onclick="switchTab('tickets')">
+                aria-selected="false" tabindex="-1" onclick="switchTab('tickets')">
           <i class="ti ti-list"></i>Issues
         </button>
         <!-- Manage: Logs + Deploy + Analytics -->
         <div class="stab-group" id="stab-group-manage">
           <button class="stab stab-trigger" type="button" id="stab-manage-trigger"
-                  aria-haspopup="true" aria-expanded="false"
+                  aria-haspopup="true" aria-expanded="false" tabindex="-1"
                   onclick="toggleStabDropdown('manage', event)">
             <i class="ti ti-tool"></i>Manage
             <i class="ti ti-chevron-down stab-caret"></i>
@@ -8201,7 +8217,7 @@
         <!-- Planning: Roadmap + Advisor -->
         <div class="stab-group" id="stab-group-planning">
           <button class="stab stab-trigger" type="button" id="stab-planning-trigger"
-                  aria-haspopup="true" aria-expanded="false"
+                  aria-haspopup="true" aria-expanded="false" tabindex="-1"
                   onclick="toggleStabDropdown('planning', event)">
             <i class="ti ti-compass"></i>Planning
             <i class="ti ti-chevron-down stab-caret"></i>
@@ -8219,7 +8235,7 @@
         </div>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
-                aria-selected="false" onclick="switchTab('settings')">
+                aria-selected="false" tabindex="-1" onclick="switchTab('settings')">
           <i class="ti ti-adjustments-cog"></i>Settings
         </button>
       </nav>
@@ -11309,8 +11325,9 @@ async function init() {
   // Track drag cursor position for the multi-drag pill
   document.addEventListener('dragover', _smgmtDragMovePill);
 
-  // Set up sticky toolbar shadow
+  // Set up sticky toolbar shadow and condensed header on scroll
   _smgmtInitScrollShadow();
+  _projCondensedHeaderInit();
   const sprintMgmtPromise =
     _activeTab === 'sprint-mgmt'
       ? prefetchPromise.then(async () => {
@@ -11388,6 +11405,16 @@ function _smgmtInitScrollShadow() {
 
   mainArea.addEventListener('scroll', function() {
     stickyArea.classList.toggle('scrolled', mainArea.scrollTop > 4);
+  }, { passive: true });
+}
+
+// ── Condensed header on scroll (AC6/#1054) ───────────────────────────────────
+function _projCondensedHeaderInit() {
+  const mainArea = document.getElementById('main-area');
+  const header   = document.getElementById('proj-header');
+  if (!mainArea || !header) return;
+  mainArea.addEventListener('scroll', function() {
+    header.classList.toggle('proj-header--condensed', mainArea.scrollTop > 50);
   }, { passive: true });
 }
 

@@ -55,12 +55,21 @@ export function switchTab(tab, pushHistory) {
   const subTabsRow = document.querySelector('.sub-tabs-row');
   if (subTabsRow) subTabsRow.classList.toggle('hidden', onGlobalSettings);
 
+  const _topLevelTabs = ['sprint-mgmt', 'tickets', 'manage', 'planning', 'settings'];
   ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'metrics', 'est-vs-actual', 'calibration', 'notes', 'roadmap', 'advisor', 'settings'].forEach(t => {
     const btn = document.getElementById('stab-' + t);
     if (!btn) return;
     const isActive = !onGlobalSettings && t === tab;
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-selected', String(isActive));
+  });
+  // Roving tabindex: active top-level tab gets 0; others get -1 so Tab exits the group
+  _topLevelTabs.forEach(t => {
+    const suffix = t === 'manage' ? 'manage-trigger' : t === 'planning' ? 'planning-trigger' : t;
+    const btn = document.getElementById('stab-' + suffix);
+    if (!btn) return;
+    const isTopActive = !onGlobalSettings && (t === tab || btn.classList.contains('active'));
+    btn.tabIndex = isTopActive ? 0 : -1;
   });
   closeAllStabDropdowns();
   ['analytics', 'more', 'planning', 'manage'].forEach(groupName => {

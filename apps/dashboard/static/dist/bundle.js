@@ -3439,44 +3439,14 @@ Replace the existing draft (${data.existing_label})?`
   function _smgmtUpdateSelectionUI2() {
     const count = _smgmtSelectedIssues.size;
     _blUpdateActions();
-    let bar = document.getElementById("smgmt-selection-bar");
+    document.getElementById("smgmt-selection-bar")?.remove();
+    const bar = document.getElementById("proj-selection-bar");
     const listEl = document.getElementById("smgmt-sprint-list");
-    if (count > 0) {
-      if (!bar) {
-        bar = document.createElement("div");
-        bar.id = "smgmt-selection-bar";
-        bar.className = "smgmt-selection-bar";
-        bar.setAttribute("role", "status");
-        bar.setAttribute("aria-live", "polite");
-        bar.innerHTML = `
-        <i class="ti ti-checkbox"></i>
-        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
-        <span style="color:var(--text-muted)">\u2014 batch move to a sprint or backlog</span>
-        <div class="smgmt-sel-bar-actions">
-          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                  onclick="_smgmtDeleteSelected()">
-            <i class="ti ti-trash"></i> Delete
-          </button>
-          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
-          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-            <i class="ti ti-x"></i> Deselect all
-          </button>
-          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                  onclick="_smgmtToggleMoveToMenu(event)">
-            <i class="ti ti-send"></i> Move to Sprint &#9660;
-          </button>
-          <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
-        </div>`;
-        if (listEl)
-          listEl.insertBefore(bar, listEl.firstChild);
-      }
+    if (count > 0 && bar) {
       bar.classList.add("show");
+      bar.classList.remove("hidden");
       if (listEl)
         listEl.classList.add("has-selection");
-      _smgmtPositionSelectionBar(bar, listEl);
       const countEl = document.getElementById("smgmt-sel-count");
       if (countEl)
         countEl.textContent = count === 1 ? "1 ticket selected" : `${count} tickets selected`;
@@ -3487,37 +3457,12 @@ Replace the existing draft (${data.existing_label})?`
         deleteBtn.classList.toggle("show", showDelete);
       }
     } else {
-      if (bar)
+      if (bar) {
         bar.classList.remove("show");
+        bar.classList.add("hidden");
+      }
       if (listEl)
         listEl.classList.remove("has-selection");
-    }
-  }
-  function _smgmtPositionSelectionBar(bar, listEl) {
-    if (!bar || !listEl)
-      return;
-    try {
-      const labels = /* @__PURE__ */ new Set();
-      (_smgmtData && _smgmtData.issues || []).forEach((i) => {
-        if (_smgmtSelectedIssues.has(i.number) && i.sprint_label)
-          labels.add(i.sprint_label);
-      });
-      let target = null;
-      if (labels.size === 1) {
-        const lbl = [...labels][0];
-        const card = document.getElementById("smgmt-card-" + lbl);
-        if (card && card.parentNode === listEl)
-          target = card;
-      }
-      if (target) {
-        if (bar.nextElementSibling !== target)
-          listEl.insertBefore(bar, target);
-      } else if (listEl.firstChild !== bar) {
-        listEl.insertBefore(bar, listEl.firstChild);
-      }
-    } catch (_) {
-      if (listEl.firstChild !== bar)
-        listEl.insertBefore(bar, listEl.firstChild);
     }
   }
   function _smgmtPopulateSelectionDropdown() {

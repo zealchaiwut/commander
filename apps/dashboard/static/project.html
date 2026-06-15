@@ -3064,7 +3064,23 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Inline selection action bar (above sprint list) ── */
+    /* ── Project-level selection bar (sticky under tab nav) ── */
+    .proj-selection-bar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 28px;
+      background: var(--blue-bg);
+      border-top: 1px solid var(--blue);
+      font-size: 13px;
+      color: var(--blue);
+      white-space: nowrap;
+      flex-wrap: wrap;
+    }
+    .proj-selection-bar.show { display: flex; }
+    .proj-selection-bar-hint { color: var(--text-muted); }
+
+    /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
     .smgmt-selection-bar {
       display: none;
       align-items: center;
@@ -7734,6 +7750,29 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
+      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+        <i class="ti ti-checkbox"></i>
+        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
+        <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
+        <div class="smgmt-sel-bar-actions">
+          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                  onclick="_smgmtDeleteSelected()">
+            <i class="ti ti-trash"></i> Delete
+          </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
+          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+            <i class="ti ti-x"></i> Deselect all
+          </button>
+          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                  onclick="_smgmtToggleMoveToMenu(event)">
+            <i class="ti ti-send"></i> Move to Sprint &#9660;
+          </button>
+          <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
+        </div>
+      </div>
     </header>
 
     <!-- Tab content -->
@@ -7840,13 +7879,6 @@
               <span class="bl-header-title">
                 Backlog <span class="bl-header-count" id="smgmt-backlog-count">0 tickets</span>
               </span>
-              <div class="bl-header-add" id="bl-header-add" hidden onclick="event.stopPropagation()">
-                <select class="bl-target bl-target--header" id="bl-target-header"
-                        aria-label="Target sprint" onchange="_blSyncTargetSelects(); _blUpdateWhatIf()"></select>
-                <button class="bl-add-header-btn" id="bl-add-header-btn" type="button" onclick="_blConfirmAdd()">
-                  <span id="bl-add-header-label">Add selected to Sprint</span> ▾
-                </button>
-              </div>
               <div class="bl-header-right">
                 <div class="bl-header-est" onclick="event.stopPropagation()">
                   <button class="smgmt-bulk-est-btn hidden" id="smgmt-backlog-bulk-est-btn"
@@ -15425,7 +15457,7 @@ let _fsPreview = null;
 
 // Close bulk-move dropdown when clicking outside the selection bar
 document.addEventListener('click', function(e) {
-  const bar = document.getElementById('smgmt-selection-bar');
+  const bar = document.getElementById('proj-selection-bar');
   if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
 });
 
@@ -15623,21 +15655,15 @@ function _blPopulateTarget() {
 /** Reveal/hide the picker bar based on selection and refresh its labels + what-if. */
 function _blUpdateActions() {
   const bar = document.getElementById('bl-actions');
-  const headerAdd = document.getElementById('bl-header-add');
   const whatifBar = document.getElementById('bl-whatif-bar');
   const nums = _blSelectedBacklogNums();
   if (nums.length === 0) {
     if (bar) bar.hidden = true;
-    if (headerAdd) headerAdd.hidden = true;
     if (whatifBar) { whatifBar.hidden = true; whatifBar.innerHTML = ''; }
     return;
   }
   if (bar) bar.hidden = true;
-  if (headerAdd) headerAdd.hidden = false;
-  _blPopulateTarget();
-  const countEl = document.getElementById('bl-sel-count');
-  if (countEl) countEl.textContent = `${nums.length} selected`;
-  _blUpdateWhatIf();
+  if (whatifBar) { whatifBar.hidden = true; whatifBar.innerHTML = ''; }
 }
 
 /** Format minutes as a compact ~Nm / ~N.Nh string. */
@@ -20337,6 +20363,20 @@ async function _milestoneRefresh() {
 }
 
 /** Render (or clear) the sprint status badge in the sidebar for any project. */
+function _snavSidebarBadgeShouldShow(d, runState, rework, active, store, storeWins) {
+  if (!d || !d.has_sprint) return false;
+  if (rework > 0) return true;
+  if (runState === 'needs_rework') return true;
+  if (runState === 'finished') return true;
+  if (runState === 'running') {
+    if (storeWins && store && (store.run_state === 'running' || store.run_state === 'needs_rework')) {
+      return true;
+    }
+    return active > 0;
+  }
+  return false;
+}
+
 function _snavRenderSidebarBadge(slug, d) {
   const item = document.querySelector(`.sb-proj-item[data-slug="${CSS.escape(slug)}"]`);
   if (!item) return;
@@ -20350,17 +20390,18 @@ function _snavRenderSidebarBadge(slug, d) {
   const rework = cols['needs-rework'] || 0;
   const active = (cols['in-progress'] || 0) + (cols['sit'] || 0) + (cols['uat'] || 0);
 
-  // Determine run_state from the shared store (for current project) or GitHub data (others)
   const isCurrentProject = (slug === _slug);
   const store = isCurrentProject ? _sprintProgressStore : null;
   const storeWins = _sprintStoreOverridesNav(store, d);
   const runState = (storeWins && store) ? store.run_state : (d.state || 'running');
 
+  if (!_snavSidebarBadgeShouldShow(d, runState, rework, active, store, storeWins)) return;
+
   let badgeClass, label;
   if (runState === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
   else if (rework > 0)           { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
   else if (active > 0 || storeWins) { badgeClass = 'sb-sprint-badge--running'; label = 'Running'; }
-  else                           { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+  else                           { badgeClass = 'sb-sprint-badge--running'; label = 'Running'; }
 
   const sprintShort = storeWins
     ? _sprintPillShortLabel(store.sprint_label, store.sprint)
@@ -22926,8 +22967,7 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 
-<!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
-<!-- The bar is injected at the top of #smgmt-sprint-list via _smgmtUpdateSelectionUI() -->
+<!-- ── Inline multi-select action bar (proj-selection-bar in header) ── -->
 
 <!-- ── Ghost-confirm modal (issue #364) ── -->
 <div class="modal-backdrop hidden" id="gc-backdrop"></div>

@@ -23,6 +23,7 @@ from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
 from .status import router as status_router
 from .settings import router as settings_router
+from .suggestions import router as suggestions_router
 from .system import router as system_router
 from .tickets import router as tickets_router
 
@@ -45,6 +46,7 @@ __all__ = [
     "sprints_router",
     "settings_router",
     "status_router",
+    "suggestions_router",
     "system_router",
     "tickets_router",
 ]

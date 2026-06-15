@@ -494,7 +494,7 @@
     const subTabsRow = document.querySelector(".sub-tabs-row");
     if (subTabsRow)
       subTabsRow.classList.toggle("hidden", onGlobalSettings);
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "settings"].forEach((t) => {
+    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings"].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
       if (!btn)
         return;
@@ -511,7 +511,7 @@
       if (trigger)
         trigger.classList.toggle("active", !!group.querySelector(".stab.active"));
     });
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "settings", "global-settings"].forEach((t) => {
+    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings", "global-settings"].forEach((t) => {
       const pane = document.getElementById("pane-" + t);
       if (pane)
         pane.classList.toggle("active", t === tab);
@@ -564,6 +564,8 @@
       notesInit();
     if (tab === "roadmap")
       roadmapInit();
+    if (tab === "advisor")
+      advInit();
     if (tab === "settings")
       projSettingsInit();
     if (tab === "global-settings") {

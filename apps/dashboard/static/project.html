@@ -483,11 +483,19 @@
       overflow-y: auto;
     }
 
+    /* ── Sticky project chrome (header + selection bar scroll as one unit) ── */
+    .proj-sticky-chrome {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+
     /* ── Project header ── */
     .proj-header {
-      position: sticky;
-      top: 0; /* sticks to top of main-area scroll container */
-      z-index: 20;
+      position: static;
+      z-index: auto;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       padding: 18px 28px 0;
@@ -1470,6 +1478,15 @@
       font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
       color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
     }
+    .ticket-grp-uat-close-btn {
+      flex-shrink: 0;
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--amber);
+      border: 1px solid var(--amber); border-radius: 5px;
+      cursor: pointer; font-family: inherit; white-space: nowrap;
+      transition: background .12s, color .12s;
+    }
+    .ticket-grp-uat-close-btn:hover { background: var(--amber-bg); }
     .ticket-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 0;
@@ -1676,6 +1693,7 @@
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
+      .proj-sticky-chrome { position: static; }
       .smgmt-sticky-area { position: static; }
       .tickets-grid { grid-template-columns: 1fr; }
       .tickets-main { border-right: none; border-bottom: 1px solid var(--border); }
@@ -3091,7 +3109,7 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (sticky under tab nav) ── */
+    /* ── Project-level selection bar (inside sticky chrome, below tab nav) ── */
     .proj-selection-bar {
       display: none;
       align-items: center;
@@ -3103,9 +3121,6 @@
       color: var(--blue);
       white-space: nowrap;
       flex-wrap: wrap;
-      position: sticky;
-      top: var(--proj-tabs-bottom, 100px);
-      z-index: 21;
       box-shadow: 0 2px 8px rgba(0,0,0,.06);
     }
     .proj-selection-bar.show { display: flex; }
@@ -7686,7 +7701,8 @@
   <!-- ── Main content ── -->
   <div class="main-area" id="main-area">
 
-    <!-- Project header (sticky within main-area) -->
+    <div class="proj-sticky-chrome" id="proj-sticky-chrome">
+    <!-- Project header -->
     <header class="proj-header" id="proj-header">
       <div class="proj-header-row">
         <div class="proj-header-title">
@@ -7866,6 +7882,8 @@
       </div>
     </div>
 
+    </div><!-- /proj-sticky-chrome -->
+
     <!-- Tab content -->
     <div class="tab-content">
 
@@ -7973,14 +7991,6 @@
                 Backlog <span class="bl-header-count" id="smgmt-backlog-count">0 tickets</span>
               </span>
               <div class="bl-header-right">
-                <div class="bl-header-est" onclick="event.stopPropagation()">
-                  <button class="smgmt-bulk-est-btn hidden" id="smgmt-backlog-bulk-est-btn"
-                          onclick="_smgmtBulkEstimate('__backlog__',this)"
-                          title="Estimate all unsized backlog tickets"
-                          aria-label="Estimate unsized backlog tickets">
-                    <i class="ti ti-calculator"></i> Estimate unsized</button>
-                  <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-progress" aria-hidden="true"></span>
-                </div>
                 <span class="smgmt-backlog-chevron-icon"><i class="ti ti-chevron-down"></i></span>
               </div>
             </div>
@@ -8928,6 +8938,65 @@
       <div class="tab-pane" id="pane-settings" role="tabpanel" aria-labelledby="stab-settings">
         <div class="proj-settings-wrap">
 
+          <!-- Sprint / repo cleanup card (issue #735) — pinned first -->
+          <div class="proj-settings-card" id="ps-sprint-cleanup-card">
+            <div class="proj-settings-card-head">
+              <i class="ti ti-archive proj-settings-card-icon"></i>
+              <div>
+                <div class="proj-settings-card-title">Sprint file cleanup</div>
+                <div class="proj-settings-card-sub">Archive stale sprint runtime files, prune old test files, and delete merged feature branches</div>
+              </div>
+            </div>
+            <div class="proj-settings-card-body" id="ps-cleanup-body">
+              <div class="ps-scaffold-actions">
+                <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
+                  <i class="ti ti-search"></i> Preview cleanup
+                </button>
+                <button class="ps-btn" id="ps-tests-preview-btn" onclick="testFilesCleanupPreview()"
+                        title="Keep the 100 most recently committed tests/test_*.py files; remove the rest">
+                  <i class="ti ti-file-minus"></i> Clean old test files
+                </button>
+                <button class="ps-btn" id="ps-stale-scan-btn" onclick="_histScanStale()" title="Scan remote for leftover feature branches and flag them on sprint history rows">
+                  <i class="ti ti-git-branch"></i> Scan stale branches
+                </button>
+                <button class="ps-btn" id="ps-stale-prune-btn" onclick="psPruneMergedBranches()"
+                        title="Delete all merged feature branches found by the last scan">
+                  <i class="ti ti-git-branch-deleted"></i> Prune merged branches
+                </button>
+                <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-cleanup-preview" style="display:none;margin-top:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
+                  Files to archive
+                </div>
+                <ul id="ps-cleanup-list" class="ps-scaffold-list"></ul>
+                <div id="ps-cleanup-empty" style="display:none;font-size:13px;color:var(--text-muted)">
+                  Nothing to archive — no finished sprints have stale files.
+                </div>
+                <div id="ps-cleanup-confirm-wrap" style="display:none;margin-top:12px">
+                  <button class="ps-btn ps-btn-primary" id="ps-cleanup-confirm-btn" onclick="sprintCleanupConfirm()">
+                    <i class="ti ti-archive"></i> Archive these files
+                  </button>
+                </div>
+              </div>
+              <div id="ps-tests-preview" style="display:none;margin-top:12px">
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
+                  Test files to remove
+                </div>
+                <div id="ps-tests-summary" style="font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+                <ul id="ps-tests-list" class="ps-scaffold-list"></ul>
+                <div id="ps-tests-empty" style="display:none;font-size:13px;color:var(--text-muted)">
+                  Nothing to remove — at most 100 test files, or none found.
+                </div>
+                <div id="ps-tests-confirm-wrap" style="display:none;margin-top:12px">
+                  <button class="ps-btn ps-btn-primary" id="ps-tests-confirm-btn" onclick="testFilesCleanupConfirm()">
+                    <i class="ti ti-trash"></i> Delete these test files
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Estimation card -->
           <div class="proj-settings-card">
             <div class="proj-settings-card-head">
@@ -9127,42 +9196,6 @@
             </div>
             <div class="proj-settings-card-body" id="ps-envvars-body">
               <!-- Sections injected by envVarsLoad() -->
-            </div>
-          </div>
-
-          <!-- Sprint file cleanup card (issue #735) -->
-          <div class="proj-settings-card" id="ps-sprint-cleanup-card">
-            <div class="proj-settings-card-head">
-              <i class="ti ti-archive proj-settings-card-icon"></i>
-              <div>
-                <div class="proj-settings-card-title">Sprint File Cleanup</div>
-                <div class="proj-settings-card-sub">Archive stale runtime files from finished sprints to reduce startup noise</div>
-              </div>
-            </div>
-            <div class="proj-settings-card-body" id="ps-cleanup-body">
-              <div class="ps-scaffold-actions">
-                <button class="ps-btn" id="ps-cleanup-preview-btn" onclick="sprintCleanupPreview()">
-                  <i class="ti ti-search"></i> Preview cleanup
-                </button>
-                <button class="ps-btn" id="ps-stale-scan-btn" onclick="_histScanStale()" title="Scan remote for leftover feature branches and flag them on sprint history rows">
-                  <i class="ti ti-git-branch"></i> Scan stale branches
-                </button>
-                <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
-              </div>
-              <div id="ps-cleanup-preview" style="display:none;margin-top:12px">
-                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">
-                  Files to archive
-                </div>
-                <ul id="ps-cleanup-list" class="ps-scaffold-list"></ul>
-                <div id="ps-cleanup-empty" style="display:none;font-size:13px;color:var(--text-muted)">
-                  Nothing to archive — no finished sprints have stale files.
-                </div>
-                <div id="ps-cleanup-confirm-wrap" style="display:none;margin-top:12px">
-                  <button class="ps-btn ps-btn-primary" id="ps-cleanup-confirm-btn" onclick="sprintCleanupConfirm()">
-                    <i class="ti ti-archive"></i> Archive these files
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -10293,7 +10326,11 @@ function renderTickets(data, repo) {
         </div>`;
       }).join('');
       const gid = g.label.replace(/\s+/g, '-');
-      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span></div>${rows}`;
+      const uatBtn = g.label === 'UAT'
+        ? `<button type="button" class="ticket-grp-uat-close-btn" onclick="openBulkCloseUatModal()"
+                  title="Bulk close UAT tickets left open after sprint sign-off">Close all UAT</button>`
+        : '';
+      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span>${uatBtn}</div>${rows}`;
     }).join('');
   }
 
@@ -10436,6 +10473,7 @@ async function closeTicketModalConfirm() {
 
 // ── Bulk Close flow ───────────────────────────────────────────────────────────
 const _bulkSelected = new Map(); // num → title
+let _bulkCloseTargets = null;    // when set, modal/confirm use this instead of selection
 
 function _onTicketCheckbox(el) {
   const num   = parseInt(el.dataset.num, 10);
@@ -10479,36 +10517,62 @@ function _bulkDeselectAll() {
   _bulkUpdateActionBar();
 }
 
-function openBulkCloseModal() {
-  if (_bulkSelected.size === 0) return;
+function openBulkCloseModal(opts) {
+  const targets = _bulkCloseTargets || _bulkSelected;
+  if (targets.size === 0) return;
   const listEl = document.getElementById('bcm-ticket-list');
   if (listEl) {
-    listEl.innerHTML = Array.from(_bulkSelected.entries()).map(([num, title]) =>
+    listEl.innerHTML = Array.from(targets.entries()).map(([num, title]) =>
       `<div class="bcm-ticket-item">
         <span class="bcm-ticket-num">#${num}</span>
         <span class="bcm-ticket-title" title="${escHtml(title)}">${escHtml(title)}</span>
       </div>`
     ).join('');
   }
+  const introEl = document.getElementById('bcm-intro');
+  if (introEl) {
+    introEl.textContent = (opts && opts.intro)
+      || 'The following tickets will be closed on GitHub. This cannot be undone from the dashboard.';
+  }
+  const titleEl = document.querySelector('#bcm-modal .modal-title');
+  if (titleEl) titleEl.textContent = (opts && opts.title) || 'Close tickets';
   const errEl = document.getElementById('bcm-modal-error');
   if (errEl) errEl.classList.add('hidden');
   const confirmBtn = document.getElementById('bcm-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${_bulkSelected.size} issue${_bulkSelected.size !== 1 ? 's' : ''}`; }
+  const n = targets.size;
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${n} issue${n !== 1 ? 's' : ''}`; }
   document.getElementById('bcm-backdrop')?.classList.remove('hidden');
   document.getElementById('bcm-modal')?.classList.remove('hidden');
+}
+
+/** Bulk close every open UAT ticket (leftover after sprint sign-off). */
+function openBulkCloseUatModal() {
+  const uatGroup = _ticketGroups.find(g => g.label === 'UAT');
+  if (!uatGroup || !uatGroup.items.length) return;
+  _bulkCloseTargets = new Map(uatGroup.items.map(t => [t.number, t.title]));
+  openBulkCloseModal({
+    title: 'Close UAT tickets',
+    intro: `${uatGroup.items.length} UAT ticket${uatGroup.items.length !== 1 ? 's' : ''} will be closed on GitHub. `
+      + 'These were left open after sprint sign-off. This cannot be undone from the dashboard.',
+  });
 }
 
 function _bulkCloseCancel() {
   document.getElementById('bcm-backdrop')?.classList.add('hidden');
   document.getElementById('bcm-modal')?.classList.add('hidden');
+  _bulkCloseTargets = null;
+  const titleEl = document.querySelector('#bcm-modal .modal-title');
+  if (titleEl) titleEl.textContent = 'Close tickets';
 }
 
 async function _bulkCloseConfirm() {
-  if (_bulkSelected.size === 0 || !_ticketsRepo) return;
+  const targets = _bulkCloseTargets || _bulkSelected;
+  if (targets.size === 0 || !_ticketsRepo) return;
+  const fromUatBulk = !!_bulkCloseTargets;
   const confirmBtn = document.getElementById('bcm-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Closing…'; }
 
-  const tickets  = Array.from(_bulkSelected.entries()); // [[num,title],…]
+  const tickets  = Array.from(targets.entries()); // [[num,title],…]
   const results  = [];
 
   for (const [num, title] of tickets) {
@@ -10532,7 +10596,9 @@ async function _bulkCloseConfirm() {
   // Render result summary (success/error per ticket) in action bar results list
   const resultListEl = document.getElementById('bab-result-list');
   const closeBtnEl   = document.getElementById('bab-close-btn');
-  if (resultListEl) {
+  if (fromUatBulk) {
+    _ticketsShowSuccess(`Closed ${results.filter(r => r.ok).length} of ${results.length} UAT ticket${results.length !== 1 ? 's' : ''}.`);
+  } else if (resultListEl) {
     resultListEl.innerHTML = results.map(r =>
       r.ok
         ? `<div class="bab-result-item ok">✓ #${r.num} ${escHtml(r.title)}</div>`
@@ -10549,6 +10615,16 @@ async function _bulkCloseConfirm() {
     document.getElementById(`ticket-row-${num}`)?.remove();
     document.querySelector(`.ticket-checkbox[data-num="${num}"]`)?.closest('.ticket-row')?.remove();
   });
+
+  // Drop empty group headers (e.g. after closing all UAT tickets)
+  for (const g of _ticketGroups) {
+    g.items = g.items.filter(t => !successNums.includes(t.number));
+    if (g.items.length === 0) {
+      const gid = g.label.replace(/\s+/g, '-');
+      document.getElementById(`ticket-grp-hdr-${gid}`)?.remove();
+    }
+  }
+  _ticketsUpdateGroupHeaders();
 
   // Update ticket count in toolbar
   if (successNums.length > 0) {
@@ -10900,20 +10976,13 @@ async function init() {
 }
 
 // ── Sprint Mgmt toolbar height calculation ─────────────────────────────────
-// Compute top offset for the sticky area (proj-header height)
+// Compute top offset for the sticky area (sticky chrome = header + selection bar)
 function _smgmtUpdateToolbarTop() {
-  const header     = document.getElementById('proj-header');
-  const selBar     = document.getElementById('proj-selection-bar');
+  const chrome     = document.getElementById('proj-sticky-chrome');
   const stickyArea = document.getElementById('smgmt-sticky-area');
-  const tabsRow    = header?.querySelector('.sub-tabs-row');
-  if (tabsRow) {
-    const tabsBottom = tabsRow.offsetTop + tabsRow.offsetHeight;
-    document.documentElement.style.setProperty('--proj-tabs-bottom', tabsBottom + 'px');
-  }
-  let headerH = header ? header.offsetHeight : 0;
-  if (selBar && selBar.classList.contains('show')) headerH += selBar.offsetHeight;
-  document.documentElement.style.setProperty('--proj-header-height', headerH + 'px');
-  if (stickyArea) stickyArea.style.top = headerH + 'px';
+  const chromeH    = chrome ? chrome.offsetHeight : 0;
+  document.documentElement.style.setProperty('--proj-header-height', chromeH + 'px');
+  if (stickyArea) stickyArea.style.top = chromeH + 'px';
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
@@ -23614,7 +23683,7 @@ document.addEventListener('keydown', function(e) {
     <button class="modal-close" onclick="_bulkCloseCancel()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body">
-    <p style="font-size:13px;color:var(--text);margin:0 0 4px;">The following tickets will be closed on GitHub. This cannot be undone from the dashboard.</p>
+    <p id="bcm-intro" style="font-size:13px;color:var(--text);margin:0 0 4px;">The following tickets will be closed on GitHub. This cannot be undone from the dashboard.</p>
     <div class="bcm-ticket-list" id="bcm-ticket-list"></div>
     <div class="modal-error hidden" id="bcm-modal-error"></div>
   </div>
@@ -24546,26 +24615,39 @@ document.addEventListener('keydown', function(e) {
 
   // ── Calibration: scatter + by-size table ──
   const _SZ_COLORS = { S: 'var(--green)', M: 'var(--blue)', L: 'var(--amber)', XL: 'var(--red)' };
-  const _TICKS = [5, 15, 30, 60, 90];
-  const _L = 64, _R = 620, _T = 22, _B = 250, _EMAX = 100, _AMAX = 130;
-  const _xm = v => _L + (v / _EMAX) * (_R - _L);
-  const _ym = v => _B - (v / _AMAX) * (_B - _T);
+  const _L = 64, _R = 620, _T = 22, _B = 250;
 
-  function _anlScatter(points) {
+  /** Axis cap from max configured L/XL label (+20% buffer); grid split into 4 equal parts. */
+  function _anlScatterAxisMax(bySize) {
+    const bs = bySize || {};
+    const lCfg = bs.L?.configured_minutes ?? 30;
+    const xlCfg = bs.XL?.configured_minutes ?? 90;
+    return Math.ceil(Math.max(lCfg, xlCfg) * 1.2);
+  }
+
+  function _anlScatterTicks(axisMax) {
+    return [0, 1, 2, 3, 4].map(i => axisMax * i / 4);
+  }
+
+  function _anlScatter(points, bySize) {
     const svg = document.getElementById('scatter-svg');
     if (!svg) return;
+    const axisMax = _anlScatterAxisMax(bySize);
+    const ticks = _anlScatterTicks(axisMax);
+    const _xm = v => _L + (v / axisMax) * (_R - _L);
+    const _ym = v => _B - (v / axisMax) * (_B - _T);
     let p = '';
-    _TICKS.forEach(v => {
+    ticks.forEach(v => {
+      const lbl = Math.round(v) + 'm';
       p += '<line x1="' + _xm(v) + '" y1="' + _T + '" x2="' + _xm(v) + '" y2="' + _B + '" stroke="var(--border)" stroke-width="1"/>';
-      p += '<text x="' + _xm(v) + '" y="' + (_B + 15) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + v + 'm</text>';
+      p += '<text x="' + _xm(v) + '" y="' + (_B + 15) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + lbl + '</text>';
       p += '<line x1="' + _L + '" y1="' + _ym(v) + '" x2="' + _R + '" y2="' + _ym(v) + '" stroke="var(--border)" stroke-width="1"/>';
-      p += '<text x="' + (_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + v + 'm</text>';
+      p += '<text x="' + (_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + lbl + '</text>';
     });
     p += '<line x1="' + _L + '" y1="' + _B + '" x2="' + _R + '" y2="' + _B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
     p += '<line x1="' + _L + '" y1="' + _T + '" x2="' + _L + '" y2="' + _B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
-    const dm = Math.min(_EMAX, _AMAX);
-    p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(dm) + '" y2="' + _ym(dm) + '" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
-    p += '<text x="' + (_xm(dm) - 6) + '" y="' + (_ym(dm) - 6) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
+    p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(axisMax) + '" y2="' + _ym(axisMax) + '" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
+    p += '<text x="' + (_xm(axisMax) - 6) + '" y="' + (_ym(axisMax) - 6) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
     p += '<text x="' + ((_L + _R) / 2) + '" y="' + (_B + 32) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle">estimated (min)</text>';
     p += '<text x="18" y="' + ((_T + _B) / 2) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle" transform="rotate(-90 18 ' + ((_T + _B) / 2) + ')">actual (min)</text>';
     (points || []).forEach(pt => {
@@ -24616,7 +24698,7 @@ document.addEventListener('keydown', function(e) {
     fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/calibration' + _anlScopeQS())
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(data => {
-        _anlScatter(data.points || []);
+        _anlScatter(data.points || [], data.by_size || {});
         _anlCalTable(data.by_size || {});
         const empty = document.getElementById('cal-empty');
         if (empty) empty.style.display = (data.points || []).length > 0 ? 'none' : 'block';
@@ -26941,6 +27023,7 @@ async function scaffoldApplyConfirm() {
 
 // ── Sprint file cleanup (issue #735) ──────────────────────────────────────────
 let _cleanupPreviewFiles = [];
+let _testCleanupPreviewFiles = [];
 
 async function _sprintCleanupPost(dryRun) {
   var slug = window._currentProjectSlug || '';
@@ -26994,6 +27077,129 @@ async function sprintCleanupConfirm() {
     _cleanupPreviewFiles = [];
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
+  }
+}
+
+async function _testFilesCleanupPost(dryRun) {
+  var slug = window._currentProjectSlug || '';
+  if (!slug) return null;
+  var resp = await fetch('/api/maintenance/tests/cleanup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({project: slug, keep: 100, dry_run: dryRun}),
+  });
+  if (!resp.ok) {
+    var err = await resp.json().catch(function() { return {}; });
+    throw new Error(err.detail || ('HTTP ' + resp.status));
+  }
+  return await resp.json();
+}
+
+async function testFilesCleanupPreview() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var previewEl = document.getElementById('ps-tests-preview');
+  var listEl = document.getElementById('ps-tests-list');
+  var emptyEl = document.getElementById('ps-tests-empty');
+  var confirmWrap = document.getElementById('ps-tests-confirm-wrap');
+  var summaryEl = document.getElementById('ps-tests-summary');
+  if (statusEl) statusEl.textContent = 'Scanning test files…';
+  try {
+    var data = await _testFilesCleanupPost(true);
+    _testCleanupPreviewFiles = (data && data.remove) || [];
+    if (summaryEl) {
+      summaryEl.textContent = 'Keeping ' + ((data && data.kept_count) || 0)
+        + ' newest of ' + ((data && data.total_count) || 0) + ' test files (git recency).';
+    }
+    if (listEl) {
+      var shown = _testCleanupPreviewFiles.slice(0, 40);
+      listEl.innerHTML = shown.map(function(f) {
+        return '<li>' + escHtml(f) + '</li>';
+      }).join('');
+      if (_testCleanupPreviewFiles.length > shown.length) {
+        listEl.innerHTML += '<li style="color:var(--text-muted)">… and '
+          + (_testCleanupPreviewFiles.length - shown.length) + ' more</li>';
+      }
+    }
+    if (emptyEl) emptyEl.style.display = _testCleanupPreviewFiles.length === 0 ? '' : 'none';
+    if (confirmWrap) confirmWrap.style.display = _testCleanupPreviewFiles.length > 0 ? '' : 'none';
+    if (previewEl) previewEl.style.display = '';
+    if (statusEl) statusEl.textContent = '';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Test preview failed: ' + e.message;
+  }
+}
+
+async function testFilesCleanupConfirm() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var confirmWrap = document.getElementById('ps-tests-confirm-wrap');
+  if (!confirm('Delete ' + _testCleanupPreviewFiles.length + ' old test file(s)? This cannot be undone from the dashboard.')) return;
+  if (statusEl) statusEl.textContent = 'Deleting old test files…';
+  try {
+    var data = await _testFilesCleanupPost(false);
+    var n = (data && data.deleted) ? data.deleted.length : 0;
+    if (statusEl) statusEl.textContent = 'Deleted ' + n + ' test file(s); kept ' + ((data && data.kept_count) || 0) + '.';
+    if (confirmWrap) confirmWrap.style.display = 'none';
+    _testCleanupPreviewFiles = [];
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Test cleanup failed: ' + e.message;
+  }
+}
+
+async function psPruneMergedBranches() {
+  var statusEl = document.getElementById('ps-cleanup-status');
+  var repo = (_cachedFullRepo && _slug) ? _cachedFullRepo[_slug] : null;
+  if (!repo) {
+    if (statusEl) statusEl.textContent = 'Project repo not loaded.';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Scanning stale branches…';
+  try {
+    var scanResp = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
+    if (!scanResp.ok) throw new Error('HTTP ' + scanResp.status);
+    var scanData = await scanResp.json();
+    var branches = (scanData.branches || []).map(function(b) { return b.branch; });
+    if (typeof _histScanStale === 'function') await _histScanStale();
+    if (!branches.length) {
+      if (statusEl) statusEl.textContent = 'No stale branches found.';
+      return;
+    }
+    var dryResp = await fetch('/cleanup-stale-branches', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({repo: repo, branches: branches, confirm: false}),
+    });
+    if (!dryResp.ok) throw new Error('HTTP ' + dryResp.status);
+    var plan = await dryResp.json();
+    var toDelete = plan.to_delete || [];
+    var skipped = plan.skipped_unmerged || [];
+    if (!toDelete.length) {
+      if (statusEl) statusEl.textContent = skipped.length
+        ? 'No merged branches to delete (' + skipped.length + ' unmerged skipped).'
+        : 'No merged branches to delete.';
+      return;
+    }
+    var msg = 'Delete ' + toDelete.length + ' merged branch' + (toDelete.length !== 1 ? 'es' : '')
+      + '?\n\n' + toDelete.join('\n');
+    if (skipped.length) msg += '\n\nSkipped (unmerged — never deleted):\n' + skipped.join('\n');
+    if (!confirm(msg)) {
+      if (statusEl) statusEl.textContent = '';
+      return;
+    }
+    if (statusEl) statusEl.textContent = 'Deleting merged branches…';
+    var resp = await fetch('/cleanup-stale-branches', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({repo: repo, branches: branches, confirm: true}),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var result = await resp.json();
+    var deleted = (result.deleted || []).length;
+    var failed = (result.failed || []).length;
+    if (typeof _histScanStale === 'function') await _histScanStale();
+    if (statusEl) statusEl.textContent = 'Deleted ' + deleted + ' merged branch'
+      + (deleted !== 1 ? 'es' : '') + (failed ? ' (' + failed + ' failed)' : '') + '.';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Branch prune failed: ' + e.message;
   }
 }
 

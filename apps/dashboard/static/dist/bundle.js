@@ -3470,8 +3470,10 @@ Replace the existing draft (${data.existing_label})?`
       if (listEl)
         listEl.classList.remove("has-selection");
     }
-    if (typeof _smgmtUpdateToolbarTop === "function")
+    if (typeof _smgmtUpdateToolbarTop === "function") {
       _smgmtUpdateToolbarTop();
+      requestAnimationFrame(_smgmtUpdateToolbarTop);
+    }
   }
   function _smgmtPopulateSelectionDropdown() {
   }

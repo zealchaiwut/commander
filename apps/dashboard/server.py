@@ -149,6 +149,13 @@ except ImportError:
     _CLEAN_SPRINT_AVAILABLE = False
 
 try:
+    import prune_test_files as _prune_test_files
+    _PRUNE_TESTS_AVAILABLE = True
+except ImportError:
+    _prune_test_files = None  # type: ignore[assignment]
+    _PRUNE_TESTS_AVAILABLE = False
+
+try:
     import mis_sizing as _mis_sizing
     _MIS_SIZING_AVAILABLE = True
 except ImportError:
@@ -2797,6 +2804,54 @@ def post_sprint_cleanup(body: _SprintCleanupBody):
         "kept_count": result["kept_count"],
         "dry_run": result["dry_run"],
     }
+
+
+class _TestCleanupBody(BaseModel):
+    project: str
+    keep: int = 100
+    dry_run: bool = True
+
+
+def _maintenance_repo_root(project: str) -> Path:
+    """Resolve the git clone that holds tests/ for maintenance actions."""
+    slug = _resolve_project_slug(project.strip())
+    project_root = _project_root_path(slug)
+    for candidate in (project_root / "uat", project_root, _REPO_ROOT):
+        if (candidate / "tests").is_dir():
+            return candidate.resolve()
+    return project_root.resolve()
+
+
+@app.post("/api/maintenance/tests/cleanup")
+def post_test_files_cleanup(body: _TestCleanupBody):
+    """Remove old ``tests/test_*.py`` files, keeping the N most recent in git history."""
+    if not _PRUNE_TESTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="prune_test_files module unavailable")
+
+    project = (body.project or "").strip()
+    if not project:
+        raise HTTPException(status_code=400, detail="project is required")
+
+    keep = max(int(body.keep or 100), 0)
+    repo_root = _maintenance_repo_root(project)
+    if not (repo_root / "tests").is_dir():
+        return {
+            "repo_root": str(repo_root),
+            "keep_limit": keep,
+            "kept": [],
+            "remove": [],
+            "kept_count": 0,
+            "remove_count": 0,
+            "total_count": 0,
+            "dry_run": body.dry_run,
+            "deleted": [],
+            "failed": [],
+        }
+
+    try:
+        return _prune_test_files.run_prune(repo_root, keep=keep, dry_run=body.dry_run)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Test cleanup failed: {exc}") from exc
 
 
 # ── Branch cleanup (issue #634) ───────────────────────────────────────────────

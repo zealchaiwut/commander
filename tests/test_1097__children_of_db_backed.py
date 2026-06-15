@@ -41,6 +41,20 @@ def fresh_db(tmp_path):
     _db_module.DB_PATH = original
 
 
+def _insert_sprint(db_module, label, project="owner/repo", parent_label=None):
+    """Direct DB insert for test fixtures — avoids record_sprint_start's dependency
+    on transition_sprint_state which has a duplicate definition in db.py (pre-existing
+    bug on sprint/sprint-74.2 base)."""
+    with db_module.get_conn() as conn:
+        db_module._create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO sprints (label, project, state, parent_label)"
+            " VALUES (?, ?, 'running', ?)",
+            (label, project, parent_label),
+        )
+        conn.commit()
+
+
 def _import_server():
     import server as srv
     return srv
@@ -53,9 +67,9 @@ class TestChildrenOfDbBacked:
 
     def test_children_of_returns_db_children(self, fresh_db):
         """Given one parent + two children in DB, children_of returns both children."""
-        fresh_db.record_sprint_start("sprint-10", project="owner/repo", parent_label=None)
-        fresh_db.record_sprint_start("sprint-10.1", project="owner/repo", parent_label="sprint-10")
-        fresh_db.record_sprint_start("sprint-10.2", project="owner/repo", parent_label="sprint-10")
+        _insert_sprint(fresh_db, "sprint-10")
+        _insert_sprint(fresh_db, "sprint-10.1", parent_label="sprint-10")
+        _insert_sprint(fresh_db, "sprint-10.2", parent_label="sprint-10")
 
         srv = _import_server()
         result = srv.children_of("sprint-10")
@@ -66,9 +80,9 @@ class TestChildrenOfDbBacked:
 
     def test_children_of_returns_sorted_by_sub_index(self, fresh_db):
         """children_of returns children sorted by sub-index (sprint-N.1 before sprint-N.2)."""
-        fresh_db.record_sprint_start("sprint-20", project="owner/repo")
-        fresh_db.record_sprint_start("sprint-20.2", project="owner/repo", parent_label="sprint-20")
-        fresh_db.record_sprint_start("sprint-20.1", project="owner/repo", parent_label="sprint-20")
+        _insert_sprint(fresh_db, "sprint-20")
+        _insert_sprint(fresh_db, "sprint-20.2", parent_label="sprint-20")
+        _insert_sprint(fresh_db, "sprint-20.1", parent_label="sprint-20")
 
         srv = _import_server()
         result = srv.children_of("sprint-20")
@@ -124,7 +138,7 @@ class TestChildrenOfDiskFallback:
     def test_db_takes_priority_over_disk(self, tmp_path, fresh_db):
         """When DB has children, disk glob is NOT consulted (DB is primary)."""
         # DB has sprint-50.1
-        fresh_db.record_sprint_start("sprint-50.1", project="owner/repo", parent_label="sprint-50")
+        _insert_sprint(fresh_db, "sprint-50.1", parent_label="sprint-50")
 
         # Disk has sprint-50.2 only
         project_root = tmp_path / "proj"
@@ -191,9 +205,9 @@ class TestChildrenOfConsistency:
 
     def test_derive_outcome_lifecycle_uses_children_of(self, fresh_db, tmp_path):
         """_derive_outcome_lifecycle resolves children via children_of, not old functions."""
-        fresh_db.record_sprint_start("sprint-60", project="owner/repo")
-        fresh_db.record_sprint_start("sprint-60.1", project="owner/repo", parent_label="sprint-60")
-        fresh_db.record_sprint_start("sprint-60.2", project="owner/repo", parent_label="sprint-60")
+        _insert_sprint(fresh_db, "sprint-60")
+        _insert_sprint(fresh_db, "sprint-60.1", parent_label="sprint-60")
+        _insert_sprint(fresh_db, "sprint-60.2", parent_label="sprint-60")
 
         project_root = tmp_path / "proj"
         project_root.mkdir()
@@ -233,9 +247,9 @@ class TestChildrenOfConsistency:
 
     def test_bulk_complete_collect_issues_uses_children_of(self, fresh_db, tmp_path):
         """_bulk_complete_collect_issues resolves children via children_of."""
-        fresh_db.record_sprint_start("sprint-70", project="owner/repo")
-        fresh_db.record_sprint_start("sprint-70.1", project="owner/repo", parent_label="sprint-70")
-        fresh_db.record_sprint_start("sprint-70.2", project="owner/repo", parent_label="sprint-70")
+        _insert_sprint(fresh_db, "sprint-70")
+        _insert_sprint(fresh_db, "sprint-70.1", parent_label="sprint-70")
+        _insert_sprint(fresh_db, "sprint-70.2", parent_label="sprint-70")
 
         project_root = tmp_path / "proj"
         project_root.mkdir()

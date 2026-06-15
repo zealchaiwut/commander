@@ -163,7 +163,7 @@
     }
 
     /* ── Sprint status pill (sits at the tab-strip level) ── */
-    .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
+    .snav-wrap { display: none !important; } /* sprint nav pill retired — header auto-refresh + board sub-nav suffice */
     .snav-pill {
       display: inline-flex; align-items: center; gap: 6px;
       height: 32px; padding: 0 10px; border-radius: 16px;
@@ -497,6 +497,11 @@
       padding-bottom: 14px;
       border-bottom: 1px solid var(--border);
     }
+    .proj-header-title {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0; flex-shrink: 1;
+    }
+    .proj-header-row-spacer { flex: 1; min-width: 8px; }
     .proj-header-icon {
       width: 22px; height: 22px; border-radius: 5px;
       display: flex; align-items: center; justify-content: center;
@@ -505,8 +510,16 @@
     .proj-header-name {
       font-size: 22px; font-weight: 700; line-height: 1.15;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      flex: 1; min-width: 0;
+      min-width: 0;
     }
+    .proj-header-gh-link {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 18px; flex-shrink: 0;
+      margin-top: 2px;
+      transition: color .15s;
+    }
+    .proj-header-gh-link:hover { color: var(--text); }
+    .proj-header-gh-link.hidden { display: none; }
     .proj-header-pill {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 3px 9px; border-radius: 20px;
@@ -1609,14 +1622,19 @@
     .ct-modal { width: min(400px, calc(100vw - 32px)); }
     /* ── Create Label modal ── */
     .cl-modal { width: min(420px, calc(100vw - 32px)); }
-    /* ── Bulk close action bar ── */
+    /* ── Bulk close action bar (sticky under tab nav, Issues tab only) ── */
     .bulk-action-bar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-      background: var(--bg); border-bottom: 2px solid var(--amber);
-      padding: 10px 20px; display: flex; align-items: center; gap: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 28px;
+      background: var(--amber-bg);
+      border-top: 1px solid var(--amber);
+      font-size: 13px;
+      color: var(--text);
+      flex-wrap: wrap;
     }
-    .bulk-action-bar.hidden { display: none; }
+    .bulk-action-bar:not(.hidden) { display: flex; }
     .bab-label { font-size: 13px; font-weight: 600; color: var(--text); }
     .bab-spacer { flex: 1; }
     .bab-results { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
@@ -1679,6 +1697,7 @@
       top: var(--proj-header-height, 88px);
       z-index: 15;
       background: var(--bg);
+      border-bottom: 1px solid var(--border);
       box-shadow: none;
       transition: box-shadow .15s;
     }
@@ -2999,25 +3018,40 @@
     /* ── Auto-refresh pill ── */
     .smgmt-ar-pill-wrap { position: relative; display: inline-block; }
     .smgmt-ar-pill {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 5px 10px; border-radius: 20px; border: 1px solid transparent;
-      font-size: 12px; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: stretch;
+      border-radius: 20px; border: 1px solid transparent;
+      font-size: 12px; font-weight: 600;
+      white-space: nowrap; overflow: hidden;
       transition: background .15s, border-color .15s, color .15s;
-      white-space: nowrap; background: none;
+    }
+    .smgmt-ar-pill-refresh,
+    .smgmt-ar-pill-trigger {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 5px 10px; border: none; background: none; cursor: pointer;
+      font-size: inherit; font-weight: inherit; color: inherit;
+      transition: background .12s;
+    }
+    .smgmt-ar-pill-refresh { padding-right: 6px; }
+    .smgmt-ar-pill-trigger { padding-left: 6px; }
+    .smgmt-ar-pill-sep {
+      width: 1px; align-self: stretch; margin: 5px 0;
+      background: currentColor; opacity: .22; flex-shrink: 0;
     }
     .smgmt-ar-pill.is-on {
       background: var(--green-bg, #f0fdf4); color: var(--green, #16a34a);
       border-color: rgba(22,163,74,.35);
     }
-    .smgmt-ar-pill.is-on:hover {
-      background: var(--green-bg, #dcfce7); border-color: var(--green, #16a34a);
+    .smgmt-ar-pill.is-on .smgmt-ar-pill-refresh:hover,
+    .smgmt-ar-pill.is-on .smgmt-ar-pill-trigger:hover {
+      background: rgba(22,163,74,.08);
     }
     .smgmt-ar-pill.is-off {
       background: var(--red-bg, #fff0f0); color: var(--red, #dc2626);
       border-color: rgba(220,38,38,.35);
     }
-    .smgmt-ar-pill.is-off:hover {
-      background: var(--red-bg, #fee2e2); border-color: var(--red, #dc2626);
+    .smgmt-ar-pill.is-off .smgmt-ar-pill-refresh:hover,
+    .smgmt-ar-pill.is-off .smgmt-ar-pill-trigger:hover {
+      background: rgba(220,38,38,.06);
     }
     .smgmt-ar-chevron { font-size: 10px; opacity: .7; }
     /* Countdown label — keep width stable as the number changes, and pop on each tick */
@@ -3031,7 +3065,7 @@
       100% { transform: scale(1);   opacity: 1; }
     }
     /* Spin the refresh icon at the moment a refresh fires */
-    .smgmt-ar-pill .ti-refresh.is-spinning { animation: smgmtArSpin .6s ease-in-out; }
+    .smgmt-ar-pill-refresh .ti-refresh.is-spinning { animation: smgmtArSpin .6s ease-in-out; }
     @keyframes smgmtArSpin {
       from { transform: rotate(0deg); }
       to   { transform: rotate(360deg); }
@@ -3057,7 +3091,23 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Inline selection action bar (above sprint list) ── */
+    /* ── Project-level selection bar (sticky under tab nav) ── */
+    .proj-selection-bar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 28px;
+      background: var(--blue-bg);
+      border-top: 1px solid var(--blue);
+      font-size: 13px;
+      color: var(--blue);
+      white-space: nowrap;
+      flex-wrap: wrap;
+    }
+    .proj-selection-bar.show { display: flex; }
+    .proj-selection-bar-hint { color: var(--text-muted); }
+
+    /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
     .smgmt-selection-bar {
       display: none;
       align-items: center;
@@ -4517,6 +4567,21 @@
       font-family: var(--mono);
       color: var(--text-muted);
     }
+    .bl-row .smgmt-ticket-est {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      min-width: 28px;
+      text-align: right;
+    }
+    .bl-row .smgmt-ticket-est--pending {
+      display: inline-flex;
+      align-items: center;
+      color: var(--blue);
+      font-family: inherit;
+      min-width: 0;
+    }
     .bl-whatif-bar {
       display: flex;
       flex-wrap: wrap;
@@ -5792,6 +5857,13 @@
     .bc-card-preview--error { color: var(--red); }
     .bc-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
     .bc-attach-warn { font-size: 10px; color: var(--amber); margin-top: 3px; }
+    .bc-attach-warn .ti { font-size: 11px; vertical-align: -1px; margin-right: 3px; }
+    .bc-attach-job-warn {
+      display: flex; align-items: flex-start; gap: 6px;
+      padding: 8px 28px; font-size: 12px; color: var(--amber);
+      background: var(--amber-bg); border-bottom: 1px solid var(--amber);
+    }
+    .bc-attach-job-warn .ti { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
     .bc-tag {
       font-size: 10px; padding: 1px 6px; border-radius: 8px;
       background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
@@ -7601,12 +7673,44 @@
     <!-- Project header (sticky within main-area) -->
     <header class="proj-header" id="proj-header">
       <div class="proj-header-row">
-        <div class="proj-header-icon" id="proj-header-icon">
-          <i class="ti ti-folder"></i>
+        <div class="proj-header-title">
+          <div class="proj-header-icon" id="proj-header-icon">
+            <i class="ti ti-folder"></i>
+          </div>
+          <span class="proj-header-name" id="proj-header-name">Loading…</span>
+          <a class="proj-header-gh-link hidden" id="proj-header-gh-link"
+             href="#" target="_blank" rel="noopener noreferrer"
+             title="Open repository on GitHub" aria-label="Open repository on GitHub">
+            <i class="ti ti-brand-github"></i>
+          </a>
         </div>
-        <span class="proj-header-name" id="proj-header-name">Loading…</span>
-        <span id="proj-header-pill"></span>
+        <span id="proj-header-pill" class="hidden" aria-hidden="true"></span>
+        <div class="proj-header-row-spacer" aria-hidden="true"></div>
         <div class="proj-header-actions">
+          <!-- Auto-refresh pill (issue #275) — project-wide, left of Create -->
+          <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+            <div class="smgmt-ar-pill is-on" id="smgmt-ar-pill">
+              <button type="button" class="smgmt-ar-pill-refresh" id="smgmt-ar-pill-refresh"
+                      onclick="_smgmtArRefreshNow(event)" aria-label="Refresh now" title="Refresh now">
+                <i class="ti ti-refresh"></i>
+              </button>
+              <span class="smgmt-ar-pill-sep" aria-hidden="true"></span>
+              <button type="button" class="smgmt-ar-pill-trigger" id="smgmt-ar-pill-trigger"
+                      onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                      aria-label="Auto-refresh interval" title="Auto-refresh interval">
+                <span id="smgmt-ar-pill-label">15s</span>
+                <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+              </button>
+            </div>
+            <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+              <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+              <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+              <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+              <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+              <div class="smgmt-ar-menu-divider"></div>
+              <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+            </div>
+          </div>
           <div class="proj-create-wrap" id="proj-create-wrap">
             <button class="btn-primary" id="proj-create-btn" onclick="toggleCreateMenu(event)"
                     aria-haspopup="true" aria-expanded="false" title="Create tickets">
@@ -7639,33 +7743,51 @@
         </button>
         <button class="stab" role="tab" id="stab-tickets"
                 aria-selected="false" onclick="switchTab('tickets')">
-          <i class="ti ti-list"></i>Tickets
+          <i class="ti ti-list"></i>Issues
         </button>
-        <button class="stab" role="tab" id="stab-logs"
-                aria-selected="false" onclick="switchTab('logs')">
-          <i class="ti ti-terminal-2"></i>Logs
-        </button>
-        <button class="stab" role="tab" id="stab-deploy"
-                aria-selected="false" onclick="switchTab('deploy')">
-          <i class="ti ti-rocket"></i>Deploy
-        </button>
-        <!-- Analytics dropdown group -->
-        <!-- Analytics — single tab, promoted to the nav root (issue: one item left) -->
-        <button class="stab" role="tab" id="stab-metrics"
-                aria-selected="false" onclick="switchTab('metrics')">
-          <i class="ti ti-chart-bar"></i>Analytics
-        </button>
+        <!-- Manage: Logs + Deploy + Analytics -->
+        <div class="stab-group" id="stab-group-manage">
+          <button class="stab stab-trigger" type="button" id="stab-manage-trigger"
+                  aria-haspopup="true" aria-expanded="false"
+                  onclick="toggleStabDropdown('manage', event)">
+            <i class="ti ti-tool"></i>Manage
+            <i class="ti ti-chevron-down stab-caret"></i>
+          </button>
+          <div class="stab-dropdown" role="menu">
+            <button class="stab" role="menuitem" id="stab-logs"
+                    aria-selected="false" onclick="switchTab('logs')">
+              <i class="ti ti-terminal-2"></i>Logs
+            </button>
+            <button class="stab" role="menuitem" id="stab-deploy"
+                    aria-selected="false" onclick="switchTab('deploy')">
+              <i class="ti ti-rocket"></i>Deploy
+            </button>
+            <button class="stab" role="menuitem" id="stab-metrics"
+                    aria-selected="false" onclick="switchTab('metrics')">
+              <i class="ti ti-chart-bar"></i>Analytics
+            </button>
+          </div>
+        </div>
         <!-- Notes moved to the global left sidebar (issue #717) -->
-        <!-- Roadmap (issue #878) -->
-        <button class="stab" role="tab" id="stab-roadmap"
-                aria-selected="false" onclick="switchTab('roadmap')">
-          <i class="ti ti-map-2"></i>Roadmap
-        </button>
-        <!-- Advisor (issue #881) -->
-        <button class="stab" role="tab" id="stab-advisor"
-                aria-selected="false" onclick="switchTab('advisor')">
-          <i class="ti ti-bulb"></i>Advisor
-        </button>
+        <!-- Planning: Roadmap + Advisor -->
+        <div class="stab-group" id="stab-group-planning">
+          <button class="stab stab-trigger" type="button" id="stab-planning-trigger"
+                  aria-haspopup="true" aria-expanded="false"
+                  onclick="toggleStabDropdown('planning', event)">
+            <i class="ti ti-compass"></i>Planning
+            <i class="ti ti-chevron-down stab-caret"></i>
+          </button>
+          <div class="stab-dropdown" role="menu">
+            <button class="stab" role="menuitem" id="stab-roadmap"
+                    aria-selected="false" onclick="switchTab('roadmap')">
+              <i class="ti ti-map-2"></i>Roadmap
+            </button>
+            <button class="stab" role="menuitem" id="stab-advisor"
+                    aria-selected="false" onclick="switchTab('advisor')">
+              <i class="ti ti-bulb"></i>Advisor
+            </button>
+          </div>
+        </div>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
                 aria-selected="false" onclick="switchTab('settings')">
@@ -7695,6 +7817,36 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
+      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+        <i class="ti ti-checkbox"></i>
+        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+        <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
+        <div class="smgmt-sel-bar-actions">
+          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                  onclick="_smgmtDeleteSelected()">
+            <i class="ti ti-trash"></i> Delete
+          </button>
+          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
+          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+            <i class="ti ti-x"></i> Deselect all
+          </button>
+          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                  onclick="_smgmtMoveToModalOpen()">
+            <i class="ti ti-send"></i> Move to Sprint
+          </button>
+        </div>
+      </div>
+      <!-- Issues tab bulk-close bar (project-level, under tab nav) -->
+      <div class="bulk-action-bar hidden" id="bulk-action-bar" role="status" aria-live="polite">
+        <span class="bab-label" id="bab-label">0 issues selected</span>
+        <div class="bab-results hidden" id="bab-result-list"></div>
+        <div class="bab-spacer"></div>
+        <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close issues</button>
+        <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
+      </div>
     </header>
 
     <!-- Tab content -->
@@ -7730,72 +7882,44 @@
           <span id="smgmt-reest-bg-text">Reestimating…</span>
         </div>
 
-        <!-- Sprint sub-nav: Board / Running / History (issue #798) -->
-        <nav class="subnav" role="tablist" aria-label="Sprint views">
-          <button class="subtab active" id="smgmt-subtab-board" role="tab"
-                  aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
-          <button class="subtab" id="smgmt-subtab-running" role="tab"
-                  aria-selected="false" onclick="_smgmtShowSubView('running')">Running<span
-                  class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
-          <button class="subtab" id="smgmt-subtab-history" role="tab"
-                  aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
-                  class="subtab-badge needs-action" id="smgmt-history-count"
-                  aria-label="Sprints needing your action" hidden>0</span></button>
-          <div class="subnav-actions">
-            <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
-                    onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
-                    aria-label="Clean up empty sprints" style="display:none">
-              <i class="ti ti-trash"></i>
-              Clean up empty sprints
-            </button>
-            <button class="btn-ghost" id="smgmt-plan-next-btn"
-                    onclick="smgmtPlanNextSprint()"
-                    title="Draft the next sprint from the active milestone's backlog"
-                    aria-label="Plan next sprint">
-              <i class="ti ti-wand"></i>
-              Plan next sprint
-            </button>
-            <button class="btn-primary" id="smgmt-new-sprint-btn"
-                    onclick="smgmtOpenNewSprint()" title="Create a new sprint"
-                    aria-label="New Sprint">
-              <i class="ti ti-plus"></i>
-              New Sprint
-            </button>
-          </div>
-        </nav>
+        <!-- Sprint sub-nav: Board / Running / History — sticky within Sprint tab -->
+        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
+          <nav class="subnav" role="tablist" aria-label="Sprint views">
+            <button class="subtab active" id="smgmt-subtab-board" role="tab"
+                    aria-selected="true" onclick="_smgmtShowSubView('board')">Board</button>
+            <button class="subtab" id="smgmt-subtab-running" role="tab"
+                    aria-selected="false" onclick="_smgmtShowSubView('running')">Running<span
+                    class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
+            <button class="subtab" id="smgmt-subtab-history" role="tab"
+                    aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
+                    class="subtab-badge needs-action" id="smgmt-history-count"
+                    aria-label="Sprints needing your action" hidden>0</span></button>
+            <div class="subnav-actions">
+              <button class="btn-ghost" id="smgmt-cleanup-empty-btn"
+                      onclick="_smgmtCleanupEmpty()" title="Delete sprint labels with no tickets"
+                      aria-label="Clean up empty sprints" style="display:none">
+                <i class="ti ti-trash"></i>
+                Clean up empty sprints
+              </button>
+              <button class="btn-ghost" id="smgmt-plan-next-btn"
+                      onclick="smgmtPlanNextSprint()"
+                      title="Draft the next sprint from the active milestone's backlog"
+                      aria-label="Plan next sprint">
+                <i class="ti ti-wand"></i>
+                Plan next sprint
+              </button>
+              <button class="btn-primary" id="smgmt-new-sprint-btn"
+                      onclick="smgmtOpenNewSprint()" title="Create a new sprint"
+                      aria-label="New Sprint">
+                <i class="ti ti-plus"></i>
+                New Sprint
+              </button>
+            </div>
+          </nav>
+        </div>
 
         <!-- Board sub-view (default) -->
         <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
-
-        <!-- Sticky area: toolbar + label filters stick together below the project header -->
-        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
-          <!-- Toolbar -->
-          <div class="smgmt-toolbar" id="smgmt-toolbar">
-            <span class="smgmt-toolbar-title">Sprint Management</span>
-            <div class="smgmt-toolbar-actions">
-              <!-- Auto-refresh pill (issue #275) -->
-              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                        aria-label="Auto-refresh interval">
-                  <i class="ti ti-refresh"></i>
-                  <span id="smgmt-ar-pill-label">15s</span>
-                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-                </button>
-                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                  <div class="smgmt-ar-menu-divider"></div>
-                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Tag chips, search field, and size legend relocated to the Tickets
-               tab (issue #798) — removed from the Sprint pane. -->
-        </div>
 
         <!-- Sprint list -->
         <div class="smgmt-content">
@@ -7831,13 +7955,6 @@
               <span class="bl-header-title">
                 Backlog <span class="bl-header-count" id="smgmt-backlog-count">0 tickets</span>
               </span>
-              <div class="bl-header-add" id="bl-header-add" hidden onclick="event.stopPropagation()">
-                <select class="bl-target bl-target--header" id="bl-target-header"
-                        aria-label="Target sprint" onchange="_blSyncTargetSelects(); _blUpdateWhatIf()"></select>
-                <button class="bl-add-header-btn" id="bl-add-header-btn" type="button" onclick="_blConfirmAdd()">
-                  <span id="bl-add-header-label">Add selected to Sprint</span> ▾
-                </button>
-              </div>
               <div class="bl-header-right">
                 <div class="bl-header-est" onclick="event.stopPropagation()">
                   <button class="smgmt-bulk-est-btn hidden" id="smgmt-backlog-bulk-est-btn"
@@ -8300,6 +8417,7 @@
             </button>
           </div>
           <div class="bc-parallel-banner" id="bc-parallel-banner"></div>
+          <div class="bc-attach-job-warn hidden" id="bc-attach-banner" role="alert"></div>
 
           <!-- Bulk selection controls (issue #534) -->
           <div class="bc-bulk-controls hidden" id="bc-bulk-controls" role="group" aria-label="Bulk selection controls">
@@ -8404,7 +8522,7 @@
               </select>
               <button type="button" class="bc-btn-retry-all hidden" id="bc-retry-all-btn" onclick="bcRetryAllFailed()">Retry all failed (0)</button>
               <button type="button" class="bc-stop-btn" id="bc-stop-btn" onclick="bcStop()">
-                <i class="ti ti-player-stop"></i> Stop after current
+                <i class="ti ti-player-stop"></i> Stop
               </button>
               <button type="button" class="btn-ghost hidden" id="bc-skip-estimate-btn" onclick="bcSkipEstimation()">Skip</button>
               <button type="button" class="btn-primary hidden" id="bc-estimate-btn" onclick="bcStartEstimation()">Estimate drafts &rarr;</button>
@@ -9480,6 +9598,7 @@ const _estDataCache = {};
 let _ticketGroups = [];
 // Sprint ticket map for token header reactivity: label → [ticket, ...]
 let _smgmtBySprint = {};
+let _smgmtOrderedLabels = [];
 // Reverse lookup: issueNum (int) → sprint label
 const _smgmtTicketToSprint = {};
 
@@ -9703,7 +9822,7 @@ function updateProjectHeader(proj) {
 
   const iconEl = document.getElementById('proj-header-icon');
   const nameEl = document.getElementById('proj-header-name');
-  const pillEl = document.getElementById('proj-header-pill');
+  const ghLink = document.getElementById('proj-header-gh-link');
   // Recalculate toolbar sticky top after header content changes
   requestAnimationFrame(_smgmtUpdateToolbarTop);
 
@@ -9716,19 +9835,13 @@ function updateProjectHeader(proj) {
   }
   if (nameEl) nameEl.textContent = proj.name || _slug;
 
-  // Status pill. The "Sprint X running" label is intentionally NOT rendered here
-  // (hotfix #2): it duplicated the sprint-nav status pill and the sub-nav running
-  // dot, and the Sprint-Mgmt auto-refresh pill already governs the Board / Running
-  // / History sub-views. UAT-pending stays — it's a distinct, actionable signal.
-  if (pillEl) {
-    if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
-      const count = proj.uat_count || 0;
-      pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
-        <span class="pill-dot"></span>
-        ${count} UAT pending
-      </span>`;
+  const repo = proj.repo || _cachedFullRepo[_slug];
+  if (ghLink) {
+    if (repo) {
+      ghLink.href = `https://github.com/${repo}`;
+      ghLink.classList.remove('hidden');
     } else {
-      pillEl.innerHTML = '';
+      ghLink.classList.add('hidden');
     }
   }
 
@@ -10324,20 +10437,23 @@ function _bulkUpdateActionBar() {
   const closeBtn = document.getElementById('bab-close-btn');
   if (!bar) return;
   const n = _bulkSelected.size;
-  if (n === 0) {
+  const onIssuesTab = typeof _activeTab === 'undefined' || _activeTab === 'tickets';
+  if (n === 0 || !onIssuesTab) {
     bar.classList.add('hidden');
+    if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
     return;
   }
   bar.classList.remove('hidden');
   document.getElementById('bab-result-list')?.classList.add('hidden');
-  if (labelEl) labelEl.textContent = `${n} ticket${n !== 1 ? 's' : ''} selected`;
+  if (labelEl) labelEl.textContent = `${n} issue${n !== 1 ? 's' : ''} selected`;
   if (closeBtn) {
     closeBtn.disabled    = false;
-    closeBtn.textContent = `Close ${n} Ticket${n !== 1 ? 's' : ''}`;
+    closeBtn.textContent = `Close ${n} issue${n !== 1 ? 's' : ''}`;
     closeBtn.classList.remove('hidden');
   }
   const dismissBtn = document.getElementById('bab-dismiss-btn');
   if (dismissBtn) dismissBtn.textContent = '✕ Clear';
+  if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
 }
 
 function _bulkDeselectAll() {
@@ -10360,7 +10476,7 @@ function openBulkCloseModal() {
   const errEl = document.getElementById('bcm-modal-error');
   if (errEl) errEl.classList.add('hidden');
   const confirmBtn = document.getElementById('bcm-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${_bulkSelected.size} Ticket${_bulkSelected.size !== 1 ? 's' : ''}`; }
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Close ${_bulkSelected.size} issue${_bulkSelected.size !== 1 ? 's' : ''}`; }
   document.getElementById('bcm-backdrop')?.classList.remove('hidden');
   document.getElementById('bcm-modal')?.classList.remove('hidden');
 }
@@ -10705,17 +10821,6 @@ async function init() {
   // Track drag cursor position for the multi-drag pill
   document.addEventListener('dragover', _smgmtDragMovePill);
 
-  // Close move-to menu when clicking outside
-  document.addEventListener('click', function(e) {
-    const menu = document.getElementById('smgmt-move-to-menu');
-    const btn = document.getElementById('smgmt-move-to-btn');
-    if (menu && menu.classList.contains('open')) {
-      if (!menu.contains(e.target) && e.target !== btn) {
-        menu.classList.remove('open');
-      }
-    }
-  });
-
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
   const sprintMgmtPromise =
@@ -10737,6 +10842,7 @@ async function init() {
     prefetchPromise,
     sprintMgmtPromise || Promise.resolve(),
   ]);
+  if (typeof _smgmtArInit === 'function') _smgmtArInit();
 
   // Start 30s sidebar refresh
   startSidebarRefresh();
@@ -10781,8 +10887,10 @@ async function init() {
 function _smgmtUpdateToolbarTop() {
   const header     = document.getElementById('proj-header');
   const stickyArea = document.getElementById('smgmt-sticky-area');
-  if (header && stickyArea) {
-    stickyArea.style.top = header.offsetHeight + 'px';
+  if (header) {
+    const h = header.offsetHeight;
+    document.documentElement.style.setProperty('--proj-header-height', h + 'px');
+    if (stickyArea) stickyArea.style.top = h + 'px';
   }
 }
 
@@ -15419,9 +15527,9 @@ let _fsPreview = null;
 
 
 
-// Close bulk-move dropdown when clicking outside the selection bar
+// Close move-to menu on outside click (legacy no-op — modal uses backdrop)
 document.addEventListener('click', function(e) {
-  const bar = document.getElementById('smgmt-selection-bar');
+  const bar = document.getElementById('proj-selection-bar');
   if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
 });
 
@@ -15619,21 +15727,15 @@ function _blPopulateTarget() {
 /** Reveal/hide the picker bar based on selection and refresh its labels + what-if. */
 function _blUpdateActions() {
   const bar = document.getElementById('bl-actions');
-  const headerAdd = document.getElementById('bl-header-add');
   const whatifBar = document.getElementById('bl-whatif-bar');
   const nums = _blSelectedBacklogNums();
   if (nums.length === 0) {
     if (bar) bar.hidden = true;
-    if (headerAdd) headerAdd.hidden = true;
     if (whatifBar) { whatifBar.hidden = true; whatifBar.innerHTML = ''; }
     return;
   }
   if (bar) bar.hidden = true;
-  if (headerAdd) headerAdd.hidden = false;
-  _blPopulateTarget();
-  const countEl = document.getElementById('bl-sel-count');
-  if (countEl) countEl.textContent = `${nums.length} selected`;
-  _blUpdateWhatIf();
+  if (whatifBar) { whatifBar.hidden = true; whatifBar.innerHTML = ''; }
 }
 
 /** Format minutes as a compact ~Nm / ~N.Nh string. */
@@ -15959,119 +16061,16 @@ let _smgmtMoveFromSprint = null; // current sprint label (null if from backlog)
 
 function _smgmtMoveToOpen(event, issueNum, fromSprintLabel) {
   event.stopPropagation();
-  const popup = document.getElementById('smgmt-moveto-popup');
-  if (!popup) return;
-
-  // Toggle: close if same issue
-  if (_smgmtMoveToIssue === issueNum && !popup.classList.contains('hidden')) {
-    _smgmtMoveToClose();
-    return;
-  }
-
-  _smgmtMoveToIssue    = issueNum;
-  _smgmtMoveFromSprint = fromSprintLabel || null;
-
-  let html = '';
-  _smgmtMoveTargets().forEach(t => {
-    const label = t.label;
-    if (label === fromSprintLabel) return; // skip current sprint
-    const locked = t.running;              // a running sprint can't take new tickets
-    const onclick = locked ? '' : `onclick="_smgmtMoveToConfirm(${issueNum},'${label}')"`;
-    html += `<button class="smgmt-moveto-option" ${locked ? 'disabled' : ''} ${onclick}>` +
-            `${escHtml(sprintLabelDisplay(label))}${locked ? ' (running)' : ''}</button>`;
-  });
-
-  // Only show Backlog option if ticket is currently in a sprint
-  if (fromSprintLabel) {
-    if (html) html += '<hr class="smgmt-moveto-divider">';
-    html += `<button class="smgmt-moveto-option is-backlog" onclick="_smgmtMoveToConfirm(${issueNum},null)">Backlog (remove sprint)</button>`;
-  }
-
-  if (!html) {
-    html = '<div style="padding:10px 14px;font-size:12px;color:var(--text-muted)">No sprints available</div>';
-  }
-
-  popup.innerHTML = html;
-  popup.classList.remove('hidden');
-  popup.setAttribute('aria-label', `Move ticket #${issueNum} to sprint`);
-
-  // Position popup near clicked button. The popup is position:fixed, so it is
-  // anchored to the viewport — use raw getBoundingClientRect() values and do NOT
-  // add window.scrollX/scrollY (doing so misplaced it whenever the page was
-  // scrolled, which is the common case on mobile).
-  const btn = event.currentTarget || event.target;
-  const rect = btn.getBoundingClientRect();
-  const popupH = 200;
-  const popupW = Math.max(rect.width, 160);
-  const spaceBelow = window.innerHeight - rect.bottom;
-  popup.style.top = (spaceBelow < popupH
-    ? Math.max(8, rect.top - popupH)
-    : rect.bottom) + 'px';
-  // Clamp horizontally so the popup never spills off a narrow (mobile) viewport.
-  let left = rect.left;
-  if (left + popupW > window.innerWidth - 8) {
-    left = Math.max(8, window.innerWidth - popupW - 8);
-  }
-  popup.style.left     = left + 'px';
-  popup.style.minWidth = popupW + 'px';
-
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', _smgmtMoveToOutsideHandler);
-  }, 0);
+  _smgmtMoveToModalOpen(issueNum, fromSprintLabel || null);
 }
 
-function _smgmtMoveToOutsideHandler(event) {
-  const popup = document.getElementById('smgmt-moveto-popup');
-  if (!popup || popup.contains(event.target)) return;
-  _smgmtMoveToClose();
-}
+function _smgmtMoveToOutsideHandler() { /* legacy — popup retired */ }
 
 function _smgmtMoveToClose() {
   const popup = document.getElementById('smgmt-moveto-popup');
   if (popup) popup.classList.add('hidden');
   _smgmtMoveToIssue    = null;
   _smgmtMoveFromSprint = null;
-  document.removeEventListener('click', _smgmtMoveToOutsideHandler);
-}
-
-async function _smgmtMoveToConfirm(issueNum, targetLabel) {
-  // Block concurrent moves (issue #276)
-  if (_smgmtMoveLock) return;
-  const fromSprint = _smgmtMoveFromSprint;  // capture before close resets it
-  _smgmtMoveToClose();
-
-  // targetLabel is "sprint-N" or null (backlog)
-  const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
-
-  // Optimistic update
-  if (_smgmtData) {
-    const iss = _smgmtData.issues.find(i => i.number === issueNum);
-    if (iss) iss.sprint = targetNum;
-    _smgmtRender(_smgmtData);
-  }
-
-  const repo = _smgmtRepo();
-  _smgmtBoardLock();
-  try {
-    const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    await loadSprintMgmt();
-  } catch (e) {
-    // Rollback optimistic update
-    if (_smgmtData) {
-      const iss = _smgmtData.issues.find(i => i.number === issueNum);
-      if (iss) iss.sprint = fromSprint ? parseInt(fromSprint.split('-')[1], 10) : null;
-      _smgmtRender(_smgmtData);
-    }
-    _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
-  } finally {
-    _smgmtBoardUnlock();
-  }
 }
 
 // ── Per-row ≡ actions menu (issue #275 follow-up) ──────────────────────────
@@ -16168,33 +16167,36 @@ async function _smgmtRunEstimate(issueNum) {
 
 // ── "Move to" modal (issue #275 follow-up) ─────────────────────────────────
 
-let _smgmtMoveModalIssue = null;
-let _smgmtMoveModalFrom  = null;
+let _smgmtMoveModalIssue  = null;  // single-issue move
+let _smgmtMoveModalFrom   = null;
+let _smgmtMoveModalIssues = [];    // non-empty ⇒ bulk move via selection bar
 
-// Active sprint targets for the move-ticket UIs: the board's known sprint
-// labels (GitHub-derived, incl sub-labels like sprint-66.6), with finished
-// sprints dropped and running ones flagged so the UI locks them. Single source
-// = the board's sprint set, not the all-base-numbers _smgmtData.sprints (which
-// listed old finished sprints like 59/65/66 and never showed sub-labels).
 function _smgmtMoveTargets() {
   const partOf = lbl => {
     const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || '');
     return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
   };
-  return Object.keys(_smgmtBySprint || {})
+  const labels = new Set(Object.keys(_smgmtBySprint || {}));
+  const ordered = _smgmtOrderedLabels
+    || (_smgmtData?.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+  ordered.forEach(lbl => labels.add(lbl));
+  return [...labels]
     .filter(lbl => !_smgmtFinishedLabels.has(lbl))
     .sort((a, b) => { const pa = partOf(a), pb = partOf(b); return pa[0] - pb[0] || pa[1] - pb[1]; })
     .map(lbl => ({ label: lbl, running: _smgmtRunningLabels.has(lbl) }));
 }
 
-function _smgmtMoveToModalOpen(issueNum, fromLabel) {
-  _smgmtRowMenuClose();
-  _smgmtMoveModalIssue = issueNum;
-  _smgmtMoveModalFrom  = fromLabel || null;
+/** Sprint label shared by a selection (multi-select is same-sprint scoped). */
+function _smgmtSelectionSprintLabel(nums) {
+  const iss = (_smgmtData?.issues || []).find(i => i.number === nums[0]);
+  return iss?.sprint_label || null;
+}
 
-  const issue = (_smgmtData?.issues || []).find(i => i.number === issueNum);
-  document.getElementById('mt-ticket-info').textContent =
-    issue ? `#${issue.number} — ${issue.title}` : `#${issueNum}`;
+function _smgmtMoveModalShow({ title, infoLabel, infoText, fromLabel }) {
+  document.getElementById('mt-modal-title').textContent = title;
+  const infoLbl = document.getElementById('mt-info-label');
+  if (infoLbl) infoLbl.textContent = infoLabel;
+  document.getElementById('mt-ticket-info').textContent = infoText;
 
   const targets = _smgmtMoveTargets();
   const nextNum = _smgmtGhostComputeNextFree();
@@ -16203,7 +16205,7 @@ function _smgmtMoveToModalOpen(issueNum, fromLabel) {
   targets.forEach(t => {
     const lbl       = t.label;
     const isCurrent = lbl === fromLabel;
-    const locked    = t.running;            // a running sprint can't take new tickets
+    const locked    = t.running;
     const disabled  = isCurrent || locked;
     const note      = isCurrent ? ' (current)' : (locked ? ' (running — locked)' : '');
     html += `<button class="mt-option" ${disabled ? 'disabled' : ''} onclick="_smgmtMoveModalPick('${lbl}', false)">` +
@@ -16224,25 +16226,70 @@ function _smgmtMoveToModalOpen(issueNum, fromLabel) {
   document.getElementById('mt-modal').classList.remove('hidden');
 }
 
+/**
+ * Open the move-to modal for one issue, or for the current selection when
+ * called with no args (selection bar "Move to Sprint").
+ */
+function _smgmtMoveToModalOpen(issueNum, fromLabel) {
+  _smgmtRowMenuClose();
+  _smgmtCloseMoveToMenu();
+
+  if (issueNum == null) {
+    const selected = Array.from(_smgmtSelectedIssues);
+    if (selected.length === 0) return;
+    if (selected.length === 1) {
+      issueNum = selected[0];
+      fromLabel = _smgmtSelectionSprintLabel(selected);
+    } else {
+      _smgmtMoveModalIssues = selected;
+      _smgmtMoveModalIssue  = null;
+      _smgmtMoveModalFrom   = _smgmtSelectionSprintLabel(selected);
+      _smgmtMoveModalShow({
+        title: 'Move issues to…',
+        infoLabel: 'Selection:',
+        infoText: `${selected.length} issues selected`,
+        fromLabel: _smgmtMoveModalFrom,
+      });
+      return;
+    }
+  }
+
+  _smgmtMoveModalIssues = [];
+  _smgmtMoveModalIssue  = issueNum;
+  _smgmtMoveModalFrom   = fromLabel || null;
+  const issue = (_smgmtData?.issues || []).find(i => i.number === issueNum);
+  _smgmtMoveModalShow({
+    title: 'Move issue to…',
+    infoLabel: 'Issue:',
+    infoText: issue ? `#${issue.number} — ${issue.title}` : `#${issueNum}`,
+    fromLabel: _smgmtMoveModalFrom,
+  });
+}
+
 function _smgmtMoveToModalClose() {
   document.getElementById('mt-backdrop').classList.add('hidden');
   document.getElementById('mt-modal').classList.add('hidden');
-  _smgmtMoveModalIssue = null;
-  _smgmtMoveModalFrom  = null;
+  _smgmtMoveModalIssue  = null;
+  _smgmtMoveModalFrom   = null;
+  _smgmtMoveModalIssues = [];
 }
 
 /** Apply a move chosen in the modal. isNew creates the sprint label first. */
 async function _smgmtMoveModalPick(targetLabel, isNew) {
   if (_smgmtMoveLock) return;
+  const bulkNums  = _smgmtMoveModalIssues.length ? [..._smgmtMoveModalIssues] : null;
   const issueNum  = _smgmtMoveModalIssue;
   const fromLabel = _smgmtMoveModalFrom;
+  _smgmtMoveToModalClose();
+
+  if (bulkNums && bulkNums.length > 0) {
+    await _smgmtMoveModalPickBulk(bulkNums, targetLabel, isNew);
+    return;
+  }
   if (issueNum == null) return;
 
   const repo      = _smgmtRepo();
   const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
-
-  // Close the modal first, then lock the board (mirrors the drag/popup move flow)
-  _smgmtMoveToModalClose();
 
   // Optimistic move
   if (_smgmtData) {
@@ -16273,13 +16320,69 @@ async function _smgmtMoveModalPick(targetLabel, isNew) {
     await loadSprintMgmt();
     _smgmtShowToast(`#${issueNum} moved to ${targetLabel ? 'Sprint ' + targetNum : 'Backlog'}`);
   } catch (e) {
-    // Rollback optimistic move
     if (_smgmtData) {
       const iss = _smgmtData.issues.find(i => i.number === issueNum);
       if (iss) iss.sprint = fromLabel ? parseInt(fromLabel.split('-')[1], 10) : null;
       _smgmtRender(_smgmtData);
     }
     _smgmtShowToast(`Failed to move #${issueNum}: ${e.message}`);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
+/** Bulk move — same batch API as the former selection-bar dropdown. */
+async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
+  const repo = _smgmtRepo();
+  if (!repo || nums.length === 0) return;
+
+  const sprintLabel = targetLabel || 'backlog';
+  const dest = sprintLabel === 'backlog'
+    ? 'Backlog'
+    : `Sprint ${sprintLabel.split('-')[1]}`;
+  const targetNum = sprintLabel === 'backlog'
+    ? null
+    : parseInt(sprintLabel.split('-')[1], 10);
+
+  if (_smgmtData) {
+    nums.forEach(n => {
+      const iss = _smgmtData.issues.find(i => i.number === n);
+      if (iss) iss.sprint = targetNum;
+    });
+    _smgmtClearSelection();
+    _smgmtRender(_smgmtData);
+  }
+
+  _smgmtBoardLock(`Moving ${nums.length} issue${nums.length !== 1 ? 's' : ''} to ${dest}…`);
+  try {
+    if (isNew) {
+      const createRes = await fetch('/api/sprints/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo, sprint_number: targetNum }),
+      });
+      if (!createRes.ok && createRes.status !== 409) {
+        const d = await createRes.json().catch(() => ({}));
+        throw new Error(d.detail || 'HTTP ' + createRes.status);
+      }
+    }
+    const changes = nums.map(n => ({ issue_num: n, sprint_label: sprintLabel }));
+    const res = await fetch('/api/sprints/batch-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes, project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.failed > 0 && data.errors?.length) {
+      _smgmtShowInlineError(`${data.failed} issue${data.failed !== 1 ? 's' : ''} failed to move:\n${data.errors.join('\n')}`);
+    } else if (data.applied > 0) {
+      _smgmtShowToast(`Moved ${data.applied} issue${data.applied !== 1 ? 's' : ''} to ${dest}.`);
+    }
+    await loadSprintMgmt();
+  } catch (e) {
+    _smgmtShowToast('Failed to move issues: ' + e.message);
+    await loadSprintMgmt();
   } finally {
     _smgmtBoardUnlock();
   }
@@ -16695,7 +16798,7 @@ function _smgmtArStartTicker() {
 
 /** Re-trigger the refresh icon's one-shot spin animation. */
 function _smgmtArSpinIcon() {
-  const icon = document.querySelector('#smgmt-ar-pill .ti-refresh');
+  const icon = document.querySelector('#smgmt-ar-pill-refresh .ti-refresh');
   if (!icon) return;
   icon.classList.remove('is-spinning');
   void icon.offsetWidth; // force reflow so the animation restarts
@@ -16742,16 +16845,28 @@ function _smgmtArUpdatePill() {
 function _smgmtArPillClick(event) {
   event.stopPropagation();
   const menu = document.getElementById('smgmt-ar-menu');
-  const pill = document.getElementById('smgmt-ar-pill');
+  const trigger = document.getElementById('smgmt-ar-pill-trigger');
   if (!menu) return;
   const isOpen = !menu.classList.contains('hidden');
   if (isOpen) {
     menu.classList.add('hidden');
-    pill.setAttribute('aria-expanded', 'false');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
   } else {
     _smgmtArUpdatePill(); // refresh checkmarks before showing
     menu.classList.remove('hidden');
-    pill.setAttribute('aria-expanded', 'true');
+    if (trigger) trigger.setAttribute('aria-expanded', 'true');
+  }
+}
+
+/** Manual refresh — icon half of the pill; does not open the interval menu. */
+async function _smgmtArRefreshNow(event) {
+  event.stopPropagation();
+  _smgmtArCloseMenu();
+  _smgmtArSpinIcon();
+  await _smgmtArDoRefresh();
+  if (_arInterval > 0) {
+    _arRemaining = _arInterval;
+    _smgmtArUpdatePill();
   }
 }
 
@@ -16776,9 +16891,9 @@ function _smgmtArTurnOff() {
 /** Close the interval menu. */
 function _smgmtArCloseMenu() {
   const menu = document.getElementById('smgmt-ar-menu');
-  const pill = document.getElementById('smgmt-ar-pill');
+  const trigger = document.getElementById('smgmt-ar-pill-trigger');
   if (menu) menu.classList.add('hidden');
-  if (pill) pill.setAttribute('aria-expanded', 'false');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
 }
 
 // Close menu when clicking outside the pill wrapper
@@ -18761,8 +18876,19 @@ function _bcRenderStep2() {
   // Terminal states: sized, estimate_failed, failed, skipped
   const fullyDone    = sized + estimateFailed + failed + skipped;
 
-  // Banner
+  // Banner (+ job-level attachment warning when pre-commit failed)
   const banner = document.getElementById('bc-parallel-banner');
+  const attachBanner = document.getElementById('bc-attach-banner');
+  if (attachBanner) {
+    if (job.attachment_error) {
+      attachBanner.innerHTML =
+        `<i class="ti ti-alert-triangle"></i><span>${escHtml(job.attachment_error)}</span>`;
+      attachBanner.classList.remove('hidden');
+    } else {
+      attachBanner.innerHTML = '';
+      attachBanner.classList.add('hidden');
+    }
+  }
   if (banner) {
     if (job.status === 'running') {
       banner.innerHTML = `BA is drafting ${total} tickets in parallel — ` +
@@ -18788,7 +18914,8 @@ function _bcRenderStep2() {
 
   // Ticket list — preserve any in-progress editor content before re-rendering
   const list = document.getElementById('bc-ticket-list');
-  if (list) {
+  const stageForList = _bcComputeStage(job);
+  if (list && stageForList !== 'posting') {
     // Save current editor values so they survive the innerHTML replacement
     tickets.forEach(t => {
       if (t.state === 'failed') {
@@ -18837,8 +18964,9 @@ function _bcRenderStep2() {
   const stage = _bcComputeStage(job);
   _bcUpdateStageRail(stage);
 
+  const bcMsSel = document.getElementById('bc-milestone');
   // Hide every right-side control, then reveal only the ones for this stage.
-  [stopBtn, doneBtn, reviewPostBtn, continueBtn, estimateBtn, skipEstBtn, sprintSel].forEach(el => el && el.classList.add('hidden'));
+  [stopBtn, doneBtn, reviewPostBtn, continueBtn, estimateBtn, skipEstBtn, sprintSel, bcMsSel].forEach(el => el && el.classList.add('hidden'));
   // Hide posting-progress unless we're in the posting stage (issue #931)
   if (stage !== 'posting') _bcHidePostingProgress();
 
@@ -18864,7 +18992,6 @@ function _bcRenderStep2() {
     _bcEnsureSprintsLoaded(job);
     _bcEnsureMilestonesLoaded(job);
     if (sprintSel)   sprintSel.classList.remove('hidden');
-    const bcMsSel = document.getElementById('bc-milestone');
     if (bcMsSel)     bcMsSel.classList.remove('hidden');
     if (continueBtn) { continueBtn.disabled = false; continueBtn.title = ''; continueBtn.classList.remove('hidden'); }
   } else if (stage === 4) {                             // ④ Post (you)
@@ -19006,6 +19133,7 @@ function _bcRenderPostingProgress(tickets, postingTicketIndices) {
 
   // Show component, hide ticket list and parallel banner
   pgWrap.classList.remove('hidden');
+  pgWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   const list   = document.getElementById('bc-ticket-list');
   const banner = document.getElementById('bc-parallel-banner');
   const bulk   = document.getElementById('bc-bulk-controls');
@@ -19022,6 +19150,11 @@ function _bcHidePostingProgress() {
   if (pgWrap) pgWrap.classList.add('hidden');
   if (list)   list.classList.remove('hidden');
   if (banner) banner.classList.remove('hidden');
+}
+
+function _bcAttachWarnHtml(t) {
+  if (!t.attachment_warning) return '';
+  return `<div class="bc-attach-warn"><i class="ti ti-alert-triangle"></i>${escHtml(t.attachment_warning)}</div>`;
 }
 
 function _bcRenderCard(t) {
@@ -19057,7 +19190,7 @@ function _bcRenderCard(t) {
       tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
     }
     if (t.attachment_warning) {
-      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+      tags += _bcAttachWarnHtml(t);
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'estimating') {
@@ -19077,7 +19210,7 @@ function _bcRenderCard(t) {
       tags = `<div class="bc-card-tags">${labelsArr.map(l => `<span class="bc-tag">${escHtml(l)}</span>`).join('')}</div>`;
     }
     if (t.attachment_warning) {
-      tags += `<div class="bc-attach-warn">${escHtml(t.attachment_warning)}</div>`;
+      tags += _bcAttachWarnHtml(t);
     }
     actions = `<a class="bc-action-btn" href="${escHtml(issueUrl)}" target="_blank" rel="noopener" title="Open on GitHub">&#x2197;</a>`;
   } else if (t.state === 'estimate_failed') {
@@ -19167,6 +19300,7 @@ function _bcRenderCard(t) {
             <div class="bc-size-warn-banner">
               Body is too large for GitHub (${charCount.toLocaleString()} chars, ${overBy.toLocaleString()} over the 62,000-char limit). Choose a remediation action or skip.
             </div>
+            ${_bcAttachWarnHtml(t)}
             <div class="bc-size-warn-actions">
               <button class="bc-btn-remedy-comment" id="bc-btn-comment-${t.index}"
                   onclick="bcSizeRemedyComment(${t.index})">Move detail to follow-up comment</button>
@@ -19197,6 +19331,7 @@ function _bcRenderCard(t) {
           <textarea class="bc-draft-edit-body" id="bc-draft-body-${t.index}"
                     tabindex="0" oninput="_bcOnDraftEdit(${t.index})">${escHtml(bodyVal)}</textarea>
           ${regenErrHtml}
+          ${_bcAttachWarnHtml(t)}
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
                     onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
@@ -19791,6 +19926,8 @@ async function bcPostSelected() {
   const milestone = (document.getElementById('bc-milestone') || {}).value || '';
   _bcPosting = true;  // → footer shows "Posting…", and we jump to Sprint Mgmt on done
   _bcPostingIndices = toPost.map(t => t.index);  // track which tickets are being posted (issue #931)
+  bcCancelReview();
+  _bcRenderStep2();  // show posting-progress immediately (don't wait for SSE)
 
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {
@@ -19807,15 +19944,15 @@ async function bcPostSelected() {
       if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
       const errBanner = document.getElementById('bc-post-error');
       if (errBanner) { errBanner.textContent = `Post failed: ${errMsg}. Try again.`; errBanner.classList.remove('hidden'); }
+      _bcRenderStep2();
     }
   } catch (e) {
     _bcPosting = false;
     console.error('[bc] post-selected error:', e);
     if (postBtn)  { postBtn.disabled = false;  postBtn.textContent  = 'Post to GitHub'; }
     if (reviewBtn){ reviewBtn.disabled = false; reviewBtn.textContent = 'Post to GitHub'; }
+    _bcRenderStep2();
   }
-
-  bcCancelReview();
 }
 
 // Keyboard: Cmd/Ctrl+Enter triggers Run when Bulk Create tab is active and step 1 is shown
@@ -20333,6 +20470,20 @@ async function _milestoneRefresh() {
 }
 
 /** Render (or clear) the sprint status badge in the sidebar for any project. */
+function _snavSidebarBadgeShouldShow(d, runState, rework, active, store, storeWins) {
+  if (!d || !d.has_sprint) return false;
+  if (rework > 0) return true;
+  if (runState === 'needs_rework') return true;
+  if (runState === 'finished') return true;
+  if (runState === 'running') {
+    if (storeWins && store && (store.run_state === 'running' || store.run_state === 'needs_rework')) {
+      return true;
+    }
+    return active > 0;
+  }
+  return false;
+}
+
 function _snavRenderSidebarBadge(slug, d) {
   const item = document.querySelector(`.sb-proj-item[data-slug="${CSS.escape(slug)}"]`);
   if (!item) return;
@@ -20346,17 +20497,18 @@ function _snavRenderSidebarBadge(slug, d) {
   const rework = cols['needs-rework'] || 0;
   const active = (cols['in-progress'] || 0) + (cols['sit'] || 0) + (cols['uat'] || 0);
 
-  // Determine run_state from the shared store (for current project) or GitHub data (others)
   const isCurrentProject = (slug === _slug);
   const store = isCurrentProject ? _sprintProgressStore : null;
   const storeWins = _sprintStoreOverridesNav(store, d);
   const runState = (storeWins && store) ? store.run_state : (d.state || 'running');
 
+  if (!_snavSidebarBadgeShouldShow(d, runState, rework, active, store, storeWins)) return;
+
   let badgeClass, label;
   if (runState === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
   else if (rework > 0)           { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
   else if (active > 0 || storeWins) { badgeClass = 'sb-sprint-badge--running'; label = 'Running'; }
-  else                           { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
+  else                           { badgeClass = 'sb-sprint-badge--running'; label = 'Running'; }
 
   const sprintShort = storeWins
     ? _sprintPillShortLabel(store.sprint_label, store.sprint)
@@ -22922,8 +23074,7 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 
-<!-- ── Inline multi-select action bar (rendered inside sprint list by JS) ── -->
-<!-- The bar is injected at the top of #smgmt-sprint-list via _smgmtUpdateSelectionUI() -->
+<!-- ── Inline multi-select action bar (proj-selection-bar in header) ── -->
 
 <!-- ── Ghost-confirm modal (issue #364) ── -->
 <div class="modal-backdrop hidden" id="gc-backdrop"></div>
@@ -23037,12 +23188,12 @@ document.addEventListener('keydown', function(e) {
 <div class="modal mt-modal hidden" id="mt-modal"
      role="dialog" aria-modal="true" aria-labelledby="mt-modal-title">
   <div class="modal-header">
-    <span class="modal-title" id="mt-modal-title">Move ticket to…</span>
+    <span class="modal-title" id="mt-modal-title">Move issue to…</span>
     <button class="modal-close" aria-label="Close" onclick="_smgmtMoveToModalClose()">&times;</button>
   </div>
   <div class="modal-body">
     <div class="gc-detail-row">
-      <span class="gc-detail-label">Ticket:</span>&nbsp;
+      <span class="gc-detail-label" id="mt-info-label">Issue:</span>&nbsp;
       <span id="mt-ticket-info"></span>
     </div>
     <div class="mt-options" id="mt-options"></div>
@@ -23386,15 +23537,6 @@ document.addEventListener('keydown', function(e) {
 </div>
 
 <div id="tickets-toast"></div>
-
-<!-- ── Bulk close action bar ── -->
-<div class="bulk-action-bar hidden" id="bulk-action-bar">
-  <span class="bab-label" id="bab-label">0 tickets selected</span>
-  <div class="bab-results hidden" id="bab-result-list"></div>
-  <div class="bab-spacer"></div>
-  <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close Tickets</button>
-  <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
-</div>
 
 <!-- ── Close Ticket modal ── -->
 <div class="modal-backdrop hidden" id="ct-backdrop" onclick="closeTicketModalCancel()"></div>

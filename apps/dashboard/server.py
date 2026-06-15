@@ -8655,94 +8655,25 @@ def get_sprint_estimate_vs_actual(sprint_label: str, project: str):
 
 @app.get("/api/calibration")
 def get_calibration(project: str):
-    """Return average actual time per size bucket across all finished sprints.
+    """Return average actual time per size bucket (legacy calibration tab).
 
-    Scans every sprint-N-state.json in the project's .commander/sprints/
-    directory, matches each ticket's actual elapsed time with its cached
-    size estimate, then averages by bucket.
-
-    Response schema:
-      {
-        "buckets": {
-          "S":  { "avg_minutes": 8.5, "count": 5, "canonical_minutes": 5 },
-          "M":  { "avg_minutes": 18.2, "count": 3, "canonical_minutes": 15 },
-          "L":  { "avg_minutes": null, "count": 0, "canonical_minutes": 30 },
-          "XL": { "avg_minutes": null, "count": 0, "canonical_minutes": 60 }
-        }
-      }
-    avg_minutes is null for buckets with no completed tickets that have
-    both a size estimate and a recorded actual time.
+    Delegates to the durable ``calibration_cache.json`` path used by Analytics
+    so archived sprint state files remain in the dataset.
     """
-    project_root = _project_root_path(project)
-    commander = _commander_dir(project_root)
-    sprints_dir = commander / "sprints"
-    estimates_dir = commander / "estimates"
-
-    def _parse_ts(s: Optional[str]) -> Optional[float]:
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s.rstrip("Z"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except Exception:
-            return None
-
-    # Accumulate (total_minutes, count) per bucket
-    buckets_raw: dict[str, list[float]] = {"S": [], "M": [], "L": [], "XL": []}
-
-    if sprints_dir.exists():
-        for state_path in sprints_dir.glob("sprint-*-state.json"):
-            try:
-                state_data = json.loads(state_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            for iss in state_data.get("issues", []):
-                issue_num = iss.get("number")
-                if issue_num is None:
-                    continue
-
-                # Count any ticket that reached a completed state — done/passed
-                # plus uat/merged — so calibration isn't starved when tickets
-                # finish via UAT rather than a literal "done" status.
-                if iss.get("status") not in ("done", "passed", "uat", "merged"):
-                    continue
-
-                start_ts = _parse_ts(iss.get("coder_started_at"))
-                end_ts = (
-                    _parse_ts(iss.get("tester_finished_at"))
-                    or _parse_ts(iss.get("status_changed_at"))
-                )
-                if start_ts is None or end_ts is None:
-                    continue
-                elapsed_minutes = max(0.0, end_ts - start_ts) / 60.0
-
-                est_path = estimates_dir / f"issue-{issue_num}.json"
-                if not est_path.exists():
-                    continue
-                try:
-                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, OSError):
-                    continue
-
-                size = est_data.get("size") or None
-                if size not in buckets_raw:
-                    continue
-
-                buckets_raw[size].append(elapsed_minutes)
-
+    try:
+        repo = _resolve_project_slug(project)
+    except HTTPException:
+        repo = project
+    data = _compute_calibration(repo)
     canonical = {"S": 5, "M": 15, "L": 30, "XL": 60}
     result_buckets: dict[str, dict] = {}
-    for size in ("S", "M", "L", "XL"):
-        vals = buckets_raw[size]
+    for size in _CALIBRATION_SIZES:
+        row = data["by_size"][size]
         result_buckets[size] = {
-            "avg_minutes": round(sum(vals) / len(vals), 1) if vals else None,
-            "count":       len(vals),
-            "canonical_minutes": canonical[size],
+            "avg_minutes": row["avg_minutes"],
+            "count": row["count"],
+            "canonical_minutes": row.get("configured_minutes") or canonical[size],
         }
-
     return {"buckets": result_buckets}
 
 
@@ -9392,7 +9323,12 @@ def _refresh_calibration_cache(
     project_root: Path,
     configured_minutes: dict[str, int],
 ) -> dict:
-    """Bootstrap archive once, then ingest only new live sprint state files."""
+    """Merge sprint state files into calibration_cache.json (durable local store).
+
+    Live ``sprint-*-state.json`` files and ``archive/`` copies are scanned every
+    refresh; the ``processed`` list prevents double-counting. Aggregates in
+    ``by_size`` persist even after state files are archived or deleted.
+    """
     commander = _commander_dir(project_root)
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
@@ -9404,15 +9340,13 @@ def _refresh_calibration_cache(
         return cache
 
     archive_dir = sprints_dir / "archive"
-    if not cache.get("archive_bootstrap_done") and archive_dir.is_dir():
+    if archive_dir.is_dir():
         for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
             if _calibration_absorb_state_file(
                 cache, state_file, sprints_dir, estimates_dir,
                 configured_minutes, processed,
             ):
                 changed = True
-        cache["archive_bootstrap_done"] = True
-        changed = True
 
     for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
         if _calibration_absorb_state_file(
@@ -9420,6 +9354,10 @@ def _refresh_calibration_cache(
             configured_minutes, processed,
         ):
             changed = True
+
+    if not cache.get("archive_bootstrap_done"):
+        cache["archive_bootstrap_done"] = True
+        changed = True
 
     if changed:
         _save_calibration_cache(commander, cache)
@@ -11330,11 +11268,7 @@ def _init_attachment_cache(repo: str) -> Path:
     """
     cache_dir = _get_attachment_cache_dir(repo)
     if cache_dir.exists():
-        # Fetch latest from origin
-        subprocess.run(
-            ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
-            capture_output=True, text=True, cwd=str(cache_dir),
-        )
+        _sync_attachments_branch_ref(cache_dir)
         return cache_dir
 
     # First use — bare-clone
@@ -11353,6 +11287,55 @@ def _init_attachment_cache(repo: str) -> Path:
         capture_output=True, text=True, check=True,
     )
     return cache_dir
+
+
+def _sync_attachments_branch_ref(cache_dir: Path) -> None:
+    """Fetch origin/attachments and align local HEAD with the remote tip.
+
+    Bare-cache refs/heads/attachments can lag behind origin after another
+  machine pushed; committing on a stale tip causes non-fast-forward push failures.
+    """
+    subprocess.run(
+        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    remote_ref = f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"
+    check = subprocess.run(
+        ["git", "rev-parse", "--verify", remote_ref],
+        capture_output=True, text=True, cwd=str(cache_dir),
+    )
+    if check.returncode == 0:
+        subprocess.run(
+            ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}", remote_ref],
+            capture_output=True, text=True, cwd=str(cache_dir),
+        )
+
+
+_BULK_ATTACHMENT_WARN = (
+    "Attachments were not uploaded to GitHub — add them manually on the attachments branch."
+)
+
+
+def _ticket_has_attachment_assignment(assignments: list, ticket_index: int) -> bool:
+    """True when image_assignments include at least one file for this ticket."""
+    for a in assignments:
+        assignment = a.get("assignment")
+        if assignment == "all" or assignment == ticket_index:
+            if a.get("filename"):
+                return True
+    return False
+
+
+def _apply_bulk_attachment_warning(job: dict, message: str) -> None:
+    """Record a job-level attachment failure and per-ticket warnings where relevant."""
+    job["attachment_error"] = message
+    assignments = job.get("image_assignments") or []
+    for t in job.get("tickets", []):
+        idx = t.get("index")
+        if idx is None:
+            continue
+        if _ticket_has_attachment_assignment(assignments, idx):
+            t["attachment_warning"] = message
 
 
 def _list_existing_attachments(cache_dir: Path, issue_number: int) -> set[str]:
@@ -11480,6 +11463,7 @@ def _commit_attachments_to_branch(
 
         return new_commit_sha
 
+    _sync_attachments_branch_ref(cache_dir)
     new_sha = _do_commit()
 
     # Push to remote
@@ -11490,19 +11474,8 @@ def _commit_attachments_to_branch(
     if push_result.returncode == 0:
         return
 
-    # Push failed — retry once with fresh fetch + rebase
-    subprocess.run(
-        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
-        capture_output=True, text=True, cwd=str(cache_dir),
-    )
-    # Update FETCH_HEAD into the local branch and redo commit on top
-    # Reset local branch to remote
-    subprocess.run(
-        ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}",
-         f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"],
-        capture_output=True, text=True, cwd=str(cache_dir),
-    )
-    # Redo the commit on the new base
+    # Push failed — sync remote tip and retry commit once
+    _sync_attachments_branch_ref(cache_dir)
     _do_commit()
     retry_push = subprocess.run(
         ["git", "push", "origin", f"refs/heads/{_ATTACHMENTS_BRANCH}:refs/heads/{_ATTACHMENTS_BRANCH}"],
@@ -11620,6 +11593,7 @@ def _commit_assets_to_branch(
 
         return new_commit_sha
 
+    _sync_attachments_branch_ref(cache_dir)
     _do_commit()
 
     push_result = subprocess.run(
@@ -11630,16 +11604,8 @@ def _commit_assets_to_branch(
     if push_result.returncode == 0:
         return
 
-    # Retry once on push failure
-    subprocess.run(
-        ["git", "fetch", "origin", _ATTACHMENTS_BRANCH],
-        capture_output=True, text=True, cwd=str(cache_dir),
-    )
-    subprocess.run(
-        ["git", "update-ref", f"refs/heads/{_ATTACHMENTS_BRANCH}",
-         f"refs/remotes/origin/{_ATTACHMENTS_BRANCH}"],
-        capture_output=True, text=True, cwd=str(cache_dir),
-    )
+    # Push failed — sync remote tip and retry commit once
+    _sync_attachments_branch_ref(cache_dir)
     _do_commit()
     retry_push = subprocess.run(
         ["git", "push", "origin",
@@ -12775,10 +12741,19 @@ async def _bulk_flusher(job_id: str) -> None:
         try:
             url_map = await asyncio.to_thread(_do_pre_commit_bulk_images, job_id, job["repo"])
             job["image_url_map"] = url_map
+            if url_map:
+                job.pop("attachment_error", None)
+            else:
+                _apply_bulk_attachment_warning(job, _BULK_ATTACHMENT_WARN)
             _persist_bulk_job(job)
         except Exception as pre_err:
             logger.warning("Bulk image pre-commit failed: %s", str(pre_err)[:200])
             job["image_url_map"] = {}
+            _apply_bulk_attachment_warning(
+                job,
+                f"{_BULK_ATTACHMENT_WARN} ({str(pre_err)[:120]})",
+            )
+            _persist_bulk_job(job)
 
     tickets = job["tickets"]
     n = len(tickets)
@@ -13112,6 +13087,7 @@ async def bulk_create_start(
         "stop_requested": False,
         "has_attachments": len(attachment_file_data) > 0,
         "attachment_filenames": [n for n, _ in attachment_file_data],
+        "attachment_error": None,
         "image_assignments": image_assignments,
         "image_url_map": None,
         "tickets": tickets,
@@ -13532,10 +13508,19 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
                     _do_pre_commit_bulk_images, job["job_id"], job["repo"]
                 )
                 job["image_url_map"] = url_map
+                if url_map:
+                    job.pop("attachment_error", None)
+                else:
+                    _apply_bulk_attachment_warning(job, _BULK_ATTACHMENT_WARN)
                 _persist_bulk_job(job)
             except Exception as _pre_err:
                 logger.warning("Bulk image pre-commit retry failed: %s", str(_pre_err)[:200])
                 job["image_url_map"] = {}
+                _apply_bulk_attachment_warning(
+                    job,
+                    f"{_BULK_ATTACHMENT_WARN} ({str(_pre_err)[:120]})",
+                )
+                _persist_bulk_job(job)
 
         # Resolve the batch's target sprint once ("NEW" → create the next
         # sprint-N label), then persist the concrete label back onto the job.
@@ -13572,6 +13557,13 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
             await _broadcast_bulk_event(job_id, {"type": "ticket_update", "ticket": dict(t)})
 
             body_with_attachments = _build_body_with_images(t.get("body") or "", idx, job)
+
+            if (
+                job.get("has_attachments")
+                and not job.get("image_url_map")
+                and _ticket_has_attachment_assignment(job.get("image_assignments") or [], idx)
+            ):
+                t["attachment_warning"] = job.get("attachment_error") or _BULK_ATTACHMENT_WARN
 
             # Body size guard (issue #261)
             if len(body_with_attachments) > _BC_BODY_SIZE_THRESHOLD:

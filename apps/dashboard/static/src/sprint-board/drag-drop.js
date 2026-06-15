@@ -11,7 +11,7 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
-/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt, sprintLabelDisplay,
+/* global _activeTab, _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtMoveToModalOpen, _smgmtOrderedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, _smgmtUpdateToolbarTop, loadSprintMgmt, sprintLabelDisplay,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
 
 export function isDragBlocked(state) {
@@ -37,90 +37,34 @@ export function computeDropPlan(dragInfo, targetLabel) {
 
 export function _smgmtUpdateSelectionUI() {
   const count = _smgmtSelectedIssues.size;
-  _blUpdateActions();  // refresh the backlog panel picker + what-if (issue #800)
+  _blUpdateActions();
 
-  // Inline selection bar (lives inside smgmt-sprint-list as first child)
-  let bar = document.getElementById('smgmt-selection-bar');
+  // Remove legacy inline bar if present from an older build.
+  document.getElementById('smgmt-selection-bar')?.remove();
+
+  const bar = document.getElementById('proj-selection-bar');
   const listEl = document.getElementById('smgmt-sprint-list');
+  const onSprintTab = typeof _activeTab === 'undefined' || _activeTab === 'sprint-mgmt';
 
-  if (count > 0) {
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'smgmt-selection-bar';
-      bar.className = 'smgmt-selection-bar';
-      bar.setAttribute('role', 'status');
-      bar.setAttribute('aria-live', 'polite');
-      // Build interior once
-      bar.innerHTML = `
-        <i class="ti ti-checkbox"></i>
-        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 tickets selected</strong>
-        <span style="color:var(--text-muted)">— batch move to a sprint or backlog</span>
-        <div class="smgmt-sel-bar-actions">
-          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                  onclick="_smgmtDeleteSelected()">
-            <i class="ti ti-trash"></i> Delete
-          </button>
-          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
-          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-            <i class="ti ti-x"></i> Deselect all
-          </button>
-          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                  onclick="_smgmtToggleMoveToMenu(event)">
-            <i class="ti ti-send"></i> Move to Sprint &#9660;
-          </button>
-          <div class="smgmt-move-to-menu" id="smgmt-move-to-menu"></div>
-        </div>`;
-      if (listEl) listEl.insertBefore(bar, listEl.firstChild);
-    }
+  if (count > 0 && bar && onSprintTab) {
     bar.classList.add('show');
+    bar.classList.remove('hidden');
     if (listEl) listEl.classList.add('has-selection');
-    // Anchor the bar to the sprint being selected: when every selected ticket
-    // belongs to one sprint, sit the bar directly above that sprint's card so
-    // it reads as "this sprint's selection"; a cross-sprint selection falls back
-    // to the top of the list (hotfix #4).
-    _smgmtPositionSelectionBar(bar, listEl);
     const countEl = document.getElementById('smgmt-sel-count');
-    if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
-    _smgmtPopulateMoveToMenu();
-    // Show Delete button only for a single closed/unplanned issue
+    if (countEl) countEl.textContent = count === 1 ? '1 issue selected' : `${count} issues selected`;
     const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
     if (deleteBtn) {
       const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
       deleteBtn.classList.toggle('show', showDelete);
     }
   } else {
-    if (bar) bar.classList.remove('show');
+    if (bar) {
+      bar.classList.remove('show');
+      bar.classList.add('hidden');
+    }
     if (listEl) listEl.classList.remove('has-selection');
   }
-}
-
-// Move the selection bar to sit immediately above the card of the sprint whose
-// tickets are selected. Cross-sprint (or unresolved) selections go to the top of
-// the list. Sticky positioning keeps it visible while scrolling (hotfix #4).
-function _smgmtPositionSelectionBar(bar, listEl) {
-  if (!bar || !listEl) return;
-  try {
-    const labels = new Set();
-    (_smgmtData && _smgmtData.issues || []).forEach(i => {
-      if (_smgmtSelectedIssues.has(i.number) && i.sprint_label) labels.add(i.sprint_label);
-    });
-    let target = null;
-    if (labels.size === 1) {
-      const lbl = [...labels][0];
-      const card = document.getElementById('smgmt-card-' + lbl);
-      if (card && card.parentNode === listEl) target = card;
-    }
-    if (target) {
-      if (bar.nextElementSibling !== target) listEl.insertBefore(bar, target);
-    } else if (listEl.firstChild !== bar) {
-      listEl.insertBefore(bar, listEl.firstChild);
-    }
-  } catch (_) {
-    if (listEl.firstChild !== bar) listEl.insertBefore(bar, listEl.firstChild);
-  }
+  if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
 }
 
 export function _smgmtPopulateSelectionDropdown() {
@@ -133,7 +77,12 @@ function _smgmtMoveTargetLabels() {
     return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
   };
   const finished = _smgmtFinishedLabels || new Set();
-  return Object.keys(_smgmtBySprint || {})
+  const labels = new Set(Object.keys(_smgmtBySprint || {}));
+  // Empty planned sprints (0 tickets) are on the board but absent from bySprint keys.
+  const ordered = _smgmtOrderedLabels
+    || (_smgmtData?.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+  ordered.forEach(lbl => labels.add(lbl));
+  return [...labels]
     .filter(lbl => !finished.has(lbl))
     .sort((a, b) => {
       const pa = partOf(a), pb = partOf(b);
@@ -141,50 +90,15 @@ function _smgmtMoveTargetLabels() {
     });
 }
 
-export function _smgmtPopulateMoveToMenu() {
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (!menu || !_smgmtData) return;
-
-  const selectedNums = Array.from(_smgmtSelectedIssues);
-  const occupiedLabels = new Set(
-    selectedNums.map(n => {
-      const iss = (_smgmtData.issues || []).find(i => i.number === n);
-      return iss ? iss.sprint_label : undefined;
-    }).filter(lbl => lbl != null)
-  );
-
-  let html = '';
-  _smgmtMoveTargetLabels().forEach(label => {
-    if (occupiedLabels.has(label)) return;
-    const running = _smgmtRunningLabels.has(label);
-    const display = typeof sprintLabelDisplay === 'function'
-      ? sprintLabelDisplay(label)
-      : label.replace('sprint-', 'Sprint ');
-    html += `<button class="smgmt-move-to-item" ${running ? 'disabled' : ''} `
-      + `onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">`
-      + `${display}${running ? ' (running)' : ''}</button>`;
-    if (!running && typeof _smgmtHotswapAvailableFor === 'function' && _smgmtHotswapAvailableFor(label)) {
-      html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" `
-        + `onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">`
-        + `${display} — replace (hotswap)</button>`;
-    }
-  });
-  html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
-}
+/** @deprecated Selection bar opens the shared move modal — kept for compat. */
+export function _smgmtPopulateMoveToMenu() {}
 
 export function _smgmtToggleMoveToMenu(event) {
-  event.stopPropagation();
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (!menu) return;
-  _smgmtPopulateMoveToMenu();
-  menu.classList.toggle('open');
+  event?.stopPropagation();
+  if (typeof _smgmtMoveToModalOpen === 'function') _smgmtMoveToModalOpen();
 }
 
-export function _smgmtCloseMoveToMenu() {
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (menu) menu.classList.remove('open');
-}
+export function _smgmtCloseMoveToMenu() {}
 
 export function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {

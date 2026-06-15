@@ -472,7 +472,7 @@ def _write_archive_state(
 
 
 def test_calibration_archive_bootstrap_once(tmp_path):
-    """Archived state files are ingested once into calibration_cache.json."""
+    """Archived state files are ingested into calibration_cache.json and persist."""
     _write_archive_state(tmp_path, "sprint-1", [_done_issue(101, coder_min=10, tester_min=5)])
     _write_estimate(tmp_path, 101, "S")
     data = _calibration(tmp_path).json()
@@ -492,6 +492,20 @@ def test_calibration_archive_bootstrap_once(tmp_path):
     archive_file.parent.rmdir()
     data2 = _calibration(tmp_path).json()
     assert data2["by_size"]["S"]["count"] == 1
+
+
+def test_calibration_picks_up_newly_archived_file(tmp_path):
+    """Archive files are scanned on every refresh, not only once."""
+    _write_archive_state(tmp_path, "sprint-9", [_done_issue(201, coder_min=8, tester_min=2)])
+    _write_estimate(tmp_path, 201, "S")
+    first = _calibration(tmp_path).json()
+    assert first["by_size"]["S"]["count"] == 1
+
+    _write_archive_state(tmp_path, "sprint-10", [_done_issue(202, coder_min=12, tester_min=3)])
+    _write_estimate(tmp_path, 202, "S")
+    second = _calibration(tmp_path).json()
+    assert second["by_size"]["S"]["count"] == 2
+    assert second["by_size"]["S"]["avg_minutes"] == 12.5
 
 
 def test_calibration_incremental_live_without_full_rescan(tmp_path):

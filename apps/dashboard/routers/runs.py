@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -30,13 +30,11 @@ for _p in (str(_DASHBOARD_ROOT),):
 from .runs_service import (  # noqa: E402
     DEFAULT_LOG_LIMIT,
     DEFAULT_TAIL_LINES,
-    count_log_lines,
     get_issue_log_tail,
     get_log_path_from_db,
     list_runs,
     read_log_page,
     read_log_tail,
-    resolve_log_path,
 )
 
 router = APIRouter(tags=["runs"])
@@ -93,8 +91,6 @@ def _resolve_agent_log(sprint: str, issue: int, agent: str) -> Path:
 
     log_file = Path(raw_path).resolve()
     # Constrain to .commander/logs/ allowlist (AC2)
-    allowed_dir = log_file.parent
-    # Walk up to find the .commander/logs/ directory
     # The allowlist check: log_path must be inside a .commander/logs/ directory
     if not _is_within_commander_logs(log_file):
         raise HTTPException(

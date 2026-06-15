@@ -2176,6 +2176,21 @@ def deploy_environment(slug: str, env: str):
     except _deploy_actions.DeployActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Preflight: deploy is pull-only and never switches branches, so a pull of
+    # <branch> while a different branch is checked out aborts with a cryptic
+    # "Not possible to fast-forward". Detect the wrong branch up front and return
+    # an actionable 409. Best-effort — a probe failure never blocks the deploy.
+    cur = subprocess.run(
+        _deploy_actions.build_current_branch_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if cur.returncode == 0:
+        mismatch = _deploy_actions.branch_mismatch_error(
+            cur.stdout, branch, working_dir
+        )
+        if mismatch:
+            raise HTTPException(status_code=409, detail=mismatch)
+
     pull = subprocess.run(
         _deploy_actions.build_pull_command(branch),
         capture_output=True, text=True, cwd=working_dir,
@@ -4412,6 +4427,72 @@ def _coder_clone_path(project_root: Path) -> Path:
     return project_root
 
 
+def _tester_clone_path(project_root: Path) -> Path:
+    """Return the tester clone path for a project root (nested or flat layout)."""
+    nested = project_root / "tester"
+    if nested.exists():
+        return nested
+    flat = project_root.parent / f"{project_root.name}-tester"
+    if flat.exists():
+        return flat
+    return nested
+
+
+def _sprint_yaml_path(project_root: Path) -> Path:
+    return _commander_dir(project_root) / "sprint.yaml"
+
+
+def _ensure_sprint_yaml(project_root: Path, repo: str) -> Optional[Path]:
+    """Ensure project-root sprint.yaml exists for sprint_manager dispatch.
+
+    Without it sprint_manager falls back to stale ~/commander/work-* paths and
+    design-doc guards check the wrong worktree. Generated from the nested/flat
+    clone layout when missing; never overwrites an existing file.
+    """
+    path = _sprint_yaml_path(project_root)
+    if path.exists():
+        return path
+    commander = _commander_dir(project_root)
+    commander.mkdir(parents=True, exist_ok=True)
+    api_url = (os.environ.get("DASHBOARD_API_URL") or "http://localhost:8000").strip()
+    content = (
+        f"repo_name: {repo}\n\n"
+        "worktrees:\n"
+        f"  coder: { _coder_clone_path(project_root) }\n"
+        f"  tester: { _tester_clone_path(project_root) }\n"
+        "  tester_app_subdir: apps/dashboard\n\n"
+        "paths:\n"
+        f"  scripts_dir: { _REPO_ROOT / 'scripts' }\n"
+        f"  logs_dir: { commander / 'logs' }\n"
+        f"  sprints_dir: { commander / 'sprints' }\n"
+        f"  alerts_dir: { commander / 'alerts' }\n\n"
+        "dashboard:\n"
+        f"  api_url: {api_url}\n"
+    )
+    try:
+        path.write_text(content, encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def _sprint_manager_argv(sprint_label: str, repo: str, project_root: Path) -> list[str]:
+    """Build sprint_manager CLI argv with repo + config so dispatch is project-scoped."""
+    argv = [
+        sys.executable,
+        str(SPRINT_MANAGER_PATH),
+        sprint_label,
+        "--alert-mode",
+        _ALERT_MODES,
+        "--repo",
+        repo,
+    ]
+    cfg = _ensure_sprint_yaml(project_root, repo)
+    if cfg is not None:
+        argv.extend(["--config", str(cfg)])
+    return argv
+
+
 def _main_clone_path(project_root: Path) -> Path:
     """Return the main working clone for a project root.
 
@@ -4729,12 +4810,14 @@ def _sprint_db_set_state(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
+                project=project or "",
             )
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
         elif state in ("needs_rework", "cancelled", "failed"):
             # cancelled/failed are legacy callers — all bad endings land in
@@ -4743,6 +4826,7 @@ def _sprint_db_set_state(
                 sprint_label,
                 end_reason=extra_fields.get("end_reason"),
                 ended_at=extra_fields.get("ended_at"),
+                project=project or "",
             )
     except Exception:
         pass
@@ -4887,43 +4971,14 @@ def _live_manager_pid(project_root: Path, sprint_label: str) -> Optional[int]:
     return None
 
 
-def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
-    """Re-assert a sprint's lifecycle state as running in the DB.
-
-    Called when a live manager PID is found for a sprint whose stored state was
-    wrongly flipped to a terminal value. record_sprint_start clears the stale
-    ended_at/end_reason as part of the transition.
-
-    plan.json is NOT written here — GET endpoints call this indirectly and must
-    not mutate plan.json (issue #1096).  The sprint manager owns plan.json writes.
-    """
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    row = None
-    try:
-        row = db.get_sprint(sprint_label)
-    except Exception:
-        pass
-    project = (row or {}).get("project") or ""
-    started_at = (row or {}).get("started_at")
-    try:
-        _sprint_db_set_state(sprint_label, project, "running", started_at=started_at)
-    except Exception:
-        pass
-    _log.warning(
-        "Sprint %s: stored state was terminal but manager PID is alive — "
-        "healed back to running", sprint_label,
-    )
-
-
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint is running.
+    """Check if a sprint is running. Pure read — zero DB writes.
 
     The durable `sprints` table is the authoritative source (issue #757): a
-    sprint is running only when DB state='running' AND its PID is alive. A
-    PID-dead + DB-running row is reconciled to state='needs_rework' and reported as
-    not running. Falls back to plan.json + PID-file scanning only for legacy
-    sprints that have no DB row yet.
+    sprint is running only when DB state='running' AND its PID is alive. Any
+    terminal DB state is treated as definitive — the reconcile service handles
+    state corrections, not this function. Falls back to plan.json + PID-file
+    scanning only for legacy sprints that have no DB row yet.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
@@ -4947,39 +5002,25 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             _db_row = None
     if _db_row is not None:
         if _db_row.get("state") != "running":
-            # Recovery: a reconcile race can flip a still-running sprint to a
-            # terminal state (e.g. a startup sweep landing mid-dispatch before
-            # the PID file is written). If the manager is provably alive, the
-            # stored state is wrong — heal it back to running instead of
-            # reporting the sprint dead forever.
-            if _live_manager_pid(project_root, sprint_label) is not None:
-                _heal_sprint_to_running(project_root, sprint_label)
-                return True
+            # Terminal DB state is authoritative — never flip it back to running.
+            # The reconcile service and startup sweep are now correct; a live PID
+            # alongside a terminal row is not a sign of flip-flop — it is a race
+            # where the manager is shutting down. Report not running.
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
-        # DB=running but PID dead — reconcile DB to needs_rework.
-        # plan.json is NOT written here (issue #1096): GET endpoints call
-        # _is_sprint_running and must not mutate plan.json.
+        # DB=running but PID dead — report not running (reconciler will fix state).
         _log.warning(
-            "Sprint %s: DB state=running but no alive PID — reconciling to needs_rework",
+            "Sprint %s: DB state=running but no alive PID — reporting not running",
             sprint_label,
         )
-        try:
-            db.record_sprint_needs_rework(sprint_label, end_reason="process lost")
-        except Exception:
-            pass
         return False
 
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
         plan_state = plan.get("state")
         if plan_state in _NOT_RUNNING_PLAN_STATES:
-            # Same recovery as the DB branch for legacy (no-DB-row) sprints: a
-            # live manager overrides a stale terminal plan.json.
-            if _live_manager_pid(project_root, sprint_label) is not None:
-                _heal_sprint_to_running(project_root, sprint_label)
-                return True
+            # Terminal plan.json state is authoritative — never flip it back.
             return False
         if plan_state == "running":
             sprints_dir = _commander_dir(project_root) / "sprints"
@@ -5020,13 +5061,9 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
                     return True
                 except OSError:
                     pass
-            # plan.json=running but no alive PID — log and return False.
-            # plan.json is NOT written here (issue #1096): GET endpoints call
-            # _is_sprint_running and must not mutate plan.json.  The startup
-            # sweep (_sweep_plan_json_states) handles the reconcile at boot time.
+            # plan.json=running but no alive PID — report not running (reconciler will fix state).
             _log.warning(
-                "Sprint %s: plan.json=running but no alive PID — not running "
-                "(startup sweep will reconcile plan.json)",
+                "Sprint %s: plan.json=running but no alive PID — reporting not running",
                 sprint_label,
             )
             return False
@@ -5077,10 +5114,6 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         except OSError:
             pass
 
-    # plan.json is NOT created here for legacy sprints (issue #1096):
-    # _is_sprint_running is called from GET endpoints and must not write files.
-    # The sprint manager owns plan.json creation.
-
     return pid_alive
 
 
@@ -5114,17 +5147,7 @@ def _all_sprints_running() -> list[dict]:
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(data, dict) or data.get("state") != "running":
-                # Recovery: a stale terminal plan.json with a provably-alive
-                # manager is still running — a reconcile race flipped it. Heal
-                # and report it, so the running pane doesn't drop a live sprint.
-                if isinstance(data, dict):
-                    _recover_pid = _live_manager_pid(root, label)
-                    if _recover_pid is not None:
-                        _heal_sprint_to_running(root, label)
-                        result.append({
-                            "project": proj["repo"], "sprint_label": label,
-                            "pid": _recover_pid or None,
-                        })
+                # Terminal plan.json state is authoritative — skip; no heal-back.
                 continue
             # Verify PID alive; reconcile dead ones to cancelled
             pid = _get_sprint_pid(root, label)
@@ -6435,8 +6458,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     log_fh = open(log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), body.sprint_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(body.sprint_label, body.project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=log_fh,
@@ -8077,6 +8099,32 @@ def _outcome_from_ingested_row(
             "failure_reason": fr,
         })
 
+    # Rec 2c — union agent_runs so the outcome band agrees with the History
+    # ledger. History (sprint_history_service._finalize_records) unions tickets
+    # recorded in agent_runs but absent from the ingested issues_json snapshot
+    # (e.g. merged in an EARLIER run of this sprint). Without the same union the
+    # outcome band and the History row showed different counts for one sprint.
+    # Additive only — never rewrites a ticket already in result_issues.
+    try:
+        from routers import sprint_history_service  # noqa: PLC0415
+        _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
+        for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
+            _eid = str(_extra.get("number"))
+            if not _eid or _eid in _seen:
+                continue
+            _st = (_extra.get("state") or "").lower()  # merged | closed | open
+            _oc = "done" if _st == "merged" else ("failed" if _st == "closed" else "skipped")
+            result_issues.append({
+                "number": _extra.get("number"),
+                "title": _extra.get("title", ""),
+                "outcome": _oc,
+                "elapsed_secs": None,
+                "failure_reason": None,
+            })
+            _seen.add(_eid)
+    except Exception:
+        pass
+
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"
@@ -8117,6 +8165,8 @@ def _outcome_from_ingested_row(
 _CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
 _SPRINT_WORK_EXCLUDE_LABELS = frozenset({"sprint-summary", "docs", "documentation"})
 _SPRINT_UAT_LABELS = frozenset({"UAT", "UAT-approved", "released"})
+# Canonical lifecycle states that mean the sprint has finished (issue #1093).
+_OUTCOME_TERMINAL_STATES = frozenset({"completed", "needs_rework", "ready_to_merge", "deleted"})
 
 
 def _sprint_work_tickets_all_uat(project: str, sprint_label: str) -> bool:
@@ -8154,21 +8204,27 @@ def _derive_outcome_lifecycle(
     pane_state: str,
     failed_count: int,
 ) -> str:
-    """Board/history lifecycle — derives partial_finished when a re-run child is in flight."""
-    children = children_of(sprint_label, project_root)
-    if children:
-        unsettled = [c for c in children if not _child_sprint_settled(project_root, project, c)]
-        if unsettled:
-            return "partial_finished"
-        if failed_count == 0 and pane_state == "completed":
-            return "ready_to_merge"
-        if _sprint_work_tickets_all_uat(project, sprint_label):
-            return "ready_to_merge"
-    if plan_state == "needs_rework" and failed_count > 0:
-        return "needs_rework"
-    if plan_state == "needs_rework" and failed_count == 0 and pane_state == "completed":
-        return "ready_to_merge"
-    return db.canonical_lifecycle(pane_state)
+    """Board/history lifecycle — DB-only: derives partial_finished when a child is unsettled.
+
+    Reads parent canonical state and child rows exclusively from the sprints DB
+    table (issue #1093). No GitHub label lookups, no disk globs.
+    """
+    row = db.get_sprint(sprint_label)
+    if row is None:
+        return db.canonical_lifecycle(pane_state)
+    parent_state = db.canonical_lifecycle(row["state"])
+    if parent_state not in _OUTCOME_TERMINAL_STATES:
+        return parent_state
+    children = db.get_sprint_children(sprint_label)
+    if not children:
+        return parent_state
+    unsettled = [
+        c for c in children
+        if db.canonical_lifecycle(c["state"]) not in _CHILD_SETTLED_STATES
+    ]
+    if unsettled:
+        return "partial_finished"
+    return parent_state
 
 
 @app.get("/api/sprints/{sprint_label}/outcome")
@@ -9418,6 +9474,17 @@ def get_sprint_finish_card(sprint_label: str, project: str):
     except (json.JSONDecodeError, OSError) as e:
         raise HTTPException(500, detail=str(e))
 
+    # Rec 2d — collapse the disk-vs-DB dual path: populate the DB row from disk on
+    # read so DB-backed readers (outcome, history) converge regardless of which
+    # endpoint the UI hits first. UPDATE-only (never mints a draft row);
+    # best-effort — an ingest hiccup must never break the finish card.
+    _fc_db_row = db.get_sprint(sprint_label)
+    if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
+        try:
+            db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)
+        except Exception:
+            pass
+
     def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
             return None
@@ -9930,6 +9997,10 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
                              parent=sprint_label)
     except Exception:
         pass
+    _sprint_db_set_state(
+        sub_label, project, "running",
+        started_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     stripped_env = _build_sprint_subprocess_env()
     goal_path = _sprint_goal_path(project_root, sprint_label)
@@ -9941,8 +10012,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     run_log_fh = open(run_log_path, "w")
     try:
         proc = subprocess.Popen(
-            [sys.executable, str(SPRINT_MANAGER_PATH), sub_label,
-             "--alert-mode", _ALERT_MODES],
+            _sprint_manager_argv(sub_label, project, project_root),
             env=stripped_env,
             cwd=str(coder_path),
             stdout=run_log_fh,

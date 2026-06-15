@@ -560,7 +560,7 @@ _logger = logging.getLogger("db.sprint_state")
 _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
     "draft":          frozenset({"planned", "running", "ready_to_merge", "needs_rework", "deleted"}),
     "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
-    "running":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
+    "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
     "needs_rework":   frozenset({"running", "deleted"}),
     "completed":      frozenset({"deleted"}),
@@ -1237,16 +1237,18 @@ def record_sprint_start(
 
 
 def record_sprint_finish(label: str, ended_at: str | None = None,
-                         end_reason: str | None = None) -> None:
+                         end_reason: str | None = None,
+                         project: str = "") -> None:
     """Move a sprints row to `completed` (issue #757)."""
     transition_sprint_state(
         label, "completed", actor="manager",
-        end_reason=end_reason, ended_at=ended_at,
+        end_reason=end_reason, ended_at=ended_at, project=project,
     )
 
 
 def record_sprint_needs_rework(label: str, end_reason: str | None = None,
-                               ended_at: str | None = None) -> None:
+                               ended_at: str | None = None,
+                               project: str = "") -> None:
     """Move a sprints row to `needs_rework` with a reason.
 
     Unified-lifecycle terminal for every bad ending: ticket failure, crash,
@@ -1260,11 +1262,12 @@ def record_sprint_needs_rework(label: str, end_reason: str | None = None,
 
 
 def record_sprint_ready_to_merge(label: str, end_reason: str | None = None,
-                                 ended_at: str | None = None) -> None:
+                                 ended_at: str | None = None,
+                                 project: str = "") -> None:
     """Move a sprints row to `ready_to_merge` (run ended, all tickets passed)."""
     transition_sprint_state(
         label, "ready_to_merge", actor="manager",
-        end_reason=end_reason, ended_at=ended_at,
+        end_reason=end_reason, ended_at=ended_at, project=project,
     )
 
 
@@ -1281,7 +1284,7 @@ def record_sprint_fail(label: str, end_reason: str | None = None,
 
 
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
-                         ended_at: str | None) -> None:
+                         ended_at: str | None, project: str = "") -> None:
     ended_at = ended_at or _now_iso()
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
@@ -1289,38 +1292,19 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         # (e.g. a legacy sprint cancelled before its first DB write).
         conn.execute(
             """
-            INSERT INTO sprints (label, state, created_at, ended_at, end_reason)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sprints (label, project, state, created_at, ended_at, end_reason)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(label) DO UPDATE SET
                 state      = excluded.state,
                 ended_at   = excluded.ended_at,
-                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason),
+                project    = CASE
+                    WHEN excluded.project IS NOT NULL AND excluded.project != ''
+                    THEN excluded.project ELSE sprints.project END
             """,
-            (label, state, ended_at, ended_at, end_reason),
+            (label, project or "", state, ended_at, ended_at, end_reason),
         )
         conn.commit()
-
-
-def transition_sprint_state(
-    label: str,
-    to_state: str,
-    actor: str,
-    end_reason: str | None = None,
-) -> tuple[bool, str | None]:
-    """Guarded sprint lifecycle writer — returns (ok, rejection_reason).
-
-    Single authoritative entry-point for running→terminal transitions so the
-    foundation guard (issue #1087) can enforce actor-based ownership.
-    Currently all actors are permitted; #1087 will tighten to require
-    actor="manager" for running→terminal transitions.
-
-    Returns (True, None) on success or (False, reason) when rejected.
-    """
-    _TERMINAL = {"ready_to_merge", "needs_rework", "completed"}
-    if to_state not in _TERMINAL:
-        return (False, f"transition_sprint_state: unsupported to_state={to_state!r}")
-    _set_sprint_terminal(label, to_state, end_reason, None)
-    return (True, None)
 
 
 def rename_sprint(old_label: str, new_label: str) -> None:
@@ -1357,6 +1341,17 @@ def list_sprints_lifecycle() -> list[dict]:
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
         rows = conn.execute("SELECT * FROM sprints").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_sprint_children(parent_label: str) -> list[dict]:
+    """Return sprints rows whose parent_label matches the given label (issue #1093)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute(
+            "SELECT * FROM sprints WHERE parent_label = ? ORDER BY label",
+            (parent_label,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 

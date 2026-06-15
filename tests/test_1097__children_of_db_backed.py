@@ -204,10 +204,21 @@ class TestChildrenOfConsistency:
     """children_of returns the same child set at both outcome-derive and bulk-complete."""
 
     def test_derive_outcome_lifecycle_uses_children_of(self, fresh_db, tmp_path):
-        """_derive_outcome_lifecycle resolves children via children_of, not old functions."""
+        """_derive_outcome_lifecycle resolves children from the DB.
+
+        Superseded by issue #1093: the function now reads child rows exclusively
+        via db.get_sprint_children (no children_of disk glob, no GitHub labels).
+        Children are only resolved when the parent is in a terminal state.
+        """
         _insert_sprint(fresh_db, "sprint-60")
         _insert_sprint(fresh_db, "sprint-60.1", parent_label="sprint-60")
         _insert_sprint(fresh_db, "sprint-60.2", parent_label="sprint-60")
+        # Parent must be terminal for the child-resolution path to run (issue #1093).
+        with fresh_db.get_conn() as conn:
+            conn.execute(
+                "UPDATE sprints SET state = 'completed' WHERE label = ?", ("sprint-60",)
+            )
+            conn.commit()
 
         project_root = tmp_path / "proj"
         project_root.mkdir()
@@ -216,17 +227,15 @@ class TestChildrenOfConsistency:
 
         captured = []
 
-        real_children_of = srv.children_of
+        real_get_children = fresh_db.get_sprint_children
 
-        def _spy(parent_label, project_root=None):
-            result = real_children_of(parent_label, project_root=project_root)
-            captured.append((parent_label, result))
+        def _spy(parent_label):
+            result = real_get_children(parent_label)
+            captured.append((parent_label, [r["label"] for r in result]))
             return result
 
-        with patch("server.children_of", side_effect=_spy), \
-             patch("server._child_sprint_settled", return_value=True), \
-             patch("server._sprint_work_tickets_all_uat", return_value=True):
-            srv._derive_outcome_lifecycle(
+        with patch("db.get_sprint_children", side_effect=_spy):
+            lc = srv._derive_outcome_lifecycle(
                 sprint_label="sprint-60",
                 project_root=project_root,
                 project="owner/repo",
@@ -236,14 +245,16 @@ class TestChildrenOfConsistency:
             )
 
         assert any(parent == "sprint-60" for parent, _ in captured), (
-            "_derive_outcome_lifecycle must call children_of('sprint-60'); "
-            f"captured calls: {captured!r}"
+            "_derive_outcome_lifecycle must resolve children via "
+            f"db.get_sprint_children('sprint-60'); captured calls: {captured!r}"
         )
         # Verify the child set at the call site matches DB
         child_sets = [set(children) for parent, children in captured if parent == "sprint-60"]
         assert any(s == {"sprint-60.1", "sprint-60.2"} for s in child_sets), (
-            f"children_of must return both children at _derive_outcome_lifecycle; got {child_sets!r}"
+            f"get_sprint_children must return both children; got {child_sets!r}"
         )
+        # Children are 'running' (unsettled) → outcome is partial_finished.
+        assert lc == "partial_finished"
 
     def test_bulk_complete_collect_issues_uses_children_of(self, fresh_db, tmp_path):
         """_bulk_complete_collect_issues resolves children via children_of."""

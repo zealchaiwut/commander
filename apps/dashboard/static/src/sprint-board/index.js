@@ -18,6 +18,11 @@ import {
 import {
   _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
 } from './scheduled-run.js';
+import {
+  _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
+  _histToggleCard, _histToggleFold, _histFocusLabel, _histStateChip,
+  _histRenderLedger, _histRerunSprint,
+} from './history.js';
 
 import {
   _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
@@ -214,3 +219,15 @@ globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
 // Plan next sprint + pending-sign-off decoration (issue #861)
 globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
 globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
+
+// History ledger (issue #806 / #797 extraction)
+globalThis._histNeedsActionCount = _histNeedsActionCount;
+globalThis._histLoadLedger = _histLoadLedger;
+globalThis._histScanStale = _histScanStale;
+globalThis._histCleanupStale = _histCleanupStale;
+globalThis._histToggleCard = _histToggleCard;
+globalThis._histToggleFold = _histToggleFold;
+globalThis._histFocusLabel = _histFocusLabel;
+globalThis._histStateChip = _histStateChip;
+globalThis._histRenderLedger = _histRenderLedger;
+globalThis._histRerunSprint = _histRerunSprint;

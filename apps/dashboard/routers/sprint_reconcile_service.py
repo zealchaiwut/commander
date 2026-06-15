@@ -82,17 +82,24 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
     if stored not in _TERMINAL_STATES and stored != "running":
         return None
 
-    # AC1+AC2: when the owning manager process is alive, the reconciler must not
-    # propose any state change — the sprint is actively running.
-    if stored == "running" and _is_manager_pid_alive(label):
-        return None
+    # When the sprint is running, only a *confirmed orphan* may be settled — a
+    # manager PID file that exists but whose process is dead (issue #1088):
+    #  • live PID             → actively running, no patch (AC1/AC2)
+    #  • PID file present+dead → orphaned, settle below (AC3)
+    #  • PID file absent       → unknown; a pure rework signal must NOT flip a
+    #                            running sprint (issue #1095), so leave it running.
+    if stored == "running":
+        if not _manager_pid_file(label).exists():
+            return None
+        if _is_manager_pid_alive(label):
+            return None
 
     try:
         has_rework = srv._has_rework_tickets(label, project)
     except Exception:
         return None
 
-    # AC3: dead-PID running sprint — settle state based on ticket outcomes.
+    # AC3: confirmed-orphan running sprint — settle state based on ticket outcomes.
     if stored == "running":
         if has_rework:
             return {"state": "needs_rework", "end_reason": "reconcile-orphan"}

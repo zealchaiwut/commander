@@ -129,27 +129,27 @@ def test_is_sprint_running_stale_pid_but_state_completed(tmp_path):
 
 
 def test_is_sprint_running_reconciles_dead_pid(tmp_path):
-    """plan.json=running but PID is dead → reconcile to needs_rework (P1)."""
+    """plan.json=running but PID is dead → returns False; plan.json unchanged (read-only, #1096)."""
     root, sprints = _make_project_root(tmp_path)
     server._plan_json_set_state(root, "sprint-5", "running")
-    # Write a clearly dead PID (process 1 is init, not sprint_manager — but
-    # for a truly dead PID test we use a large unlikely number)
+    # Write a clearly dead PID
     (sprints / "sprint-5-pid").write_text("999999999", encoding="utf-8")
-    result = server._is_sprint_running(root, "sprint-5")
+    with patch("server.db.get_sprint", return_value=None):
+        result = server._is_sprint_running(root, "sprint-5")
     assert result is False
-    reconciled = server._read_plan_json(root, "sprint-5")
-    assert reconciled["state"] == "needs_rework"
-    assert reconciled["end_reason"] == "process lost"
+    # _is_sprint_running is read-only — plan.json must NOT be mutated
+    unchanged = server._read_plan_json(root, "sprint-5")
+    assert unchanged["state"] == "running"
+    assert "end_reason" not in unchanged
 
 
-def test_is_sprint_running_no_plan_no_pid_creates_completed(tmp_path):
-    """No plan.json, no PID file → lazy migration to state=completed."""
+def test_is_sprint_running_no_plan_no_pid_not_running(tmp_path):
+    """No plan.json, no PID file → returns False; no lazy plan creation (#1096)."""
     root, _ = _make_project_root(tmp_path)
     result = server._is_sprint_running(root, "sprint-99")
     assert result is False
-    plan = server._read_plan_json(root, "sprint-99")
-    assert plan is not None
-    assert plan["state"] == "completed"
+    # Read-only path — plan.json must NOT be created
+    assert server._read_plan_json(root, "sprint-99") is None
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +175,16 @@ def test_get_sprint_state_returns_plan_json(client, tmp_path):
     assert "created_at" in data
 
 
-def test_get_sprint_state_lazy_migration(client, tmp_path):
-    """No plan.json → lazily creates one and returns it."""
+def test_get_sprint_state_missing_plan_returns_404(client, tmp_path):
+    """No plan.json → returns 404 (not lazy-created).
+
+    Issue #1096: GET endpoints must not write plan.json.  The sprint manager
+    is the sole writer, so missing plan.json returns 404 instead of creating it.
+    """
     resp = client.get("/api/sprints/sprint-42/state?project=myrepo")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["state"] in ("planning", "running", "completed", "cancelled")
+    assert resp.status_code == 404, (
+        f"GET /state with no plan.json must return 404 (issue #1096); got {resp.status_code}"
+    )
 
 
 def test_get_sprint_state_invalid_label(client):

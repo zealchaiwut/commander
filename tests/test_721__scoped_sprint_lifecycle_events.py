@@ -109,6 +109,8 @@ def _run_managed(srv, tmp_path, project="owner/proj-run", label="sprint-90"):
         patch("server._build_sprint_subprocess_env", return_value={}),
         patch("server._plan_json_set_state", return_value=None),
         patch("subprocess.Popen", return_value=mock_proc),
+        patch("services.sprint_manager.sprint_manager.list_backlog_issues",
+              return_value=[{"number": 1, "title": "Backlog ticket", "labels": []}]),
     ]
     with _stack(patches):
         client = TestClient(srv.app)
@@ -135,7 +137,7 @@ def _finish_sprint(srv, tmp_path, owner="owner", repo_name="proj-fin",
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
         patch("server._get_sprint_issues", return_value=issues),
-        patch("server._child_sprint_labels_from_plans", return_value=[]),
+        patch("server.children_of", return_value=[]),
         patch("server._merge_sprint_branch_chain", return_value=[]),
         patch("server._gh_branch_exists", return_value=False),
         patch("server._plan_json_set_state", return_value=None),

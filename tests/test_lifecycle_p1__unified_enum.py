@@ -182,7 +182,7 @@ class TestTerminalWriters:
 # ── AC-4: orphan-PID reconciliation writes needs_rework ──────────────────────
 
 class TestOrphanReconcile:
-    def test_is_sprint_running_reconciles_dead_plan(self, fresh_db, tmp_path):
+    def test_is_sprint_running_reports_not_running_dead_plan(self, fresh_db, tmp_path):
         from server import _is_sprint_running
 
         project_root = tmp_path / "proj"
@@ -192,11 +192,11 @@ class TestOrphanReconcile:
         plan_path.write_text(
             json.dumps({"state": "running", "tickets": [1]}), encoding="utf-8"
         )
-        # No PID file at all → the running claim is dead.
+        # No PID file at all → not running; plan.json unchanged (read-only, #1096).
         assert _is_sprint_running(project_root, "sprint-9") is False
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        assert plan["state"] == "needs_rework"
-        assert plan["end_reason"] == "process lost"
+        assert plan["state"] == "running"
+        assert "end_reason" not in plan
 
     def test_no_cancelled_write_sites_left_in_server(self):
         assert '_plan_json_set_state(project_root, sprint_label, "cancelled"' \
@@ -347,16 +347,17 @@ class TestSprintManagerSource:
 
 class TestPaneSources:
     def test_history_chip_map_has_new_states(self):
-        # Enum keys in board/history lifecycle maps (sprint-lifecycle.md).
+        _HISTORY_SRC = (_REPO_ROOT / "apps/dashboard/static/src/sprint-board/history.js").read_text(encoding="utf-8")
         for needle in ("needs_rework", "ready_to_merge", "partial_finished"):
-            assert needle in _PROJECT_HTML
-        # Human-readable labels in history chips and sprint card badges.
-        # History chips use short labels ('Partial'); card badges use ALL CAPS.
-        for needle in (
-            "Ready to merge", "Partial", "PARTIAL FINISHED",
-            "NEEDS REWORK", "Needs rework",
-        ):
-            assert needle in _PROJECT_HTML, f"missing lifecycle label: {needle!r}"
+            assert needle in _HISTORY_SRC or needle in _BUNDLE_SRC, (
+                f"missing lifecycle enum key: {needle!r}"
+            )
+        for needle in ("Ready to merge", "Partial", "Failed"):
+            assert needle in _HISTORY_SRC or needle in _BUNDLE_SRC, f"missing history chip label: {needle!r}"
+        for needle in ("PARTIAL FINISHED", "NEEDS REWORK"):
+            assert needle in _PROJECT_HTML or needle in _BOARD_RENDER_SRC or needle in _BUNDLE_SRC, (
+                f"missing board badge label: {needle!r}"
+            )
 
     def test_resume_verb_removed(self):
         assert "_histResumeSprint" not in _PROJECT_HTML

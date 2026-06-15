@@ -80,7 +80,10 @@ def test_ac3_start_writes_running_row(fresh_db):
 
 
 def test_ac3_finish_updates_to_completed(fresh_db):
+    # Per the lifecycle spec (issue #1087), running→completed is illegal;
+    # record_sprint_finish must be called from ready_to_merge state.
     fresh_db.record_sprint_start("sprint-99", project="p")
+    fresh_db.record_sprint_ready_to_merge("sprint-99")
     fresh_db.record_sprint_finish("sprint-99")
     row = fresh_db.get_sprint("sprint-99")
     assert row["state"] == "completed"
@@ -144,7 +147,9 @@ def test_ac6_running_but_pid_dead_does_not_report_running(fresh_db):
 
 
 def test_ac6_completed_never_reports_running(fresh_db):
+    # Correct sequence: running → ready_to_merge → completed (issue #1087)
     fresh_db.record_sprint_start("sprint-99", project="p")
+    fresh_db.record_sprint_ready_to_merge("sprint-99")
     fresh_db.record_sprint_finish("sprint-99")
     assert fresh_db.is_sprint_running("sprint-99", pid_alive=True) is False
 

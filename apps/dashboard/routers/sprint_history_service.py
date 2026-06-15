@@ -483,19 +483,9 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
-    lifecycle_state = _normalize_state(row.get("state"))
-    plan = _read_plan_file(sprints_dirs, label) or {}
-    plan_state_raw = plan.get("state") or plan.get("status")
-    plan_state: str | None = None
-    if plan_state_raw:
-        plan_state = _normalize_state(plan_state_raw)
-        if plan_state == "completed" and lifecycle_state not in ("completed", "deleted", "running"):
-            lifecycle_state = "completed"
-        elif plan_state == "deleted" and lifecycle_state != "running":
-            lifecycle_state = "deleted"
-    end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
-    if plan_state == "completed" and plan.get("end_reason"):
-        end_reason = plan.get("end_reason")
+    from . import sprint_state  # noqa: PLC0415
+    lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
+    end_reason = row.get("end_reason") or enrich.get("end_reason")
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
     # Prefer the durable `sprints` columns (written by the finish flow) over the
     # state file, so PR/Summary links on the ledger card don't go missing when an

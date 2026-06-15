@@ -497,6 +497,11 @@
       padding-bottom: 14px;
       border-bottom: 1px solid var(--border);
     }
+    .proj-header-title {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0; flex-shrink: 1;
+    }
+    .proj-header-row-spacer { flex: 1; min-width: 8px; }
     .proj-header-icon {
       width: 22px; height: 22px; border-radius: 5px;
       display: flex; align-items: center; justify-content: center;
@@ -505,7 +510,7 @@
     .proj-header-name {
       font-size: 22px; font-weight: 700; line-height: 1.15;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      flex: 1; min-width: 0;
+      min-width: 0;
     }
     .proj-header-gh-link {
       display: inline-flex; align-items: center; justify-content: center;
@@ -7624,16 +7629,19 @@
     <!-- Project header (sticky within main-area) -->
     <header class="proj-header" id="proj-header">
       <div class="proj-header-row">
-        <div class="proj-header-icon" id="proj-header-icon">
-          <i class="ti ti-folder"></i>
+        <div class="proj-header-title">
+          <div class="proj-header-icon" id="proj-header-icon">
+            <i class="ti ti-folder"></i>
+          </div>
+          <span class="proj-header-name" id="proj-header-name">Loading…</span>
+          <a class="proj-header-gh-link hidden" id="proj-header-gh-link"
+             href="#" target="_blank" rel="noopener noreferrer"
+             title="Open repository on GitHub" aria-label="Open repository on GitHub">
+            <i class="ti ti-brand-github"></i>
+          </a>
         </div>
-        <span class="proj-header-name" id="proj-header-name">Loading…</span>
-        <a class="proj-header-gh-link hidden" id="proj-header-gh-link"
-           href="#" target="_blank" rel="noopener noreferrer"
-           title="Open repository on GitHub" aria-label="Open repository on GitHub">
-          <i class="ti ti-brand-github"></i>
-        </a>
         <span id="proj-header-pill" class="hidden" aria-hidden="true"></span>
+        <div class="proj-header-row-spacer" aria-hidden="true"></div>
         <div class="proj-header-actions">
           <!-- Auto-refresh pill (issue #275) — project-wide, left of Create -->
           <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">

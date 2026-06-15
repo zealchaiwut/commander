@@ -161,9 +161,27 @@ function _histIssueRowHtml(iss, isChild, s) {
   </div>`;
 }
 
+// True when the sprint genuinely failed — not a successful natural end mis-tagged
+// as needs_rework by a stale GitHub reconcile (issue #1137).
+function _histSprintFailed(s) {
+  const st = (s.lifecycle_state || '').toLowerCase();
+  if (st === 'failed') return true;
+  if (st !== 'needs_rework') return false;
+  const er = (s.end_reason || '').toLowerCase();
+  if (er === 'natural' || er === 'merge_sprint') return false;
+  const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+  if (failed.length) return true;
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  if (issues.length && issues.every(i =>
+    (i.state || '').toLowerCase() === 'merged'
+    || (i.agent_status || '').toLowerCase() === 'completed'
+  )) return false;
+  return true;
+}
+
 function _histFailedBlockHtml(s) {
+  if (!_histSprintFailed(s)) return '';
   const state = (s.lifecycle_state || '').toLowerCase();
-  if (state !== 'needs_rework' && state !== 'failed') return '';
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   const sprintReason = s.failure_reason || s.end_reason;
   if (!failed.length && !sprintReason) return '';
@@ -406,6 +424,11 @@ export function _histStateChip(state, sprint) {
   // legacy values (cancelled→needs_rework, failed→needs_rework, …) and derives
   // partial_finished from children's states, so no client-side inference here.
   const s = (state || 'unknown').toLowerCase();
+  const er = sprint && sprint.end_reason ? String(sprint.end_reason).toLowerCase() : '';
+  const displayState = (s === 'needs_rework' && (er === 'natural' || er === 'merge_sprint')
+    && sprint && !_histSprintFailed(sprint))
+    ? 'ready_to_merge'
+    : s;
   const map = {
     completed:        ['completed', 'Completed'],
     ready_to_merge:   ['completed', 'Ready to merge'],
@@ -420,8 +443,8 @@ export function _histStateChip(state, sprint) {
     cancelled: ['failed',    'Failed'],
     planning:  ['planning',  'Draft'],
   };
-  const pair = map[s] || ['unknown', s];
-  const reason = sprint && sprint.end_reason && (s === 'needs_rework' || s === 'failed' || s === 'cancelled')
+  const pair = map[displayState] || ['unknown', displayState];
+  const reason = sprint && sprint.end_reason && _histSprintFailed(sprint)
     ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>`
     : '';
   return `<span class="hist-state ${pair[0]}">${pair[1]}</span>${reason}`;
@@ -491,8 +514,7 @@ function _histGanttHtml(s, stats) {
   const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
-  const _gst = (s.lifecycle_state || '').toLowerCase();
-  const failed = _gst === 'needs_rework' || _gst === 'failed';
+  const sprintFailed = _histSprintFailed(s);
   const crash = stats.crash;
   const rows = tickets.map(t => {
     const segs = (t.segments || []).map(seg => {
@@ -505,7 +527,7 @@ function _histGanttHtml(s, stats) {
     }).join('');
     // The crash ✕ sits on its own ticket's row, at the segment-end offset.
     let marker = '';
-    if (failed && crash && crash.ticket === t.ticket) {
+    if (sprintFailed && crash && crash.ticket === t.ticket) {
       const at = (crash.offset / scale) * 100;
       marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">✕</span>`;
     }
@@ -533,8 +555,7 @@ function _histStatsHtml(s) {
   const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
   const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
 
-  const _gst = (s.lifecycle_state || '').toLowerCase();
-  const sprintFailed = _gst === 'needs_rework' || _gst === 'failed';
+  const sprintFailed = _histSprintFailed(s);
 
   const chips = [];
   if (wall != null) chips.push(_histStatChip('ti-clock', 'wall', _histFmtSecs(wall)));

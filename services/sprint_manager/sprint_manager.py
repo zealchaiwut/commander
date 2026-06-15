@@ -1205,7 +1205,11 @@ def _sprint_branch_for_label(label: str) -> str:
 
 
 def _base_sprint_branch(label: str) -> str:
-    """Branch all per-ticket merges target: sprint/sprint-68 for any 68.x label."""
+    """Base sprint branch for lineage (sprint/sprint-68 for any 68.x label).
+
+    Used when creating child branches off the base and when promoting the chain
+    at Merge Sprint — not as the per-ticket merge target during a child run.
+    """
     return _sprint_branch_for_label(_label_base(label))
 
 
@@ -2640,9 +2644,9 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
         f"- **{r.gate}**: {r.symbol}" for r in results
     )
     if gates_skipped:
-        header = f"Quality gates skipped (`--skip-gates`). Tester verified, then auto-merged into the sprint base branch `{target_branch}`."
+        header = f"Quality gates skipped (`--skip-gates`). Tester verified, then auto-merged into `{target_branch}`."
     else:
-        header = f"Quality gates passed. Tester verified → gates → merged into the sprint base branch `{target_branch}`."
+        header = f"Quality gates passed. Tester verified → gates → merged into `{target_branch}`."
     comment = (
         f"{header}\n\n"
         f"Gates:\n{gate_lines}\n\n"
@@ -8526,8 +8530,10 @@ def run_sprint(
     Returns (SprintSummary, SprintState).
     Supports resume/retry_failed from persisted state.
 
-    target_branch: branch to merge feature branches into. Defaults to the base
-    sprint branch (sprint/sprint-N). Pass 'develop' to override (AC-5 #269).
+    target_branch: branch to merge feature branches into after gates pass.
+    Defaults to this sprint's branch (sprint/sprint-N or sprint/sprint-N.M).
+    Chain promotion (child → base → develop) happens only at Merge Sprint.
+    Pass 'develop' to override (AC-5 #269).
 
     preflight_approved: optional list of issue numbers approved by the pre-flight
     review. When provided, only issues in this list are dispatched; others are
@@ -8568,15 +8574,15 @@ def run_sprint(
         sys.stdout.write(str(f"  sprints-dir:  {cfg.sprints_dir}") + "\n")
         sys.stdout.write(str(f"  api-url:      {cfg.api_url}") + "\n")
 
-    # Determine the sprint branch name and effective merge target.
-    # Per-ticket merges always land on the base sprint branch (sprint/sprint-N).
-    # Child sprint branches (sprint/sprint-N.M) are created off that base branch.
+    # Determine the sprint branch name and per-ticket merge target.
+    # Child sprint branches (sprint/sprint-N.M) are created off the base branch;
+    # per-ticket merges land on THIS sprint's branch (gates fail → no merge).
     # Passing --target-branch develop explicitly is still supported as a
     # deliberate override (AC-5 of issue #269).
     sprint_branch = _sprint_branch_for_label(label)
     base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
-        target_branch = base_merge_target
+        target_branch = sprint_branch
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
@@ -8912,7 +8918,7 @@ def run_sprint(
             continue
 
         # Already-merged guard (hotfix E2): if this ticket's feature branch is
-        # already merged into the sprint base branch, it passed in a prior run —
+        # already merged into the sprint merge target, it passed in a prior run —
         # never re-dispatch it, even if its UAT label was stripped. That is
         # exactly how sprint-73's #931 (merged at 19:35, UAT stripped at 19:50)
         # got re-run into a divergent-branch crash. Trust git, not the label, and

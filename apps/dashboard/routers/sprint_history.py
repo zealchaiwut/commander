@@ -62,6 +62,7 @@ class SprintHistoryItem(BaseModel):
     summary_issue_num: int | None = None
     failure_reason: str | None = None
     has_rerun_child: bool = False
+    partial_children: list[str] = []
     # Post-sprint reconciliation result (issue #856): {all_clear, checks[], ...}
     # or None for sprints that closed before this feature was deployed.
     reconciliation: dict | None = None

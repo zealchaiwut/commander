@@ -937,6 +937,10 @@ export function _smgmtCardHtml(
     hasLedgerRun &&
     (outcomeLifecycle === "ready_to_merge" ||
       (outcomeLifecycle === "completed" && outcomeState === "completed"));
+  const isAwaitingMerge =
+    isReadyToMerge ||
+    (finished && !isRunning && !isHasRework && !planBlocksPostRun);
+  const showRunningChrome = isRunningView && !isAwaitingMerge;
   const isPostRun =
     !isRunningView && !planBlocksPostRun && hasLedgerRun;
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
@@ -1120,15 +1124,15 @@ export function _smgmtCardHtml(
     live && live.time_spent_sec > 0
       ? `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">elapsed ${_fmtRunningTime(live.time_spent_sec)}</span>`
       : `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}"></span>`;
-  const runningBadgeHtml = isRunningView
+  const runningBadgeHtml = showRunningChrome
     ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${isLinger ? "done" : runningRatio}</span>`
     : "";
-  const runningStripeHtml = isRunningView
+  const runningStripeHtml = showRunningChrome
     ? '<div class="smgmt-running-stripe"></div>'
     : "";
   const runningClass = isRunning
     ? " smgmt-running"
-    : isLinger
+    : isLinger && !isAwaitingMerge
       ? " smgmt-linger"
       : "";
 
@@ -1151,13 +1155,13 @@ export function _smgmtCardHtml(
                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
+          ${parentLineage}
           ${runningBadgeHtml}
-          ${isRunningView ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
+          ${showRunningChrome ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
           ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
-          ${parentLineage}
           <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">

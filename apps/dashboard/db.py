@@ -571,6 +571,11 @@ _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
 _GUARD_FROM: frozenset[str] = frozenset({"running"})
 _GUARD_TO: frozenset[str] = frozenset({"ready_to_merge", "needs_rework", "completed"})
 
+# Reconciler-only promotions not in the general edge table (issue #1137).
+_RECONCILE_ONLY_EDGES: frozenset[tuple[str, str]] = frozenset({
+    ("needs_rework", "ready_to_merge"),
+})
+
 
 class TransitionResult:
     """Returned by transition_sprint_state to signal acceptance or rejection."""
@@ -609,7 +614,11 @@ def transition_sprint_state(
     current = canonical_lifecycle(row["state"] if row else "draft")
 
     allowed = _LEGAL_SPRINT_EDGES.get(current, frozenset())
-    if to_state not in allowed:
+    reconcile_promote = (
+        actor == "reconcile"
+        and (current, to_state) in _RECONCILE_ONLY_EDGES
+    )
+    if to_state not in allowed and not reconcile_promote:
         msg = (
             f"sprint {label!r}: illegal edge {current!r}→{to_state!r} "
             f"by actor={actor!r} (allowed: {sorted(allowed)})"

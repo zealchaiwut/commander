@@ -60,8 +60,8 @@ def test_terminal_parent_all_children_settled_returns_db_state():
     assert lc == "completed"
 
 
-def test_terminal_parent_child_ready_to_merge_is_settled():
-    """ready_to_merge child counts as settled (in _CHILD_SETTLED_STATES)."""
+def test_terminal_parent_child_ready_to_merge_is_partial():
+    """ready_to_merge child is still open — parent stays partial_finished."""
     db.record_sprint_start("sprint-20", project="test/repo")
     db.record_sprint_finish("sprint-20")
     db.record_sprint_start("sprint-20.1", project="test/repo", parent_label="sprint-20")
@@ -70,7 +70,7 @@ def test_terminal_parent_child_ready_to_merge_is_settled():
     lc = srv._derive_outcome_lifecycle(
         "sprint-20", Path("/unused"), "test/repo", "", "", 0,
     )
-    assert lc == "completed"
+    assert lc == "partial_finished"
 
 
 # ── AC5 / UAT3 ────────────────────────────────────────────────────────────────

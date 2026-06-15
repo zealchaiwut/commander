@@ -918,10 +918,29 @@ Replace the existing draft (${data.existing_label})?`
     <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
   </div>`;
   }
+  function _histSprintFailed(s) {
+    const st = (s.lifecycle_state || "").toLowerCase();
+    if (st === "failed")
+      return true;
+    if (st !== "needs_rework")
+      return false;
+    const er = (s.end_reason || "").toLowerCase();
+    if (er === "natural" || er === "merge_sprint")
+      return false;
+    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+    if (failed.length)
+      return true;
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (issues.length && issues.every(
+      (i) => (i.state || "").toLowerCase() === "merged" || (i.agent_status || "").toLowerCase() === "completed"
+    ))
+      return false;
+    return true;
+  }
   function _histFailedBlockHtml(s) {
-    const state = (s.lifecycle_state || "").toLowerCase();
-    if (state !== "needs_rework" && state !== "failed")
+    if (!_histSprintFailed(s))
       return "";
+    const state = (s.lifecycle_state || "").toLowerCase();
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
     const sprintReason = s.failure_reason || s.end_reason;
     if (!failed.length && !sprintReason)
@@ -1071,6 +1090,8 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _histStateChip(state, sprint) {
     const s = (state || "unknown").toLowerCase();
+    const er = sprint && sprint.end_reason ? String(sprint.end_reason).toLowerCase() : "";
+    const displayState = s === "needs_rework" && (er === "natural" || er === "merge_sprint") && sprint && !_histSprintFailed(sprint) ? "ready_to_merge" : s;
     const map = {
       completed: ["completed", "Completed"],
       ready_to_merge: ["completed", "Ready to merge"],
@@ -1085,8 +1106,8 @@ Replace the existing draft (${data.existing_label})?`
       cancelled: ["failed", "Failed"],
       planning: ["planning", "Draft"]
     };
-    const pair = map[s] || ["unknown", s];
-    const reason = sprint && sprint.end_reason && (s === "needs_rework" || s === "failed" || s === "cancelled") ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>` : "";
+    const pair = map[displayState] || ["unknown", displayState];
+    const reason = sprint && sprint.end_reason && _histSprintFailed(sprint) ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>` : "";
     return `<span class="hist-state ${pair[0]}">${pair[1]}</span>${reason}`;
   }
   function _histStatChip(icon, label, value, cls) {
@@ -1142,8 +1163,7 @@ Replace the existing draft (${data.existing_label})?`
     if (!tickets.length)
       return "";
     const scale = Math.max(1, stats.wall_seconds || 0);
-    const _gst = (s.lifecycle_state || "").toLowerCase();
-    const failed = _gst === "needs_rework" || _gst === "failed";
+    const sprintFailed = _histSprintFailed(s);
     const crash = stats.crash;
     const rows = tickets.map((t) => {
       const segs = (t.segments || []).map((seg) => {
@@ -1155,7 +1175,7 @@ Replace the existing draft (${data.existing_label})?`
         return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
       }).join("");
       let marker = "";
-      if (failed && crash && crash.ticket === t.ticket) {
+      if (sprintFailed && crash && crash.ticket === t.ticket) {
         const at = crash.offset / scale * 100;
         marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">\u2715</span>`;
       }
@@ -1174,8 +1194,7 @@ Replace the existing draft (${data.existing_label})?`
     const hasRuns = !!(stats && stats.has_runs);
     const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
     const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
-    const _gst = (s.lifecycle_state || "").toLowerCase();
-    const sprintFailed = _gst === "needs_rework" || _gst === "failed";
+    const sprintFailed = _histSprintFailed(s);
     const chips = [];
     if (wall != null)
       chips.push(_histStatChip("ti-clock", "wall", _histFmtSecs(wall)));
@@ -5043,6 +5062,8 @@ ${data.errors.join("\n")}`);
     const hasLedgerRun = _smgmtHasLedgerRun(label);
     const isHasRework = hasLedgerRun && (outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled");
     const isReadyToMerge = hasLedgerRun && (outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed");
+    const isAwaitingMerge = isReadyToMerge || finished && !isRunning && !isHasRework && !planBlocksPostRun;
+    const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
     const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
@@ -5149,9 +5170,9 @@ ${data.errors.join("\n")}`);
     const runningTotal = live ? live.total_count || tickets.length : tickets.length;
     const runningRatio = runningTotal > 0 ? `${runningComplete}/${runningTotal}` : "\u2014";
     const runningElapsed = live && live.time_spent_sec > 0 ? `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">elapsed ${_fmtRunningTime(live.time_spent_sec)}</span>` : `<span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}"></span>`;
-    const runningBadgeHtml = isRunningView ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${isLinger ? "done" : runningRatio}</span>` : "";
-    const runningStripeHtml = isRunningView ? '<div class="smgmt-running-stripe"></div>' : "";
-    const runningClass = isRunning ? " smgmt-running" : isLinger ? " smgmt-linger" : "";
+    const runningBadgeHtml = showRunningChrome ? `<span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}"><span class="smgmt-running-badge-dot"></span>${isLinger ? "done" : runningRatio}</span>` : "";
+    const runningStripeHtml = showRunningChrome ? '<div class="smgmt-running-stripe"></div>' : "";
+    const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
     return `
@@ -5169,13 +5190,13 @@ ${data.errors.join("\n")}`);
                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
             <i class="ti ti-chevron-down"></i></button>
           <span class="smgmt-sprint-name sc-name">${escHtml(sprintLabelDisplay(label))}</span>
+          ${parentLineage}
           ${runningBadgeHtml}
-          ${isRunningView ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
+          ${showRunningChrome ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
           ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
-          ${parentLineage}
           <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">

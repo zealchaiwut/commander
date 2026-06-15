@@ -401,8 +401,8 @@ def test_read_plan_prefers_commander_sprints_dir(tmp_path):
     assert plan["end_reason"] == "bulk_complete"
 
 
-def test_parent_completed_when_ready_to_merge_child_settles(client, fresh_db, tmp_path, monkeypatch):
-    """Bottom-up partial_finished pass must not strand parents on ready_to_merge kids."""
+def test_parent_partial_when_ready_to_merge_child_open(client, fresh_db, tmp_path, monkeypatch):
+    """Parent stays partial_finished while any descendant awaits Merge Sprint."""
     sprints_dir = tmp_path / "sprints"
     monkeypatch.setattr(svc, "DEFAULT_SPRINTS_DIR", sprints_dir, raising=False)
     _insert_lifecycle(fresh_db, "sprint-68", "completed", project="o/r",
@@ -415,7 +415,8 @@ def test_parent_completed_when_ready_to_merge_child_settles(client, fresh_db, tm
         "sprint-68.5", "o/r", "deleted", issues=[], end_reason="deleted via dashboard",
     )
     parent = _by_label(client.get("/api/sprints/history").json(), "sprint-68")
-    assert parent["lifecycle_state"] == "completed"
+    assert parent["lifecycle_state"] == "partial_finished"
+    assert "sprint-68.4" in parent.get("partial_children", [])
 
 
 def test_history_honors_plan_bulk_complete_over_stale_db(client, fresh_db, tmp_path, monkeypatch):

@@ -274,20 +274,21 @@ class TestHistoryLifecycle:
             "written at the source now"
         )
 
-    def test_failed_tickets_promote_to_needs_rework(self, tmp_path):
+    def test_failed_tickets_do_not_downgrade_ready_to_merge(self, tmp_path):
+        """Fix-round failures in the ledger must not overturn a successful end."""
         from routers.sprint_history_service import _finalize_records
         rec = _rec("sprint-5", "ready_to_merge",
                    failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
         _finalize_records([rec], tmp_path)
-        assert rec["lifecycle_state"] == "needs_rework"
-        assert rec["failure_reason"] == "boom"
+        assert rec["lifecycle_state"] == "ready_to_merge"
 
-    def test_failed_tickets_do_not_downgrade_completed(self, tmp_path):
+    def test_failed_tickets_promote_to_needs_rework(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
-        rec = _rec("sprint-5", "completed",
+        rec = _rec("sprint-5", "planned",
                    failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
         _finalize_records([rec], tmp_path)
-        assert rec["lifecycle_state"] == "completed"
+        assert rec["lifecycle_state"] == "needs_rework"
+        assert rec["failure_reason"] == "boom"
 
     def test_parent_with_unfinished_child_is_partial_finished(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
@@ -297,6 +298,14 @@ class TestHistoryLifecycle:
         assert parent["lifecycle_state"] == "partial_finished"
         assert parent["partial_children"] == ["sprint-68.1"]
         assert child["lifecycle_state"] == "needs_rework"
+
+    def test_parent_with_ready_to_merge_child_is_partial_finished(self, tmp_path):
+        from routers.sprint_history_service import _finalize_records
+        parent = _rec("sprint-68", "needs_rework")
+        child = _rec("sprint-68.2", "ready_to_merge")
+        _finalize_records([parent, child], tmp_path)
+        assert parent["lifecycle_state"] == "partial_finished"
+        assert parent["partial_children"] == ["sprint-68.2"]
 
     def test_parent_flips_completed_when_children_settle(self, tmp_path):
         from routers.sprint_history_service import _finalize_records

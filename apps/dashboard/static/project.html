@@ -2755,7 +2755,7 @@
     /* Parent sprint lineage indicator */
     .smgmt-sprint-lineage {
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
-      opacity: .8;
+      opacity: .8; margin-left: 6px;
     }
     .smgmt-sprint-unit { display: flex; flex-direction: column; }
     .smgmt-done-badge {
@@ -4105,11 +4105,27 @@
       background: linear-gradient(180deg, var(--green-bg) 0%, transparent 100%);
     }
 
-    /* Post-run linger: frozen running snapshot, greyscaled for one hour. */
-    .smgmt-sprint-card.smgmt-linger,
-    .run-shell.linger {
+    /* Post-run linger: frozen running snapshot. Success runs greyscale; rework keeps yellow. */
+    .smgmt-sprint-card.smgmt-linger:not(.smgmt-needs-rework),
+    .run-shell.linger:not(.run-shell--rework) {
       filter: grayscale(1);
       opacity: .78;
+    }
+    .smgmt-sprint-card.smgmt-linger.smgmt-needs-rework {
+      filter: none;
+      opacity: 1;
+      border-color: var(--yellow);
+      box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .smgmt-sprint-card.smgmt-linger.smgmt-needs-rework .smgmt-sprint-header {
+      background: linear-gradient(180deg, var(--yellow-bg) 0%, transparent 100%);
+    }
+    .smgmt-sprint-card.smgmt-linger.smgmt-needs-rework .smgmt-running-stripe {
+      background: var(--yellow);
+    }
+    .smgmt-sprint-card.smgmt-linger.smgmt-needs-rework .smgmt-running-badge-dot {
+      animation: none;
+      background: var(--yellow);
     }
     .smgmt-sprint-card.smgmt-linger {
       border-color: var(--text-sub);

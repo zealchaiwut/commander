@@ -156,6 +156,16 @@ def test_ac3_rejection_result_has_reason(fresh_db):
 
 # ── AC4: actor guard on running→terminal ─────────────────────────────────────
 
+def test_reconcile_promotes_needs_rework_to_ready_to_merge(fresh_db):
+    """Reconciler may promote a mis-tagged natural success back to ready_to_merge."""
+    fresh_db.record_sprint_start("s", project="p")
+    fresh_db.record_sprint_ready_to_merge("s", end_reason="natural")
+    fresh_db.record_sprint_needs_rework("s", end_reason="natural")
+    r = fresh_db.transition_sprint_state("s", "ready_to_merge", actor="reconcile")
+    assert r.accepted is True
+    assert fresh_db.get_sprint("s")["state"] == "ready_to_merge"
+
+
 def test_ac4_running_to_needs_rework_reconcile_rejected(fresh_db):
     """Core guard case from the bug report."""
     _set_state_direct(fresh_db, "s", "running")

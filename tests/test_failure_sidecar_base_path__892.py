@@ -5,15 +5,13 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 # Add dashboard to path like logs_stats_service does
 import sys
 _dashboard_root = Path(__file__).resolve().parent.parent / "apps" / "dashboard"
 if str(_dashboard_root) not in sys.path:
     sys.path.insert(0, str(_dashboard_root))
 
-from routers.logs_stats_service import _get_projects_base, _runtime_dirs_for_project, _read_failure_sidecar
+from routers.logs_stats_service import _get_projects_base, _runtime_dirs_for_project, _read_failure_sidecar  # noqa: E402
 
 
 # AC1: _PROJECTS_BASE resolves from COMMANDER_BASE, not hardcoded ~/dev
@@ -70,7 +68,7 @@ def test_failure_sidecar__logs_resolved_path_debug():
     with tempfile.TemporaryDirectory() as tmpdir:
         with mock.patch.dict(os.environ, {"COMMANDER_BASE": tmpdir}):
             with mock.patch("routers.logs_stats_service._log") as mock_log:
-                result = _get_projects_base()
+                _get_projects_base()
                 # Should have called _log.debug with the resolved path
                 mock_log.debug.assert_called()
                 call_args = mock_log.debug.call_args

@@ -30,12 +30,21 @@ Use company Cline subscription for sprint **coder** dispatches only; keep
 tester/BA/documentor on Claude Code. Design:
 [features/coder-backends.md](features/coder-backends.md).
 
-- [ ] **Phase 1 — pluggable coder backend:** `COMMANDER_CODER_BACKEND=cline|claude`
-      (default `claude`); update `_dispatch_coder()`, `_dispatch_doctor()`, and
-      `_doctor_probe_auth()` in `services/sprint_manager/sprint_manager.py`
-- [ ] **Phase 2 — Cline worktree setup:** `cline auth` in `~/dev/commander/coder`,
-      replicate MCP (codedb/github/sqlite), add `.clinerules` from
-      `.claude/agents/coder.md`
+**Setup script (local or remote Mac mini):**
+
+```bash
+bash scripts/setup_cline.sh                  # install + doctor
+cd ~/dev/commander/coder && cline auth       # interactive — pick subscription OR API key
+bash scripts/setup_cline.sh --enable-followups   # safer default
+# bash scripts/setup_cline.sh --enable-always     # full Cline coder
+```
+
+See [machine-onboarding.md](machine-onboarding.md#cline-coder-backend-migration).
+
+- [x] **Phase 1 — pluggable coder backend:** `agent_config.coder.backend` +
+      `use_cline_followups` in sprint.yaml (landed #916–#920)
+- [ ] **Phase 2 — Cline worktree setup:** run `scripts/setup_cline.sh` on each
+      machine that dispatches coders (including remote Mac mini after migration)
 - [ ] **Phase 3 — telemetry (optional):** Cline hooks or `--json` log parsing into
       `/api/agent-event` and `/api/token-usage` so dashboard shows coder activity
 - [ ] **Validation:** 2–3 manual tickets through Cline coder before first
@@ -69,6 +78,17 @@ failed step** instead of redoing everything:
       per-issue estimator (or bump the size) so the budget/forecast and
       model-routing reflect reality on the retry, rather than reusing the stale
       pre-failure estimate.
+
+### Bulk create attachments — durable storage (deferred)
+
+Fix A (sync bare-cache ref before push) and B (surface `attachment_warning` in UI)
+shipped 2026-06-15. Remaining hardening:
+
+- [ ] **Persist upload bytes under `.commander/bulk-jobs/{job_id}/files/`** instead of
+      temp-only dirs (`tempfile.mkdtemp`) that vanish on server restart. Today a
+      restart between draft and post leaves `has_attachments` true but no bytes on
+      disk, so pre-commit retries return an empty `image_url_map` with no recovery
+      path except re-uploading.
 
 ### Pending — model/UI fixes (start AFTER sprint-67.1 finishes; one PR)
 

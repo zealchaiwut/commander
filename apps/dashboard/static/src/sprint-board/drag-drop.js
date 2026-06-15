@@ -11,7 +11,7 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
-/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt, sprintLabelDisplay,
+/* global _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtOrderedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, loadSprintMgmt, sprintLabelDisplay,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
 
 export function isDragBlocked(state) {
@@ -44,14 +44,14 @@ export function _smgmtUpdateSelectionUI() {
 
   const bar = document.getElementById('proj-selection-bar');
   const listEl = document.getElementById('smgmt-sprint-list');
+  const onSprintTab = typeof _activeTab === 'undefined' || _activeTab === 'sprint-mgmt';
 
-  if (count > 0 && bar) {
+  if (count > 0 && bar && onSprintTab) {
     bar.classList.add('show');
     bar.classList.remove('hidden');
     if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
-    if (countEl) countEl.textContent = count === 1 ? '1 ticket selected' : `${count} tickets selected`;
-    _smgmtPopulateMoveToMenu();
+    if (countEl) countEl.textContent = count === 1 ? '1 issue selected' : `${count} issues selected`;
     const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
     if (deleteBtn) {
       const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
@@ -64,6 +64,7 @@ export function _smgmtUpdateSelectionUI() {
     }
     if (listEl) listEl.classList.remove('has-selection');
   }
+  if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
 }
 
 export function _smgmtPopulateSelectionDropdown() {
@@ -76,7 +77,12 @@ function _smgmtMoveTargetLabels() {
     return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
   };
   const finished = _smgmtFinishedLabels || new Set();
-  return Object.keys(_smgmtBySprint || {})
+  const labels = new Set(Object.keys(_smgmtBySprint || {}));
+  // Empty planned sprints (0 tickets) are on the board but absent from bySprint keys.
+  const ordered = _smgmtOrderedLabels
+    || (_smgmtData?.order || []).filter(l => /^sprint-\d+(\.\d+)*$/.test(l));
+  ordered.forEach(lbl => labels.add(lbl));
+  return [...labels]
     .filter(lbl => !finished.has(lbl))
     .sort((a, b) => {
       const pa = partOf(a), pb = partOf(b);
@@ -84,50 +90,15 @@ function _smgmtMoveTargetLabels() {
     });
 }
 
-export function _smgmtPopulateMoveToMenu() {
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (!menu || !_smgmtData) return;
-
-  const selectedNums = Array.from(_smgmtSelectedIssues);
-  const occupiedLabels = new Set(
-    selectedNums.map(n => {
-      const iss = (_smgmtData.issues || []).find(i => i.number === n);
-      return iss ? iss.sprint_label : undefined;
-    }).filter(lbl => lbl != null)
-  );
-
-  let html = '';
-  _smgmtMoveTargetLabels().forEach(label => {
-    if (occupiedLabels.has(label)) return;
-    const running = _smgmtRunningLabels.has(label);
-    const display = typeof sprintLabelDisplay === 'function'
-      ? sprintLabelDisplay(label)
-      : label.replace('sprint-', 'Sprint ');
-    html += `<button class="smgmt-move-to-item" ${running ? 'disabled' : ''} `
-      + `onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">`
-      + `${display}${running ? ' (running)' : ''}</button>`;
-    if (!running && typeof _smgmtHotswapAvailableFor === 'function' && _smgmtHotswapAvailableFor(label)) {
-      html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" `
-        + `onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">`
-        + `${display} — replace (hotswap)</button>`;
-    }
-  });
-  html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-  menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
-}
+/** @deprecated Selection bar opens the shared move modal — kept for compat. */
+export function _smgmtPopulateMoveToMenu() {}
 
 export function _smgmtToggleMoveToMenu(event) {
-  event.stopPropagation();
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (!menu) return;
-  _smgmtPopulateMoveToMenu();
-  menu.classList.toggle('open');
+  event?.stopPropagation();
+  if (typeof _smgmtMoveToModalOpen === 'function') _smgmtMoveToModalOpen();
 }
 
-export function _smgmtCloseMoveToMenu() {
-  const menu = document.getElementById('smgmt-move-to-menu');
-  if (menu) menu.classList.remove('open');
-}
+export function _smgmtCloseMoveToMenu() {}
 
 export function _smgmtClearSelection() {
   _smgmtSelectedIssues.forEach(num => {

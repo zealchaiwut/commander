@@ -116,13 +116,31 @@ Same prompt, different harness. Before trusting overnight sprints, manually veri
 - `_dispatch_coder`, `_dispatch_doctor`, `_doctor_probe_auth` backend-aware
 - Follow-up label routing + fix-loop escalation to claude-code
 
-**Phase 2 — Cline setup in coder worktree**
+**Phase 2 — Cline setup in coder worktree** — use the setup script:
+
+```bash
+cd ~/dev/commander/uat    # any clone with scripts/
+bash scripts/setup_cline.sh
+cd ~/dev/commander/coder
+cline auth                    # company subscription (interactive)
+# OR metered API: export ANTHROPIC_API_KEY=sk-ant-...  — pick one, not both
+
+# Enable (safer first):
+bash scripts/setup_cline.sh --enable-followups
+# OR full switch:
+# bash scripts/setup_cline.sh --enable-always
+```
+
+Remote Mac mini: run the same script after `setup_machine.sh` on that host.
+See [machine-onboarding.md](../machine-onboarding.md#cline-coder-backend-migration).
+
+Manual checklist (if not using the script):
 
 ```bash
 cd ~/dev/commander/coder
 cline auth                    # company subscription
-# replicate MCP config from Claude Code
-# add .clinerules mirroring .claude/agents/coder.md workflow
+# replicate MCP config from Claude Code (optional — falls back to gh/grep)
+# .clinerules ships in repo (issue #916)
 ```
 
 **Phase 3 — telemetry (optional)**

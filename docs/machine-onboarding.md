@@ -20,14 +20,15 @@ other document.
 Work through the sections **in order** (or use [Quick bootstrap](#quick-bootstrap-setup_machinesh) on a fresh Mac):
 
 1. [Quick bootstrap](#quick-bootstrap-setup_machinesh) *(one command — recommended)*
-2. [Clone layout](#1-clone-layout)
-3. [Venv per clone](#2-venv-per-clone)
-4. [Claude install + setup-token](#3-claude-install--setup-token)
-5. [gh auth + token](#4-gh-auth--token)
-6. [install_launchd.sh](#5-install_launchdsh)
-7. [Doctor run](#6-doctor-run)
-8. [First sprint smoke test](#7-first-sprint-smoke-test)
-9. [Failure Signatures](#8-failure-signatures)
+2. [Cline coder backend](#cline-coder-backend-migration) *(optional — remote Mac mini / cost split)*
+3. [Clone layout](#1-clone-layout)
+4. [Venv per clone](#2-venv-per-clone)
+5. [Claude install + setup-token](#3-claude-install--setup-token)
+6. [gh auth + token](#4-gh-auth--token)
+7. [install_launchd.sh](#5-install_launchdsh)
+8. [Doctor run](#6-doctor-run)
+9. [First sprint smoke test](#7-first-sprint-smoke-test)
+10. [Failure Signatures](#8-failure-signatures)
 
 ---
 
@@ -68,6 +69,59 @@ bash scripts/update_crg_graphs.sh
 ```
 
 Sprint manager also runs a best-effort `update` before each coder/tester ticket.
+
+---
+
+## Cline coder backend (migration)
+
+Optional: route **coder** dispatches to the Cline CLI (company subscription) while
+tester/BA stay on Claude Code. Code is on `develop` (#916–#920); config lives in
+`~/dev/commander/.commander/sprint.yaml`.
+
+Run this on **every machine that dispatches coders** — including when you
+re-provision the **remote Mac mini** after `setup_machine.sh`:
+
+```bash
+cd ~/dev/commander/uat    # any clone
+bash scripts/setup_cline.sh
+```
+
+The script installs `cline` via `npm install -g cline`, checks the coder
+worktree and `.clinerules`, and prints doctor results. It does **not** run
+interactive auth for you.
+
+**Authenticate** (pick one billing path — not both):
+
+```bash
+cd ~/dev/commander/coder
+cline auth                              # company Cline subscription
+# OR: export ANTHROPIC_API_KEY=sk-ant-…  # metered API (kept in coder subprocess only)
+```
+
+**Enable** in sprint.yaml:
+
+```bash
+bash scripts/setup_cline.sh --enable-followups   # safer: Cline on follow-up tickets only
+# bash scripts/setup_cline.sh --enable-always    # every coder dispatch uses Cline
+```
+
+| Flag | `sprint.yaml` effect |
+|------|----------------------|
+| `--enable-always` | `agent_config.coder.backend: cline` |
+| `--enable-followups` | `agent_config.use_cline_followups: true` (initial dispatch stays Claude Code; fix-loop can escalate Cline → Claude Code) |
+| `--disable` | revert to `claude-code` defaults |
+
+**Verify** before an overnight sprint:
+
+```bash
+bash scripts/setup_cline.sh --doctor-only
+cd ~/dev/commander/coder
+cline -y -m claude-sonnet-4-6 \
+  "Read CLAUDE.md and .claude/agents/coder.md. Dry-run only: explain the coder workflow for issue #<N> without making changes."
+```
+
+Full design, caveats (no Cline telemetry, MCP fallback), and single-ticket dispatch
+test: [features/coder-backends.md](features/coder-backends.md).
 
 ---
 

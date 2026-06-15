@@ -78,6 +78,9 @@ Usage:
 The doctor section prints a PASS/FAIL table for gh auth, the claude CLI,
 tailscale, the dashboard port, and sqlite3, and exits nonzero if any check
 FAILs. For launchd service issues it points you at scripts/install_launchd.sh.
+
+Optional Cline coder backend (after bootstrap):
+  bash scripts/setup_cline.sh
 EOF
 }
 
@@ -337,6 +340,7 @@ run_doctor() {
     fi
     echo ""
     echo "All doctor checks PASSED."
+    echo "Optional Cline coder: bash scripts/setup_cline.sh"
     return 0
 }
 

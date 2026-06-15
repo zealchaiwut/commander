@@ -29,3 +29,12 @@ dashboard:
 # When true, sprint manager runs the documentor after each tester passes UAT,
 # committing minimal README/CLAUDE.md updates and posting a UAT comment.
 # documentor_enabled: false
+
+# Optional — coder backend (issues #916–#920). Default: claude-code everywhere.
+# Setup: bash scripts/setup_cline.sh  (see docs/features/coder-backends.md)
+#
+# agent_config:
+#   coder_model: claude-sonnet-4-6
+#   coder:
+#     backend: claude-code          # or cline for every coder dispatch
+#   use_cline_followups: false      # true = Cline only on follow-up tickets (.clinerules required)

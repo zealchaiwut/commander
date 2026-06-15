@@ -502,7 +502,7 @@
       btn.setAttribute("aria-selected", String(isActive));
     });
     closeAllStabDropdowns();
-    ["analytics", "more", "planning"].forEach((groupName) => {
+    ["analytics", "more", "planning", "manage"].forEach((groupName) => {
       const group = document.getElementById("stab-group-" + groupName);
       if (!group)
         return;
@@ -572,6 +572,12 @@
       settingsPopulateRepos();
       globalSettingsLoad();
     }
+    if (typeof window._smgmtUpdateSelectionUI === "function")
+      window._smgmtUpdateSelectionUI();
+    if (typeof window._bulkUpdateActionBar === "function")
+      window._bulkUpdateActionBar();
+    if (typeof window._smgmtUpdateToolbarTop === "function")
+      window._smgmtUpdateToolbarTop();
   }
   function toggleStabDropdown(name, e) {
     e.stopPropagation();
@@ -588,7 +594,7 @@
   var _subTabsEl = document.getElementById("sub-tabs");
   if (_subTabsEl) {
     _subTabsEl.addEventListener("keydown", function(e) {
-      const enabledTabs = ["sprint-mgmt", "tickets", "logs", "deploy", "metrics", "planning", "roadmap", "advisor", "settings"];
+      const enabledTabs = ["sprint-mgmt", "tickets", "manage", "logs", "deploy", "metrics", "planning", "roadmap", "advisor", "settings"];
       const focused = document.activeElement;
       const currentId = focused ? focused.id.replace("stab-", "") : null;
       const currentIdx = enabledTabs.indexOf(currentId);
@@ -3442,15 +3448,15 @@ Replace the existing draft (${data.existing_label})?`
     document.getElementById("smgmt-selection-bar")?.remove();
     const bar = document.getElementById("proj-selection-bar");
     const listEl = document.getElementById("smgmt-sprint-list");
-    if (count > 0 && bar) {
+    const onSprintTab = typeof _activeTab === "undefined" || _activeTab === "sprint-mgmt";
+    if (count > 0 && bar && onSprintTab) {
       bar.classList.add("show");
       bar.classList.remove("hidden");
       if (listEl)
         listEl.classList.add("has-selection");
       const countEl = document.getElementById("smgmt-sel-count");
       if (countEl)
-        countEl.textContent = count === 1 ? "1 ticket selected" : `${count} tickets selected`;
-      _smgmtPopulateMoveToMenu();
+        countEl.textContent = count === 1 ? "1 issue selected" : `${count} issues selected`;
       const deleteBtn = document.getElementById("smgmt-sel-delete-btn");
       if (deleteBtn) {
         const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
@@ -3464,57 +3470,19 @@ Replace the existing draft (${data.existing_label})?`
       if (listEl)
         listEl.classList.remove("has-selection");
     }
+    if (typeof _smgmtUpdateToolbarTop === "function")
+      _smgmtUpdateToolbarTop();
   }
   function _smgmtPopulateSelectionDropdown() {
   }
-  function _smgmtMoveTargetLabels() {
-    const partOf = (lbl) => {
-      const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || "");
-      return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
-    };
-    const finished = _smgmtFinishedLabels || /* @__PURE__ */ new Set();
-    return Object.keys(_smgmtBySprint || {}).filter((lbl) => !finished.has(lbl)).sort((a, b) => {
-      const pa = partOf(a), pb = partOf(b);
-      return pa[0] - pb[0] || pa[1] - pb[1];
-    });
-  }
   function _smgmtPopulateMoveToMenu() {
-    const menu = document.getElementById("smgmt-move-to-menu");
-    if (!menu || !_smgmtData)
-      return;
-    const selectedNums = Array.from(_smgmtSelectedIssues);
-    const occupiedLabels = new Set(
-      selectedNums.map((n) => {
-        const iss = (_smgmtData.issues || []).find((i) => i.number === n);
-        return iss ? iss.sprint_label : void 0;
-      }).filter((lbl) => lbl != null)
-    );
-    let html = "";
-    _smgmtMoveTargetLabels().forEach((label) => {
-      if (occupiedLabels.has(label))
-        return;
-      const running = _smgmtRunningLabels.has(label);
-      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(label) : label.replace("sprint-", "Sprint ");
-      html += `<button class="smgmt-move-to-item" ${running ? "disabled" : ""} onclick="_smgmtMoveSelectedTo('${label}');_smgmtCloseMoveToMenu()">${display}${running ? " (running)" : ""}</button>`;
-      if (!running && typeof _smgmtHotswapAvailableFor === "function" && _smgmtHotswapAvailableFor(label)) {
-        html += `<button class="smgmt-move-to-item smgmt-move-to-item--hotswap" onclick="_smgmtHotswapModalOpen('${label}');_smgmtCloseMoveToMenu()">${display} \u2014 replace (hotswap)</button>`;
-      }
-    });
-    html += `<button class="smgmt-move-to-item" onclick="_smgmtMoveSelectedTo('backlog');_smgmtCloseMoveToMenu()">Backlog (no sprint)</button>`;
-    menu.innerHTML = html || '<span style="display:block;padding:8px 14px;font-size:12px;color:var(--text-muted)">No other sprints available</span>';
   }
   function _smgmtToggleMoveToMenu(event) {
-    event.stopPropagation();
-    const menu = document.getElementById("smgmt-move-to-menu");
-    if (!menu)
-      return;
-    _smgmtPopulateMoveToMenu();
-    menu.classList.toggle("open");
+    event?.stopPropagation();
+    if (typeof _smgmtMoveToModalOpen === "function")
+      _smgmtMoveToModalOpen();
   }
   function _smgmtCloseMoveToMenu() {
-    const menu = document.getElementById("smgmt-move-to-menu");
-    if (menu)
-      menu.classList.remove("open");
   }
   function _smgmtClearSelection() {
     _smgmtSelectedIssues.forEach((num) => {
@@ -4409,6 +4377,7 @@ ${data.errors.join("\n")}`);
       );
       return !hasChild;
     });
+    _smgmtOrderedLabels = orderedLabels;
     _smgmtFinishedLabels = _finishedSet;
     let _smgmtNextUpLabel = null;
     const sortedForNext = [...orderedLabels].sort((a, b) => {
@@ -5581,8 +5550,7 @@ ${data.errors.join("\n")}`);
     const sizeValue = _smgmtTicketSize(ticket) || "";
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const sizePillHtml = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
-    const ageDays = ticket.created_at ? Math.floor((Date.now() - Date.parse(ticket.created_at)) / 864e5) : null;
-    const ageHtml = ageDays != null && !isNaN(ageDays) ? `<span class="bl-row-age">${ageDays}d</span>` : "";
+    const estHtml = _smgmtTicketEstHtml(ticket);
     return `
     <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
          draggable="true"
@@ -5600,7 +5568,7 @@ ${data.errors.join("\n")}`);
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${ageHtml}
+      ${schedDepHtml}${sizePillHtml}${estHtml}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">

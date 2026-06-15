@@ -3098,11 +3098,15 @@
       gap: 12px;
       padding: 10px 28px;
       background: var(--blue-bg);
-      border-top: 1px solid var(--blue);
+      border-bottom: 1px solid var(--blue);
       font-size: 13px;
       color: var(--blue);
       white-space: nowrap;
       flex-wrap: wrap;
+      position: sticky;
+      top: var(--proj-tabs-bottom, 100px);
+      z-index: 21;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
     }
     .proj-selection-bar.show { display: flex; }
     .proj-selection-bar-hint { color: var(--text-muted); }
@@ -3823,9 +3827,21 @@
       font-weight: 600;
     }
     .smgmt-move-to-item--hotswap:hover { background: var(--amber-bg); }
+    .mt-modal .modal-body { max-height: min(70vh, 520px); }
+    .mt-modal .mt-selection-row {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      margin: 0 -20px;
+      padding: 0 20px 10px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .mt-option-count { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--text-muted); }
     .mt-options { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
     .mt-option {
       display: flex; align-items: center; gap: 8px;
+      width: 100%;
       text-align: left; padding: 9px 12px; font-size: 13px; font-weight: 500;
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 6px; color: var(--text); cursor: pointer; font-family: inherit;
@@ -7817,28 +7833,6 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
-      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-        <i class="ti ti-checkbox"></i>
-        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-        <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
-        <div class="smgmt-sel-bar-actions">
-          <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                  onclick="_smgmtDeleteSelected()">
-            <i class="ti ti-trash"></i> Delete
-          </button>
-          <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
-          <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-            <i class="ti ti-x"></i> Deselect all
-          </button>
-          <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                  onclick="_smgmtMoveToModalOpen()">
-            <i class="ti ti-send"></i> Move to Sprint
-          </button>
-        </div>
-      </div>
       <!-- Issues tab bulk-close bar (project-level, under tab nav) -->
       <div class="bulk-action-bar hidden" id="bulk-action-bar" role="status" aria-live="polite">
         <span class="bab-label" id="bab-label">0 issues selected</span>
@@ -7848,6 +7842,29 @@
         <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
       </div>
     </header>
+
+    <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+      <i class="ti ti-checkbox"></i>
+      <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+      <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
+      <div class="smgmt-sel-bar-actions">
+        <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                onclick="_smgmtDeleteSelected()">
+          <i class="ti ti-trash"></i> Delete
+        </button>
+        <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                onclick="_smgmtReEstimateSelected()">
+          <i class="ti ti-sparkles"></i> Reestimate
+        </button>
+        <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+          <i class="ti ti-x"></i> Deselect all
+        </button>
+        <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                onclick="_smgmtMoveToModalOpen()">
+          <i class="ti ti-send"></i> Move to Sprint
+        </button>
+      </div>
+    </div>
 
     <!-- Tab content -->
     <div class="tab-content">
@@ -10886,12 +10903,17 @@ async function init() {
 // Compute top offset for the sticky area (proj-header height)
 function _smgmtUpdateToolbarTop() {
   const header     = document.getElementById('proj-header');
+  const selBar     = document.getElementById('proj-selection-bar');
   const stickyArea = document.getElementById('smgmt-sticky-area');
-  if (header) {
-    const h = header.offsetHeight;
-    document.documentElement.style.setProperty('--proj-header-height', h + 'px');
-    if (stickyArea) stickyArea.style.top = h + 'px';
+  const tabsRow    = header?.querySelector('.sub-tabs-row');
+  if (tabsRow) {
+    const tabsBottom = tabsRow.offsetTop + tabsRow.offsetHeight;
+    document.documentElement.style.setProperty('--proj-tabs-bottom', tabsBottom + 'px');
   }
+  let headerH = header ? header.offsetHeight : 0;
+  if (selBar && selBar.classList.contains('show')) headerH += selBar.offsetHeight;
+  document.documentElement.style.setProperty('--proj-header-height', headerH + 'px');
+  if (stickyArea) stickyArea.style.top = headerH + 'px';
 }
 
 // ── Sprint Mgmt scroll-shadow ─────────────────────────────────────────────
@@ -15859,6 +15881,19 @@ async function _blConfirmAdd() {
 // ── Sprint hotswap: replace a sprint and push existing tickets down ─────────
 
 let _smgmtHotswapTarget = null;
+let _smgmtHotswapIncomingOverride = null;
+
+function _smgmtHotswapIncomingNums() {
+  if (_smgmtHotswapIncomingOverride?.length) return _smgmtHotswapIncomingOverride.slice();
+  return Array.from(_smgmtSelectedIssues);
+}
+
+/** True when moving into target would shift existing tickets down (+1 sprint). */
+function _smgmtHotswapNeedsConfirm(targetLabel, incomingNums) {
+  if (!targetLabel || !/^sprint-\d+$/.test(targetLabel)) return false;
+  const steps = _smgmtHotswapPlan(targetLabel, incomingNums);
+  return !!(steps && steps.some(s => s.kind === 'shift'));
+}
 
 /** Build the ordered list of shift/place steps for a hotswap into targetLabel. */
 function _smgmtHotswapPlan(targetLabel, incomingNums) {
@@ -15923,13 +15958,15 @@ function _smgmtHotswapSprintHasBlockers(targetLabel, steps) {
   return blocked;
 }
 
-function _smgmtHotswapModalOpen(targetLabel) {
+function _smgmtHotswapModalOpen(targetLabel, incomingNums) {
   _smgmtCloseMoveToMenu();
-  const nums = Array.from(_smgmtSelectedIssues);
+  if (incomingNums?.length) _smgmtHotswapIncomingOverride = incomingNums.slice();
+  const nums = _smgmtHotswapIncomingNums();
   if (!targetLabel || nums.length === 0) return;
 
   const steps = _smgmtHotswapPlan(targetLabel, nums);
   if (!steps) {
+    _smgmtHotswapIncomingOverride = null;
     _smgmtMoveSelectedTo(targetLabel);
     return;
   }
@@ -15967,13 +16004,16 @@ function _smgmtHotswapModalClose() {
   document.getElementById('hs-backdrop').classList.add('hidden');
   document.getElementById('hs-modal').classList.add('hidden');
   _smgmtHotswapTarget = null;
+  _smgmtHotswapIncomingOverride = null;
 }
 
 async function _smgmtHotswapAppend() {
   const target = _smgmtHotswapTarget;
   if (!target) return;
+  const nums = _smgmtHotswapIncomingNums();
   _smgmtHotswapModalClose();
-  await _smgmtMoveSelectedTo(target);
+  if (!nums.length) return;
+  await _smgmtMoveModalPickBulk(nums, target, false);
 }
 
 async function _smgmtReloadBoardPreserveView() {
@@ -15987,7 +16027,7 @@ async function _smgmtReloadBoardPreserveView() {
 async function _smgmtHotswapConfirm() {
   const targetLabel = _smgmtHotswapTarget;
   if (!targetLabel || _smgmtMoveLock) return;
-  const incomingNums = Array.from(_smgmtSelectedIssues);
+  const incomingNums = _smgmtHotswapIncomingNums();
   const steps = _smgmtHotswapPlan(targetLabel, incomingNums);
   if (!steps) return;
 
@@ -16208,8 +16248,12 @@ function _smgmtMoveModalShow({ title, infoLabel, infoText, fromLabel }) {
     const locked    = t.running;
     const disabled  = isCurrent || locked;
     const note      = isCurrent ? ' (current)' : (locked ? ' (running — locked)' : '');
+    const count     = _smgmtSprintIssueCount(lbl);
+    const countHtml = count > 0
+      ? `<span class="mt-option-count">${count} ticket${count !== 1 ? 's' : ''}</span>`
+      : '';
     html += `<button class="mt-option" ${disabled ? 'disabled' : ''} onclick="_smgmtMoveModalPick('${lbl}', false)">` +
-            `<i class="ti ti-flag"></i> ${escHtml(sprintLabelDisplay(lbl))}${note}</button>`;
+            `<i class="ti ti-flag"></i> ${escHtml(sprintLabelDisplay(lbl))}${note}${countHtml}</button>`;
   });
   html += `<button class="mt-option mt-option-new" onclick="_smgmtMoveModalPick('sprint-${nextNum}', true)">` +
           `<i class="ti ti-plus"></i> Create new sprint (Sprint ${nextNum})</button>`;
@@ -16280,7 +16324,13 @@ async function _smgmtMoveModalPick(targetLabel, isNew) {
   const bulkNums  = _smgmtMoveModalIssues.length ? [..._smgmtMoveModalIssues] : null;
   const issueNum  = _smgmtMoveModalIssue;
   const fromLabel = _smgmtMoveModalFrom;
+  const incomingNums = bulkNums?.length ? bulkNums : (issueNum != null ? [issueNum] : []);
   _smgmtMoveToModalClose();
+
+  if (targetLabel && !isNew && _smgmtHotswapNeedsConfirm(targetLabel, incomingNums)) {
+    _smgmtHotswapModalOpen(targetLabel, incomingNums);
+    return;
+  }
 
   if (bulkNums && bulkNums.length > 0) {
     await _smgmtMoveModalPickBulk(bulkNums, targetLabel, isNew);
@@ -23192,7 +23242,7 @@ document.addEventListener('keydown', function(e) {
     <button class="modal-close" aria-label="Close" onclick="_smgmtMoveToModalClose()">&times;</button>
   </div>
   <div class="modal-body">
-    <div class="gc-detail-row">
+    <div class="gc-detail-row mt-selection-row" id="mt-selection-row">
       <span class="gc-detail-label" id="mt-info-label">Issue:</span>&nbsp;
       <span id="mt-ticket-info"></span>
     </div>

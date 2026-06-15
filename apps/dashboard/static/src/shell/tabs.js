@@ -21,7 +21,6 @@ export function switchTab(tab, pushHistory) {
   }
 
   if (_activeTab === 'sprint-mgmt' && tab !== 'sprint-mgmt') {
-    _smgmtArStopTicker();
     if (_smgmtLivePollId !== null) {
       clearInterval(_smgmtLivePollId);
       _smgmtLivePollId = null;
@@ -64,7 +63,7 @@ export function switchTab(tab, pushHistory) {
     btn.setAttribute('aria-selected', String(isActive));
   });
   closeAllStabDropdowns();
-  ['analytics', 'more'].forEach(groupName => {
+  ['analytics', 'more', 'planning'].forEach(groupName => {
     const group = document.getElementById('stab-group-' + groupName);
     if (!group) return;
     const trigger = group.querySelector('.stab-trigger');
@@ -143,7 +142,7 @@ document.addEventListener('click', closeAllStabDropdowns);
 const _subTabsEl = document.getElementById('sub-tabs');
 if (_subTabsEl) {
   _subTabsEl.addEventListener('keydown', function(e) {
-    const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'bulk-create', 'timeline', 'compare', 'est-vs-actual', 'calibration', 'notes', 'settings'];
+    const enabledTabs = ['sprint-mgmt', 'tickets', 'logs', 'deploy', 'metrics', 'planning', 'roadmap', 'advisor', 'settings'];
     const focused = document.activeElement;
     const currentId = focused ? focused.id.replace('stab-', '') : null;
     const currentIdx = enabledTabs.indexOf(currentId);

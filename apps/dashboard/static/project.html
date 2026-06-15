@@ -163,7 +163,7 @@
     }
 
     /* ── Sprint status pill (sits at the tab-strip level) ── */
-    .snav-wrap { position: relative; flex-shrink: 0; margin-bottom: 5px; }
+    .snav-wrap { display: none !important; } /* sprint nav pill retired — header auto-refresh + board sub-nav suffice */
     .snav-pill {
       display: inline-flex; align-items: center; gap: 6px;
       height: 32px; padding: 0 10px; border-radius: 16px;
@@ -507,6 +507,13 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       flex: 1; min-width: 0;
     }
+    .proj-header-gh-link {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 17px; flex-shrink: 0;
+      transition: color .15s;
+    }
+    .proj-header-gh-link:hover { color: var(--text); }
+    .proj-header-gh-link.hidden { display: none; }
     .proj-header-pill {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 3px 9px; border-radius: 20px;
@@ -7605,8 +7612,31 @@
           <i class="ti ti-folder"></i>
         </div>
         <span class="proj-header-name" id="proj-header-name">Loading…</span>
-        <span id="proj-header-pill"></span>
+        <a class="proj-header-gh-link hidden" id="proj-header-gh-link"
+           href="#" target="_blank" rel="noopener noreferrer"
+           title="Open repository on GitHub" aria-label="Open repository on GitHub">
+          <i class="ti ti-brand-github"></i>
+        </a>
+        <span id="proj-header-pill" class="hidden" aria-hidden="true"></span>
         <div class="proj-header-actions">
+          <!-- Auto-refresh pill (issue #275) — project-wide, left of Create -->
+          <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
+            <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
+                    onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
+                    aria-label="Auto-refresh interval">
+              <i class="ti ti-refresh"></i>
+              <span id="smgmt-ar-pill-label">15s</span>
+              <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
+            </button>
+            <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
+              <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
+              <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
+              <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
+              <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
+              <div class="smgmt-ar-menu-divider"></div>
+              <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
+            </div>
+          </div>
           <div class="proj-create-wrap" id="proj-create-wrap">
             <button class="btn-primary" id="proj-create-btn" onclick="toggleCreateMenu(event)"
                     aria-haspopup="true" aria-expanded="false" title="Create tickets">
@@ -7639,7 +7669,7 @@
         </button>
         <button class="stab" role="tab" id="stab-tickets"
                 aria-selected="false" onclick="switchTab('tickets')">
-          <i class="ti ti-list"></i>Tickets
+          <i class="ti ti-list"></i>Issues
         </button>
         <button class="stab" role="tab" id="stab-logs"
                 aria-selected="false" onclick="switchTab('logs')">
@@ -7656,16 +7686,25 @@
           <i class="ti ti-chart-bar"></i>Analytics
         </button>
         <!-- Notes moved to the global left sidebar (issue #717) -->
-        <!-- Roadmap (issue #878) -->
-        <button class="stab" role="tab" id="stab-roadmap"
-                aria-selected="false" onclick="switchTab('roadmap')">
-          <i class="ti ti-map-2"></i>Roadmap
-        </button>
-        <!-- Advisor (issue #881) -->
-        <button class="stab" role="tab" id="stab-advisor"
-                aria-selected="false" onclick="switchTab('advisor')">
-          <i class="ti ti-bulb"></i>Advisor
-        </button>
+        <!-- Planning: Roadmap + Advisor -->
+        <div class="stab-group" id="stab-group-planning">
+          <button class="stab stab-trigger" type="button" id="stab-planning-trigger"
+                  aria-haspopup="true" aria-expanded="false"
+                  onclick="toggleStabDropdown('planning', event)">
+            <i class="ti ti-compass"></i>Planning
+            <i class="ti ti-chevron-down stab-caret"></i>
+          </button>
+          <div class="stab-dropdown" role="menu">
+            <button class="stab" role="menuitem" id="stab-roadmap"
+                    aria-selected="false" onclick="switchTab('roadmap')">
+              <i class="ti ti-map-2"></i>Roadmap
+            </button>
+            <button class="stab" role="menuitem" id="stab-advisor"
+                    aria-selected="false" onclick="switchTab('advisor')">
+              <i class="ti ti-bulb"></i>Advisor
+            </button>
+          </div>
+        </div>
         <!-- Settings (top level) -->
         <button class="stab" role="tab" id="stab-settings"
                 aria-selected="false" onclick="switchTab('settings')">
@@ -7766,36 +7805,6 @@
 
         <!-- Board sub-view (default) -->
         <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
-
-        <!-- Sticky area: toolbar + label filters stick together below the project header -->
-        <div class="smgmt-sticky-area" id="smgmt-sticky-area">
-          <!-- Toolbar -->
-          <div class="smgmt-toolbar" id="smgmt-toolbar">
-            <span class="smgmt-toolbar-title">Sprint Management</span>
-            <div class="smgmt-toolbar-actions">
-              <!-- Auto-refresh pill (issue #275) -->
-              <div class="smgmt-ar-pill-wrap" id="smgmt-ar-pill-wrap">
-                <button class="smgmt-ar-pill is-on" id="smgmt-ar-pill"
-                        onclick="_smgmtArPillClick(event)" aria-haspopup="true" aria-expanded="false"
-                        aria-label="Auto-refresh interval">
-                  <i class="ti ti-refresh"></i>
-                  <span id="smgmt-ar-pill-label">15s</span>
-                  <i class="ti ti-chevron-down smgmt-ar-chevron"></i>
-                </button>
-                <div class="smgmt-ar-menu hidden" id="smgmt-ar-menu" role="menu">
-                  <button class="smgmt-ar-menu-item" data-interval="5"  onclick="_smgmtArSelect(5)">5s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="15" onclick="_smgmtArSelect(15)">15s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="30" onclick="_smgmtArSelect(30)">30s</button>
-                  <button class="smgmt-ar-menu-item" data-interval="60" onclick="_smgmtArSelect(60)">1m</button>
-                  <div class="smgmt-ar-menu-divider"></div>
-                  <button class="smgmt-ar-menu-item smgmt-ar-turn-off" onclick="_smgmtArTurnOff()">Turn off</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Tag chips, search field, and size legend relocated to the Tickets
-               tab (issue #798) — removed from the Sprint pane. -->
-        </div>
 
         <!-- Sprint list -->
         <div class="smgmt-content">
@@ -9703,7 +9712,7 @@ function updateProjectHeader(proj) {
 
   const iconEl = document.getElementById('proj-header-icon');
   const nameEl = document.getElementById('proj-header-name');
-  const pillEl = document.getElementById('proj-header-pill');
+  const ghLink = document.getElementById('proj-header-gh-link');
   // Recalculate toolbar sticky top after header content changes
   requestAnimationFrame(_smgmtUpdateToolbarTop);
 
@@ -9716,19 +9725,13 @@ function updateProjectHeader(proj) {
   }
   if (nameEl) nameEl.textContent = proj.name || _slug;
 
-  // Status pill. The "Sprint X running" label is intentionally NOT rendered here
-  // (hotfix #2): it duplicated the sprint-nav status pill and the sub-nav running
-  // dot, and the Sprint-Mgmt auto-refresh pill already governs the Board / Running
-  // / History sub-views. UAT-pending stays — it's a distinct, actionable signal.
-  if (pillEl) {
-    if (proj.status === 'uat-pending' || (proj.uat_count && proj.uat_count > 0)) {
-      const count = proj.uat_count || 0;
-      pillEl.innerHTML = `<span class="proj-header-pill pill-uat">
-        <span class="pill-dot"></span>
-        ${count} UAT pending
-      </span>`;
+  const repo = proj.repo || _cachedFullRepo[_slug];
+  if (ghLink) {
+    if (repo) {
+      ghLink.href = `https://github.com/${repo}`;
+      ghLink.classList.remove('hidden');
     } else {
-      pillEl.innerHTML = '';
+      ghLink.classList.add('hidden');
     }
   }
 
@@ -10737,6 +10740,7 @@ async function init() {
     prefetchPromise,
     sprintMgmtPromise || Promise.resolve(),
   ]);
+  if (typeof _smgmtArInit === 'function') _smgmtArInit();
 
   // Start 30s sidebar refresh
   startSidebarRefresh();

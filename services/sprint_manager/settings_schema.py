@@ -51,6 +51,8 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "tracked": {"secret": False, "default": True},
     # Per-project tester repo override (GITHUB_ISSUE_TEST_REPO equivalent)
     "tester_test_repo": {"secret": False, "default": ""},
+    # Post-sprint wrap-up agents (issue #1146)
+    "reviewer_enabled": {"secret": False, "default": False},
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},

@@ -17,8 +17,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 BOARD_JS = (
     REPO_ROOT

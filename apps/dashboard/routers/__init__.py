@@ -26,6 +26,7 @@ from .settings import router as settings_router
 from .suggestions import router as suggestions_router
 from .system import router as system_router
 from .tickets import router as tickets_router
+from .timeline import router as timeline_router
 
 __all__ = [
     "activity_router",
@@ -49,4 +50,5 @@ __all__ = [
     "suggestions_router",
     "system_router",
     "tickets_router",
+    "timeline_router",
 ]

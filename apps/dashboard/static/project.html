@@ -7525,6 +7525,137 @@
     .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
     @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
 
+    /* ── Chip-only assignment map (issue #1108) ────────────────────────────
+       Number-only issue chips replace full lane cards. Working = blue tint +
+       pulse dot; Waiting = grey; Retry = amber. Spacing on 4px scale. */
+    .lane-chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; min-height: 24px; }
+    .lane-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text-sub);
+      cursor: pointer; transition: border-color .15s;
+    }
+    .lane-chip:hover { border-color: var(--text-muted); }
+    .lane-chip--working {
+      background: var(--blue-bg); color: var(--blue);
+      border-color: rgba(59,130,246,.30);
+    }
+    .lane-chip--working:hover { border-color: var(--blue); }
+    .lane-chip--retry {
+      background: var(--amber-bg); color: var(--amber);
+      border-color: rgba(217,119,6,.30);
+    }
+    .lane-chip--retry:hover { border-color: var(--amber); }
+    .lane-chip-pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor; flex-shrink: 0;
+      animation: laneChipPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes laneChipPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .3; }
+    }
+    .lane-chip-empty {
+      font-size: 11px; color: var(--text-muted); padding: 2px 0;
+      font-style: italic;
+    }
+    @media (prefers-reduced-motion: reduce) { .lane-chip-pulse { animation: none; } }
+
+    /* ── Running-pane Gantt timeline (issue #1147) ───────────────────────────
+       Per-issue horizontal track rows on a shared sprint time axis.
+       Prefix: rp-tl-  (running-pane timeline). All colours use CSS tokens. */
+    .rp-timeline-wrap { display: flex; flex-direction: column; gap: 0; overflow: hidden;
+      border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+      margin: 0; }
+
+    /* Agent time-split bar */
+    .rp-tl-split { padding: 10px 12px 8px; border-bottom: 1px solid var(--border);
+      background: var(--surface-2); }
+    .rp-tl-split-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden;
+      background: var(--border); gap: 0; margin-top: 6px; }
+    .rp-tl-split-seg { height: 100%; border-radius: 0; transition: width .3s ease; }
+    .rp-tl-split-seg--coder    { background: var(--purple); }
+    .rp-tl-split-seg--tester   { background: var(--amber); }
+    .rp-tl-split-seg--documenter { background: var(--teal); }
+    .rp-tl-split-seg--reviewer { background: var(--indigo, #6366f1); }
+    .rp-tl-split-seg--pending  { opacity: .35;
+      background-image: repeating-linear-gradient(
+        45deg, transparent, transparent 3px, rgba(0,0,0,.15) 3px, rgba(0,0,0,.15) 5px); }
+
+    /* Axis row: gridlines + now-line */
+    .rp-tl-axis-wrap { position: relative; height: 28px; padding: 0 52px 0 48px;
+      border-bottom: 1px solid var(--border); background: var(--surface-2); overflow: hidden; }
+    .rp-tl-grid { position: absolute; inset: 0 52px 0 48px; pointer-events: none; }
+    .rp-tl-gridline { position: absolute; top: 0; bottom: 0; width: 1px;
+      background: var(--border); display: flex; flex-direction: column;
+      align-items: flex-start; }
+    .rp-tl-gridline-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono);
+      padding: 4px 2px 0; white-space: nowrap; user-select: none; }
+    .rp-tl-now { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 4; }
+    .rp-tl-now-line { position: absolute; top: 0; bottom: 0; left: 0; width: 2px;
+      background: var(--green, #16a34a); box-shadow: 0 0 4px var(--green, #16a34a); }
+    .rp-tl-finish-label { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+      font-size: 9px; font-family: var(--mono); color: var(--text-sub);
+      white-space: nowrap; font-weight: 700; }
+
+    /* Per-issue row */
+    .rp-tl-row { display: flex; align-items: stretch; min-height: 32px; border-bottom: 1px solid var(--border); }
+    .rp-tl-row:last-child { border-bottom: none; }
+    .rp-tl-row-num { flex: 0 0 48px; display: flex; align-items: center; justify-content: flex-end;
+      padding-right: 8px; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      color: var(--text-muted); background: var(--surface-2);
+      border-right: 1px solid var(--border); }
+    .rp-tl-track { flex: 1 1 auto; position: relative; min-height: 32px; overflow: hidden; }
+
+    /* Estimate envelope — grey background behind done-issue segments */
+    .rp-tl-envelope { position: absolute; top: 4px; bottom: 4px; border-radius: 3px;
+      background: #9ca3af; opacity: .18; pointer-events: none; }
+
+    /* Segment base */
+    .rp-tl-seg { position: absolute; top: 6px; bottom: 6px; border-radius: 3px;
+      min-width: 2px; pointer-events: none; }
+    .rp-tl-seg--coder    { background: var(--purple); }
+    .rp-tl-seg--tester   { background: var(--amber); }
+    .rp-tl-seg--documenter { background: var(--teal); }
+    .rp-tl-seg--reviewer { background: var(--indigo, #6366f1); }
+
+    /* Retry: hatched + dimmed */
+    .rp-tl-seg--retry {
+      opacity: 0.55;
+      background-image: repeating-linear-gradient(
+        45deg, transparent, transparent 4px, rgba(0,0,0,.30) 4px, rgba(0,0,0,.30) 7px);
+    }
+
+    /* Running/projected: blink animation */
+    .rp-tl-seg--running   { animation: rpTlBlink 1.4s ease-in-out infinite; }
+    .rp-tl-seg--projected { animation: rpTlBlink 1.4s ease-in-out infinite; }
+    @keyframes rpTlBlink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+    /* Ghost: queued or projected remainder — faint + hatched */
+    .rp-tl-seg--ghost {
+      opacity: 0.25;
+      background-image: repeating-linear-gradient(
+        45deg, transparent, transparent 4px, rgba(0,0,0,.40) 4px, rgba(0,0,0,.40) 7px);
+    }
+
+    /* Wrap-up row */
+    .rp-tl-wrapup { margin-top: 0; }
+    .rp-tl-row--wrapup { margin-top: 12px; border-top: 1px dashed var(--border) !important; }
+
+    /* Right-side label */
+    .rp-tl-row-label { flex: 0 0 52px; display: flex; flex-direction: column;
+      align-items: flex-start; justify-content: center; padding: 0 6px 0 4px;
+      border-left: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+    .rp-tl-metric { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      color: var(--text); white-space: nowrap; }
+    .rp-tl-sub { font-family: var(--mono); font-size: 9px; color: var(--text-muted);
+      white-space: nowrap; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .rp-tl-seg--running, .rp-tl-seg--projected { animation: none; }
+    }
+
     /* ── Node inspector panel (issue #804) ───────────────────────────────────
        Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
        .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
@@ -8331,6 +8462,8 @@
             <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail"></div>
             <!-- Two-queue coder/tester lane view (issue #927) -->
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
+            <!-- Running-pane Gantt timeline (issue #1147) -->
+            <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
             <!-- Node inspector panel (issue #804) -->
             <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
           </div>
@@ -13122,6 +13255,7 @@ function _smgmtRunningViewUpdate(label, live) {
   _smgmtMetricsUpdate(primary, snap);
   _smgmtRailUpdate(primary, snap);
   _smgmtLanesUpdate(primary, snap);
+  _smgmtRpTimelineFetch(primary, _smgmtRepo());
 }
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
@@ -13575,7 +13709,8 @@ function _smgmtLaneSizeInline(iss) {
     : '';
 }
 
-/** One card inside a lane — reuses the existing .node markup for card primitives. */
+/** One card inside a lane — reuses the existing .node markup for card primitives.
+ *  Kept for the Done fold which still shows full cards. */
 function _smgmtLaneCardHtml(iss, stage, live) {
   const num = iss.number;
   const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
@@ -13629,6 +13764,31 @@ function _smgmtLaneCardHtml(iss, stage, live) {
     + `</button>`;
 }
 
+/** Scroll to and briefly highlight the .smgmt-ticket card for issue num
+ *  in the All Issues list (issue #1108). */
+function _smgmtLaneChipClick(num) {
+  const row = document.querySelector(`#pane-sprint-mgmt .smgmt-ticket[data-issue="${num}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  row.classList.add('is-selected');
+  setTimeout(() => row.classList.remove('is-selected'), 1800);
+}
+
+/** Number-only chip for a lane Working or Waiting row (issue #1108).
+ *  isWorking=true → blue tint + pulse dot; isRetry=true → amber tint. */
+function _smgmtLaneChipHtml(num, isWorking, isRetry) {
+  let cls = 'lane-chip';
+  if (isWorking) cls += ' lane-chip--working';
+  else if (isRetry) cls += ' lane-chip--retry';
+  const pulse = isWorking
+    ? '<span class="lane-chip-pulse" aria-hidden="true"></span>'
+    : '';
+  return `<button type="button" class="${cls}" onclick="_smgmtLaneChipClick(${num})" title="Jump to #${num} in All Issues">`
+    + pulse
+    + `#${num}`
+    + `</button>`;
+}
+
 /** Full lanes HTML from a /live snapshot. */
 function _smgmtLanesHtml(label, live) {
   const issues = (live && live.issues) || [];
@@ -13675,43 +13835,53 @@ function _smgmtLanesHtml(label, live) {
     }
   });
 
-  const renderGroup = (items, label, role, live) => {
+  // Chip row renderer — replaces full cards in Working/Waiting rows (issue #1108).
+  // Done fold still uses _smgmtLaneCardHtml (full detail for completed items).
+  const renderChipGroup = (items, rowLabel, isWorkingRow) => {
     const cls = items.length === 0 ? ' empty' : '';
-    const cards = items.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+    const chips = items.map(({ iss, stage }) => {
+      const working = isWorkingRow;
+      const isRetry = !isWorkingRow && (
+        (iss.tester_attempt_count || 0) > 0 ||
+        (iss.coder_attempt || 1) > 1
+      );
+      return _smgmtLaneChipHtml(iss.number, working, isRetry);
+    }).join('');
+    const emptyText = isWorkingRow ? '— idle' : '—';
     const placeholder = items.length === 0
-      ? `<div style="font-size:12px;color:var(--text-muted);padding:4px 4px 2px;font-style:italic;">—</div>`
+      ? `<span class="lane-chip-empty">${emptyText}</span>`
       : '';
     return `<div class="lane-group${cls}">`
-      + `<div class="lane-group-label">${escHtml(label)}</div>`
-      + cards + placeholder
+      + `<div class="lane-group-label">${escHtml(rowLabel)}</div>`
+      + `<div class="lane-chip-row">${chips}${placeholder}</div>`
       + `</div>`;
   };
 
   const coderLane = `<div class="lane" data-lane="coder">
     <div class="lane-head">
-      <div class="lane-title"><span class="lane-title-coder">Coder</span></div>
+      <div class="lane-title"><i class="ti ti-code lane-title-coder" aria-hidden="true"></i><span class="lane-title-coder">Coder</span></div>
       <div class="lane-capacity">
         ${_smgmtLaneDotsHtml(coderWorking.length, maxCoder, 'filled')}
         <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
       </div>
     </div>
     <div class="lane-body">
-      ${renderGroup(coderWorking, 'Working', 'coder', live)}
-      ${renderGroup(coderWaiting, 'Waiting', 'coder', live)}
+      ${renderChipGroup(coderWorking, 'Working', true)}
+      ${renderChipGroup(coderWaiting, 'Waiting', false)}
     </div>
   </div>`;
 
   const testerLane = `<div class="lane" data-lane="tester">
     <div class="lane-head">
-      <div class="lane-title"><span class="lane-title-tester">Tester</span></div>
+      <div class="lane-title"><i class="ti ti-flask lane-title-tester" aria-hidden="true"></i><span class="lane-title-tester">Tester</span></div>
       <div class="lane-capacity">
         ${_smgmtLaneDotsHtml(testerWorking.length, maxTester, 'filled-tester')}
         <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
       </div>
     </div>
     <div class="lane-body">
-      ${renderGroup(testerWorking, 'Working', 'tester', live)}
-      ${renderGroup(testerWaiting, 'Waiting', 'tester', live)}
+      ${renderChipGroup(testerWorking, 'Working', true)}
+      ${renderChipGroup(testerWaiting, 'Waiting', false)}
     </div>
   </div>`;
 
@@ -13792,6 +13962,260 @@ function _smgmtLanesUpdate(label, live) {
   lanesEl.innerHTML = _smgmtLanesHtml(label, live);
   if (doneOpen) _smgmtLaneFoldToggle('smgmt-lanes-done-fold');
   if (upOpen)   _smgmtLaneFoldToggle('smgmt-lanes-upcoming-fold');
+}
+
+// ── Running-pane Gantt timeline (issue #1147) ─────────────────────────────────
+// Pure HTML renderer — data is the JSON from GET /api/sprints/{label}/timeline.
+// All times are ISO-8601 UTC strings from the server. Scales everything on a
+// shared sprint_started_at → projected_finish axis (0% → 100%).
+
+function _smgmtRpTimelineHtml(data) {
+  if (!data || !data.issues || !data.issues.length) return '';
+
+  const sprintStartMs = Date.parse(data.sprint_started_at);
+  const nowMs         = Date.parse(data.server_now);
+  const finishMs      = Date.parse(data.projected_finish);
+  const totalMs       = Math.max(finishMs - sprintStartMs, 1);
+
+  // Shared % helper — clamps to [0, 100]
+  function pct(ms) {
+    return Math.max(0, Math.min(100, (ms - sprintStartMs) / totalMs * 100));
+  }
+
+  // ── Format helpers ──────────────────────────────────────────────────────────
+  function fmtMin(ms) {
+    const m = Math.round(ms / 60000);
+    return m + 'm';
+  }
+  function fmtHHMM(isoStr) {
+    const d = new Date(isoStr);
+    const h = d.getHours().toString().padStart(2, '0');
+    const m = d.getMinutes().toString().padStart(2, '0');
+    return h + ':' + m;
+  }
+
+  const nowPct    = pct(nowMs);
+  const finishPct = pct(finishMs);
+
+  // ── Agent time totals for split bar ────────────────────────────────────────
+  let coderMs = 0, testerMs = 0;
+  for (const iss of data.issues) {
+    for (const seg of (iss.segments || [])) {
+      const a = (seg.agent || '').toLowerCase();
+      const st = seg.start ? Date.parse(seg.start) : null;
+      const en = seg.end   ? Date.parse(seg.end)   : nowMs;
+      if (!st) continue;
+      const dur = Math.max(0, en - st);
+      if (a === 'coder')  coderMs  += dur;
+      if (a === 'tester') testerMs += dur;
+    }
+  }
+  const wu = data.wrap_up_estimate || {};
+  const docEstMs      = (wu.documenter || 0) * 60000;
+  const revEstMs      = (wu.reviewer   || 0) * 60000;
+  const agentTotalMs  = coderMs + testerMs + docEstMs + revEstMs || 1;
+  const coderPct      = Math.round(coderMs  / agentTotalMs * 100);
+  const testerPct     = Math.round(testerMs / agentTotalMs * 100);
+  const docPct        = Math.round(docEstMs / agentTotalMs * 100);
+  const revPct        = wu.reviewer ? Math.round(revEstMs / agentTotalMs * 100) : 0;
+
+  // ── Split bar HTML ──────────────────────────────────────────────────────────
+  let splitSegs = '';
+  if (coderPct  > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--coder" style="width:${coderPct}%"></div>`;
+  if (testerPct > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--tester" style="width:${testerPct}%"></div>`;
+  if (docPct    > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:${docPct}%"></div>`;
+  if (revPct    > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--reviewer rp-tl-split-seg--pending" style="width:${revPct}%"></div>`;
+
+  const splitHtml = `
+    <div class="rp-tl-split">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-sub)">Agent time split</div>
+      <div class="rp-tl-split-bar">${splitSegs}</div>
+    </div>`;
+
+  // ── 15-minute gridlines ─────────────────────────────────────────────────────
+  let gridLines = '';
+  for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
+    const p = pct(sprintStartMs + t);
+    const label = t === 0 ? '0m' : (Math.round(t / 60000) + 'm');
+    // Suppress labels that are too close to the finish label (within 5%)
+    const tooClose = Math.abs(p - finishPct) < 5 && t > 0;
+    const labelHtml = tooClose ? '' : `<span class="rp-tl-gridline-label">${escHtml(label)}</span>`;
+    gridLines += `<div class="rp-tl-gridline" style="left:${p.toFixed(2)}%">${labelHtml}</div>`;
+  }
+
+  const finishHHMM = fmtHHMM(data.projected_finish);
+  const axisHtml = `
+    <div class="rp-tl-axis-wrap">
+      <div class="rp-tl-grid">${gridLines}</div>
+      <div class="rp-tl-now" style="left:calc(${nowPct.toFixed(2)}% - 1px)">
+        <div class="rp-tl-now-line"></div>
+      </div>
+      <div class="rp-tl-finish-label">est. finish ${escHtml(finishHHMM)}</div>
+    </div>`;
+
+  // ── Per-issue rows ──────────────────────────────────────────────────────────
+  let issueRowsHtml = '';
+  let queuedStartMs = nowMs; // running issue finishes ~now; queue after
+
+  // Find the running issue end estimate for queuing subsequent issues
+  for (const iss of data.issues) {
+    if (iss.status === 'running' || iss.agent_status === 'running') {
+      const remaining = (iss.estimated_remaining_ms != null)
+        ? iss.estimated_remaining_ms
+        : ((iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000);
+      queuedStartMs = nowMs + remaining;
+      break;
+    }
+  }
+
+  for (const iss of data.issues) {
+    const issNum    = iss.number || iss.issue_number || '?';
+    const isDone    = iss.status === 'done' || iss.status === 'uat';
+    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
+    const isQueued  = !isDone && !isRunning;
+
+    // Estimate envelope for done issues
+    let envelopeHtml = '';
+    if (isDone && iss.calibrated_estimate) {
+      const estMs  = (iss.calibrated_estimate || iss.estimate_minutes || 0) * 60000;
+      const envW   = pct(sprintStartMs + estMs) - pct(sprintStartMs);
+      if (envW > 0) {
+        envelopeHtml = `<div class="rp-tl-envelope" style="left:0%;width:${envW.toFixed(2)}%"></div>`;
+      }
+    }
+
+    // Segments
+    let segsHtml = '';
+    const segs = iss.segments || [];
+    const agentCounts = {};
+    for (const seg of segs) {
+      const agent    = (seg.agent || 'coder').toLowerCase();
+      const segStart = seg.start ? Date.parse(seg.start) : null;
+      if (!segStart) continue;
+      const segEnd   = seg.end   ? Date.parse(seg.end)   : nowMs;
+      const L = pct(segStart);
+      const W = pct(segEnd) - L;
+      if (W <= 0 && !isRunning) continue;
+
+      agentCounts[agent] = (agentCounts[agent] || 0) + 1;
+      const isRetry = seg.attempt_kind && seg.attempt_kind !== 'initial'
+        ? true
+        : agentCounts[agent] > 1;
+      const isLiveSeg = !seg.end;
+
+      let cls = `rp-tl-seg rp-tl-seg--${escHtml(agent)}`;
+      if (isRetry)  cls += ' rp-tl-seg--retry';
+      if (isLiveSeg && isRunning) cls += ' rp-tl-seg--running';
+      if (isQueued) cls += ' rp-tl-seg--ghost';
+
+      const wStr = Math.max(W, 0.5).toFixed(2);
+      segsHtml += `<div class="${cls}" style="left:${L.toFixed(2)}%;width:${wStr}%"></div>`;
+    }
+
+    // Projected remainder for running issue
+    if (isRunning) {
+      const remaining = (iss.estimated_remaining_ms != null)
+        ? iss.estimated_remaining_ms
+        : ((iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000);
+      const projEnd  = nowMs + remaining;
+      const projL    = pct(nowMs);
+      const projW    = pct(projEnd) - projL;
+      if (projW > 0) {
+        segsHtml += `<div class="rp-tl-seg rp-tl-seg--running rp-tl-seg--projected rp-tl-seg--ghost" style="left:${projL.toFixed(2)}%;width:${projW.toFixed(2)}%"></div>`;
+      }
+    }
+
+    // Queued: ghost full-estimate block starting after running
+    if (isQueued && !segs.length) {
+      const estMs  = (iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000;
+      const qL     = pct(queuedStartMs);
+      const qW     = pct(queuedStartMs + estMs) - qL;
+      if (qW > 0) {
+        const agent = (iss.agent || 'coder').toLowerCase();
+        segsHtml += `<div class="rp-tl-seg rp-tl-seg--${escHtml(agent)} rp-tl-seg--ghost" style="left:${qL.toFixed(2)}%;width:${qW.toFixed(2)}%"></div>`;
+      }
+      queuedStartMs += estMs;
+    }
+
+    // Right-side label
+    const elapsedMs = segs.reduce((acc, seg) => {
+      if (!seg.start) return acc;
+      const st = Date.parse(seg.start);
+      const en = seg.end ? Date.parse(seg.end) : nowMs;
+      return acc + Math.max(0, en - st);
+    }, 0);
+    const mainMetric = fmtMin(elapsedMs);
+    const tryCount   = segs.length;
+    const estMs2     = (iss.calibrated_estimate || iss.estimate_minutes || 0) * 60000;
+    const overMs     = estMs2 > 0 ? elapsedMs - estMs2 : 0;
+    let subLine = '';
+    if (tryCount > 1) {
+      subLine = `${tryCount} tries`;
+      if (overMs > 60000) subLine += `, +${fmtMin(overMs)} over`;
+    }
+
+    const rowExtraCls = isQueued ? ' rp-tl-row--queued' : '';
+    issueRowsHtml += `
+      <div class="rp-tl-row${rowExtraCls}">
+        <div class="rp-tl-row-num">#${escHtml(String(issNum))}</div>
+        <div class="rp-tl-track">${envelopeHtml}${segsHtml}</div>
+        <div class="rp-tl-row-label">
+          <div class="rp-tl-metric">${escHtml(mainMetric)}</div>
+          ${subLine ? `<div class="rp-tl-sub">${escHtml(subLine)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // ── Wrap-up row (documenter + optional reviewer) ────────────────────────────
+  let wrapUpHtml = '';
+  if (wu.documenter) {
+    const docMs   = wu.documenter * 60000;
+    const docL    = pct(queuedStartMs);
+    const docW    = pct(queuedStartMs + docMs) - docL;
+    let wrapSegsHtml = '';
+    if (docW > 0) {
+      wrapSegsHtml += `<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:${docL.toFixed(2)}%;width:${docW.toFixed(2)}%"></div>`;
+    }
+    let revEndMs = queuedStartMs + docMs;
+    if (wu.reviewer) {
+      const revMs  = wu.reviewer * 60000;
+      const revL   = pct(revEndMs);
+      const revW   = pct(revEndMs + revMs) - revL;
+      revEndMs += revMs;
+      if (revW > 0) {
+        wrapSegsHtml += `<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:${revL.toFixed(2)}%;width:${revW.toFixed(2)}%"></div>`;
+      }
+    }
+    const wrapEstMs = wu.documenter * 60000 + (wu.reviewer ? wu.reviewer * 60000 : 0);
+    wrapUpHtml = `
+      <div class="rp-tl-row rp-tl-row--wrapup rp-tl-wrapup">
+        <div class="rp-tl-row-num" style="font-size:8px;color:var(--text-muted)">WU</div>
+        <div class="rp-tl-track">${wrapSegsHtml}</div>
+        <div class="rp-tl-row-label">
+          <div class="rp-tl-metric">${escHtml(fmtMin(wrapEstMs))}</div>
+          <div class="rp-tl-sub">est.</div>
+        </div>
+      </div>`;
+  }
+
+  return splitHtml + axisHtml + issueRowsHtml + wrapUpHtml;
+}
+
+/** Fetch timeline data and update the running-pane timeline widget. */
+function _smgmtRpTimelineFetch(label, project) {
+  const el = document.getElementById('smgmt-rp-timeline');
+  if (!el || !label || !project) return;
+  fetch(`/api/sprints/${encodeURIComponent(label)}/timeline?project=${encodeURIComponent(project)}`)
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function(data) {
+      if (!data || !data.issues || !data.issues.length) {
+        el.hidden = true;
+        return;
+      }
+      el.innerHTML = _smgmtRpTimelineHtml(data);
+      el.hidden = false;
+    })
+    .catch(function() { el.hidden = true; });
 }
 
 // ── Node inspector panel (issue #804) ────────────────────────────────────────

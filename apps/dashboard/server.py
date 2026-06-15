@@ -4972,45 +4972,14 @@ def _live_manager_pid(project_root: Path, sprint_label: str) -> Optional[int]:
     return None
 
 
-def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
-    """Re-assert a sprint's lifecycle state as running across DB + plan.json.
-
-    Called when a live manager PID is found for a sprint whose stored state was
-    wrongly flipped to a terminal value. record_sprint_start clears the stale
-    ended_at/end_reason as part of the transition.
-    """
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    row = None
-    try:
-        row = db.get_sprint(sprint_label)
-    except Exception:
-        pass
-    project = (row or {}).get("project") or ""
-    started_at = (row or {}).get("started_at")
-    try:
-        _sprint_db_set_state(sprint_label, project, "running", started_at=started_at)
-    except Exception:
-        pass
-    try:
-        _plan_json_set_state(project_root, sprint_label, "running",
-                             started_at=started_at)
-    except Exception:
-        pass
-    _log.warning(
-        "Sprint %s: stored state was terminal but manager PID is alive — "
-        "healed back to running", sprint_label,
-    )
-
-
 def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
-    """Check if a sprint is running.
+    """Check if a sprint is running. Pure read — zero DB writes.
 
     The durable `sprints` table is the authoritative source (issue #757): a
-    sprint is running only when DB state='running' AND its PID is alive. A
-    PID-dead + DB-running row is reconciled to state='needs_rework' and reported as
-    not running. Falls back to plan.json + PID-file scanning only for legacy
-    sprints that have no DB row yet.
+    sprint is running only when DB state='running' AND its PID is alive. Any
+    terminal DB state is treated as definitive — the reconcile service handles
+    state corrections, not this function. Falls back to plan.json + PID-file
+    scanning only for legacy sprints that have no DB row yet.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
@@ -5034,42 +5003,25 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             _db_row = None
     if _db_row is not None:
         if _db_row.get("state") != "running":
-            # Recovery: a reconcile race can flip a still-running sprint to a
-            # terminal state (e.g. a startup sweep landing mid-dispatch before
-            # the PID file is written). If the manager is provably alive, the
-            # stored state is wrong — heal it back to running instead of
-            # reporting the sprint dead forever.
-            if _live_manager_pid(project_root, sprint_label) is not None:
-                _heal_sprint_to_running(project_root, sprint_label)
-                return True
+            # Terminal DB state is authoritative — never flip it back to running.
+            # The reconcile service and startup sweep are now correct; a live PID
+            # alongside a terminal row is not a sign of flip-flop — it is a race
+            # where the manager is shutting down. Report not running.
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
-        # DB=running but PID dead — reconcile both stores to needs_rework.
+        # DB=running but PID dead — report not running (reconciler will fix state).
         _log.warning(
-            "Sprint %s: DB state=running but no alive PID — reconciling to needs_rework",
+            "Sprint %s: DB state=running but no alive PID — reporting not running",
             sprint_label,
         )
-        try:
-            db.record_sprint_needs_rework(sprint_label, end_reason="process lost")
-        except Exception:
-            pass
-        try:
-            _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                 end_reason="process lost")
-        except Exception:
-            pass
         return False
 
     plan = _read_plan_json(project_root, sprint_label)
     if plan is not None:
         plan_state = plan.get("state")
         if plan_state in _NOT_RUNNING_PLAN_STATES:
-            # Same recovery as the DB branch for legacy (no-DB-row) sprints: a
-            # live manager overrides a stale terminal plan.json.
-            if _live_manager_pid(project_root, sprint_label) is not None:
-                _heal_sprint_to_running(project_root, sprint_label)
-                return True
+            # Terminal plan.json state is authoritative — never flip it back.
             return False
         if plan_state == "running":
             sprints_dir = _commander_dir(project_root) / "sprints"
@@ -5110,16 +5062,11 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
                     return True
                 except OSError:
                     pass
-            # plan.json=running but no alive PID — reconcile to needs_rework
+            # plan.json=running but no alive PID — report not running (reconciler will fix state).
             _log.warning(
-                "Sprint %s: plan.json=running but no alive PID — reconciling to needs_rework",
+                "Sprint %s: plan.json=running but no alive PID — reporting not running",
                 sprint_label,
             )
-            try:
-                _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                     end_reason="process lost")
-            except Exception:
-                pass
             return False
         # Unknown state value — fall through to PID check below
 
@@ -5168,19 +5115,6 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         except OSError:
             pass
 
-    if plan is None:
-        # Lazy migration: create plan.json for this legacy sprint
-        try:
-            if pid_alive:
-                _plan_json_set_state(project_root, sprint_label, "running",
-                                     started_at=datetime.now(timezone.utc).isoformat())
-                _log.info("[plan-migrate] %s: created plan.json state=running (legacy PID)", sprint_label)
-            else:
-                _plan_json_set_state(project_root, sprint_label, "completed")
-                _log.info("[plan-migrate] %s: created plan.json state=completed (no PID, historical)", sprint_label)
-        except Exception:
-            pass
-
     return pid_alive
 
 
@@ -5214,17 +5148,7 @@ def _all_sprints_running() -> list[dict]:
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(data, dict) or data.get("state") != "running":
-                # Recovery: a stale terminal plan.json with a provably-alive
-                # manager is still running — a reconcile race flipped it. Heal
-                # and report it, so the running pane doesn't drop a live sprint.
-                if isinstance(data, dict):
-                    _recover_pid = _live_manager_pid(root, label)
-                    if _recover_pid is not None:
-                        _heal_sprint_to_running(root, label)
-                        result.append({
-                            "project": proj["repo"], "sprint_label": label,
-                            "pid": _recover_pid or None,
-                        })
+                # Terminal plan.json state is authoritative — skip; no heal-back.
                 continue
             # Verify PID alive; reconcile dead ones to cancelled
             pid = _get_sprint_pid(root, label)

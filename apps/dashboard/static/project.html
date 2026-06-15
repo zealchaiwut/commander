@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
     var m = window.location.pathname.match(/^\/project\/([^/]+)/);
     var slug = m ? decodeURIComponent(m[1]) : '';
     var k = 'settings:' + slug + ':theme';
-    var v = localStorage.getItem(k) || localStorage.getItem('theme') || 'light';
+    var v = localStorage.getItem(k) || localStorage.getItem('theme') || 'dark';
     var theme = v === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       : (v === 'dark' ? 'dark' : 'light');
@@ -116,30 +116,31 @@
 
     /* ── Top nav bar ── */
     .top-nav {
-      position: sticky; top: 0; z-index: 30;
+      position: sticky; top: 0; z-index: var(--z-nav);
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 0 16px;
+      padding: 0 var(--space-4);
       height: 48px;
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
       flex-shrink: 0;
     }
-    .top-nav-left { display: flex; align-items: center; gap: 10px; }
+    .top-nav-left { display: flex; align-items: center; gap: var(--space-2); }
     .brand-mark {
-      width: 26px; height: 26px; border-radius: 6px;
+      width: 26px; height: 26px; border-radius: var(--radius-md);
       background: var(--text);
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; color: var(--surface); font-size: 14px;
+      flex-shrink: 0; color: var(--surface); font-size: var(--font-size-lg);
       text-decoration: none;
     }
-    .brand-wordmark { font-size: 14px; font-weight: 700; letter-spacing: -.02em; }
-    .top-nav-right { display: flex; align-items: center; gap: 8px; }
+    .brand-wordmark { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); letter-spacing: -.02em; }
+    .top-nav-right { display: flex; align-items: center; gap: var(--space-2); }
     .btn-icon {
       width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-      border: 1px solid var(--border); border-radius: 6px; background: none;
-      color: var(--text-muted); font-size: 15px; transition: background .15s, color .15s;
+      border: 1px solid var(--border); border-radius: var(--radius-md); background: none;
+      color: var(--text-muted); font-size: var(--font-size-xl); transition: background .15s, color .15s;
     }
     .btn-icon:hover { background: var(--surface-2); color: var(--text); }
+    .btn-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
     /* ── Active-milestone indicator (issue #880) — header, links to Roadmap ── */
     .hnav-milestone {
@@ -499,11 +500,11 @@
       z-index: auto;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 18px 28px 0;
+      padding: var(--space-4) var(--space-8) 0;
     }
     .proj-header-row {
-      display: flex; align-items: center; gap: 12px;
-      padding-bottom: 14px;
+      display: flex; align-items: center; gap: var(--space-3);
+      padding-bottom: var(--space-4);
       border-bottom: 1px solid var(--border);
     }
     .proj-header-title {
@@ -606,15 +607,16 @@
       flex: 1 1 auto; min-width: 0;
     }
     .stab {
-      display: flex; align-items: center; gap: 6px;
-      padding: 10px 0; margin-right: 24px; flex-shrink: 0;
+      display: flex; align-items: center; gap: var(--space-1);
+      padding: var(--space-3) 0; margin-right: var(--space-6); flex-shrink: 0;
       background: none; border: none; border-bottom: 2px solid transparent;
-      color: var(--text-muted); font-size: 13px; font-weight: 500;
-      transition: color .15s, border-color .15s; white-space: nowrap;
+      color: var(--text-muted); font-size: var(--font-size-base); font-weight: var(--font-weight-medium);
+      transition: color .15s, border-color .15s, background .15s; white-space: nowrap;
       cursor: pointer;
     }
-    .stab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 700; }
-    .stab:hover:not(.active):not(.disabled) { color: var(--text); }
+    .stab.active { color: var(--text); border-bottom-color: var(--blue); font-weight: var(--font-weight-bold); }
+    .stab:hover:not(.active):not(.disabled) { color: var(--text); background: var(--surface-hover); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+    .stab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
     .stab.disabled {
       color: var(--text-sub); cursor: not-allowed;
     }

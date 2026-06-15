@@ -701,7 +701,11 @@
       const src = String(a.source || '').toLowerCase();
       const badge = src === 'github' ? 'github' : 'agent';
       const lbl = (a.source || 'EVENT').toUpperCase();
-      return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
+      const _tld = a.time ? new Date(a.time) : null;
+      const timeFmt = _tld && !isNaN(_tld)
+        ? String(_tld.getHours()).padStart(2,'0') + ':' + String(_tld.getMinutes()).padStart(2,'0')
+        : '';
+      return `<div class="tl-row"><span class="tl-time">${esc(timeFmt)}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
     // The "N more in Logs" row was redundant with the foot link below.
     const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;

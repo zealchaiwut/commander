@@ -134,7 +134,8 @@ def test_is_sprint_running_reconciles_dead_pid(tmp_path):
     server._plan_json_set_state(root, "sprint-5", "running")
     # Write a clearly dead PID
     (sprints / "sprint-5-pid").write_text("999999999", encoding="utf-8")
-    result = server._is_sprint_running(root, "sprint-5")
+    with patch("server.db.get_sprint", return_value=None):
+        result = server._is_sprint_running(root, "sprint-5")
     assert result is False
     # _is_sprint_running is read-only — plan.json must NOT be mutated
     unchanged = server._read_plan_json(root, "sprint-5")
@@ -174,12 +175,16 @@ def test_get_sprint_state_returns_plan_json(client, tmp_path):
     assert "created_at" in data
 
 
-def test_get_sprint_state_lazy_migration(client, tmp_path):
-    """No plan.json → lazily creates one and returns it."""
+def test_get_sprint_state_missing_plan_returns_404(client, tmp_path):
+    """No plan.json → returns 404 (not lazy-created).
+
+    Issue #1096: GET endpoints must not write plan.json.  The sprint manager
+    is the sole writer, so missing plan.json returns 404 instead of creating it.
+    """
     resp = client.get("/api/sprints/sprint-42/state?project=myrepo")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["state"] in ("planning", "running", "completed", "cancelled")
+    assert resp.status_code == 404, (
+        f"GET /state with no plan.json must return 404 (issue #1096); got {resp.status_code}"
+    )
 
 
 def test_get_sprint_state_invalid_label(client):

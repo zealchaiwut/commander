@@ -208,7 +208,7 @@ async def run_finish_sprint(
             else:
                 finish_labels = [
                     base_label,
-                    *srv._child_sprint_labels_from_plans(project_root, base_label),
+                    *srv.children_of(base_label, project_root),
                 ]
             for lbl in finish_labels:
                 try:

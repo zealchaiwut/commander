@@ -1056,7 +1056,7 @@ Replace the existing draft (${data.existing_label})?`
         const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
         const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
         html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
-        onclick="event.stopPropagation();smgmtRerunSprint('${lbl}')">
+        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
         <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
       } else if (state === "completed" || state === "ready_to_merge") {
         html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
@@ -1540,7 +1540,7 @@ Replace the existing draft (${data.existing_label})?`
     const childrenReady = _histChildSprintsAllCompleted(group);
     if (!childrenReady) {
       return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
-            title="Finish all child sprint runs before bulk completing">
+            title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete
     </button>`;
     }
@@ -1749,6 +1749,33 @@ Replace the existing draft (${data.existing_label})?`
     const recentHtml = recent.map(_histGroupHtml).join("");
     const foldsHtml = folds.map(_histFoldHtml).join("");
     el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
+  }
+  async function _histRerunSprint(label) {
+    const repo = (typeof _smgmtRepo === "function" ? _smgmtRepo() : null) || _cachedFullRepo && _cachedFullRepo[_slug] || "";
+    if (!repo)
+      return;
+    const enc = encodeURIComponent(label);
+    try {
+      const prev = await fetch(`/api/sprints/${enc}/rerun-preview?project=${encodeURIComponent(repo)}`);
+      if (!prev.ok) {
+        console.error("_histRerunSprint preview failed", await prev.text());
+        return;
+      }
+      const data = await prev.json();
+      const ticketNumbers = (data.tickets || []).map((t) => t.number);
+      const res = await fetch(`/api/sprints/${enc}/rerun?project=${encodeURIComponent(repo)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true })
+      });
+      if (!res.ok) {
+        console.error("_histRerunSprint failed", await res.text());
+        return;
+      }
+      await _histLoadLedger2(repo);
+    } catch (e) {
+      console.error("_histRerunSprint error", e);
+    }
   }
   async function _histLoadLedger2(repo) {
     if (!repo)
@@ -5751,6 +5778,7 @@ ${data.errors.join("\n")}`);
   globalThis._histFocusLabel = _histFocusLabel;
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
+  globalThis._histRerunSprint = _histRerunSprint;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import sprint_state
 import github_events_sync
 import live_metrics as _live_metrics
 import projects as projects_module
@@ -191,6 +192,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 # Configurable via .env: how long (seconds) a 'working' agent can be silent before
 # it is marked 'timed_out'.  Default: 300 s (5 minutes).
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
+COMMANDER_SWEEP_GRACE_SECONDS: int = int(os.environ.get("COMMANDER_SWEEP_GRACE_SECONDS", "30"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _start_time: float = 0.0
@@ -420,10 +422,8 @@ def _sweep_orphan_pid_files() -> None:
 
 
 def _sweep_plan_json_states(projects: list) -> None:
-    """Reconcile plan.json files with state=running that have no alive PID (issue #507).
-
-    Called once on startup after PID sweeping completes.  Any sprint whose
-    plan.json says running but whose PID is dead gets reconciled to needs_rework.
+    """Three-condition gate before settling running plan.json to needs_rework (issue #1089).
+    Writes go through db.transition_sprint_state(actor="reconcile") — never direct (AC2).
     """
     reconciled = 0
     for proj in projects:
@@ -440,37 +440,36 @@ def _sweep_plan_json_states(projects: list) -> None:
                     continue
                 if not isinstance(data, dict) or data.get("state") != "running":
                     continue
-                pid_file    = sprints_dir / f"{label}-pid"
-                pending_file = sprints_dir / f"{label}-pid.pending"
-                pid_alive = False
-                for candidate in (pid_file, pending_file):
-                    if not candidate.exists():
-                        continue
-                    try:
-                        raw = candidate.read_text(encoding="utf-8").strip()
-                        if raw in ("", "0"):
-                            pid_alive = True
-                            break
-                        pid = int(raw)
-                        os.kill(pid, 0)
-                        pid_alive = True
-                        break
-                    except (ProcessLookupError, ValueError, OSError):
-                        pass
-                    except PermissionError:
-                        pid_alive = True
-                        break
-                if not pid_alive:
-                    data["state"] = "needs_rework"
-                    data["end_reason"] = "process lost"
-                    try:
-                        tmp = plan_file.with_suffix(".json.tmp")
-                        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                        os.replace(str(tmp), str(plan_file))
-                        reconciled += 1
-                        print(f"[startup-sweep] reconciled {label} plan.json: running→needs_rework (PID dead)")
-                    except Exception as exc:
-                        print(f"[startup-sweep] could not reconcile {label} plan.json: {exc}")
+                # Condition 1: PID file absent (orphan sweep already cleaned dead PIDs)
+                if (sprints_dir / f"{label}-pid").exists() or (sprints_dir / f"{label}-pid.pending").exists():
+                    continue
+                # Condition 2: no live manager process (guards startup race before PID written)
+                if _live_manager_pid(project_root, label) is not None:
+                    continue
+                # Condition 3: grace window must have elapsed
+                row = db.get_sprint(label)
+                raw_ts = (row or {}).get("started_at") or data.get("started_at")
+                if not raw_ts:
+                    print(f"[startup-sweep] {label}: no started_at — grace assumed, skip")
+                    continue
+                try:
+                    started = datetime.fromisoformat(raw_ts)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - started).total_seconds()
+                except (ValueError, TypeError):
+                    age = COMMANDER_SWEEP_GRACE_SECONDS + 1
+                if age < COMMANDER_SWEEP_GRACE_SECONDS:
+                    print(f"[startup-sweep] {label}: grace {age:.0f}s < {COMMANDER_SWEEP_GRACE_SECONDS}s — skip")
+                    continue
+                # All three conditions met — route through the guarded writer (AC2)
+                ok, rejection = db.transition_sprint_state(label, "needs_rework", actor="reconcile", end_reason="process lost")
+                if ok:
+                    _plan_json_set_state(project_root, label, "needs_rework", end_reason="process lost")
+                    reconciled += 1
+                    print(f"[startup-sweep] reconciled {label}: running→needs_rework")
+                else:
+                    print(f"[startup-sweep] {label}: guard rejected — {rejection}")  # AC5
         except Exception as exc:
             print(f"[startup-sweep] plan.json sweep error for {proj.get('repo')}: {exc}")
     if reconciled:
@@ -6530,32 +6529,15 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
 def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
 
-    Creates plan.json lazily on first access for legacy sprints that pre-date
-    this feature.  State values: see _VALID_PLAN_STATES (unified lifecycle).
+    GET endpoints must not write plan.json (issue #1096): the sprint manager
+    is the sole writer.  Returns 404 when plan.json does not exist.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
     project_root = _project_root_path(project)
     plan = _read_plan_json(project_root, sprint_label)
     if plan is None:
-        # Lazy migration for legacy sprint (issue #507)
-        sprints_dir = _commander_dir(project_root) / "sprints"
-        has_pid = (sprints_dir / f"{sprint_label}-pid").exists() or \
-                  (sprints_dir / f"{sprint_label}-pid.pending").exists()
-        if has_pid and _is_sprint_running(project_root, sprint_label):
-            new_state = "running"
-        else:
-            new_state = "completed"
-        try:
-            _plan_json_set_state(project_root, sprint_label, new_state)
-            _log.info("[plan-migrate] %s: created plan.json state=%s (lazy, first state access)", sprint_label, new_state)
-        except Exception:
-            pass
-        plan = _read_plan_json(project_root, sprint_label)
-    if plan is None:
-        raise HTTPException(404, detail=f"Could not read or create plan.json for {sprint_label}")
+        raise HTTPException(404, detail=f"plan.json not found for {sprint_label!r}")
     return plan
 
 
@@ -8010,7 +7992,15 @@ def get_sprint_state(sprint_label: str, project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
+    """Pure read-only signal: True when the sprint has open work tickets with rework labels.
+
+    This function is a pure GitHub-label-derived signal. It is read-only and
+    must never trigger a sprint state write directly. Its return value is valid
+    only as input to reconcile proposals (e.g. fed into
+    ``_github_reconcile_row`` which feeds ``transition_sprint_state`` via the
+    reconcile actor). Call sites that consume this signal may only set local
+    display variables — they must not pass the result directly to a
+    state-writing function.
 
     A finished sprint is rework when any open work ticket either carries a
     rework/rejected label (needs-rework or tester-rejected — a tester rejection
@@ -8170,28 +8160,6 @@ def _outcome_from_ingested_row(
         "summary_issue_url": surl,
         "summary_issue_num": summary_issue_num,
     }
-
-
-def _child_sprint_labels_for_parent(project_root: Path, parent_label: str) -> list[str]:
-    """Direct child re-run labels spawned from parent_label."""
-    children: list[str] = []
-    rerun = _sprint_rerun_into_map(project_root)
-    for parent, child in rerun.items():
-        if parent == parent_label and child not in children:
-            children.append(child)
-    sprints_dir = _commander_dir(project_root) / "sprints"
-    if sprints_dir.is_dir():
-        for plan_file in sprints_dir.glob("sprint-*-plan.json"):
-            label = plan_file.name[: -len("-plan.json")]
-            plan = _read_plan_json(project_root, label)
-            if plan and plan.get("parent") == parent_label and label not in children:
-                children.append(label)
-
-    def _sub_idx(lbl: str) -> float:
-        m = re.match(r"^sprint-\d+\.(\d+)$", lbl)
-        return float(m.group(1)) if m else 0.0
-
-    return sorted(children, key=_sub_idx)
 
 
 _CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
@@ -8745,35 +8713,6 @@ def get_calibration(project: str):
         }
 
     return {"buckets": result_buckets}
-
-
-def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
-
-    A finished sprint is rework when any open work ticket either carries a
-    rework/rejected label (needs-rework or tester-rejected — a tester rejection
-    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
-    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
-    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
-    closed) reads as completed.
-    """
-    NON_WORK = {"sprint-summary", "docs", "documentation"}
-    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
-    DONE = {"UAT", "UAT-approved", "released"}
-    try:
-        issues = _get_sprint_issues(project, sprint_label)
-    except Exception:
-        return False
-    for iss in issues:
-        labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        if labels & NON_WORK:
-            continue
-        if labels & REWORK:
-            return True
-        if not (labels & DONE):
-            # open work ticket that never reached a done/UAT state → unfinished/failed
-            return True
-    return False
 
 
 def _count_rework_tickets(sprint_label: str, project: str) -> int:
@@ -10191,19 +10130,45 @@ def _sprint_branch_name(label: str) -> str:
     return f"sprint/{label}"
 
 
-def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list[str]:
-    """Return child sprint labels under base_label, sorted by sub-index."""
+def children_of(parent_label: str, project_root: Path | None = None) -> list[str]:
+    """Return child sprint labels whose parent is parent_label, sorted by sub-index.
+
+    Primary: queries sprints DB WHERE parent_label matches.
+    Fallback (rows predating parent-linkage tracking): plan.json disk glob.
+    """
+    try:
+        with db.get_conn() as conn:
+            db._create_sprint_lifecycle_tables(conn)
+            rows = conn.execute(
+                "SELECT label FROM sprints WHERE parent_label = ?",
+                (parent_label,),
+            ).fetchall()
+        if rows:
+            return sorted([r["label"] for r in rows], key=_sprint_label_sub_index)
+    except Exception:
+        pass
+    if project_root is None:
+        return []
+    # Fallback: disk glob for sprints predating DB parent-linkage tracking
     sprints_dir = _commander_dir(project_root) / "sprints"
     if not sprints_dir.is_dir():
         return []
-    m = re.match(r"^sprint-(\d+)$", base_label)
-    if not m:
-        return []
-    n = m.group(1)
-    children: list[str] = []
-    for path in sprints_dir.glob(f"sprint-{n}.*-plan.json"):
-        lbl = path.name.replace("-plan.json", "")
-        if _is_child_sprint_label(lbl):
+    base_m = re.match(r"^sprint-(\d+)$", parent_label)
+    if base_m:
+        # Fast path: base sprint → glob sprint-N.* directly
+        n = base_m.group(1)
+        children: list[str] = []
+        for path in sprints_dir.glob(f"sprint-{n}.*-plan.json"):
+            lbl = path.name.replace("-plan.json", "")
+            if _is_child_sprint_label(lbl):
+                children.append(lbl)
+        return sorted(children, key=_sprint_label_sub_index)
+    # General path: child sprint as parent — scan all plan files for parent match
+    children = []
+    for plan_file in sprints_dir.glob("sprint-*-plan.json"):
+        lbl = plan_file.name[: -len("-plan.json")]
+        plan = _read_plan_json(project_root, lbl)
+        if plan and plan.get("parent") == parent_label and lbl not in children:
             children.append(lbl)
     return sorted(children, key=_sprint_label_sub_index)
 
@@ -10225,23 +10190,8 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
 
 
 def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
-    """Lifecycle state for bulk-complete gating (DB + plan.json)."""
-    plan = _read_plan_json(project_root, sprint_label)
-    plan_state = (plan.get("state") or "").strip().lower() if plan else ""
-
-    db_state = ""
-    try:
-        row = db.get_sprint(sprint_label)
-        if row:
-            db_state = (row.get("state") or "").strip().lower()
-    except Exception:
-        pass
-
-    if db_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return db_state
-    if plan_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return plan_state
-    return db_state or plan_state
+    """Lifecycle state for bulk-complete gating (canonical accessor only)."""
+    return sprint_state.current(sprint_label)
 
 
 def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:
@@ -10269,7 +10219,7 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
 def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    for child_label in children_of(base_label, project_root):
         if not _bulk_complete_lineage_settled(project_root, child_label):
             unsettled.append(child_label)
     return unsettled
@@ -10367,7 +10317,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    children = _child_sprint_labels_from_plans(project_root, base_label)
+    children = children_of(base_label, project_root)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -10407,7 +10357,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    children = _child_sprint_labels_from_plans(project_root, base_label)
+    children = children_of(base_label, project_root)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -10519,7 +10469,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         else:
             sprint_issues = _get_sprint_issues(repo, base_label)
             seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-            for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+            for child_label in children_of(base_label, project_root):
                 try:
                     for iss in _get_sprint_issues(repo, child_label):
                         if iss["number"] not in seen_nums:
@@ -10619,7 +10569,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
-    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    child_labels = children_of(base_label, project_root)
     is_child = _is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
     finish_labels = [label] if is_child else all_labels
@@ -10778,7 +10728,7 @@ def _open_summary_issues_for_labels(repo: str, labels: list[str]) -> list[dict]:
 def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str) -> tuple[list[str], list[dict]]:
     if not re.match(r"^sprint-\d+$", base_label):
         raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
-    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    child_labels = children_of(base_label, project_root)
     if not child_labels:
         raise HTTPException(400, detail=f"No child sprints found under {base_label}")
     all_labels = [base_label, *child_labels]

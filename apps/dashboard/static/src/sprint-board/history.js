@@ -4,7 +4,7 @@
  * run-stats — fed by GET /api/sprints/history (local-only).
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
-          _smgmtBySprint, _smgmtUpdateSubnav, smgmtRerunSprint, smgmtFinishSprint,
+          _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
           smgmtDeleteSprint, _nextSprintSublabel, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
@@ -240,7 +240,7 @@ function _histVerbsHtml(s) {
       : '';
     const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
     html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
-               onclick="smgmtRerunSprint('${lbl}')">
+               onclick="_histRerunSprint('${lbl}')">
                <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   } else if (state === 'completed' || state === 'ready_to_merge') {
     html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
@@ -351,7 +351,7 @@ function _histHeadActionsHtml(s) {
         : '';
       const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
       html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
-        onclick="event.stopPropagation();smgmtRerunSprint('${lbl}')">
+        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
         <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
     } else if (state === 'completed' || state === 'ready_to_merge') {
       html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
@@ -899,7 +899,7 @@ function _histBulkCompleteBtnHtml(group) {
   const childrenReady = _histChildSprintsAllCompleted(group);
   if (!childrenReady) {
     return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
-            title="Finish all child sprint runs before bulk completing">
+            title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete
     </button>`;
   }
@@ -1173,10 +1173,31 @@ export function _histRenderLedger(sprints) {
   el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
 }
 
-// Re-run from History reuses the Board's confirm modal (smgmtRerunSprint): it
-// previews the carried tickets, lets the operator select + confirm, then creates
-// the versioned sub-sprint and runs it. Wired on the history buttons' onclick so
-// the History and Board reruns share one path (no separate direct-dispatch).
+// Re-run from History creates and dispatches immediately (no confirm modal).
+// Fetches the rerun-preview to resolve the versioned label and ticket list,
+// then POSTs to the rerun endpoint with auto_run: true so the child sub-sprint
+// starts right away.
+export async function _histRerunSprint(label) {
+  const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null)
+    || (_cachedFullRepo && _cachedFullRepo[_slug]) || '';
+  if (!repo) return;
+  const enc = encodeURIComponent(label);
+  try {
+    const prev = await fetch(`/api/sprints/${enc}/rerun-preview?project=${encodeURIComponent(repo)}`);
+    if (!prev.ok) { console.error('_histRerunSprint preview failed', await prev.text()); return; }
+    const data = await prev.json();
+    const ticketNumbers = (data.tickets || []).map(t => t.number);
+    const res = await fetch(`/api/sprints/${enc}/rerun?project=${encodeURIComponent(repo)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true })
+    });
+    if (!res.ok) { console.error('_histRerunSprint failed', await res.text()); return; }
+    await _histLoadLedger(repo);
+  } catch (e) {
+    console.error('_histRerunSprint error', e);
+  }
+}
 
 export async function _histLoadLedger(repo) {
   if (!repo) return;

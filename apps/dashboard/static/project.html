@@ -6794,6 +6794,21 @@
       font-size: 13px; z-index: 1000; text-align: center; font-family: monospace;
     }
 
+    /* ── Dashboard unreachable banner (cold load / server restart) ── */
+    .dashboard-unreachable-banner {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      position: fixed; top: 0; left: 0; right: 0;
+      padding: 8px 16px;
+      background: var(--amber-bg); border-bottom: 2px solid var(--amber); color: var(--text);
+      font-size: 13px; z-index: 1001; text-align: center;
+    }
+    .dashboard-unreachable-banner.hidden { display: none; }
+    .dashboard-load-error .dashboard-retry-btn {
+      margin-top: 6px; display: inline-block; font-size: 12px;
+      background: none; border: none; padding: 0; color: var(--blue);
+      cursor: pointer; font-family: inherit; text-decoration: underline;
+    }
+
     /* ── Settings sidebar link (issue #430) ── */
     .sb-settings-link {
       display: flex; align-items: center; gap: 9px;
@@ -9711,6 +9726,80 @@ async function updateSidebarFooter() {
 
 // ── Load home data ────────────────────────────────────────────────────────────
 let _sidebarRefreshTimer = null;
+let _dashboardReconnectTimer = null;
+let _dashboardLoadFailed = false;
+
+function _showDashboardUnreachable(message) {
+  const banner = document.getElementById('dashboard-unreachable-banner');
+  if (!banner) return;
+  banner.classList.remove('hidden');
+  const msgEl = banner.querySelector('.dashboard-unreachable-msg');
+  if (msgEl) msgEl.textContent = message || "Can't reach dashboard — is the server running?";
+}
+
+function _hideDashboardUnreachable() {
+  const banner = document.getElementById('dashboard-unreachable-banner');
+  if (banner) banner.classList.add('hidden');
+  _dashboardLoadFailed = false;
+  if (_dashboardReconnectTimer) {
+    clearTimeout(_dashboardReconnectTimer);
+    _dashboardReconnectTimer = null;
+  }
+}
+
+function _renderDashboardLoadError(message) {
+  if (_dashboardLoadFailed) return;
+  _dashboardLoadFailed = true;
+  const msg = message || "Can't reach dashboard — is the server running?";
+  _showDashboardUnreachable(msg);
+  const list = document.getElementById('sb-project-list');
+  if (list && !list.querySelector('.sb-proj-item')) {
+    list.innerHTML = `<div class="dashboard-load-error" style="padding:8px 16px;font-size:12px;color:var(--text-sub)">`
+      + `${escHtml(msg)} `
+      + `<button type="button" class="dashboard-retry-btn" onclick="_retryDashboardLoad()">Retry</button>`
+      + `</div>`;
+  }
+  const nameEl = document.getElementById('proj-header-name');
+  if (nameEl && nameEl.textContent === 'Loading…') {
+    nameEl.textContent = 'Dashboard unreachable';
+  }
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (listEl && listEl.textContent.trim().startsWith('Loading sprints')) {
+    listEl.innerHTML = `<div class="loading-msg">${escHtml(msg)} `
+      + `<button type="button" class="dashboard-retry-btn" onclick="_retryDashboardLoad()">Retry</button></div>`;
+  }
+  _pollHealthThenRetry();
+}
+
+function _pollHealthThenRetry() {
+  if (_dashboardReconnectTimer) clearTimeout(_dashboardReconnectTimer);
+  function poll() {
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function(r) {
+        if (r.ok) { _retryDashboardLoad(); return; }
+        _dashboardReconnectTimer = setTimeout(poll, 1500);
+      })
+      .catch(function() { _dashboardReconnectTimer = setTimeout(poll, 1500); });
+  }
+  _dashboardReconnectTimer = setTimeout(poll, 2500);
+}
+
+async function _retryDashboardLoad() {
+  _hideDashboardUnreachable();
+  const nameEl = document.getElementById('proj-header-name');
+  if (nameEl) nameEl.textContent = 'Loading…';
+  const listEl = document.getElementById('smgmt-sprint-list');
+  if (listEl && _activeTab === 'sprint-mgmt') {
+    listEl.innerHTML = '<div class="loading-msg" id="smgmt-loading">Loading sprints…</div>';
+  }
+  await Promise.all([loadHomeData(false), _prefetchFullRepo()]);
+  if (_cachedFullRepo[_slug] && typeof loadSprintMgmt === 'function' && _activeTab === 'sprint-mgmt') {
+    _sprintMgmtLoaded = false;
+    await loadSprintMgmt();
+    if (typeof _smgmtArInit === 'function') _smgmtArInit();
+    if (typeof _applyDeepLinkSubView === 'function') _applyDeepLinkSubView();
+  }
+}
 
 async function loadHomeData(silent) {
   try {
@@ -9727,13 +9816,16 @@ async function loadHomeData(silent) {
 
     buildSidebar(projects);
     updateProjectHeader(_projectData);
+    _hideDashboardUnreachable();
     // Re-apply all sprint status badges after sidebar rebuild
     if (_snavState) _snavUpdateSidebarBadge();
     Object.entries(_snavStateBySlug).forEach(([slug, state]) => _snavRenderSidebarBadge(slug, state));
     _snavRefreshAll();
   } catch (err) {
-    // Degrade gracefully: sidebar shows without dots, header may be empty
-    if (!silent) console.warn('Home data unavailable:', err);
+    if (!silent) {
+      console.warn('Home data unavailable:', err);
+      _renderDashboardLoadError('Home data unavailable — is the server running?');
+    }
   }
 }
 
@@ -10477,7 +10569,7 @@ const _cachedFullRepo = {};
 async function _prefetchFullRepo() {
   try {
     const r = await fetch('/api/projects');
-    if (!r.ok) return;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     const projects = d.projects || [];
     const sidebarRows = [];
@@ -10502,7 +10594,12 @@ async function _prefetchFullRepo() {
         color: cur.color,
       });
     }
-  } catch (e) { /* ignore */ }
+    _hideDashboardUnreachable();
+    return true;
+  } catch (e) {
+    _renderDashboardLoadError("Can't reach dashboard — is the server running?");
+    return false;
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -10551,8 +10648,12 @@ async function init() {
     history.replaceState({ slug, tab }, '', expected + window.location.search);
   }
 
+  // Start API loads before tab wiring so a bundle hiccup can't block data fetch.
+  const homePromise = loadHomeData(false);
+  const prefetchPromise = _prefetchFullRepo();
+
   // Activate the correct tab without pushing history (already set above)
-  switchTab(tab, false);
+  if (typeof switchTab === 'function') switchTab(tab, false);
 
   // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
   _setupModals();
@@ -10573,11 +10674,6 @@ async function init() {
 
   // Set up sticky toolbar shadow
   _smgmtInitScrollShadow();
-
-  // Parallel cold load: projects prefetch unlocks header + sprint board without
-  // blocking on the heavier /api/home payload.
-  const homePromise = loadHomeData(false);
-  const prefetchPromise = _prefetchFullRepo();
   const sprintMgmtPromise =
     _activeTab === 'sprint-mgmt'
       ? prefetchPromise.then(async () => {
@@ -23361,6 +23457,12 @@ document.addEventListener('keydown', function(e) {
 
 <!-- ── GitHub CLI auth warning banner (issue #424) ── -->
 <div id="gh-auth-banner" class="gh-auth-banner"></div>
+
+<!-- ── Dashboard unreachable banner (server down / restart during page load) ── -->
+<div class="dashboard-unreachable-banner hidden" id="dashboard-unreachable-banner" role="alert">
+  <i class="ti ti-wifi-off"></i>
+  <span class="dashboard-unreachable-msg">Can't reach dashboard — is the server running?</span>
+</div>
 
 <!-- ── Toast notification container (issue #426) ── -->
 <div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>

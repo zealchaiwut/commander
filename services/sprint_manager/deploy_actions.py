@@ -1,9 +1,10 @@
 """Local deploy / restart action helpers (issue #723).
 
 Pure, side-effect-free builders and validators that the dashboard's deploy and
-restart endpoints use to drive a ``git pull`` + service restart for
-Mac-mini-hosted (``host=local``) environments. All authority stays pull-only:
-no merge, push, PR, checkout, or branch switching is ever performed here.
+restart endpoints use to drive a ``git checkout`` + ``git pull`` + service
+restart for Mac-mini-hosted (``host=local``) environments. Deploy syncs the
+clone to the configured branch (``git checkout <branch>``) then fast-forward
+pulls from origin — no merge, push, PR, or branch creation.
 
 Design split:
   - The functions in this module build commands and validate config. They never
@@ -68,6 +69,11 @@ def require_deploy_target(entry: Optional[dict]) -> tuple[str, str]:
     return working_dir, branch
 
 
+def build_checkout_command(branch: str) -> list[str]:
+    """Build ``git checkout <branch>`` so deploy can sync off a feature branch."""
+    return ["git", "checkout", branch]
+
+
 def build_pull_command(branch: str) -> list[str]:
     """Build the pull-only command. Fast-forward only; never merges or pushes."""
     return ["git", "pull", "--ff-only", "origin", branch]
@@ -86,17 +92,11 @@ def build_current_branch_command() -> list[str]:
 def branch_mismatch_error(
     current: str, expected: str, working_dir: str
 ) -> Optional[str]:
-    """Return an actionable error when the clone is on the wrong branch, else None.
+    """Return a human-readable mismatch description, or None when branches match.
 
-    Deploy is pull-only and never switches branches (see module docstring), so a
-    ``git pull --ff-only origin <expected>`` run while a different branch is
-    checked out aborts with a cryptic ``fatal: Not possible to fast-forward``.
-    Detecting the mismatch up front lets the endpoint return a clear 409 telling
-    the operator exactly how to fix it (a detached ``HEAD`` is treated as a
-    mismatch too — the fix is the same checkout).
-
-    Returns None when the branches match. The caller skips the check entirely on
-    a probe failure, so this never blocks on an undeterminable branch.
+    Deploy now runs :func:`build_checkout_command` before pull, so this helper is
+    only used for diagnostics/tests. A detached ``HEAD`` (``current == "HEAD"``)
+    is treated as a mismatch.
     """
     current = (current or "").strip()
     expected = (expected or "").strip()

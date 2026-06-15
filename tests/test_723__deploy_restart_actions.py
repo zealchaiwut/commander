@@ -44,12 +44,20 @@ def test_build_pull_command_is_ff_only():
     assert "develop" in cmd
 
 
-def test_pull_command_never_merges_pushes_or_checks_out():
-    """AC2: no merge/push/PR/checkout op is ever in the command."""
+def test_pull_command_never_merges_pushes_or_rebases():
+    """AC2: the pull command itself is fast-forward only."""
     cmd = da.build_pull_command("master")
     joined = " ".join(cmd)
-    for forbidden in ("merge", "push", "checkout", "switch", "reset", "rebase"):
+    for forbidden in ("merge", "push", "reset", "rebase"):
         assert forbidden not in joined
+
+
+def test_checkout_command_is_separate_from_pull():
+    """Deploy checks out the target branch in a separate step before pull."""
+    checkout = da.build_checkout_command("develop")
+    pull = da.build_pull_command("develop")
+    assert checkout == ["git", "checkout", "develop"]
+    assert "checkout" not in " ".join(pull)
 
 
 def test_require_deploy_target_returns_dir_and_branch():
@@ -281,6 +289,8 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
 
     def fake_run(cmd, *a, **kw):
         calls.append((cmd, kw.get("cwd")))
+        if cmd[:2] == ["git", "checkout"]:
+            return _completed(cmd, stdout=f"Switched to branch 'develop'\n")
         if cmd[:2] == ["git", "pull"]:
             return _completed(cmd, stdout="Updating 111..222\nFast-forward\n")
         if cmd[:2] == ["git", "rev-parse"]:
@@ -297,6 +307,9 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
     assert "Fast-forward" in data["pull_output"]
     assert data["head"] == "deadbeefcafe"
 
+    checkout_call = next(c for c in calls if c[0][:2] == ["git", "checkout"])
+    assert checkout_call[1] == "/srv/commander-uat"
+    assert checkout_call[0] == ["git", "checkout", "develop"]
     # pull ran in working_dir, fast-forward only
     pull_call = next(c for c in calls if c[0][:2] == ["git", "pull"])
     assert pull_call[1] == "/srv/commander-uat"

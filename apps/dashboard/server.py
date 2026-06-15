@@ -67,6 +67,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import db
 import github_client
+import sprint_state
 import github_events_sync
 import live_metrics as _live_metrics
 import projects as projects_module
@@ -191,6 +192,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "prd").lower()
 # Configurable via .env: how long (seconds) a 'working' agent can be silent before
 # it is marked 'timed_out'.  Default: 300 s (5 minutes).
 AGENT_IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
+COMMANDER_SWEEP_GRACE_SECONDS: int = int(os.environ.get("COMMANDER_SWEEP_GRACE_SECONDS", "30"))
 _TIMEOUT_CHECK_INTERVAL: int = 60  # run the check every 60 seconds
 
 _start_time: float = 0.0
@@ -420,10 +422,8 @@ def _sweep_orphan_pid_files() -> None:
 
 
 def _sweep_plan_json_states(projects: list) -> None:
-    """Reconcile plan.json files with state=running that have no alive PID (issue #507).
-
-    Called once on startup after PID sweeping completes.  Any sprint whose
-    plan.json says running but whose PID is dead gets reconciled to needs_rework.
+    """Three-condition gate before settling running plan.json to needs_rework (issue #1089).
+    Writes go through db.transition_sprint_state(actor="reconcile") — never direct (AC2).
     """
     reconciled = 0
     for proj in projects:
@@ -440,37 +440,36 @@ def _sweep_plan_json_states(projects: list) -> None:
                     continue
                 if not isinstance(data, dict) or data.get("state") != "running":
                     continue
-                pid_file    = sprints_dir / f"{label}-pid"
-                pending_file = sprints_dir / f"{label}-pid.pending"
-                pid_alive = False
-                for candidate in (pid_file, pending_file):
-                    if not candidate.exists():
-                        continue
-                    try:
-                        raw = candidate.read_text(encoding="utf-8").strip()
-                        if raw in ("", "0"):
-                            pid_alive = True
-                            break
-                        pid = int(raw)
-                        os.kill(pid, 0)
-                        pid_alive = True
-                        break
-                    except (ProcessLookupError, ValueError, OSError):
-                        pass
-                    except PermissionError:
-                        pid_alive = True
-                        break
-                if not pid_alive:
-                    data["state"] = "needs_rework"
-                    data["end_reason"] = "process lost"
-                    try:
-                        tmp = plan_file.with_suffix(".json.tmp")
-                        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                        os.replace(str(tmp), str(plan_file))
-                        reconciled += 1
-                        print(f"[startup-sweep] reconciled {label} plan.json: running→needs_rework (PID dead)")
-                    except Exception as exc:
-                        print(f"[startup-sweep] could not reconcile {label} plan.json: {exc}")
+                # Condition 1: PID file absent (orphan sweep already cleaned dead PIDs)
+                if (sprints_dir / f"{label}-pid").exists() or (sprints_dir / f"{label}-pid.pending").exists():
+                    continue
+                # Condition 2: no live manager process (guards startup race before PID written)
+                if _live_manager_pid(project_root, label) is not None:
+                    continue
+                # Condition 3: grace window must have elapsed
+                row = db.get_sprint(label)
+                raw_ts = (row or {}).get("started_at") or data.get("started_at")
+                if not raw_ts:
+                    print(f"[startup-sweep] {label}: no started_at — grace assumed, skip")
+                    continue
+                try:
+                    started = datetime.fromisoformat(raw_ts)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - started).total_seconds()
+                except (ValueError, TypeError):
+                    age = COMMANDER_SWEEP_GRACE_SECONDS + 1
+                if age < COMMANDER_SWEEP_GRACE_SECONDS:
+                    print(f"[startup-sweep] {label}: grace {age:.0f}s < {COMMANDER_SWEEP_GRACE_SECONDS}s — skip")
+                    continue
+                # All three conditions met — route through the guarded writer (AC2)
+                ok, rejection = db.transition_sprint_state(label, "needs_rework", actor="reconcile", end_reason="process lost")
+                if ok:
+                    _plan_json_set_state(project_root, label, "needs_rework", end_reason="process lost")
+                    reconciled += 1
+                    print(f"[startup-sweep] reconciled {label}: running→needs_rework")
+                else:
+                    print(f"[startup-sweep] {label}: guard rejected — {rejection}")  # AC5
         except Exception as exc:
             print(f"[startup-sweep] plan.json sweep error for {proj.get('repo')}: {exc}")
     if reconciled:
@@ -4889,11 +4888,14 @@ def _live_manager_pid(project_root: Path, sprint_label: str) -> Optional[int]:
 
 
 def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
-    """Re-assert a sprint's lifecycle state as running across DB + plan.json.
+    """Re-assert a sprint's lifecycle state as running in the DB.
 
     Called when a live manager PID is found for a sprint whose stored state was
     wrongly flipped to a terminal value. record_sprint_start clears the stale
     ended_at/end_reason as part of the transition.
+
+    plan.json is NOT written here — GET endpoints call this indirectly and must
+    not mutate plan.json (issue #1096).  The sprint manager owns plan.json writes.
     """
     import logging as _logging
     _log = _logging.getLogger(__name__)
@@ -4906,11 +4908,6 @@ def _heal_sprint_to_running(project_root: Path, sprint_label: str) -> None:
     started_at = (row or {}).get("started_at")
     try:
         _sprint_db_set_state(sprint_label, project, "running", started_at=started_at)
-    except Exception:
-        pass
-    try:
-        _plan_json_set_state(project_root, sprint_label, "running",
-                             started_at=started_at)
     except Exception:
         pass
     _log.warning(
@@ -4961,18 +4958,15 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
             return False
         if _sprint_pid_alive(project_root, sprint_label):
             return True
-        # DB=running but PID dead — reconcile both stores to needs_rework.
+        # DB=running but PID dead — reconcile DB to needs_rework.
+        # plan.json is NOT written here (issue #1096): GET endpoints call
+        # _is_sprint_running and must not mutate plan.json.
         _log.warning(
             "Sprint %s: DB state=running but no alive PID — reconciling to needs_rework",
             sprint_label,
         )
         try:
             db.record_sprint_needs_rework(sprint_label, end_reason="process lost")
-        except Exception:
-            pass
-        try:
-            _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                 end_reason="process lost")
         except Exception:
             pass
         return False
@@ -5026,16 +5020,15 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
                     return True
                 except OSError:
                     pass
-            # plan.json=running but no alive PID — reconcile to needs_rework
+            # plan.json=running but no alive PID — log and return False.
+            # plan.json is NOT written here (issue #1096): GET endpoints call
+            # _is_sprint_running and must not mutate plan.json.  The startup
+            # sweep (_sweep_plan_json_states) handles the reconcile at boot time.
             _log.warning(
-                "Sprint %s: plan.json=running but no alive PID — reconciling to needs_rework",
+                "Sprint %s: plan.json=running but no alive PID — not running "
+                "(startup sweep will reconcile plan.json)",
                 sprint_label,
             )
-            try:
-                _plan_json_set_state(project_root, sprint_label, "needs_rework",
-                                     end_reason="process lost")
-            except Exception:
-                pass
             return False
         # Unknown state value — fall through to PID check below
 
@@ -5084,18 +5077,9 @@ def _is_sprint_running(project_root: Path, sprint_label: str) -> bool:
         except OSError:
             pass
 
-    if plan is None:
-        # Lazy migration: create plan.json for this legacy sprint
-        try:
-            if pid_alive:
-                _plan_json_set_state(project_root, sprint_label, "running",
-                                     started_at=datetime.now(timezone.utc).isoformat())
-                _log.info("[plan-migrate] %s: created plan.json state=running (legacy PID)", sprint_label)
-            else:
-                _plan_json_set_state(project_root, sprint_label, "completed")
-                _log.info("[plan-migrate] %s: created plan.json state=completed (no PID, historical)", sprint_label)
-        except Exception:
-            pass
+    # plan.json is NOT created here for legacy sprints (issue #1096):
+    # _is_sprint_running is called from GET endpoints and must not write files.
+    # The sprint manager owns plan.json creation.
 
     return pid_alive
 
@@ -6523,32 +6507,15 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
 def get_sprint_state(sprint_label: str, project: str):
     """Return the full plan.json payload for a sprint (issue #507).
 
-    Creates plan.json lazily on first access for legacy sprints that pre-date
-    this feature.  State values: see _VALID_PLAN_STATES (unified lifecycle).
+    GET endpoints must not write plan.json (issue #1096): the sprint manager
+    is the sole writer.  Returns 404 when plan.json does not exist.
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
     project_root = _project_root_path(project)
     plan = _read_plan_json(project_root, sprint_label)
     if plan is None:
-        # Lazy migration for legacy sprint (issue #507)
-        sprints_dir = _commander_dir(project_root) / "sprints"
-        has_pid = (sprints_dir / f"{sprint_label}-pid").exists() or \
-                  (sprints_dir / f"{sprint_label}-pid.pending").exists()
-        if has_pid and _is_sprint_running(project_root, sprint_label):
-            new_state = "running"
-        else:
-            new_state = "completed"
-        try:
-            _plan_json_set_state(project_root, sprint_label, new_state)
-            _log.info("[plan-migrate] %s: created plan.json state=%s (lazy, first state access)", sprint_label, new_state)
-        except Exception:
-            pass
-        plan = _read_plan_json(project_root, sprint_label)
-    if plan is None:
-        raise HTTPException(404, detail=f"Could not read or create plan.json for {sprint_label}")
+        raise HTTPException(404, detail=f"plan.json not found for {sprint_label!r}")
     return plan
 
 
@@ -8003,7 +7970,15 @@ def get_sprint_state(sprint_label: str, project: str):
 
 
 def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
+    """Pure read-only signal: True when the sprint has open work tickets with rework labels.
+
+    This function is a pure GitHub-label-derived signal. It is read-only and
+    must never trigger a sprint state write directly. Its return value is valid
+    only as input to reconcile proposals (e.g. fed into
+    ``_github_reconcile_row`` which feeds ``transition_sprint_state`` via the
+    reconcile actor). Call sites that consume this signal may only set local
+    display variables — they must not pass the result directly to a
+    state-writing function.
 
     A finished sprint is rework when any open work ticket either carries a
     rework/rejected label (needs-rework or tester-rejected — a tester rejection
@@ -8704,35 +8679,6 @@ def get_calibration(project: str):
         }
 
     return {"buckets": result_buckets}
-
-
-def _has_rework_tickets(sprint_label: str, project: str) -> bool:
-    """Return True if the sprint should read as rework rather than completed.
-
-    A finished sprint is rework when any open work ticket either carries a
-    rework/rejected label (needs-rework or tester-rejected — a tester rejection
-    is treated as a failed sprint) or never reached a done/UAT state (e.g. the
-    coder failed, so nothing shipped). Non-work tickets (summary/docs) are
-    ignored. A sprint whose work all reached UAT/UAT-approved (or is fully
-    closed) reads as completed.
-    """
-    NON_WORK = {"sprint-summary", "docs", "documentation"}
-    REWORK = {"needs-rework", "need-rework", "tester-rejected"}
-    DONE = {"UAT", "UAT-approved", "released"}
-    try:
-        issues = _get_sprint_issues(project, sprint_label)
-    except Exception:
-        return False
-    for iss in issues:
-        labels = {lbl["name"] for lbl in iss.get("labels", [])}
-        if labels & NON_WORK:
-            continue
-        if labels & REWORK:
-            return True
-        if not (labels & DONE):
-            # open work ticket that never reached a done/UAT state → unfinished/failed
-            return True
-    return False
 
 
 def _count_rework_tickets(sprint_label: str, project: str) -> int:
@@ -10170,23 +10116,8 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
 
 
 def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
-    """Lifecycle state for bulk-complete gating (DB + plan.json)."""
-    plan = _read_plan_json(project_root, sprint_label)
-    plan_state = (plan.get("state") or "").strip().lower() if plan else ""
-
-    db_state = ""
-    try:
-        row = db.get_sprint(sprint_label)
-        if row:
-            db_state = (row.get("state") or "").strip().lower()
-    except Exception:
-        pass
-
-    if db_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return db_state
-    if plan_state in _BULK_COMPLETE_CHILD_READY_STATES:
-        return plan_state
-    return db_state or plan_state
+    """Lifecycle state for bulk-complete gating (canonical accessor only)."""
+    return sprint_state.current(sprint_label)
 
 
 def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:

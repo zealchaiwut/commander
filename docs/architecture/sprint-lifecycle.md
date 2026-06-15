@@ -10,6 +10,29 @@
 > tickets; companion to [`boundaries.md`](./boundaries.md) and
 > [`frontend-map.md`](./frontend-map.md).
 
+## Canonical Read Contract (issue #1091)
+
+**`sprint_state.current(label)` is the sole sanctioned way to read sprint
+lifecycle state.**
+
+```python
+from apps.dashboard import sprint_state
+state = sprint_state.current("sprint-74.1")  # e.g. "running", "needs_rework"
+```
+
+Internally it calls `canonical_lifecycle(db.get_sprint(label)["state"])`.
+
+Rules for all call sites:
+
+- **Zero disk reads.** No `plan.json`, no `-state.json`, no `-pid` file.
+- **Zero label inference.** No GitHub label lookups.
+- **Zero fallback logic.** DB is the only source. A missing row returns
+  `"unknown"`.
+
+Existing call sites that read plan.json, infer state from labels, or apply
+multi-source reconciliation must be migrated to `sprint_state.current()` in
+subsequent tickets. Do not add new call sites that bypass this accessor.
+
 ## Problem — Four Competing Truths
 
 Today one sprint's status is answered by four disconnected sources, and they

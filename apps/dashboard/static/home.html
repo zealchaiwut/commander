@@ -7,21 +7,10 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/css/tokens.css">
   <style>
-    /* ── design tokens (from home_ceo_brief_mock.html, issue #842) ── */
-    :root{
-      --bg:#f9fafb;--surface:#fff;--surface-2:#f3f4f6;--surface-hover:#f5f6f8;--border:#e5e7eb;
-      --text:#111827;--text-muted:#6b7280;--text-sub:#9ca3af;
-      --green:#16a34a;--green-bg:#dcfce7;--amber:#d97706;--amber-bg:#fef3c7;
-      --red:#dc2626;--red-bg:#fee2e2;--blue:#2563eb;--blue-bg:#dbeafe;
-      --purple:#7c3aed;--purple-bg:#ede9fe;--mono:'SF Mono','Fira Code','Cascadia Code',monospace;
-    }
-    [data-theme="dark"]{
-      --bg:#0d0d0d;--surface:#161616;--surface-2:#1e1e1e;--surface-hover:#222;--border:#2a2a2a;
-      --text:#e5e7eb;--text-muted:#9ca3af;--text-sub:#6b7280;
-      --green:#22c55e;--green-bg:rgba(34,197,94,.13);--amber:#eab308;--amber-bg:rgba(234,179,8,.13);
-      --red:#f87171;--red-bg:rgba(239,68,68,.13);--blue:#60a5fa;--blue-bg:rgba(96,165,250,.13);
-      --purple:#a78bfa;--purple-bg:rgba(167,139,250,.13);
-    }
+    /* ── local token: pure-white icon color for brand-colored badge backgrounds.
+       tokens.css has no white constant (--surface is dark in dark mode), so
+       this single variable is defined here rather than in tokens.css. ── */
+    :root { --icon-on-color: #fff; }
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;padding:28px 24px;min-height:100vh}
     .home{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
@@ -85,7 +74,7 @@
     /* ===== per-project brief card ===== */
     .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
     .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
-    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;color:#fff}
+    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;color:var(--icon-on-color)}
     .pb-title-link{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:inherit;min-width:0}
     .pb-title-link:hover .pbname{color:var(--blue)}
     .pbname{font-weight:700;font-size:16px;transition:color .12s}
@@ -122,7 +111,7 @@
     /* Hide the bottom row (shipped detail + to-do) for a compact summary view. */
     .pbrief.hide-bottom .pb-cell-shipped,
     .pbrief.hide-bottom .pb-cell-todo{display:none}
-    .pb-bottom-toggle{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:color .12s,border-color .12s}
+    .pb-bottom-toggle{width:24px;height:24px;min-width:var(--space-12);min-height:var(--space-12);border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:color .12s,border-color .12s}
     .pb-bottom-toggle:hover{color:var(--text);border-color:var(--text-muted)}
     .pb-bottom-toggle .ti{transition:transform .15s}
     .pbrief.hide-bottom .pb-bottom-toggle .ti{transform:rotate(-90deg)}
@@ -143,6 +132,10 @@
     .pb-sum-loading{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px}
     .pb-sum-loading .ti{animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion: reduce) {
+      .pbstatus.run .d, .pulse { animation: none; }
+      .pb-sum-loading .ti { animation: none; }
+    }
 
     .pb-statusline{margin:0;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
     .pb-statusline .mono{font-family:var(--mono);font-size:12px;color:var(--text)}

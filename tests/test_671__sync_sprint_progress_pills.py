@@ -341,6 +341,26 @@ class TestSharedStoreInJs:
             "_smgmtLivePatch does not read from _sprintProgressStore"
         )
 
+    def test_sprint_progress_fetch_passes_project_param(self):
+        """_sprintProgressFetch must pass project= so the persisted file is found."""
+        src = _html()
+        fn_match = re.search(
+            r"async function _sprintProgressFetch\b.*?(?=\nfunction |\n\/\/ ──)",
+            src, re.DOTALL
+        )
+        assert fn_match, "_sprintProgressFetch not found"
+        fn = fn_match.group(0)
+        assert "project=" in fn, (
+            "_sprintProgressFetch does not pass project= to /api/sprint-progress"
+        )
+
+    def test_pill_helpers_support_child_sprint_labels(self):
+        """Child sprint labels must override GitHub base-number pills."""
+        src = _html()
+        assert "_sprintStoreOverridesNav" in src
+        assert "_sprintPillShortLabel" in src
+        assert "store.sprint_label" in src
+
 
 # ── AC6: Single render function triggers all three components ──────────────────
 
@@ -510,3 +530,41 @@ class TestStaleFetchBehavior:
         ), (
             "sprint-progress handler does not attempt to read persisted file as fallback"
         )
+
+    def test_endpoint_reads_persisted_file_with_repo_param(self, tmp_path):
+        """repo= alone must resolve the persisted file (frontend passes repo, not project)."""
+        try:
+            client, srv = _get_test_client()
+        except Exception:
+            pytest.skip("server import failed")
+
+        runtime = tmp_path / ".commander" / "runtime"
+        runtime.mkdir(parents=True)
+        cached = {
+            "has_sprint": True,
+            "sprint_label": "sprint-75.2",
+            "sprint": 75,
+            "done": 1,
+            "total": 1,
+            "run_state": "running",
+            "source": "live",
+        }
+        (runtime / "sprint-progress.json").write_text(json.dumps(cached), encoding="utf-8")
+
+        with patch.object(srv, "_project_root_path") as mock_root, \
+             patch.object(srv, "_all_sprints_running") as mock_running, \
+             patch.object(srv, "get_sprint_nav_status") as mock_nav:
+            mock_root.return_value = tmp_path
+            mock_running.return_value = []
+            mock_nav.side_effect = AssertionError("GitHub fallback should not run when file exists")
+
+            resp = client.get(
+                "/api/sprint-progress",
+                params={"repo": "zealchaiwut/commander"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("sprint_label") == "sprint-75.2"
+        assert data.get("done") == 1
+        assert data.get("total") == 1

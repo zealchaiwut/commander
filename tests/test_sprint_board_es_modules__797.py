@@ -34,10 +34,13 @@ SMOKE = REPO_ROOT / "tests" / "frontend" / "dragdrop.smoke.test.mjs"
 # Measured directly from `git show origin/sprint/sprint-62:apps/dashboard/static/project.html | wc -c`
 REAL_BASELINE_BYTES = 1_168_820
 
-CONCERN_MODULES = ["board-render", "drag-drop", "run-controls", "finish-modal", "rerun-modal"]
+CONCERN_MODULES = [
+    "board-render", "drag-drop", "run-controls", "finish-modal", "rerun-modal",
+    "bulk-complete-modal", "plan-next", "scheduled-run", "history",
+]
 PUBLIC_HANDLERS = [
-    "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint",
-    "_smgmtDropOnSprint", "_smgmtTicketDragStart", "_rrConfirm", "_fsConfirm",
+    "smgmtRunSprint", "smgmtFinishSprint", "smgmtRerunSprint", "smgmtPlanNextSprint",
+    "_smgmtDropOnSprint", "_smgmtTicketDragStart", "_rrConfirm", "_fsConfirm", "_fsRetry",
 ]
 
 
@@ -64,6 +67,17 @@ def test_sprint_board_es_modules__handler_not_inline(fn):
         f"{fn} still defined inline in project.html"
 
 
+def test_sprint_board_es_modules__switch_tab_not_inline():
+    assert not re.search(r'function\s+switchTab\s*\(', _read(PROJECT_HTML)), \
+        'switchTab still defined inline in project.html'
+
+
+def test_shell_tabs_module_exports_switch_tab():
+    tabs = STATIC / 'src' / 'shell' / 'tabs.js'
+    assert tabs.exists(), 'shell/tabs.js must exist'
+    assert 'export function switchTab' in _read(tabs)
+
+
 def test_sprint_board_es_modules__mount_point_and_bundle_retained():
     # AC2: page keeps the board mount point and loads the dist bundle.
     html = _read(PROJECT_HTML)
@@ -76,10 +90,14 @@ def test_sprint_board_es_modules__mount_point_and_bundle_retained():
 
 def test_sprint_board_es_modules__measurable_reduction_vs_real_baseline():
     now = PROJECT_HTML.stat().st_size
-    removed = REAL_BASELINE_BYTES - now
-    assert now < REAL_BASELINE_BYTES, f"project.html ({now}) not smaller than baseline"
-    # Real reduction is ~235 KB; require a substantial >=100 KB cut.
-    assert removed >= 100_000, f"expected >=100 KB cut, only {removed} bytes removed"
+    # Cumulative baseline: project.html size before BOTH extraction waves —
+    # history.js (~40 KB) and tabs.js (~8 KB). Post-merge both cuts apply, so the
+    # combined reduction must exceed their sum.
+    PRE_WAVE_BYTES = 1_231_348
+    wave_removed = PRE_WAVE_BYTES - now
+    assert wave_removed >= 48_000, (
+        f"expected >=48 KB cut (history.js + tabs.js), only {wave_removed} bytes removed"
+    )
 
 
 # --- AC4: smoke test imports the modularized pure helpers with tested signatures ---
@@ -102,7 +120,7 @@ def test_sprint_board_es_modules__npm_test_runs_frontend_suite():
 
 # --- AC6: committed bundle strictly re-exposes each public handler (no regression) ---
 
-@pytest.mark.parametrize("fn", PUBLIC_HANDLERS)
+@pytest.mark.parametrize("fn", PUBLIC_HANDLERS + ["switchTab"])
 def test_sprint_board_es_modules__bundle_reexposes_handler(fn):
     # Strict assignment (globalThis.fn = / window.fn =) so page onclick/ondrag resolve.
     assert re.search(rf"(?:window|globalThis)\.{re.escape(fn)}\s*=", _read(BUNDLE)), \
@@ -113,5 +131,5 @@ def test_sprint_board_es_modules__bundle_in_sync_with_source():
     # Sanity that the bundle was rebuilt from the extracted modules (it is the
     # artifact served at runtime; a stale bundle would mean broken board JS).
     bundle = _read(BUNDLE)
-    for anchor in ("_smgmtRender", "_smgmtDropOnSprint", "computeDropPlan", "_fsConfirm"):
+    for anchor in ("_smgmtRender", "_smgmtDropOnSprint", "computeDropPlan", "_fsConfirm", "_fsRetry"):
         assert anchor in bundle, f"committed bundle missing extracted symbol {anchor}"

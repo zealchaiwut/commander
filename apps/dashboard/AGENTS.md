@@ -39,3 +39,5 @@ via Server-Sent Events. This is the monolith being progressively extracted into
 - `dashboard.db` — runtime data file; never commit it.
 - `.env` — secrets; never commit; use `.env.example` for documentation.
 - The `GITHUB_TOKEN` env var — never log, print, or expose in API responses.
+
+<!-- needs-review: hotfix/board-history-running-ux — directory had changes; review and update this file -->

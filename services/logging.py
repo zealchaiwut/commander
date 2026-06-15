@@ -35,6 +35,33 @@ _REQUIRED_KEYS = (
     "issue_num", "sprint_label", "project", "git_sha", "event", "message",
 )
 
+# ---------------------------------------------------------------------------
+# Dispatch lifecycle events — category mapping (issue #902)
+# ---------------------------------------------------------------------------
+# Events emitted via structured_log.info/error in sprint_manager.py are teed
+# into events-<date>.jsonl with a `category` field so the Activity API can
+# surface and filter them. No new call sites needed in sprint_manager.py —
+# the tee is done centrally in _emit() below.
+_LIFECYCLE_EVENT_CATEGORY: dict[str, str] = {
+    "dispatch_start":    "agent",
+    "dispatch_finished": "agent",
+    "dispatch_failed":   "error",
+    "dispatch_killed":   "error",
+    "gate_failed":       "error",
+    "sprint_crashed":    "error",
+    "gate_passed":       "gate",
+    "sidecar_written":   "sprint",
+}
+
+# Fields to carry from the structured record into the events JSONL entry.
+# Only keys that are explicitly listed travel; everything else is dropped to
+# keep the events file compact and avoid leaking raw message strings.
+_LIFECYCLE_FIELDS = frozenset({
+    "run_id", "issue_num", "agent_role", "sprint_label", "project",
+    "attempt", "exit_code", "duration_s", "gate", "reason",
+    "stderr_tail", "sidecar", "error",
+})
+
 
 class EventType(Enum):
     """Canonical lifecycle event vocabulary for sprint orchestration log records.
@@ -271,6 +298,28 @@ class _Logger:
                 record[key] = None
 
         _append_line(self._structured_log_path(), json.dumps(record, default=str) + "\n")
+
+        # Tee dispatch lifecycle events into events-<date>.jsonl (issue #902).
+        # Done here centrally so sprint_manager.py call sites need no changes.
+        category = _LIFECYCLE_EVENT_CATEGORY.get(event)
+        if category is not None:
+            try:
+                evt: dict[str, Any] = {
+                    "timestamp": record["ts"],
+                    "name": event,
+                    "category": category,
+                }
+                # Carry only the whitelisted correlation + payload fields.
+                for fld in _LIFECYCLE_FIELDS:
+                    val = record.get(fld)
+                    if val is not None:
+                        evt[fld] = val
+                _append_line(self._events_log_path(), json.dumps(evt, default=str) + "\n")
+            except Exception as _tee_exc:
+                print(
+                    f"[commander.logging] IO error teeing lifecycle event: {_tee_exc}",
+                    file=sys.stderr,
+                )
 
     def info(self, event: str, message: str, **fields: Any) -> None:
         self._emit("INFO", event, message, **fields)

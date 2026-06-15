@@ -9,6 +9,10 @@ sessions).
 
 Agents may ONLY pause for confirmation for: (1) ambiguous requirements where a wrong guess wastes significant work; (2) destructive actions without clear precedent (`git push --force`, `git reset --hard`, touching `master`, deleting issues); (3) role-specific gate — BA shows the ticket body once before creating it on GitHub, Coder never pauses, Tester never pauses. Everything else — branch creation, commits, pushes, label updates, running tests, calling workflow scripts — executes immediately with a one-line status update. Default is **execute**, not ask.
 
+## Bug Reports — Investigate and Plan First (Direct Sessions)
+
+When the operator reports a bug or asks why something is broken, ALWAYS investigate the root cause and present a plan for discussion BEFORE making any fix. Read the relevant code, logs, and state; explain what is actually happening and why; lay out the fix options with a recommendation; then wait for the operator to choose. Do not jump straight to editing. This applies to direct Claude Code sessions with the operator — it does not change the autonomous Coder/Tester agents, which never pause. Once the operator approves the plan, the default-execute policy above governs the fix.
+
 ## Project Overview
 
 Commander is:

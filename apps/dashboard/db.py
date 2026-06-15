@@ -154,10 +154,14 @@ def init_db():
         """)
         _create_ticket_status_table(conn)
         _create_issues_table(conn)
+        _create_milestones_table(conn)
         _create_sync_state_table(conn)
         _create_sprint_lifecycle_tables(conn)
         _create_sprint_history_table(conn)
         _create_agent_runs_table(conn)
+        _create_advisor_suggestions_table(conn)
+        _create_advisor_look_ahead_table(conn)
+        _create_advisor_dismissed_table(conn)
         conn.commit()
 
 
@@ -229,6 +233,128 @@ def _create_sync_state_table(conn: sqlite3.Connection) -> None:
             updated_at TEXT
         )
     """)
+
+
+# ── Milestones mirror (issue #877) ────────────────────────────────────────────
+#
+# A local mirror of repo milestones, kept fresh by
+# github_milestones.sync_milestones_mirror() via ETag-conditional polling — the
+# same read-from-DB-not-GitHub model as the issues mirror. The GET milestones
+# endpoint serves from this table so reads consume zero GitHub rate-limit quota;
+# before the first sync it falls back to a live GitHub fetch. Write operations
+# (create/edit/close) upsert here too so the change is visible immediately.
+
+
+def _create_milestones_table(conn: sqlite3.Connection) -> None:
+    """Create the milestones mirror table (issue #877).
+
+    `raw` holds the full GitHub-shaped milestone dict so readers can reconstruct
+    every field without a live call. Primary key is (repo, number) so multiple
+    repos can be mirrored.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS milestones (
+            repo        TEXT NOT NULL DEFAULT '',
+            number      INTEGER NOT NULL,
+            title       TEXT,
+            description TEXT,
+            state       TEXT,
+            due_on      TEXT,
+            updated_at  TEXT,
+            raw         TEXT,
+            PRIMARY KEY (repo, number)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_milestones_repo_state "
+        "ON milestones (repo, state)"
+    )
+
+
+def upsert_milestones(repo: str, milestones: list[dict]) -> int:
+    """Upsert a batch of GitHub-shaped milestone dicts into the mirror.
+
+    Each dict carries: number, title, description, state, due_on, plus any extra
+    fields preserved in the `raw` column. Returns the number written.
+    """
+    if not milestones:
+        return 0
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        for ms in milestones:
+            number = ms.get("number")
+            if number is None:
+                continue
+            conn.execute(
+                """INSERT INTO milestones
+                       (repo, number, title, description, state, due_on,
+                        updated_at, raw)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(repo, number) DO UPDATE SET
+                       title       = excluded.title,
+                       description = excluded.description,
+                       state       = excluded.state,
+                       due_on      = excluded.due_on,
+                       updated_at  = excluded.updated_at,
+                       raw         = excluded.raw""",
+                (
+                    repo,
+                    int(number),
+                    ms.get("title", ""),
+                    ms.get("description", ""),
+                    ms.get("state", ""),
+                    ms.get("due_on", "") or "",
+                    ms.get("updated_at", "") or ms.get("updatedAt", ""),
+                    json.dumps(ms),
+                ),
+            )
+        conn.commit()
+    return len(milestones)
+
+
+def _row_to_milestone(row: sqlite3.Row) -> dict:
+    """Reconstruct a GitHub-shaped milestone dict from a mirror row."""
+    if row["raw"]:
+        try:
+            return json.loads(row["raw"])
+        except (ValueError, TypeError):
+            pass
+    return {
+        "number": row["number"],
+        "title": row["title"],
+        "description": row["description"],
+        "state": row["state"],
+        "due_on": row["due_on"],
+    }
+
+
+def get_mirrored_milestones(repo: str, state: str | None = None) -> list[dict]:
+    """Return mirrored milestones for a repo as GitHub-shaped dicts.
+
+    Optionally filter by state ('open' / 'closed'). Returns an empty list when
+    nothing is mirrored yet (callers may then fall back to a live fetch).
+    """
+    sql = "SELECT * FROM milestones WHERE repo = ?"
+    params: list = [repo]
+    if state is not None:
+        sql += " AND state = ?"
+        params.append(state)
+    sql += " ORDER BY number ASC"
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_milestone(r) for r in rows]
+
+
+def get_mirrored_milestone(repo: str, number: int) -> dict | None:
+    """Return a single mirrored milestone, or None if not present."""
+    with get_conn() as conn:
+        _create_milestones_table(conn)
+        row = conn.execute(
+            "SELECT * FROM milestones WHERE repo = ? AND number = ?",
+            (repo, int(number)),
+        ).fetchone()
+    return _row_to_milestone(row) if row else None
 
 
 # ── Brief summary cache (issue #840) ──────────────────────────────────────────
@@ -423,6 +549,129 @@ def canonical_lifecycle(raw: str | None) -> str:
     return _LEGACY_LIFECYCLE_MAP.get(s, s or "unknown")
 
 
+# ── Sprint state machine guard ────────────────────────────────────────────────
+
+_logger = logging.getLogger("db.sprint_state")
+
+# Legal state-to-state edges per the sprint-lifecycle contract diagram.
+# Non-running states allow direct terminal transitions to handle sprint
+# cancellations, legacy data ingest, and orphan-PID reconciliation without
+# requiring a full running start.  The critical guard — requiring actor="manager"
+# for running→terminal — is enforced separately below.
+_LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
+    "draft":          frozenset({"planned", "running", "ready_to_merge", "needs_rework", "deleted"}),
+    "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
+    "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
+    "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
+    "needs_rework":   frozenset({"running", "deleted"}),
+    "completed":      frozenset({"deleted"}),
+    "deleted":        frozenset(),
+}
+
+# Transitions FROM these states TO the guarded targets require actor="manager".
+_GUARD_FROM: frozenset[str] = frozenset({"running"})
+_GUARD_TO: frozenset[str] = frozenset({"ready_to_merge", "needs_rework", "completed"})
+
+# Reconciler-only promotions not in the general edge table (issue #1137).
+_RECONCILE_ONLY_EDGES: frozenset[tuple[str, str]] = frozenset({
+    ("needs_rework", "ready_to_merge"),
+})
+
+
+class TransitionResult:
+    """Returned by transition_sprint_state to signal acceptance or rejection."""
+
+    __slots__ = ("accepted", "reason")
+
+    def __init__(self, accepted: bool, reason: str = "") -> None:
+        self.accepted = accepted
+        self.reason = reason
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"TransitionResult(accepted={self.accepted!r}, reason={self.reason!r})"
+
+
+def transition_sprint_state(
+    label: str,
+    to_state: str,
+    actor: str,
+    end_reason: str | None = None,
+    ended_at: str | None = None,
+    started_at: str | None = None,
+    project: str = "",
+    parent_label: str | None = None,
+) -> TransitionResult:
+    """Single authoritative writer for sprint lifecycle state transitions.
+
+    Enforces the legal edge set from docs/architecture/sprint-lifecycle.md and
+    rejects any running→terminal transition where actor != "manager". Returns a
+    TransitionResult; never raises on a guard failure.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        row = conn.execute(
+            "SELECT state FROM sprints WHERE label = ?", (label,)
+        ).fetchone()
+    current = canonical_lifecycle(row["state"] if row else "draft")
+
+    allowed = _LEGAL_SPRINT_EDGES.get(current, frozenset())
+    reconcile_promote = (
+        actor == "reconcile"
+        and (current, to_state) in _RECONCILE_ONLY_EDGES
+    )
+    if to_state not in allowed and not reconcile_promote:
+        msg = (
+            f"sprint {label!r}: illegal edge {current!r}→{to_state!r} "
+            f"by actor={actor!r} (allowed: {sorted(allowed)})"
+        )
+        _logger.warning(msg)
+        return TransitionResult(accepted=False, reason=msg)
+
+    if current in _GUARD_FROM and to_state in _GUARD_TO and actor != "manager":
+        msg = (
+            f"sprint {label!r}: {current!r}→{to_state!r} rejected for "
+            f"actor={actor!r}; only actor='manager' may make this transition"
+        )
+        _logger.warning(msg)
+        return TransitionResult(accepted=False, reason=msg)
+
+    if to_state == "running":
+        _ts = started_at or _now_iso()
+        with get_conn() as conn:
+            _create_sprint_lifecycle_tables(conn)
+            conn.execute(
+                """
+                INSERT INTO sprints
+                    (label, project, state, created_at, started_at, parent_label)
+                VALUES (?, ?, 'running', ?, ?, ?)
+                ON CONFLICT(label) DO UPDATE SET
+                    project      = excluded.project,
+                    state        = 'running',
+                    started_at   = excluded.started_at,
+                    created_at   = COALESCE(sprints.created_at, excluded.created_at),
+                    parent_label = COALESCE(excluded.parent_label, sprints.parent_label),
+                    ended_at     = NULL,
+                    end_reason   = NULL
+                """,
+                (label, project, _ts, _ts, parent_label),
+            )
+            conn.commit()
+    elif to_state == "deleted":
+        # `deleted` is not a storable state in the sprints CHECK constraint
+        # (it lives in sprint_history per the lifecycle spec); remove the row.
+        with get_conn() as conn:
+            _create_sprint_lifecycle_tables(conn)
+            conn.execute("DELETE FROM sprints WHERE label = ?", (label,))
+            conn.commit()
+    else:
+        _set_sprint_terminal(label, to_state, end_reason, ended_at)
+
+    _logger.info(
+        "sprint %r: %r → %r by actor=%r", label, current, to_state, actor
+    )
+    return TransitionResult(accepted=True)
+
+
 _SPRINTS_TABLE_DDL = """
         CREATE TABLE IF NOT EXISTS sprints (
             label        TEXT PRIMARY KEY,
@@ -538,8 +787,24 @@ def ingest_sprint_run_artifact(
             "SELECT label FROM sprints WHERE label = ?", (label,)
         ).fetchone()
         if existing:
+            updates = [
+                fields["issues_json"],
+                fields["tokens"],
+                fields["wall_clock_secs"],
+                fields["reconciliation_json"],
+                fields["summary_issue_url"],
+                fields["summary_path"],
+                fields["pr_number"],
+                fields["post_sprint_json"],
+                fields["estimate_accuracy"],
+                ingested_at,
+            ]
+            project_sql = ""
+            if (project or "").strip():
+                project_sql = ", project = ?"
+                updates.append(project.strip())
             conn.execute(
-                """
+                f"""
                 UPDATE sprints SET
                     issues_json = ?,
                     tokens = ?,
@@ -550,22 +815,10 @@ def ingest_sprint_run_artifact(
                     pr_number = ?,
                     post_sprint_json = ?,
                     estimate_accuracy = ?,
-                    run_ingested_at = ?
+                    run_ingested_at = ?{project_sql}
                 WHERE label = ?
                 """,
-                (
-                    fields["issues_json"],
-                    fields["tokens"],
-                    fields["wall_clock_secs"],
-                    fields["reconciliation_json"],
-                    fields["summary_issue_url"],
-                    fields["summary_path"],
-                    fields["pr_number"],
-                    fields["post_sprint_json"],
-                    fields["estimate_accuracy"],
-                    ingested_at,
-                    label,
-                ),
+                tuple(updates) + (label,),
             )
         else:
             conn.execute(
@@ -760,11 +1013,76 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         ("base_sha", "TEXT"),
         ("attempt_kind", "TEXT"),
         ("log_path", "TEXT"),
+        ("backend", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+
+
+def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_suggestions draft store (issue #881).
+
+    One row per suggestion from the most recent advisor run. Replaced wholesale
+    on every new run (scheduled or on-demand) so there is no suggestion history
+    beyond the current draft set per project.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_suggestions (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0,
+            pitch     TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            milestone TEXT NOT NULL,
+            scope     TEXT NOT NULL CHECK(scope IN ('S', 'M', 'L'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_suggestions_project "
+        "ON advisor_suggestions (project)"
+    )
+
+
+def _create_advisor_look_ahead_table(conn: sqlite3.Connection) -> None:
+    """Create the advisor_look_ahead store (issue #883 / brief #884).
+
+    Ordered entries from the most recent advisor look-ahead run. Replaced
+    wholesale on every new run — no history beyond the current set per project.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_look_ahead (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            project   TEXT NOT NULL,
+            run_at    TEXT NOT NULL,
+            position  INTEGER NOT NULL,
+            entry     TEXT NOT NULL,
+            on_demand INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_look_ahead_project "
+        "ON advisor_look_ahead (project)"
+    )
+
+
+def _create_advisor_dismissed_table(conn: sqlite3.Connection) -> None:
+    """Durable store for pitches the user has dismissed (issue #882)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_dismissed (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            project      TEXT NOT NULL,
+            pitch        TEXT NOT NULL,
+            dismissed_at TEXT NOT NULL,
+            UNIQUE(project, pitch)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_dismissed_project "
+        "ON advisor_dismissed (project)"
+    )
 
 
 def _duration_between(started_at: str | None, finished_at: str | None) -> int | None:
@@ -791,6 +1109,7 @@ def record_agent_start(
     base_sha: str | None = None,
     attempt_kind: str | None = None,
     log_path: str | None = None,
+    backend: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -801,6 +1120,7 @@ def record_agent_start(
     `base_sha` are optional forensic fields from worktree hygiene (issue #788).
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
+    `backend` is 'cline' or 'claude-code' (issue #920).
     Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
@@ -809,10 +1129,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path, backend) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path),
+             worktree_sha, base_sha, attempt_kind, log_path, backend),
         )
         conn.commit()
         return cur.lastrowid
@@ -934,49 +1254,48 @@ def record_sprint_start(
     """Write (or move to) a `running` sprints row (issue #757).
 
     Idempotent on `label`: a second start re-asserts state='running' and
-    refreshes started_at without creating a duplicate row.
+    refreshes started_at without creating a duplicate row. Routed through
+    transition_sprint_state (issue #1087) so the legal-edge guard applies.
     """
-    started_at = started_at or _now_iso()
-    with get_conn() as conn:
-        _create_sprint_lifecycle_tables(conn)
-        conn.execute(
-            """
-            INSERT INTO sprints
-                (label, project, state, created_at, started_at, parent_label)
-            VALUES (?, ?, 'running', ?, ?, ?)
-            ON CONFLICT(label) DO UPDATE SET
-                project      = excluded.project,
-                state        = 'running',
-                started_at   = excluded.started_at,
-                created_at   = COALESCE(sprints.created_at, excluded.created_at),
-                parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
-            """,
-            (label, project, started_at, started_at, parent_label),
-        )
-        conn.commit()
+    transition_sprint_state(
+        label, "running", actor="manager",
+        started_at=started_at, project=project, parent_label=parent_label,
+    )
 
 
 def record_sprint_finish(label: str, ended_at: str | None = None,
-                         end_reason: str | None = None) -> None:
+                         end_reason: str | None = None,
+                         project: str = "") -> None:
     """Move a sprints row to `completed` (issue #757)."""
-    _set_sprint_terminal(label, "completed", end_reason, ended_at)
+    transition_sprint_state(
+        label, "completed", actor="manager",
+        end_reason=end_reason, ended_at=ended_at, project=project,
+    )
 
 
 def record_sprint_needs_rework(label: str, end_reason: str | None = None,
-                               ended_at: str | None = None) -> None:
+                               ended_at: str | None = None,
+                               project: str = "") -> None:
     """Move a sprints row to `needs_rework` with a reason.
 
     Unified-lifecycle terminal for every bad ending: ticket failure, crash,
     orphan PID, or user cancel. The distinction lives in `end_reason`
     ("stopped by user", "process lost", "ticket-failures", …).
     """
-    _set_sprint_terminal(label, "needs_rework", end_reason, ended_at)
+    transition_sprint_state(
+        label, "needs_rework", actor="manager",
+        end_reason=end_reason, ended_at=ended_at,
+    )
 
 
 def record_sprint_ready_to_merge(label: str, end_reason: str | None = None,
-                                 ended_at: str | None = None) -> None:
+                                 ended_at: str | None = None,
+                                 project: str = "") -> None:
     """Move a sprints row to `ready_to_merge` (run ended, all tickets passed)."""
-    _set_sprint_terminal(label, "ready_to_merge", end_reason, ended_at)
+    transition_sprint_state(
+        label, "ready_to_merge", actor="manager",
+        end_reason=end_reason, ended_at=ended_at, project=project,
+    )
 
 
 def record_sprint_cancel(label: str, end_reason: str = "stopped by user",
@@ -992,7 +1311,7 @@ def record_sprint_fail(label: str, end_reason: str | None = None,
 
 
 def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
-                         ended_at: str | None) -> None:
+                         ended_at: str | None, project: str = "") -> None:
     ended_at = ended_at or _now_iso()
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
@@ -1000,14 +1319,17 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         # (e.g. a legacy sprint cancelled before its first DB write).
         conn.execute(
             """
-            INSERT INTO sprints (label, state, created_at, ended_at, end_reason)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sprints (label, project, state, created_at, ended_at, end_reason)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(label) DO UPDATE SET
                 state      = excluded.state,
                 ended_at   = excluded.ended_at,
-                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason),
+                project    = CASE
+                    WHEN excluded.project IS NOT NULL AND excluded.project != ''
+                    THEN excluded.project ELSE sprints.project END
             """,
-            (label, state, ended_at, ended_at, end_reason),
+            (label, project or "", state, ended_at, ended_at, end_reason),
         )
         conn.commit()
 
@@ -1046,6 +1368,17 @@ def list_sprints_lifecycle() -> list[dict]:
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
         rows = conn.execute("SELECT * FROM sprints").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_sprint_children(parent_label: str) -> list[dict]:
+    """Return sprints rows whose parent_label matches the given label (issue #1093)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute(
+            "SELECT * FROM sprints WHERE parent_label = ? ORDER BY label",
+            (parent_label,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 

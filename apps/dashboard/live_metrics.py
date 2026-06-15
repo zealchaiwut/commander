@@ -1,8 +1,8 @@
-"""Live-snapshot metric helpers (issue #803), extracted from server.py.
+"""Live-snapshot metric helpers (issue #803, #927), extracted from server.py.
 
-Two pure helpers that the ``/api/sprints/{label}/live`` endpoint composes. They
-live here, not in the ``server.py`` monolith, so the endpoint can gain the
-Running-view metric strip without growing the guarded file (COMMANDER_GATE_MONOLITH).
+Pure helpers that the ``/api/sprints/{label}/live`` endpoint composes. They
+live here, not in the ``server.py`` monolith, so the endpoint can grow its
+response without growing the guarded file (COMMANDER_GATE_MONOLITH).
 
 * ``compute_levels(issues)`` — per dispatch-level progress for the pipeline
   board, extracted verbatim from the live endpoint.
@@ -15,8 +15,28 @@ Running-view metric strip without growing the guarded file (COMMANDER_GATE_MONOL
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+
+def _inflight_seconds(started_at: Optional[str]) -> int:
+    """Live elapsed seconds since ``started_at`` for an unfinished agent_runs row.
+
+    agent_runs timestamps are naive UTC (``record_sprint_start`` writes
+    ``utcnow().isoformat()``); compare against a naive UTC now. Returns 0 on any
+    parse failure so a malformed timestamp never breaks the metric strip.
+    """
+    if not started_at:
+        return 0
+    try:
+        ts = datetime.fromisoformat(started_at)
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        delta = (datetime.utcnow() - ts).total_seconds()
+        return int(delta) if delta > 0 else 0
+    except (ValueError, TypeError):
+        return 0
 
 # Path setup mirrors the routers/ modules so the sibling ``db`` / ``settings_repo``
 # imports resolve whether the dashboard is launched from its dir or the repo root.
@@ -92,6 +112,83 @@ def _blended_rate(project: Optional[str]) -> Optional[float]:
         return None
 
 
+def _fetch_sprint_agent_run_rows(sprint_label: str) -> list[dict]:
+    """All agent_runs rows for a sprint label (empty list on any DB error)."""
+    import db as _db  # sibling module
+
+    try:
+        with _db.get_conn() as conn:
+            _db._create_agent_runs_table(conn)
+            raw = conn.execute(
+                "SELECT issue_number, agent, total_tokens, duration_seconds, "
+                "attempt_kind, started_at, finished_at "
+                "FROM agent_runs WHERE sprint_label = ?",
+                (sprint_label,),
+            ).fetchall()
+            return [dict(r) for r in raw]
+    except Exception:
+        return []
+
+
+def runs_by_issue(rows: list[dict]) -> dict[int, list[dict]]:
+    """Group agent_runs rows by issue_number."""
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        num = r.get("issue_number")
+        if num is None:
+            continue
+        out.setdefault(int(num), []).append(r)
+    return out
+
+
+def _parse_ts_utc(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).rstrip("Z"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def issue_elapsed_secs(
+    iss: dict,
+    now_utc: datetime,
+    runs_by_issue_map: dict[int, list[dict]],
+) -> Optional[int]:
+    """Cumulative wall time for one ticket across all coder/tester attempts.
+
+    Prefers ``agent_runs`` (sums every dispatch including fix rounds). Falls
+  back to coder_started_at → tester_finished_at when no runs are recorded.
+    """
+    num = iss.get("number")
+    if num is None:
+        return None
+
+    runs = runs_by_issue_map.get(int(num)) or []
+    if runs:
+        total = 0
+        counted = False
+        for r in runs:
+            dur = r.get("duration_seconds")
+            if dur:
+                total += int(dur)
+                counted = True
+            elif not r.get("finished_at"):
+                inflight = _inflight_seconds(r.get("started_at"))
+                if inflight > 0:
+                    total += inflight
+                counted = True
+        if counted:
+            return max(0, total)
+
+    coder_start_dt = _parse_ts_utc(iss.get("coder_started_at"))
+    if coder_start_dt is None:
+        return None
+    end_dt = _parse_ts_utc(iss.get("tester_finished_at")) or now_utc
+    return max(0, int((end_dt - coder_start_dt).total_seconds()))
+
+
 def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]:
     """agent_runs-derived metrics for the Running-view metric strip (issue #803).
 
@@ -104,19 +201,7 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
       - ``agent_time_split`` — {"coder": secs, "tester": secs} from duration_seconds
       - ``token_cost_usd`` / ``usd_per_token`` — only when a price map is set
     """
-    import db as _db  # sibling module
-
-    rows: list = []
-    try:
-        with _db.get_conn() as conn:
-            _db._create_agent_runs_table(conn)
-            rows = conn.execute(
-                "SELECT agent, total_tokens, duration_seconds, attempt_kind "
-                "FROM agent_runs WHERE sprint_label = ?",
-                (sprint_label,),
-            ).fetchall()
-    except Exception:
-        rows = []
+    rows = _fetch_sprint_agent_run_rows(sprint_label)
 
     if not rows:
         return {}
@@ -130,10 +215,20 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
         tok = r["total_tokens"]
         if tok:
             token_total += int(tok)
-        dur = r["duration_seconds"]
         agent = (r["agent"] or "").lower()
-        if dur and agent in time_by_agent:
+        if agent not in time_by_agent:
+            continue
+        dur = r["duration_seconds"]
+        if dur:
             time_by_agent[agent] += int(dur)
+        elif not r["finished_at"]:
+            # In-flight run: duration_seconds is written only at finish, so an
+            # unfinished row reads 0 and the Agent Time card sat at 0m0s for the
+            # whole run. Count the live elapsed (now − started_at) so the split
+            # ticks while the agent works.
+            elapsed = _inflight_seconds(r["started_at"])
+            if elapsed > 0:
+                time_by_agent[agent] += elapsed
 
     metrics: dict[str, Any] = {
         "agent_runs_present": True,
@@ -150,3 +245,26 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
         metrics["token_cost_usd"] = round(token_total * rate, 4)
 
     return metrics
+
+
+def pipeline_stage_from_status(raw_agent_status: str, derived_status: str, tac: int) -> str:
+    """Two-queue lane assignment for the running pane (issue #927)."""
+    if raw_agent_status in ("coder_dispatched", "coder_running"):
+        return "coding"
+    if raw_agent_status == "coder_done":
+        return "awaiting_tester"
+    if raw_agent_status in ("tester_dispatched", "tester_running"):
+        return "testing"
+    if derived_status in ("done", "skipped") or raw_agent_status in ("tester_done", "completed", "failed"):
+        return "done"
+    if tac > 0:
+        return "rework"
+    return "pending"
+
+
+def lane_capacity(status_data: dict) -> dict:
+    """Max concurrent slots per lane for the two-queue view (issue #927)."""
+    return {
+        "max_coder_slots":  int(status_data.get("max_coder_slots", 1)),
+        "max_tester_slots": int(status_data.get("max_tester_slots", 1)),
+    }

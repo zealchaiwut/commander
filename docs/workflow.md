@@ -1,11 +1,35 @@
 # Workflow
 
-The end-to-end flow from raw idea to signed-off code. Three stages: **Bulk
-Create**, **Run Sprint**, and **Finish / Rerun Sprint**. Each stage names the
-agents it uses.
+The end-to-end flow from raw idea to signed-off code. The core pipeline is three
+stages — **Bulk Create**, **Run Sprint**, **Finish / Rerun Sprint** — but there
+are now several ways to *drive* and *augment* that pipeline (overnight, on a
+schedule, grouped under a milestone, advised, signed off). The [Operating
+modes](#operating-modes) section maps them; the stages below describe the core
+pipeline in detail.
 
 > This document describes current behavior. When a sprint changes the pipeline,
 > the documentor updates this file.
+
+---
+
+## Operating modes
+
+Pick an entry point. They all reduce to the same Stage 1 → 3 pipeline — they
+differ in **who triggers it, when, and what surrounds it**.
+
+| Mode | What it is | How to start | Best for |
+|------|------------|--------------|----------|
+| **Manual per-ticket** | One issue at a time, you in the loop: `/ba` → `/coder` → `/tester` interactively | Run each agent in its pane (see [tutorial §4](tutorial.md#4-the-workflow--end-to-end)) | A single feature you want to watch closely |
+| **Bulk Create → Run Sprint** | Draft many tickets, label them `sprint-N`, run the whole sprint unattended | Bulk Create tab → Run Sprint (Stages 1–2 below) | A batch of related work |
+| **Overnight / unattended sprint** | Same Run Sprint, but the dashboard runs under **launchd** (authoritative unattended runner) so it survives logout/reboot and you monitor from your phone over Tailscale | Start a sprint, leave it; check the board in the morning | Long sprints, away-from-desk |
+| **Scheduled sprint queue** | Queue one or more sprints to fire at a set `scheduled_run_time` instead of now (#863) | Set a run time in the scheduler UI; `/api/scheduler/config` + `/api/scheduler/sprints` | "Run sprint-12 at 2am", batching off-peak |
+| **Milestone-grouped** | Group issues/sprints under a GitHub **milestone**; the Roadmap view shows milestone cards + progress (#877–880) | Assign a milestone on the ticket / Roadmap tab; `/api/roadmap/milestones` | Tracking a multi-sprint initiative |
+| **Advisor-driven** *(new, partial)* | A daily agent surfaces "what to build next" suggestions on the morning brief as advisory decision items | Read the home brief; act on a suggested action | Deciding the next sprint when the backlog is fuzzy |
+| **Sign-off gate** | Human Approve/Reject — both for finished tickets at `UAT` and as a pending-sign-off gate on *planned* sprints before they run (#862) | Dashboard Approve/Reject; `/api/sprints/pending-signoff`, `/api/sprints/{label}/approve` | Keeping a human checkpoint in an otherwise autonomous flow |
+
+> **Advisor caveat:** the advisor (#881) is **half-shipped** — pending a
+> complete-or-revert decision (#1015). Treat its suggestions as emerging, not
+> load-bearing. See [`milestones/post-lifecycle-backlog.md`](milestones/post-lifecycle-backlog.md) §5.
 
 ---
 
@@ -49,8 +73,10 @@ validates it. Driven by `services/sprint_manager/sprint_manager.py`.
   - **Fix loop** — if the tester or a gate fails, the coder is re-dispatched with
     the failure context, up to `COMMANDER_MAX_FIX_ROUNDS` (default 3) attempts.
     After that the ticket is tagged `needs-rework` and the merge is blocked.
-  - **Quality gates** — typecheck, lint, design, pytest, and merge-preview run
-    after the tester. All must pass to merge.
+  - **Quality gates** — typecheck, lint, frontend-lint, design, pytest,
+    monolith, and merge-preview run after the tester (cheap/deterministic
+    first). All must pass to merge. See
+    [features/sprint-manager.md](features/sprint-manager.md#quality-gates).
   - **Documentor** updates `CHANGELOG.md` (and README where relevant) for the
     ticket. *Agent: Documentor.*
   - **Merge** — `finish_feature.py` merges the feature branch into the sprint
@@ -69,7 +95,15 @@ tickets that need more work.
 ### Finish
 
 - **Review UAT issues** — tickets at the `UAT` label are the deliverables. Test
-  them in the running app, then close the good ones.
+  them in the running app, then **Approve** the good ones (closes the issue) or
+  **Reject** (sets `needs-rework`). UAT is the "done" state — there is no
+  separate done stage before human sign-off.
+- **Pending sign-off gate** *(optional)* — a *planned* sprint can be held in a
+  pending-sign-off state for Approve/Reject before it runs, not just after
+  (#862; `/api/sprints/pending-signoff`). Use it to keep a human checkpoint in
+  an otherwise autonomous flow.
+- **Milestone progress** — if the sprint's issues carry a GitHub milestone, the
+  Roadmap view rolls their closure into milestone progress (#877–880).
 - **Sprint summary** — a summary report is generated for the sprint and posted as
   a GitHub issue (labeled `sprint-N` + `sprint-summary`). Posting this summary is
   what marks the sprint as finished; the card then drops off the Sprint
@@ -86,6 +120,10 @@ summary stay untouched:
 - A fresh branch, PR, and summary are created for the sub-sprint.
 - The sub-sprint then runs the full Stage 2 pipeline under its own label.
 
+On the board, **Re-run** appears only after the sprint label has its own run in
+the history ledger (`sprint_has_run`), not merely because moved tickets still
+carry `needs-rework` from a prior sprint.
+
 ---
 
 ## Agents at a glance
@@ -99,6 +137,7 @@ summary stay untouched:
 | Run Sprint | Tester | Write/run tests, post report |
 | Run Sprint | Documentor | Update changelog and docs |
 | Run Sprint | Reviewer | Review diff, open follow-up tickets |
+| Daily (out-of-band) | Advisor | Suggest what to build next on the morning brief *(new, partial — #881/#1015)* |
 
 Default models per agent are documented in [../CLAUDE.md](../CLAUDE.md) under
 "API Cost and Model Selection".

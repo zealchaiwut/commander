@@ -62,7 +62,11 @@ The Home tab (`/`) shows:
 
 ## Sprint Mgmt Tab
 
-The Sprint Mgmt tab has a toolbar at the top and a list of sprint blocks below.
+The Sprint Mgmt tab has a toolbar at the top and a sub-nav bar below it
+that switches between three panes: **Board**, **Running**, and **History**.
+The active sub-view is persisted to `sessionStorage` per project, so a page
+refresh or auto-refresh returns to the same pane instead of snapping to Board.
+Deep-links (e.g. from a card header button) always win over the saved pref.
 
 ### Toolbar
 
@@ -72,9 +76,9 @@ The Sprint Mgmt tab has a toolbar at the top and a list of sprint blocks below.
 | New Ticket | Opens the BA draft-ticket modal |
 | New Sprint | Opens the New Sprint modal to create a sprint label |
 
-### Sprint blocks
+### Board sub-view
 
-Each sprint is shown as a block with four visual states:
+Shows all sprint columns. Sprint blocks have four visual states:
 
 | State | Appearance |
 |---|---|
@@ -83,13 +87,40 @@ Each sprint is shown as a block with four visual states:
 | Completed | Green — all tickets merged or skipped |
 | Failed | Red — one or more tickets failed the tester gate |
 
-A running sprint block shows a **live log panel** below it. The panel tails the
-sprint dispatch log, refreshes on demand, and includes a Cancel button to kill
-the sprint.
+Running sprints default to **collapsed** on the Board — their live detail lives
+in the Running pane. The card header shows an **"Open in Running"** button that
+deep-links to the Running pane. Collapse state is tri-state: `'1'` = collapsed,
+`'0'` = explicitly expanded by the user, absent = default (collapsed for running,
+expanded otherwise).
+
+Finished sprints (`completed`, `ready_to_merge`, `partial_finished`) show a
+**"History"** button in the card header that opens the History pane and focuses
+that sprint.
+
+The batch-select bar anchors directly above the card of the sprint whose tickets
+are selected (single-sprint selection); a cross-sprint selection falls back to
+the top of the list.
 
 A **sticky Backlog block** always appears at the bottom of the sprint list,
 showing all issues not yet assigned to a sprint. It cannot be reordered past
 other sprint blocks via drag-and-drop.
+
+### Running pane
+
+Shows the live rail and metrics strip for the currently running sprint.
+
+The Running metrics strip shows per-issue status. The sprint-level **"Fix rounds
+X/2" tile has been removed** (it summed per-issue fix-round counts and was
+meaningless as a sprint total). Fix-round badges appear on each rail node
+instead. The strip shows **"Retrying: N tickets"** only while one or more tickets
+are currently in a fix round.
+
+### History pane
+
+Shows the finished-sprint ledger. Issue rows display the ticket **title** (not
+just the number) and are clickable — they open the GitHub issue in a new tab,
+matching the Board affordance. Rows that can't resolve a title from the ledger
+fall back to the Board's per-sprint ticket cache.
 
 ### Time tracking
 

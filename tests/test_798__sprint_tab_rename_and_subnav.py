@@ -175,13 +175,16 @@ class TestRunningLiveDot:
 
 
 # ---------------------------------------------------------------------------
-# AC4 — History tab badge shows the total sprint count
+# AC4 — History tab badge is a NEEDS-ACTION count (notification semantics),
+# not an inventory of every sprint: it counts only sprints awaiting the
+# operator (ready_to_merge / needs_rework / failed) and is hidden at zero, so a
+# history of all-completed sprints shows no badge.
 # ---------------------------------------------------------------------------
 
 class TestHistoryBadge:
     def test_history_badge_element_exists(self, html):
         assert 'id="smgmt-history-count"' in html, \
-            "History sub-tab must contain a sprint-count badge (smgmt-history-count)"
+            "History sub-tab must contain a needs-action badge (smgmt-history-count)"
 
     def test_badge_lives_inside_history_subtab(self, html):
         m = re.search(r'id="smgmt-subtab-history".*?</button>', html, re.S)
@@ -189,12 +192,31 @@ class TestHistoryBadge:
         assert "smgmt-history-count" in m.group(0), \
             "Count badge must be inside the History sub-tab button"
 
-    def test_badge_populated_from_sprint_count(self, html):
+    def test_badge_hidden_by_default(self, html):
+        m = re.search(r'id="smgmt-history-count"[^>]*>', html)
+        assert m and "hidden" in m.group(0), \
+            "Badge must start hidden — nothing needs action until states load"
+
+    def test_badge_populated_from_needs_action(self, html):
         idx = html.find("function _smgmtUpdateSubnav")
         assert idx >= 0, "_smgmtUpdateSubnav must exist"
         body = html[idx:idx + 1200]
         assert "smgmt-history-count" in body, \
             "_smgmtUpdateSubnav must populate the History count badge"
+        assert "_histNeedsActionCount" in body, \
+            "the badge count must come from the needs-action helper"
+        assert "hidden" in body, "the badge must hide when the count is zero"
+
+    def test_action_states_are_human_gated_only(self, html):
+        idx = html.find("_HIST_ACTION_STATES")
+        assert idx >= 0, "the needs-action state set must exist"
+        decl = html[idx:idx + 200]
+        for state in ("ready_to_merge", "needs_rework", "failed"):
+            assert state in decl, f"{state} requires the operator and must count"
+        # Passive / live states must NOT be in the action set.
+        for state in ("completed", "deleted", "cancelled", "running"):
+            assert f"'{state}'" not in decl, \
+                f"{state} needs no action and must not inflate the badge"
 
 
 # ---------------------------------------------------------------------------

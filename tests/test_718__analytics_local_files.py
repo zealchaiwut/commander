@@ -442,3 +442,97 @@ def test_tester_attempt_count_increment_present_in_dispatch():
     idx = src.index('set_agent_status("tester_dispatched")')
     window = src[idx:idx + 400]
     assert "tester_attempt_count += 1" in window
+
+
+# ---------------------------------------------------------------------------
+# Calibration cache — archive bootstrap + incremental live ingest
+# ---------------------------------------------------------------------------
+
+def _write_archive_state(
+    project_root: Path,
+    sprint_label: str,
+    issues: list[dict],
+    *,
+    start_timestamp: str = "2026-01-10T10:00:00Z",
+) -> None:
+    import re
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    archive_dir = project_root / ".commander" / "sprints" / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    state = {
+        "sprint_label": sprint_label,
+        "sprint_number": int(n),
+        "start_timestamp": start_timestamp,
+        "issues": issues,
+    }
+    (archive_dir / f"sprint-{n}-state.json").write_text(
+        json.dumps(state), encoding="utf-8"
+    )
+
+
+def test_calibration_archive_bootstrap_once(tmp_path):
+    """Archived state files are ingested into calibration_cache.json and persist."""
+    _write_archive_state(tmp_path, "sprint-1", [_done_issue(101, coder_min=10, tester_min=5)])
+    _write_estimate(tmp_path, 101, "S")
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["S"]["count"] == 1
+    assert data["by_size"]["S"]["avg_minutes"] == 15.0
+
+    cache_path = tmp_path / ".commander" / "calibration_cache.json"
+    assert cache_path.is_file()
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cache["archive_bootstrap_done"] is True
+    assert len(cache["processed"]) == 1
+
+    # Second request must not re-scan archive — delete archived file and confirm
+    # counts still come from cache.
+    archive_file = tmp_path / ".commander" / "sprints" / "archive" / "sprint-1-state.json"
+    archive_file.unlink()
+    archive_file.parent.rmdir()
+    data2 = _calibration(tmp_path).json()
+    assert data2["by_size"]["S"]["count"] == 1
+
+
+def test_calibration_picks_up_newly_archived_file(tmp_path):
+    """Archive files are scanned on every refresh, not only once."""
+    _write_archive_state(tmp_path, "sprint-9", [_done_issue(201, coder_min=8, tester_min=2)])
+    _write_estimate(tmp_path, 201, "S")
+    first = _calibration(tmp_path).json()
+    assert first["by_size"]["S"]["count"] == 1
+
+    _write_archive_state(tmp_path, "sprint-10", [_done_issue(202, coder_min=12, tester_min=3)])
+    _write_estimate(tmp_path, 202, "S")
+    second = _calibration(tmp_path).json()
+    assert second["by_size"]["S"]["count"] == 2
+    assert second["by_size"]["S"]["avg_minutes"] == 12.5
+
+
+def test_calibration_incremental_live_without_full_rescan(tmp_path):
+    """New live sprint tickets extend aggregates without re-reading archive."""
+    _write_archive_state(tmp_path, "sprint-1", [_done_issue(101, coder_min=10, tester_min=5)])
+    _write_estimate(tmp_path, 101, "M")
+    first = _calibration(tmp_path).json()
+    assert first["by_size"]["M"]["count"] == 1
+    assert first["by_size"]["M"]["avg_minutes"] == 15.0
+
+    _write_state(tmp_path, "sprint-2", [_done_issue(102, coder_min=20, tester_min=10)])
+    _write_estimate(tmp_path, 102, "M")
+    second = _calibration(tmp_path).json()
+    assert second["by_size"]["M"]["count"] == 2
+    assert second["by_size"]["M"]["avg_minutes"] == 22.5
+    assert second["by_size"]["M"]["min_minutes"] == 15.0
+    assert second["by_size"]["M"]["max_minutes"] == 30.0
+    assert len(second["points"]) == 2
+
+
+def test_calibration_filtered_scan_includes_archive(tmp_path):
+    """Scoped sprint filter still reads matching files from archive/."""
+    _write_archive_state(
+        tmp_path, "sprint-42", [_done_issue(101, coder_min=12, tester_min=3)],
+        start_timestamp="2026-02-10T10:00:00Z",
+    )
+    _write_estimate(tmp_path, 101, "L")
+    data = _calibration(tmp_path, sprint="sprint-42").json()
+    assert data["by_size"]["L"]["count"] == 1
+    assert data["points"][0]["issue_number"] == 101

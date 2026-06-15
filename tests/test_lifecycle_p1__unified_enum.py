@@ -182,7 +182,7 @@ class TestTerminalWriters:
 # ── AC-4: orphan-PID reconciliation writes needs_rework ──────────────────────
 
 class TestOrphanReconcile:
-    def test_is_sprint_running_reconciles_dead_plan(self, fresh_db, tmp_path):
+    def test_is_sprint_running_reports_not_running_dead_plan(self, fresh_db, tmp_path):
         from server import _is_sprint_running
 
         project_root = tmp_path / "proj"
@@ -192,11 +192,11 @@ class TestOrphanReconcile:
         plan_path.write_text(
             json.dumps({"state": "running", "tickets": [1]}), encoding="utf-8"
         )
-        # No PID file at all → the running claim is dead.
+        # No PID file at all → not running; plan.json unchanged (read-only, #1096).
         assert _is_sprint_running(project_root, "sprint-9") is False
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        assert plan["state"] == "needs_rework"
-        assert plan["end_reason"] == "process lost"
+        assert plan["state"] == "running"
+        assert "end_reason" not in plan
 
     def test_no_cancelled_write_sites_left_in_server(self):
         assert '_plan_json_set_state(project_root, sprint_label, "cancelled"' \
@@ -274,20 +274,21 @@ class TestHistoryLifecycle:
             "written at the source now"
         )
 
-    def test_failed_tickets_promote_to_needs_rework(self, tmp_path):
+    def test_failed_tickets_do_not_downgrade_ready_to_merge(self, tmp_path):
+        """Fix-round failures in the ledger must not overturn a successful end."""
         from routers.sprint_history_service import _finalize_records
         rec = _rec("sprint-5", "ready_to_merge",
                    failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
         _finalize_records([rec], tmp_path)
-        assert rec["lifecycle_state"] == "needs_rework"
-        assert rec["failure_reason"] == "boom"
+        assert rec["lifecycle_state"] == "ready_to_merge"
 
-    def test_failed_tickets_do_not_downgrade_completed(self, tmp_path):
+    def test_failed_tickets_promote_to_needs_rework(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
-        rec = _rec("sprint-5", "completed",
+        rec = _rec("sprint-5", "planned",
                    failed_tickets=[{"ticket_id": 7, "failure_reason": "boom"}])
         _finalize_records([rec], tmp_path)
-        assert rec["lifecycle_state"] == "completed"
+        assert rec["lifecycle_state"] == "needs_rework"
+        assert rec["failure_reason"] == "boom"
 
     def test_parent_with_unfinished_child_is_partial_finished(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
@@ -297,6 +298,14 @@ class TestHistoryLifecycle:
         assert parent["lifecycle_state"] == "partial_finished"
         assert parent["partial_children"] == ["sprint-68.1"]
         assert child["lifecycle_state"] == "needs_rework"
+
+    def test_parent_with_ready_to_merge_child_is_partial_finished(self, tmp_path):
+        from routers.sprint_history_service import _finalize_records
+        parent = _rec("sprint-68", "needs_rework")
+        child = _rec("sprint-68.2", "ready_to_merge")
+        _finalize_records([parent, child], tmp_path)
+        assert parent["lifecycle_state"] == "partial_finished"
+        assert parent["partial_children"] == ["sprint-68.2"]
 
     def test_parent_flips_completed_when_children_settle(self, tmp_path):
         from routers.sprint_history_service import _finalize_records
@@ -347,15 +356,24 @@ class TestSprintManagerSource:
 
 class TestPaneSources:
     def test_history_chip_map_has_new_states(self):
-        for needle in ("needs_rework", "ready_to_merge", "partial_finished",
-                       "Needs rework", "Ready to merge", "Partial finished"):
-            assert needle in _PROJECT_HTML
+        _HISTORY_SRC = (_REPO_ROOT / "apps/dashboard/static/src/sprint-board/history.js").read_text(encoding="utf-8")
+        for needle in ("needs_rework", "ready_to_merge", "partial_finished"):
+            assert needle in _HISTORY_SRC or needle in _BUNDLE_SRC, (
+                f"missing lifecycle enum key: {needle!r}"
+            )
+        for needle in ("Ready to merge", "Partial", "Failed"):
+            assert needle in _HISTORY_SRC or needle in _BUNDLE_SRC, f"missing history chip label: {needle!r}"
+        for needle in ("PARTIAL FINISHED", "NEEDS REWORK"):
+            assert needle in _PROJECT_HTML or needle in _BOARD_RENDER_SRC or needle in _BUNDLE_SRC, (
+                f"missing board badge label: {needle!r}"
+            )
 
     def test_resume_verb_removed(self):
         assert "_histResumeSprint" not in _PROJECT_HTML
 
     def test_board_accepts_draft_plan_state(self):
-        assert "planState === 'draft'" in _BOARD_RENDER_SRC
+        assert ("planState === 'draft'" in _BOARD_RENDER_SRC
+                or 'planState === "draft"' in _BOARD_RENDER_SRC)
 
     def test_bundle_is_rebuilt(self):
         # esbuild normalizes quotes, so match both spellings.

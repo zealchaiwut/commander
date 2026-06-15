@@ -1,9 +1,10 @@
 """Local deploy / restart action helpers (issue #723).
 
 Pure, side-effect-free builders and validators that the dashboard's deploy and
-restart endpoints use to drive a ``git pull`` + service restart for
-Mac-mini-hosted (``host=local``) environments. All authority stays pull-only:
-no merge, push, PR, checkout, or branch switching is ever performed here.
+restart endpoints use to drive a ``git checkout`` + ``git pull`` + service
+restart for Mac-mini-hosted (``host=local``) environments. Deploy syncs the
+clone to the configured branch (``git checkout <branch>``) then fast-forward
+pulls from origin — no merge, push, PR, or branch creation.
 
 Design split:
   - The functions in this module build commands and validate config. They never
@@ -68,6 +69,11 @@ def require_deploy_target(entry: Optional[dict]) -> tuple[str, str]:
     return working_dir, branch
 
 
+def build_checkout_command(branch: str) -> list[str]:
+    """Build ``git checkout <branch>`` so deploy can sync off a feature branch."""
+    return ["git", "checkout", branch]
+
+
 def build_pull_command(branch: str) -> list[str]:
     """Build the pull-only command. Fast-forward only; never merges or pushes."""
     return ["git", "pull", "--ff-only", "origin", branch]
@@ -76,6 +82,31 @@ def build_pull_command(branch: str) -> list[str]:
 def build_head_sha_command() -> list[str]:
     """Command that prints the current HEAD sha."""
     return ["git", "rev-parse", "HEAD"]
+
+
+def build_current_branch_command() -> list[str]:
+    """Command that prints the checked-out branch name (``HEAD`` if detached)."""
+    return ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+
+
+def branch_mismatch_error(
+    current: str, expected: str, working_dir: str
+) -> Optional[str]:
+    """Return a human-readable mismatch description, or None when branches match.
+
+    Deploy now runs :func:`build_checkout_command` before pull, so this helper is
+    only used for diagnostics/tests. A detached ``HEAD`` (``current == "HEAD"``)
+    is treated as a mismatch.
+    """
+    current = (current or "").strip()
+    expected = (expected or "").strip()
+    if not current or not expected or current == expected:
+        return None
+    return (
+        f"Clone is on branch '{current}', but deploy targets '{expected}'. "
+        f"Deploy is pull-only and never switches branches — switch it first: "
+        f"cd {working_dir} && git checkout {expected}"
+    )
 
 
 def restart_label(entry: dict) -> Optional[str]:
@@ -432,6 +463,42 @@ def build_kickstart_command(label: str, uid: Optional[int] = None) -> list[str]:
 def is_self_restart(entry: dict) -> bool:
     """True when *entry* targets the dashboard's own launchd process."""
     return restart_label(entry) == DASHBOARD_LAUNCHD_LABEL
+
+
+def is_self_restart_dir(entry: dict, self_dir: Optional[str]) -> bool:
+    """True when *entry*'s working_dir is the dashboard's own clone.
+
+    Script-path equivalent of is_self_restart: a stop+start restart whose
+    working_dir is the running dashboard's clone would have its ``stop`` step
+    kill the process serving the request before ``start`` runs, so it must be
+    detached (see build_detached_restart_command).
+    """
+    wd = (entry.get("working_dir") or "").strip()
+    if not wd or not self_dir:
+        return False
+    try:
+        return os.path.realpath(wd) == os.path.realpath(str(self_dir))
+    except OSError:
+        return False
+
+
+def build_detached_restart_command(
+    stop: Optional[str], start: Optional[str], delay_seconds: float = 1.0
+) -> list[str]:
+    """Build a detached ``sleep; stop; start`` helper for a script self-restart.
+
+    The sleep lets the HTTP response flush before ``stop`` kills the dashboard.
+    Run via ``Popen(start_new_session=True)`` so the helper survives ``stop``
+    (which kills the dashboard's process group) and goes on to run ``start`` —
+    the missing-restart bug was the synchronous handler being killed mid-stop,
+    so ``start`` never ran.
+    """
+    parts = [f"sleep {delay_seconds}"]
+    if stop:
+        parts.append(stop)
+    if start:
+        parts.append(start)
+    return ["sh", "-c", "; ".join(parts)]
 
 
 def build_self_restart_command(

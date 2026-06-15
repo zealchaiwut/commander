@@ -16,6 +16,7 @@ from sprint_manager import (
     _changed_js_ts_files,
     _gate_design,
     _gate_lint,
+    _gate_pytest,
     _gate_typecheck,
     _run_quality_gates,
 )
@@ -137,12 +138,79 @@ class TestGateDesign:
         assert result.passed is True
 
     def test_design_fail_reverts_to_sit(self, tmp_path):
+        # Full-scope legacy behaviour: any finding across the directory fails the
+        # gate and reverts to SIT. (The default 'changed' scope fails only on
+        # net-new findings — see test_design_gate__net_new_only.py.)
         (tmp_path / "style.css").write_text("body { color: red; }")
         with patch("sprint_manager._try", return_value=(True, "/usr/bin/npx", "")):
             with patch("sprint_manager._run_timed") as mock_run:
                 mock_run.return_value = (1, '[{"antipattern": "low-contrast"}]', "")
                 with patch("sprint_manager._revert_to_sit") as mock_revert:
-                    result = _gate_design(1, tmp_path, skip=False)
+                    result = _gate_design(1, tmp_path, skip=False, gate_scope="full")
+        assert result.passed is False
+        mock_revert.assert_called_once()
+
+
+# ── _gate_pytest ──────────────────────────────────────────────────────────────
+
+class TestGatePytest:
+    def test_skip_flag(self, tmp_path):
+        result = _gate_pytest(1, tmp_path, skip=True)
+        assert result == GateResult(gate="pytest", passed=True, skipped=True)
+
+    def test_no_test_files_changed_passes(self, tmp_path):
+        with patch("sprint_manager._changed_py_files", return_value=["server.py"]):
+            with patch("sprint_manager._try", return_value=(True, "/usr/bin/pytest", "")):
+                result = _gate_pytest(1, tmp_path, skip=False, gate_scope="changed")
+        assert result.passed is True
+        assert "no test files changed" in result.output
+
+    def test_changed_scope_runs_from_git_root(self, tmp_path):
+        """AC: pytest runs from git root so tests/ paths resolve correctly.
+
+        When _changed_py_files returns tests/test_foo.py, pytest must be
+        invoked with cwd=git_root, not cwd=worktester_dashboard, because
+        worktester_dashboard is apps/dashboard/ and tests/ is at the repo root.
+        """
+        captured_cwd = {}
+
+        def fake_run_timed(*args, **kwargs):
+            cwd = kwargs.get("cwd")
+            cmd = list(args)
+            if "rev-parse" in cmd:
+                # Return a fake git root distinct from worktester_dashboard
+                return (0, str(tmp_path / "git_root"), "")
+            if any("pytest" in str(a) for a in cmd):
+                captured_cwd["pytest"] = str(cwd)
+                return (0, "1 passed", "")
+            return (0, "tests/test_foo.py\nserver.py\n", "")
+
+        with patch("sprint_manager._run_timed", fake_run_timed):
+            with patch("sprint_manager._try", return_value=(True, "/usr/bin/pytest", "")):
+                with patch("sprint_manager._post_agent_event"):
+                    _gate_pytest(1, tmp_path, skip=False, gate_scope="changed")
+
+        git_root = str(tmp_path / "git_root")
+        assert captured_cwd.get("pytest") == git_root, (
+            f"pytest must run from git root ({git_root}), "
+            f"got {captured_cwd.get('pytest')!r}"
+        )
+
+    def test_changed_scope_fails_on_test_failure(self, tmp_path):
+        def fake_run_timed(*args, **kwargs):
+            cmd = list(args)
+            if "rev-parse" in cmd:
+                return (0, str(tmp_path), "")
+            if any("pytest" in str(a) for a in cmd):
+                return (1, "", "FAILED tests/test_foo.py")
+            return (0, "tests/test_foo.py\n", "")
+
+        with patch("sprint_manager._run_timed", fake_run_timed):
+            with patch("sprint_manager._try", return_value=(True, "/usr/bin/pytest", "")):
+                with patch("sprint_manager._post_agent_event"):
+                    with patch("sprint_manager._revert_to_sit") as mock_revert:
+                        result = _gate_pytest(1, tmp_path, skip=False, gate_scope="changed")
+
         assert result.passed is False
         mock_revert.assert_called_once()
 

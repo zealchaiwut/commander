@@ -18,6 +18,8 @@ globalThis._rrVersionedLabel ??= null;
 // Finish Sprint modal (issue #367 parity)
 globalThis._fsLabel ??= null;
 globalThis._fsPreview ??= null;
+// Active finish-sprint progress job (issue #929 — reconnect support)
+globalThis._fsActiveJob ??= null;
 
 // Bulk Complete Sprint modal (parent + child lineage)
 globalThis._bcLabel ??= null;
@@ -32,16 +34,30 @@ globalThis._pfWarnings ??= null;
 globalThis._pfCycle ??= null;
 globalThis._pfFlags ??= null;
 globalThis._pfSelectedIds ??= new Set();
+// Cline follow-up opt-in (issue #919)
+globalThis._pfUseClineFollowups ??= false;
 
 // Drag/drop local locks
 globalThis._smgmtMoveLock ??= false;
 globalThis._smgmtGhostNextNum ??= null;
 
 export const SPRINT_BOARD_STATE_KEYS = [
-  "_rrLabel", "_rrVersionedLabel",
-  "_fsLabel", "_fsPreview",
-  "_bcLabel", "_bcPreview",
-  "_pfCurrentLabel", "_pfCurrentRepo", "_pfState", "_pfDagData",
-  "_pfWarnings", "_pfCycle", "_pfFlags", "_pfSelectedIds",
-  "_smgmtMoveLock", "_smgmtGhostNextNum",
+  "_rrLabel",
+  "_rrVersionedLabel",
+  "_fsLabel",
+  "_fsPreview",
+  "_fsActiveJob",
+  "_bcLabel",
+  "_bcPreview",
+  "_pfCurrentLabel",
+  "_pfCurrentRepo",
+  "_pfState",
+  "_pfDagData",
+  "_pfWarnings",
+  "_pfCycle",
+  "_pfFlags",
+  "_pfSelectedIds",
+  "_pfUseClineFollowups",
+  "_smgmtMoveLock",
+  "_smgmtGhostNextNum",
 ];

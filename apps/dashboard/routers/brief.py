@@ -80,6 +80,30 @@ class ActivityItem(BaseModel):
     message: str = ""
 
 
+class RanOvernightEntry(BaseModel):
+    """A sprint that finished within the overnight window (issue #864)."""
+    label: Optional[str] = None
+    outcome: str = ""  # "success" | "failure" | "partial"
+    summary_issue_number: Optional[int] = None
+    brief_path: Optional[str] = None
+    project: Optional[str] = None  # set in the home roll-up
+
+
+class SuggestedNextItem(BaseModel):
+    """One advisor suggestion or look-ahead entry for the brief (issue #884)."""
+    text: str = ""
+    type: str = "suggestion"  # "suggestion" | "look_ahead"
+    slug: str = ""
+
+
+class WaitingSprint(BaseModel):
+    """A sprint pending human sign-off (issue #864)."""
+    label: Optional[str] = None
+    ticket_count: int = 0
+    estimated_hours: float = 0.0
+    project: Optional[str] = None  # set in the home roll-up
+
+
 class ProjectBrief(BaseModel):
     project: str
     date: str
@@ -89,6 +113,9 @@ class ProjectBrief(BaseModel):
     blocked: list[BlockedTicket] = []
     kpis: ProjectKpis = ProjectKpis()
     recent_activity: list[ActivityItem] = []
+    ran_overnight: list[RanOvernightEntry] = []
+    waiting_on_you: list[WaitingSprint] = []
+    suggested_next: list[SuggestedNextItem] = []
 
 
 class GlobalKpis(BaseModel):
@@ -96,6 +123,7 @@ class GlobalKpis(BaseModel):
     tickets_done: int = 0
     in_progress: int = 0
     needs_your_call: int = 0
+    awaiting_signoff: int = 0
 
 
 class Decision(BaseModel):
@@ -110,6 +138,9 @@ class HomeBrief(BaseModel):
     global_kpis: GlobalKpis = GlobalKpis()
     decisions: list[Decision] = []
     projects: list[ProjectBrief] = []
+    ran_overnight: list[RanOvernightEntry] = []
+    waiting_on_you: list[WaitingSprint] = []
+    suggested_next: list[SuggestedNextItem] = []
 
 
 class ProjectSummary(BaseModel):

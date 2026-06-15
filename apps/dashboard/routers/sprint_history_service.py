@@ -183,6 +183,9 @@ def _normalize_issue(iss: dict) -> dict:
         "time_spent": iss.get("time_spent", _issue_time_spent(iss)),
         "pr_number": pr,
     }
+    title = iss.get("title")
+    if title:
+        out["title"] = str(title)
     if agent_status:
         out["agent_status"] = agent_status
     if failure_reason:
@@ -252,30 +255,51 @@ def _read_plan_file(sprints_dirs: Path | list[Path], label: str) -> dict | None:
     return None
 
 
+# agent_runs.outcome values that indicate a ticket's work landed / was rejected.
+_AGENT_RUN_MERGED = {"merged", "pass", "passed", "success", "done", "complete",
+                     "completed", "uat", "shipped"}
+_AGENT_RUN_FAILED = {"fail", "failed", "reject", "rejected", "crash", "crashed",
+                     "skipped", "error"}
+
+
 def _issues_from_agent_runs(label: str) -> list[dict]:
-    """Synthesize issue rows from agent_runs when state.json has no tickets."""
+    """Synthesize issue rows from agent_runs, deriving each ticket's disposition
+    from its run outcomes.
+
+    Used both as a fallback when state.json has no tickets AND to UNION in
+    tickets that ran under this sprint but were dropped from the latest state
+    file (e.g. merged in an earlier run of the same sprint) so the History ledger
+    matches the Board rather than hiding successes.
+    """
     try:
         rows = _db().agent_runs_for_sprint(label)
     except Exception:
         return []
-    seen: set[int] = set()
-    issues: list[dict] = []
+    agg: dict[int, dict] = {}
     for row in rows:
         num = row.get("issue_number")
-        if num is None:
-            continue
         try:
             tid = int(num)
         except (TypeError, ValueError):
             continue
-        if tid in seen or tid <= 0:
+        if tid <= 0:
             continue
-        seen.add(tid)
+        outcome = (row.get("outcome") or "").strip().lower()
+        rec = agg.setdefault(tid, {"merged": False, "failed": False})
+        if outcome in _AGENT_RUN_MERGED:
+            rec["merged"] = True
+        elif outcome in _AGENT_RUN_FAILED:
+            rec["failed"] = True
+    issues: list[dict] = []
+    for tid in sorted(agg):
+        rec = agg[tid]
+        state = "merged" if rec["merged"] else ("closed" if rec["failed"] else "open")
         issues.append({
             "ticket_id": tid,
-            "state": "open",
+            "state": state,
             "time_spent": None,
             "pr_number": None,
+            "from_agent_runs": True,
         })
     return issues
 
@@ -321,8 +345,16 @@ def _enrich_from_state(label: str, sprints_dirs: Path | list[Path]) -> dict:
     issues_raw = state.get("issues", [])
     out["issues_raw"] = issues_raw
     out["issues"] = [_normalize_issue(i) for i in issues_raw]
-    if not out["issues"]:
-        out["issues"] = _issues_from_agent_runs(label)
+    # Union with tickets recorded in agent_runs but missing from the current state
+    # file — e.g. tickets that merged in an EARLIER run of this sprint and were
+    # dropped from the latest state. Without this the History ledger shows fewer
+    # tickets than the Board (sprint-73 showed 7 vs the board's 10, hiding the
+    # already-merged #901/#903/#926). Hotfix B.
+    _have = {i.get("ticket_id") for i in out["issues"]}
+    for _extra in _issues_from_agent_runs(label):
+        if _extra.get("ticket_id") not in _have:
+            out["issues"].append(_extra)
+            _have.add(_extra.get("ticket_id"))
     out["failed_tickets"] = _failed_tickets_from_raw(issues_raw)
     tin = state.get("total_tokens_in") or 0
     tout = state.get("total_tokens_out") or 0
@@ -409,6 +441,21 @@ def _normalize_state(raw: str | None) -> str:
     return _db().canonical_lifecycle(raw)
 
 
+def _lifecycle_display_state(lifecycle: str, end_reason: str | None, issues: list[dict]) -> str:
+    """Correct needs_rework rows that are successful natural ends (issue #1137)."""
+    if lifecycle != "needs_rework" or (end_reason or "") != "natural":
+        return lifecycle
+    if not issues:
+        return lifecycle
+    if all(
+        (i.get("state") or "").lower() == "merged"
+        or (i.get("agent_status") or "").lower() in ("completed", "done")
+        for i in issues
+    ):
+        return "ready_to_merge"
+    return lifecycle
+
+
 # ── record builders ───────────────────────────────────────────────────────────
 
 def _record_from_history(rec: dict) -> dict:
@@ -451,20 +498,21 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
-    lifecycle_state = _normalize_state(row.get("state"))
-    plan = _read_plan_file(sprints_dirs, label) or {}
-    plan_state_raw = plan.get("state") or plan.get("status")
-    plan_state: str | None = None
-    if plan_state_raw:
-        plan_state = _normalize_state(plan_state_raw)
-        if plan_state == "completed" and lifecycle_state not in ("completed", "deleted", "running"):
-            lifecycle_state = "completed"
-        elif plan_state == "deleted" and lifecycle_state != "running":
-            lifecycle_state = "deleted"
-    end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
-    if plan_state == "completed" and plan.get("end_reason"):
-        end_reason = plan.get("end_reason")
+    from . import sprint_state  # noqa: PLC0415
+    lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
+    end_reason = row.get("end_reason") or enrich.get("end_reason")
+    issues = enrich["issues"]
+    lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
+    # Prefer the durable `sprints` columns (written by the finish flow) over the
+    # state file, so PR/Summary links on the ledger card don't go missing when an
+    # older state.json lacks them.
+    summary_issue_url = row.get("summary_issue_url") or enrich["summary_issue_url"]
+    summary_issue_num = (
+        _parse_issue_num_from_url(summary_issue_url)
+        if summary_issue_url else enrich["summary_issue_num"]
+    )
+    summary_path = row.get("summary_path") or enrich["summary_path"]
     return {
         "label": label,
         "project": row.get("project", ""),
@@ -474,9 +522,9 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
         "tokens": enrich["tokens"],
         "estimate_accuracy": enrich["estimate_accuracy"],
         "pr_number": pr_number,
-        "summary_path": enrich["summary_path"],
-        "summary_issue_url": enrich["summary_issue_url"],
-        "summary_issue_num": enrich["summary_issue_num"],
+        "summary_path": summary_path,
+        "summary_issue_url": summary_issue_url,
+        "summary_issue_num": summary_issue_num,
         "reconciliation": enrich["reconciliation"],
         "issues": enrich["issues"],
         "failed_tickets": enrich["failed_tickets"],
@@ -492,6 +540,18 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
     enrich = _enrich_from_state(label, sprints_dirs)
     plan = _read_plan_file(sprints_dirs, label) or {}
     state_raw = plan.get("status") or plan.get("state")
+    # Sort chronologically like the DB-backed builders (ISO timestamps), NOT by
+    # the raw label string — otherwise "sprint-999"/"sprint-8" sort lexically
+    # above "sprint-69" and float to the top of History (issue: sprint-69 buried
+    # under older runs). Prefer plan/state timestamps; fixtures with no timestamp
+    # fall back to "" and sort to the bottom under reverse=True.
+    state_file = _read_state_file(sprints_dirs, label) or {}
+    sort_key = (
+        plan.get("ended_at")
+        or plan.get("started_at")
+        or state_file.get("start_timestamp")
+        or ""
+    )
     return {
         "label": label,
         "project": plan.get("project", ""),
@@ -510,7 +570,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
         "failure_reason": enrich["failure_reason"],
         "plan_status": enrich.get("plan_status"),
         "post_sprint": enrich.get("post_sprint"),
-        "_sort_key": label,
+        "_sort_key": sort_key,
     }
 
 
@@ -518,6 +578,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
 # artifacts (sprint-1-estimate.json, sprint-1-preflight-<date>.json, plan
 # files, test debris) from surfacing as zombie History rows.
 _LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+_SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
 
 def _label_sub_index(label: str | None) -> int:
@@ -533,9 +594,10 @@ def _label_base(label: str | None) -> str:
     return m.group(1) if m else (label or "")
 
 
-# Terminal lifecycle states for the partial_finished derivation: a parent with
-# children is "settled" only when every child reached one of these.
-_CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
+# Child states that close the partial_finished chain (sprint-lifecycle.md): a parent
+# stays partial_finished until every descendant reaches Merge Sprint (completed).
+# ready_to_merge means "run done, awaiting sign-off" — not chain-complete.
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
 
 
 def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
@@ -583,13 +645,19 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
 
         # Failed tickets are recorded facts — unless the sprint is already settled.
         if rec.get("failed_tickets") and rec.get("lifecycle_state") not in (
-            "running", "deleted", "completed",
+            "running", "deleted", "completed", "ready_to_merge",
         ):
             rec["lifecycle_state"] = "needs_rework"
             if not rec.get("failure_reason"):
                 rec["failure_reason"] = rec["failed_tickets"][-1].get("failure_reason")
 
-        rec.pop("plan_status", None)
+        plan_st_raw = rec.pop("plan_status", None)
+        if (
+            _normalize_state(plan_st_raw or "") == "completed"
+            and (rec.get("end_reason") or "") == "bulk_complete"
+        ):
+            rec["lifecycle_state"] = "completed"
+
         state_by_label[label] = rec.get("lifecycle_state") or "unknown"
 
     # Derived partial_finished pass — walk deepest children first so promotions
@@ -618,10 +686,14 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
         if unsettled:
             rec["lifecycle_state"] = "partial_finished"
             rec["partial_children"] = sorted(unsettled, key=_label_sub_index)
-        elif descendants:
-            # All children settled — the parent chain is complete.
-            rec["lifecycle_state"] = "completed"
-            state_by_label[label] = "completed"
+        elif descendants and own in ("needs_rework", "partial_finished"):
+            # Superseded parent only — not a sibling still at ready_to_merge.
+            if all(
+                state_by_label.get(c, "unknown") in _CHILD_SETTLED_STATES
+                for c in descendants
+            ):
+                rec["lifecycle_state"] = "completed"
+                state_by_label[label] = "completed"
 
     _fill_missing_links(records, sprints_dirs)
 
@@ -669,9 +741,34 @@ def _links_from_events(project: str, label: str) -> dict:
     return out
 
 
+def _github_summary_by_label(project: str) -> dict[str, dict]:
+    """Map sprint label → {number, url} from cached GitHub sprint-summary issues."""
+    if not project:
+        return {}
+    try:
+        import github_client  # noqa: PLC0415
+        issues = github_client.list_summary_issues(repo_name=project)
+    except Exception:
+        return {}
+    result: dict[str, dict] = {}
+    for iss in issues:
+        m = _SUMMARY_TITLE_NUM_RE.match(iss.get("title", "") or "")
+        if not m:
+            continue
+        label = f"sprint-{m.group(1)}"
+        prev = result.get(label)
+        if prev is None or (iss.get("number") or 0) > (prev.get("number") or 0):
+            result[label] = {
+                "number": iss.get("number"),
+                "url": iss.get("url"),
+            }
+    return result
+
+
 def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
-    """Backfill PR / summary targets from disk, events, and parent sprint rows."""
+    """Backfill PR / summary targets from disk, events, GitHub cache, and parents."""
     by_label = {r.get("label"): r for r in records if r.get("label")}
+    github_by_project: dict[str, dict[str, dict]] = {}
 
     for rec in records:
         label = rec.get("label")
@@ -706,6 +803,15 @@ def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) ->
                         f"https://github.com/{project}/issues/{meta['summary_issue_num']}"
                     )
 
+        if rec.get("summary_issue_num") is None and project:
+            if project not in github_by_project:
+                github_by_project[project] = _github_summary_by_label(project)
+            gh_sum = github_by_project[project].get(label)
+            if gh_sum:
+                rec["summary_issue_num"] = gh_sum.get("number")
+                if not rec.get("summary_issue_url") and gh_sum.get("url"):
+                    rec["summary_issue_url"] = gh_sum["url"]
+
     for rec in records:
         if rec.get("pr_number") is not None:
             continue
@@ -727,11 +833,45 @@ def _discover_file_labels(sprints_dirs: Path | list[Path]) -> set[str]:
             continue
         for p in sprints_dir.glob("*-state.json"):
             labels.add(p.name[: -len("-state.json")])
+        for p in sprints_dir.glob("*-plan.json"):
+            labels.add(p.name[: -len("-plan.json")])
         for p in sprints_dir.glob("sprint-*.json"):
-            if p.name.endswith("-state.json"):
+            if p.name.endswith("-state.json") or p.name.endswith("-plan.json"):
                 continue
             labels.add(p.stem)
     return {l for l in labels if _LABEL_RE.match(l)}
+
+
+def _resolve_sprint_project(
+    label: str,
+    declared: str,
+    sprints_dirs: Path | list[Path],
+    db_module,
+) -> str:
+    """Infer owner/repo when the sprints row was ingested without project (child reruns)."""
+    if (declared or "").strip():
+        return declared.strip()
+    plan = _read_plan_file(sprints_dirs, label) or {}
+    proj = (plan.get("project") or "").strip()
+    if proj:
+        return proj
+    state = _read_state_file(sprints_dirs, label) or {}
+    proj = (state.get("project") or "").strip()
+    if proj:
+        return proj
+    parent = (plan.get("parent") or "").strip()
+    if parent:
+        prow = db_module.get_sprint(parent)
+        if prow and (prow.get("project") or "").strip():
+            return prow["project"].strip()
+    row = db_module.get_sprint(label)
+    if row:
+        parent = (row.get("parent_label") or "").strip()
+        if parent:
+            prow = db_module.get_sprint(parent)
+            if prow and (prow.get("project") or "").strip():
+                return prow["project"].strip()
+    return ""
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -775,6 +915,14 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         records.append(_record_from_files(label, search_dirs))
 
     if project:
+        for rec in records:
+            if not (rec.get("project") or "").strip():
+                rec["project"] = _resolve_sprint_project(
+                    rec.get("label") or "",
+                    rec.get("project") or "",
+                    search_dirs,
+                    db,
+                )
         records = [r for r in records if r.get("project") == project]
 
     _finalize_records(records, search_dirs)

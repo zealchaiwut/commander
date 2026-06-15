@@ -66,6 +66,21 @@
     .dec-act[disabled]{opacity:.6;cursor:default}
     .dec-empty{padding:14px 15px;color:var(--text-muted);font-size:13px}
 
+    /* planner state (issue #864): ran overnight + waiting on you */
+    .planner-list{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    .planner-row{display:flex;align-items:center;gap:11px;padding:12px 16px;border-top:1px solid var(--border)}
+    .planner-row:first-child{border-top:none}
+    .planner-row .label{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
+    .planner-meta{font-size:12px;color:var(--text-muted)}
+    .planner-meta .mono{font-family:var(--mono)}
+    .planner-spacer{margin-left:auto}
+    .outcome-badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0}
+    .outcome-badge.success{background:var(--green-bg);color:var(--green)}
+    .outcome-badge.failure{background:var(--red-bg);color:var(--red)}
+    .outcome-badge.partial{background:var(--amber-bg);color:var(--amber)}
+    .planner-link{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 11px;cursor:pointer;white-space:nowrap;background:var(--surface);text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+    .planner-link:hover{background:var(--surface-hover)}
+
     /* ===== per-project brief card ===== */
     .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px}
     .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
@@ -83,14 +98,33 @@
     @keyframes glow{0%,100%{box-shadow:0 0 0 2px var(--green-bg)}50%{box-shadow:0 0 0 5px var(--green-bg)}}
     .pbstatus{margin-left:auto}
 
+    /* active-milestone progress indicator (issue #880) — compact, never dominant */
+    .pb-milestone{display:none;margin-left:auto;align-items:center;gap:8px;text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-muted);font-size:12px;max-width:48%;transition:border-color .12s,color .12s}
+    .pb-milestone.show{display:inline-flex}
+    .pb-milestone .ti{font-size:13px;flex-shrink:0}
+    .pb-ms-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pb-milestone:hover{border-color:var(--blue);color:var(--blue)}
+    .pb-milestone:hover .pb-ms-name{color:var(--blue)}
+    .pb-ms-count{font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
+    .pb-milestone + .pbstatus{margin-left:10px}
+
     /* 2×2 project grid: summary | to-do / shipped | activity */
     .pb-grid{display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:auto auto;align-items:stretch}
     @media(max-width:740px){.pb-grid{grid-template-columns:1fr;grid-template-rows:auto}}
     .pb-cell{display:flex;flex-direction:column;min-height:0;padding:14px 18px}
     .pb-cell-summary{grid-column:1;grid-row:1;border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
-    .pb-cell-todo{grid-column:2;grid-row:1;border-bottom:1px solid var(--border)}
+    /* Recent Activity sits top-right (compact); TO-DO drops to bottom-right where
+       it has room to grow (it tends to be the longest cell). */
+    .pb-cell-activity{grid-column:2;grid-row:1;border-bottom:1px solid var(--border)}
     .pb-cell-shipped{grid-column:1;grid-row:2;border-right:1px solid var(--border)}
-    .pb-cell-activity{grid-column:2;grid-row:2}
+    .pb-cell-todo{grid-column:2;grid-row:2}
+    /* Hide the bottom row (shipped detail + to-do) for a compact summary view. */
+    .pbrief.hide-bottom .pb-cell-shipped,
+    .pbrief.hide-bottom .pb-cell-todo{display:none}
+    .pb-bottom-toggle{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:color .12s,border-color .12s}
+    .pb-bottom-toggle:hover{color:var(--text);border-color:var(--text-muted)}
+    .pb-bottom-toggle .ti{transition:transform .15s}
+    .pbrief.hide-bottom .pb-bottom-toggle .ti{transform:rotate(-90deg)}
     @media(max-width:740px){
       .pb-cell-summary,.pb-cell-shipped{border-right:none}
       .pb-cell-summary,.pb-cell-todo,.pb-cell-shipped{border-bottom:1px solid var(--border)}
@@ -138,8 +172,9 @@
     .tl-foot a{color:var(--text-muted);text-decoration:none;font-family:var(--mono)}
     .tl-foot a:hover{color:var(--text)}
     .pb-foot{display:flex;justify-content:flex-end;padding:10px 18px 14px;border-top:1px solid var(--border)}
-    .open-proj{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 12px;cursor:pointer;text-decoration:none}
-    .open-proj:hover{color:var(--text);border-color:var(--text-muted)}
+    /* Bolder primary "open project" button: filled, weighted, clear affordance. */
+    .open-proj{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--surface);border:1px solid var(--text);background:var(--text);border-radius:6px;padding:7px 14px;cursor:pointer;text-decoration:none}
+    .open-proj:hover{opacity:.88}
 
     /* add project */
     .add-proj{border:1px dashed var(--border);border-radius:12px;padding:16px;text-align:center;color:var(--text-muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
@@ -205,6 +240,18 @@
     return '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
   }
 
+  // Per-project collapse state for the bottom row (shipped detail + to-do).
+  function _bottomHidden(slug){
+    try { return localStorage.getItem('pb_hide_bottom_' + slug) === '1'; }
+    catch(_){ return false; }
+  }
+  function toggleBottom(slug){
+    const card = document.querySelector('.pbrief[data-slug="' + (window.CSS && CSS.escape ? CSS.escape(slug) : slug) + '"]');
+    if (!card) return;
+    const hidden = card.classList.toggle('hide-bottom');
+    try { localStorage.setItem('pb_hide_bottom_' + slug, hidden ? '1' : '0'); } catch(_){}
+  }
+
   function _projectTitleLinkHtml(slug){
     const name = _projectDisplayName(slug);
     return `<a class="pb-title-link" href="${esc(_sprintMgmtHref(slug))}" title="Open sprint management">` +
@@ -237,7 +284,32 @@
   function todayIso(){ return fmtIso(new Date()); }
 
   // ── boot ──────────────────────────────────────────────────────────────────
+  // Deck/monitoring deep links open `/?project=<P>&view=<V>[&filter=errors]`.
+  // `/` serves this home page, so translate that into the canonical project URL
+  // and bounce there; project.html reads ?view= / ?filter= to pick the pane.
+  // view -> tab segment; the sub-view (board/running/history/summary) and the
+  // errors filter are carried in the query for project.html to apply.
+  function _deckRedirect(){
+    const p = new URLSearchParams(window.location.search);
+    const project = p.get('project');
+    if (!project) return false;
+    const view = (p.get('view') || '').toLowerCase();
+    const tab = (view === 'activity') ? 'logs'
+              : (view === 'tickets')  ? 'tickets'
+              : 'sprint';   // running / board / history / summary all live here
+    const q = new URLSearchParams();
+    if (view) q.set('view', view);
+    const filter = p.get('filter');
+    if (filter) q.set('filter', filter);
+    const qs = q.toString();
+    window.location.replace(
+      '/project/' + encodeURIComponent(project) + '/' + tab + (qs ? '?' + qs : '')
+    );
+    return true;
+  }
+
   async function init(){
+    if (_deckRedirect()) return;   // bounced to the project view; stop here
     try {
       const home = await (await fetch('/api/home')).json();
       (home.projects || []).forEach(p => {
@@ -294,8 +366,15 @@
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
+    // issue #864: planner state — what ran overnight + what's awaiting sign-off.
+    // Both the morning brief and the evening flow render from this same shared
+    // brief payload, so the "Waiting on you" list is identical across flows.
+    html += renderRanOvernight(brief.ran_overnight || []);
+    html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
+    // issue #884: advisor suggestions at end of brief body
+    html += renderSuggestedNext(brief.suggested_next || []);
     root.innerHTML = html;
 
     // hydrate per-project AI summaries from the stored summary store
@@ -308,6 +387,27 @@
       const el = document.getElementById('todo-' + slug);
       if (el && window.CommanderTodo) CommanderTodo.mount(el, slug);
     });
+
+    // #880: hydrate the active-milestone progress indicator on each card.
+    projects.forEach(p => loadMilestone(p.project, p.repo));
+  }
+
+  // #880: fetch the active milestone for a project and reveal the indicator.
+  // No active milestone → the element stays hidden, card renders normally (AC3).
+  async function loadMilestone(slug, repo){
+    const el = document.getElementById('ms-' + slug);
+    if (!el || !repo) return;
+    try {
+      const r = await fetch('/api/home/milestone?repo=' + encodeURIComponent(repo));
+      if (!r.ok) return;
+      const m = await r.json();
+      if (!m || !m.label) return;
+      const name = m.title || 'Milestone';
+      el.querySelector('.pb-ms-name').textContent = name;
+      el.querySelector('.pb-ms-count').textContent = m.label;
+      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
+      el.classList.add('show');
+    } catch(_) { /* leave indicator hidden on error */ }
   }
 
   // ── AC1: brief header (date + covering-since subtitle) ─────────────────────
@@ -353,6 +453,69 @@
       <div class="kpi"><div class="kpi-v">${n(gk.tickets_done)}</div><div class="kpi-l">Tickets done</div></div>
       <div class="kpi"><div class="kpi-v">${n(gk.in_progress)}</div><div class="kpi-l">In progress</div></div>
       <div class="kpi"><div class="kpi-v a">${n(gk.needs_your_call)}</div><div class="kpi-l">Need your call</div></div>
+    </div>`;
+  }
+
+  // ── issue #864: ran overnight + waiting on you ─────────────────────────────
+  // Resolve the clickable target for a "ran overnight" entry: prefer the
+  // sprint's summary issue on GitHub; fall back to the project's board.
+  function _briefLinkHref(entry){
+    const repo = _repoBySlug[entry.project] || '';
+    if (entry.summary_issue_number && repo){
+      return 'https://github.com/' + repo + '/issues/' + entry.summary_issue_number;
+    }
+    return '/project/' + encodeURIComponent(entry.project || '') + '/sprint-mgmt';
+  }
+
+  // AC1 / AC7: each scheduled sprint that ran overnight, its outcome, and a
+  // direct link to its sprint brief. Hidden entirely when nothing ran (AC4).
+  function renderRanOvernight(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(e => {
+      const outcome = String(e.outcome || '').toLowerCase();
+      const cls = ['success','failure','partial'].includes(outcome) ? outcome : 'partial';
+      const ic = outcome === 'success' ? 'ti-circle-check'
+               : outcome === 'failure' ? 'ti-alert-triangle' : 'ti-progress-check';
+      const proj = e.project
+        ? `<span class="planner-meta"><span class="mono">${esc(e.project)}</span></span>` : '';
+      const external = (e.summary_issue_number && _repoBySlug[e.project])
+        ? ' target="_blank" rel="noopener"' : '';
+      return `
+        <div class="planner-row">
+          <span class="outcome-badge ${cls}"><i class="ti ${ic}" style="font-size:11px"></i>${esc(outcome || 'ran')}</span>
+          <span class="label">${esc(prettyLabel(e.label))}</span>
+          ${proj}
+          <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
+    </div>`;
+  }
+
+  // AC2 / AC8: every sprint awaiting human sign-off, with ticket count and
+  // estimated hours. Hidden entirely when nothing is pending (AC3). The same
+  // payload feeds the evening flow, so the list matches across both.
+  function renderWaitingOnYou(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(w => {
+      const hrs = (w.estimated_hours != null) ? w.estimated_hours : 0;
+      const tc = w.ticket_count || 0;
+      const proj = w.project ? ` · <span class="mono">${esc(w.project)}</span>` : '';
+      return `
+        <div class="planner-row">
+          <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:11px"></i>sign-off</span>
+          <span class="label">${esc(prettyLabel(w.label))}</span>
+          <span class="planner-meta">${tc} ticket${tc === 1 ? '' : 's'} · <span class="mono">~${esc(hrs)}h</span>${proj}</span>
+          <a class="planner-link planner-spacer" href="/project/${esc(w.project || '')}/sprint-mgmt">Sign off <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-hourglass-high"></i> Waiting on you <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
     </div>`;
   }
 
@@ -404,6 +567,36 @@
     <div>
       <div class="sec-title"><i class="ti ti-gavel"></i> Needs your decision <span class="count">${decisions.length}</span></div>
       <div class="decisions">${rows}</div>
+    </div>`;
+  }
+
+  // ── issue #884: advisor "Suggested Next" section ───────────────────────────
+  // Rendered at the end of the brief body. Each item links to the project's
+  // Roadmap tab where the full advisor suggestions panel lives (issue #882).
+  // Section omitted entirely when the list is empty (AC5).
+  function renderSuggestedNext(list){
+    if (!list || !list.length) return '';
+    const rows = list.map(function(s){
+      const slug = s.slug || '';
+      const href = '/project/' + encodeURIComponent(slug) + '/roadmap';
+      const ic = s.type === 'look_ahead'
+        ? 'ti-arrow-right'
+        : 'ti-bulb';
+      const badge = s.type === 'look_ahead'
+        ? '<span class="outcome-badge partial" style="font-size:9px;padding:1px 6px"><i class="ti ti-arrow-right" style="font-size:9px"></i>look-ahead</span>'
+        : '';
+      return `
+        <div class="planner-row">
+          <i class="ti ${ic}" style="font-size:14px;color:var(--text-muted);flex-shrink:0"></i>
+          ${badge}
+          <span style="flex:1;font-size:13px;color:var(--text)">${esc(s.text || '')}</span>
+          <a class="planner-link planner-spacer" href="${esc(href)}">Roadmap <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+        </div>`;
+    }).join('');
+    return `
+    <div>
+      <div class="sec-title"><i class="ti ti-stars"></i> Suggested Next <span class="count">${list.length}</span></div>
+      <div class="planner-list">${rows}</div>
     </div>`;
   }
 
@@ -504,27 +697,38 @@
       return '<div class="timeline"><div class="tl-row"><span class="tl-txt muted">No recent activity.</span></div></div>';
     }
     const shown = acts.slice(0, HOME_ACTIVITY_LIMIT);
-    const hidden = acts.length - shown.length;
     const rows = shown.map(a => {
       const src = String(a.source || '').toLowerCase();
       const badge = src === 'github' ? 'github' : 'agent';
       const lbl = (a.source || 'EVENT').toUpperCase();
-      return `<div class="tl-row"><span class="tl-time">${esc(a.time || '')}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
+      const _tld = a.time ? new Date(a.time) : null;
+      const timeFmt = _tld && !isNaN(_tld)
+        ? String(_tld.getHours()).padStart(2,'0') + ':' + String(_tld.getMinutes()).padStart(2,'0')
+        : '';
+      return `<div class="tl-row"><span class="tl-time">${esc(timeFmt)}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    const more = hidden > 0
-      ? `<div class="tl-more">${hidden} more in <a href="/project/${esc(p.project)}/logs">Logs</a></div>`
-      : '';
+    // The "N more in Logs" row was redundant with the foot link below.
     const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
-    return `<div class="timeline">${rows}${more}${foot}</div>`;
+    return `<div class="timeline">${rows}${foot}</div>`;
   }
 
   function renderProject(p){
     const slug = p.project;
     return `
-      <div class="pbrief" data-slug="${esc(slug)}">
+      <div class="pbrief${_bottomHidden(slug) ? ' hide-bottom' : ''}" data-slug="${esc(slug)}">
         <div class="pbrief-head">
           ${_projectTitleLinkHtml(slug)}
+          <a class="pb-milestone" id="ms-${esc(slug)}" href="/project/${esc(slug)}/roadmap"
+             title="Active milestone — open Roadmap"
+             aria-label="Active milestone progress, open Roadmap tab">
+            <i class="ti ti-flag-3"></i>
+            <span class="pb-ms-name"></span>
+            <span class="pb-ms-count"></span>
+          </a>
           ${_statusPill(p)}
+          <button class="pb-bottom-toggle" title="Hide/show shipped detail + to-do"
+                  aria-label="Toggle bottom row" onclick="toggleBottom('${esc(slug)}')">
+            <i class="ti ti-chevron-up"></i></button>
         </div>
 
         <div class="pb-grid">
@@ -552,7 +756,7 @@
         </div>
 
         <div class="pb-foot">
-          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt"><i class="ti ti-arrow-right" style="font-size:13px"></i> Open ${esc(slug)}</a>
+          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:13px"></i></a>
         </div>
       </div>`;
   }

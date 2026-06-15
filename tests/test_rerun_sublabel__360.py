@@ -69,6 +69,31 @@ class TestNextSprintSublabel:
         with pytest.raises(ValueError):
             _next_sprint_sublabel("sprint-abc", set())
 
+    def test_reuses_draft_child_plan_over_existing_label(self, tmp_path):
+        """sprint-73.2 with draft sprint-73.3 plan → sprint-73.3, not sprint-73.4."""
+        sprints_dir = tmp_path / ".commander" / "sprints"
+        sprints_dir.mkdir(parents=True)
+        (sprints_dir / "sprint-73.3-plan.json").write_text(
+            json.dumps({
+                "state": "draft",
+                "parent": "sprint-73.2",
+                "tickets": [928, 929, 932],
+            }),
+            encoding="utf-8",
+        )
+        existing = {"sprint-73.3", "sprint-73.2"}
+        assert _next_sprint_sublabel("sprint-73.2", existing, tmp_path) == "sprint-73.3"
+
+    def test_skips_finished_child_plan(self, tmp_path):
+        sprints_dir = tmp_path / ".commander" / "sprints"
+        sprints_dir.mkdir(parents=True)
+        (sprints_dir / "sprint-15.1-plan.json").write_text(
+            json.dumps({"state": "needs_rework", "parent": "sprint-15", "tickets": [1]}),
+            encoding="utf-8",
+        )
+        existing = {"sprint-15.1"}
+        assert _next_sprint_sublabel("sprint-15", existing, tmp_path) == "sprint-15.2"
+
 
 # ── AC-2: _SPRINT_LABEL_RE accepts dotted labels ─────────────────────────────
 

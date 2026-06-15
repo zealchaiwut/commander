@@ -6,10 +6,23 @@
  * concern modules also runs their side effects; ./state.js seeds modal/drag
  * state on `window`.
  *
- * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal.
+ * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal
+ * · bulk-complete modal · plan-next · scheduled-run.
  */
 
 import './state.js';
+
+import {
+  smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
+} from './plan-next.js';
+import {
+  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
+} from './scheduled-run.js';
+import {
+  _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
+  _histToggleCard, _histToggleFold, _histFocusLabel, _histStateChip,
+  _histRenderLedger, _histRerunSprint,
+} from './history.js';
 
 import {
   _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
@@ -17,7 +30,7 @@ import {
 } from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
-  smgmtFinishSprint, _fsConfirm,
+  smgmtFinishSprint, _fsConfirm, _fsRetry,
 } from './finish-modal.js';
 import {
   _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
@@ -31,6 +44,8 @@ import {
   _pfBuildDAGHtml, _pfDrawDAGArrows, _pfToggleTicket, _pfGetSelectedTickets,
   _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
+  _pfStepperInit, _pfStepState, _pfStepperAnimate, _pfStepperSummary,
+  smgmtKickoffRun, smgmtKickoffRetry,
 } from './run-controls.js';
 import {
   computeDropPlan,
@@ -58,7 +73,7 @@ import {
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
-  _smgmtApplyRerunOptimistic, _smgmtIsFreshRerunSprint,
+  _smgmtApplyRerunOptimistic,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -77,6 +92,7 @@ globalThis._fsCatClass = _fsCatClass;
 globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
+globalThis._fsRetry = _fsRetry;
 
 // Bulk Complete modal (parent + child lineage)
 globalThis._bcOpen = _bcOpen;
@@ -114,6 +130,14 @@ globalThis._pfUpdateSections = _pfUpdateSections;
 globalThis._pfShowError = _pfShowError;
 globalThis._pfRetry = _pfRetry;
 globalThis._pfConfirm = _pfConfirm;
+// Stepper functions (issue #933)
+globalThis._pfStepperInit = _pfStepperInit;
+globalThis._pfStepState = _pfStepState;
+globalThis._pfStepperAnimate = _pfStepperAnimate;
+globalThis._pfStepperSummary = _pfStepperSummary;
+// Kickoff stepper (issue #932)
+globalThis.smgmtKickoffRun = smgmtKickoffRun;
+globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
 
 // Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
 // computeDropPlan is a DOM-free decision helper kept on the global (and thus in
@@ -186,3 +210,24 @@ globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
+
+// Run-on-schedule toggle (issue #863)
+globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
+globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
+globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
+
+// Plan next sprint + pending-sign-off decoration (issue #861)
+globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
+globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
+
+// History ledger (issue #806 / #797 extraction)
+globalThis._histNeedsActionCount = _histNeedsActionCount;
+globalThis._histLoadLedger = _histLoadLedger;
+globalThis._histScanStale = _histScanStale;
+globalThis._histCleanupStale = _histCleanupStale;
+globalThis._histToggleCard = _histToggleCard;
+globalThis._histToggleFold = _histToggleFold;
+globalThis._histFocusLabel = _histFocusLabel;
+globalThis._histStateChip = _histStateChip;
+globalThis._histRenderLedger = _histRenderLedger;
+globalThis._histRerunSprint = _histRerunSprint;

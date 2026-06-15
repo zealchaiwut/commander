@@ -149,6 +149,8 @@ SQLite is the **authoritative, only live** store. As of sprint 57 it also holds 
 | `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
 | `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
 | `sprint_history` | Append-only ledger of terminal sprint events (notably deletions) for the History feed; snapshots the ticket list before label-strip so deleted sprints stay visible (issue #805) |
+| `advisor_suggestions` | Current draft suggestions from the most recent advisor run per project; replaced wholesale on each run (issue #881) |
+| `advisor_look_ahead` | Ordered look-ahead entries (2–5 sprints) from the most recent advisor run per project; replaced wholesale on each run (issue #883) |
 
 ### ticket_status (issue #755)
 
@@ -187,6 +189,12 @@ Index: `(repo, state)`.
 
 `sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
+
+**DB is the sole source of truth for lifecycle state (sprint 74.2).** plan.json / labels / PID files are no longer read as state.
+
+- **Read:** `sprint_state.current(label)` is the only sanctioned reader (issue #1091). It returns `canonical_lifecycle(db.get_sprint(label)["state"])` — zero disk reads, zero GitHub label lookups, zero fallback. Missing row → `"unknown"`. The History pane and `_derive_outcome_lifecycle` were migrated onto it (issues #1092, #1093); GET endpoints no longer mutate plan.json (issue #1096). See `docs/architecture/sprint-lifecycle.md`.
+- **Write:** `db.transition_sprint_state(label, to_state, actor=...)` is the single guarded writer (issue #1087); `record_sprint_start/finish/needs_rework/ready_to_merge` route through it. It enforces the legal edge set (`draft→planned/running/...`, `running→ready_to_merge/needs_rework/deleted`, etc.) and rejects any `running→ready_to_merge|needs_rework|completed` transition unless `actor="manager"`. Returns a `TransitionResult(accepted, reason)`; never raises on a guard failure.
+- **Reconciler:** the GitHub/orphan reconciler skips any `running` sprint whose owning manager PID is still alive (`.commander/sprints/<label>-pid`), and only settles a dead-PID running sprint to `ready_to_merge`/`needs_rework` based on ticket outcomes — all via `transition_sprint_state` (issues #1089, #1098).
 
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
 
@@ -266,6 +274,47 @@ the deletion) and read via `list_sprint_history()`.
 | `created_at` | text | ISO 8601 timestamp |
 
 Index: `(created_at DESC)`.
+
+### advisor_suggestions (issue #881)
+
+Current draft suggestions from the most recent daily advisor run per project.
+Replaced wholesale on every new run — no suggestion history beyond the current
+set. Created by `_create_advisor_suggestions_table` in `apps/dashboard/db.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
+| `run_at` | text NOT NULL | ISO 8601 UTC timestamp of the advisor run |
+| `on_demand` | integer NOT NULL DEFAULT 0 | 1 if triggered via the on-demand API endpoint, 0 for scheduled |
+| `pitch` | text NOT NULL | One-line suggestion title |
+| `rationale` | text NOT NULL | Why the advisor recommends this suggestion |
+| `milestone` | text NOT NULL | Target milestone label |
+| `scope` | text NOT NULL | Effort size: `S`, `M`, or `L` |
+
+Index: `ix_advisor_suggestions_project` on `(project)`.
+
+Endpoints: `GET /api/projects/{project}/advisor/suggestions`, `POST /api/projects/{project}/advisor/run`, `POST /api/advisor/tick`.
+
+### advisor_look_ahead (issue #883)
+
+Ordered 2-to-5-sprint look-ahead entries from the most recent advisor run per project.
+Replaced wholesale on every new run. Created by `_create_advisor_look_ahead_table`
+in `apps/dashboard/db.py`.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | integer PK | Auto-increment |
+| `project` | text NOT NULL | Repo slug, e.g. `zealchaiwut/commander` |
+| `run_at` | text NOT NULL | ISO 8601 UTC timestamp of the advisor run |
+| `position` | integer NOT NULL | Sort order within the look-ahead list |
+| `entry` | text NOT NULL | Look-ahead entry text |
+| `on_demand` | integer NOT NULL DEFAULT 0 | 1 if triggered on-demand, 0 for scheduled |
+
+Index: `ix_advisor_look_ahead_project` on `(project)`.
+
+Endpoint: `GET /api/projects/{project}/advisor/look-ahead`.
+
 
 ## API Endpoints
 

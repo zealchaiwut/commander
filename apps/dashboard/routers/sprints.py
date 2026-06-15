@@ -15,6 +15,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from . import brief
+from . import scheduler
 from . import sprints_service
 from . import todos
 
@@ -31,9 +32,22 @@ router.include_router(brief.router)
 # so include_router mounts the routes unchanged without growing server.py.
 router.include_router(todos.router)
 
+# Scheduled overnight sprint queue endpoints (issue #863) ride on this
+# already-mounted router for the same reason — scheduler declares full
+# ``/api/scheduler/*`` paths and carries no prefix, so include_router mounts the
+# routes unchanged without growing server.py (COMMANDER_GATE_MONOLITH).
+router.include_router(scheduler.router)
+
 
 class SprintOrderBody(BaseModel):
     order: list[str]
+
+
+class PlanNextSprintBody(BaseModel):
+    project: str
+    # When a pending-sign-off draft already exists, the client re-submits with
+    # replace=true after confirming the prompt (issue #861, AC11).
+    replace: bool = False
 
 
 class SprintGoalBody(BaseModel):
@@ -69,6 +83,25 @@ def get_sprint_order(project: str):
 def save_sprint_order(project: str, body: SprintOrderBody):
     """Persist sprint display order for a project slug."""
     return sprints_service.save_sprint_order(project, body.order)
+
+
+@router.post("/api/sprints/plan-next")
+def plan_next_sprint(body: PlanNextSprintBody):
+    """Draft the next sprint from the active milestone's backlog (issue #861).
+
+    Returns ``{status, created, ...}``. ``status`` is one of ``ok``,
+    ``no_milestone``, ``empty`` (zero capacity / no eligible tickets), or
+    ``conflict`` (a pending-sign-off draft already exists — re-submit with
+    ``replace: true`` to discard and re-plan). No GitHub label is changed unless
+    ``status == "ok"``.
+    """
+    return sprints_service.plan_next_sprint(body.project, body.replace)
+
+
+@router.get("/api/sprints/pending-signoff")
+def get_pending_signoff_sprints(project: str):
+    """Labels of sprints in pending-sign-off state for a project (issue #861)."""
+    return sprints_service.pending_signoff_sprints(project)
 
 
 @router.get("/api/sprints/running-all")

@@ -185,7 +185,14 @@ def _apply_cost(rows: list[dict], rate: float) -> list[dict]:
 # ── Per-size averages ─────────────────────────────────────────────────────────
 
 def _compute_per_size_avg(project_root: Path) -> dict[str, Any]:
-    """Compute average total_tokens per issue size using estimates + agent_runs."""
+    """Average actual TIME (minutes) and tokens per ticket size (S/M/L/XL).
+
+    Keys off the size LABEL from estimates and the recorded run duration from
+    agent_runs. Time is the primary calibration signal — it's recorded even when
+    tokens are 0 (subscription auth doesn't bill tokens), which is why the
+    token-only version showed nothing. ``avg_tokens`` is kept but the UI greys it
+    out ("N/A (soon)") until token tracking is wired.
+    """
     estimates_dir = _commander_dir(project_root) / "estimates"
     issue_to_size: dict[int, str] = {}
 
@@ -200,32 +207,43 @@ def _compute_per_size_avg(project_root: Path) -> dict[str, Any]:
             except Exception:
                 continue
 
-    # Aggregate total_tokens per issue from agent_runs.
+    # Aggregate per issue from agent_runs: total tokens + total run seconds.
     try:
         with _db.get_conn() as conn:
             _db._create_agent_runs_table(conn)
             rows = conn.execute(
-                """SELECT issue_number, SUM(total_tokens) AS total_tokens
+                """SELECT issue_number,
+                          SUM(total_tokens)      AS total_tokens,
+                          SUM(duration_seconds)  AS total_secs
                    FROM agent_runs
-                   WHERE total_tokens IS NOT NULL
                    GROUP BY issue_number"""
             ).fetchall()
-        per_issue = {int(r["issue_number"]): int(r["total_tokens"]) for r in rows}
+        per_issue_tokens = {int(r["issue_number"]): int(r["total_tokens"])
+                            for r in rows if r["total_tokens"]}
+        per_issue_secs = {int(r["issue_number"]): float(r["total_secs"])
+                          for r in rows if r["total_secs"]}
     except Exception:
-        per_issue = {}
+        per_issue_tokens, per_issue_secs = {}, {}
 
-    buckets: dict[str, list[int]] = {sz: [] for sz in _SIZES}
-    for issue_num, tokens in per_issue.items():
-        size = issue_to_size.get(issue_num)
-        if size in buckets:
-            buckets[size].append(tokens)
+    tok_buckets: dict[str, list[int]] = {sz: [] for sz in _SIZES}
+    min_buckets: dict[str, list[float]] = {sz: [] for sz in _SIZES}
+    for issue_num, tokens in per_issue_tokens.items():
+        sz = issue_to_size.get(issue_num)
+        if sz in tok_buckets:
+            tok_buckets[sz].append(tokens)
+    for issue_num, secs in per_issue_secs.items():
+        sz = issue_to_size.get(issue_num)
+        if sz in min_buckets:
+            min_buckets[sz].append(secs / 60.0)
 
     result: dict[str, Any] = {}
     for sz in _SIZES:
-        vals = buckets[sz]
+        toks = tok_buckets[sz]
+        mins = min_buckets[sz]
         result[sz] = {
-            "count": len(vals),
-            "avg_tokens": round(sum(vals) / len(vals)) if vals else None,
+            "count": len(mins) or len(toks),
+            "avg_minutes": round(sum(mins) / len(mins), 1) if mins else None,
+            "avg_tokens": round(sum(toks) / len(toks)) if toks else None,
         }
     return result
 

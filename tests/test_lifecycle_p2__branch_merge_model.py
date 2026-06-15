@@ -4,7 +4,8 @@ Design contract: docs/architecture/sprint-lifecycle.md
 Tracking:        docs/milestones/sprint-lifecycle-redesign.md (P2)
 
 Child sprint branches are created off the base sprint branch; per-ticket merges
-land on base; develop is reached only at Merge Sprint (renamed Finish Sprint).
+land on the active sprint branch (child or base); develop is reached only at
+Merge Sprint (renamed Finish Sprint).
 """
 from __future__ import annotations
 
@@ -95,10 +96,10 @@ class TestCreateSprintPr:
 
 
 class TestRunSprintMergeTarget:
-    def test_default_target_is_base_branch(self):
+    def test_default_target_is_sprint_branch(self):
         snippet = _SM_SRC.split("def run_sprint")[1].split("def _run_pipeline_dispatch")[0]
         assert "base_merge_target = _base_sprint_branch(label)" in snippet
-        assert "target_branch = base_merge_target" in snippet
+        assert "target_branch = sprint_branch" in snippet
 
     def test_dispatch_uses_sprint_branch_not_merge_target(self):
         assert "sprint_branch=sprint_branch" in _SM_SRC
@@ -110,7 +111,7 @@ class TestMergeSprintEndpoint:
         block = _SERVER_SRC.split("async def finish_sprint")[1].split("@app.")[0]
         assert "Merge Sprint" in block
         assert "remove=[label]" not in block
-        assert "_merge_sprint_branch_chain" in block
+        assert "_merge_sprint_branches_for_label" in block
 
     def test_finish_preview_exposes_merge_branches(self):
         block = _SERVER_SRC.split("def get_sprint_finish_preview")[1].split("@app.")[0]

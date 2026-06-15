@@ -1,7 +1,8 @@
 # Commander platform — usage tutorial
 
-Day-to-day reference for using Commander. For first-time machine setup see
-[`dashboard/README.md`](../dashboard/README.md). For agent rules see
+Day-to-day reference for using Commander. For a five-minute install see
+[`quickstart.md`](quickstart.md); for provisioning a brand-new machine see
+[`machine-onboarding.md`](machine-onboarding.md). For agent rules see
 [`CLAUDE.md`](../CLAUDE.md).
 
 ---
@@ -48,7 +49,7 @@ The diagram shows every handoff in the BA→Coder→Tester→UAT loop.
 | Python | 3.12 | `brew install python@3.12` |
 | Node.js | 18+ | `brew install node` |
 | `gh` CLI | 2.x | `brew install gh` |
-| Claude Code | latest | `npm install -g @anthropic/claude-code` |
+| Claude Code | latest | `npm install -g @anthropic-ai/claude-code` |
 | tmux | any | `brew install tmux` |
 | Tailscale | any | [tailscale.com/download](https://tailscale.com/download) — optional |
 
@@ -61,43 +62,49 @@ gh auth login
 ### Clone, install, configure
 
 ```bash
-git clone https://github.com/zealchaiwut/commander.git ~/commander
-cd ~/commander/dashboard
+git clone https://github.com/zealchaiwut/commander.git ~/dev/commander/prd
+cd ~/dev/commander/prd
 python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+npm install && npm run build            # esbuild frontend bundle
+cp apps/dashboard/.env.example apps/dashboard/.env
 ```
 
-Edit `.env` — set `TRACKED_REPOS` to your GitHub repo:
+Edit `apps/dashboard/.env` — set `TRACKED_REPOS` to your GitHub repo:
 
 ```
 TRACKED_REPOS=zealchaiwut/commander
 GITHUB_DEFAULT_BRANCH=master
 ```
 
-### Set up worktrees
+### Set up agent clones
+
+Commander runs each agent role in its own clone (see §6c for the layouts). The
+sprint manager reads their paths from `.commander/sprint.yaml`. To onboard a
+project with the nested layout:
 
 ```bash
-cd ~/commander
-git worktree add work-coder develop
-git worktree add work-tester develop
+cd ~/dev/commander/prd
+python3 scripts/init_project.py <repo-name> --nested
 ```
 
-### Set up tmux layout
+### Set up tmux layout (attended local dev only)
 
 ```bash
-bash ~/commander/start.sh
+bash ~/dev/commander/prd/start.sh
 ```
 
 This loads `~/.commander.tmux` and opens four panes: SERVER (top-left),
-CODER (top-right), TESTER (bottom-left), UTILITY/BA (bottom-right).
+CODER (top-right), TESTER (bottom-left), UTILITY/BA (bottom-right). For
+unattended/remote running, **launchd** is the authoritative runner — see
+[`machine-onboarding.md`](machine-onboarding.md).
 
 ### First-run verification
 
 ```bash
-cd ~/commander/dashboard && source venv/bin/activate
-python3 -c "import server, db, github_client, projects; print('OK')"
+cd ~/dev/commander/prd && source venv/bin/activate
+./.commander/setup.sh
 bash scripts/start_prd.sh
 ```
 
@@ -109,29 +116,32 @@ Open `http://localhost:8000`. The dashboard should show your repo.
 
 | Environment | Branch | Port | Directory |
 |-------------|--------|------|-----------|
-| PRD | `master` | **8000** | `~/commander/dashboard/` |
-| UAT | `develop` | **8001** | `~/commander/dashboard-uat/` |
+| PRD | `master` | **8000** | `~/dev/commander/prd/` |
+| UAT | `develop` | **8001** | `~/dev/commander/uat/` |
+
+All `scripts/*.sh` below run from the PRD clone (`~/dev/commander/prd`);
+`start_uat.sh` targets `../uat` automatically.
 
 ### One-time UAT setup
 
 ```bash
-bash ~/commander/dashboard/scripts/setup_uat_env.sh
+bash scripts/setup_uat_env.sh
 ```
 
 ### Start and stop
 
 ```bash
 # Start PRD (port 8000)
-bash ~/commander/dashboard/scripts/start_prd.sh
+bash scripts/start_prd.sh
 
 # Start UAT (port 8001)
-bash ~/commander/dashboard/scripts/start_uat.sh
+bash scripts/start_uat.sh
 
-# Stop both
-bash ~/commander/dashboard/scripts/stop_all.sh
+# Stop both (or pass prd / uat to stop one)
+bash scripts/stop_all.sh
 
 # Show running status and branch
-bash ~/commander/dashboard/scripts/status.sh
+bash scripts/status.sh
 ```
 
 ### Sync UAT after a tester merge
@@ -139,9 +149,9 @@ bash ~/commander/dashboard/scripts/status.sh
 When the Tester merges a feature to `develop`, pull and restart:
 
 ```bash
-bash ~/commander/dashboard/scripts/sync_uat.sh
-bash ~/commander/dashboard/scripts/stop_all.sh
-bash ~/commander/dashboard/scripts/start_uat.sh
+bash scripts/sync_uat.sh
+bash scripts/stop_all.sh uat
+bash scripts/start_uat.sh
 ```
 
 ### Access from phone via Tailscale
@@ -214,9 +224,10 @@ comment, and — if all tests pass — merges to `develop` and moves the ticket 
 Sync and restart UAT:
 
 ```bash
-bash ~/commander/dashboard/scripts/sync_uat.sh
-bash ~/commander/dashboard/scripts/stop_all.sh
-bash ~/commander/dashboard/scripts/start_uat.sh
+cd ~/dev/commander/prd
+bash scripts/sync_uat.sh
+bash scripts/stop_all.sh uat
+bash scripts/start_uat.sh
 ```
 
 Open the feature on your phone: `http://<tailscale-ip>:8001/api/health`.
@@ -234,19 +245,19 @@ Tick any `MANUAL` UAT steps shown inline, then click **Approve**.
 Or approve from the terminal:
 
 ```bash
-cd ~/commander/dashboard && source venv/bin/activate
+cd ~/dev/commander/prd && source venv/bin/activate
 python3 scripts/approve_ticket.py --issue 42
 ```
 
 ### f. Release: merge develop to master, restart PRD
 
 ```bash
-cd ~/commander
+cd ~/dev/commander/prd
 git checkout master
 git merge develop --no-ff -m "release: merge develop into master"
 git push origin master
-bash dashboard/scripts/stop_all.sh
-bash dashboard/scripts/start_prd.sh
+bash scripts/stop_all.sh prd
+bash scripts/start_prd.sh
 ```
 
 The endpoint is now live at `http://localhost:8000/api/health`.
@@ -255,55 +266,60 @@ The endpoint is now live at `http://localhost:8000/api/health`.
 
 ## 5. Sprint Manager — automated sprint runs
 
-The Sprint Manager (`dashboard/scripts/sprint_manager.py`) replaces the
+The Sprint Manager (`services/sprint_manager/sprint_manager.py`) replaces the
 manual coder → tester → approve loop. Given a sprint label, it works through
-every open backlog issue sequentially: dispatches the Coder agent, dispatches
-the Tester, runs three quality gates (pytest → ruff lint → merge preview), and
-merges passing tickets to `develop`. When the sprint finishes it writes an
-executive summary and optionally records learnings.
+every issue in that sprint sequentially: dispatches the Coder agent, dispatches
+the Tester, runs seven quality gates (typecheck → lint → frontend-lint → design
+→ pytest → monolith → merge-preview), and merges passing tickets to the sprint
+base branch. When the sprint finishes it writes an executive summary and
+optionally records learnings.
 
 ### Run a sprint
 
 ```bash
-cd ~/commander
-python3 dashboard/scripts/sprint_manager.py sprint-3
+# label is positional; auto-discovers .commander/sprint.yaml by walking up
+cd ~/dev/commander/prd
+python3 services/sprint_manager/sprint_manager.py sprint-3
 ```
 
-For each backlog issue the manager:
+For each issue the manager:
 
 1. Dispatches the Coder → implements the feature on a worktree branch
 2. Dispatches the Tester → writes pytest tests for each AC, runs them
-3. Runs quality gates: **pytest**, **ruff lint**, **merge-preview**
-4. Gate pass → merges to `develop`, labels ticket `UAT`
-5. Gate fail → labels ticket back to `SIT`, posts a structured failure comment
+3. Runs the quality gates (cheap/deterministic first; see [Sprint Manager feature doc](features/sprint-manager.md#quality-gates))
+4. Gate pass → merges to the active sprint branch, labels ticket `UAT`
+5. Gate fail → labels ticket `needs-rework` with an `end_reason`, posts a structured failure comment, moves on
 
 ### Common flags
 
 ```bash
+SM=services/sprint_manager/sprint_manager.py
+
 # Dry run — shows what would happen, no agents dispatched
-python3 dashboard/scripts/sprint_manager.py sprint-3 --dry-run
+python3 $SM sprint-3 --dry-run
 
 # Skip all gates (faster, less safe)
-python3 dashboard/scripts/sprint_manager.py sprint-3 --skip-gates
+python3 $SM sprint-3 --skip-gates
 
-# Skip only the pytest gate
-python3 dashboard/scripts/sprint_manager.py sprint-3 --gate-pytest=false
+# Skip only the pytest gate (each gate has a --no-gate-<name> flag)
+python3 $SM sprint-3 --no-gate-pytest
 
 # Resume after a crash or manual stop
-python3 dashboard/scripts/sprint_manager.py sprint-3 --resume
+python3 $SM sprint-3 --resume
 
 # Retry tickets that previously failed
-python3 dashboard/scripts/sprint_manager.py sprint-3 --retry-failed
+python3 $SM sprint-3 --retry-failed
 
 # Send alerts to dashboard banner and a log file
-python3 dashboard/scripts/sprint_manager.py sprint-3 --alert-mode dashboard-banner,file
+python3 $SM sprint-3 --alert-mode dashboard-banner,file
 ```
 
 ### Executive summary and Sprint History tab
 
 After the sprint loop finishes, the manager writes a Markdown summary to
-`dashboard/sprints/sprint-N-summary-YYYY-MM-DD.md` and creates a GitHub issue
-for permanent record. If run interactively (TTY) you'll see:
+`.commander/sprints/{label}-summary-YYYY-MM-DD.md` (per-label, so child sprints
+don't overwrite siblings) and creates a GitHub issue for permanent record. If
+run interactively (TTY) you'll see:
 
 ```
 Sprint 3 done. Want to add learnings to the summary? (y/n)
@@ -318,17 +334,21 @@ full Markdown.
 
 ### Failure categories
 
-When a ticket fails its quality gates the manager posts a comment labelling
-the failure as one of:
+When a ticket fails the manager records a failure class (used by the bounded
+fix-loop, 4a/4b) on the sidecar and in the comment:
 
 | Category | Meaning |
 |----------|---------|
 | `CRASH` | Coder or Tester subprocess exited non-zero |
 | `HANG` | No log output for the hang-kill timeout; process was killed |
-| `GATE_FAIL` | pytest or ruff gate returned non-zero |
+| `GATE_FAIL` | a quality gate returned non-zero |
 | `TESTER_REJECTED` | Tester marked the ticket as needs-rework |
 
-The ticket moves back to `SIT` and the sprint moves on to the next issue.
+Logic failures (gate / tester-rejected) re-dispatch the coder with accumulated
+context up to `COMMANDER_MAX_FIX_ROUNDS` (default 3); after that the ticket is
+tagged `RETRY_EXHAUSTED`. On terminal failure the manager labels the ticket
+`needs-rework` and moves on to the next issue. Infra failures (crash/hang) stay
+on their existing paths and don't consume fix rounds.
 
 ### Sprint Planning tab
 
@@ -391,7 +411,7 @@ accidentally committed because it sits outside any git working tree.
 **Onboard a new project with the nested layout:**
 
 ```bash
-cd ~/dev/commander/prd/dashboard
+cd ~/dev/commander/prd
 source venv/bin/activate
 python3 scripts/init_project.py <repo-name> --nested
 ```

@@ -156,6 +156,7 @@ def _mirror_labels(repo_name: str) -> list[dict] | None:
 _TTL_BY_PREFIX = {
     "labels:": 300.0,
     "sprint_labels:": 300.0,
+    "sprint_labels_live:": 300.0,
     "sprints:": 300.0,
     # Summary issues change only when a sprint finishes; 120s staleness is fine
     # and cuts the board/nav polling burn on this (GraphQL) query ~4x further.
@@ -281,7 +282,7 @@ def list_open_issues_with_body(repo_name: str | None = None, limit: int = 200) -
         return _json(
             "issue", "list", "--repo", r,
             "--state", "open",
-            "--json", "number,title,labels,assignees,state,url,body,createdAt,updatedAt",
+            "--json", "number,title,labels,assignees,state,url,body,milestone,createdAt,updatedAt",
             "--limit", str(limit),
         )
     return _cached(key, fetch)
@@ -333,6 +334,7 @@ def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
         pass
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
 
 
 def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) -> None:
@@ -348,6 +350,7 @@ def create_sprint_label_strict(sprint_num: int, repo_name: str | None = None) ->
          "--color", "0075ca", "--description", f"Sprint {sprint_num} issues")
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"labels:{r}")
 
 
@@ -368,6 +371,8 @@ def delete_label(label_name: str, repo_name: str | None = None) -> None:
     r = _r(repo_name)
     _run("label", "delete", label_name, "--repo", r, "--yes")
     invalidate(f"sprints:{r}")
+    invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"open_issues:{r}")
     invalidate(f"open_issues_body:{r}")
     invalidate(f"issues:{r}:")
@@ -401,7 +406,7 @@ def assign_sprint(issue_id: int, sprint_num: int | None, repo_name: str | None =
     # Find existing sprint labels on the issue
     issue = get_issue(issue_id, repo_name=repo_name)
     current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
-    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_RE.match(lbl)]
+    current_sprint_labels = [lbl for lbl in current_labels if SPRINT_LABEL_RE_ALL.match(lbl)]
 
     if sprint_num is None:
         # Remove all sprint labels (ticket moves to backlog)
@@ -466,23 +471,96 @@ def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dic
     return _cached(key, fetch)
 
 
+def _live_sprint_label_names(repo_name: str) -> list[str]:
+    """Sprint-* label names from a TTL-cached ``gh label list`` (300s).
+
+    The issues mirror only sees labels attached to an issue, so an EMPTY sprint
+    label (0 issues — e.g. an orphan left by a rolled-back create, or a sprint
+    whose tickets all hot-swapped away) is invisible to it. That hid the label
+    from the board and broke New Sprint with "label already exists". Unioning a
+    periodically-refreshed live label list (issue #1C-B) surfaces every existing
+    sprint label; the 300s TTL keeps the GraphQL cost to ~12 calls/hr/repo.
+    """
+    r = _r(repo_name)
+    key = f"sprint_labels_live:{r}"
+    def fetch():
+        try:
+            labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "300")
+        except Exception:
+            return []
+        return [lbl["name"] for lbl in labels
+                if isinstance(lbl, dict) and SPRINT_LABEL_RE_ALL.match(lbl.get("name", ""))]
+    return _cached(key, fetch)
+
+
+def _all_sprint_label_names(repo_name: str) -> set[str]:
+    """Union of mirror-derived sprint labels (zero-cost, fresh for active labels)
+    and the TTL-cached live label list (catches empty/orphan labels)."""
+    names = set(_live_sprint_label_names(repo_name))
+    mirror = _mirror_labels(repo_name)
+    if mirror is not None:
+        names.update(lbl["name"] for lbl in mirror
+                     if SPRINT_LABEL_RE_ALL.match(lbl["name"]))
+    return names
+
+
 def list_sprints(repo_name: str | None = None) -> list[int]:
     r = _r(repo_name)
-    labels = _mirror_labels(r)
-    if labels is not None:
-        nums = sorted({int(m.group(1)) for lbl in labels
-                       if (m := SPRINT_RE.match(lbl["name"]))})
-        if nums:
-            return nums
-    key = f"sprints:{r}"
+    names = _all_sprint_label_names(r)
+    return sorted({int(m.group(1)) for n in names if (m := SPRINT_RE.match(n))})
+
+
+def list_milestones(repo_name: str | None = None) -> list[dict]:
+    """List repository milestones (issue #861, Plan next sprint).
+
+    Returns ``[{title, state, dueOn, number}, ...]`` for all milestones. Used to
+    resolve the *active milestone* (the open milestone with the nearest due
+    date). Cached on the standard TTL like the other read paths.
+    """
+    r = _r(repo_name)
+    key = f"milestones:{r}"
+
     def fetch():
-        labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
-        nums = []
-        for lbl in labels:
-            m = SPRINT_RE.match(lbl["name"])
-            if m:
-                nums.append(int(m.group(1)))
-        return sorted(nums)
+        out = _json("api", f"repos/{r}/milestones",
+                    "--paginate", "-X", "GET",
+                    "-f", "state=all", "-f", "per_page=100")
+        result = []
+        for m in out or []:
+            result.append({
+                "title": m.get("title", ""),
+                "state": m.get("state", "open"),
+                "dueOn": m.get("due_on"),
+                "number": m.get("number"),
+            })
+        return result
+
+    return _cached(key, fetch)
+
+
+def list_open_issues_for_planning(repo_name: str | None = None,
+                                  limit: int = 300) -> list[dict]:
+    """Open issues with the fields the sprint planner needs (issue #861).
+
+    Like ``list_open_issues_with_body`` but also requests the ``milestone``
+    field, so the planner can filter to the active milestone's open backlog
+    (AC3). Uses the DB mirror when it already carries body+milestone, else a
+    cached ``gh issue list``.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None and all(
+            "body" in i and "milestone" in i for i in mirror):
+        return [i for i in mirror if i.get("state") == "open"][:limit]
+    key = f"open_issues_planning:{r}"
+
+    def fetch():
+        return _json(
+            "issue", "list", "--repo", r,
+            "--state", "open",
+            "--json", "number,title,labels,assignees,state,url,body,milestone,createdAt,updatedAt",
+            "--limit", str(limit),
+        )
+
     return _cached(key, fetch)
 
 
@@ -495,22 +573,13 @@ def _sprint_label_sort_key_gc(label: str) -> tuple[int, int]:
 
 
 def list_sprint_labels(repo_name: str | None = None) -> list[str]:
-    """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally."""
+    """Return all sprint labels (sprint-N and sprint-N.X) sorted naturally.
+
+    Unions the issues-mirror labels with a TTL-cached live label list so empty
+    sprint labels (attached to no issue) still appear (issue #1C-B)."""
     r = _r(repo_name)
-    labels = _mirror_labels(r)
-    if labels is not None:
-        result = [lbl["name"] for lbl in labels if SPRINT_LABEL_RE_ALL.match(lbl["name"])]
-        if result:
-            return sorted(result, key=_sprint_label_sort_key_gc)
-    key = f"sprint_labels:{r}"
-    def fetch():
-        labels = _json("label", "list", "--repo", r, "--json", "name", "--limit", "200")
-        result = []
-        for lbl in labels:
-            if SPRINT_LABEL_RE_ALL.match(lbl["name"]):
-                result.append(lbl["name"])
-        return sorted(result, key=_sprint_label_sort_key_gc)
-    return _cached(key, fetch)
+    names = _all_sprint_label_names(r)
+    return sorted(names, key=_sprint_label_sort_key_gc)
 
 
 def get_label_color(label_name: str, repo_name: str | None = None) -> str | None:
@@ -541,6 +610,7 @@ def create_label(name: str, color: str, description: str = "", repo_name: str | 
         pass
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"labels:{r}")
 
 
@@ -582,6 +652,7 @@ def assign_sprint_by_label(issue_id: int, sprint_label: str | None,
     invalidate(f"open_issues:{r}")
     invalidate(f"sprints:{r}")
     invalidate(f"sprint_labels:{r}")
+    invalidate(f"sprint_labels_live:{r}")
     invalidate(f"latest_sprint:{r}")
 
 
@@ -770,17 +841,56 @@ def search_issues_by_title(title: str, repo_name: str | None = None) -> list[dic
 
 
 def create_issue(title: str, body: str, labels: list[str],
-                 repo_name: str | None = None) -> tuple[int, str]:
+                 repo_name: str | None = None,
+                 milestone: str | None = None) -> tuple[int, str]:
     r = _r(repo_name)
-    url = _run(
+    args = [
         "issue", "create", "--repo", r,
         "--title", title, "--body", body,
         "--label", ",".join(labels),
-    )
+    ]
+    # `gh issue create --milestone` resolves a milestone by title; only pass it
+    # when one was chosen so an empty selection leaves the issue unassigned
+    # (issue #879 AC5).
+    if milestone:
+        args += ["--milestone", milestone]
+    url = _run(*args)
     number = int(url.rstrip("/").split("/")[-1])
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
     return number, url
+
+
+def list_milestones(repo_name: str | None = None, state: str = "open") -> list[dict]:
+    """Return the repo's milestones as [{"number", "title", "state"}, ...].
+
+    Used by the milestone selector (issue #879) and the roadmap tab. ``state``
+    is one of "open" | "closed" | "all" (GitHub's milestone filter). Cached on
+    the standard github_client TTL.
+    """
+    r = _r(repo_name)
+    key = f"milestones:{r}:{state}"
+
+    def fetch():
+        raw = _json("api", f"repos/{r}/milestones?state={state}&per_page=100")
+        return [
+            {"number": m["number"], "title": m["title"], "state": m.get("state", "open")}
+            for m in (raw or [])
+        ]
+
+    return _cached(key, fetch)
+
+
+def milestone_view(issue: dict) -> dict | None:
+    """Shrink a gh issue's milestone object to the {number, title} the UI needs.
+
+    Returns None for an unassigned issue so chips/filters can branch on falsiness
+    (issue #879 AC5/AC6/AC7).
+    """
+    ms = issue.get("milestone")
+    if not ms:
+        return None
+    return {"number": ms.get("number"), "title": ms.get("title")}
 
 
 def list_labels(repo_name: str | None = None) -> list[dict]:
@@ -845,6 +955,63 @@ def update_issue_body(issue_id: int, body: str, repo_name: str | None = None):
         except Exception:
             pass
     invalidate(f"issues:{r}:")
+
+
+# ── milestone operations (issue #878) ────────────────────────────────────────
+
+def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:
+    """Return all milestones for the repo as a list of dicts.
+
+    Fields include: number, title, description, due_on, state.
+    """
+    r = _r(repo_name)
+    return _json("api", f"repos/{r}/milestones", "-f", f"state={state}",
+                 "-f", "per_page=100")
+
+
+def list_issues_with_milestone(repo_name: str | None = None) -> list[dict]:
+    """Return all issues (open and closed) that belong to any milestone.
+
+    Backed by the mirror when available; falls back to the gh CLI.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        return [i for i in mirror if i.get("milestone")]
+    return _json(
+        "issue", "list", "--repo", r,
+        "--state", "all",
+        "--json", "number,title,labels,state,milestone",
+        "--limit", "500",
+    )
+
+
+def create_milestone(title: str, description: str = "",
+                     due_on: str | None = None,
+                     repo_name: str | None = None) -> dict:
+    """Create a new GitHub milestone and return its dict."""
+    r = _r(repo_name)
+    args = ["api", f"repos/{r}/milestones", "--method", "POST",
+            "-f", f"title={title}", "-f", f"description={description}"]
+    if due_on:
+        args += ["-f", f"due_on={due_on}"]
+    return _json(*args)
+
+
+def update_milestone(number: int, fields: dict,
+                     repo_name: str | None = None) -> dict:
+    """PATCH a milestone's fields (title, description, due_on, state)."""
+    r = _r(repo_name)
+    args = ["api", f"repos/{r}/milestones/{number}", "--method", "PATCH"]
+    for k, v in fields.items():
+        args += ["-f", f"{k}={v}"]
+    return _json(*args)
+
+
+def set_milestone_state(number: int, state: str,
+                        repo_name: str | None = None) -> dict:
+    """Open or close a milestone by setting its state field."""
+    return update_milestone(number, {"state": state}, repo_name=repo_name)
 
 
 # ── test report ───────────────────────────────────────────────────────────────

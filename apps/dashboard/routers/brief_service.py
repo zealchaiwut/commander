@@ -36,8 +36,17 @@ _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_DASHBOARD_ROOT))
 
+# services/sprint_manager holds the canonical size→minutes map (issue #766) —
+# the single source for the "waiting on you" estimated-hours figure.
+_SPRINT_MANAGER_ROOT = _DASHBOARD_ROOT.parent.parent / "services" / "sprint_manager"
+if str(_SPRINT_MANAGER_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_SPRINT_MANAGER_ROOT))
+
 # How many recent events to include in recent_activity (no pagination — AC scope).
 RECENT_ACTIVITY_LIMIT = 10
+
+# Max lines in the "Suggested Next" brief section (suggestions + look-ahead, issue #884).
+SUGGESTED_NEXT_MAX = 5
 
 # Label vocabularies (GitHub labels are the source of truth for ticket state).
 _DONE_LABELS = {"done", "uat"}
@@ -46,6 +55,32 @@ _REWORK_LABELS = {"rework", "returned-from-qa", "returned", "blocked"}
 _FAILED_LABELS = {"failed", "sit-failed"}
 _NEEDS_YOU_LABELS = {"uat"}
 _SHIPPED_STATES = {"completed"}
+
+# Planner state (issue #864).
+# A sprint is "waiting on you" — pending human sign-off — while it sits in the
+# ``ready_to_merge`` lifecycle state: finished, awaiting the human merge action.
+_SIGNOFF_STATES = {"ready_to_merge"}
+# Terminal lifecycle states a "ran overnight" sprint can land in, mapped to a
+# human-facing outcome. (``partial_finished`` is derived at read time and never
+# stored, so it is unreachable from the sprints table today — kept for forward
+# compatibility.) Keyed by the *canonical* lifecycle value.
+_OVERNIGHT_OUTCOMES = {
+    "completed": "success",
+    "ready_to_merge": "success",
+    "partial_finished": "partial",
+    "needs_rework": "failure",
+    "failed": "failure",
+    "cancelled": "failure",
+}
+
+
+def _size_to_minutes() -> dict[str, int]:
+    """Canonical size→minutes map (issue #766); best-effort with a safe default."""
+    try:
+        from sizing import SIZE_TO_MINUTES  # noqa: PLC0415
+        return SIZE_TO_MINUTES
+    except Exception:
+        return {"S": 5, "M": 15, "L": 30, "XL": 90}
 
 
 def _db():
@@ -415,6 +450,118 @@ def _build_recent_activity(db, project_key: str, start: str, end: str) -> list[d
     return out
 
 
+# ── planner-state section builders (issue #864) ───────────────────────────────
+
+def _ticket_size_minutes(issue: dict) -> int:
+    """Minutes for a ticket, read from its ``size-*`` label (canonical map)."""
+    sizes = _size_to_minutes()
+    for name in _label_names(issue):
+        if name.startswith("size-"):
+            letter = name.split("-", 1)[1].upper()
+            if letter in sizes:
+                return sizes[letter]
+    return 0
+
+
+def _build_waiting_on_you(db, project_key: str, slug: str) -> list[dict]:
+    """Sprints awaiting human sign-off (``ready_to_merge``), with size totals.
+
+    Each entry carries the sprint's ticket count and an estimated-hours figure
+    summed from the per-ticket ``size-*`` labels (issue #864 AC2).
+    """
+    out: list[dict] = []
+    for row in _sprints_in_state(db, _SIGNOFF_STATES, project_key, slug):
+        label = row.get("label")
+        nums = db.get_sprint_ticket_order(label)
+        minutes = 0
+        for num in nums:
+            issue = db.get_mirrored_issue(project_key, num)
+            if issue:
+                minutes += _ticket_size_minutes(issue)
+        out.append({
+            "label": label,
+            "ticket_count": len(nums),
+            "estimated_hours": round(minutes / 60, 2),
+        })
+    out.sort(key=lambda s: s["label"] or "")
+    return out
+
+
+def _build_ran_overnight(db, project_key: str, slug: str,
+                         start: str, end: str) -> list[dict]:
+    """Sprints that finished within the brief window — "ran overnight" (AC1).
+
+    Outcome is derived from the canonical lifecycle state; each entry links to
+    its sprint brief via the summary issue and/or the on-disk brief path (AC7).
+    """
+    match = _project_match_values(project_key, slug)
+    out: list[dict] = []
+    for row in db.list_sprints_lifecycle():
+        if (row.get("project") or "") not in match:
+            continue
+        ended = row.get("ended_at") or ""
+        if not (start <= ended <= end):
+            continue
+        outcome = _OVERNIGHT_OUTCOMES.get(db.canonical_lifecycle(row.get("state")))
+        if outcome is None:
+            continue
+        label = row.get("label")
+        meta = _sprint_finish_meta(db, project_key, label)
+        out.append({
+            "label": label,
+            "outcome": outcome,
+            "summary_issue_number": meta["summary_issue_number"],
+            # brief_generator (#860) writes docs/sprint-briefs/<label>.md, where
+            # the label already carries the "sprint-" prefix.
+            "brief_path": f"docs/sprint-briefs/{label}.md" if label else None,
+        })
+    out.sort(key=lambda s: s["label"] or "")
+    return out
+
+
+# ── advisor suggestions section (issue #884) ─────────────────────────────────
+
+def _build_suggested_next(db, project_key: str, slug: str) -> list[dict]:
+    """Read advisor suggestions and first look-ahead entry for the brief.
+
+    Returns at most SUGGESTED_NEXT_MAX items total: suggestions first, then
+    the first look-ahead entry as the final item. Returns [] when both sources
+    are empty so the "Suggested Next" section is omitted from the rendered brief.
+    Gracefully returns [] if the advisor tables are absent (before issues #881/#883
+    are merged).
+    """
+    try:
+        with db.get_conn() as conn:
+            sug_rows = conn.execute(
+                "SELECT pitch FROM advisor_suggestions "
+                "WHERE project = ? ORDER BY id ASC",
+                (project_key,),
+            ).fetchall()
+    except Exception:
+        sug_rows = []
+
+    try:
+        with db.get_conn() as conn:
+            la_rows = conn.execute(
+                "SELECT entry FROM advisor_look_ahead "
+                "WHERE project = ? ORDER BY position ASC LIMIT 1",
+                (project_key,),
+            ).fetchall()
+    except Exception:
+        la_rows = []
+
+    look_ahead_entry: Optional[str] = la_rows[0]["entry"] if la_rows else None
+    max_sugs = (SUGGESTED_NEXT_MAX - 1) if look_ahead_entry else SUGGESTED_NEXT_MAX
+    pitches = [r["pitch"] for r in sug_rows][:max_sugs]
+
+    items: list[dict] = [
+        {"text": p, "type": "suggestion", "slug": slug} for p in pitches
+    ]
+    if look_ahead_entry:
+        items.append({"text": look_ahead_entry, "type": "look_ahead", "slug": slug})
+    return items
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def build_project_brief(slug: str, date: Optional[str] = None,
@@ -438,6 +585,9 @@ def build_project_brief(slug: str, date: Optional[str] = None,
     up_next = _build_up_next(db, project_key, slug)
     blocked = _build_blocked(db, project_key)
     recent_activity = _build_recent_activity(db, project_key, start, end)
+    ran_overnight = _build_ran_overnight(db, project_key, slug, start, end)
+    waiting_on_you = _build_waiting_on_you(db, project_key, slug)
+    suggested_next = _build_suggested_next(db, project_key, slug)
 
     kpis = {
         "sprints_shipped": len(shipped),
@@ -456,6 +606,9 @@ def build_project_brief(slug: str, date: Optional[str] = None,
         "blocked": blocked,
         "kpis": kpis,
         "recent_activity": recent_activity,
+        "ran_overnight": ran_overnight,
+        "waiting_on_you": waiting_on_you,
+        "suggested_next": suggested_next,
     }
 
 
@@ -509,6 +662,9 @@ def build_home_brief(date: Optional[str] = None,
 
     projects: list[dict] = []
     decisions: list[dict] = []
+    ran_overnight: list[dict] = []
+    waiting_on_you: list[dict] = []
+    suggested_next_all: list[dict] = []
     try:
         project_list = _load_projects()
     except Exception:
@@ -520,12 +676,24 @@ def build_home_brief(date: Optional[str] = None,
         brief = build_project_brief(slug, date=d, window=window)
         projects.append(brief)
         decisions.extend(_decisions_for_project(slug, brief))
+        # Tag each planner-state entry with its project so the home roll-up
+        # stays navigable (issue #864). The lists are the SAME builder output
+        # the per-project brief carries, so any flow (morning/evening) sees one
+        # source of truth (AC8).
+        ran_overnight.extend({**e, "project": slug} for e in brief.get("ran_overnight", []))
+        waiting_on_you.extend({**w, "project": slug} for w in brief.get("waiting_on_you", []))
+        suggested_next_all.extend(brief.get("suggested_next", []))
+
+    # Cap the home roll-up at SUGGESTED_NEXT_MAX (issue #884 AC2).
+    suggested_next = suggested_next_all[:SUGGESTED_NEXT_MAX]
 
     global_kpis = {
         "sprints_shipped": sum(b["kpis"]["sprints_shipped"] for b in projects),
         "tickets_done": sum(b["kpis"]["tickets_done"] for b in projects),
         "in_progress": sum(1 for b in projects if b["kpis"]["in_progress"]),
         "needs_your_call": sum(b["kpis"]["needs_you"] for b in projects),
+        # Drives the nav-pill sign-off indicator (AC5/AC6): >0 → indicator shown.
+        "awaiting_signoff": len(waiting_on_you),
     }
 
     return {
@@ -533,4 +701,7 @@ def build_home_brief(date: Optional[str] = None,
         "global_kpis": global_kpis,
         "decisions": decisions,
         "projects": projects,
+        "ran_overnight": ran_overnight,
+        "waiting_on_you": waiting_on_you,
+        "suggested_next": suggested_next,
     }

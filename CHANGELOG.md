@@ -1,5 +1,9 @@
 # Changelog
 
+## Sprint 75
+
+- [#876](https://github.com/zealchaiwut/commander/issues/876) Format recent-activity timestamp to short local `HH:MM` time on home brief — 2026-06-15
+
 ## Sprint 74.2
 
 DB-only sprint lifecycle: a single guarded write path and a single read accessor, eliminating plan.json / label / PID drift.

@@ -9,17 +9,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.sprint_manager.sprint_manager import (
+    _fail_loud_shipped_reconciliation,
     _git_target_ref,
     _git_verified_shipped_issues,
     _is_issue_merged_into_target,
+    _prune_stale_local_feature_branch,
     _reporting_not_shipped_issues,
+    _shipped_reconciliation_mismatch,
 )
 
 
@@ -247,3 +250,212 @@ class TestReportingHelpers:
 
         assert shipped == []
         assert not_shipped == []
+
+
+# ---------------------------------------------------------------------------
+# _shipped_reconciliation_mismatch / _fail_loud_shipped_reconciliation
+# ---------------------------------------------------------------------------
+
+class TestShippedReconciliation:
+    """Tests for P0 fail-loud reconciliation helpers."""
+
+    def test_mismatch_returns_done_unverified_numbers(self):
+        """_shipped_reconciliation_mismatch returns issue nums done but not verified."""
+        state = _state(
+            _issue(10, "done"),
+            _issue(11, "done"),
+            _issue(12, "skipped"),
+        )
+
+        def _mock_merged(issue_num, target, feature_branch=None):
+            return issue_num == 10
+
+        with patch(
+            "services.sprint_manager.sprint_manager._is_issue_merged_into_target",
+            side_effect=_mock_merged,
+        ):
+            result = _shipped_reconciliation_mismatch(state, "develop")
+
+        assert result == [11], "Only issue 11 is done-but-unverified"
+
+    def test_mismatch_empty_when_all_verified(self):
+        """No mismatch when all done issues are git-verified."""
+        state = _state(_issue(1, "done"), _issue(2, "done"))
+
+        with patch(
+            "services.sprint_manager.sprint_manager._is_issue_merged_into_target",
+            return_value=True,
+        ):
+            result = _shipped_reconciliation_mismatch(state, "develop")
+
+        assert result == []
+
+    def test_fail_loud_logs_error_and_returns_mismatch(self, capsys):
+        """_fail_loud_shipped_reconciliation logs error and prints [ERROR] when mismatch."""
+        state = _state(_issue(20, "done"), _issue(21, "done"))
+
+        def _mock_merged(issue_num, target, feature_branch=None):
+            return issue_num == 20
+
+        mock_log = MagicMock()
+        with patch(
+            "services.sprint_manager.sprint_manager._is_issue_merged_into_target",
+            side_effect=_mock_merged,
+        ), patch(
+            "services.sprint_manager.sprint_manager.structured_log",
+            mock_log,
+        ):
+            result = _fail_loud_shipped_reconciliation(state, "develop", "Sprint summary")
+
+        assert result == [21]
+        mock_log.error.assert_called_once()
+        call_args = mock_log.error.call_args
+        assert call_args[0][0] == "shipped_reconciliation_failed"
+        captured = capsys.readouterr()
+        assert "[ERROR]" in captured.out
+        assert "#21" in captured.out
+
+    def test_fail_loud_silent_when_all_clear(self, capsys):
+        """_fail_loud_shipped_reconciliation returns [] and logs nothing when clean."""
+        state = _state(_issue(30, "done"))
+
+        mock_log = MagicMock()
+        with patch(
+            "services.sprint_manager.sprint_manager._is_issue_merged_into_target",
+            return_value=True,
+        ), patch(
+            "services.sprint_manager.sprint_manager.structured_log",
+            mock_log,
+        ):
+            result = _fail_loud_shipped_reconciliation(state, "develop", "Sprint PR")
+
+        assert result == []
+        mock_log.error.assert_not_called()
+        captured = capsys.readouterr()
+        assert "[ERROR]" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# _prune_stale_local_feature_branch
+# ---------------------------------------------------------------------------
+
+class TestPruneStaleLocalFeatureBranch:
+    """Tests for the E2 stale-branch pruner."""
+
+    def _make_try_for_prune(
+        self,
+        *,
+        local_branch: str = "feature/42-fix-foo",
+        origin_branch: str = "  origin/feature/42-fix-foo\n",
+        local_sha: str = "aaa111",
+        origin_sha: str = "bbb222",
+        is_merged: bool = False,
+        unmerged_count: int = 0,
+        delete_ok: bool = True,
+    ):
+        """Build a _try mock for prune scenarios."""
+        calls = []
+
+        def _try_stub(*args, **kwargs):
+            cmd = list(args)
+            cmd_str = " ".join(str(a) for a in cmd)
+            calls.append(cmd_str)
+
+            # git fetch origin — treat as run (not _try), but in case
+            if "fetch" in cmd:
+                return (True, "", "")
+
+            # git branch --list feature/42-*  (local lookup)
+            if "branch" in cmd and "--list" in cmd and "-r" not in cmd:
+                if "feature/42" in cmd_str:
+                    return (True, f"  {local_branch}\n", "")
+                return (True, "", "")
+
+            # git rev-parse --verify (dispatch on origin vs local)
+            if "rev-parse" in cmd and "--verify" in cmd:
+                if "origin/feature" in cmd_str:
+                    if origin_branch.strip():
+                        return (True, f"{origin_sha}\n", "")
+                    return (False, "", "not found")
+                if local_branch in cmd_str:
+                    return (True, f"{local_sha}\n", "")
+                return (True, "sha\n", "")
+
+            # git branch -r --list origin/feature/42-*
+            if "branch" in cmd and "-r" in cmd and "--list" in cmd:
+                return (True, origin_branch, "")
+
+            # git branch -D (delete)
+            if "branch" in cmd and "-D" in cmd:
+                return (delete_ok, "", "")
+
+            # rev-list --count (ancestor check)
+            if "rev-list" in cmd and "--count" in cmd:
+                return (True, f"{unmerged_count}\n", "")
+
+            return (True, "", "")
+
+        return _try_stub, calls
+
+    def test_deletes_local_branch_when_sha_diverges_from_origin(self):
+        """Local branch with different SHA from origin → deleted."""
+        _try_stub, calls = self._make_try_for_prune(
+            local_sha="aaa111",
+            origin_sha="bbb222",  # different — stale local
+        )
+
+        with patch("services.sprint_manager.sprint_manager._try", side_effect=_try_stub), \
+             patch("services.sprint_manager.sprint_manager._run", return_value=(0, "", "")):
+            _prune_stale_local_feature_branch(42, "develop")
+
+        # The delete was attempted (branch -D)
+        delete_calls = [c for c in calls if "-D" in c]
+        assert delete_calls, "Expected a branch -D call when SHAs diverge"
+
+    def test_no_prune_when_local_matches_origin(self):
+        """Local branch with same SHA as origin → not deleted."""
+        _try_stub, calls = self._make_try_for_prune(
+            local_sha="same111",
+            origin_sha="same111",  # identical — not stale
+        )
+
+        with patch("services.sprint_manager.sprint_manager._try", side_effect=_try_stub), \
+             patch("services.sprint_manager.sprint_manager._run", return_value=(0, "", "")):
+            _prune_stale_local_feature_branch(42, "develop")
+
+        delete_calls = [c for c in calls if "-D" in c]
+        assert not delete_calls, "Should not delete branch when SHA matches origin"
+
+    def test_no_local_branch_is_noop(self):
+        """When no local feature branch exists, prune does nothing."""
+        def _try_stub(*args, **kwargs):
+            cmd = list(args)
+            if "branch" in cmd and "--list" in cmd and "-r" not in cmd:
+                return (True, "", "")  # no local branch
+            return (True, "", "")
+
+        with patch("services.sprint_manager.sprint_manager._try", side_effect=_try_stub), \
+             patch("services.sprint_manager.sprint_manager._run", return_value=(0, "", "")):
+            _prune_stale_local_feature_branch(42, "develop")
+
+        # If no exception was raised, test passes — nothing to assert
+        assert True
+
+    def test_deletes_stale_ancestor_local_when_no_origin(self):
+        """Local branch with 0 unique commits, no origin, not git-verified → deleted."""
+        _try_stub, calls = self._make_try_for_prune(
+            origin_branch="",  # no origin branch
+            unmerged_count=0,  # ancestor of target
+            is_merged=False,
+        )
+
+        with patch("services.sprint_manager.sprint_manager._try", side_effect=_try_stub), \
+             patch("services.sprint_manager.sprint_manager._run", return_value=(0, "", "")), \
+             patch(
+                 "services.sprint_manager.sprint_manager._is_issue_merged_into_target",
+                 return_value=False,
+             ):
+            _prune_stale_local_feature_branch(42, "develop")
+
+        delete_calls = [c for c in calls if "-D" in c]
+        assert delete_calls, "Expected branch -D when no origin and ancestor"

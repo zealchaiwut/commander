@@ -2444,6 +2444,128 @@ def _log_shipped_status_git_mismatch(
             )
 
 
+def _shipped_reconciliation_mismatch(
+    state: "SprintState",
+    merge_target: str,
+) -> list[int]:
+    """Return issue numbers that are status==done but not git-verified on merge_target."""
+    return [
+        i.number
+        for i in state.issues
+        if i.status == "done" and not _is_issue_merged_into_target(i.number, merge_target)
+    ]
+
+
+def _fail_loud_shipped_reconciliation(
+    state: "SprintState",
+    merge_target: str,
+    context: str,
+) -> list[int]:
+    """Check for done-but-unverified tickets and fail loud if any are found.
+
+    Logs a structured error and prints a prominent [ERROR] line.
+    Returns the list of mismatched issue numbers (empty = all clear).
+    """
+    mismatch = _shipped_reconciliation_mismatch(state, merge_target)
+    if mismatch:
+        nums_str = ", ".join(f"#{n}" for n in mismatch)
+        structured_log.error(
+            "shipped_reconciliation_failed",
+            f"{context}: {len(mismatch)} ticket(s) marked done but not git-verified on {merge_target}",
+            issue_nums=mismatch,
+            merge_target=merge_target,
+            context=context,
+        )
+        sys.stdout.write(
+            f"  [ERROR] {context}: {len(mismatch)} ticket(s) marked done but not "
+            f"git-verified on {merge_target}: {nums_str}\n"
+        )
+    return mismatch
+
+
+def _prune_stale_local_feature_branch(
+    issue_num: int,
+    merge_target: str,
+    cwd: Optional[Path] = None,
+) -> None:
+    """Delete a stale local feature branch so E2 merge-check reads fresh state.
+
+    A local branch is considered stale and is deleted when either:
+    - origin/feature exists with a different SHA (local is divergent / outdated), OR
+    - local branch exists, no origin/feature exists, the issue is NOT git-verified
+      merged, and the local tip has 0 commits outside merge_target (stale ancestor).
+
+    Runs fetch origin first so the origin/ refs are current.
+    """
+    effective_cwd = cwd or REPO_ROOT
+
+    # fetch to refresh origin refs
+    _run("git", "fetch", "origin", cwd=effective_cwd, check=False)
+
+    # find local feature branch pattern feature/<num>-*
+    ok_local, local_out, _ = _try(
+        "git", "branch", "--list", f"feature/{issue_num}-*",
+        cwd=effective_cwd,
+    )
+    if not ok_local or not local_out.strip():
+        return  # no local branch, nothing to prune
+
+    local_branch = local_out.strip().lstrip("* ").split()[0]
+
+    # get local tip SHA
+    ok_local_sha, local_sha, _ = _try(
+        "git", "rev-parse", "--verify", local_branch,
+        cwd=effective_cwd,
+    )
+    if not ok_local_sha:
+        return
+
+    local_sha = local_sha.strip()
+
+    # check origin/feature
+    ok_origin, origin_out, _ = _try(
+        "git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*",
+        cwd=effective_cwd,
+    )
+    origin_branch_exists = ok_origin and bool(origin_out.strip())
+
+    if origin_branch_exists:
+        origin_ref = origin_out.strip().split()[0]
+        ok_origin_sha, origin_sha, _ = _try(
+            "git", "rev-parse", "--verify", origin_ref,
+            cwd=effective_cwd,
+        )
+        if ok_origin_sha and origin_sha.strip() != local_sha:
+            # local is divergent from origin — delete it
+            ok_del, _, _ = _try("git", "branch", "-D", local_branch, cwd=effective_cwd)
+            if ok_del:
+                sys.stdout.write(
+                    f"  [prune] deleted stale local branch {local_branch} "
+                    f"(diverged from origin)\n"
+                )
+        return
+
+    # No origin branch — check if local is a stale ancestor
+    if not _is_issue_merged_into_target(issue_num, merge_target):
+        # not git-verified merged — check if local tip has 0 unique commits
+        ok_count, count_out, _ = _try(
+            "git", "rev-list", "--count", local_sha, f"^{merge_target}",
+            cwd=effective_cwd,
+        )
+        if ok_count:
+            try:
+                count = int(count_out.strip())
+            except ValueError:
+                count = 1
+            if count == 0:
+                ok_del, _, _ = _try("git", "branch", "-D", local_branch, cwd=effective_cwd)
+                if ok_del:
+                    sys.stdout.write(
+                        f"  [prune] deleted stale local branch {local_branch} "
+                        f"(ancestor of {merge_target}, no origin, not verified merged)\n"
+                    )
+
+
 # ── quality gates ─────────────────────────────────────────────────────────────
 
 _GATE_FAILURE_CLASS_MAP: dict[str, str] = {
@@ -2795,6 +2917,9 @@ def _gate_lint(
     return GateResult(gate="lint", passed=True, output=combined)
 
 
+_MERGE_PREVIEW_TMP_BRANCH = "_cmdr_merge_preview_tmp"
+
+
 def _gate_merge_preview(
     issue_num: int,
     feature_branch: str,
@@ -2803,24 +2928,38 @@ def _gate_merge_preview(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
 ) -> GateResult:
-    """Gate 3 -- simulate merge in worktester root without committing."""
+    """Gate 3 -- simulate merge in worktester root without committing.
+
+    Rebase path (when origin/feature exists):
+    1. fetch origin
+    2. checkout/track origin/target_branch locally
+    3. create temp branch _cmdr_merge_preview_tmp at origin/feature tip
+    4. rebase temp branch onto origin/target_branch
+    5. if rebase fails → gate fail (like merge conflict)
+    6. if rebase ok → merge --no-commit --no-ff temp into target
+    7. finally: merge --abort, delete temp branch, leave clean
+
+    Fallback (no origin/feature): merge origin/feature ref directly.
+    """
     if skip:
         sys.stdout.write(str("  [gate:merge-preview] skipped") + "\n")
         return GateResult(gate="merge-preview", passed=True, skipped=True)
 
     _post_agent_event("gate:merge-preview")
-    sys.stdout.write(str(f"  [gate:merge-preview] simulating merge of {feature_branch} into {target_branch} ...") + "\n")
+    sys.stdout.write(str(
+        f"  [gate:merge-preview] simulating merge of {feature_branch} into {target_branch} ..."
+    ) + "\n")
 
     merge_ok = False
     combined = ""
 
     try:
-        # Fetch + update target branch
+        # Step 1: fetch
         _run("git", "fetch", "origin", cwd=worktester_root, check=False)
 
-        # Ensure target branch exists locally
+        # Step 2: ensure target branch exists locally and is up-to-date
         ok, _, _ = _try("git", "show-ref", "--verify", "--quiet",
-                         f"refs/heads/{target_branch}", cwd=worktester_root)
+                        f"refs/heads/{target_branch}", cwd=worktester_root)
         if ok:
             _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
             _run("git", "pull", "origin", target_branch, cwd=worktester_root, check=False)
@@ -2828,22 +2967,78 @@ def _gate_merge_preview(
             _run("git", "checkout", "--track", f"origin/{target_branch}",
                  cwd=worktester_root, check=False)
 
-        # Attempt dry-run merge using the remote tracking ref so the branch
-        # resolves even when it was never checked out locally in this worktree.
-        rc, stdout, stderr = _run_timed(
-            "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
+        # Step 3: check whether origin/feature exists
+        origin_feature_ok, _, _ = _try(
+            "git", "rev-parse", "--verify", f"origin/{feature_branch}",
             cwd=worktester_root,
         )
-        combined = stdout + stderr
-        merge_ok = (rc == 0)
+
+        if origin_feature_ok:
+            # Clean up any leftover tmp branch from a prior aborted run
+            _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+
+            # Create temp branch at origin/feature tip
+            _run(
+                "git", "checkout", "-b", _MERGE_PREVIEW_TMP_BRANCH,
+                f"origin/{feature_branch}",
+                cwd=worktester_root, check=False,
+            )
+
+            # Step 4: rebase temp onto origin/target
+            rebase_rc, rebase_out, rebase_err = _run_timed(
+                "git", "rebase", f"origin/{target_branch}",
+                cwd=worktester_root,
+            )
+            combined += rebase_out + rebase_err
+
+            if rebase_rc != 0:
+                sys.stdout.write(str(
+                    f"  [gate:merge-preview] FAIL -- rebase onto {target_branch} failed"
+                ) + "\n")
+                structured_log.error(
+                    "gate_failed",
+                    f"[gate:merge-preview] FAIL: rebase onto {target_branch} failed",
+                    gate="merge-preview", issue_num=issue_num, target_branch=target_branch,
+                )
+                # Abort rebase so the worktree is clean
+                _run("git", "rebase", "--abort", cwd=worktester_root, check=False)
+                _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+                _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+                _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)
+                return GateResult(gate="merge-preview", passed=False, output=combined)
+
+            # Step 5: return to target and do dry-run merge of rebased temp
+            _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+            rc, stdout, stderr = _run_timed(
+                "git", "merge", "--no-commit", "--no-ff", _MERGE_PREVIEW_TMP_BRANCH,
+                cwd=worktester_root,
+            )
+            combined += stdout + stderr
+            merge_ok = (rc == 0)
+        else:
+            # Fallback: merge remote tracking ref directly (original behaviour)
+            rc, stdout, stderr = _run_timed(
+                "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
+                cwd=worktester_root,
+            )
+            combined = stdout + stderr
+            merge_ok = (rc == 0)
 
         if merge_ok:
             sys.stdout.write(str("  [gate:merge-preview] PASS -- no conflicts") + "\n")
         else:
-            structured_log.error("gate_failed", f"[gate:merge-preview] FAIL: conflicts detected merging into {target_branch}", gate="merge-preview", issue_num=issue_num, target_branch=target_branch)
+            structured_log.error(
+                "gate_failed",
+                f"[gate:merge-preview] FAIL: conflicts detected merging into {target_branch}",
+                gate="merge-preview", issue_num=issue_num, target_branch=target_branch,
+            )
     finally:
         # Always abort to leave working tree clean
         _run("git", "merge", "--abort", cwd=worktester_root, check=False)
+        # Ensure we're back on target branch
+        _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+        # Delete tmp branch if it exists
+        _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
 
     if not merge_ok:
         _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)
@@ -6281,6 +6476,7 @@ def write_sprint_summary(
 
     if merge_target:
         _log_shipped_status_git_mismatch(state, merge_target)
+        _fail_loud_shipped_reconciliation(state, merge_target, "Sprint summary")
 
     content = generate_sprint_summary(
         state,
@@ -6370,8 +6566,10 @@ def _create_sprint_pr(
     r = _r(repo_name)
     n = sprint_number if sprint_number is not None else sprint_label
 
+    reconciliation_mismatch: list[int] = []
     if merge_target:
         _log_shipped_status_git_mismatch(state, merge_target)
+        reconciliation_mismatch = _fail_loud_shipped_reconciliation(state, merge_target, "Sprint PR")
         shipped  = _git_verified_shipped_issues(state, merge_target)
         not_shipped = _reporting_not_shipped_issues(state, merge_target)
     else:
@@ -6391,7 +6589,17 @@ def _create_sprint_pr(
         skipped_lines_parts.append(f"- #{i.number} {i.title} ({reason})")
     skipped_lines = "\n".join(skipped_lines_parts) or "None."
 
+    reconciliation_section = ""
+    if reconciliation_mismatch:
+        mismatch_refs = " ".join(f"#{n}" for n in reconciliation_mismatch)
+        reconciliation_section = (
+            f"### Reconciliation failed\n\n"
+            f"{len(reconciliation_mismatch)} ticket(s) marked done in state but not "
+            f"git-verified on {merge_target}: {mismatch_refs}\n\n"
+        )
+
     body = (
+        f"{reconciliation_section}"
         f"## Sprint {n} — auto-generated PR\n\n"
         f"This PR promotes `{sprint_branch}` into `{pr_base}` after all sprint issues "
         f"have been processed.\n\n"
@@ -8710,6 +8918,10 @@ def run_sprint(
         # got re-run into a divergent-branch crash. Trust git, not the label, and
         # re-apply UAT so the board reflects reality.
         if issue_state.status not in ("done", "skipped"):
+            # Prune stale local feature branch before E2 merge-check so we read
+            # fresh state and don't misidentify an ancestor as merged.
+            _e2_cwd = cfg.worktree_coder if cfg is not None else REPO_ROOT
+            _prune_stale_local_feature_branch(num, target_branch, cwd=_e2_cwd)
             # Use strict merge check to avoid false-positives from stale ancestor
             # branches that pass git branch --merged without ever being merged.
             _e2_merged = _is_issue_merged_into_target(num, target_branch)

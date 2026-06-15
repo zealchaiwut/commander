@@ -2866,8 +2866,8 @@
     .smgmt-sprint-card.smgmt-has-rework { border-color: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05); }
     .smgmt-sprint-card.smgmt-needs-rework .smgmt-sprint-header,
     .smgmt-sprint-card.smgmt-has-rework .smgmt-sprint-header { background: linear-gradient(180deg,var(--yellow-bg) 0%,transparent 100%); }
-    .smgmt-sprint-card.smgmt-partial-finished { border-color: color-mix(in srgb, #facc15 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, #facc15 18%, transparent), 0 1px 3px rgba(0,0,0,0.05); }
-    .smgmt-sprint-card.smgmt-partial-finished .smgmt-sprint-header { background: linear-gradient(180deg,color-mix(in srgb, #facc15 18%, transparent) 0%,transparent 100%); }
+    .smgmt-sprint-card.smgmt-partial-finished { border-color: color-mix(in srgb, var(--yellow) 55%, transparent); box-shadow: 0 0 0 3px var(--yellow-bg), 0 1px 3px rgba(0,0,0,0.05); }
+    .smgmt-sprint-card.smgmt-partial-finished .smgmt-sprint-header { background: linear-gradient(180deg,var(--yellow-bg) 0%,transparent 100%); }
     /* Legacy 2-state fallback (kept for any path still emitting smgmt-stopped) */
     .smgmt-sprint-card.smgmt-stopped { border-color: var(--amber); }
     .smgmt-sprint-card.smgmt-stopped .smgmt-sprint-header { background: linear-gradient(180deg,var(--amber-bg) 0%,transparent 100%); }
@@ -2892,7 +2892,7 @@
       border: 1px solid transparent;
     }
     .smgmt-state-badge.state-finished { background: var(--amber-bg);  color: var(--amber);    border-color: var(--amber);  }
-    .smgmt-state-badge.state-partial  { background: color-mix(in srgb, #facc15 18%, transparent);  color: #a16207;    border-color: color-mix(in srgb, #facc15 45%, transparent);  }
+    .smgmt-state-badge.state-partial  { background: var(--yellow-bg);  color: var(--yellow);    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);  }
     .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     /* NEXT UP badge */
@@ -2941,7 +2941,7 @@
     .slp-pending    { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     .slp-mark-text  { line-height: 1; }
     /* Expanded body */
-    .slp-ancestor-body { padding: 0 14px 10px; border-top: 1px solid var(--border); }
+    .slp-ancestor-body { padding: 0 var(--space-4) var(--space-2); border-top: 1px solid var(--border); }
     .slp-no-tickets { font-size: 12px; color: var(--text-sub); padding: 10px 0; }
     /* Per-ticket rows */
     .slp-ancestor-ticket-row {
@@ -3642,8 +3642,8 @@
       margin-bottom: 8px;
     }
     .smgmt-focus-step {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 13px; padding: 3px 0;
+      display: flex; align-items: center; gap: var(--space-2);
+      font-size: 13px; padding: var(--space-1) 0;
     }
     .smgmt-focus-num {
       width: 18px; height: 18px; border-radius: 50%;
@@ -3668,8 +3668,8 @@
       border-radius: 11px; overflow: hidden; margin-bottom: 12px;
     }
     .smgmt-draft-card .smgmt-card-head {
-      display: flex; align-items: center; gap: 10px;
-      padding: 13px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
     }
     .smgmt-draft-badge {
       font-family: var(--mono); font-size: 10px; font-weight: 700;
@@ -4584,7 +4584,7 @@
       overflow: hidden;
     }
     .sc-v5 .sc-header {
-      padding: 14px 18px 10px;
+      padding: var(--space-3) var(--space-4) var(--space-2);
       margin-bottom: 0;
       border-bottom: 1px solid var(--border);
     }
@@ -4699,9 +4699,9 @@
       min-height: 40px;
     }
     .sc-v5 .smgmt-ticket {
-      padding: 10px 18px;
+      padding: var(--space-2) var(--space-4);
       border-bottom: 1px solid var(--border);
-      gap: 10px;
+      gap: var(--space-2);
     }
     .sc-v5 .smgmt-ticket:last-child { border-bottom: none; }
     .sc-v5 .smgmt-ticket-title { flex: 1; min-width: 0; font-size: 13px; }
@@ -5109,17 +5109,17 @@
 
     /* ── Dual active-agent cards + per-level progress (issue #739) ── */
     .smgmt-active-agents {
-      display: flex; gap: 12px; flex-wrap: wrap;
-      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; gap: var(--space-3); flex-wrap: wrap;
+      padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
     }
     .smgmt-active-agent {
-      display: flex; align-items: center; gap: 8px; min-width: 0;
+      display: flex; align-items: center; gap: var(--space-2); min-width: 0;
       flex: 1 1 220px;
-      padding: 8px 12px; border-radius: 8px;
+      padding: var(--space-2) var(--space-3); border-radius: 8px;
       border: 1px solid var(--border); background: var(--surface-2);
     }
-    .smgmt-active-agent--coder  { border-left: 3px solid var(--purple); }
-    .smgmt-active-agent--tester { border-left: 3px solid var(--amber); }
+    .smgmt-active-agent--coder  { border-top: 2px solid var(--purple); background: var(--purple-bg); }
+    .smgmt-active-agent--tester { border-top: 2px solid var(--amber);  background: var(--amber-bg);  }
     .smgmt-active-spinner {
       display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
       border: 2px solid var(--border); border-top-color: var(--blue);
@@ -5141,8 +5141,8 @@
     }
 
     .smgmt-levels {
-      display: flex; flex-direction: column; gap: 4px;
-      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: var(--space-1);
+      padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border);
     }
     .smgmt-level-row {
       display: flex; align-items: center; gap: 8px;
@@ -5329,10 +5329,9 @@
       flex-shrink: 0;
       display: inline-flex; align-items: center; justify-content: center;
       width: 16px; height: 16px;
-      color: #d97706; font-size: 13px; cursor: default;
+      color: var(--amber); font-size: 13px; cursor: default;
     }
     .smgmt-risk-flag-icon:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 2px; }
-    [data-theme="dark"] .smgmt-risk-flag-icon { color: #fbbf24; }
     .smgmt-conflict-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
@@ -5347,18 +5346,16 @@
     .smgmt-dep-order-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
-      background: rgba(99,102,241,.1); color: #6366f1;
-      border: 1px solid rgba(99,102,241,.28);
+      background: var(--indigo-bg); color: var(--indigo);
+      border: 1px solid color-mix(in srgb, var(--indigo) 28%, transparent);
       cursor: pointer; white-space: nowrap;
     }
     .smgmt-dep-order-badge:hover { filter: brightness(1.05); }
     .smgmt-dep-order-badge:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 3px; }
     .smgmt-dep-order-badge.is-cycle {
-      background: rgba(202,138,4,.1); color: #b45309;
-      border-color: rgba(202,138,4,.28);
+      background: var(--amber-bg); color: var(--amber);
+      border-color: color-mix(in srgb, var(--amber) 28%, transparent);
     }
-    [data-theme="dark"] .smgmt-dep-order-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
-    [data-theme="dark"] .smgmt-dep-order-badge.is-cycle { background: rgba(234,179,8,.12); color: #fcd34d; }
     /* ── Execution-preview mini-rail (issue #809) ───────────────────────────── */
     .mini-rail {
       margin: 8px 12px 4px;
@@ -5420,11 +5417,10 @@
     .smgmt-sched-dep-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 3px;
-      background: rgba(99,102,241,.08); color: #6366f1;
-      border: 1px solid rgba(99,102,241,.22);
+      background: var(--indigo-bg); color: var(--indigo);
+      border: 1px solid color-mix(in srgb, var(--indigo) 22%, transparent);
       white-space: nowrap;
     }
-    [data-theme="dark"] .smgmt-sched-dep-badge { background: rgba(99,102,241,.15); color: #a5b4fc; }
     /* ── Expandable ticket details panel (issue #614) ── */
     .t-details-btn {
       font-size: 11px; font-weight: 500; color: var(--text-sub);

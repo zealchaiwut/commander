@@ -20,9 +20,12 @@ mounted on the ``/api/logs`` (log_search) router.
 from __future__ import annotations
 
 import json
+import logging
 import sys as _sys
 from pathlib import Path
 from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
 
 # apps/dashboard is on sys.path so ``import db`` resolves (mirrors the other
 # router service modules and the server bootstrap).
@@ -43,7 +46,30 @@ _DERIVED_CLASS = {
     ("tester", "failed"): "TESTER_REJECTED",
 }
 
-_PROJECTS_BASE = Path.home() / "dev"
+def _get_projects_base() -> Path:
+    """Return the projects base directory from COMMANDER_BASE env var or ~/dev fallback.
+
+    Logs the resolved path at DEBUG level so operators can confirm which root
+    was picked (AC4). If COMMANDER_BASE is set but points to a non-existent
+    path, emits a WARNING and falls back to ~/dev (AC5).
+    """
+    import os  # noqa: PLC0415
+    default = Path.home() / "dev"
+    env_val = os.environ.get("COMMANDER_BASE")
+    if env_val:
+        candidate = Path(env_val)
+        if not candidate.exists():
+            _log.warning(
+                "COMMANDER_BASE=%s does not exist; falling back to %s",
+                candidate,
+                default,
+            )
+            _log.debug("projects_base resolved: %s (fallback)", default)
+            return default
+        _log.debug("projects_base resolved: %s (from COMMANDER_BASE)", candidate)
+        return candidate
+    _log.debug("projects_base resolved: %s (default)", default)
+    return default
 
 
 def _db():
@@ -71,7 +97,7 @@ def _runtime_dirs_for_project(project: Optional[str]) -> list[Path]:
     if not project:
         return []
     slug = project.split("/")[-1] if "/" in project else project
-    root = _PROJECTS_BASE / slug
+    root = _get_projects_base() / slug
     candidates = [
         root / ".commander" / "runtime",
         root / "coder" / ".commander" / "runtime",

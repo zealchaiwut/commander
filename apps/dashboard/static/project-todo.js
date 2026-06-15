@@ -70,7 +70,7 @@
     '.todo-foot{margin-top:6px;border-top:1px dashed var(--border);padding-top:8px;flex-shrink:0}',
     '.todo-hint{font-size:10.5px;color:var(--text-sub);display:flex;align-items:center;gap:5px;font-family:var(--mono)}',
     '.todo-more{font-size:11px;color:var(--text-sub);padding:6px 8px;font-family:var(--mono)}',
-    '.todo-dock{position:fixed;right:20px;bottom:20px;width:320px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);z-index:60;display:flex;flex-direction:column;overflow:hidden}',
+    '.todo-dock{position:fixed;left:20px;bottom:20px;width:320px;max-width:calc(100vw - 40px);background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);z-index:60;display:flex;flex-direction:column;overflow:hidden}',
     '.todo-dock.collapsed .todo-dock-body{display:none}',
     '.todo-dock-bar{display:flex;align-items:center;gap:8px;padding:10px 13px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border)}',
     '.todo-dock.collapsed .todo-dock-bar{border-bottom:none}',
@@ -79,7 +79,7 @@
     '.todo-dock-bar .ti-chevron-down{margin-left:4px;transition:transform .15s;flex-shrink:0}',
     '.todo-dock.collapsed .todo-dock-bar .ti-chevron-down{transform:rotate(180deg)}',
     '.todo-dock-body{max-height:min(60vh,520px);overflow:auto}',
-    '@media(max-width:560px){.todo-dock{right:12px;left:12px;width:auto}}',
+    '@media(max-width:560px){.todo-dock{left:12px;right:auto;width:auto;max-width:calc(100vw - 24px)}}',
     '.todo-fs{position:fixed;inset:0;z-index:400;background:var(--bg);display:flex;flex-direction:column}',
     '.todo-fs.hidden{display:none!important}',
     '.todo-fs-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}',
@@ -162,10 +162,21 @@
     return _states[project];
   }
 
-  function fetchList(project) {
+  function fetchList(project, attempt) {
+    attempt = attempt || 0;
     return fetch(apiBase(project))
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .catch(function () { return []; });
+      .then(function (r) {
+        if (!r.ok) throw new Error('todo fetch ' + r.status);
+        return r.json();
+      })
+      .catch(function () {
+        if (attempt < 1) {
+          return new Promise(function (resolve) {
+            setTimeout(function () { resolve(fetchList(project, 1)); }, 800);
+          });
+        }
+        return null;
+      });
   }
 
   function apiCreate(project, text) {
@@ -515,7 +526,7 @@
     if (dock) dock.classList.add('collapsed');
 
     fetchList(project).then(function (items) {
-      st.items = items || [];
+      if (items !== null) st.items = items;
       renderAll(project);
       var input = panel.querySelector('.todo-input');
       if (input) input.focus();
@@ -537,7 +548,7 @@
 
   function refresh(project) {
     return fetchList(project).then(function (items) {
-      getState(project).items = items || [];
+      if (items !== null) getState(project).items = items;
       renderAll(project);
     });
   }
@@ -689,7 +700,7 @@
     if (st.panels.indexOf(container) < 0) st.panels.push(container);
 
     fetchList(project).then(function (items) {
-      st.items = items || [];
+      if (items !== null) st.items = items;
       renderAll(project);
     });
   }

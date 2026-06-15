@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -374,3 +375,26 @@ def test_ac10_no_side_stripe_in_metric_card():
     rule = _css_rule(".metric")
     assert "border-left" not in rule and "border-right" not in rule, \
         "metric cards must not use side-stripe borders (impeccable ban)"
+
+
+# ───────────── Per-ticket elapsed sums all agent_runs attempts ───────────────
+
+def test_issue_elapsed_secs_sums_all_agent_runs_attempts():
+    """Fix-round retries must accumulate, not show only the latest coder window."""
+    import live_metrics as lm
+
+    now = datetime.now(timezone.utc)
+    by_issue = {
+        802: [
+            {"duration_seconds": 600, "finished_at": "2026-06-11T00:10:00", "started_at": "2026-06-11T00:00:00"},
+            {"duration_seconds": 120, "finished_at": "2026-06-11T00:12:00", "started_at": "2026-06-11T00:10:00"},
+            {"duration_seconds": 218, "finished_at": "2026-06-11T00:15:38", "started_at": "2026-06-11T00:12:00"},
+        ],
+    }
+    iss = {
+        "number": 802,
+        # Fix round reset coder_started_at — timestamp-only math would under-count.
+        "coder_started_at": "2026-06-11T00:12:00Z",
+        "tester_finished_at": None,
+    }
+    assert lm.issue_elapsed_secs(iss, now, by_issue) == 938

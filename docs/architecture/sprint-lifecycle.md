@@ -193,6 +193,12 @@ approval gate. A confirmation modal lists exactly what will happen:
 - Action verbs by state: `draft`/`planned` → Run; `running` → Cancel;
   `needs_rework` → Re-run (child); `ready_to_merge` → Merge Sprint;
   `completed` → none.
+- **Post-run affordances (Re-run, Merge Sprint) are ledger-gated**, not
+  inferred from ticket labels on the column. The board API includes
+  `sprint_has_run[label]` (same `_sprint_has_own_run_outcome` helper as History
+  and outcome). A `planned` sprint that received tickets moved from a prior
+  failed run — e.g. still carrying `needs-rework` or `SIT` — shows **Run
+  Sprint**, not Re-run, until that label has its own ingested run.
 
 ## History Pane
 

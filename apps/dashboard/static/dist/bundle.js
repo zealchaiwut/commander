@@ -4604,6 +4604,9 @@ ${data.errors.join("\n")}`);
     if (!_smgmtData.sprint_rerun_into)
       _smgmtData.sprint_rerun_into = {};
     _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
+    if (!_smgmtData.sprint_has_run)
+      _smgmtData.sprint_has_run = {};
+    _smgmtData.sprint_has_run[parentLabel] = true;
     if (!_smgmtData.sprint_plan_states)
       _smgmtData.sprint_plan_states = {};
     _smgmtData.sprint_plan_states[subLabel] = "draft";
@@ -4619,6 +4622,9 @@ ${data.errors.join("\n")}`);
       );
     }
   }
+  function _smgmtHasLedgerRun(label) {
+    return Boolean((_smgmtData?.sprint_has_run || {})[label]);
+  }
   async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
@@ -4631,14 +4637,7 @@ ${data.errors.join("\n")}`);
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
-      const tickets = bySprint[label] || [];
-      const hasRework = tickets.some(
-        (t) => (t.labels || []).some(
-          (l) => l.name === "need-rework" || l.name === "needs-rework"
-        )
-      );
-      const hasCompleted = _smgmtHasCompletedTickets(tickets);
-      if (tickets.length > 0 && !hasRework && !hasCompleted)
+      if (!_smgmtHasLedgerRun(label))
         continue;
       toFetch.push(label);
     }
@@ -5041,10 +5040,10 @@ ${data.errors.join("\n")}`);
     ].includes(planState);
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
-    const isHasRework = outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled";
-    const isReadyToMerge = outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed";
-    const hasCompleted = isFreshRerun ? false : _smgmtHasCompletedTickets(tickets);
-    const isPostRun = !isRunningView && !planBlocksPostRun && !!(outcome && (outcome.sprint_status || outcome.state) || hasCompleted);
+    const hasLedgerRun = _smgmtHasLedgerRun(label);
+    const isHasRework = hasLedgerRun && (outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled");
+    const isReadyToMerge = hasLedgerRun && (outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed");
+    const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
     const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";

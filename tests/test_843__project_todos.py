@@ -22,6 +22,7 @@ AC coverage:
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -315,3 +316,59 @@ def test_repo_helpers_in_sprint_manager_module():
     assert hasattr(todo_repo, "update_todo")
     assert hasattr(todo_repo, "delete_todo")
     assert hasattr(todo_repo, "clear_done_todos")
+
+
+# ── JSON fallback durability (UAT / COMMANDER_DISABLE_NEON) ───────────────────
+
+def test_json_fallback_disable_neon_uses_store_even_with_database_url(
+    monkeypatch, tmp_path,
+):
+    store = tmp_path / "project_todos_store.json"
+    monkeypatch.setattr(todo_repo, "_fallback_store_path", lambda: store)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
+    monkeypatch.setenv("COMMANDER_DISABLE_NEON", "1")
+    monkeypatch.setattr(todo_repo, "_session_factory", None)
+
+    created = todo_repo.create_todo("commander", "neon off")
+    assert created["text"] == "neon off"
+    listed = todo_repo.list_todos("commander")
+    assert any(t["id"] == created["id"] for t in listed)
+    assert store.is_file()
+
+
+def test_json_fallback_corrupt_store_recovers_from_backup(monkeypatch, tmp_path):
+    store = tmp_path / "project_todos_store.json"
+    bak = tmp_path / "project_todos_store.json.bak"
+    monkeypatch.setattr(todo_repo, "_fallback_store_path", lambda: store)
+    monkeypatch.setattr(todo_repo, "_session_factory", None)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    todo_repo.create_todo("p", "saved")
+    shutil_copy = __import__("shutil").copy2
+    shutil_copy(store, bak)
+    store.write_text("{not json", encoding="utf-8")
+
+    listed = todo_repo.list_todos("p")
+    assert len(listed) == 1
+    assert listed[0]["text"] == "saved"
+
+
+def test_json_fallback_corrupt_store_refuses_wipe_on_write(monkeypatch, tmp_path):
+    store = tmp_path / "project_todos_store.json"
+    monkeypatch.setattr(todo_repo, "_fallback_store_path", lambda: store)
+    monkeypatch.setattr(todo_repo, "_session_factory", None)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    todo_repo.create_todo("p", "keep me")
+    bak = tmp_path / "project_todos_store.json.bak"
+    if bak.is_file():
+        bak.unlink()
+    store.write_text("{corrupt", encoding="utf-8")
+
+    todo_repo.create_todo("p", "would wipe")
+    if store.is_file():
+        try:
+            data = json.loads(store.read_text(encoding="utf-8"))
+            assert data.get("todos"), "corrupt file must not be overwritten with empty store"
+        except json.JSONDecodeError:
+            pass  # still corrupt — good, we did not wipe with a fresh empty file

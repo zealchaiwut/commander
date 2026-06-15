@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from services.sprint_manager.commander_paths import discover_commander_dir
+
 _lock = threading.Lock()
 
 _ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -31,7 +33,7 @@ def _attach_root() -> Path:
 
 
 def _manifest_path() -> Path:
-    d = _repo_root() / ".commander"
+    d = discover_commander_dir(Path(__file__).resolve())
     d.mkdir(parents=True, exist_ok=True)
     return d / "todo_attachments.json"
 

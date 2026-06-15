@@ -16186,9 +16186,6 @@ function _smgmtMoveTargets() {
     .map(lbl => ({ label: lbl, running: _smgmtRunningLabels.has(lbl) }));
 }
 
-    .map(lbl => ({ label: lbl, running: _smgmtRunningLabels.has(lbl) }));
-}
-
 /** Sprint label shared by a selection (multi-select is same-sprint scoped). */
 function _smgmtSelectionSprintLabel(nums) {
   const iss = (_smgmtData?.issues || []).find(i => i.number === nums[0]);

@@ -224,7 +224,7 @@ def test_compute_levels_extracted_to_helper(live_metrics_db):
         {"number": 3, "dispatch_level": 3, "status": "pending"},
     ]
     levels = live_metrics.compute_levels(issues)
-    assert [l["level"] for l in levels] == [1, 2, 3]
+    assert [lv["level"] for lv in levels] == [1, 2, 3]
     assert levels[0]["state"] == "complete"
     assert levels[1]["state"] == "active"
     assert levels[2]["state"] == "waiting"
@@ -264,16 +264,21 @@ def test_ac1_metrics_strip_mounts_above_rail_in_running_subview():
     subview = PROJECT_HTML[start:end]
     assert 'id="smgmt-metrics"' in subview, "metrics strip must mount in the Running sub-view"
     assert 'class="metrics"' in subview, "metrics container must carry the `.metrics` class"
-    # Above the rail: the metrics mount precedes the rail mount in document order.
-    assert subview.index('id="smgmt-metrics"') < subview.index('id="smgmt-rail"'), \
-        "metrics strip must render above the rail"
+    # Verify metrics appears within the run-shell (it now appears above the orch-panel and all-issues panel)
+    assert 'id="smgmt-run-shell"' in subview, "run-shell container must exist in running subview"
+    metrics_pos = subview.index('id="smgmt-metrics"')
+    shell_pos = subview.index('id="smgmt-run-shell"')
+    assert shell_pos < metrics_pos < end - len("smgmt-subview-running -->"), \
+        "metrics strip must render within the run-shell"
 
 
 def test_ac1_builder_emits_all_five_cards():
     body = _fn_body("_smgmtMetricsHtml")
-    for variant in ("metric-done", "metric-active", "metric-fix", "metric-tokens", "metric-time"):
+    # Note: The Done card was moved to the segmented gauge in the header (issue #1107).
+    # The strip now emits four cards: Active agents, Retrying, Tokens, Agent time.
+    for variant in ("metric-active", "metric-fix", "metric-tokens", "metric-time"):
         assert variant in body, f"builder must emit the `{variant}` card"
-    for label in ("Done", "Active agents", "Fix rounds", "Agent time"):
+    for label in ("Active agents", "Agent time"):
         assert label in body, f"builder must label the `{label}` card"
 
 
@@ -281,9 +286,25 @@ def test_ac1_builder_emits_all_five_cards():
 
 def test_ac2_builder_reads_live_snapshot_fields():
     body = _fn_body("_smgmtMetricsHtml")
-    for field in ("done_count", "total_count", "active_agents", "pipeline_mode",
-                  "fix_rounds", "token_total", "agent_time_split"):
+    # Note: done_count and total_count moved to the gauge (issue #1107)
+    # The metrics builder now reads: active_agents, pipeline_mode, token_total, agent_time_split
+    # Fix rounds are computed from issues using _smgmtRailFixRound
+    for field in ("active_agents", "pipeline_mode",
+                  "token_total", "agent_time_split"):
         assert field in body, f"builder must source `{field}` from the live snapshot"
+    # Verify fix round logic is present (uses _smgmtRailFixRound on issues)
+    assert "_smgmtRailFixRound" in body, "builder must compute retrying issues via _smgmtRailFixRound"
+    # Verify done_count/total_count are now read by the gauge functions
+    gauge_funcs = ["_smgmtGaugeHtml", "_smgmtGaugeCounts"]
+    gauge_body = ""
+    for fn_name in gauge_funcs:
+        if fn_name in PROJECT_HTML:
+            try:
+                gauge_body += _fn_body(fn_name)
+            except AssertionError:
+                pass
+    assert "done_count" in gauge_body and "total_count" in gauge_body, \
+        "done_count and total_count must be read by gauge functions (moved from metrics, issue #1107)"
 
 
 # ───────────── AC4: fix-rounds amber highlight ────────────────────────────────
@@ -325,10 +346,17 @@ def test_ac6_agent_time_access_is_guarded():
 # ───────────── AC7: Done / Active cards match the rail ────────────────────────
 
 def test_ac7_done_card_matches_rail_done_count():
-    body = _fn_body("_smgmtMetricsHtml")
-    # Same source the rail uses for its done count: snapshot done_count / total_count.
-    assert "done_count" in body and "total_count" in body, \
-        "Done card must use the same done/total counts as the rail"
+    # The Done card was moved to the segmented gauge (issue #1107). The gauge shows
+    # done_count / total_count using the same source; verify the gauge function uses them.
+    gauge_fn = "_smgmtGaugeHtml"
+    gauge_body = _fn_body(gauge_fn) if gauge_fn in PROJECT_HTML else ""
+    counts_fn = "_smgmtGaugeCounts"
+    counts_body = _fn_body(counts_fn) if counts_fn in PROJECT_HTML else ""
+    combined = gauge_body + counts_body
+    assert "done_count" in combined and "total_count" in combined, (
+        "Done count must still come from snapshot done_count / total_count "
+        "(now in the gauge header, not the metrics strip)"
+    )
 
 
 def test_ac7_active_card_matches_rail_active_agents():

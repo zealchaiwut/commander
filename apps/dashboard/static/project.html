@@ -7340,6 +7340,51 @@
     .run-head-meta { color: var(--text-sub); }
     .run-head-watchdog { color: var(--text-muted); font-size: 11px; }
 
+    /* ── Segmented progress gauge (issue #1107) ──────────────────────────────
+       Four-segment horizontal bar: done (green) · retrying (amber) ·
+       running (blue, shimmer) · queued (grey remainder). */
+    .rp-gauge-wrap {
+      padding: 10px 18px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .rp-gauge {
+      height: 8px; border-radius: 999px; background: var(--surface-2);
+      display: flex; overflow: hidden; border: 1px solid var(--border);
+    }
+    .rp-gauge-seg {
+      height: 100%; transition: width .4s ease;
+    }
+    .rp-gauge-seg--done    { background: var(--green); }
+    .rp-gauge-seg--retrying { background: var(--amber); }
+    .rp-gauge-seg--running {
+      background: var(--blue); position: relative; overflow: hidden;
+      animation: rp-gauge-shimmer 1.6s ease-in-out infinite;
+    }
+    .rp-gauge-seg--queued  { background: var(--surface-2); flex: 1 1 auto; }
+    @keyframes rp-gauge-shimmer {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .55; }
+    }
+    .rp-gauge-legend {
+      font-size: 11px; font-family: var(--mono); color: var(--text-muted);
+      display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    }
+    .rp-gauge-legend-done    { color: var(--green); font-weight: 700; }
+    .rp-gauge-legend-retrying { color: var(--amber); font-weight: 700; }
+    .rp-gauge-legend-running  { color: var(--blue); font-weight: 700; }
+    .rp-gauge-legend-queued   { color: var(--text-muted); }
+    .rp-gauge-legend-sep      { color: var(--border); }
+    .rp-gauge-summary {
+      font-size: 12px; font-weight: 700; color: var(--text-sub); font-family: var(--mono);
+    }
+    .rp-stat-row {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px;
+    }
+    .rp-stat-sep { color: var(--border); }
+    .rp-stat-amber { color: var(--amber); font-weight: 700; }
+
     /* ── Level-rail node board (issue #802) ──────────────────────────────────
        A vertical spine of level gates; each level holds per-ticket node cards.
        Tokens are the BA Path-A literal contract: .rail/.level/.level-dot/.nodes
@@ -13320,6 +13365,84 @@ function _smgmtRunningViewUpdate(label, live) {
   _smgmtRpTimelineFetch(primary, _smgmtRepo());
 }
 
+/** Derive done/retrying/running/queued counts from a live snapshot. */
+function _smgmtGaugeCounts(live) {
+  const issues = (live && live.issues) || [];
+  const total = live && live.total_count != null ? Number(live.total_count) : issues.length;
+  const done = Number(live && live.done_count || 0);
+  const retrying = issues.filter(function(i) {
+    return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+  }).length;
+  const running = issues.filter(function(i) {
+    return i.status !== 'done' && _smgmtRailFixRound(i) == null
+      && (i.agent === 'coder' || i.agent === 'tester');
+  }).length;
+  const queued = Math.max(0, total - done - retrying - running);
+  return { done: done, retrying: retrying, running: running, queued: queued, total: total };
+}
+
+/** Build the gauge HTML (bar + legend + summary + stat row) from a live snapshot. */
+function _smgmtGaugeHtml(live) {
+  const c = _smgmtGaugeCounts(live);
+  const t = c.total || 1; // avoid /0
+  const pct = function(n) { return (n / t * 100).toFixed(2) + '%'; };
+
+  // Gauge bar segments — running segment only rendered when running > 0
+  const runningStyle = c.running > 0
+    ? `style="width:${pct(c.running)}"` : 'style="width:0"';
+  const bar = `<div class="rp-gauge" id="smgmt-rp-gauge">`
+    + `<div class="rp-gauge-seg rp-gauge-seg--done" id="smgmt-rp-seg-done" style="width:${pct(c.done)}"></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--retrying" id="smgmt-rp-seg-retrying" style="width:${pct(c.retrying)}"></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--running" id="smgmt-rp-seg-running" ${runningStyle}></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--queued" id="smgmt-rp-seg-queued" style="width:${pct(c.queued)}"></div>`
+    + `</div>`;
+
+  // Legend: N done / N retrying / N running / N queued
+  const sep = '<span class="rp-gauge-legend-sep"> / </span>';
+  const legend = `<div class="rp-gauge-legend" id="smgmt-rp-gauge-legend">`
+    + `<span class="rp-gauge-legend-done" id="smgmt-rp-leg-done">${c.done} done</span>${sep}`
+    + `<span class="rp-gauge-legend-retrying" id="smgmt-rp-leg-retrying">${c.retrying} retrying</span>${sep}`
+    + `<span class="rp-gauge-legend-running" id="smgmt-rp-leg-running">${c.running} running</span>${sep}`
+    + `<span class="rp-gauge-legend-queued" id="smgmt-rp-leg-queued">${c.queued} queued</span>`
+    + `</div>`;
+
+  // Summary: X of Y done
+  const summary = `<div class="rp-gauge-summary" id="smgmt-rp-gauge-summary">${c.done} of ${c.total} done</div>`;
+
+  // Stat row: agents · mode  ·  retrying info  ·  coder Xm / tester Xm
+  const issues = (live && live.issues) || [];
+  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
+  const mode = live && live.pipeline_mode ? 'parallel' : 'serial';
+  const agentStr = `${activeCount} agent${activeCount !== 1 ? 's' : ''} · ${mode}`;
+
+  let retryingStr = '';
+  if (c.retrying > 0) {
+    const retryIss = issues.find(function(i) {
+      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+    });
+    const retryLabel = retryIss
+      ? `#${retryIss.number} with failure context`
+      : `${c.retrying} retrying`;
+    retryingStr = `<span class="rp-stat-sep"> · </span><span class="rp-stat-amber">${escHtml(retryLabel)}</span>`;
+  }
+
+  let timeStr = '';
+  if (live && live.agent_time_split) {
+    const cSec = Number(live.agent_time_split.coder || 0);
+    const tSec = Number(live.agent_time_split.tester || 0);
+    if (cSec + tSec > 0) {
+      timeStr = `<span class="rp-stat-sep"> · </span>`
+        + `coder ${escHtml(_smgmtFmtSplit(cSec))} / tester ${escHtml(_smgmtFmtSplit(tSec))}`;
+    }
+  }
+
+  const statRow = `<div class="rp-stat-row" id="smgmt-rp-stat-row">`
+    + `<span>${escHtml(agentStr)}</span>${retryingStr}${timeStr}`
+    + `</div>`;
+
+  return `<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">${bar}${legend}${summary}${statRow}</div>`;
+}
+
 function _smgmtRunHeadHtml(label, live, isLinger) {
   const display = sprintLabelDisplay(label);
   const elapsed = live && live.time_spent_sec > 0 ? _fmtRunningTime(live.time_spent_sec) : '0m 0s';
@@ -13342,6 +13465,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
   const watchdog = isLinger
     ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
     : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog · heartbeat ${hb}s ago</span>`;
+  const gaugeHtml = isLinger ? '' : _smgmtGaugeHtml(live || {});
   return `<div class="run-head-card" id="smgmt-run-head-card" data-label="${safeLabel}">
     <div class="run-head-top">
       <div class="run-head-left">
@@ -13350,6 +13474,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       </div>
       ${cancelBtn}
     </div>
+    ${gaugeHtml}
     <div class="run-head-sub">
       <span class="run-head-meta" id="smgmt-run-head-meta">${escHtml(metaParts.join(' · '))}</span>
       ${watchdog}
@@ -13368,6 +13493,57 @@ function _smgmtRunHeadPatch(label, live) {
   if (estRem) metaParts.push(estRem);
   if (metaEl) metaEl.textContent = metaParts.join(' · ');
   if (wdEl) wdEl.textContent = `watchdog · heartbeat ${_smgmtLiveHeartbeatSec()}s ago`;
+
+  // Patch gauge elements (issue #1107)
+  const c = _smgmtGaugeCounts(live);
+  const t = c.total || 1;
+  const pct = function(n) { return (n / t * 100).toFixed(2) + '%'; };
+  const segDone    = document.getElementById('smgmt-rp-seg-done');
+  const segRetry   = document.getElementById('smgmt-rp-seg-retrying');
+  const segRunning = document.getElementById('smgmt-rp-seg-running');
+  const segQueued  = document.getElementById('smgmt-rp-seg-queued');
+  if (segDone)    segDone.style.width    = pct(c.done);
+  if (segRetry)   segRetry.style.width   = pct(c.retrying);
+  if (segRunning) segRunning.style.width = c.running > 0 ? pct(c.running) : '0';
+  if (segQueued)  segQueued.style.width  = pct(c.queued);
+
+  const legDone    = document.getElementById('smgmt-rp-leg-done');
+  const legRetry   = document.getElementById('smgmt-rp-leg-retrying');
+  const legRunning = document.getElementById('smgmt-rp-leg-running');
+  const legQueued  = document.getElementById('smgmt-rp-leg-queued');
+  if (legDone)    legDone.textContent    = c.done + ' done';
+  if (legRetry)   legRetry.textContent   = c.retrying + ' retrying';
+  if (legRunning) legRunning.textContent = c.running + ' running';
+  if (legQueued)  legQueued.textContent  = c.queued + ' queued';
+
+  const summaryEl = document.getElementById('smgmt-rp-gauge-summary');
+  if (summaryEl) summaryEl.textContent = c.done + ' of ' + c.total + ' done';
+
+  // Patch stat row
+  const issues = (live && live.issues) || [];
+  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
+  const mode = live.pipeline_mode ? 'parallel' : 'serial';
+  const agentStr = activeCount + ' agent' + (activeCount !== 1 ? 's' : '') + ' · ' + mode;
+  let retryingStr = '';
+  if (c.retrying > 0) {
+    const retryIss = issues.find(function(i) {
+      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+    });
+    const retryLabel = retryIss
+      ? '#' + retryIss.number + ' with failure context'
+      : c.retrying + ' retrying';
+    retryingStr = ' · ' + retryLabel;
+  }
+  let timeStr = '';
+  if (live.agent_time_split) {
+    const cSec = Number(live.agent_time_split.coder || 0);
+    const tSec = Number(live.agent_time_split.tester || 0);
+    if (cSec + tSec > 0) {
+      timeStr = ' · coder ' + _smgmtFmtSplit(cSec) + ' / tester ' + _smgmtFmtSplit(tSec);
+    }
+  }
+  const statRowEl = document.getElementById('smgmt-rp-stat-row');
+  if (statRowEl) statRowEl.textContent = agentStr + retryingStr + timeStr;
 }
 
 function _smgmtRunHeadUpdate(label, live, isLinger) {
@@ -14846,21 +15022,12 @@ function _smgmtFmtUsd(usd) {
   return '$' + n.toFixed(n > 0 && n < 1 ? 4 : 2);
 }
 
-/** Build the metric-strip markup from a /live snapshot. Returns the five cards
- *  (Done x/y, Active agents, Fix rounds, Tokens ≈ $, Agent time split), with the
- *  agent_runs- and price-map-gated cards omitted when their source is absent. */
+/** Build the metric-strip markup from a /live snapshot. Returns cards for
+ *  Active agents, Fix rounds, Tokens ≈ $, and Agent time split (the Done
+ *  card was removed in issue #1107 — it is now the gauge in the header). */
 function _smgmtMetricsHtml(live) {
   if (!live) return '';
   const cards = [];
-
-  const done = Number(live.done_count || 0);
-  const total = Number(live.total_count || 0);
-  const failed = Number(live.failed_count || 0);
-  const skipped = Number(live.skipped_count || 0);
-  cards.push('<div class="metric metric-done"><div class="metric-label">Done</div>'
-    + '<div class="metric-value">' + done
-    + '<span class="metric-unit">/ ' + total + '</span></div>'
-    + '<div class="metric-sub">' + failed + ' failed · ' + skipped + ' skipped</div></div>');
 
   const active = ((live.active_agents) || []).length;
   const mode = live.pipeline_mode ? 'pipeline mode' : 'serial mode';

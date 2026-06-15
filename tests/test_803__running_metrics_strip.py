@@ -271,9 +271,11 @@ def test_ac1_metrics_strip_mounts_above_rail_in_running_subview():
 
 def test_ac1_builder_emits_all_five_cards():
     body = _fn_body("_smgmtMetricsHtml")
-    for variant in ("metric-done", "metric-active", "metric-fix", "metric-tokens", "metric-time"):
+    # Note: The Done card was moved to the segmented gauge in the header (issue #1107).
+    # The strip now emits four cards: Active agents, Retrying, Tokens, Agent time.
+    for variant in ("metric-active", "metric-fix", "metric-tokens", "metric-time"):
         assert variant in body, f"builder must emit the `{variant}` card"
-    for label in ("Done", "Active agents", "Fix rounds", "Agent time"):
+    for label in ("Active agents", "Agent time"):
         assert label in body, f"builder must label the `{label}` card"
 
 
@@ -325,10 +327,17 @@ def test_ac6_agent_time_access_is_guarded():
 # ───────────── AC7: Done / Active cards match the rail ────────────────────────
 
 def test_ac7_done_card_matches_rail_done_count():
-    body = _fn_body("_smgmtMetricsHtml")
-    # Same source the rail uses for its done count: snapshot done_count / total_count.
-    assert "done_count" in body and "total_count" in body, \
-        "Done card must use the same done/total counts as the rail"
+    # The Done card was moved to the segmented gauge (issue #1107). The gauge shows
+    # done_count / total_count using the same source; verify the gauge function uses them.
+    gauge_fn = "_smgmtGaugeHtml"
+    gauge_body = _fn_body(gauge_fn) if gauge_fn in PROJECT_HTML else ""
+    counts_fn = "_smgmtGaugeCounts"
+    counts_body = _fn_body(counts_fn) if counts_fn in PROJECT_HTML else ""
+    combined = gauge_body + counts_body
+    assert "done_count" in combined and "total_count" in combined, (
+        "Done count must still come from snapshot done_count / total_count "
+        "(now in the gauge header, not the metrics strip)"
+    )
 
 
 def test_ac7_active_card_matches_rail_active_agents():

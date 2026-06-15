@@ -19,6 +19,9 @@
 
 import { renderProgressActivity } from "../progress-activity.js";
 
+/** Tracks which labels are resolved ancestors on the current board render. */
+let _smgmtResolvedAncestors = new Set();
+
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   const listEl = document.getElementById("smgmt-sprint-list");
   if (!listEl) return;
@@ -205,9 +208,15 @@ export function _smgmtRender(data) {
 
   // After a re-run moves tickets to a child label, hide the empty parent card until refresh
   // would have dropped it from the order list anyway (issue #512 UX).
+  // Resolved ancestors: sprints that ran and were rerun into a child sprint.
+  // Previously hidden; now rendered as compact collapsed rows (issue #1043).
+  _smgmtResolvedAncestors = new Set();
   const orderedLabels = orderedLabelsRaw.filter((label) => {
     const tickets = bySprint[label] || [];
-    if (_smgmtHideRerunParent(label, tickets, _rerunInto)) return false;
+    if (_smgmtHideRerunParent(label, tickets, _rerunInto)) {
+      _smgmtResolvedAncestors.add(label);
+      return true; // keep for compact ancestor row rendering
+    }
     const ticketCount = tickets.length;
     if (ticketCount > 0) return true;
     if (_finishedSet.has(label)) return false;
@@ -247,6 +256,19 @@ export function _smgmtRender(data) {
   const cards = orderedLabels
     .map((label) => {
       const tickets = bySprint[label] || [];
+
+      // Resolved ancestors use compact collapsed rows (issue #1043)
+      if (_smgmtResolvedAncestors.has(label)) {
+        const childLabel = _rerunInto[label];
+        const outcome = _smgmtOutcomeCache[label] || null;
+        const ancestorHtml = _smgmtAncestorRowHtml(label, outcome, childLabel);
+        return (
+          `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
+          ancestorHtml +
+          `</div>`
+        );
+      }
+
       if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
       const inLinger =
         typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -477,9 +499,8 @@ export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
     if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtIsFreshRerunSprint(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
-    // Outcome bands only for labels that actually ran — not tickets moved
-    // from a prior sprint with stale needs-rework/SIT labels.
-    if (!_smgmtHasLedgerRun(label)) continue;
+    // Resolved ancestors always ran; skip the ledger check for them (issue #1043).
+    if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label)) continue;
     toFetch.push(label);
   }
   await Promise.all(
@@ -491,7 +512,12 @@ export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
         if (resp.ok) {
           const outcome = await resp.json();
           _smgmtOutcomeCache[label] = outcome;
-          _smgmtInjectOutcomeBand(label, outcome);
+          // Ancestor rows update their compact header; regular cards inject a band.
+          if (_smgmtResolvedAncestors.has(label)) {
+            _smgmtUpdateAncestorRow(label, outcome);
+          } else {
+            _smgmtInjectOutcomeBand(label, outcome);
+          }
         } else {
           _smgmtOutcomeCache[label] = null;
         }
@@ -1828,4 +1854,194 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
         <i class="ti ti-menu-2"></i></button>
     </div>`;
+}
+
+// ── Ancestor sprint rows (issue #1043) ──────────────────────────────────────
+
+/**
+ * Determine merge state for a resolved ancestor sprint from its outcome data.
+ * Returns: "merged" | "needs_merge" | "failed" | "unknown"
+ */
+export function _smgmtAncestorMergeState(label, outcome) {
+  if (!outcome) return "unknown";
+  const counts = outcome.counts || {};
+  const done = counts.done || 0;
+  if (done === 0) return "failed";
+  // Use the same lifecycle derivation as _smgmtStateMeta (project.html global)
+  const meta =
+    typeof _smgmtStateMeta === "function"
+      ? _smgmtStateMeta(outcome, (outcome.issues || []).length)
+      : { state: "unknown" };
+  const state = meta.state;
+  if (state === "ready_to_merge" || state === "partial_finished") return "needs_merge";
+  if (state === "needs_rework") return "needs_merge";
+  if (state === "completed") return "merged";
+  // Finished (has summary issue) with passing tickets → merged
+  if (_smgmtFinishedLabels && _smgmtFinishedLabels.has(label) && done > 0) return "merged";
+  return "needs_merge";
+}
+
+/** Build carry-down summary: "3 merged · 1 reworked → 73.1". */
+export function _smgmtAncestorCarrySummary(outcome, childLabel) {
+  if (!outcome) return "";
+  const counts = outcome.counts || {};
+  const done = counts.done || 0;
+  const carried = (counts.failed || 0) + (counts.skipped || 0);
+  const childDisplay = childLabel
+    ? sprintLabelDisplay(childLabel).replace("Sprint ", "")
+    : "";
+  let summary = `${done} merged`;
+  if (carried > 0 && childDisplay) summary += ` · ${carried} reworked → ${childDisplay}`;
+  else if (carried > 0) summary += ` · ${carried} reworked`;
+  return summary;
+}
+
+/** Per-ticket rows for an expanded ancestor sprint (merged / carried fate marks). */
+export function _smgmtAncestorTicketsHtml(label, outcome, childLabel) {
+  const issues = (outcome && outcome.issues) || [];
+  if (issues.length === 0) {
+    return '<div class="slp-no-tickets">No ticket data available.</div>';
+  }
+  const repo = _smgmtRepo();
+  const childDisplay = childLabel
+    ? sprintLabelDisplay(childLabel).replace("Sprint ", "")
+    : "";
+  return issues
+    .map((iss) => {
+      const o = iss.outcome || "skipped";
+      const isMerged = o === "done";
+      const issueUrl = repo
+        ? `https://github.com/${repo}/issues/${iss.number}`
+        : "#";
+      if (isMerged) {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-merged" title="Merged"><i class="ti ti-circle-check"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-merged">merged</span>
+        </div>`;
+      } else {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-carried" title="Carried to ${escHtml(childDisplay)}"><i class="ti ti-arrow-right"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-carried">carried → ${escHtml(childDisplay)}</span>
+        </div>`;
+      }
+    })
+    .join("");
+}
+
+/** Compact collapsed row for a resolved ancestor sprint (issue #1043). */
+export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
+  const mergeState = _smgmtAncestorMergeState(label, outcome);
+  const safeLabel = escHtml(label);
+  const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
+
+  let markIcon, markText, markCls;
+  if (mergeState === "merged") {
+    markIcon = "ti-git-merge";
+    markText = "Merged";
+    markCls = "slp-merged";
+  } else if (mergeState === "needs_merge") {
+    markIcon = "ti-git-pull-request";
+    markText = "Needs merge";
+    markCls = "slp-needs-merge";
+  } else if (mergeState === "failed") {
+    markIcon = "ti-circle-x";
+    markText = "Failed";
+    markCls = "slp-failed";
+  } else {
+    markIcon = "ti-clock";
+    markText = "Pending";
+    markCls = "slp-pending";
+  }
+
+  const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto);
+  const ticketsHtml = outcome
+    ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto)
+    : '<div class="slp-no-tickets">Loading outcome data…</div>';
+
+  const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+  const rerunTitle = _smgmtAnySprintRunning
+    ? 'title="Cannot re-run: another sprint is currently running."'
+    : "";
+  const actionsHtml =
+    mergeState === "needs_merge"
+      ? `<div class="slp-ancestor-actions">
+          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
+                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
+            <i class="ti ti-refresh"></i> Re-run</button>
+          <button class="smgmt-finish-btn sc-merge-link"
+                  onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+        </div>`
+      : "";
+
+  return `<div class="slp-ancestor-row" id="smgmt-card-${safeLabel}"
+               onclick="smgmtToggleAncestor('${safeLabel}')">
+    <div class="slp-ancestor-header">
+      <button class="smgmt-collapse-btn slp-ancestor-toggle"
+              aria-label="Expand ${escHtml(sprintLabelDisplay(label))}"
+              title="Expand ${escHtml(sprintLabelDisplay(label))}"
+              onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
+        <i class="ti ti-chevron-right"></i>
+      </button>
+      <span class="slp-merge-mark ${markCls}" title="${escHtml(markText)}">
+        <i class="ti ${markIcon}"></i>
+        <span class="slp-mark-text">${escHtml(markText)}</span>
+      </span>
+      <span class="slp-ancestor-name">${escHtml(sprintLabelDisplay(label))}</span>
+      ${carrySummary ? `<span class="slp-carry-summary">${escHtml(carrySummary)}</span>` : ""}
+    </div>
+    <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
+      <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
+        ${ticketsHtml}
+      </div>
+      ${actionsHtml}
+    </div>
+  </div>`;
+}
+
+/** Toggle expanded/collapsed state of a resolved ancestor sprint row. */
+export function smgmtToggleAncestor(label) {
+  const body = document.getElementById(`slp-body-${label}`);
+  const toggleIcon = document.querySelector(
+    `#smgmt-card-${CSS.escape(label)} .slp-ancestor-toggle i`,
+  );
+  if (!body) return;
+  const isExpanded = !body.hidden;
+  body.hidden = isExpanded;
+  if (toggleIcon) {
+    toggleIcon.className = isExpanded ? "ti ti-chevron-right" : "ti ti-chevron-down";
+  }
+  try {
+    localStorage.setItem(`slp_ancestor_${label}`, isExpanded ? "0" : "1");
+  } catch (_) {}
+}
+
+/** Update an ancestor row in-place when outcome data arrives asynchronously. */
+export function _smgmtUpdateAncestorRow(label, outcome) {
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card || !card.classList.contains("slp-ancestor-row")) return;
+  const childLabel = (_smgmtData?.sprint_rerun_into || {})[label];
+  const newHtml = _smgmtAncestorRowHtml(label, outcome, childLabel);
+  const wasExpanded =
+    document.getElementById(`slp-body-${label}`)?.hidden === false;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = newHtml;
+  const newCard = tmp.firstElementChild;
+  if (newCard) {
+    card.replaceWith(newCard);
+    if (wasExpanded) {
+      const newBody = document.getElementById(`slp-body-${label}`);
+      if (newBody) newBody.hidden = false;
+      const newIcon = document.querySelector(
+        `#smgmt-card-${CSS.escape(label)} .slp-ancestor-toggle i`,
+      );
+      if (newIcon) newIcon.className = "ti ti-chevron-down";
+    }
+  }
 }

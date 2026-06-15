@@ -2870,6 +2870,74 @@
       opacity: .8; margin-left: 6px;
     }
     .smgmt-sprint-unit { display: flex; flex-direction: column; }
+
+    /* ── Resolved ancestor sprint rows (issue #1043) ──────────────────────── */
+    .slp-ancestor-row {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+      cursor: pointer; transition: border-color .15s;
+    }
+    .slp-ancestor-row:hover { border-color: var(--text-sub); }
+    .slp-ancestor-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; min-height: 44px;
+    }
+    .slp-ancestor-name {
+      font-size: 13px; font-weight: 600; color: var(--text); flex-shrink: 0;
+    }
+    .slp-carry-summary {
+      font-size: 12px; color: var(--text-sub); font-family: var(--mono);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* Merge-state mark: three distinct states */
+    .slp-merge-mark {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      text-transform: uppercase; letter-spacing: .04em;
+      padding: 2px 8px; border-radius: 999px; flex-shrink: 0;
+      border: 1px solid transparent;
+    }
+    .slp-merged     { background: var(--green-bg);  color: var(--green);  border-color: var(--green);  }
+    .slp-needs-merge{ background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber);  }
+    .slp-failed     { background: var(--red-bg);    color: var(--red);    border-color: var(--red);    }
+    .slp-pending    { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
+    .slp-mark-text  { line-height: 1; }
+    /* Expanded body */
+    .slp-ancestor-body { padding: 0 14px 10px; border-top: 1px solid var(--border); }
+    .slp-no-tickets { font-size: 12px; color: var(--text-sub); padding: 10px 0; }
+    /* Per-ticket rows */
+    .slp-ancestor-ticket-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 4px; border-bottom: 1px solid var(--border-faint);
+      font-size: 13px;
+    }
+    .slp-ancestor-ticket-row:last-child { border-bottom: none; }
+    .slp-ticket-merged { color: var(--green); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-carried { color: var(--amber); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-title {
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--text-sub);
+    }
+    .slp-fate-merged  {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--green); background: var(--green-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-carried {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--amber); background: var(--amber-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    /* Action buttons for needs_merge ancestors */
+    .slp-ancestor-actions {
+      display: flex; align-items: center; gap: 8px;
+      padding-top: 10px; padding-bottom: 2px;
+    }
+    /* Chevron toggle button (reuses smgmt-collapse-btn styles) */
+    .slp-ancestor-toggle { background: none; border: none; cursor: pointer;
+                           color: var(--text-sub); padding: 2px; line-height: 1; }
+    .slp-ancestor-toggle:hover { color: var(--text); }
+
     .smgmt-done-badge {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 4px 10px; border-radius: 999px; font-size: 11px;

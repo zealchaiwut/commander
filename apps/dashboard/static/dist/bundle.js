@@ -4430,6 +4430,7 @@ ${data.errors.join("\n")}`);
       listEl.innerHTML = '<div class="loading-msg">No sprints yet. Create one with + New Sprint.</div>';
       return;
     }
+    const _finishedSet = new Set(data.finished_sprints || []);
     const orderedLabelsRaw = order.length > 0 ? order.filter((l) => /^sprint-\d+(\.\d+)*$/.test(l)) : [...sprints].sort((a, b) => a - b).map((n) => `sprint-${n}`);
     const _sprintParents = data.sprint_parents || {};
     const _rerunInto = data.sprint_rerun_into || {};
@@ -4458,6 +4459,8 @@ ${data.errors.join("\n")}`);
       const ticketCount = tickets.length;
       if (ticketCount > 0)
         return true;
+      if (_finishedSet.has(label))
+        return false;
       if (_rerunInto[label])
         return false;
       const hasChild = Object.values(_sprintParents).some(
@@ -4465,7 +4468,7 @@ ${data.errors.join("\n")}`);
       );
       return !hasChild;
     });
-    _smgmtFinishedLabels = new Set(data.finished_sprints || []);
+    _smgmtFinishedLabels = _finishedSet;
     let _smgmtNextUpLabel = null;
     const sortedForNext = [...orderedLabels].sort((a, b) => {
       const ka = _smgmtSprintLabelSortKey(a);

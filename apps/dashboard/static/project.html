@@ -120,7 +120,7 @@
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       padding: 0 var(--space-4);
-      height: 48px;
+      height: var(--space-12);
       display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
       flex-shrink: 0;
     }
@@ -135,7 +135,7 @@
     .brand-wordmark { font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); letter-spacing: -.02em; }
     .top-nav-right { display: flex; align-items: center; gap: var(--space-2); }
     .btn-icon {
-      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      width: var(--space-8); height: var(--space-8); display: flex; align-items: center; justify-content: center;
       border: 1px solid var(--border); border-radius: var(--radius-md); background: none;
       color: var(--text-muted); font-size: var(--font-size-xl); transition: background .15s, color .15s;
     }
@@ -144,23 +144,23 @@
 
     /* ── Active-milestone indicator (issue #880) — header, links to Roadmap ── */
     .hnav-milestone {
-      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
-      max-width: 280px; margin-bottom: 5px; padding: 5px 11px;
-      border: 1px solid var(--border); border-radius: 8px;
+      display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+      max-width: 280px; margin-bottom: var(--space-1); padding: var(--space-1) var(--space-3);
+      border: 1px solid var(--border); border-radius: var(--radius-lg);
       background: var(--surface-2); color: var(--text-muted);
-      font-size: 12px; text-decoration: none;
+      font-size: var(--font-size-md); text-decoration: none;
       transition: border-color .12s, color .12s;
     }
     .hnav-milestone.hidden { display: none; }
     .hnav-milestone:hover { border-color: var(--blue); color: var(--blue); }
-    .hnav-milestone .ti { font-size: 13px; flex-shrink: 0; }
+    .hnav-milestone .ti { font-size: var(--font-size-base); flex-shrink: 0; }
     .hnav-ms-name {
-      font-weight: 600; color: var(--text);
+      font-weight: var(--font-weight-semibold); color: var(--text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .hnav-milestone:hover .hnav-ms-name { color: var(--blue); }
     .hnav-ms-count {
-      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      font-family: var(--mono); font-size: var(--font-size-sm); color: var(--text-muted);
       white-space: nowrap; flex-shrink: 0;
     }
 
@@ -508,32 +508,32 @@
       border-bottom: 1px solid var(--border);
     }
     .proj-header-title {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: center; gap: var(--space-2);
       min-width: 0; flex-shrink: 1;
     }
-    .proj-header-row-spacer { flex: 1; min-width: 8px; }
+    .proj-header-row-spacer { flex: 1; min-width: var(--space-2); }
     .proj-header-icon {
-      width: 22px; height: 22px; border-radius: 5px;
+      width: var(--space-5); height: var(--space-5); border-radius: var(--radius-sm);
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; font-size: 12px; color: #fff;
+      flex-shrink: 0; font-size: var(--font-size-md); color: #fff;
     }
     .proj-header-name {
-      font-size: 22px; font-weight: 700; line-height: 1.15;
+      font-size: 22px; font-weight: var(--font-weight-bold); line-height: var(--line-height-tight);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       min-width: 0;
     }
     .proj-header-gh-link {
       display: inline-flex; align-items: center; justify-content: center;
-      color: var(--text-muted); font-size: 18px; flex-shrink: 0;
-      margin-top: 2px;
+      color: var(--text-muted); font-size: var(--font-size-2xl); flex-shrink: 0;
+      margin-top: var(--space-px);
       transition: color .15s;
     }
     .proj-header-gh-link:hover { color: var(--text); }
     .proj-header-gh-link.hidden { display: none; }
     .proj-header-pill {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px; border-radius: 20px;
-      font-size: 11px; font-weight: 600;
+      display: inline-flex; align-items: center; gap: var(--space-1);
+      padding: var(--space-px) var(--space-2); border-radius: var(--radius-full);
+      font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold);
       flex-shrink: 0;
     }
     .pill-running {
@@ -543,7 +543,7 @@
       background: var(--amber-bg); color: var(--amber);
     }
     .pill-dot {
-      width: 6px; height: 6px; border-radius: 50%;
+      width: var(--space-1); height: var(--space-1); border-radius: 50%;
       background: currentColor;
       animation: pillGlow 2s ease-in-out infinite;
     }
@@ -555,7 +555,7 @@
     .pill-uat .pill-dot { animation: none; }
 
     .proj-header-actions {
-      display: flex; align-items: center; gap: 8px;
+      display: flex; align-items: center; gap: var(--space-2);
       margin-left: auto; flex-shrink: 0;
     }
     /* "+ Create" dropdown (New ticket / Bulk create) */
@@ -598,7 +598,7 @@
     /* ── Sub-tab strip ── */
     /* Row that holds the scrolling tab strip + the right-aligned sprint pill.
        The pill lives OUTSIDE the overflow:auto nav so its dropdown isn't clipped. */
-    .sub-tabs-row { display: flex; align-items: flex-end; gap: 12px; }
+    .sub-tabs-row { display: flex; align-items: flex-end; gap: var(--space-3); }
     .sub-tabs {
       display: flex; align-items: flex-end;
       padding: 0 0; gap: 0;
@@ -609,6 +609,7 @@
     .stab {
       display: flex; align-items: center; gap: var(--space-1);
       padding: var(--space-3) 0; margin-right: var(--space-6); flex-shrink: 0;
+      min-height: var(--space-12);
       background: none; border: none; border-bottom: 2px solid transparent;
       color: var(--text-muted); font-size: var(--font-size-base); font-weight: var(--font-weight-medium);
       transition: color .15s, border-color .15s, background .15s; white-space: nowrap;
@@ -621,38 +622,38 @@
       color: var(--text-sub); cursor: not-allowed;
     }
     .stab.disabled:hover { color: var(--text-sub); }
-    .stab .ti { font-size: 14px; }
+    .stab .ti { font-size: var(--font-size-lg); }
     .stab-soon {
-      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      font-size: var(--font-size-2xs); font-weight: var(--font-weight-bold); letter-spacing: .05em; text-transform: uppercase;
       background: var(--surface-2); color: var(--text-sub);
-      padding: 1px 5px; border-radius: 4px;
+      padding: var(--space-px) var(--space-1); border-radius: var(--radius-sm);
     }
     /* ── Dropdown tab groups ── */
     .stab-group { position: relative; display: flex; align-items: flex-end; }
-    .stab-trigger .stab-caret { font-size: 11px; margin-left: -2px; transition: transform .15s; }
+    .stab-trigger .stab-caret { font-size: var(--font-size-sm); margin-left: 0; transition: transform .15s; }
     .stab-group.open > .stab-trigger .stab-caret { transform: rotate(180deg); }
     .stab-dropdown {
-      display: none; position: absolute; top: calc(100% + 2px); left: 0; z-index: 300;
+      display: none; position: absolute; top: calc(100% + var(--space-px)); left: 0; z-index: var(--z-panel);
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
-      padding: 4px; min-width: 170px; flex-direction: column; gap: 1px;
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-panel);
+      padding: var(--space-1); min-width: 170px; flex-direction: column; gap: var(--space-px);
     }
     .stab-group.open > .stab-dropdown { display: flex; }
     .stab-dropdown .stab {
-      margin-right: 0; padding: 8px 10px; border-radius: 6px; border-bottom: none;
+      margin-right: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border-bottom: none;
       width: 100%; justify-content: flex-start;
     }
-    .stab-dropdown .stab.active { color: var(--text); font-weight: 700; background: var(--surface-2); border-bottom: none; }
+    .stab-dropdown .stab.active { color: var(--text); font-weight: var(--font-weight-bold); background: var(--surface-2); border-bottom: none; }
     .stab-dropdown .stab:hover:not(.active):not(.disabled) { background: var(--surface-2); color: var(--text); border-bottom: none; }
     .bc-tab-badge {
-      display: inline-flex; align-items: center; gap: 2px;
-      font-size: 10px; font-weight: 600; letter-spacing: .02em;
-      background: var(--blue); color: #fff;
-      padding: 1px 6px; border-radius: 10px; margin-left: 4px;
-      white-space: nowrap; line-height: 1.6;
+      display: inline-flex; align-items: center; gap: var(--space-px);
+      font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: .02em;
+      background: var(--blue); color: var(--surface);
+      padding: var(--space-px) var(--space-1); border-radius: var(--radius-xl); margin-left: var(--space-1);
+      white-space: nowrap; line-height: var(--line-height-relaxed);
     }
-    .bc-tab-badge--warn { background: #f59e0b; }
-    .bc-tab-badge--ready { background: #2563eb; }
+    .bc-tab-badge--warn { background: var(--amber); }
+    .bc-tab-badge--ready { background: var(--blue); }
     @keyframes bc-badge-spin { to { transform: rotate(360deg); } }
     .bc-tab-badge-spin { display: inline-block; animation: bc-badge-spin .9s linear infinite; }
 

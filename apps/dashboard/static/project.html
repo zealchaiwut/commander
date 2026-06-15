@@ -2643,21 +2643,35 @@
     .fs-action-row a { color: var(--accent); text-decoration: none; font-size: 12px; }
     .fs-action-row a:hover { text-decoration: underline; }
     .smgmt-delete-btn {
-      padding: 4px 10px; font-size: 11px; font-weight: 600;
-      background: var(--surface); color: var(--red); border: 1px solid var(--red);
-      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
-      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 6px; font-size: 13px;
+      background: none; color: var(--text-sub); border: none;
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: color .15s;
+      display: inline-flex; align-items: center;
     }
-    .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-delete-btn:hover { color: var(--text); background: var(--surface-2); }
     .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
-      background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
-      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
       display: inline-flex; align-items: center; gap: 4px;
     }
-    .smgmt-finish-btn:hover { opacity: .85; }
+    .smgmt-finish-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .smgmt-finish-btn.hidden { display: none; }
+    /* Quiet secondary link for Merge Sprint when Re-run is the primary action */
+    .sc-merge-link {
+      background: none; color: var(--text-muted); border: none;
+      font-size: 11px; font-weight: 500; padding: 4px 8px;
+      cursor: pointer; flex-shrink: 0; transition: color .15s;
+      display: inline-flex; align-items: center; gap: 4px; border-radius: 4px;
+    }
+    .sc-merge-link:hover { color: var(--text); background: var(--surface-2); }
+    .sc-merge-link.hidden { display: none; }
+    /* One-line plain-language status sentence under the sprint header */
+    .sc-status-line {
+      font-size: 12px; color: var(--text-muted); padding: 6px 18px 4px;
+      border-bottom: none; line-height: 1.4;
+    }
     /* ── Sprint inline rename ── */
     .smgmt-rename-btn {
       background: none; border: none; padding: 0 2px; cursor: pointer;
@@ -2839,9 +2853,9 @@
       padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
       border: 1px solid transparent;
     }
-    .smgmt-state-badge.state-finished { background: var(--steel-bg);  color: var(--steel);    border-color: var(--steel);  }
+    .smgmt-state-badge.state-finished { background: var(--amber-bg);  color: var(--amber);    border-color: var(--amber);  }
     .smgmt-state-badge.state-partial  { background: color-mix(in srgb, #facc15 18%, transparent);  color: #a16207;    border-color: color-mix(in srgb, #facc15 45%, transparent);  }
-    .smgmt-state-badge.state-rework   { background: var(--yellow-bg); color: var(--yellow);   border-color: var(--yellow); }
+    .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     /* NEXT UP badge */
     .smgmt-next-badge {
@@ -4374,11 +4388,11 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: .08em;
-      background: var(--surface-2);
-      color: var(--text-sub);
+      background: var(--blue-bg);
+      color: var(--blue);
       padding: 2px 7px;
       border-radius: 4px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--blue);
       flex-shrink: 0;
     }
     /* Pending sign-off badge — amber 'needs you' state (issue #862) */
@@ -4452,7 +4466,11 @@
       margin-bottom: 2px;
     }
     .sc-v5 .cap-budget-line strong { font-weight: 700; }
-    .sc-v5 .cap-bar { height: 8px; border-radius: 4px; }
+    .sc-v5 .cap-bar { height: 8px; border-radius: 4px; overflow: hidden; }
+    /* Budget bar color states keyed to real headroom (AC4 — issue #1042) */
+    .sc-v5 .cap-bar--green { background: var(--green); }
+    .sc-v5 .cap-bar--amber { background: var(--amber); }
+    .sc-v5 .cap-bar--red   { background: var(--red); }
     .sc-v5 .cap-hint {
       font-size: 11px;
       color: var(--text-sub);
@@ -15169,12 +15187,19 @@ function _smgmtUpdateCapBar(label) {
     };
     const budgetLine = `<div class="cap-budget-line"><strong>${escHtml(fmtDur(total))}</strong> of ${escHtml(fmtDur(budget))}</div>`;
 
+    // Color the bar based on real budget headroom (AC4 — issue #1042)
+    let barColorClass = 'cap-bar--green';
+    if (total > budget) barColorClass = 'cap-bar--red';
+    else if (total >= budget) barColorClass = 'cap-bar--amber';
+
     let hintClass = 'cap-hint', hintText;
     if (total > budget) {
       hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ${escHtml(fmtDur(total - budget))}</strong>`;
       hintClass = 'cap-hint cap-hint--over';
     } else {
-      hintText = `${escHtml(sizeBreakdown)} — <strong>${budget - total}m headroom</strong>`;
+      const headroom = budget - total;
+      const headroomDisplay = fmtDur(headroom);
+      hintText = `${escHtml(sizeBreakdown)} — <strong>${escHtml(headroomDisplay)} headroom</strong>`;
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
@@ -15202,7 +15227,7 @@ function _smgmtUpdateCapBar(label) {
 
     el.innerHTML =
       budgetLine +
-      `<div class="cap-bar">${barHtml}</div>` +
+      `<div class="cap-bar ${barColorClass}">${barHtml}</div>` +
       `<div class="${hintClass}">${hintText}</div>`;
   } catch (_) {
     el.innerHTML = '';

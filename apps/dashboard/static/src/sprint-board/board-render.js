@@ -1172,17 +1172,26 @@ export function _smgmtCardHtml(
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">
           <button class="smgmt-delete-btn"
+                  aria-label="Delete sprint"
+                  title="Delete sprint"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
-            <i class="ti ti-trash"></i> Delete</button>
+            <i class="ti ti-trash"></i></button>
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
-          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
-                  title="${finishDisabled ? "No open tickets" : "Finish sprint"}"
+          <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>
         </div>
       </div>
+      ${(function() {
+        const _ss = _smgmtCardStatusSentence(label, {
+          isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
+          isAwaitingMerge, planState, outcome, tickets,
+        });
+        return _ss ? `<div class="sc-status-line">${escHtml(_ss)}</div>` : "";
+      })()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       ${summaryHtml}
@@ -1536,6 +1545,51 @@ export function _smgmtTicketSize(t) {
 
 export function _smgmtTicketHasEstimate(t) {
   return _smgmtTicketSize(t) !== null;
+}
+
+/**
+ * Plain-language status sentence for a sprint card — shown directly under the
+ * sprint header to give the operator one unambiguous signal at a glance.
+ */
+export function _smgmtCardStatusSentence(label, opts) {
+  const {
+    isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
+    isAwaitingMerge, planState, outcome, tickets,
+  } = opts;
+  if (isRunning) return "";
+  if (isLinger) return "Sprint finished — snapshot kept 1 hour.";
+  if (isHasRework) {
+    const c = (outcome && outcome.counts) || {};
+    const done = c.done || 0;
+    const failed = c.failed || 0;
+    const total = outcome && Array.isArray(outcome.issues) ? outcome.issues.length : 0;
+    if (total > 0 && failed > 0) {
+      return `${done} of ${total} passed, ${failed} need${failed === 1 ? "s" : ""} rework — re-run or merge what passed.`;
+    }
+    return "Some tickets need rework — re-run or merge what passed.";
+  }
+  if (isReadyToMerge || isAwaitingMerge) {
+    return "All tickets passed. Ready to merge.";
+  }
+  if (isNext) {
+    if (_smgmtAnySprintRunning) {
+      const blocker = typeof _smgmtRunningBlockerShort === "function"
+        ? _smgmtRunningBlockerShort() : "";
+      return `Ready to run. Waiting on ${blocker}.`;
+    }
+    return "Ready to run.";
+  }
+  if (_smgmtAnySprintRunning) {
+    return "Blocked: another sprint is running.";
+  }
+  if (!planState || planState === "draft" || planState === "planning") {
+    return tickets.length === 0
+      ? "No tickets yet — drag some from the backlog."
+      : "Set a sprint goal to enable the run.";
+  }
+  return tickets.length === 0
+    ? "No tickets — add some from the backlog."
+    : "Planned.";
 }
 
 /** Short label for the sprint blocking Run, e.g. "S56". */

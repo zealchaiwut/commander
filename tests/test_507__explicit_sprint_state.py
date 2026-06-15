@@ -128,42 +128,28 @@ def test_is_sprint_running_stale_pid_but_state_completed(tmp_path):
     assert server._is_sprint_running(root, "sprint-5") is False
 
 
-def test_is_sprint_running_dead_pid_does_not_mutate_plan_json(tmp_path):
-    """plan.json=running but PID is dead → returns False; plan.json must be unchanged.
-
-    Issue #1096: _is_sprint_running is called from GET endpoints and must NOT
-    write plan.json.  The startup sweep (_sweep_plan_json_states) reconciles
-    stale plan.json files at boot time instead.
-    """
+def test_is_sprint_running_reconciles_dead_pid(tmp_path):
+    """plan.json=running but PID is dead → returns False; plan.json unchanged (read-only, #1096)."""
     root, sprints = _make_project_root(tmp_path)
     server._plan_json_set_state(root, "sprint-5", "running")
-    original_bytes = (sprints / "sprint-5-plan.json").read_bytes()
     # Write a clearly dead PID
     (sprints / "sprint-5-pid").write_text("999999999", encoding="utf-8")
     with patch("server.db.get_sprint", return_value=None):
         result = server._is_sprint_running(root, "sprint-5")
     assert result is False
-    after_bytes = (sprints / "sprint-5-plan.json").read_bytes()
-    assert after_bytes == original_bytes, (
-        "_is_sprint_running must not rewrite plan.json (issue #1096)"
-    )
+    # _is_sprint_running is read-only — plan.json must NOT be mutated
+    unchanged = server._read_plan_json(root, "sprint-5")
+    assert unchanged["state"] == "running"
+    assert "end_reason" not in unchanged
 
 
-def test_is_sprint_running_no_plan_no_pid_does_not_create_plan(tmp_path):
-    """No plan.json, no PID file → returns False; plan.json must NOT be created.
-
-    Issue #1096: _is_sprint_running is called from GET endpoints and must not
-    write plan.json.  Legacy plan.json creation moved to the sprint manager.
-    """
-    root, sprints = _make_project_root(tmp_path)
-    plan_path = sprints / "sprint-99-plan.json"
-    assert not plan_path.exists()
-    with patch("server.db.get_sprint", return_value=None):
-        result = server._is_sprint_running(root, "sprint-99")
+def test_is_sprint_running_no_plan_no_pid_not_running(tmp_path):
+    """No plan.json, no PID file → returns False; no lazy plan creation (#1096)."""
+    root, _ = _make_project_root(tmp_path)
+    result = server._is_sprint_running(root, "sprint-99")
     assert result is False
-    assert not plan_path.exists(), (
-        "_is_sprint_running must not create plan.json for legacy sprints (issue #1096)"
-    )
+    # Read-only path — plan.json must NOT be created
+    assert server._read_plan_json(root, "sprint-99") is None
 
 
 # ---------------------------------------------------------------------------

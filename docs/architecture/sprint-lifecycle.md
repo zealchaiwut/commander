@@ -144,16 +144,16 @@ develop
 
 - **Child sprint branches are created off the base sprint branch** (today they
   are created off develop — this changes).
-- **All children merge back into the base branch**, regardless of depth:
-  `68.6 → 68 → develop`, `68.5 → 68 → develop`. The immediate-parent label
-  (68.6's parent is 68.5) is **lineage display only** and never affects branch
-  targets.
-- **Passing work merges to base immediately.** When the tester passes a ticket
-  the work is merged child → base and the ticket gets the `UAT` label.
-  **`UAT` label literally means "merged to the base branch, awaiting UAT
-  review".** This holds even when the run overall is `needs_rework` (mixed
-  results): passed tickets' work is on base, so the next child — created off
-  base — sees it.
+- **Per-ticket merges land on the active sprint branch.** When sprint-68.2 is
+  running, gates pass → feature merges into `sprint/sprint-68.2`; gates fail →
+  no merge. Base sprint 68 merges into `sprint/sprint-68` the same way.
+- **Chain promotion happens only at Merge Sprint:** leftover child branches merge
+  into base in label order (`68.6 → 68`, `68.5 → 68`), then base → develop.
+  The immediate-parent label (68.6's parent is 68.5) is **lineage display only**
+  and never affects per-ticket merge targets.
+- **Passing work gets the `UAT` label** when merged onto the sprint branch for
+  that run. **`UAT` means "merged to the sprint branch, awaiting human Merge
+  Sprint".** develop is not touched until Merge Sprint.
 - develop receives code **only at Merge Sprint**.
 
 ### Merge Sprint (renames "Finish Sprint")
@@ -177,7 +177,7 @@ approval gate. A confirmation modal lists exactly what will happen:
 - Before dispatch, a **confirmation modal** lists the tickets that will move
   to the new child. Eligible tickets exclude:
   - the sprint summary issue, and
-  - tickets already carrying the `UAT` label (their work is merged to base).
+  - tickets already carrying the `UAT` label (their work is merged on a prior run).
 - If no ticket is eligible to move, Re-run is disabled.
 - A sub-sprint is a first-class sprint: its own column, branch, run, history
   row. The only parent linkage is a lineage flag shown on the History pane.
@@ -234,7 +234,7 @@ Sequencing to be agreed; each theme is independently shippable.
 | # | Theme | Main code areas |
 |---|-------|-----------------|
 | 1 | Lifecycle foundation — new enum in DB + legacy display mapping; derived `partial_finished`; remove all same-label re-dispatch paths | `apps/dashboard/db.py`, `server.py` dispatch routes, `static/src/sprint-board/run-controls.js` |
-| 2 | Branch/merge model — children off base; per-pass child→base merge; Merge Sprint (merge children in order → base → develop → close issues/PRs, keep labels); cancel → `needs_rework` + reason to summary issue | `services/sprint_manager/sprint_manager.py`, finish-sprint endpoint |
+| 2 | Branch/merge model — children off base; per-pass merge to active sprint branch; Merge Sprint (merge children in order → base → develop → close issues/PRs, keep labels); cancel → `needs_rework` + reason to summary issue | `services/sprint_manager/sprint_manager.py`, finish-sprint endpoint |
 | 3 | Reconciliation service — GitHub-state reconcile on refresh (stale-while-revalidate); end-of-run disk→DB ingest; remove render-time disk reads from outcome/history endpoints | new router service, `routers/sprint_history_service.py`, outcome endpoint in `server.py` |
 | 4 | UI — board: unified badges, no cancelled/run-stats, re-run confirmation modal with ticket-move list; History: `partial_finished`, DB-only duration, auto-refresh, state-gated verbs; run-stats ✕ only on `needs_rework` | `static/src/sprint-board/board-render.js`, `rerun-modal.js`, `project.html` History section |
 

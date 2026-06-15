@@ -441,6 +441,21 @@ def _normalize_state(raw: str | None) -> str:
     return _db().canonical_lifecycle(raw)
 
 
+def _lifecycle_display_state(lifecycle: str, end_reason: str | None, issues: list[dict]) -> str:
+    """Correct needs_rework rows that are successful natural ends (issue #1137)."""
+    if lifecycle != "needs_rework" or (end_reason or "") != "natural":
+        return lifecycle
+    if not issues:
+        return lifecycle
+    if all(
+        (i.get("state") or "").lower() == "merged"
+        or (i.get("agent_status") or "").lower() in ("completed", "done")
+        for i in issues
+    ):
+        return "ready_to_merge"
+    return lifecycle
+
+
 # ── record builders ───────────────────────────────────────────────────────────
 
 def _record_from_history(rec: dict) -> dict:
@@ -486,6 +501,8 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     from . import sprint_state  # noqa: PLC0415
     lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
     end_reason = row.get("end_reason") or enrich.get("end_reason")
+    issues = enrich["issues"]
+    lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
     # Prefer the durable `sprints` columns (written by the finish flow) over the
     # state file, so PR/Summary links on the ledger card don't go missing when an
@@ -576,9 +593,10 @@ def _label_base(label: str | None) -> str:
     return m.group(1) if m else (label or "")
 
 
-# Terminal lifecycle states for the partial_finished derivation: a parent with
-# children is "settled" only when every child reached one of these.
-_CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
+# Child states that close the partial_finished chain (sprint-lifecycle.md): a parent
+# stays partial_finished until every descendant reaches Merge Sprint (completed).
+# ready_to_merge means "run done, awaiting sign-off" — not chain-complete.
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
 
 
 def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
@@ -626,13 +644,19 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
 
         # Failed tickets are recorded facts — unless the sprint is already settled.
         if rec.get("failed_tickets") and rec.get("lifecycle_state") not in (
-            "running", "deleted", "completed",
+            "running", "deleted", "completed", "ready_to_merge",
         ):
             rec["lifecycle_state"] = "needs_rework"
             if not rec.get("failure_reason"):
                 rec["failure_reason"] = rec["failed_tickets"][-1].get("failure_reason")
 
-        rec.pop("plan_status", None)
+        plan_st_raw = rec.pop("plan_status", None)
+        if (
+            _normalize_state(plan_st_raw or "") == "completed"
+            and (rec.get("end_reason") or "") == "bulk_complete"
+        ):
+            rec["lifecycle_state"] = "completed"
+
         state_by_label[label] = rec.get("lifecycle_state") or "unknown"
 
     # Derived partial_finished pass — walk deepest children first so promotions
@@ -661,10 +685,14 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
         if unsettled:
             rec["lifecycle_state"] = "partial_finished"
             rec["partial_children"] = sorted(unsettled, key=_label_sub_index)
-        elif descendants:
-            # All children settled — the parent chain is complete.
-            rec["lifecycle_state"] = "completed"
-            state_by_label[label] = "completed"
+        elif descendants and own in ("needs_rework", "partial_finished"):
+            # Superseded parent only — not a sibling still at ready_to_merge.
+            if all(
+                state_by_label.get(c, "unknown") in _CHILD_SETTLED_STATES
+                for c in descendants
+            ):
+                rec["lifecycle_state"] = "completed"
+                state_by_label[label] = "completed"
 
     _fill_missing_links(records, sprints_dirs)
 

@@ -107,7 +107,22 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
 
     canonical = _db().canonical_lifecycle(stored)
     if has_rework and canonical in ("ready_to_merge", "completed"):
-        return {"state": "needs_rework", "end_reason": row.get("end_reason") or "github-reconcile"}
+        # A natural successful run end must not be downgraded because GitHub
+        # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).
+        end_reason = row.get("end_reason") or ""
+        if end_reason == "natural":
+            try:
+                import json
+                issues = json.loads(row.get("issues_json") or "[]")
+                if issues and all(
+                    (i.get("state") or "").lower() == "merged"
+                    or (i.get("agent_status") or "").lower() in ("completed", "done")
+                    for i in issues
+                ):
+                    return None
+            except Exception:
+                pass
+        return {"state": "needs_rework", "end_reason": end_reason or "github-reconcile"}
     if not has_rework and canonical == "needs_rework" and stored in ("needs_rework", "failed", "cancelled"):
         # All tickets settled on GitHub — promote to ready_to_merge when plausible.
         failed_in_db = False
@@ -136,12 +151,13 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     if not patch:
         return False
     # AC4: all writes go through transition_sprint_state, not direct DB calls.
-    return transition_sprint_state(
+    result = transition_sprint_state(
         label,
         patch["state"],
         actor="reconcile",
         end_reason=patch.get("end_reason"),
     )
+    return result.accepted
 
 
 def reconcile_project(project: str, limit: int = 40) -> list[str]:

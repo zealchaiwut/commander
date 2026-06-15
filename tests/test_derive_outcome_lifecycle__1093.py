@@ -68,7 +68,9 @@ def test_derive_outcome_lifecycle__parent_terminal_all_children_settled(fresh_db
         conn.commit()
 
     result = _derive_outcome_lifecycle("parent-sprint", project_root, "test-project", "completed", "completed", 0)
-    assert result == "completed", "Expected DB state (completed) when all children are settled"
+    assert result == "partial_finished", (
+        "ready_to_merge child is unsettled — parent stays partial_finished"
+    )
 
 
 def test_derive_outcome_lifecycle__parent_nonterminal_child_unsettled(fresh_db, project_root):

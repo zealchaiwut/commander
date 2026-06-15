@@ -287,7 +287,7 @@ For each issue the manager:
 1. Dispatches the Coder → implements the feature on a worktree branch
 2. Dispatches the Tester → writes pytest tests for each AC, runs them
 3. Runs the quality gates (cheap/deterministic first; see [Sprint Manager feature doc](features/sprint-manager.md#quality-gates))
-4. Gate pass → merges to the sprint base branch, labels ticket `UAT`
+4. Gate pass → merges to the active sprint branch, labels ticket `UAT`
 5. Gate fail → labels ticket `needs-rework` with an `end_reason`, posts a structured failure comment, moves on
 
 ### Common flags

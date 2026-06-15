@@ -8089,6 +8089,17 @@ def _outcome_from_ingested_row(
     stored_state = row.get("state") or ""
     lifecycle = db.canonical_lifecycle(stored_state)
     end_reason = row.get("end_reason")
+    if lifecycle == "needs_rework" and (end_reason or "") == "natural":
+        try:
+            _raw = json.loads(row.get("issues_json") or "[]")
+            if _raw and all(
+                (i.get("state") or "").lower() == "merged"
+                or (i.get("agent_status") or "").lower() in ("completed", "done")
+                for i in _raw
+            ):
+                lifecycle = "ready_to_merge"
+        except (json.JSONDecodeError, TypeError):
+            pass
     is_cancelled = lifecycle == "needs_rework" and (end_reason or "").startswith("stopped")
 
     try:
@@ -8179,7 +8190,8 @@ def _outcome_from_ingested_row(
     }
 
 
-_CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
+# Merge Sprint (completed) closes the chain; ready_to_merge is still open work.
+_CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
 _SPRINT_WORK_EXCLUDE_LABELS = frozenset({"sprint-summary", "docs", "documentation"})
 _SPRINT_UAT_LABELS = frozenset({"UAT", "UAT-approved", "released"})
 # Canonical lifecycle states that mean the sprint has finished (issue #1093).

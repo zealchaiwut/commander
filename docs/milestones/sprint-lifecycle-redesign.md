@@ -74,9 +74,9 @@ same-label re-runs.
 - [x] **Child sprint branches off base branch.** *Done 2026-06-12.*
   - `_create_sprint_branch(sprint_branch, parent_ref=…)` creates base sprints
     off `develop`, child sprints off `sprint/sprint-N`.
-  - `run_sprint` defaults `target_branch` to `_base_sprint_branch(label)` so
-    per-ticket merges land on base; coder/tester worktrees use the child
-    `sprint/{label}` branch.
+  - `run_sprint` defaults `target_branch` to `_sprint_branch_for_label(label)` so
+    per-ticket merges land on the active sprint branch; child branches are still
+    created off the base via `parent_ref=_base_sprint_branch(label)`.
 - [x] **End-of-run PR targets base; no auto-merge to develop.**
   - `_create_sprint_pr(..., pr_base=…)` creates child→base PRs only; the
     auto-merge block to develop was removed.

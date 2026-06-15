@@ -1537,10 +1537,12 @@ def get_sprint_progress(project: str = "", repo: str = ""):
     """
     repo_name = repo or (project or None)
 
+    key_project = project or repo or ""
+
     # ── 1. Try live in-memory status ─────────────────────────────────────────
     running = _all_sprints_running()
-    if project:
-        running = [r for r in running if r["project"] == project]
+    if key_project:
+        running = [r for r in running if r["project"] == key_project]
 
     for r in running:
         key = (r["project"], r["sprint_label"])
@@ -1586,12 +1588,11 @@ def get_sprint_progress(project: str = "", repo: str = ""):
             "source": "live",
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
-        _persist_sprint_progress(project or r["project"], result)
+        _persist_sprint_progress(key_project, result)
         return result
 
     # ── 2. Try persisted file ────────────────────────────────────────────────
-    file_project = project or ""
-    progress_path = _sprint_progress_file_path(file_project)
+    progress_path = _sprint_progress_file_path(key_project)
     if progress_path and progress_path.exists():
         try:
             cached = json.loads(progress_path.read_text(encoding="utf-8"))
@@ -1625,7 +1626,7 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         "source": "github",
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
-    _persist_sprint_progress(file_project, result)
+    _persist_sprint_progress(key_project, result)
     return result
 
 
@@ -10859,16 +10860,22 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             err_msg = exc.stderr.strip() if exc.stderr else str(exc)
             errors.append(f"#{issue_num}: {err_msg}")
 
-    # 3. Mark finished sprint member(s) completed in plan.json
+    # 3. Mark finished sprint member(s) completed in plan.json + sprints DB
+    _ended_at = datetime.now(timezone.utc).isoformat()
     for lbl in finish_labels:
         try:
             _plan_json_set_state(
                 project_root, lbl, "completed",
-                ended_at=datetime.now(timezone.utc).isoformat(),
+                ended_at=_ended_at,
                 end_reason="merge_sprint",
             )
         except Exception as exc:
             errors.append(f"plan.json update failed for {lbl}: {exc}")
+        _sprint_db_set_state(
+            lbl, repo, "completed",
+            ended_at=_ended_at,
+            end_reason="merge_sprint",
+        )
 
     # Invalidate caches so board refreshes
     github_client.invalidate("open_issues_body:")

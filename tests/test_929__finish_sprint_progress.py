@@ -141,6 +141,14 @@ def test_service_sets_current_for_merge():
     )
 
 
+def test_finish_syncs_lifecycle_db():
+    """Finish must mirror completed state into the sprints DB (History reads DB only)."""
+    svc = FINISH_PROGRESS_SVC.read_text()
+    server = (REPO_ROOT / "apps" / "dashboard" / "server.py").read_text()
+    assert "_sprint_db_set_state" in svc and "completed" in svc
+    assert "_sprint_db_set_state" in server and 'end_reason="merge_sprint"' in server
+
+
 def test_service_sets_current_for_cleanup():
     """AC3 — current must update to a cleanup-step label."""
     src = FINISH_PROGRESS_SVC.read_text()

@@ -13704,6 +13704,7 @@ function _smgmtLivePatch(label, live) {
     done: completeCount,
     total: totalCount,
     run_state: 'running',
+    source: 'live',
     fetched_at: Date.now(),
   };
 
@@ -20224,14 +20225,40 @@ function _sprintProgressRender() {
   }
 }
 
+/** Convert sprint label or number to compact pill text: sprint-75.2 → S75.2, 76 → S76. */
+function _sprintPillShortLabel(labelOrNum, fallbackNum) {
+  if (labelOrNum && String(labelOrNum).startsWith('sprint-')) {
+    const m = String(labelOrNum).match(/^sprint-(\d+(?:\.\d+)?)$/);
+    return m ? `S${m[1]}` : String(labelOrNum);
+  }
+  const n = (labelOrNum != null && labelOrNum !== '') ? labelOrNum : fallbackNum;
+  return `S${n}`;
+}
+
+/** True when the unified progress store should override GitHub nav-status for pills. */
+function _sprintStoreOverridesNav(store, d) {
+  if (!store || !store.has_sprint) return false;
+  if (store.source === 'live') return true;
+  if (!d || !d.has_sprint) return true;
+  const ghLabel = `sprint-${d.sprint}`;
+  if (store.sprint_label && store.sprint_label !== ghLabel) return true;
+  return store.sprint === d.sprint;
+}
+
 /** Fetch unified sprint progress from /api/sprint-progress and update the store. */
 async function _sprintProgressFetch() {
   const repo = _snavRepo();
   if (!repo) return;
   try {
-    const res = await fetch(`/api/sprint-progress?repo=${encodeURIComponent(repo)}`);
+    const res = await fetch(
+      `/api/sprint-progress?project=${encodeURIComponent(repo)}&repo=${encodeURIComponent(repo)}`
+    );
     if (!res.ok) return;
     const data = await res.json();
+    if (data.source === 'github' && _sprintProgressStore?.source === 'live') {
+      const age = Date.now() - (_sprintProgressStore.fetched_at || 0);
+      if (age < 300000) return;
+    }
     _sprintProgressStore = { ...data, fetched_at: Date.now() };
     _sprintProgressRender();
   } catch (_) { /* leave last-known state */ }
@@ -20278,17 +20305,20 @@ function _snavRenderSidebarBadge(slug, d) {
   // Determine run_state from the shared store (for current project) or GitHub data (others)
   const isCurrentProject = (slug === _slug);
   const store = isCurrentProject ? _sprintProgressStore : null;
-  const runState = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
+  const storeWins = _sprintStoreOverridesNav(store, d);
+  const runState = (storeWins && store) ? store.run_state : (d.state || 'running');
 
   let badgeClass, label;
   if (runState === 'finished')   { badgeClass = 'sb-sprint-badge--finished';  label = 'Finished';   }
   else if (rework > 0)           { badgeClass = 'sb-sprint-badge--rework';    label = 'Has rework'; }
-  else if (active > 0)           { badgeClass = 'sb-sprint-badge--running';   label = 'Running';    }
+  else if (active > 0 || storeWins) { badgeClass = 'sb-sprint-badge--running'; label = 'Running'; }
   else                           { badgeClass = 'sb-sprint-badge--preflight'; label = 'Pre-flight'; }
 
-  // Use shared store for done/total (current project) to stay in sync with other pills
-  const total = (store && store.has_sprint && store.sprint === d.sprint) ? store.total : (d.total || 0);
-  const num = (store && store.has_sprint && store.sprint === d.sprint)
+  const sprintShort = storeWins
+    ? _sprintPillShortLabel(store.sprint_label, store.sprint)
+    : _sprintPillShortLabel(null, d.sprint);
+  const total = storeWins ? store.total : (d.total || 0);
+  const num = storeWins
     ? store.done
     : (runState === 'finished')
       ? (d.done || 0) + (d.uat || 0)
@@ -20299,7 +20329,7 @@ function _snavRenderSidebarBadge(slug, d) {
     _sprintProgressFetch().catch(() => {});
   }
 
-  const text = `S${d.sprint} ${num}/${total}`;
+  const text = `${sprintShort} ${num}/${total}`;
 
   const badge = document.createElement('span');
   badge.className = `sb-sprint-badge ${badgeClass}`;
@@ -20401,22 +20431,25 @@ function _snavRenderPill() {
 
   // Use shared store for done/total to stay in sync with the other two pills
   const store = _sprintProgressStore;
-  const run_state = (store && store.has_sprint) ? store.run_state : (d.state || 'running');
+  const storeWins = _sprintStoreOverridesNav(store, d);
+  const run_state = storeWins ? store.run_state : (d.state || 'running');
+  const sprintShort = storeWins
+    ? _sprintPillShortLabel(store.sprint_label, store.sprint)
+    : _sprintPillShortLabel(null, d.sprint);
 
   if (run_state === 'finished') {
     dot.className = 'snav-dot snav-dot--finished';
-    const completedF = (store && store.has_sprint && store.sprint === d.sprint)
+    const completedF = storeWins
       ? store.done
       : (d.done || 0) + (d.uat || 0);
-    const finTotal = (store && store.has_sprint && store.sprint === d.sprint)
+    const finTotal = storeWins
       ? store.total
       : (d.total || 0);
-    text.textContent = `S${d.sprint} · ${completedF}/${finTotal}`;
+    text.textContent = `${sprintShort} · ${completedF}/${finTotal}`;
   } else {
     const cols = d.columns || {};
     const rework = cols['needs-rework'] || 0;
-    // Use shared store for the done/total fraction (single source of truth across all pills)
-    const complete = (store && store.has_sprint && store.sprint === d.sprint)
+    const complete = storeWins
       ? store.done
       : (() => {
           const liveData = _smgmtLiveCache[`sprint-${d.sprint}`];
@@ -20426,7 +20459,7 @@ function _snavRenderPill() {
           }
           return _snavSettledDone(d.total, cols);
         })();
-    const total = (store && store.has_sprint && store.sprint === d.sprint)
+    const total = storeWins
       ? store.total
       : (d.total || 0);
     const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
@@ -20442,7 +20475,7 @@ function _snavRenderPill() {
       if (names.length) agentsHtml = ` · <span class="snav-agents">${escHtml(names.join('+'))}</span>`;
     }
     dot.className = rework > 0 ? 'snav-dot snav-dot--rework' : 'snav-dot snav-dot--running';
-    text.innerHTML = `S${d.sprint} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}${agentsHtml}`;
+    text.innerHTML = `${sprintShort} · ${complete}/${total}${doneHtml}${uatHtml}${reworkHtml}${agentsHtml}`;
   }
 }
 

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Board — collapsed lineage with merge marks</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <style>
+    :root{
+      --bg:#f9fafb;--surface:#fff;--surface-2:#f3f4f6;--surface-hover:#f5f6f8;--border:#e5e7eb;
+      --text:#111827;--text-muted:#6b7280;--text-sub:#9ca3af;
+      --green:#16a34a;--green-bg:#dcfce7;--amber:#d97706;--amber-bg:#fef3c7;
+      --red:#dc2626;--red-bg:#fee2e2;--blue:#2563eb;--blue-bg:#dbeafe;
+      --purple:#7c3aed;--purple-bg:#ede9fe;--mono:'SF Mono','Fira Code','Cascadia Code',monospace;
+    }
+    [data-theme="dark"]{
+      --bg:#0d0d0d;--surface:#161616;--surface-2:#1e1e1e;--surface-hover:#222;--border:#2a2a2a;
+      --text:#e5e7eb;--text-muted:#9ca3af;--text-sub:#6b7280;
+      --green:#22c55e;--green-bg:rgba(34,197,94,.13);--amber:#eab308;--amber-bg:rgba(234,179,8,.13);
+      --red:#f87171;--red-bg:rgba(239,68,68,.13);--blue:#60a5fa;--blue-bg:rgba(96,165,250,.13);
+      --purple:#a78bfa;--purple-bg:rgba(167,139,250,.13);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;padding:26px 22px;min-height:100vh}
+    .wrap{max-width:880px;margin:0 auto}
+    .theme-toggle{position:fixed;top:16px;right:16px;background:var(--surface);border:1px solid var(--border);padding:6px 11px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;font-family:var(--mono);z-index:100}
+    .note{font-size:12px;color:var(--text-sub);font-family:var(--mono);line-height:1.6;margin-bottom:14px}
+
+    .focus{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px 16px;margin-bottom:16px}
+    .focus-title{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-sub);margin-bottom:9px}
+    .focus-step{display:flex;align-items:center;gap:10px;font-size:13px;padding:4px 0}
+    .fnum{width:18px;height:18px;border-radius:50%;background:var(--text);color:var(--surface);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--mono)}
+    .fnum.muted{background:var(--surface-2);color:var(--text-sub)}
+    .focus-step b{font-weight:700}.focus-step .mono{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+
+    .seclabel{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-sub);margin:16px 2px 8px;display:flex;align-items:center;gap:7px}
+    .seclabel .cnt{font-family:var(--mono);font-weight:500}
+
+    /* ===== collapsed lineage row ===== */
+    .lin{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px}
+    .lin-row{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer}
+    .lin-row:hover{background:var(--surface-hover)}
+    .lchev{color:var(--text-sub);font-size:14px;transition:transform .15s}
+    .lin.open .lchev{transform:rotate(90deg)}
+    .state-ic{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+    .state-ic.merged{background:var(--green-bg);color:var(--green)}
+    .state-ic.needsmerge{background:var(--amber-bg);color:var(--amber)}
+    .state-ic.failed{background:var(--red-bg);color:var(--red)}
+    .lname{font-weight:700;font-size:14px}
+    .mark{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;display:inline-flex;align-items:center;gap:4px}
+    .mark.merged{background:var(--green-bg);color:var(--green)}
+    .mark.needsmerge{background:var(--amber-bg);color:var(--amber)}
+    .mark.failed{background:var(--red-bg);color:var(--red)}
+    .lsum{font-family:var(--mono);font-size:12px;color:var(--text-sub)}
+    .lsum .down{color:var(--text-muted)}
+    .lright{margin-left:auto;display:flex;align-items:center;gap:10px}
+    .ltime{font-family:var(--mono);font-size:11px;color:var(--text-sub)}
+    .lmenu{color:var(--text-sub);font-size:15px}
+
+    .lin-detail{display:none;border-top:1px solid var(--border);padding:6px 8px 8px;background:var(--surface-2)}
+    .lin.open .lin-detail{display:block}
+    .dt-row{display:flex;align-items:center;gap:10px;padding:7px 10px;font-size:13px}
+    .dt-ic{font-size:14px;width:16px;text-align:center}
+    .dt-ic.ok{color:var(--green)}.dt-ic.carry{color:var(--amber)}.dt-ic.fail{color:var(--red)}
+    .dt-num{font-family:var(--mono);font-size:12px;color:var(--text-sub);min-width:42px}
+    .dt-title{flex:1;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dt-tag{font-family:var(--mono);font-size:10px;color:var(--text-sub)}
+    .dt-tag.carry{color:var(--amber)}
+    .dt-actions{padding:8px 10px 4px;display:flex;gap:6px}
+    .btn-2nd{font-size:12px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);border-radius:6px;padding:6px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+    .btn-2nd:hover{background:var(--surface-hover);color:var(--text)}
+    .btn-merge{font-size:12px;font-weight:600;border:1px solid var(--green);background:var(--green);color:#fff;border-radius:6px;padding:6px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+
+    /* ===== active sprint (expanded) ===== */
+    .sprint{background:var(--surface);border:1px solid var(--green);box-shadow:0 0 0 2px var(--green-bg);border-radius:11px;overflow:hidden;margin-bottom:12px}
+    .sp-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--border)}
+    .chev{color:var(--text-sub);font-size:15px}
+    .spname{font-weight:700;font-size:15px}
+    .badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;background:var(--green-bg);color:var(--green)}
+    .spmeta{font-family:var(--mono);font-size:12px;color:var(--text-sub)}
+    .sp-actions{margin-left:auto;display:flex;gap:6px;align-items:center}
+    .iconbtn{background:none;border:none;color:var(--text-sub);cursor:pointer;padding:6px;border-radius:6px;display:flex;font-size:15px}
+    .iconbtn:hover{background:var(--surface-hover);color:var(--red)}
+    .btn-run{font-size:13px;font-weight:600;border:1px solid var(--green);background:var(--green);color:#fff;border-radius:7px;padding:7px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .btn-run:disabled{background:var(--surface-2);color:var(--text-sub);border-color:var(--border);cursor:not-allowed}
+
+    .decide{display:flex;align-items:center;gap:10px;margin:12px 16px 0;padding:11px 14px;border-radius:8px;background:var(--surface-2)}
+    .decide i{font-size:16px;color:var(--text-sub);flex-shrink:0}
+    .decide-txt{flex:1;font-size:13px;line-height:1.45}.decide-txt b{font-weight:700}.decide-txt .mono{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+    .preview{margin:12px 16px 0;padding:9px 13px;background:var(--surface-2);border-radius:8px;font-family:var(--mono);font-size:11px;color:var(--text-sub);display:flex;align-items:center;gap:8px}
+    .preview .ok{color:var(--green)}
+    .budget{margin:12px 16px 0}
+    .budget-top{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-bottom:5px}.budget-top b{color:var(--text);font-weight:700}
+    .bbar{height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden}
+    .bfill{height:100%;border-radius:999px}.bfill.full{background:var(--amber)}
+    .budget-note{font-size:11px;color:var(--text-sub);font-family:var(--mono);margin-top:5px}.budget-note .full{color:var(--amber);font-weight:700}
+    .tickets{padding:6px 8px 8px}
+    .trow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px}
+    .trow:hover{background:var(--surface-hover)}
+    .grip{color:var(--text-sub);font-size:13px;cursor:grab}
+    .tstatus{font-size:14px;color:var(--text-sub)}.tstatus.rejected{color:var(--red)}
+    .tnum{font-family:var(--mono);font-size:12px;color:var(--text-sub);min-width:42px}
+    .ttitle{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .tsize{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--surface-2);color:var(--text-sub)}
+    .carry-tag{font-family:var(--mono);font-size:9px;color:var(--amber);font-weight:700}
+    .tmin{font-family:var(--mono);font-size:11px;color:var(--text-sub);min-width:40px;text-align:right}
+    .tmenu{color:var(--text-sub);font-size:14px}
+
+    .backlog{background:var(--surface);border:1px solid var(--border);border-radius:11px;overflow:hidden}
+    .bk-filters{display:flex;gap:6px;padding:11px 16px;border-bottom:1px solid var(--border);align-items:center}
+    .fchip{font-family:var(--mono);font-size:11px;padding:4px 11px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer}
+    .fchip.active{background:var(--text);color:var(--surface);border-color:var(--text)}
+    .bk-grid{display:grid;grid-template-columns:1fr 1fr}
+    .bk-row{display:flex;align-items:center;gap:9px;padding:8px 16px;font-size:12.5px;border-top:1px solid var(--border)}
+    .bk-row .tnum{min-width:46px}.bk-row .ttitle{color:var(--text-muted)}
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="document.documentElement.setAttribute('data-theme',document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')"><i class="ti ti-moon"></i> Theme</button>
+
+  <div class="wrap">
+    <div class="note">Ancestor sprints collapse to one marked line each — you can see at a glance which were MERGED (green), which still need a merge decision (amber), and which FAILED (red), plus what each carried down. Only the active sprint (73.3) stays expanded. Click any collapsed row to see its tickets, marked merged ✓ or carried →.</div>
+
+    <!-- FOCUS GUIDE -->
+    <div class="focus">
+      <div class="focus-title">What to do, in order</div>
+      <div class="focus-step"><span class="fnum">1</span> <span><b>Sprint 73.1</b> still needs a merge decision — <span class="mono">2 merged, 1 reworked</span></span></div>
+      <div class="focus-step"><span class="fnum">2</span> <span><b>Sprint 73.3</b> is ready to run — <span class="mono">blocked: S71.1 running</span></span></div>
+      <div class="focus-step"><span class="fnum muted">✓</span> <span style="color:var(--text-muted)">Sprint 73 merged · Sprint 73.2 failed (carried into 73.3) — both resolved</span></div>
+    </div>
+
+    <!-- ===== LINEAGE (collapsed, marked) ===== -->
+    <div class="seclabel"><i class="ti ti-git-branch"></i> Lineage <span class="cnt">73 → 73.3</span></div>
+
+    <!-- 73 merged -->
+    <div class="lin" onclick="this.classList.toggle('open')">
+      <div class="lin-row">
+        <i class="ti ti-chevron-right lchev"></i>
+        <span class="state-ic merged"><i class="ti ti-git-merge"></i></span>
+        <span class="lname">Sprint 73</span>
+        <span class="mark merged"><i class="ti ti-check" style="font-size:10px"></i> Merged</span>
+        <span class="lsum">3 merged <span class="down">· 1 reworked → 73.1</span></span>
+        <span class="lright"><span class="ltime">26m</span><i class="ti ti-menu-2 lmenu"></i></span>
+      </div>
+      <div class="lin-detail" onclick="event.stopPropagation()">
+        <div class="dt-row"><span class="dt-ic ok"><i class="ti ti-check"></i></span><span class="dt-num">#930</span><span class="dt-title">Batch reestimate: shared progress bar</span><span class="dt-tag">merged</span></div>
+        <div class="dt-row"><span class="dt-ic ok"><i class="ti ti-check"></i></span><span class="dt-num">#903</span><span class="dt-title">Set Activity as default landing view</span><span class="dt-tag">merged</span></div>
+        <div class="dt-row"><span class="dt-ic ok"><i class="ti ti-check"></i></span><span class="dt-num">#901</span><span class="dt-title">Redesign Activity view</span><span class="dt-tag">merged</span></div>
+        <div class="dt-row"><span class="dt-ic carry"><i class="ti ti-arrow-down"></i></span><span class="dt-num">#926</span><span class="dt-title">Restructure running pane</span><span class="dt-tag carry">carried → 73.1</span></div>
+      </div>
+    </div>
+
+    <!-- 73.1 needs merge (the one actionable ancestor) -->
+    <div class="lin" onclick="this.classList.toggle('open')">
+      <div class="lin-row">
+        <i class="ti ti-chevron-right lchev"></i>
+        <span class="state-ic needsmerge"><i class="ti ti-alert-triangle"></i></span>
+        <span class="lname">Sprint 73.1</span>
+        <span class="mark needsmerge"><i class="ti ti-alert-triangle" style="font-size:10px"></i> Needs merge</span>
+        <span class="lsum">2 passed <span class="down">· 1 reworked → 73.2 · not merged yet</span></span>
+        <span class="lright"><span class="ltime">58m</span><i class="ti ti-menu-2 lmenu"></i></span>
+      </div>
+      <div class="lin-detail" onclick="event.stopPropagation()">
+        <div class="dt-row"><span class="dt-ic ok"><i class="ti ti-check"></i></span><span class="dt-num">#933</span><span class="dt-title">Pre-flight checks as live stepper</span><span class="dt-tag">passed · awaiting merge</span></div>
+        <div class="dt-row"><span class="dt-ic ok"><i class="ti ti-check"></i></span><span class="dt-num">#927</span><span class="dt-title">Running pane: two-queue lanes</span><span class="dt-tag">passed · awaiting merge</span></div>
+        <div class="dt-row"><span class="dt-ic carry"><i class="ti ti-arrow-down"></i></span><span class="dt-num">#931</span><span class="dt-title">Bulk Create: shared progress component</span><span class="dt-tag carry">reworked → 73.2</span></div>
+        <div class="dt-actions">
+          <button class="btn-2nd"><i class="ti ti-refresh"></i> Re-run #931</button>
+          <button class="btn-merge"><i class="ti ti-git-merge"></i> Merge 2 passed</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 73.2 failed -->
+    <div class="lin" onclick="this.classList.toggle('open')">
+      <div class="lin-row">
+        <i class="ti ti-chevron-right lchev"></i>
+        <span class="state-ic failed"><i class="ti ti-x"></i></span>
+        <span class="lname">Sprint 73.2</span>
+        <span class="mark failed"><i class="ti ti-x" style="font-size:10px"></i> Failed</span>
+        <span class="lsum">0 merged <span class="down">· 3 carried → 73.3</span></span>
+        <span class="lright"><span class="ltime">33m</span><i class="ti ti-menu-2 lmenu"></i></span>
+      </div>
+      <div class="lin-detail" onclick="event.stopPropagation()">
+        <div class="dt-row"><span class="dt-ic fail"><i class="ti ti-x"></i></span><span class="dt-num">#932</span><span class="dt-title">Sprint kickoff stepper</span><span class="dt-tag carry">fix-loop exhausted → 73.3</span></div>
+        <div class="dt-row"><span class="dt-ic fail"><i class="ti ti-x"></i></span><span class="dt-num">#928</span><span class="dt-title">Extract reusable progress component</span><span class="dt-tag carry">tester exited → 73.3</span></div>
+        <div class="dt-row"><span class="dt-ic fail"><i class="ti ti-x"></i></span><span class="dt-num">#929</span><span class="dt-title">Progress component while finishing sprint</span><span class="dt-tag carry">tester exited → 73.3</span></div>
+      </div>
+    </div>
+
+    <!-- ===== ACTIVE SPRINT (expanded) ===== -->
+    <div class="seclabel"><i class="ti ti-player-play" style="color:var(--green)"></i> Up next — your live sprint <span class="cnt">1</span></div>
+
+    <div class="sprint">
+      <div class="sp-head">
+        <i class="ti ti-chevron-down chev"></i>
+        <span class="spname">Sprint 73.3</span>
+        <span class="badge">Next up</span>
+        <span class="spmeta">3 tickets · carried from 73.2 · ~3h</span>
+        <span class="sp-actions">
+          <button class="iconbtn" title="Delete"><i class="ti ti-trash"></i></button>
+          <button class="btn-run" disabled><i class="ti ti-player-play"></i> Run Sprint</button>
+        </span>
+      </div>
+      <div class="decide">
+        <i class="ti ti-clock"></i>
+        <span class="decide-txt"><b>Ready to run.</b> Holds the 3 tickets carried from <span class="mono">73.2</span>. Waiting on <span class="mono">S71.1</span> to finish — becomes runnable automatically.</span>
+      </div>
+      <div class="preview"><i class="ti ti-route"></i> Run preview: <span class="ok">no cycles</span> · <span class="ok">no conflicts</span> · 1 level</div>
+      <div class="budget">
+        <div class="budget-top"><span>Sprint budget</span><span><b>3h</b> of 3h</span></div>
+        <div class="bbar"><div class="bfill full" style="width:100%"></div></div>
+        <div class="budget-note">XL×3 — <span class="full">0m headroom</span></div>
+      </div>
+      <div class="tickets">
+        <div class="trow"><span class="grip"><i class="ti ti-grip-vertical"></i></span><i class="ti ti-circle-x tstatus rejected"></i><span class="tnum">#932</span><span class="ttitle">Sprint kickoff: stepper for run/re-run flow</span><span class="carry-tag">↩ from 73.2</span><span class="tsize">XL</span><span class="tmin">60m</span><i class="ti ti-menu-2 tmenu"></i></div>
+        <div class="trow"><span class="grip"><i class="ti ti-grip-vertical"></i></span><i class="ti ti-circle-dot tstatus"></i><span class="tnum">#929</span><span class="ttitle">Show shared progress component while finishing sprint</span><span class="carry-tag">↩ from 73.2</span><span class="tsize">XL</span><span class="tmin">60m</span><i class="ti ti-menu-2 tmenu"></i></div>
+        <div class="trow"><span class="grip"><i class="ti ti-grip-vertical"></i></span><i class="ti ti-circle-dot tstatus"></i><span class="tnum">#928</span><span class="ttitle">Extract reusable progress/activity component</span><span class="carry-tag">↩ from 73.2</span><span class="tsize">XL</span><span class="tmin">60m</span><i class="ti ti-menu-2 tmenu"></i></div>
+      </div>
+    </div>
+
+    <!-- ===== BACKLOG ===== -->
+    <div class="seclabel"><i class="ti ti-inbox"></i> Backlog <span class="cnt">52</span></div>
+    <div class="backlog">
+      <div class="bk-filters">
+        <span class="fchip active">All</span><span class="fchip">S</span><span class="fchip">M</span><span class="fchip">L</span><span class="fchip">XL</span><span class="fchip">unestimated</span>
+        <span style="margin-left:auto"><button class="btn-2nd"><i class="ti ti-ruler"></i> Estimate unsized</button></span>
+      </div>
+      <div class="bk-grid">
+        <div class="bk-row"><span class="tnum">#1005</span><span class="ttitle">[follow-up] Remove dead code</span></div>
+        <div class="bk-row"><span class="tnum">#1004</span><span class="ttitle">[follow-up] Extract duplicate helper</span></div>
+        <div class="bk-row"><span class="tnum">#1003</span><span class="ttitle">[follow-up] Activity backend cleanup</span></div>
+        <div class="bk-row"><span class="tnum">#1000</span><span class="ttitle">[follow-up] Keep background job alive</span></div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

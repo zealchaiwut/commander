@@ -875,25 +875,6 @@ Replace the existing draft (${data.existing_label})?`
     }
     return '<span class="iss-icon idle"></span>';
   }
-  function _histProgressText(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    if (!issues.length)
-      return "";
-    const done = issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
-    return `${done}/${issues.length} done`;
-  }
-  function _histEstBarMini(s) {
-    const acc = s.estimate_accuracy;
-    if (acc == null || isNaN(acc))
-      return "";
-    const accPct = acc <= 1 ? Math.round(acc * 100) : Math.round(Math.min(100, 100 / acc));
-    const tone = acc > 1.25 ? "var(--red)" : acc > 1 ? "var(--amber)" : "var(--green)";
-    const fill = Math.min(100, Math.max(10, accPct));
-    return `<span class="hist-est-mini" title="Estimate accuracy ${Number(acc).toFixed(2)}\xD7">
-    <span class="hist-est-mini-fill" style="width:${fill}%;background:${tone}"></span>
-    <span class="hist-est-mini-lbl">${accPct}%</span>
-  </span>`;
-  }
   function _histIssueTitle(iss, s) {
     if (iss.title)
       return String(iss.title);
@@ -944,42 +925,6 @@ Replace the existing draft (${data.existing_label})?`
       return false;
     return true;
   }
-  function _histFailedBlockHtml(s) {
-    if (!_histSprintFailed(s))
-      return "";
-    const state = (s.lifecycle_state || "").toLowerCase();
-    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-    const sprintReason = s.failure_reason || s.end_reason;
-    if (!failed.length && !sprintReason)
-      return "";
-    const items = failed.map((ft) => {
-      const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
-      const reason = ft.failure_reason || "Agent failed";
-      return `<div class="hist-fail-item"><span class="fail-id">${escHtml(String(id))}</span><span>${escHtml(String(reason))}</span></div>`;
-    }).join("");
-    const summary = !failed.length && sprintReason ? `<div class="hist-fail-item"><span>${escHtml(String(sprintReason))}</span></div>` : "";
-    return `<div class="hist-fail-block">
-    <div class="fail-head"><i class="ti ti-alert-triangle"></i> Sprint failed</div>
-    ${items}${summary}
-  </div>`;
-  }
-  function _histPartialChildrenHtml(s) {
-    const state = (s.lifecycle_state || "").toLowerCase();
-    if (state !== "partial_finished")
-      return "";
-    const children = Array.isArray(s.partial_children) ? s.partial_children : [];
-    if (!children.length)
-      return "";
-    const links = children.map((c) => {
-      const lbl = escHtml(c);
-      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(c) : c;
-      return `<button type="button" class="hist-partial-link" onclick="event.stopPropagation();_histFocusLabel('${lbl}')">${escHtml(display)}</button>`;
-    }).join("");
-    return `<div class="hist-partial-block">
-    <i class="ti ti-arrows-split"></i>
-    <span>Tickets moved to child sprint${children.length !== 1 ? "s" : ""}: ${links}</span>
-  </div>`;
-  }
   function _histFocusLabel(label) {
     if (!label)
       return;
@@ -988,19 +933,6 @@ Replace the existing draft (${data.existing_label})?`
     const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-  function _histIssueListHtml(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const isChild = _histIsChild(s.label);
-    const failedBlock = _histFailedBlockHtml(s);
-    const partialBlock = _histPartialChildrenHtml(s);
-    if (!issues.length) {
-      if (partialBlock)
-        return `${failedBlock}${partialBlock}`;
-      const empty = failedBlock ? "" : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
-      return `${failedBlock}${empty}`;
-    }
-    return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>`;
   }
   function _histRepo(s) {
     const cached = _cachedFullRepo[_slug];
@@ -1049,46 +981,6 @@ Replace the existing draft (${data.existing_label})?`
     html += `<a class="hist-link link-logs" href="${escHtml(_histLogsUrl(s))}">
              <i class="ti ti-list-details"></i> Logs</a>`;
     return `<div class="hist-links">${html}</div>`;
-  }
-  function _histHeadActionsHtml(s) {
-    let html = "";
-    const pr = _histPrUrl(s);
-    if (pr) {
-      html += `<a class="hist-head-btn link-pr" href="${escHtml(pr)}" target="_blank" rel="noopener"
-      onclick="event.stopPropagation()" title="Open sprint PR">
-      <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
-    }
-    const sum = _histSummaryUrl(s);
-    if (sum) {
-      const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num}` : "Summary";
-      html += `<a class="hist-head-btn link-sum" href="${escHtml(sum)}" target="_blank" rel="noopener"
-      onclick="event.stopPropagation()" title="Open sprint summary">
-      <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
-    }
-    html += `<a class="hist-head-btn" href="${escHtml(_histLogsUrl(s))}"
-    onclick="event.stopPropagation()" title="Open sprint logs">
-    <i class="ti ti-list-details"></i> Logs</a>`;
-    if (!_histIsLocked(s.lifecycle_state)) {
-      const state = (s.lifecycle_state || "").toLowerCase();
-      const lbl = escHtml(s.label || "");
-      const rawLabel = s.label || "";
-      if (state === "needs_rework" || state === "failed" || state === "cancelled") {
-        const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-        const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-        const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
-        html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
-        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
-        <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
-      } else if (state === "completed" || state === "ready_to_merge") {
-        html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
-        onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
-        <i class="ti ti-flag-check"></i> Finish sprint</button>`;
-        html += `<button type="button" class="hist-head-btn hist-head-btn--delete"
-        onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')">
-        <i class="ti ti-trash"></i> Delete</button>`;
-      }
-    }
-    return html ? `<span class="hist-head-actions">${html}</span>` : "";
   }
   function _histStateChip(state, sprint) {
     const s = (state || "unknown").toLowerCase();
@@ -1288,24 +1180,6 @@ Replace the existing draft (${data.existing_label})?`
       stale_labels: "Status labels"
     }[name] || name;
   }
-  function _histPostSprintChipHtml(s) {
-    const ps = s.post_sprint;
-    if (!ps)
-      return "";
-    const doc = ps.documenter;
-    const rev = ps.reviewer;
-    const docRan = doc && doc.status && doc.status !== "skipped";
-    const revRan = rev && rev.status && rev.status !== "skipped";
-    if (!docRan && !revRan)
-      return "";
-    const parts = [];
-    if (docRan)
-      parts.push("documenter");
-    if (revRan)
-      parts.push("reviewer");
-    return `<span class="post-sprint-chip" title="${escHtml(ps.note || "Post-sprint agents")}">
-    <i class="ti ti-clock-play"></i> post-sprint</span>`;
-  }
   function _histIssueUrl(num) {
     if (num == null)
       return "";
@@ -1387,54 +1261,169 @@ Replace the existing draft (${data.existing_label})?`
     ${rows}
   </div>`;
   }
-  function _histReconcileHtml(s) {
+  function _histLooseEndBandHtml(s) {
+    const r = s.reconciliation;
+    if (r && Array.isArray(r.checks)) {
+      const staleCheck = r.checks.find((c) => !c.ok && c.name === "stale_labels");
+      if (staleCheck) {
+        const detail = staleCheck.detail || "Clear stale status labels";
+        return `<div class="hist-loose-end-band">
+        <i class="ti ti-tag"></i>
+        <span class="hist-band-msg">${escHtml(detail)}</span>
+      </div>`;
+      }
+    }
+    const g = _histStaleBySprint[s.label];
+    if (g && g.count) {
+      const n = g.count;
+      const word = n === 1 ? "stale branch" : "stale branches";
+      const lbl = escHtml(s.label || "");
+      return `<div class="hist-loose-end-band">
+      <i class="ti ti-git-branch"></i>
+      <span class="hist-band-msg">${n} ${word}</span>
+      <button type="button" class="hist-band-cta"
+        onclick="event.stopPropagation();_histCleanupStale('${lbl}')">Clean up</button>
+    </div>`;
+    }
+    return "";
+  }
+  function _histWhatListHtml(s) {
+    if (_histIsLocked(s.lifecycle_state))
+      return "";
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (_histSprintFailed(s)) {
+      const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+      const sprintReason = s.failure_reason || s.end_reason;
+      if (!failed.length && !sprintReason)
+        return "";
+      const items = failed.map((ft) => {
+        const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
+        const reason = ft.failure_reason || "Agent failed";
+        const ts = ft.failed_at || ft.timestamp || "";
+        const tsHtml = ts ? `<span class="wl-ts">${escHtml(String(ts).slice(0, 16).replace("T", " "))}</span>` : "";
+        const logHref = escHtml(_histLogsUrl(s));
+        return `<div class="wl-item">
+        <span class="wl-id">${escHtml(String(id))}</span>
+        <span class="wl-reason">${escHtml(String(reason))}</span>
+        ${tsHtml}
+        <a class="wl-log" href="${logHref}" onclick="event.stopPropagation()" title="View logs">log</a>
+      </div>`;
+      }).join("");
+      const summary = !failed.length && sprintReason ? `<div class="wl-item"><span class="wl-reason">${escHtml(String(sprintReason))}</span></div>` : "";
+      return `<div class="hist-what-list">
+      <div class="hist-what-head"><i class="ti ti-x"></i> Why it failed</div>
+      ${items}${summary}
+    </div>`;
+    }
+    if (state === "partial_finished" || state === "needs_rework") {
+      const issues = Array.isArray(s.issues) ? s.issues : [];
+      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
+      if (!unfinished.length)
+        return "";
+      const n = unfinished.length;
+      const m = issues.length;
+      const isChild = _histIsChild(s.label);
+      return `<div class="hist-what-list">
+      <div class="hist-what-head">Unfinished ${n} of ${m}</div>
+      <div class="iss-list">${unfinished.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>
+    </div>`;
+    }
+    return "";
+  }
+  function _histReconPassedHtml(s) {
     const r = s.reconciliation;
     if (!r || !Array.isArray(r.checks) || !r.checks.length)
       return "";
-    const allClear = !!r.all_clear;
-    const items = r.checks.map((c) => {
-      const ok = !!c.ok;
-      const icon = ok ? "ti-circle-check" : "ti-alert-triangle";
-      const detail = c.detail || (ok ? "OK" : "unresolved");
-      return `<div class="recon-item ${ok ? "ok" : "fail"}">
-      <i class="ti ${icon}"></i>
-      <span><span class="recon-label">${escHtml(_histReconcileLabel(c.name))}:</span>
-        <span class="recon-detail">${escHtml(detail)}</span></span>
-    </div>`;
+    const passed = r.checks.filter((c) => !!c.ok);
+    if (!passed.length)
+      return "";
+    const items = passed.map((c) => {
+      const detail = c.detail || "OK";
+      return `<span class="recon-passed-item"
+      title="${escHtml(_histReconcileLabel(c.name) + ": " + detail)}">
+      <i class="ti ti-check"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
     }).join("");
-    const failed = r.checks.filter((c) => !c.ok).length;
-    const summary = allClear ? "All clear \u2014 no loose ends" : failed + (failed === 1 ? " item unresolved" : " items unresolved");
-    return `<div class="recon">
-    <div class="recon-head ${allClear ? "clear" : "flagged"}">
-      <i class="ti ${allClear ? "ti-checks" : "ti-alert-triangle"}"></i>
-      Reconciliation <span class="recon-summary">\xB7 ${escHtml(summary)}</span>
+    return `<div class="hist-recon-passed">${items}</div>`;
+  }
+  var _histDetailsExpanded = /* @__PURE__ */ new Set();
+  globalThis._histDetailsExpanded = _histDetailsExpanded;
+  function _histDetailsHtml(s) {
+    const detExpanded = _histDetailsExpanded.has(s.label);
+    const lbl = escHtml(s.label || "");
+    const chev = detExpanded ? "ti-chevron-down" : "ti-chevron-right";
+    const body = detExpanded ? `<div class="hist-details-body">
+      ${_histStatsHtml(s)}
+      ${_histPostSprintHtml(s)}
+      ${_histReconPassedHtml(s)}
+    </div>` : "";
+    return `<div class="hist-details${detExpanded ? " expanded" : ""}">
+    <div class="hist-details-head" onclick="event.stopPropagation();_histToggleDetails('${lbl}')">
+      <i class="ti ${chev} hist-chev"></i> Details
     </div>
-    ${items}
+    ${body}
   </div>`;
   }
-  function _histReconcileChipHtml(s) {
-    const r = s.reconciliation;
-    if (!r || !Array.isArray(r.checks) || !r.checks.length)
+  function _histRecoveryBtnHtml(s) {
+    if (_histIsLocked(s.lifecycle_state))
       return "";
-    if (r.all_clear) {
-      return `<span class="recon-chip clear" title="Post-sprint reconciliation: all clear">
-      <i class="ti ti-checks"></i> clear</span>`;
+    const state = (s.lifecycle_state || "").toLowerCase();
+    const lbl = escHtml(s.label || "");
+    const rawLabel = s.label || "";
+    if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
+      const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+      const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
+      const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
+      return `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
+      onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
+      <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
-    const n = r.checks.filter((c) => !c.ok).length;
-    const word = n === 1 ? "loose end" : "loose ends";
-    return `<span class="recon-chip flagged" title="Post-sprint reconciliation: ${n} ${word}">
-    <i class="ti ti-alert-triangle"></i> ${n} ${word}</span>`;
+    if (state === "ready_to_merge") {
+      return `<button type="button" class="hist-head-btn hist-head-btn--finish"
+      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
+      <i class="ti ti-flag-check"></i> Merge</button>`;
+    }
+    return "";
   }
-  function _histHeadHintsHtml(s, expanded) {
-    if (expanded) {
-      return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
-    }
+  function _histDeleteBtnHtml(s) {
+    if (_histIsLocked(s.lifecycle_state))
+      return "";
+    const state = (s.lifecycle_state || "").toLowerCase();
+    const actionable = /* @__PURE__ */ new Set([
+      "needs_rework",
+      "failed",
+      "cancelled",
+      "ready_to_merge",
+      "completed",
+      "partial_finished"
+    ]);
+    if (!actionable.has(state))
+      return "";
+    const lbl = escHtml(s.label || "");
+    return `<button type="button" class="hist-head-btn hist-head-btn--delete-icon"
+    onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')"
+    title="Delete sprint"><i class="ti ti-trash"></i></button>`;
+  }
+  function _histSecondaryLinksHtml(s) {
     let html = "";
-    const r = s.reconciliation;
-    if (r && Array.isArray(r.checks) && r.checks.length && !r.all_clear) {
-      html += _histReconcileChipHtml(s);
+    const pr = _histPrUrl(s);
+    if (pr) {
+      html += `<a class="hist-head-btn hist-head-btn--secondary link-pr"
+      href="${escHtml(pr)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint PR">
+      <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
     }
-    html += _histStaleChipHtml(s);
+    const sum = _histSummaryUrl(s);
+    if (sum) {
+      const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num}` : "Summary";
+      html += `<a class="hist-head-btn hist-head-btn--secondary link-sum"
+      href="${escHtml(sum)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint summary">
+      <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
+    }
+    html += `<a class="hist-head-btn hist-head-btn--secondary"
+    href="${escHtml(_histLogsUrl(s))}"
+    onclick="event.stopPropagation()" title="Open sprint logs">
+    <i class="ti ti-list-details"></i> Logs</a>`;
     return html;
   }
   function _histCardHtml(s, opts) {
@@ -1449,26 +1438,27 @@ Replace the existing draft (${data.existing_label})?`
       cls.push("child");
     if (expanded)
       cls.push("expanded");
-    const lockNote = locked ? `<div class="lock-note"><i class="ti ti-lock"></i> This sprint is ${escHtml((s.lifecycle_state || "").toLowerCase())} and locked \u2014 links only.</div>` : "";
     const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(s.label) : s.label || "";
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const lbl = escHtml(s.label || "");
-    const headCompact = locked && !expanded;
-    const progress = headCompact ? "" : _histProgressText(s);
-    const headActions = _histHeadActionsHtml(s);
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const endDate = s.ended_at ? String(s.ended_at).slice(0, 10) : s.started_at ? String(s.started_at).slice(0, 10) : "";
+    const metaParts = [];
+    if (endDate)
+      metaParts.push(endDate);
+    metaParts.push(issues.length + " ticket" + (issues.length !== 1 ? "s" : ""));
+    const metaHtml = `<span class="hist-meta">${escHtml(metaParts.join(" \xB7 "))}</span>`;
+    const recoveryBtn = _histRecoveryBtnHtml(s);
     const bulkBtn = opts.bulkCompleteBtn || "";
-    const headRight = headActions || bulkBtn ? `<span class="hist-card-head-right">${headActions}${bulkBtn}</span>` : "";
-    const hints = headCompact ? "" : _histHeadHintsHtml(s, expanded);
-    const duration = !headCompact && s.duration != null ? `<span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>` : "";
-    const midBits = headCompact ? "" : [duration, _histEstBarMini(s), hints].join("");
-    const headMid = midBits ? `<div class="hist-card-head-mid">${midBits}</div>` : "";
-    const body = expanded ? `
-      ${_histStatsHtml(s)}
-      ${_histPostSprintHtml(s)}
-      ${_histReconcileHtml(s)}
-      ${_histIssueListHtml(s)}
-      ${lockNote}
-      ${locked ? _histLinksHtml(s) : ""}` : "";
+    const deleteBtn = _histDeleteBtnHtml(s);
+    const secondaryLinks = _histSecondaryLinksHtml(s);
+    const headRight = secondaryLinks || deleteBtn || bulkBtn || recoveryBtn ? `<span class="hist-card-head-right">${secondaryLinks}${deleteBtn}${bulkBtn}${recoveryBtn}</span>` : "";
+    const body = expanded ? `<div class="hist-card-body">
+      ${_histLooseEndBandHtml(s)}
+      ${_histWhatListHtml(s)}
+      ${_histDetailsHtml(s)}
+      ${locked ? _histLinksHtml(s) : ""}
+    </div>` : "";
     return `<div class="${cls.join(" ")}" data-label="${lbl}">
     <div class="hist-card-head" onclick="_histToggleCard('${lbl}')">
       <div class="hist-card-head-left">
@@ -1476,12 +1466,11 @@ Replace the existing draft (${data.existing_label})?`
         ${child ? '<span class="hist-child-arrow">\u21B3</span>' : ""}
         <span class="hist-card-title">${escHtml(display)}</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${progress ? `<span class="hist-progress">${escHtml(progress)}</span>` : ""}
+        ${metaHtml}
       </div>
-      ${headMid}
       ${headRight}
     </div>
-    ${body ? `<div class="hist-card-body">${body}</div>` : ""}
+    ${body}
   </div>`;
   }
   function _histToggleCard(label) {
@@ -1489,6 +1478,15 @@ Replace the existing draft (${data.existing_label})?`
       _histExpanded.delete(label);
     } else {
       _histExpanded.add(label);
+      _histLoadRunStats(label);
+    }
+    _histRenderLedger(_histLedgerData);
+  }
+  function _histToggleDetails(label) {
+    if (_histDetailsExpanded.has(label)) {
+      _histDetailsExpanded.delete(label);
+    } else {
+      _histDetailsExpanded.add(label);
       _histLoadRunStats(label);
     }
     _histRenderLedger(_histLedgerData);
@@ -1662,17 +1660,6 @@ Replace the existing draft (${data.existing_label})?`
       Latest ${_histFoldSize} sprint groups expanded below \u2014 older groups collapse to sprint numbers; click to open details.
     </span>
   </div>`;
-  }
-  function _histStaleChipHtml(s) {
-    const g = _histStaleBySprint[s.label];
-    if (!g || !g.count)
-      return "";
-    const n = g.count;
-    const word = n === 1 ? "stale branch" : "stale branches";
-    const lbl = escHtml(s.label || "");
-    return `<button class="stale-chip" title="${n} leftover feature ${n === 1 ? "branch" : "branches"} for this sprint"
-    onclick="event.stopPropagation(); _histCleanupStale('${lbl}')">
-    <i class="ti ti-git-branch"></i> ${n} ${word} \xB7 clean up</button>`;
   }
   async function _histScanStale() {
     const repo = _cachedFullRepo[_slug];
@@ -4228,6 +4215,7 @@ ${data.errors.join("\n")}`);
   }
 
   // apps/dashboard/static/src/sprint-board/board-render.js
+  var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   async function loadSprintMgmt2(silent, optimisticRunningLabel) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
@@ -4363,10 +4351,13 @@ ${data.errors.join("\n")}`);
       const work = _smgmtWorkTickets(tickets);
       return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
     };
+    _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
       const tickets = bySprint[label] || [];
-      if (_smgmtHideRerunParent(label, tickets, _rerunInto))
-        return false;
+      if (_smgmtHideRerunParent(label, tickets, _rerunInto)) {
+        _smgmtResolvedAncestors.add(label);
+        return true;
+      }
       const ticketCount = tickets.length;
       if (ticketCount > 0)
         return true;
@@ -4404,8 +4395,29 @@ ${data.errors.join("\n")}`);
         break;
       }
     }
-    const cards = orderedLabels.map((label) => {
+    const focusGuideEl = document.getElementById("smgmt-focus-guide");
+    if (focusGuideEl) {
+      focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
+    }
+    const _planStates = data.sprint_plan_states || {};
+    const planningLabel = orderedLabels.find((l) => {
+      if (_smgmtResolvedAncestors.has(l))
+        return false;
+      if (_smgmtRunningLabels.has(l))
+        return false;
+      const ps = (_planStates[l] || "").toLowerCase();
+      return ["draft", "planned", "planning"].includes(ps);
+    });
+    const _buildCard = (label) => {
       const tickets = bySprint[label] || [];
+      if (_smgmtResolvedAncestors.has(label)) {
+        const childLabel = _rerunInto[label];
+        const outcome2 = _smgmtOutcomeCache[label] || null;
+        return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, outcome2, childLabel) + `</div>`;
+      }
+      if (label === planningLabel) {
+        return `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtDraftCardHtml(label, tickets) + `</div>`;
+      }
       if (_smgmtIsFreshRerunSprint(label))
         delete _smgmtOutcomeCache[label];
       const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -4421,7 +4433,25 @@ ${data.errors.join("\n")}`);
         _smgmtFinishedLabels.has(label)
       );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
-    }).join("");
+    };
+    const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
+    const upNextLabels = orderedLabels.filter(
+      (l) => !_smgmtResolvedAncestors.has(l) && l !== planningLabel
+    );
+    const sectionLabel = (text, cls) => `<div class="smgmt-section-label ${cls}">${text}</div>`;
+    let cards = "";
+    if (lineageLabels.length > 0) {
+      cards += sectionLabel("Lineage", "smgmt-section-lineage");
+      cards += lineageLabels.map(_buildCard).join("");
+    }
+    if (upNextLabels.length > 0) {
+      cards += sectionLabel("Up next", "smgmt-section-upnext");
+      cards += upNextLabels.map(_buildCard).join("");
+    }
+    if (planningLabel) {
+      cards += sectionLabel("Planning", "smgmt-section-planning smgmt-planning-section");
+      cards += _buildCard(planningLabel);
+    }
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
@@ -4571,7 +4601,7 @@ ${data.errors.join("\n")}`);
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
-      if (!_smgmtHasLedgerRun(label))
+      if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label))
         continue;
       toFetch.push(label);
     }
@@ -4584,7 +4614,11 @@ ${data.errors.join("\n")}`);
           if (resp.ok) {
             const outcome = await resp.json();
             _smgmtOutcomeCache[label] = outcome;
-            _smgmtInjectOutcomeBand(label, outcome);
+            if (_smgmtResolvedAncestors.has(label)) {
+              _smgmtUpdateAncestorRow(label, outcome);
+            } else {
+              _smgmtInjectOutcomeBand(label, outcome);
+            }
           } else {
             _smgmtOutcomeCache[label] = null;
           }
@@ -5116,17 +5150,33 @@ ${data.errors.join("\n")}`);
         </div>
         <div class="smgmt-sprint-header-right sc-header-right">
           <button class="smgmt-delete-btn"
+                  aria-label="Delete sprint"
+                  title="Delete sprint"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
-            <i class="ti ti-trash"></i> Delete</button>
+            <i class="ti ti-trash"></i></button>
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
-          <button class="smgmt-finish-btn ${finishHidden}" ${finishDisabled}
-                  title="${finishDisabled ? "No open tickets" : "Finish sprint"}"
+          <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
+                  title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>
         </div>
       </div>
+      ${function() {
+      const _ss = _smgmtCardStatusSentence(label, {
+        isRunning,
+        isLinger,
+        isNext,
+        isHasRework,
+        isReadyToMerge,
+        isAwaitingMerge,
+        planState,
+        outcome,
+        tickets
+      });
+      return _ss ? `<div class="sc-status-line">${escHtml(_ss)}</div>` : "";
+    }()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       ${summaryHtml}
@@ -5395,6 +5445,50 @@ ${data.errors.join("\n")}`);
   function _smgmtTicketHasEstimate(t) {
     return _smgmtTicketSize(t) !== null;
   }
+  function _smgmtCardStatusSentence(label, opts) {
+    const {
+      isRunning,
+      isLinger,
+      isNext,
+      isHasRework,
+      isReadyToMerge,
+      isAwaitingMerge,
+      planState,
+      outcome,
+      tickets
+    } = opts;
+    if (isRunning)
+      return "";
+    if (isLinger)
+      return "Sprint finished \u2014 snapshot kept 1 hour.";
+    if (isHasRework) {
+      const c = outcome && outcome.counts || {};
+      const done = c.done || 0;
+      const failed = c.failed || 0;
+      const total = outcome && Array.isArray(outcome.issues) ? outcome.issues.length : 0;
+      if (total > 0 && failed > 0) {
+        return `${done} of ${total} passed, ${failed} need${failed === 1 ? "s" : ""} rework \u2014 re-run or merge what passed.`;
+      }
+      return "Some tickets need rework \u2014 re-run or merge what passed.";
+    }
+    if (isReadyToMerge || isAwaitingMerge) {
+      return "All tickets passed. Ready to merge.";
+    }
+    if (isNext) {
+      if (_smgmtAnySprintRunning) {
+        const blocker = typeof _smgmtRunningBlockerShort === "function" ? _smgmtRunningBlockerShort() : "";
+        return `Ready to run. Waiting on ${blocker}.`;
+      }
+      return "Ready to run.";
+    }
+    if (_smgmtAnySprintRunning) {
+      return "Blocked: another sprint is running.";
+    }
+    if (!planState || planState === "draft" || planState === "planning") {
+      return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : "Set a sprint goal to enable the run.";
+    }
+    return tickets.length === 0 ? "No tickets \u2014 add some from the backlog." : "Planned.";
+  }
   function _smgmtRunningBlockerShort() {
     if (!_smgmtRunningLabels || _smgmtRunningLabels.size === 0)
       return "";
@@ -5553,29 +5647,277 @@ ${data.errors.join("\n")}`);
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const sizePillHtml = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
     const estHtml = _smgmtTicketEstHtml(ticket);
+    const draftLabel = _smgmtOrderedLabels ? _smgmtOrderedLabels.find((l) => {
+      if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
+        return false;
+      const ps = ((_smgmtData?.sprint_plan_states || {})[l] || "").toLowerCase();
+      return ["draft", "planned", "planning"].includes(ps);
+    }) : null;
+    const addToSprintBtn = draftLabel ? `<button class="smgmt-add-to-sprint-btn" tabindex="0"
+         title="Add to ${escHtml(sprintLabelDisplay(draftLabel))}"
+         onclick="event.stopPropagation();smgmtAddToDraft(${ticket.number},'${escHtml(draftLabel)}')">
+         <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>` : "";
     return `
     <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
-         ondragstart="_smgmtBacklogTicketDragStart(event, ${ticket.number})"
-         ondragend="_smgmtTicketDragEnd(event)"
          onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb" draggable="false"
+      <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? "checked" : ""}
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
-         rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
+         rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${schedDepHtml}${sizePillHtml}${estHtml}
+      ${addToSprintBtn}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
               onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtRowMenuOpen(event,${ticket.number},null,${hasEstimate});}">
         <i class="ti ti-menu-2"></i></button>
     </div>`;
+  }
+  function _smgmtAncestorMergeState(label, outcome) {
+    if (!outcome)
+      return "unknown";
+    const counts = outcome.counts || {};
+    const done = counts.done || 0;
+    if (done === 0)
+      return "failed";
+    const meta = typeof _smgmtStateMeta === "function" ? _smgmtStateMeta(outcome, (outcome.issues || []).length) : { state: "unknown" };
+    const state = meta.state;
+    if (state === "ready_to_merge" || state === "partial_finished")
+      return "needs_merge";
+    if (state === "needs_rework")
+      return "needs_merge";
+    if (state === "completed")
+      return "merged";
+    if (_smgmtFinishedLabels && _smgmtFinishedLabels.has(label) && done > 0)
+      return "merged";
+    return "needs_merge";
+  }
+  function _smgmtAncestorCarrySummary(outcome, childLabel) {
+    if (!outcome)
+      return "";
+    const counts = outcome.counts || {};
+    const done = counts.done || 0;
+    const carried = (counts.failed || 0) + (counts.skipped || 0);
+    const childDisplay = childLabel ? sprintLabelDisplay(childLabel).replace("Sprint ", "") : "";
+    let summary = `${done} merged`;
+    if (carried > 0 && childDisplay)
+      summary += ` \xB7 ${carried} reworked \u2192 ${childDisplay}`;
+    else if (carried > 0)
+      summary += ` \xB7 ${carried} reworked`;
+    return summary;
+  }
+  function _smgmtAncestorTicketsHtml(label, outcome, childLabel) {
+    const issues = outcome && outcome.issues || [];
+    if (issues.length === 0) {
+      return '<div class="slp-no-tickets">No ticket data available.</div>';
+    }
+    const repo = _smgmtRepo();
+    const childDisplay = childLabel ? sprintLabelDisplay(childLabel).replace("Sprint ", "") : "";
+    return issues.map((iss) => {
+      const o = iss.outcome || "skipped";
+      const isMerged = o === "done";
+      const issueUrl = repo ? `https://github.com/${repo}/issues/${iss.number}` : "#";
+      if (isMerged) {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-merged" title="Merged"><i class="ti ti-circle-check"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-merged">merged</span>
+        </div>`;
+      } else {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-carried" title="Carried to ${escHtml(childDisplay)}"><i class="ti ti-arrow-right"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-carried">carried \u2192 ${escHtml(childDisplay)}</span>
+        </div>`;
+      }
+    }).join("");
+  }
+  function _smgmtAncestorRowHtml(label, outcome, childLabel) {
+    const mergeState = _smgmtAncestorMergeState(label, outcome);
+    const safeLabel = escHtml(label);
+    const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
+    let markIcon, markText, markCls;
+    if (mergeState === "merged") {
+      markIcon = "ti-git-merge";
+      markText = "Merged";
+      markCls = "slp-merged";
+    } else if (mergeState === "needs_merge") {
+      markIcon = "ti-git-pull-request";
+      markText = "Needs merge";
+      markCls = "slp-needs-merge";
+    } else if (mergeState === "failed") {
+      markIcon = "ti-circle-x";
+      markText = "Failed";
+      markCls = "slp-failed";
+    } else {
+      markIcon = "ti-clock";
+      markText = "Pending";
+      markCls = "slp-pending";
+    }
+    const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto);
+    const ticketsHtml = outcome ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">Loading outcome data\u2026</div>';
+    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+    const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
+    const actionsHtml = mergeState === "needs_merge" ? `<div class="slp-ancestor-actions">
+          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
+                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
+            <i class="ti ti-refresh"></i> Re-run</button>
+          <button class="smgmt-finish-btn sc-merge-link"
+                  onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+        </div>` : "";
+    return `<div class="slp-ancestor-row" id="smgmt-card-${safeLabel}"
+               onclick="smgmtToggleAncestor('${safeLabel}')">
+    <div class="slp-ancestor-header">
+      <button class="smgmt-collapse-btn slp-ancestor-toggle"
+              aria-label="Expand ${escHtml(sprintLabelDisplay(label))}"
+              title="Expand ${escHtml(sprintLabelDisplay(label))}"
+              onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
+        <i class="ti ti-chevron-right"></i>
+      </button>
+      <span class="slp-merge-mark ${markCls}" title="${escHtml(markText)}">
+        <i class="ti ${markIcon}"></i>
+        <span class="slp-mark-text">${escHtml(markText)}</span>
+      </span>
+      <span class="slp-ancestor-name">${escHtml(sprintLabelDisplay(label))}</span>
+      ${carrySummary ? `<span class="slp-carry-summary">${escHtml(carrySummary)}</span>` : ""}
+    </div>
+    <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
+      <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
+        ${ticketsHtml}
+      </div>
+      ${actionsHtml}
+    </div>
+  </div>`;
+  }
+  function smgmtToggleAncestor(label) {
+    const body = document.getElementById(`slp-body-${label}`);
+    const toggleIcon = document.querySelector(
+      `#smgmt-card-${CSS.escape(label)} .slp-ancestor-toggle i`
+    );
+    if (!body)
+      return;
+    const isExpanded = !body.hidden;
+    body.hidden = isExpanded;
+    if (toggleIcon) {
+      toggleIcon.className = isExpanded ? "ti ti-chevron-right" : "ti ti-chevron-down";
+    }
+    try {
+      localStorage.setItem(`slp_ancestor_${label}`, isExpanded ? "0" : "1");
+    } catch (_) {
+    }
+  }
+  function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
+    const steps = [];
+    const planStates = data.sprint_plan_states || {};
+    const rerunInto = data.sprint_rerun_into || {};
+    const finishedSet = new Set(data.finished_sprints || []);
+    for (const label of orderedLabels || []) {
+      const display = sprintLabelDisplay(label).replace("Sprint ", "Sprint ");
+      if (_smgmtResolvedAncestors.has(label)) {
+        steps.push({ text: `${escHtml(display)} needs a merge decision.`, priority: "high" });
+      }
+    }
+    const draftLabel = (orderedLabels || []).find((l) => {
+      if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
+        return false;
+      const ps = (planStates[l] || "").toLowerCase();
+      return ["draft", "planned", "planning"].includes(ps);
+    });
+    const upNextCandidates = (orderedLabels || []).filter((l) => {
+      if (_smgmtResolvedAncestors.has(l))
+        return false;
+      if (_smgmtRunningLabels.has(l))
+        return false;
+      if (l === draftLabel)
+        return false;
+      if (finishedSet.has(l))
+        return false;
+      return (bySprint[l] || []).length > 0;
+    });
+    if (upNextCandidates.length > 0) {
+      const nextDisplay = sprintLabelDisplay(upNextCandidates[0]);
+      steps.push({ text: `${escHtml(nextDisplay)} is queued and ready to run.`, priority: "med" });
+    }
+    if (draftLabel) {
+      const draftDisplay = sprintLabelDisplay(draftLabel);
+      const tickets = (bySprint[draftLabel] || []).length;
+      steps.push({
+        text: `Finish planning ${escHtml(draftDisplay)} \u2014 ${tickets} ticket${tickets !== 1 ? "s" : ""} added.`,
+        priority: "low"
+      });
+    } else {
+      steps.push({ text: "No draft sprint yet \u2014 create one to start planning.", priority: "low" });
+    }
+    if (steps.length === 0) {
+      steps.push({ text: "Board is up to date.", priority: "low" });
+    }
+    const stepHtml = steps.map(
+      (s, i) => `<div class="smgmt-focus-step"><span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${i + 1}</span><span class="smgmt-focus-text">${s.text}</span></div>`
+    ).join("");
+    return `<div class="smgmt-focus-guide-title">Focus</div>` + stepHtml;
+  }
+  function _smgmtBudgetBarHtml(tickets) {
+    const sizePoints = { S: 1, M: 2, L: 3, XL: 5 };
+    let used = 0;
+    for (const t of tickets || []) {
+      const sz = _smgmtTicketSize(t);
+      used += sizePoints[sz] || 0;
+    }
+    const capacity = 10;
+    const pct = Math.min(100, Math.round(used / capacity * 100));
+    const remaining = Math.max(0, capacity - used);
+    const overBudget = used > capacity;
+    const fillClass = overBudget ? "smgmt-budget-fill smgmt-budget-fill--over" : "smgmt-budget-fill";
+    return `<div class="smgmt-budget-bar"><div class="smgmt-budget-bar-top"><span class="smgmt-budget-label">${used} / ${capacity} pts used</span><span class="smgmt-budget-headroom${overBudget ? " smgmt-budget-headroom--over" : ""}">` + (overBudget ? `${used - capacity} pts over` : `${remaining} pts remaining`) + `</span></div><div class="smgmt-budget-track"><div class="${fillClass}" style="width:${pct}%"></div></div></div>`;
+  }
+  function _smgmtDraftCardHtml(label, tickets) {
+    const display = sprintLabelDisplay(label);
+    const budgetBar = _smgmtBudgetBarHtml(tickets);
+    const ticketRowsHtml = (tickets || []).map((t) => {
+      const sizeValue = _smgmtTicketSize(t) || "";
+      const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
+      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
+    }).join("");
+    const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
+    const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
+    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">Draft</span><div class="smgmt-card-actions"><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot"><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal\u2026" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + // Budget bar
+    budgetBar + // Ticket rows
+    `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button></div></div>`;
+  }
+  function _smgmtUpdateAncestorRow(label, outcome) {
+    const card = document.getElementById(`smgmt-card-${label}`);
+    if (!card || !card.classList.contains("slp-ancestor-row"))
+      return;
+    const childLabel = (_smgmtData?.sprint_rerun_into || {})[label];
+    const newHtml = _smgmtAncestorRowHtml(label, outcome, childLabel);
+    const wasExpanded = document.getElementById(`slp-body-${label}`)?.hidden === false;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = newHtml;
+    const newCard = tmp.firstElementChild;
+    if (newCard) {
+      card.replaceWith(newCard);
+      if (wasExpanded) {
+        const newBody = document.getElementById(`slp-body-${label}`);
+        if (newBody)
+          newBody.hidden = false;
+        const newIcon = document.querySelector(
+          `#smgmt-card-${CSS.escape(label)} .slp-ancestor-toggle i`
+        );
+        if (newIcon)
+          newIcon.className = "ti ti-chevron-down";
+      }
+    }
   }
 
   // apps/dashboard/static/src/sprint-board/index.js
@@ -5698,6 +6040,12 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
   globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic2;
+  globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
+  globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
+  globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;
+  globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
+  globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
+  globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
@@ -5713,6 +6061,7 @@ ${data.errors.join("\n")}`);
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
   globalThis._histRerunSprint = _histRerunSprint;
+  globalThis._histToggleDetails = _histToggleDetails;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

@@ -1947,6 +1947,12 @@
     .hist-head-btn--finish:hover { background: var(--blue-bg); }
     .hist-head-btn--delete { color: var(--red); border-color: var(--red-bg); }
     .hist-head-btn--delete:hover { background: var(--red-bg); }
+    /* Quiet icon-only delete (AC11): no label, no red — muted grey */
+    .hist-head-btn--delete-icon { color: var(--text-sub); border-color: transparent; padding: 3px 6px; }
+    .hist-head-btn--delete-icon:hover { color: var(--text-muted); background: var(--surface-2); }
+    /* Subordinate secondary links: PR / Summary / Logs (AC12) */
+    .hist-head-btn--secondary { color: var(--text-sub); border-color: transparent; font-weight: 400; }
+    .hist-head-btn--secondary:hover { color: var(--text); background: var(--surface-2); }
     .hist-head-btn--bulk { color: var(--green); border-color: var(--green-bg); }
     .hist-head-btn--bulk:hover { background: var(--green-bg); }
     .hist-head-btn--bulk:disabled {
@@ -1966,8 +1972,8 @@
       font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
       letter-spacing: .01em; text-transform: none; flex: none;
     }
-    .hist-state.completed { color: var(--steel);  background: var(--steel-bg); }
-    .hist-state.partial   { color: #a16207; background: color-mix(in srgb, #facc15 22%, transparent); }
+    .hist-state.completed { color: var(--green);  background: var(--green-bg); }
+    .hist-state.partial   { color: var(--text-muted); background: var(--surface-2); }
     .hist-state.finished  { color: var(--text-muted); background: var(--surface-2); }
     .hist-state.failed    { color: var(--red);    background: var(--red-bg); }
     .hist-state.cancelled { color: var(--amber);  background: var(--amber-bg); }
@@ -2022,13 +2028,86 @@
     }
     .recon-item + .recon-item { margin-top: 5px; }
     .recon-item i { font-size: 15px; flex: none; margin-top: 1px; }
-    .recon-item.ok      { background: var(--green-bg); }
-    .recon-item.ok i    { color: var(--green); }
+    /* Passed recon items live inside Details only — grey checkmarks, not green boxes (AC9) */
+    .recon-item.ok      { background: transparent; }
+    .recon-item.ok i    { color: var(--text-sub); }
     .recon-item.fail    { background: var(--red-bg); }
     .recon-item.fail i  { color: var(--red); }
     .recon-item.fail .recon-detail { color: var(--red); font-weight: 600; }
     .recon-label { font-weight: 600; }
     .recon-detail { color: var(--text-muted); }
+
+    /* Passed reconciliation checks: small grey checkmarks inside Details (AC9) */
+    .hist-recon-passed {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      padding: 4px 12px 8px;
+    }
+    .recon-passed-item {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10.5px; color: var(--text-sub);
+      background: var(--surface-2); padding: 2px 7px; border-radius: 999px;
+      border: 1px solid var(--border);
+    }
+    .recon-passed-item i { font-size: 10px; color: var(--text-sub); }
+
+    /* Loose-end amber band: exactly ONE per card (AC4) */
+    .hist-loose-end-band {
+      display: flex; align-items: center; gap: 8px;
+      margin: 0 0 0; padding: 8px 14px;
+      background: var(--amber-bg); color: var(--amber);
+      font-size: 12px; font-weight: 600; border-radius: 0;
+      border-top: 1px solid color-mix(in srgb, var(--amber) 20%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--amber) 20%, transparent);
+    }
+    .hist-loose-end-band i { font-size: 13px; flex: none; }
+    .hist-band-msg { flex: 1; min-width: 0; }
+    .hist-band-cta {
+      flex: none; font-size: 11px; font-weight: 600;
+      padding: 2px 9px; border-radius: 4px; cursor: pointer;
+      background: transparent; border: 1px solid var(--amber);
+      color: var(--amber); transition: background .12s;
+    }
+    .hist-band-cta:hover { background: color-mix(in srgb, var(--amber) 15%, transparent); }
+
+    /* What-list: "Why it failed" / "Unfinished N of M" (AC5/AC6) */
+    .hist-what-list { padding: 4px 12px 6px; }
+    .hist-what-head {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .04em;
+      margin-bottom: 5px; padding-top: 4px;
+    }
+    .hist-what-head i { font-size: 12px; }
+    /* Why-it-failed list items */
+    .wl-item {
+      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+      padding: 4px 0; font-size: 11.5px;
+      border-top: 1px solid var(--border);
+    }
+    .wl-item:first-of-type { border-top: none; }
+    .wl-id { font-weight: 700; color: var(--text); min-width: 40px; flex: none; }
+    .wl-reason { flex: 1; min-width: 0; color: var(--text-muted); }
+    .wl-ts { font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums; flex: none; }
+    .wl-log { font-size: 10.5px; color: var(--blue); text-decoration: none; flex: none; }
+    .wl-log:hover { text-decoration: underline; }
+
+    /* Compact meta chip in card header (date · ticket count) */
+    .hist-meta {
+      font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums;
+    }
+    .hist-meta::before { content: '·'; margin-right: 5px; color: var(--text-sub); }
+
+    /* Details sub-block (collapsed by default — AC8) */
+    .hist-details { border-top: 1px solid var(--border); }
+    .hist-details-head {
+      display: flex; align-items: center; gap: 5px;
+      padding: 7px 12px; cursor: pointer;
+      font-size: 11.5px; color: var(--text-sub); user-select: none;
+      transition: background .12s;
+    }
+    .hist-details-head:hover { background: var(--surface-hover); color: var(--text-muted); }
+    .hist-details-head .hist-chev { font-size: 12px; }
+    .hist-details-body { padding: 0 0 4px; }
 
     /* Compact all-clear / loose-ends chip in the card head */
     .recon-chip {
@@ -2582,21 +2661,35 @@
     .fs-action-row a { color: var(--accent); text-decoration: none; font-size: 12px; }
     .fs-action-row a:hover { text-decoration: underline; }
     .smgmt-delete-btn {
-      padding: 4px 10px; font-size: 11px; font-weight: 600;
-      background: var(--surface); color: var(--red); border: 1px solid var(--red);
-      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
-      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 6px; font-size: 13px;
+      background: none; color: var(--text-sub); border: none;
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: color .15s;
+      display: inline-flex; align-items: center;
     }
-    .smgmt-delete-btn:hover { background: var(--red-bg); }
+    .smgmt-delete-btn:hover { color: var(--text); background: var(--surface-2); }
     .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
-      background: var(--amber-bg); color: var(--amber); border: 0.5px solid var(--amber);
-      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: opacity .15s;
+      background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
       display: inline-flex; align-items: center; gap: 4px;
     }
-    .smgmt-finish-btn:hover { opacity: .85; }
+    .smgmt-finish-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .smgmt-finish-btn.hidden { display: none; }
+    /* Quiet secondary link for Merge Sprint when Re-run is the primary action */
+    .sc-merge-link {
+      background: none; color: var(--text-muted); border: none;
+      font-size: 11px; font-weight: 500; padding: 4px 8px;
+      cursor: pointer; flex-shrink: 0; transition: color .15s;
+      display: inline-flex; align-items: center; gap: 4px; border-radius: 4px;
+    }
+    .sc-merge-link:hover { color: var(--text); background: var(--surface-2); }
+    .sc-merge-link.hidden { display: none; }
+    /* One-line plain-language status sentence under the sprint header */
+    .sc-status-line {
+      font-size: 12px; color: var(--text-muted); padding: 6px 18px 4px;
+      border-bottom: none; line-height: 1.4;
+    }
     /* ── Sprint inline rename ── */
     .smgmt-rename-btn {
       background: none; border: none; padding: 0 2px; cursor: pointer;
@@ -2778,9 +2871,9 @@
       padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
       border: 1px solid transparent;
     }
-    .smgmt-state-badge.state-finished { background: var(--steel-bg);  color: var(--steel);    border-color: var(--steel);  }
+    .smgmt-state-badge.state-finished { background: var(--amber-bg);  color: var(--amber);    border-color: var(--amber);  }
     .smgmt-state-badge.state-partial  { background: color-mix(in srgb, #facc15 18%, transparent);  color: #a16207;    border-color: color-mix(in srgb, #facc15 45%, transparent);  }
-    .smgmt-state-badge.state-rework   { background: var(--yellow-bg); color: var(--yellow);   border-color: var(--yellow); }
+    .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     /* NEXT UP badge */
     .smgmt-next-badge {
@@ -2795,6 +2888,74 @@
       opacity: .8; margin-left: 6px;
     }
     .smgmt-sprint-unit { display: flex; flex-direction: column; }
+
+    /* ── Resolved ancestor sprint rows (issue #1043) ──────────────────────── */
+    .slp-ancestor-row {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+      cursor: pointer; transition: border-color .15s;
+    }
+    .slp-ancestor-row:hover { border-color: var(--text-sub); }
+    .slp-ancestor-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; min-height: 44px;
+    }
+    .slp-ancestor-name {
+      font-size: 13px; font-weight: 600; color: var(--text); flex-shrink: 0;
+    }
+    .slp-carry-summary {
+      font-size: 12px; color: var(--text-sub); font-family: var(--mono);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* Merge-state mark: three distinct states */
+    .slp-merge-mark {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      text-transform: uppercase; letter-spacing: .04em;
+      padding: 2px 8px; border-radius: 999px; flex-shrink: 0;
+      border: 1px solid transparent;
+    }
+    .slp-merged     { background: var(--green-bg);  color: var(--green);  border-color: var(--green);  }
+    .slp-needs-merge{ background: var(--amber-bg);  color: var(--amber);  border-color: var(--amber);  }
+    .slp-failed     { background: var(--red-bg);    color: var(--red);    border-color: var(--red);    }
+    .slp-pending    { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
+    .slp-mark-text  { line-height: 1; }
+    /* Expanded body */
+    .slp-ancestor-body { padding: 0 14px 10px; border-top: 1px solid var(--border); }
+    .slp-no-tickets { font-size: 12px; color: var(--text-sub); padding: 10px 0; }
+    /* Per-ticket rows */
+    .slp-ancestor-ticket-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 4px; border-bottom: 1px solid var(--border-faint);
+      font-size: 13px;
+    }
+    .slp-ancestor-ticket-row:last-child { border-bottom: none; }
+    .slp-ticket-merged { color: var(--green); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-carried { color: var(--amber); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-title {
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--text-sub);
+    }
+    .slp-fate-merged  {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--green); background: var(--green-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-carried {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--amber); background: var(--amber-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    /* Action buttons for needs_merge ancestors */
+    .slp-ancestor-actions {
+      display: flex; align-items: center; gap: 8px;
+      padding-top: 10px; padding-bottom: 2px;
+    }
+    /* Chevron toggle button (reuses smgmt-collapse-btn styles) */
+    .slp-ancestor-toggle { background: none; border: none; cursor: pointer;
+                           color: var(--text-sub); padding: 2px; line-height: 1; }
+    .slp-ancestor-toggle:hover { color: var(--text); }
+
     .smgmt-done-badge {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 4px 10px; border-radius: 999px; font-size: 11px;
@@ -3447,6 +3608,103 @@
     }
 
     /* ── Backlog pane (issue #274) ── */
+    /* ── Planning board layout (issue #1044) ── */
+    .smgmt-focus-guide {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+    .smgmt-focus-guide-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      margin-bottom: 8px;
+    }
+    .smgmt-focus-step {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; padding: 3px 0;
+    }
+    .smgmt-focus-num {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--text); color: var(--surface);
+      font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-family: var(--mono);
+    }
+    .smgmt-focus-num--med  { background: var(--amber); }
+    .smgmt-focus-num--low  { background: var(--surface-2); color: var(--text-muted); }
+    .smgmt-section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-sub);
+      margin: 20px 2px 8px; display: flex; align-items: center; gap: 6px;
+    }
+    .smgmt-planning-section { }
+    /* Draft sprint card */
+    .smgmt-draft-card {
+      background: var(--surface);
+      border: 1px solid var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      border-radius: 11px; overflow: hidden; margin-bottom: 12px;
+    }
+    .smgmt-draft-card .smgmt-card-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .smgmt-draft-badge {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px; text-transform: uppercase;
+      letter-spacing: .03em;
+      background: var(--blue-bg); color: var(--blue);
+    }
+    .smgmt-sprint-name { font-weight: 700; font-size: 15px; }
+    .smgmt-card-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+    /* Goal slot */
+    .smgmt-goal-slot { padding: 12px 16px 0; }
+    .smgmt-goal-input {
+      width: 100%; padding: 8px 11px; border: 1px solid var(--border);
+      border-radius: 7px; background: var(--surface-2); color: var(--text);
+      font-size: 13px; font-family: inherit;
+    }
+    .smgmt-goal-input:focus { outline: none; border-color: var(--blue); background: var(--surface); }
+    /* Budget bar */
+    .smgmt-budget-bar { padding: 10px 16px 0; }
+    .smgmt-budget-bar-top {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 4px;
+    }
+    .smgmt-budget-label { font-weight: 700; }
+    .smgmt-budget-headroom { color: var(--text-sub); }
+    .smgmt-budget-headroom--over { color: var(--amber); font-weight: 700; }
+    .smgmt-budget-track {
+      height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+    }
+    .smgmt-budget-fill { height: 100%; background: var(--blue); border-radius: 999px; }
+    .smgmt-budget-fill--over { background: var(--amber); }
+    /* Planning ticket rows (no drag) */
+    .smgmt-plan-tickets { padding: 8px 0; }
+    .smgmt-plan-ticket { cursor: default; }
+    .smgmt-plan-ticket .smgmt-ticket-grip { display: none; }
+    .smgmt-plan-empty { padding: 14px 18px; color: var(--text-sub); font-size: 13px; }
+    .smgmt-plan-row-menu .smgmt-ctx-item--remove { color: var(--red); }
+    /* + Add ticket affordance */
+    .smgmt-add-ticket-row { padding: 8px 16px 12px; }
+    .smgmt-add-ticket-btn {
+      font-size: 13px; color: var(--blue); background: none; border: none;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 0;
+    }
+    .smgmt-add-ticket-btn:hover { text-decoration: underline; }
+    /* Add to sprint button on backlog rows */
+    .smgmt-add-to-sprint-btn {
+      font-size: 11px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-muted);
+      border-radius: 5px; padding: 3px 8px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .smgmt-add-to-sprint-btn:hover { border-color: var(--blue); color: var(--blue); }
+    /* ── end planning board layout ── */
     .smgmt-backlog-pane {
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -4326,11 +4584,11 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: .08em;
-      background: var(--surface-2);
-      color: var(--text-sub);
+      background: var(--blue-bg);
+      color: var(--blue);
       padding: 2px 7px;
       border-radius: 4px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--blue);
       flex-shrink: 0;
     }
     /* Pending sign-off badge — amber 'needs you' state (issue #862) */
@@ -4404,7 +4662,11 @@
       margin-bottom: 2px;
     }
     .sc-v5 .cap-budget-line strong { font-weight: 700; }
-    .sc-v5 .cap-bar { height: 8px; border-radius: 4px; }
+    .sc-v5 .cap-bar { height: 8px; border-radius: 4px; overflow: hidden; }
+    /* Budget bar color states keyed to real headroom (AC4 — issue #1042) */
+    .sc-v5 .cap-bar--green { background: var(--green); }
+    .sc-v5 .cap-bar--amber { background: var(--amber); }
+    .sc-v5 .cap-bar--red   { background: var(--red); }
     .sc-v5 .cap-hint {
       font-size: 11px;
       color: var(--text-sub);
@@ -7959,27 +8221,24 @@
         <!-- Sprint list -->
         <div class="smgmt-content">
 
+          <!-- Focus Guide (issue #1044) — synthesized from board state by _smgmtFocusGuideHtml -->
+          <div class="smgmt-focus-guide" id="smgmt-focus-guide" aria-live="polite"></div>
+
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
           </div>
 
-          <!-- Ghost pane — drag below last sprint to create next sprint (issue #364) -->
-          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane"
-               ondragover="_smgmtGhostDragOver(event)"
-               ondragleave="_smgmtGhostDragLeave(event)"
-               ondrop="_smgmtGhostDrop(event)">
-            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Drop here to create Sprint 1</div>
+          <!-- Ghost pane — create next sprint (issue #364); drag removed (issue #1044) -->
+          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane">
+            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Create Sprint 1</div>
             <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
           <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
-               checkbox multi-select picker, and a live what-if delta line. Keeps
-               id smgmt-backlog-pane and the drag-back-to-backlog drop target. -->
+               checkbox multi-select picker, and a live what-if delta line.
+               Drag-and-drop removed from board (issue #1044). -->
           <div class="panel bl-panel smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
-               role="region" aria-label="Backlog"
-               ondragover="_smgmtBacklogDragOver(event)"
-               ondragleave="_smgmtBacklogDragLeave(event)"
-               ondrop="_smgmtDropOnBacklog(event)">
+               role="region" aria-label="Backlog">
             <span class="bl-eyebrow">Backlog</span>
             <div class="bl-header-row" id="smgmt-backlog-header-row"
                  onclick="_smgmtBacklogToggle()"
@@ -8014,7 +8273,6 @@
                 </select>
               </div>
               <div id="smgmt-backlog-tickets" class="bl-grid">
-                <div class="smgmt-drop-hint">Drop tickets here to remove sprint label</div>
               </div>
             </div>
             <div class="bl-whatif-bar" id="bl-whatif-bar" hidden aria-live="polite"></div>
@@ -15181,12 +15439,19 @@ function _smgmtUpdateCapBar(label) {
     };
     const budgetLine = `<div class="cap-budget-line"><strong>${escHtml(fmtDur(total))}</strong> of ${escHtml(fmtDur(budget))}</div>`;
 
+    // Color the bar based on real budget headroom (AC4 — issue #1042)
+    let barColorClass = 'cap-bar--green';
+    if (total > budget) barColorClass = 'cap-bar--red';
+    else if (total >= budget) barColorClass = 'cap-bar--amber';
+
     let hintClass = 'cap-hint', hintText;
     if (total > budget) {
       hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ${escHtml(fmtDur(total - budget))}</strong>`;
       hintClass = 'cap-hint cap-hint--over';
     } else {
-      hintText = `${escHtml(sizeBreakdown)} — <strong>${budget - total}m headroom</strong>`;
+      const headroom = budget - total;
+      const headroomDisplay = fmtDur(headroom);
+      hintText = `${escHtml(sizeBreakdown)} — <strong>${escHtml(headroomDisplay)} headroom</strong>`;
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
@@ -15214,7 +15479,7 @@ function _smgmtUpdateCapBar(label) {
 
     el.innerHTML =
       budgetLine +
-      `<div class="cap-bar">${barHtml}</div>` +
+      `<div class="cap-bar ${barColorClass}">${barHtml}</div>` +
       `<div class="${hintClass}">${hintText}</div>`;
   } catch (_) {
     el.innerHTML = '';

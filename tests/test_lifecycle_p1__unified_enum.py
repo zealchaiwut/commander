@@ -182,7 +182,7 @@ class TestTerminalWriters:
 # ── AC-4: orphan-PID reconciliation writes needs_rework ──────────────────────
 
 class TestOrphanReconcile:
-    def test_is_sprint_running_reconciles_dead_plan(self, fresh_db, tmp_path):
+    def test_is_sprint_running_reports_not_running_dead_plan(self, fresh_db, tmp_path):
         from server import _is_sprint_running
 
         project_root = tmp_path / "proj"
@@ -192,11 +192,11 @@ class TestOrphanReconcile:
         plan_path.write_text(
             json.dumps({"state": "running", "tickets": [1]}), encoding="utf-8"
         )
-        # No PID file at all → the running claim is dead.
+        # No PID file at all → not running; plan.json unchanged (read-only, #1096).
         assert _is_sprint_running(project_root, "sprint-9") is False
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        assert plan["state"] == "needs_rework"
-        assert plan["end_reason"] == "process lost"
+        assert plan["state"] == "running"
+        assert "end_reason" not in plan
 
     def test_no_cancelled_write_sites_left_in_server(self):
         assert '_plan_json_set_state(project_root, sprint_label, "cancelled"' \

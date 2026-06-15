@@ -2246,35 +2246,41 @@ def _add_blocked_label(
 
 
 def _find_feature_branch(issue_num: int) -> Optional[str]:
-    """Return feature/<N>-* branch name, checking local then remote."""
-    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
+    """Return feature/<N>-* branch name, preferring origin/ remote over local.
+
+    Prefers the remote tracking ref so we get the current authoritative tip
+    (e.g. after a tester's finish_feature.py pushed the final commit) rather
+    than a potentially stale local copy.
+    """
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         return out.strip().splitlines()[0].strip().removeprefix("origin/")
+    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
+    if ok and out.strip():
+        return out.strip().splitlines()[0].strip().lstrip("* ")
     return None
 
 
-def _is_branch_merged_into(branch: str, target: str) -> bool:
+def _is_branch_merged_into(branch: str, target: str, issue_num: Optional[int] = None) -> bool:
     """Return True if branch has been merged into target (local or remote).
 
-    Checks both local refs and origin/ remote refs for the branch.
-    Uses ``git branch --merged`` which lists branches fully reachable from
-    the given commit — i.e. whose tip is an ancestor of <target>.
-    """
-    # Prefer the remote ref for the target so we don't need a local checkout
-    target_ref = f"origin/{target}"
-    ok, _, _ = _try("git", "rev-parse", "--verify", target_ref)
-    if not ok:
-        target_ref = target
+    When ``issue_num`` is provided, delegates to the strict
+    ``_is_issue_merged_into_target`` check which avoids the ``git branch
+    --merged`` false-positive on stale ancestor branches.
 
-    # Try local branch ref first
+    Without ``issue_num``, falls back to the original ``git branch --merged``
+    heuristic (kept for call sites that don't have an issue number).
+    """
+    if issue_num is not None:
+        return _is_issue_merged_into_target(issue_num, target, feature_branch=branch)
+
+    # Legacy path: git branch --merged heuristic (may false-positive on stale ancestors)
+    target_ref = _git_target_ref(target)
+
     ok, out, _ = _try("git", "branch", "--merged", target_ref, "--list", branch)
     if ok and out.strip():
         return True
 
-    # Fall back to checking the remote tracking branch
     ok, out, _ = _try("git", "branch", "-r", "--merged", target_ref, "--list", f"origin/{branch}")
     if ok and out.strip():
         return True
@@ -2316,6 +2322,248 @@ def _was_feature_merged_via_log(issue_num: int, target: str) -> bool:
         "--regexp-ignore-case", f"--grep=feature/{issue_num}-", "-1",
     )
     return ok and bool(out.strip())
+
+
+def _git_target_ref(target: str) -> str:
+    """Return the best available git ref for target: origin/<target> if it exists, else <target>."""
+    origin_ref = f"origin/{target}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", origin_ref)
+    return origin_ref if ok else target
+
+
+def _is_issue_merged_into_target(
+    issue_num: int,
+    target: str,
+    feature_branch: Optional[str] = None,
+) -> bool:
+    """Strict merge check — does NOT use git branch --merged to avoid false positives.
+
+    A stale local feature branch whose tip is an ancestor of <target> but was
+    never actually merged (e.g. superseded/force-pushed) would pass
+    ``git branch --merged`` and trigger the E2 already-merged guard falsely.
+    This function avoids that by requiring a merge-log entry OR confirming there
+    are no unique commits on the feature side not yet on the target.
+
+    Decision tree:
+    1. If a merge log entry is found in target → True (fastest, authoritative).
+    2. Resolve the feature branch tip (origin first, then local).
+    3. If the feature tip is NOT reachable from target (i.e. rev-list --count > 0)
+       → False (unmerged work present).
+    4. If we reach this point the tip IS an ancestor of target but no merge log
+       exists → False (stale ancestor, not merged).
+    """
+    target_ref = _git_target_ref(target)
+
+    # Step 1: merge log is the most reliable signal
+    if _was_feature_merged_via_log(issue_num, target):
+        return True
+
+    # Step 2: resolve feature branch tip
+    branch = feature_branch or _find_feature_branch(issue_num)
+    if not branch:
+        return False
+
+    # Prefer origin ref for the feature branch tip
+    feature_ref = f"origin/{branch}"
+    ok, _, _ = _try("git", "rev-parse", "--verify", feature_ref)
+    if not ok:
+        feature_ref = branch
+        ok, _, _ = _try("git", "rev-parse", "--verify", feature_ref)
+        if not ok:
+            return False
+
+    ok, feature_sha, _ = _try("git", "rev-parse", feature_ref)
+    if not ok or not feature_sha.strip():
+        return False
+    feature_sha = feature_sha.strip()
+
+    # Step 3: check for unmerged commits
+    ok, count_out, _ = _try(
+        "git", "rev-list", "--count", f"{feature_sha}", f"^{target_ref}",
+    )
+    if ok:
+        try:
+            unmerged = int(count_out.strip())
+        except ValueError:
+            unmerged = 1
+        if unmerged > 0:
+            # Feature has commits not present in target — genuinely unmerged
+            return False
+
+    # Step 4: tip is ancestor of target but no merge log → stale, not merged
+    return False
+
+
+def _git_verified_shipped_issues(
+    state: "SprintState",
+    merge_target: str,
+) -> list:
+    """Return issues from state that are status==done AND git-verified as merged into merge_target."""
+    return [
+        i for i in state.issues
+        if i.status == "done"
+        and _is_issue_merged_into_target(i.number, merge_target)
+    ]
+
+
+def _reporting_not_shipped_issues(
+    state: "SprintState",
+    merge_target: str,
+) -> list:
+    """Return issues that are skipped, plus done-but-not-git-verified (false done).
+
+    These issues belong in the "Skipped / Failed" section of the sprint PR/summary
+    so operators can see tickets that were marked done without actual merge proof.
+    """
+    result = []
+    for i in state.issues:
+        if i.status == "skipped":
+            result.append(i)
+        elif i.status == "done" and not _is_issue_merged_into_target(i.number, merge_target):
+            result.append(i)
+    return result
+
+
+def _log_shipped_status_git_mismatch(
+    state: "SprintState",
+    merge_target: str,
+) -> None:
+    """Log a warning for any done-labelled ticket that fails git verification."""
+    for i in state.issues:
+        if i.status == "done" and not _is_issue_merged_into_target(i.number, merge_target):
+            structured_log.warn(
+                "shipped_git_mismatch",
+                f"Issue #{i.number} marked done but not git-verified on {merge_target}",
+                issue_num=i.number,
+                merge_target=merge_target,
+                issue_title=i.title,
+            )
+            sys.stdout.write(
+                f"  [git-verify] WARNING: #{i.number} '{i.title}' is status=done "
+                f"but not git-verified on {merge_target}\n"
+            )
+
+
+def _shipped_reconciliation_mismatch(
+    state: "SprintState",
+    merge_target: str,
+) -> list[int]:
+    """Return issue numbers that are status==done but not git-verified on merge_target."""
+    return [
+        i.number
+        for i in state.issues
+        if i.status == "done" and not _is_issue_merged_into_target(i.number, merge_target)
+    ]
+
+
+def _fail_loud_shipped_reconciliation(
+    state: "SprintState",
+    merge_target: str,
+    context: str,
+) -> list[int]:
+    """Check for done-but-unverified tickets and fail loud if any are found.
+
+    Logs a structured error and prints a prominent [ERROR] line.
+    Returns the list of mismatched issue numbers (empty = all clear).
+    """
+    mismatch = _shipped_reconciliation_mismatch(state, merge_target)
+    if mismatch:
+        nums_str = ", ".join(f"#{n}" for n in mismatch)
+        structured_log.error(
+            "shipped_reconciliation_failed",
+            f"{context}: {len(mismatch)} ticket(s) marked done but not git-verified on {merge_target}",
+            issue_nums=mismatch,
+            merge_target=merge_target,
+            context=context,
+        )
+        sys.stdout.write(
+            f"  [ERROR] {context}: {len(mismatch)} ticket(s) marked done but not "
+            f"git-verified on {merge_target}: {nums_str}\n"
+        )
+    return mismatch
+
+
+def _prune_stale_local_feature_branch(
+    issue_num: int,
+    merge_target: str,
+    cwd: Optional[Path] = None,
+) -> None:
+    """Delete a stale local feature branch so E2 merge-check reads fresh state.
+
+    A local branch is considered stale and is deleted when either:
+    - origin/feature exists with a different SHA (local is divergent / outdated), OR
+    - local branch exists, no origin/feature exists, the issue is NOT git-verified
+      merged, and the local tip has 0 commits outside merge_target (stale ancestor).
+
+    Runs fetch origin first so the origin/ refs are current.
+    """
+    effective_cwd = cwd or REPO_ROOT
+
+    # fetch to refresh origin refs
+    _run("git", "fetch", "origin", cwd=effective_cwd, check=False)
+
+    # find local feature branch pattern feature/<num>-*
+    ok_local, local_out, _ = _try(
+        "git", "branch", "--list", f"feature/{issue_num}-*",
+        cwd=effective_cwd,
+    )
+    if not ok_local or not local_out.strip():
+        return  # no local branch, nothing to prune
+
+    local_branch = local_out.strip().lstrip("* ").split()[0]
+
+    # get local tip SHA
+    ok_local_sha, local_sha, _ = _try(
+        "git", "rev-parse", "--verify", local_branch,
+        cwd=effective_cwd,
+    )
+    if not ok_local_sha:
+        return
+
+    local_sha = local_sha.strip()
+
+    # check origin/feature
+    ok_origin, origin_out, _ = _try(
+        "git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*",
+        cwd=effective_cwd,
+    )
+    origin_branch_exists = ok_origin and bool(origin_out.strip())
+
+    if origin_branch_exists:
+        origin_ref = origin_out.strip().split()[0]
+        ok_origin_sha, origin_sha, _ = _try(
+            "git", "rev-parse", "--verify", origin_ref,
+            cwd=effective_cwd,
+        )
+        if ok_origin_sha and origin_sha.strip() != local_sha:
+            # local is divergent from origin — delete it
+            ok_del, _, _ = _try("git", "branch", "-D", local_branch, cwd=effective_cwd)
+            if ok_del:
+                sys.stdout.write(
+                    f"  [prune] deleted stale local branch {local_branch} "
+                    f"(diverged from origin)\n"
+                )
+        return
+
+    # No origin branch — check if local is a stale ancestor
+    if not _is_issue_merged_into_target(issue_num, merge_target):
+        # not git-verified merged — check if local tip has 0 unique commits
+        ok_count, count_out, _ = _try(
+            "git", "rev-list", "--count", local_sha, f"^{merge_target}",
+            cwd=effective_cwd,
+        )
+        if ok_count:
+            try:
+                count = int(count_out.strip())
+            except ValueError:
+                count = 1
+            if count == 0:
+                ok_del, _, _ = _try("git", "branch", "-D", local_branch, cwd=effective_cwd)
+                if ok_del:
+                    sys.stdout.write(
+                        f"  [prune] deleted stale local branch {local_branch} "
+                        f"(ancestor of {merge_target}, no origin, not verified merged)\n"
+                    )
 
 
 # ── quality gates ─────────────────────────────────────────────────────────────
@@ -2669,6 +2917,9 @@ def _gate_lint(
     return GateResult(gate="lint", passed=True, output=combined)
 
 
+_MERGE_PREVIEW_TMP_BRANCH = "_cmdr_merge_preview_tmp"
+
+
 def _gate_merge_preview(
     issue_num: int,
     feature_branch: str,
@@ -2677,24 +2928,38 @@ def _gate_merge_preview(
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
 ) -> GateResult:
-    """Gate 3 -- simulate merge in worktester root without committing."""
+    """Gate 3 -- simulate merge in worktester root without committing.
+
+    Rebase path (when origin/feature exists):
+    1. fetch origin
+    2. checkout/track origin/target_branch locally
+    3. create temp branch _cmdr_merge_preview_tmp at origin/feature tip
+    4. rebase temp branch onto origin/target_branch
+    5. if rebase fails → gate fail (like merge conflict)
+    6. if rebase ok → merge --no-commit --no-ff temp into target
+    7. finally: merge --abort, delete temp branch, leave clean
+
+    Fallback (no origin/feature): merge origin/feature ref directly.
+    """
     if skip:
         sys.stdout.write(str("  [gate:merge-preview] skipped") + "\n")
         return GateResult(gate="merge-preview", passed=True, skipped=True)
 
     _post_agent_event("gate:merge-preview")
-    sys.stdout.write(str(f"  [gate:merge-preview] simulating merge of {feature_branch} into {target_branch} ...") + "\n")
+    sys.stdout.write(str(
+        f"  [gate:merge-preview] simulating merge of {feature_branch} into {target_branch} ..."
+    ) + "\n")
 
     merge_ok = False
     combined = ""
 
     try:
-        # Fetch + update target branch
+        # Step 1: fetch
         _run("git", "fetch", "origin", cwd=worktester_root, check=False)
 
-        # Ensure target branch exists locally
+        # Step 2: ensure target branch exists locally and is up-to-date
         ok, _, _ = _try("git", "show-ref", "--verify", "--quiet",
-                         f"refs/heads/{target_branch}", cwd=worktester_root)
+                        f"refs/heads/{target_branch}", cwd=worktester_root)
         if ok:
             _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
             _run("git", "pull", "origin", target_branch, cwd=worktester_root, check=False)
@@ -2702,22 +2967,78 @@ def _gate_merge_preview(
             _run("git", "checkout", "--track", f"origin/{target_branch}",
                  cwd=worktester_root, check=False)
 
-        # Attempt dry-run merge using the remote tracking ref so the branch
-        # resolves even when it was never checked out locally in this worktree.
-        rc, stdout, stderr = _run_timed(
-            "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
+        # Step 3: check whether origin/feature exists
+        origin_feature_ok, _, _ = _try(
+            "git", "rev-parse", "--verify", f"origin/{feature_branch}",
             cwd=worktester_root,
         )
-        combined = stdout + stderr
-        merge_ok = (rc == 0)
+
+        if origin_feature_ok:
+            # Clean up any leftover tmp branch from a prior aborted run
+            _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+
+            # Create temp branch at origin/feature tip
+            _run(
+                "git", "checkout", "-b", _MERGE_PREVIEW_TMP_BRANCH,
+                f"origin/{feature_branch}",
+                cwd=worktester_root, check=False,
+            )
+
+            # Step 4: rebase temp onto origin/target
+            rebase_rc, rebase_out, rebase_err = _run_timed(
+                "git", "rebase", f"origin/{target_branch}",
+                cwd=worktester_root,
+            )
+            combined += rebase_out + rebase_err
+
+            if rebase_rc != 0:
+                sys.stdout.write(str(
+                    f"  [gate:merge-preview] FAIL -- rebase onto {target_branch} failed"
+                ) + "\n")
+                structured_log.error(
+                    "gate_failed",
+                    f"[gate:merge-preview] FAIL: rebase onto {target_branch} failed",
+                    gate="merge-preview", issue_num=issue_num, target_branch=target_branch,
+                )
+                # Abort rebase so the worktree is clean
+                _run("git", "rebase", "--abort", cwd=worktester_root, check=False)
+                _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+                _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+                _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)
+                return GateResult(gate="merge-preview", passed=False, output=combined)
+
+            # Step 5: return to target and do dry-run merge of rebased temp
+            _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+            rc, stdout, stderr = _run_timed(
+                "git", "merge", "--no-commit", "--no-ff", _MERGE_PREVIEW_TMP_BRANCH,
+                cwd=worktester_root,
+            )
+            combined += stdout + stderr
+            merge_ok = (rc == 0)
+        else:
+            # Fallback: merge remote tracking ref directly (original behaviour)
+            rc, stdout, stderr = _run_timed(
+                "git", "merge", "--no-commit", "--no-ff", f"origin/{feature_branch}",
+                cwd=worktester_root,
+            )
+            combined = stdout + stderr
+            merge_ok = (rc == 0)
 
         if merge_ok:
             sys.stdout.write(str("  [gate:merge-preview] PASS -- no conflicts") + "\n")
         else:
-            structured_log.error("gate_failed", f"[gate:merge-preview] FAIL: conflicts detected merging into {target_branch}", gate="merge-preview", issue_num=issue_num, target_branch=target_branch)
+            structured_log.error(
+                "gate_failed",
+                f"[gate:merge-preview] FAIL: conflicts detected merging into {target_branch}",
+                gate="merge-preview", issue_num=issue_num, target_branch=target_branch,
+            )
     finally:
         # Always abort to leave working tree clean
         _run("git", "merge", "--abort", cwd=worktester_root, check=False)
+        # Ensure we're back on target branch
+        _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
+        # Delete tmp branch if it exists
+        _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
 
     if not merge_ok:
         _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)
@@ -3490,7 +3811,7 @@ def handle_post_tester(
     branch_is_merged = False
 
     if found_branch:
-        branch_is_merged = _is_branch_merged_into(found_branch, target_branch)
+        branch_is_merged = _is_issue_merged_into_target(issue_num, target_branch, found_branch)
         sys.stdout.write(str(f"  Issue #{issue_num}: feature branch '{found_branch}' merged into "
             f"'{target_branch}': {branch_is_merged}") + "\n")
         if not branch_is_merged:
@@ -5491,12 +5812,18 @@ def generate_sprint_summary(
     repo_name: Optional[str] = None,
     sprint_branch: Optional[str] = None,
     sprints_dir: Optional[Path] = None,
+    merge_target: Optional[str] = None,
 ) -> str:
     """Generate a richly-formatted executive summary markdown string.
 
     When ``sprints_dir`` is provided (issue #712), each ticket's captured UAT
     browser screenshots are listed in a Screenshots section; tickets with no
     browser steps contribute nothing (no regression for legacy runs).
+
+    When ``merge_target`` is provided, ``completed`` is derived from git-verified
+    shipped issues only; tickets with status==done that fail git verification are
+    moved to the "What Didn't Ship" table with reason "marked done but not
+    git-verified on <merge_target>".
     """
     n = state.sprint_number if state.sprint_number is not None else state.sprint_label
 
@@ -5520,8 +5847,17 @@ def generate_sprint_summary(
     m_int, s = divmod(rem, 60)
     duration_str = f"{h}h {m_int}m {s}s"
 
-    completed = [i for i in state.issues if i.status == "done"]
-    skipped   = [i for i in state.issues if i.status == "skipped"]
+    if merge_target:
+        completed = _git_verified_shipped_issues(state, merge_target)
+        # done-but-not-git-verified: treat as not shipped for reporting
+        _false_done = [
+            i for i in state.issues
+            if i.status == "done" and i not in completed
+        ]
+        skipped = [i for i in state.issues if i.status == "skipped"] + _false_done
+    else:
+        completed = [i for i in state.issues if i.status == "done"]
+        skipped   = [i for i in state.issues if i.status == "skipped"]
     pending   = [i for i in state.issues if i.status == "pending"]
     # A "failed" ticket is a skipped one that actually failed (has a failure
     # category or agent_status=failed) — distinct from a legitimately-skipped
@@ -5640,9 +5976,17 @@ def generate_sprint_summary(
         "|---|---|---|---|",
     ]
     if skipped:
+        _false_done_set = set(
+            i.number for i in state.issues
+            if i.status == "done" and merge_target and i not in completed
+        )
         for issue in skipped:
-            cat    = issue.category or "unknown"
-            reason = (issue.skip_reason or "no reason recorded").replace("|", "/")
+            if issue.number in _false_done_set:
+                cat    = "git-unverified"
+                reason = f"marked done but not git-verified on {merge_target}"
+            else:
+                cat    = issue.category or "unknown"
+                reason = (issue.skip_reason or "no reason recorded").replace("|", "/")
             lines.append(f"| #{issue.number} | {issue.title} | {cat} | {reason} |")
     else:
         lines.append("| -- | All issues shipped | -- | -- |")
@@ -6111,6 +6455,7 @@ def write_sprint_summary(
     cfg: Optional["SprintConfig"] = None,
     dry_run: bool = False,
     force_summary: bool = False,
+    merge_target: Optional[str] = None,
 ) -> Optional[Path]:
     """Write summary file, create GitHub issue, prompt for learnings (AC-1/2/3).
 
@@ -6118,6 +6463,9 @@ def write_sprint_summary(
     prints a dry-run notice, but does NOT create or search GitHub issues.
 
     Returns None when end_reason is "cancelled" (issue #365 AC-3/AC-5).
+
+    When merge_target is provided, git-verified counts are used in the summary
+    and any done-but-unverified tickets are flagged in the not-shipped table.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
 
@@ -6125,6 +6473,10 @@ def write_sprint_summary(
     if end_reason == "cancelled":
         sys.stdout.write(str("  [cancel] Sprint was cancelled — skipping summary file and GitHub issue.") + "\n")
         return None
+
+    if merge_target:
+        _log_shipped_status_git_mismatch(state, merge_target)
+        _fail_loud_shipped_reconciliation(state, merge_target, "Sprint summary")
 
     content = generate_sprint_summary(
         state,
@@ -6134,6 +6486,7 @@ def write_sprint_summary(
         repo_name=eff_repo,
         sprint_branch=sprint_branch,
         sprints_dir=(cfg.sprints_dir if cfg is not None else SPRINTS_DIR),
+        merge_target=merge_target,
     )
     path = _summary_path(state.sprint_number, state.sprint_label, cfg=cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -6200,32 +6553,59 @@ def _create_sprint_pr(
     state: "SprintState",
     repo_name: Optional[str] = None,
     pr_base: str = "develop",
+    merge_target: Optional[str] = None,
 ) -> Optional[str]:
     """Create a PR from sprint_branch → pr_base at the end of a child sprint.
 
     Child branches promote into the base sprint branch here; develop is only
     reached at Merge Sprint (no auto-merge). Returns PR URL or None.
+
+    When merge_target is provided, shipped tickets are git-verified; done-but-
+    unverified tickets appear in the skipped/failed section.
     """
     r = _r(repo_name)
     n = sprint_number if sprint_number is not None else sprint_label
-    shipped = [i for i in state.issues if i.status == "done"]
+
+    reconciliation_mismatch: list[int] = []
+    if merge_target:
+        _log_shipped_status_git_mismatch(state, merge_target)
+        reconciliation_mismatch = _fail_loud_shipped_reconciliation(state, merge_target, "Sprint PR")
+        shipped  = _git_verified_shipped_issues(state, merge_target)
+        not_shipped = _reporting_not_shipped_issues(state, merge_target)
+    else:
+        shipped     = [i for i in state.issues if i.status == "done"]
+        not_shipped = [i for i in state.issues if i.status == "skipped"]
 
     ticket_lines = "\n".join(
         f"- #{i.number} {i.title}" for i in shipped
     ) or "No tickets shipped."
 
-    skipped = [i for i in state.issues if i.status == "skipped"]
-    skipped_lines = "\n".join(
-        f"- #{i.number} {i.title} ({i.category or 'unknown'})" for i in skipped
-    ) or "None."
+    skipped_lines_parts = []
+    for i in not_shipped:
+        if i.status == "done" and merge_target:
+            reason = f"marked done but not git-verified on {merge_target}"
+        else:
+            reason = i.category or "unknown"
+        skipped_lines_parts.append(f"- #{i.number} {i.title} ({reason})")
+    skipped_lines = "\n".join(skipped_lines_parts) or "None."
+
+    reconciliation_section = ""
+    if reconciliation_mismatch:
+        mismatch_refs = " ".join(f"#{n}" for n in reconciliation_mismatch)
+        reconciliation_section = (
+            f"### Reconciliation failed\n\n"
+            f"{len(reconciliation_mismatch)} ticket(s) marked done in state but not "
+            f"git-verified on {merge_target}: {mismatch_refs}\n\n"
+        )
 
     body = (
+        f"{reconciliation_section}"
         f"## Sprint {n} — auto-generated PR\n\n"
         f"This PR promotes `{sprint_branch}` into `{pr_base}` after all sprint issues "
         f"have been processed.\n\n"
         f"### Shipped ({len(shipped)} tickets)\n\n"
         f"{ticket_lines}\n\n"
-        f"### Skipped / Failed ({len(skipped)} tickets)\n\n"
+        f"### Skipped / Failed ({len(not_shipped)} tickets)\n\n"
         f"{skipped_lines}\n\n"
         f"### Stats\n\n"
         f"| Metric | Value |\n"
@@ -6636,15 +7016,21 @@ def _dispatch_documenter(
     cfg: Optional["SprintConfig"],
     repo_name: Optional[str],
     timeout_secs: int = 300,
+    merge_target: Optional[str] = None,
 ) -> None:
     """Dispatch the documenter agent after write_sprint_summary() and before _create_sprint_pr().
 
     Updates state.documenter_status, state.documenter_files_touched, and
     state.documenter_commit_sha in-place. Raises RuntimeError on failure so the
     sprint pipeline fails loudly (AC6).
+
+    When merge_target is provided, only git-verified shipped issues count as merged.
     """
     # Skip: nothing merged this sprint
-    merged = [i for i in state.issues if i.status == "done"]
+    if merge_target:
+        merged = _git_verified_shipped_issues(state, merge_target)
+    else:
+        merged = [i for i in state.issues if i.status == "done"]
     if not merged:
         sys.stdout.write(str("  [documenter] skipped: nothing merged this sprint") + "\n")
         state.documenter_status = "skipped"
@@ -6864,6 +7250,7 @@ def _dispatch_reviewer(
     head_sha: str,
     cfg: Optional["SprintConfig"],
     repo_name: Optional[str],
+    merge_target: Optional[str] = None,
 ) -> None:
     """Dispatch the reviewer agent after sprint PR creation.
 
@@ -6873,11 +7260,16 @@ def _dispatch_reviewer(
     Raises RuntimeError when the prompt template contains an unknown placeholder
     (AC-3: unknown placeholders must surface as a loud ERROR, not a silent skip).
     All other failures are advisory (logged and set state.reviewer_status="failed").
+
+    When merge_target is provided, only git-verified shipped issues count as merged.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
 
-    # Skip conditions
-    merged = [i for i in state.issues if i.status == "done"]
+    # Skip conditions: use git-verified list when merge_target is available
+    if merge_target:
+        merged = _git_verified_shipped_issues(state, merge_target)
+    else:
+        merged = [i for i in state.issues if i.status == "done"]
     if not merged:
         sys.stdout.write(str("  [reviewer] skipped: nothing merged this sprint") + "\n")
         state.reviewer_status = "skipped"
@@ -8526,11 +8918,13 @@ def run_sprint(
         # got re-run into a divergent-branch crash. Trust git, not the label, and
         # re-apply UAT so the board reflects reality.
         if issue_state.status not in ("done", "skipped"):
-            _e2_fb = _find_feature_branch(num)
-            _e2_merged = (
-                _is_branch_merged_into(_e2_fb, target_branch) if _e2_fb
-                else _was_feature_merged_via_log(num, target_branch)
-            )
+            # Prune stale local feature branch before E2 merge-check so we read
+            # fresh state and don't misidentify an ancestor as merged.
+            _e2_cwd = cfg.worktree_coder if cfg is not None else REPO_ROOT
+            _prune_stale_local_feature_branch(num, target_branch, cwd=_e2_cwd)
+            # Use strict merge check to avoid false-positives from stale ancestor
+            # branches that pass git branch --merged without ever being merged.
+            _e2_merged = _is_issue_merged_into_target(num, target_branch)
             if _e2_merged:
                 sys.stdout.write(str(
                     f"\n--- {progress} Issue #{num}: {title} --- "
@@ -9680,6 +10074,7 @@ def main() -> None:
                 sprint_branch = effective_target,
                 dry_run       = args.dry_run,
                 force_summary = args.force_summary,
+                merge_target  = effective_target,
             )
         else:
             summary_path = None
@@ -9778,6 +10173,7 @@ def main() -> None:
                 head_sha      = doc_head_sha,
                 cfg           = cfg,
                 repo_name     = eff_repo,
+                merge_target  = effective_target,
             )
             _db_agent_finish_sm(
                 0, state.sprint_label, "documenter",
@@ -9847,6 +10243,7 @@ def main() -> None:
             state          = state,
             repo_name      = eff_repo,
             pr_base        = _base_sprint_branch(args.label),
+            merge_target   = effective_target,
         )
 
     # Dispatch reviewer after sprint PR creation (issue #159)
@@ -9892,6 +10289,7 @@ def main() -> None:
                 head_sha          = head_sha,
                 cfg               = cfg,
                 repo_name         = eff_repo,
+                merge_target      = effective_target,
             )
             _db_agent_finish_sm(
                 0, state.sprint_label, "reviewer",

@@ -23,7 +23,6 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
         sys.path.insert(0, _p)
 
 import db as _db  # noqa: E402
-import projects as _projects_module  # noqa: E402
 import settings_repo as _settings_repo  # noqa: E402
 from settings_schema import APP_CONFIG_KEY  # noqa: E402
 

@@ -64,16 +64,19 @@ import {
   _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
 } from './drag-drop.js';
 import {
-  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender, 
-  _smgmtLabelFilterRender, _smgmtLabelFilterApply, 
-  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts, 
-  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml, 
-  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
+  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender,
+  _smgmtLabelFilterRender, _smgmtLabelFilterApply,
+  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts,
+  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml,
+  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard,
   _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
-  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
+  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml,
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
   _smgmtApplyRerunOptimistic,
+  // Ancestor row (issue #1043)
+  _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
+  _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -210,6 +213,14 @@ globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
+
+// Ancestor sprint rows (issue #1043)
+globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
+globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
+globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;
+globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
+globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
+globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
 
 // Run-on-schedule toggle (issue #863)
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;

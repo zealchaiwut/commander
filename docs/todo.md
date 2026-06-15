@@ -70,6 +70,33 @@ failed step** instead of redoing everything:
       model-routing reflect reality on the retry, rather than reusing the stale
       pre-failure estimate.
 
+### Pending — model/UI fixes (start AFTER sprint-67.1 finishes; one PR)
+
+Agreed 2026-06-13; do not start while 67.1 is running.
+
+- [ ] **1. Model = single source.** Global Settings Save (`PUT /api/settings`)
+      writes only the settings DB; the dispatcher reads sprint.yaml
+      `agent_config.default_model` — so Save never applies (coder/estimator
+      stayed opus). Wire Save to also write sprint.yaml `agent_config` (via
+      `settings_sync._update_sprint_yaml_agent_config`) so sprint.yaml is the
+      single source the run reads. Default may stay opus; the sonnet override
+      must stick.
+- [ ] **2. Move-ticket list ← GitHub only.** Both move UIs list every base
+      sprint number from `_smgmtData.sprints` (shows old 59/65/66, base labels,
+      no lock). Source the list from **GitHub** (single source), filtered to
+      active/current sprints incl sub-labels (66.6/67.1), and **disable the
+      running** sprint.
+- [ ] **3. Analytics size calibration (S/M/L) by TIME; tokens → "N/A (soon)".**
+      Size-vs-actual must key off the **size label** using **time per size**
+      (avg minutes from agent_runs; recorded even at 0 tokens). Grey out the
+      token column as **"N/A (soon)"** (tokens aren't tracked on the
+      subscription). Surface calibrated time-per-size in project settings too.
+- [ ] **4. Status pill ← `/api/status`.** The nav pill uses
+      `/api/sprint-nav-status` (GitHub-label, base-number heuristic → showed
+      "S71 0/11" while 67.1 ran). Make the pill prefer the live running sprint
+      from `/api/status` (sub-label aware, real progress), GitHub heuristic only
+      when nothing runs. One source for "what's running."
+
 <!-- Anything above this line is hand-maintained. -->
 
 <!-- AUTO:milestones START -->

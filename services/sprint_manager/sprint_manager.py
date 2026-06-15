@@ -1471,6 +1471,7 @@ class SprintState:
     pipeline_mode:           bool                = False
     # Post-sprint reconciliation result (issue #856) — {all_clear, checks[], ...}
     reconciliation:          Optional[dict]      = None
+    summary_issue_url:         Optional[str]       = None
 
     def to_dict(self) -> dict:
         return {
@@ -1495,6 +1496,7 @@ class SprintState:
             "estimates":                 self.estimates,
             "pipeline_mode":             self.pipeline_mode,
             "reconciliation":            self.reconciliation,
+            "summary_issue_url":           self.summary_issue_url,
         }
 
     @staticmethod
@@ -1522,6 +1524,7 @@ class SprintState:
         s.estimates                = d.get("estimates", {})
         s.pipeline_mode            = bool(d.get("pipeline_mode", False))
         s.reconciliation           = d.get("reconciliation")
+        s.summary_issue_url        = d.get("summary_issue_url")
         return s
 
     def save(self, path: Path) -> None:
@@ -6597,8 +6600,9 @@ def write_sprint_summary(
         structured_log.warn("summary_issue_create_failed", f"create_summary_github_issue raised: {exc}", exc=str(exc))
         summary_issue_num, summary_issue_url = None, None
 
-    # Store summary_issue_url in state JSON
+    # Store summary_issue_url in state JSON and in-memory state (final save uses to_dict).
     if summary_issue_url:
+        state.summary_issue_url = summary_issue_url
         try:
             if state_path.exists():
                 state_dict = json.loads(state_path.read_text())

@@ -953,6 +953,7 @@ from routers import (  # noqa: E402
     sprint_history_router,
     sprints_router,
     status_router,
+    suggestions_router,
     system_router,
     tickets_router,
 )
@@ -962,6 +963,7 @@ from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
 app.include_router(activity_router)
 app.include_router(advisor_router)
+app.include_router(suggestions_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(doctor_router)

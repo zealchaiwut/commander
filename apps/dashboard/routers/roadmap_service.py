@@ -90,6 +90,15 @@ def update_settings(repo: str, active_milestone: Any = _SENTINEL,
     return _save_settings(repo, data)
 
 
+def _look_ahead_for_roadmap(repo: str) -> list[str]:
+    """Advisor look-ahead entries for the Roadmap tab (#883)."""
+    from . import advisor_service  # noqa: PLC0415
+    try:
+        return advisor_service.get_look_ahead(repo)
+    except Exception:
+        return []
+
+
 def _apply_order(cards: list[dict], order: list[int]) -> list[dict]:
     """Sort cards by the persisted order; unlisted cards fall to the end,
     stable by milestone number."""
@@ -175,6 +184,7 @@ def get_roadmap(repo: str) -> dict:
         "active_milestone": active,
         "order": order,
         "stale": stale,
+        "look_ahead": _look_ahead_for_roadmap(repo),
     }
     if error:
         payload["error"] = error

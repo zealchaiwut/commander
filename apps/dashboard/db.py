@@ -161,6 +161,7 @@ def init_db():
         _create_agent_runs_table(conn)
         _create_advisor_suggestions_table(conn)
         _create_advisor_look_ahead_table(conn)
+        _create_advisor_dismissed_table(conn)
         conn.commit()
 
 
@@ -1064,6 +1065,23 @@ def _create_advisor_look_ahead_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_advisor_look_ahead_project "
         "ON advisor_look_ahead (project)"
+    )
+
+
+def _create_advisor_dismissed_table(conn: sqlite3.Connection) -> None:
+    """Durable store for pitches the user has dismissed (issue #882)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS advisor_dismissed (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            project      TEXT NOT NULL,
+            pitch        TEXT NOT NULL,
+            dismissed_at TEXT NOT NULL,
+            UNIQUE(project, pitch)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_advisor_dismissed_project "
+        "ON advisor_dismissed (project)"
     )
 
 

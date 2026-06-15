@@ -224,7 +224,7 @@ def test_compute_levels_extracted_to_helper(live_metrics_db):
         {"number": 3, "dispatch_level": 3, "status": "pending"},
     ]
     levels = live_metrics.compute_levels(issues)
-    assert [l["level"] for l in levels] == [1, 2, 3]
+    assert [lv["level"] for lv in levels] == [1, 2, 3]
     assert levels[0]["state"] == "complete"
     assert levels[1]["state"] == "active"
     assert levels[2]["state"] == "waiting"

@@ -974,28 +974,38 @@
       'L':  'estimation_l_minutes',
       'XL': 'estimation_xl_minutes'
     };
-    var _TICKS = [5, 15, 30, 60, 90];
     var _SVG_L = 64, _SVG_R = 620, _SVG_T = 22, _SVG_B = 250;
-    var _EMAX = 100, _AMAX = 130;
 
-    function _xm(v) { return _SVG_L + (v / _EMAX) * (_SVG_R - _SVG_L); }
-    function _ym(v) { return _SVG_B - (v / _AMAX) * (_SVG_B - _SVG_T); }
+    function _scatterAxisMax(bySize) {
+      var bs = bySize || {};
+      var lCfg = (bs.L && bs.L.configured_minutes != null) ? bs.L.configured_minutes : 30;
+      var xlCfg = (bs.XL && bs.XL.configured_minutes != null) ? bs.XL.configured_minutes : 90;
+      return Math.ceil(Math.max(lCfg, xlCfg) * 1.2);
+    }
+
+    function _scatterTicks(axisMax) {
+      return [0, 1, 2, 3, 4].map(function(i) { return axisMax * i / 4; });
+    }
 
     /* ── Scatter plot renderer ── */
-    function _renderScatter(points) {
+    function _renderScatter(points, bySize) {
       var svg = document.getElementById('scatter-svg');
       if (!svg) return;
+      var axisMax = _scatterAxisMax(bySize);
+      var ticks = _scatterTicks(axisMax);
+      function _xm(v) { return _SVG_L + (v / axisMax) * (_SVG_R - _SVG_L); }
+      function _ym(v) { return _SVG_B - (v / axisMax) * (_SVG_B - _SVG_T); }
       var p = '';
-      // Reference gridlines + tick labels at 5/15/30/60/90 on both axes
-      _TICKS.forEach(function(v) {
+      ticks.forEach(function(v) {
+        var lbl = Math.round(v) + 'm';
         p += '<line x1="' + _xm(v) + '" y1="' + _SVG_T + '" x2="' + _xm(v) + '" y2="' + _SVG_B + '"'
            + ' stroke="var(--border)" stroke-width="1"/>';
         p += '<text x="' + _xm(v) + '" y="' + (_SVG_B + 15) + '" font-size="10"'
-           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + v + 'm</text>';
+           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + lbl + '</text>';
         p += '<line x1="' + _SVG_L + '" y1="' + _ym(v) + '" x2="' + _SVG_R + '" y2="' + _ym(v) + '"'
            + ' stroke="var(--border)" stroke-width="1"/>';
         p += '<text x="' + (_SVG_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10"'
-           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + v + 'm</text>';
+           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + lbl + '</text>';
       });
       // Axis lines
       p += '<line x1="' + _SVG_L + '" y1="' + _SVG_B + '" x2="' + _SVG_R + '" y2="' + _SVG_B + '"'
@@ -1003,10 +1013,9 @@
       p += '<line x1="' + _SVG_L + '" y1="' + _SVG_T + '" x2="' + _SVG_L + '" y2="' + _SVG_B + '"'
          + ' stroke="var(--text-sub)" stroke-width="1.5"/>';
       // Dashed diagonal: est = actual
-      var dm = Math.min(_EMAX, _AMAX);
-      p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(dm) + '" y2="' + _ym(dm) + '"'
+      p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(axisMax) + '" y2="' + _ym(axisMax) + '"'
          + ' stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
-      p += '<text x="' + (_xm(dm) - 6) + '" y="' + (_ym(dm) - 6) + '" font-size="10"'
+      p += '<text x="' + (_xm(axisMax) - 6) + '" y="' + (_ym(axisMax) - 6) + '" font-size="10"'
          + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
       // Axis titles
       p += '<text x="' + ((_SVG_L + _SVG_R) / 2) + '" y="' + (_SVG_B + 32) + '" font-size="10"'
@@ -1116,7 +1125,7 @@
           return r.json();
         })
         .then(function(data) {
-          _renderScatter(data.points || []);
+          _renderScatter(data.points || [], data.by_size || {});
           _renderCalTable(data.by_size || {});
           var empty = document.getElementById('cal-empty');
           var hasData = (data.points || []).length > 0;

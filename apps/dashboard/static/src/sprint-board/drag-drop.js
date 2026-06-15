@@ -64,7 +64,10 @@ export function _smgmtUpdateSelectionUI() {
     }
     if (listEl) listEl.classList.remove('has-selection');
   }
-  if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
+  if (typeof _smgmtUpdateToolbarTop === 'function') {
+    _smgmtUpdateToolbarTop();
+    requestAnimationFrame(_smgmtUpdateToolbarTop);
+  }
 }
 
 export function _smgmtPopulateSelectionDropdown() {

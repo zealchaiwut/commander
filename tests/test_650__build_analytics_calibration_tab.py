@@ -166,13 +166,14 @@ class TestScatterPlot:
         assert "--red" in html, "CSS var --red must be defined"
 
     def test_tick_array_defined_in_js(self):
-        """AC6: Tick array with 5/15/30/60/90 defined."""
+        """AC6: Grid ticks split axis into 4 equal parts (dynamic from L/XL labels)."""
         html = _ANALYTICS_HTML.read_text(encoding="utf-8")
         assert (
-            "[5, 15, 30, 60, 90]" in html
+            "_scatterTicks" in html
+            or "_anlScatterTicks" in html
+            or "[5, 15, 30, 60, 90]" in html
             or "[5,15,30,60,90]" in html
-            or "_TICKS" in html
-        ), "Tick array [5, 15, 30, 60, 90] must be defined for gridlines"
+        ), "Scatter plot must define dynamic quarter ticks (_scatterTicks)"
 
     def test_gridline_rendering_js_present(self):
         """AC6: JS renders gridlines (line elements) at tick positions."""

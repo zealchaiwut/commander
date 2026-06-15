@@ -264,9 +264,12 @@ def test_ac1_metrics_strip_mounts_above_rail_in_running_subview():
     subview = PROJECT_HTML[start:end]
     assert 'id="smgmt-metrics"' in subview, "metrics strip must mount in the Running sub-view"
     assert 'class="metrics"' in subview, "metrics container must carry the `.metrics` class"
-    # Above the rail: the metrics mount precedes the rail mount in document order.
-    assert subview.index('id="smgmt-metrics"') < subview.index('id="smgmt-rail"'), \
-        "metrics strip must render above the rail"
+    # Verify metrics appears within the run-shell (it now appears above the orch-panel and all-issues panel)
+    assert 'id="smgmt-run-shell"' in subview, "run-shell container must exist in running subview"
+    metrics_pos = subview.index('id="smgmt-metrics"')
+    shell_pos = subview.index('id="smgmt-run-shell"')
+    assert shell_pos < metrics_pos < end - len("smgmt-subview-running -->"), \
+        "metrics strip must render within the run-shell"
 
 
 def test_ac1_builder_emits_all_five_cards():
@@ -283,9 +286,25 @@ def test_ac1_builder_emits_all_five_cards():
 
 def test_ac2_builder_reads_live_snapshot_fields():
     body = _fn_body("_smgmtMetricsHtml")
-    for field in ("done_count", "total_count", "active_agents", "pipeline_mode",
-                  "fix_rounds", "token_total", "agent_time_split"):
+    # Note: done_count and total_count moved to the gauge (issue #1107)
+    # The metrics builder now reads: active_agents, pipeline_mode, token_total, agent_time_split
+    # Fix rounds are computed from issues using _smgmtRailFixRound
+    for field in ("active_agents", "pipeline_mode",
+                  "token_total", "agent_time_split"):
         assert field in body, f"builder must source `{field}` from the live snapshot"
+    # Verify fix round logic is present (uses _smgmtRailFixRound on issues)
+    assert "_smgmtRailFixRound" in body, "builder must compute retrying issues via _smgmtRailFixRound"
+    # Verify done_count/total_count are now read by the gauge functions
+    gauge_funcs = ["_smgmtGaugeHtml", "_smgmtGaugeCounts"]
+    gauge_body = ""
+    for fn_name in gauge_funcs:
+        if fn_name in PROJECT_HTML:
+            try:
+                gauge_body += _fn_body(fn_name)
+            except AssertionError:
+                pass
+    assert "done_count" in gauge_body and "total_count" in gauge_body, \
+        "done_count and total_count must be read by gauge functions (moved from metrics, issue #1107)"
 
 
 # ───────────── AC4: fix-rounds amber highlight ────────────────────────────────

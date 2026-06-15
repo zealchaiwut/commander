@@ -292,10 +292,7 @@ function _histSummaryIssueUrl(s) {
   return `https://github.com/${repo}/issues/${s.summary_issue_num}`;
 }
 function _histSummaryUrl(s) {
-  const issueUrl = _histSummaryIssueUrl(s);
-  if (issueUrl) return issueUrl;
-  if (!s.summary_path) return '';
-  return '/api/sprint-summary?path=' + encodeURIComponent(s.summary_path);
+  return _histSummaryIssueUrl(s);
 }
 function _histLogsUrl(s) {
   return `/project/${encodeURIComponent(_slug)}/logs?sprint=${encodeURIComponent(s.label || '')}`;

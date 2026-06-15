@@ -578,6 +578,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
 # artifacts (sprint-1-estimate.json, sprint-1-preflight-<date>.json, plan
 # files, test debris) from surfacing as zombie History rows.
 _LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+_SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
 
 def _label_sub_index(label: str | None) -> int:
@@ -740,9 +741,34 @@ def _links_from_events(project: str, label: str) -> dict:
     return out
 
 
+def _github_summary_by_label(project: str) -> dict[str, dict]:
+    """Map sprint label → {number, url} from cached GitHub sprint-summary issues."""
+    if not project:
+        return {}
+    try:
+        import github_client  # noqa: PLC0415
+        issues = github_client.list_summary_issues(repo_name=project)
+    except Exception:
+        return {}
+    result: dict[str, dict] = {}
+    for iss in issues:
+        m = _SUMMARY_TITLE_NUM_RE.match(iss.get("title", "") or "")
+        if not m:
+            continue
+        label = f"sprint-{m.group(1)}"
+        prev = result.get(label)
+        if prev is None or (iss.get("number") or 0) > (prev.get("number") or 0):
+            result[label] = {
+                "number": iss.get("number"),
+                "url": iss.get("url"),
+            }
+    return result
+
+
 def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
-    """Backfill PR / summary targets from disk, events, and parent sprint rows."""
+    """Backfill PR / summary targets from disk, events, GitHub cache, and parents."""
     by_label = {r.get("label"): r for r in records if r.get("label")}
+    github_by_project: dict[str, dict[str, dict]] = {}
 
     for rec in records:
         label = rec.get("label")
@@ -776,6 +802,15 @@ def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) ->
                     rec["summary_issue_url"] = (
                         f"https://github.com/{project}/issues/{meta['summary_issue_num']}"
                     )
+
+        if rec.get("summary_issue_num") is None and project:
+            if project not in github_by_project:
+                github_by_project[project] = _github_summary_by_label(project)
+            gh_sum = github_by_project[project].get(label)
+            if gh_sum:
+                rec["summary_issue_num"] = gh_sum.get("number")
+                if not rec.get("summary_issue_url") and gh_sum.get("url"):
+                    rec["summary_issue_url"] = gh_sum["url"]
 
     for rec in records:
         if rec.get("pr_number") is not None:

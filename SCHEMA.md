@@ -323,6 +323,32 @@ Endpoint: `GET /api/projects/{project}/advisor/look-ahead`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/sprints/{sprint_label}/finish-card` | Summary card data for a sprint. Always HTTP 200 — check `state` field (see below). |
+| `GET` | `/api/sprints/{sprint_label}/timeline` | Per-issue Gantt timeline data for the running pane (issues #1146, #1147). Requires `project` query param. `sprint_label` must match `^sprint-\d+[a-z]?$` (else HTTP 400). |
+
+**`GET /api/sprints/{sprint_label}/timeline` — response shape (issue #1146):**
+
+Returns ordered per-issue segment data sourced from DB `agent_runs` (no render-time disk reads). GitHub labels are the issue-status truth; DB is the segment-time truth.
+
+```
+{
+  "sprint_started_at": "<iso>",
+  "server_now": "<iso>",
+  "issues": [
+    {
+      "number": 519, "title": "...", "url": "...",
+      "status": "done" | "running" | "queued",
+      "size": "S"|"M"|"L"|"XL"|null,
+      "calibrated_estimate": <minutes>,        // size→time mapping refined by Analytics actuals
+      "estimated_remaining": <minutes>|null,   // running only = estimate − elapsed
+      "segments": [ {"agent": "coder"|"tester", "start": "<iso>", "end": "<iso>"|null, "duration": <secs>} ]
+    }
+  ],
+  "wrap_up_estimate": {"documenter": <minutes>, "reviewer": <minutes>?},  // reviewer only when reviewer_enabled
+  "projected_finish": "<iso>"   // running remainder + queued estimates (per run mode) + wrap-up
+}
+```
+
+`projected_finish` respects run mode: serial lays the queue out sequentially; pipeline overlaps coder/tester phases. The documenter/reviewer wrap-up is a single sprint-level object, never attached to individual issues.
 
 **`GET /api/sprints/{sprint_label}/finish-card` — response states:**
 
@@ -455,7 +481,9 @@ Two sprint-manager settings drive the new panels (`services/sprint_manager/setti
 `history_fold_size` (default 10) — most-recent sprints shown expanded in History
 before older ones collapse into aggregate folds (issue #807); and
 `sprint_budget_minutes` (default 180) — the sprint capacity budget that drives the
-capacity bar (issue #801).
+capacity bar (issue #801). A third setting, `reviewer_enabled` (default `false`,
+issue #1146), gates the post-sprint reviewer wrap-up agent; when enabled the
+timeline endpoint's `wrap_up_estimate` includes a `reviewer` minutes entry.
 
 ### Daily Brief (issues #839–#842)
 

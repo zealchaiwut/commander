@@ -13,12 +13,9 @@ import logging
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import httpx
-
-if TYPE_CHECKING:
-    import db as _DbModule
 
 logger = logging.getLogger(__name__)
 
@@ -264,8 +261,8 @@ def _normalise_issue(item: dict) -> dict:
         "title": item.get("title", ""),
         "state": item.get("state", ""),
         "labels": [
-            {"name": l.get("name", ""), "color": l.get("color", "")}
-            for l in (item.get("labels") or [])
+            {"name": lbl.get("name", ""), "color": lbl.get("color", "")}
+            for lbl in (item.get("labels") or [])
         ],
         "assignees": [
             {"login": a.get("login", "")} for a in (item.get("assignees") or [])

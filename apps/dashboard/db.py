@@ -1239,6 +1239,17 @@ def list_sprints_lifecycle() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_sprint_children(parent_label: str) -> list[dict]:
+    """Return sprints rows whose parent_label matches the given label (issue #1093)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        rows = conn.execute(
+            "SELECT * FROM sprints WHERE parent_label = ? ORDER BY label",
+            (parent_label,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def is_sprint_running(label: str, pid_alive: bool) -> bool:
     """Authoritative "is this sprint running?" check (issue #757).
 

@@ -22,7 +22,6 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from services.sprint_manager import sprint_creation
-from services.sprint_manager.sprint_creation import SprintCreationError  # re-export
 
 # server.py is a top-level module on the dashboard path; make sure it resolves.
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -162,7 +161,6 @@ def _carry_over_issues(srv, gc, project: str) -> list[dict]:
         finished = {}
     nums = []
     for label in finished:
-        m = srv._SPRINT_LABEL_RE.match(label) if hasattr(srv, "_SPRINT_LABEL_RE") else None
         try:
             nums.append(int(label.split("-")[1].split(".")[0]))
         except (IndexError, ValueError):
@@ -305,7 +303,7 @@ def plan_next_sprint(project: str, replace: bool = False) -> dict:
     """
     from services.sprint_manager import sprint_planner
     from services.sprint_manager.sprint_planner import (
-        STATUS_CONFLICT, STATUS_EMPTY, STATUS_NO_MILESTONE, STATUS_OK,
+        STATUS_CONFLICT, STATUS_NO_MILESTONE, STATUS_OK,
     )
 
     srv = _server()

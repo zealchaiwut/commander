@@ -8197,6 +8197,8 @@ def _child_sprint_labels_for_parent(project_root: Path, parent_label: str) -> li
 _CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
 _SPRINT_WORK_EXCLUDE_LABELS = frozenset({"sprint-summary", "docs", "documentation"})
 _SPRINT_UAT_LABELS = frozenset({"UAT", "UAT-approved", "released"})
+# Canonical lifecycle states that mean the sprint has finished (issue #1093).
+_OUTCOME_TERMINAL_STATES = frozenset({"completed", "needs_rework", "ready_to_merge", "deleted"})
 
 
 def _sprint_work_tickets_all_uat(project: str, sprint_label: str) -> bool:
@@ -8234,21 +8236,27 @@ def _derive_outcome_lifecycle(
     pane_state: str,
     failed_count: int,
 ) -> str:
-    """Board/history lifecycle — derives partial_finished when a re-run child is in flight."""
-    children = _child_sprint_labels_for_parent(project_root, sprint_label)
-    if children:
-        unsettled = [c for c in children if not _child_sprint_settled(project_root, project, c)]
-        if unsettled:
-            return "partial_finished"
-        if failed_count == 0 and pane_state == "completed":
-            return "ready_to_merge"
-        if _sprint_work_tickets_all_uat(project, sprint_label):
-            return "ready_to_merge"
-    if plan_state == "needs_rework" and failed_count > 0:
-        return "needs_rework"
-    if plan_state == "needs_rework" and failed_count == 0 and pane_state == "completed":
-        return "ready_to_merge"
-    return db.canonical_lifecycle(pane_state)
+    """Board/history lifecycle — DB-only: derives partial_finished when a child is unsettled.
+
+    Reads parent canonical state and child rows exclusively from the sprints DB
+    table (issue #1093). No GitHub label lookups, no disk globs.
+    """
+    row = db.get_sprint(sprint_label)
+    if row is None:
+        return db.canonical_lifecycle(pane_state)
+    parent_state = db.canonical_lifecycle(row["state"])
+    if parent_state not in _OUTCOME_TERMINAL_STATES:
+        return parent_state
+    children = db.get_sprint_children(sprint_label)
+    if not children:
+        return parent_state
+    unsettled = [
+        c for c in children
+        if db.canonical_lifecycle(c["state"]) not in _CHILD_SETTLED_STATES
+    ]
+    if unsettled:
+        return "partial_finished"
+    return parent_state
 
 
 @app.get("/api/sprints/{sprint_label}/outcome")

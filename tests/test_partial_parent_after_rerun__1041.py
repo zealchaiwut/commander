@@ -1,59 +1,54 @@
-"""Parent sprint board state after child re-run (perf-coach 58.1 case)."""
+"""Parent sprint board state after child re-run (perf-coach 58.1 case).
+
+Updated for issue #1093: _derive_outcome_lifecycle now reads state exclusively
+from the DB sprints table. Tests set up DB rows via db.record_sprint_* instead
+of disk plan.json files.
+"""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 _REPO = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO / "apps" / "dashboard"))
 
+import db   # noqa: E402
 import server as srv  # noqa: E402
 
 
-def _write_plan(project_root: Path, label: str, data: dict) -> None:
-    d = project_root / ".commander" / "sprints"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{label}-plan.json").write_text(json.dumps(data))
+@pytest.fixture(autouse=True)
+def _isolated_db(tmp_path, monkeypatch):
+    db_file = tmp_path / "test_1041.db"
+    original = db.DB_PATH
+    db.DB_PATH = db_file
+    db.init_db()
+    yield
+    db.DB_PATH = original
 
 
-def _write_state(project_root: Path, label: str, data: dict) -> None:
-    d = project_root / ".commander" / "sprints"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{label}-state.json").write_text(json.dumps(data))
-
-
-def test_derive_partial_finished_when_child_still_open(tmp_path):
-    root = tmp_path / "proj"
-    _write_plan(root, "sprint-58.1", {
-        "state": "needs_rework", "tickets": [495], "parent": "sprint-58",
-    })
-    _write_plan(root, "sprint-58.2", {
-        "state": "needs_rework", "tickets": [499], "parent": "sprint-58.1",
-    })
-    with patch.object(srv, "_sprint_work_tickets_all_uat", return_value=False):
-        lc = srv._derive_outcome_lifecycle(
-            "sprint-58.1", root, "owner/repo", "needs_rework", "completed", 0,
-        )
+def test_derive_partial_finished_when_child_still_open():
+    """Parent needs_rework + child still running (unsettled) → partial_finished."""
+    db.record_sprint_start("sprint-58.1", project="owner/repo")
+    db.record_sprint_needs_rework("sprint-58.1")
+    db.record_sprint_start("sprint-58.2", project="owner/repo", parent_label="sprint-58.1")
+    # sprint-58.2 is running (unsettled)
+    lc = srv._derive_outcome_lifecycle(
+        "sprint-58.1", Path("/unused"), "owner/repo", "needs_rework", "completed", 0,
+    )
     assert lc == "partial_finished"
 
 
-def test_derive_ready_to_merge_when_child_and_parent_uat(tmp_path):
-    root = tmp_path / "proj"
-    _write_plan(root, "sprint-58.1", {
-        "state": "needs_rework", "tickets": [495, 498], "parent": "sprint-58",
-    })
-    _write_plan(root, "sprint-58.2", {
-        "state": "needs_rework", "tickets": [499], "parent": "sprint-58.1",
-    })
-    with patch.object(srv, "_sprint_work_tickets_all_uat", return_value=True):
-        with patch.object(srv, "_child_sprint_settled", return_value=True):
-            lc = srv._derive_outcome_lifecycle(
-                "sprint-58.1", root, "owner/repo", "needs_rework", "completed", 0,
-            )
+def test_derive_ready_to_merge_when_child_and_parent_uat():
+    """Parent ready_to_merge + child completed (settled) → ready_to_merge."""
+    db.record_sprint_start("sprint-58.1", project="owner/repo")
+    db.record_sprint_ready_to_merge("sprint-58.1")
+    db.record_sprint_start("sprint-58.2", project="owner/repo", parent_label="sprint-58.1")
+    db.record_sprint_finish("sprint-58.2")  # completed (settled)
+    lc = srv._derive_outcome_lifecycle(
+        "sprint-58.1", Path("/unused"), "owner/repo", "needs_rework", "completed", 0,
+    )
     assert lc == "ready_to_merge"
 
 

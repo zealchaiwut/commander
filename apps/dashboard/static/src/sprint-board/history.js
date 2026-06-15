@@ -772,8 +772,7 @@ function _histReconcileChipHtml(s) {
     <i class="ti ti-alert-triangle"></i> ${n} ${word}</span>`;
 }
 
-// Header hint chips: full detail when expanded; collapsed rows only surface
-// actionable signals (stale branches, reconciliation failures).
+// Header hint chips (kept for backward-compat; no longer used by _histCardHtml).
 function _histHeadHintsHtml(s, expanded) {
   if (expanded) {
     return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
@@ -787,6 +786,200 @@ function _histHeadHintsHtml(s, expanded) {
   return html;
 }
 
+// ── Loose-end amber band (issue #1041) ─────────────────────────────────────
+// Exactly ONE amber band per card showing the single highest-priority actionable
+// loose end. Priority: unresolved stale-labels recon check > stale branches.
+// Returns '' when no loose end exists (no band rendered — AC4 / AC7).
+function _histLooseEndBandHtml(s) {
+  // Priority 1: unresolved status-labels reconciliation check
+  const r = s.reconciliation;
+  if (r && Array.isArray(r.checks)) {
+    const staleCheck = r.checks.find(c => !c.ok && c.name === 'stale_labels');
+    if (staleCheck) {
+      const detail = staleCheck.detail || 'Clear stale status labels';
+      return `<div class="hist-loose-end-band">
+        <i class="ti ti-tag"></i>
+        <span class="hist-band-msg">${escHtml(detail)}</span>
+      </div>`;
+    }
+  }
+  // Priority 2: stale feature branches
+  const g = _histStaleBySprint[s.label];
+  if (g && g.count) {
+    const n = g.count;
+    const word = n === 1 ? 'stale branch' : 'stale branches';
+    const lbl = escHtml(s.label || '');
+    return `<div class="hist-loose-end-band">
+      <i class="ti ti-git-branch"></i>
+      <span class="hist-band-msg">${n} ${word}</span>
+      <button type="button" class="hist-band-cta"
+        onclick="event.stopPropagation();_histCleanupStale('${lbl}')">Clean up</button>
+    </div>`;
+  }
+  return '';
+}
+
+// ── What-list (issue #1041) ─────────────────────────────────────────────────
+// Single-purpose issue list, one variant per card state — eliminates cross-section
+// duplication (AC5/AC6/AC14):
+//   actually-failed sprint  → "Why it failed" list from s.failed_tickets
+//   partial / needs_rework  → "Unfinished N of M" list of unmerged issues
+//   complete / locked       → '' (nothing to display — AC7)
+function _histWhatListHtml(s) {
+  if (_histIsLocked(s.lifecycle_state)) return '';
+  const state = (s.lifecycle_state || '').toLowerCase();
+
+  // Failed branch: each crashed issue listed ONCE with reason + log link (AC5)
+  if (_histSprintFailed(s)) {
+    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+    const sprintReason = s.failure_reason || s.end_reason;
+    if (!failed.length && !sprintReason) return '';
+    const items = failed.map(ft => {
+      const id = ft.ticket_id != null ? ('#' + ft.ticket_id) : '#?';
+      const reason = ft.failure_reason || 'Agent failed';
+      const ts = ft.failed_at || ft.timestamp || '';
+      const tsHtml = ts
+        ? `<span class="wl-ts">${escHtml(String(ts).slice(0, 16).replace('T', ' '))}</span>`
+        : '';
+      const logHref = escHtml(_histLogsUrl(s));
+      return `<div class="wl-item">
+        <span class="wl-id">${escHtml(String(id))}</span>
+        <span class="wl-reason">${escHtml(String(reason))}</span>
+        ${tsHtml}
+        <a class="wl-log" href="${logHref}" onclick="event.stopPropagation()" title="View logs">log</a>
+      </div>`;
+    }).join('');
+    const summary = (!failed.length && sprintReason)
+      ? `<div class="wl-item"><span class="wl-reason">${escHtml(String(sprintReason))}</span></div>`
+      : '';
+    return `<div class="hist-what-list">
+      <div class="hist-what-head"><i class="ti ti-x"></i> Why it failed</div>
+      ${items}${summary}
+    </div>`;
+  }
+
+  // Partial branch: unfinished tickets, each listed ONCE (AC6)
+  if (state === 'partial_finished' || state === 'needs_rework') {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const unfinished = issues.filter(i => (i.state || '').toLowerCase() !== 'merged');
+    if (!unfinished.length) return '';
+    const n = unfinished.length;
+    const m = issues.length;
+    const isChild = _histIsChild(s.label);
+    return `<div class="hist-what-list">
+      <div class="hist-what-head">Unfinished ${n} of ${m}</div>
+      <div class="iss-list">${unfinished.map(i => _histIssueRowHtml(i, isChild, s)).join('')}</div>
+    </div>`;
+  }
+
+  return '';
+}
+
+// Passed reconciliation checks rendered as small grey checkmarks inside Details
+// only — never as green boxes outside Details (AC9).
+function _histReconPassedHtml(s) {
+  const r = s.reconciliation;
+  if (!r || !Array.isArray(r.checks) || !r.checks.length) return '';
+  const passed = r.checks.filter(c => !!c.ok);
+  if (!passed.length) return '';
+  const items = passed.map(c => {
+    const detail = c.detail || 'OK';
+    return `<span class="recon-passed-item"
+      title="${escHtml(_histReconcileLabel(c.name) + ': ' + detail)}">
+      <i class="ti ti-check"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
+  }).join('');
+  return `<div class="hist-recon-passed">${items}</div>`;
+}
+
+// Details sub-block collapsed by default (AC8). Contains metrics chips,
+// agent-time split, timeline, and passed reconciliation checks (AC10).
+// Toggled via _histDetailsExpanded independently of _histExpanded (AC8).
+const _histDetailsExpanded = new Set();
+globalThis._histDetailsExpanded = _histDetailsExpanded;
+
+function _histDetailsHtml(s) {
+  const detExpanded = _histDetailsExpanded.has(s.label);
+  const lbl = escHtml(s.label || '');
+  const chev = detExpanded ? 'ti-chevron-down' : 'ti-chevron-right';
+  const body = detExpanded ? `<div class="hist-details-body">
+      ${_histStatsHtml(s)}
+      ${_histPostSprintHtml(s)}
+      ${_histReconPassedHtml(s)}
+    </div>` : '';
+  return `<div class="hist-details${detExpanded ? ' expanded' : ''}">
+    <div class="hist-details-head" onclick="event.stopPropagation();_histToggleDetails('${lbl}')">
+      <i class="ti ${chev} hist-chev"></i> Details
+    </div>
+    ${body}
+  </div>`;
+}
+
+// Recovery CTA: one per card — failed → amber Re-run, ready_to_merge → Merge,
+// complete/partial → none (partial uses bulk-complete at group level — AC2).
+function _histRecoveryBtnHtml(s) {
+  if (_histIsLocked(s.lifecycle_state)) return '';
+  const state = (s.lifecycle_state || '').toLowerCase();
+  const lbl = escHtml(s.label || '');
+  const rawLabel = s.label || '';
+  if (_histSprintFailed(s) || state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
+    const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+    const rerunTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot re-run: another sprint is currently running."' : '';
+    const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
+    return `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
+      onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
+      <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
+  }
+  if (state === 'ready_to_merge') {
+    return `<button type="button" class="hist-head-btn hist-head-btn--finish"
+      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
+      <i class="ti ti-flag-check"></i> Merge</button>`;
+  }
+  return '';
+}
+
+// Delete button: quiet icon only, no label, no red styling (AC11).
+function _histDeleteBtnHtml(s) {
+  if (_histIsLocked(s.lifecycle_state)) return '';
+  const state = (s.lifecycle_state || '').toLowerCase();
+  const actionable = new Set([
+    'needs_rework', 'failed', 'cancelled', 'ready_to_merge', 'completed', 'partial_finished',
+  ]);
+  if (!actionable.has(state)) return '';
+  const lbl = escHtml(s.label || '');
+  return `<button type="button" class="hist-head-btn hist-head-btn--delete-icon"
+    onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')"
+    title="Delete sprint"><i class="ti ti-trash"></i></button>`;
+}
+
+// Secondary links: PR / Summary / Logs — visually subordinate to the recovery CTA (AC12).
+function _histSecondaryLinksHtml(s) {
+  let html = '';
+  const pr = _histPrUrl(s);
+  if (pr) {
+    html += `<a class="hist-head-btn hist-head-btn--secondary link-pr"
+      href="${escHtml(pr)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint PR">
+      <i class="ti ti-git-pull-request"></i> PR #${s.pr_number}</a>`;
+  }
+  const sum = _histSummaryUrl(s);
+  if (sum) {
+    const sumLabel = s.summary_issue_num ? `#${s.summary_issue_num}` : 'Summary';
+    html += `<a class="hist-head-btn hist-head-btn--secondary link-sum"
+      href="${escHtml(sum)}" target="_blank" rel="noopener"
+      onclick="event.stopPropagation()" title="Open sprint summary">
+      <i class="ti ti-file-description"></i> ${escHtml(sumLabel)}</a>`;
+  }
+  html += `<a class="hist-head-btn hist-head-btn--secondary"
+    href="${escHtml(_histLogsUrl(s))}"
+    onclick="event.stopPropagation()" title="Open sprint logs">
+    <i class="ti ti-list-details"></i> Logs</a>`;
+  return html;
+}
+
+// ── Redesigned card builder (issue #1041) ───────────────────────────────────
+// Section order: Header → Loose-end band → What-list → Details (collapsed)
+// AC1 / AC13 / AC14
 function _histCardHtml(s, opts) {
   opts = opts || {};
   const locked   = _histIsLocked(s.lifecycle_state);
@@ -796,32 +989,36 @@ function _histCardHtml(s, opts) {
   if (locked)   cls.push('locked');
   if (child)    cls.push('child');
   if (expanded) cls.push('expanded');
-  const lockNote = locked
-    ? `<div class="lock-note"><i class="ti ti-lock"></i> This sprint is ${escHtml((s.lifecycle_state || '').toLowerCase())} and locked — links only.</div>`
-    : '';
+
   const display = (typeof sprintLabelDisplay === 'function') ? sprintLabelDisplay(s.label) : (s.label || '');
   const chev = expanded ? 'ti-chevron-down' : 'ti-chevron-right';
   const lbl = escHtml(s.label || '');
-  const headCompact = locked && !expanded;
-  const progress = headCompact ? '' : _histProgressText(s);
-  const headActions = _histHeadActionsHtml(s);
+
+  // Compact meta: date · ticket count (AC2)
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  const endDate = s.ended_at ? String(s.ended_at).slice(0, 10)
+    : (s.started_at ? String(s.started_at).slice(0, 10) : '');
+  const metaParts = [];
+  if (endDate) metaParts.push(endDate);
+  metaParts.push(issues.length + ' ticket' + (issues.length !== 1 ? 's' : ''));
+  const metaHtml = `<span class="hist-meta">${escHtml(metaParts.join(' · '))}</span>`;
+
+  const recoveryBtn = _histRecoveryBtnHtml(s);
   const bulkBtn = opts.bulkCompleteBtn || '';
-  const headRight = (headActions || bulkBtn)
-    ? `<span class="hist-card-head-right">${headActions}${bulkBtn}</span>`
+  const deleteBtn = _histDeleteBtnHtml(s);
+  const secondaryLinks = _histSecondaryLinksHtml(s);
+  const headRight = (secondaryLinks || deleteBtn || bulkBtn || recoveryBtn)
+    ? `<span class="hist-card-head-right">${secondaryLinks}${deleteBtn}${bulkBtn}${recoveryBtn}</span>`
     : '';
-  const hints = headCompact ? '' : _histHeadHintsHtml(s, expanded);
-  const duration = (!headCompact && s.duration != null)
-    ? `<span class="hist-card-mini">${escHtml(_histFmtSecs(s.duration))}</span>`
-    : '';
-  const midBits = headCompact ? '' : [duration, _histEstBarMini(s), hints].join('');
-  const headMid = midBits ? `<div class="hist-card-head-mid">${midBits}</div>` : '';
-  const body = expanded ? `
-      ${_histStatsHtml(s)}
-      ${_histPostSprintHtml(s)}
-      ${_histReconcileHtml(s)}
-      ${_histIssueListHtml(s)}
-      ${lockNote}
-      ${locked ? _histLinksHtml(s) : ''}` : '';
+
+  // Body: loose-end band → what-list → Details (collapsed) (AC1)
+  const body = expanded ? `<div class="hist-card-body">
+      ${_histLooseEndBandHtml(s)}
+      ${_histWhatListHtml(s)}
+      ${_histDetailsHtml(s)}
+      ${locked ? _histLinksHtml(s) : ''}
+    </div>` : '';
+
   return `<div class="${cls.join(' ')}" data-label="${lbl}">
     <div class="hist-card-head" onclick="_histToggleCard('${lbl}')">
       <div class="hist-card-head-left">
@@ -829,12 +1026,11 @@ function _histCardHtml(s, opts) {
         ${child ? '<span class="hist-child-arrow">↳</span>' : ''}
         <span class="hist-card-title">${escHtml(display)}</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${progress ? `<span class="hist-progress">${escHtml(progress)}</span>` : ''}
+        ${metaHtml}
       </div>
-      ${headMid}
       ${headRight}
     </div>
-    ${body ? `<div class="hist-card-body">${body}</div>` : ''}
+    ${body}
   </div>`;
 }
 
@@ -845,6 +1041,17 @@ export function _histToggleCard(label) {
     _histExpanded.add(label);
     // Expanding a card lazily loads its run-stats block (issue #810); cached
     // after the first fetch so subsequent expands are instant.
+    _histLoadRunStats(label);
+  }
+  _histRenderLedger(_histLedgerData);
+}
+
+// Toggle the Details sub-block within an already-expanded card (issue #1041 AC8).
+export function _histToggleDetails(label) {
+  if (_histDetailsExpanded.has(label)) {
+    _histDetailsExpanded.delete(label);
+  } else {
+    _histDetailsExpanded.add(label);
     _histLoadRunStats(label);
   }
   _histRenderLedger(_histLedgerData);

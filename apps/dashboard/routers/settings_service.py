@@ -46,6 +46,7 @@ from deploy_config_schema import (  # noqa: E402
     merge_seed as _deploy_merge_seed,
     merge_for_put as _deploy_merge_for_put,
     build_deploy_config_response as _build_deploy_config_response,
+    enrich_local_working_dirs as _deploy_enrich_working_dirs,
 )
 from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
 from services.sprint_manager import deploy_validation as _deploy_validation  # noqa: E402
@@ -360,14 +361,11 @@ def _derive_project_environments(repo: str) -> dict[str, str]:
 
 
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
-    """Fill working_dir for local entries that lack one."""
+    """Fill working_dir for local entries (honours ``shared_working_dir`` seeds)."""
     envs = projects_module.get_project_environments(repo)
     if not envs:
         envs = _derive_project_environments(repo)
-    for env, entry in resp.items():
-        if entry.get("host") == "local" and not entry.get("working_dir"):
-            if env in envs:
-                entry["working_dir"] = envs[env]
+    _deploy_enrich_working_dirs(resp, envs)
 
 
 def _enrich_deploy_readiness(config: dict) -> None:

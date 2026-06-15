@@ -38,11 +38,12 @@ def test_detached_head_is_a_mismatch():
     assert da.branch_mismatch_error("HEAD", "develop", "/x") is not None
 
 
-def test_endpoint_wires_checkout_before_pull():
-    """Deploy must checkout the configured branch before the pull."""
+def test_endpoint_wires_checkout_before_sync():
+    """Deploy must checkout the configured branch before fetch + reset."""
     src = _SERVER.read_text(encoding="utf-8")
     fn = src[src.index("def deploy_environment("):]
     fn = fn[: fn.index("\n@app.", 1)]
     checkout = fn.index("build_checkout_command(branch)")
-    pull = fn.index("build_pull_command(branch)")
-    assert checkout < pull, "git checkout must run before git pull"
+    fetch = fn.index("build_fetch_command(branch)")
+    reset = fn.index("build_reset_hard_command(branch)")
+    assert checkout < fetch < reset, "git checkout → fetch → reset --hard"

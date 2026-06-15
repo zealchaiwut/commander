@@ -278,7 +278,7 @@ def test_restart_route_registered(client_ctx):
 
 
 def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
-    """AC2/AC3/AC5: pull runs in working_dir; response has stdout + HEAD; restart fires."""
+    """AC2/AC3/AC5: sync runs in working_dir; response has stdout + HEAD; restart fires."""
     client, srv, settings_repo = client_ctx
     _save_deploy_config(srv, settings_repo, {
         "uat": {"host": "local", "working_dir": "/srv/commander-uat",
@@ -289,10 +289,14 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
 
     def fake_run(cmd, *a, **kw):
         calls.append((cmd, kw.get("cwd")))
+        if cmd[:2] == ["git", "stash"]:
+            return _completed(cmd, returncode=1)
         if cmd[:2] == ["git", "checkout"]:
             return _completed(cmd, stdout=f"Switched to branch 'develop'\n")
-        if cmd[:2] == ["git", "pull"]:
-            return _completed(cmd, stdout="Updating 111..222\nFast-forward\n")
+        if cmd[:2] == ["git", "fetch"]:
+            return _completed(cmd, stdout="From origin\n")
+        if cmd[:2] == ["git", "reset"]:
+            return _completed(cmd, stdout="HEAD is now at deadbeef\n")
         if cmd[:2] == ["git", "rev-parse"]:
             return _completed(cmd, stdout="deadbeefcafe\n")
         if cmd[0] == "launchctl":
@@ -304,20 +308,20 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
 
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert "Fast-forward" in data["pull_output"]
+    assert "HEAD is now" in data["pull_output"]
     assert data["head"] == "deadbeefcafe"
 
     checkout_call = next(c for c in calls if c[0][:2] == ["git", "checkout"])
     assert checkout_call[1] == "/srv/commander-uat"
     assert checkout_call[0] == ["git", "checkout", "develop"]
-    # pull ran in working_dir, fast-forward only
-    pull_call = next(c for c in calls if c[0][:2] == ["git", "pull"])
-    assert pull_call[1] == "/srv/commander-uat"
-    assert "--ff-only" in pull_call[0]
-    # AC5: a restart (kickstart) fired after the pull
+    fetch_call = next(c for c in calls if c[0][:2] == ["git", "fetch"])
+    assert fetch_call[1] == "/srv/commander-uat"
+    reset_call = next(c for c in calls if c[0][:2] == ["git", "reset"])
+    assert reset_call[0] == ["git", "reset", "--hard", "origin/develop"]
+    # AC5: a restart (kickstart) fired after the sync
     assert any(c[0][0] == "launchctl" for c in calls)
     # AC2: never merged/pushed
-    assert not any("merge" in c[0] or "push" in c[0] for c in calls)
+    assert not any("merge" in c[0] or "push" in c[0] for c in calls if c[0][:2] != ["git", "stash"])
 
 
 def test_deploy_rejects_missing_working_dir_without_shelling_out(client_ctx):

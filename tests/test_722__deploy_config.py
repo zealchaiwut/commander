@@ -195,12 +195,13 @@ def test_get_commander_uat_seed_defaults(client_ctx):
 
 
 def test_commander_uat_scripts_are_relative_to_working_dir():
-    """UAT deploy scripts must resolve inside the uat clone, not ../../scripts."""
+    """UAT deploy scripts must resolve inside the shared prd clone working_dir."""
     from pathlib import Path
 
     from services.sprint_manager import deploy_actions as da
 
     seed = dcs.seed_for("commander")["uat"]
+    assert seed.get("shared_working_dir") == "prd"
     assert "../../" not in seed["start_script"]
     assert seed["start_script"] == "bash scripts/start_uat.sh"
     assert seed["stop_script"] == "bash scripts/stop_all.sh uat"
@@ -209,6 +210,16 @@ def test_commander_uat_scripts_are_relative_to_working_dir():
     entry["working_dir"] = str(Path(__file__).resolve().parent.parent)
     ready, errors = da.check_deploy_readiness(entry)
     assert ready, errors
+
+
+def test_enrich_shared_working_dir_prefers_prd_clone():
+    """commander uat defaults to the prd clone path when shared_working_dir is set."""
+    resp = {"uat": {"host": "local", "shared_working_dir": "prd"}}
+    dcs.enrich_local_working_dirs(
+        resp,
+        {"prd": "/dev/commander/prd", "uat": "/dev/commander/uat"},
+    )
+    assert resp["uat"]["working_dir"] == "/dev/commander/prd"
 
 
 # ── AC9: seed defaults — perf-coach ───────────────────────────────────────────

@@ -1967,24 +1967,17 @@ def _resolve_project_slug(slug: str) -> str:
 # routers/settings.py + routers/settings_service.py
 
 
-def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
-    """Fill working_dir for local entries that lack one from the env paths.
+from services.sprint_manager.deploy_config_schema import enrich_local_working_dirs as _enrich_working_dirs
 
-    host=local working_dir defaults to the existing on-disk env path so callers
-    get a usable default without the user having to re-enter it.
-    """
+from services.sprint_manager import deploy_actions as _deploy_actions
+
+
+def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
+    """Fill working_dir for local entries (honours ``shared_working_dir`` seeds)."""
     envs = projects_module.get_project_environments(repo)
     if not envs:
         envs = _derive_project_environments(repo)
-    for env, entry in resp.items():
-        if entry.get("host") == "local" and not entry.get("working_dir"):
-            if env in envs:
-                entry["working_dir"] = envs[env]
-
-
-# ── Local deploy / restart actions (issue #723) ──────────────────────────────
-
-from services.sprint_manager import deploy_actions as _deploy_actions
+    _enrich_working_dirs(resp, envs)
 
 
 def _enrich_deploy_readiness(config: dict) -> None:
@@ -2180,7 +2173,13 @@ def deploy_environment(slug: str, env: str):
     except _deploy_actions.DeployActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Sync to the configured branch before pull (matches scripts/sync_uat.sh).
+    # Sync to the configured branch, then fetch + hard-reset to origin (deploy
+    # must not fail on untracked artifacts like package-lock.json blocking pull).
+    subprocess.run(
+        _deploy_actions.build_stash_dirty_command(),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+
     checkout = subprocess.run(
         _deploy_actions.build_checkout_command(branch),
         capture_output=True, text=True, cwd=working_dir,
@@ -2194,15 +2193,27 @@ def deploy_environment(slug: str, env: str):
             ),
         )
 
-    pull = subprocess.run(
-        _deploy_actions.build_pull_command(branch),
+    fetch = subprocess.run(
+        _deploy_actions.build_fetch_command(branch),
         capture_output=True, text=True, cwd=working_dir,
     )
-    if pull.returncode != 0:
+    if fetch.returncode != 0:
         raise HTTPException(
             status_code=500,
-            detail=pull.stderr.strip() or pull.stdout.strip() or "git pull failed",
+            detail=fetch.stderr.strip() or fetch.stdout.strip() or "git fetch failed",
         )
+
+    reset = subprocess.run(
+        _deploy_actions.build_reset_hard_command(branch),
+        capture_output=True, text=True, cwd=working_dir,
+    )
+    if reset.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=reset.stderr.strip() or reset.stdout.strip() or "git reset failed",
+        )
+
+    pull_output = (fetch.stdout or "") + (reset.stdout or "")
 
     head = subprocess.run(
         _deploy_actions.build_head_sha_command(),
@@ -2210,7 +2221,7 @@ def deploy_environment(slug: str, env: str):
     )
     head_sha = head.stdout.strip()
 
-    # AC: after a successful pull, auto-trigger restart for the same env.
+    # AC: after a successful sync, auto-trigger restart for the same env.
     # Best-effort — a restart-config problem must not mask a successful pull.
     try:
         restart_result = _restart_environment(entry)
@@ -2225,7 +2236,7 @@ def deploy_environment(slug: str, env: str):
         "env": env,
         "branch": branch,
         "working_dir": working_dir,
-        "pull_output": pull.stdout,
+        "pull_output": pull_output,
         "head": head_sha,
         "restart": restart_result,
     }

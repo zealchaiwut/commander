@@ -190,6 +190,12 @@ Index: `(repo, state)`.
 `sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
 
+**DB is the sole source of truth for lifecycle state (sprint 74.2).** plan.json / labels / PID files are no longer read as state.
+
+- **Read:** `sprint_state.current(label)` is the only sanctioned reader (issue #1091). It returns `canonical_lifecycle(db.get_sprint(label)["state"])` — zero disk reads, zero GitHub label lookups, zero fallback. Missing row → `"unknown"`. The History pane and `_derive_outcome_lifecycle` were migrated onto it (issues #1092, #1093); GET endpoints no longer mutate plan.json (issue #1096). See `docs/architecture/sprint-lifecycle.md`.
+- **Write:** `db.transition_sprint_state(label, to_state, actor=...)` is the single guarded writer (issue #1087); `record_sprint_start/finish/needs_rework/ready_to_merge` route through it. It enforces the legal edge set (`draft→planned/running/...`, `running→ready_to_merge/needs_rework/deleted`, etc.) and rejects any `running→ready_to_merge|needs_rework|completed` transition unless `actor="manager"`. Returns a `TransitionResult(accepted, reason)`; never raises on a guard failure.
+- **Reconciler:** the GitHub/orphan reconciler skips any `running` sprint whose owning manager PID is still alive (`.commander/sprints/<label>-pid`), and only settles a dead-PID running sprint to `ready_to_merge`/`needs_rework` based on ticket outcomes — all via `transition_sprint_state` (issues #1089, #1098).
+
 Query with `GET /api/debug/token-usage/by-agent-model` for per-agent/model cost breakdown.
 
 The `events` table also records dashboard activity events surfaced in the activity log: `ticket_label_changed` on every real label transition (issue #720), and scoped `sprint_started` / `sprint_finished` / `sprint_rerun` lifecycle events keyed to the target project (issue #721). Agent rows carry role + issue number so the activity log can link to the GitHub issue (issue #719).

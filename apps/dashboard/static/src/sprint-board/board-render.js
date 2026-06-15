@@ -1761,6 +1761,14 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
 
+  // Agent chip derived from ticket status for consistent card anatomy (issue #1055)
+  const _planningAgent =
+    ticket.status === "in-progress" ? "coder" :
+    ticket.status === "sit" ? "tester" : null;
+  const planningAgentHtml = _planningAgent
+    ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(_planningAgent)}">${escHtml(_planningAgent.toUpperCase())}</span>`
+    : "";
+
   const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
   const sk = escHtml(label);
 
@@ -1791,6 +1799,7 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
       ${_smgmtTicketEstHtml(ticket)}
+      ${planningAgentHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">

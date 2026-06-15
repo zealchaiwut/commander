@@ -2782,8 +2782,8 @@
     .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
     .smgmt-sprint-block.drag-over-zone { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
     .smgmt-ticket {
-      display: flex; align-items: center; gap: 8px;
-      padding: 9px 16px; background: var(--surface); font-size: 12px;
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-2) var(--space-4); background: var(--surface); font-size: var(--font-size-md);
       cursor: default; transition: background 0.15s, box-shadow 0.12s;
       /* WebKit/Safari starts a TEXT selection instead of an element drag when a
          draggable="true" row contains selectable text, so dragging silently
@@ -2828,7 +2828,7 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .smgmt-ticket-status {
-      font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+      font-size: var(--font-size-xs); font-weight: 600; padding: 2px var(--space-1); border-radius: var(--radius-xs);
       flex-shrink: 0; text-transform: uppercase;
     }
     .smgmt-status-backlog    { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
@@ -3655,9 +3655,9 @@
     .smgmt-focus-num--med  { background: var(--amber); }
     .smgmt-focus-num--low  { background: var(--surface-2); color: var(--text-muted); }
     .smgmt-section-label {
-      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      font-size: var(--font-size-sm); font-weight: 700; letter-spacing: .06em;
       text-transform: uppercase; color: var(--text-sub);
-      margin: 20px 2px 8px; display: flex; align-items: center; gap: 6px;
+      margin: var(--space-5) 0 var(--space-2); display: flex; align-items: center; gap: var(--space-1);
     }
     .smgmt-planning-section { }
     /* Draft sprint card */
@@ -5098,11 +5098,11 @@
 
     /* Level separator row in running sprint ticket list (issue #613) */
     .level-sep {
-      display: flex; align-items: center; gap: 8px;
-      padding: 4px 10px; margin: 4px 0;
-      font-size: 10px; font-weight: 600; letter-spacing: .04em;
-      color: var(--text-muted); border-top: 1px solid var(--border);
-      text-transform: uppercase;
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: var(--space-1) var(--space-2); margin: var(--space-1) 0;
+      font-size: var(--font-size-xs); font-weight: 600; letter-spacing: .04em;
+      color: var(--text-sub); border-top: 1px solid var(--border);
+      background: var(--surface-2); text-transform: uppercase;
     }
     .level-sep-num { color: var(--text-sub); }
     .level-sep-desc { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-sub); }

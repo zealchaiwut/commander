@@ -79,6 +79,24 @@ def build_pull_command(branch: str) -> list[str]:
     return ["git", "pull", "--ff-only", "origin", branch]
 
 
+def build_fetch_command(branch: str) -> list[str]:
+    """Fetch the configured branch from origin (deploy pre-sync)."""
+    return ["git", "fetch", "origin", branch]
+
+
+def build_reset_hard_command(branch: str) -> list[str]:
+    """Hard-reset the working tree to ``origin/<branch>`` after fetch."""
+    return ["git", "reset", "--hard", f"origin/{branch}"]
+
+
+def build_stash_dirty_command() -> list[str]:
+    """Best-effort stash of local + untracked changes before deploy sync.
+
+    Exit code 1 when there is nothing to stash — callers should ignore that.
+    """
+    return ["git", "stash", "push", "-u", "-m", "commander-deploy-autostash"]
+
+
 def build_head_sha_command() -> list[str]:
     """Command that prints the current HEAD sha."""
     return ["git", "rev-parse", "HEAD"]

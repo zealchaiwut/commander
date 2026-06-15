@@ -171,6 +171,10 @@ export function _smgmtRender(data) {
     return;
   }
 
+  // Finished sprints (executive summary posted) — hide empty columns so stale
+  // GitHub labels do not resurrect as READY TO MERGE zombies when order is [].
+  const _finishedSet = new Set(data.finished_sprints || []);
+
   // Use order list if available (includes sub-labels), else build from integer sprints ascending
   const orderedLabelsRaw =
     order.length > 0
@@ -206,6 +210,7 @@ export function _smgmtRender(data) {
     if (_smgmtHideRerunParent(label, tickets, _rerunInto)) return false;
     const ticketCount = tickets.length;
     if (ticketCount > 0) return true;
+    if (_finishedSet.has(label)) return false;
     if (_rerunInto[label]) return false;
     const hasChild = Object.values(_sprintParents).some(
       (parent) => parent === label,
@@ -215,7 +220,7 @@ export function _smgmtRender(data) {
 
   // Finished sprints (a summary issue exists) — the same GitHub-backed signal
   // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
-  _smgmtFinishedLabels = new Set(data.finished_sprints || []);
+  _smgmtFinishedLabels = _finishedSet;
 
   // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
   let _smgmtNextUpLabel = null;

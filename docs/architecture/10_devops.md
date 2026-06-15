@@ -17,6 +17,23 @@ from that clone's config, so the two never collide.
   coder/ tester/  → develop, agent worktrees
 ```
 
+### Environments at a glance
+
+| Stage | Type | Branch | Port | Clone | Host |
+|---|---|---|---|---|---|
+| SIT | ticket label (tester gate) | `feature/*` | — | `tester/` | local M4 |
+| UAT | label + local server | `develop` | 8001 | `uat/` | local M4 |
+| PRD | live server | `master` | 8000 | `prd/` | remote mac mini |
+
+**SIT is a label/stage, not an environment.** The coder pushes a feature branch
+and flips the ticket to `SIT`; the tester then runs pytest against that branch
+**in the `tester/` clone**, merges to `develop` on green, and flips the label to
+`UAT`. There is no `sit/` clone — the four clones (`prd`, `uat`, `coder`,
+`tester`) are the whole topology.
+
+A server's stage follows its **branch**, not its name: a dashboard running
+`develop` is UAT by definition; **PRD ≡ `master`**.
+
 **PRD is the remote mac mini, and only that.** The `prd/` clone on the remote
 runs `start_prd.sh` (:8000, master) under **launchd** (the authoritative
 unattended runner), reachable over **Tailscale DNS**. This is the single live
@@ -49,6 +66,18 @@ sprint.yaml `dashboard.api_url` on `:8001`.
 the `prd/` clone are reserved for the remote mac mini. The working machine's
 `prd/` clone stays on master only for mirroring the remote, and is not the dev
 dashboard.
+
+**Decision (2026-06-15):** re-affirmed — **the local M4 is UAT only** (`uat/`,
+develop, :8001); the **mac mini is the sole PRD** (`prd/`, master, :8000). One
+authoritative production, no split-brain. Do not run `start_prd.sh` on the M4.
+
+> **Known drift (follow-up, not yet fixed):** the local launchd service
+> `com.commander.dashboard` currently runs the **`uat/` clone's venv** but sets
+> `ENVIRONMENT=prd` on **port 8000** — a local instance mislabeled as PRD, which
+> contradicts "PRD ≡ master, remote-only." Reconcile later: either point launchd
+> at a true `prd/`+master on the mini, or relabel the local service to
+> UAT/:8001. (Also: the local `prd/` clone is currently on a `docs/*` branch, not
+> `master` — should return to a clean master mirror.)
 
 ### Never mutate git in the serving clone
 

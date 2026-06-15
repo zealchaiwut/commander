@@ -7494,6 +7494,43 @@
     .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
     @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
 
+    /* ── Chip-only assignment map (issue #1108) ────────────────────────────
+       Number-only issue chips replace full lane cards. Working = blue tint +
+       pulse dot; Waiting = grey; Retry = amber. Spacing on 4px scale. */
+    .lane-chip-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; min-height: 24px; }
+    .lane-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text-sub);
+      cursor: pointer; transition: border-color .15s;
+    }
+    .lane-chip:hover { border-color: var(--text-muted); }
+    .lane-chip--working {
+      background: var(--blue-bg); color: var(--blue);
+      border-color: rgba(59,130,246,.30);
+    }
+    .lane-chip--working:hover { border-color: var(--blue); }
+    .lane-chip--retry {
+      background: var(--amber-bg); color: var(--amber);
+      border-color: rgba(217,119,6,.30);
+    }
+    .lane-chip--retry:hover { border-color: var(--amber); }
+    .lane-chip-pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor; flex-shrink: 0;
+      animation: laneChipPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes laneChipPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .3; }
+    }
+    .lane-chip-empty {
+      font-size: 11px; color: var(--text-muted); padding: 2px 0;
+      font-style: italic;
+    }
+    @media (prefers-reduced-motion: reduce) { .lane-chip-pulse { animation: none; } }
+
     /* ── Node inspector panel (issue #804) ───────────────────────────────────
        Opens when a rail node is clicked. Mock v5 contract: .inspector shell,
        .attempts timeline (.att rows), .log-tabs + .log-body. Emphasis is shown
@@ -13484,7 +13521,8 @@ function _smgmtLaneSizeInline(iss) {
     : '';
 }
 
-/** One card inside a lane — reuses the existing .node markup for card primitives. */
+/** One card inside a lane — reuses the existing .node markup for card primitives.
+ *  Kept for the Done fold which still shows full cards. */
 function _smgmtLaneCardHtml(iss, stage, live) {
   const num = iss.number;
   const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
@@ -13538,6 +13576,31 @@ function _smgmtLaneCardHtml(iss, stage, live) {
     + `</button>`;
 }
 
+/** Scroll to and briefly highlight the .smgmt-ticket card for issue num
+ *  in the All Issues list (issue #1108). */
+function _smgmtLaneChipClick(num) {
+  const row = document.querySelector(`#pane-sprint-mgmt .smgmt-ticket[data-issue="${num}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  row.classList.add('is-selected');
+  setTimeout(() => row.classList.remove('is-selected'), 1800);
+}
+
+/** Number-only chip for a lane Working or Waiting row (issue #1108).
+ *  isWorking=true → blue tint + pulse dot; isRetry=true → amber tint. */
+function _smgmtLaneChipHtml(num, isWorking, isRetry) {
+  let cls = 'lane-chip';
+  if (isWorking) cls += ' lane-chip--working';
+  else if (isRetry) cls += ' lane-chip--retry';
+  const pulse = isWorking
+    ? '<span class="lane-chip-pulse" aria-hidden="true"></span>'
+    : '';
+  return `<button type="button" class="${cls}" onclick="_smgmtLaneChipClick(${num})" title="Jump to #${num} in All Issues">`
+    + pulse
+    + `#${num}`
+    + `</button>`;
+}
+
 /** Full lanes HTML from a /live snapshot. */
 function _smgmtLanesHtml(label, live) {
   const issues = (live && live.issues) || [];
@@ -13584,43 +13647,53 @@ function _smgmtLanesHtml(label, live) {
     }
   });
 
-  const renderGroup = (items, label, role, live) => {
+  // Chip row renderer — replaces full cards in Working/Waiting rows (issue #1108).
+  // Done fold still uses _smgmtLaneCardHtml (full detail for completed items).
+  const renderChipGroup = (items, rowLabel, isWorkingRow) => {
     const cls = items.length === 0 ? ' empty' : '';
-    const cards = items.map(({ iss, stage }) => _smgmtLaneCardHtml(iss, stage, live)).join('');
+    const chips = items.map(({ iss, stage }) => {
+      const working = isWorkingRow;
+      const isRetry = !isWorkingRow && (
+        (iss.tester_attempt_count || 0) > 0 ||
+        (iss.coder_attempt || 1) > 1
+      );
+      return _smgmtLaneChipHtml(iss.number, working, isRetry);
+    }).join('');
+    const emptyText = isWorkingRow ? '— idle' : '—';
     const placeholder = items.length === 0
-      ? `<div style="font-size:12px;color:var(--text-muted);padding:4px 4px 2px;font-style:italic;">—</div>`
+      ? `<span class="lane-chip-empty">${emptyText}</span>`
       : '';
     return `<div class="lane-group${cls}">`
-      + `<div class="lane-group-label">${escHtml(label)}</div>`
-      + cards + placeholder
+      + `<div class="lane-group-label">${escHtml(rowLabel)}</div>`
+      + `<div class="lane-chip-row">${chips}${placeholder}</div>`
       + `</div>`;
   };
 
   const coderLane = `<div class="lane" data-lane="coder">
     <div class="lane-head">
-      <div class="lane-title"><span class="lane-title-coder">Coder</span></div>
+      <div class="lane-title"><i class="ti ti-code lane-title-coder" aria-hidden="true"></i><span class="lane-title-coder">Coder</span></div>
       <div class="lane-capacity">
         ${_smgmtLaneDotsHtml(coderWorking.length, maxCoder, 'filled')}
         <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
       </div>
     </div>
     <div class="lane-body">
-      ${renderGroup(coderWorking, 'Working', 'coder', live)}
-      ${renderGroup(coderWaiting, 'Waiting', 'coder', live)}
+      ${renderChipGroup(coderWorking, 'Working', true)}
+      ${renderChipGroup(coderWaiting, 'Waiting', false)}
     </div>
   </div>`;
 
   const testerLane = `<div class="lane" data-lane="tester">
     <div class="lane-head">
-      <div class="lane-title"><span class="lane-title-tester">Tester</span></div>
+      <div class="lane-title"><i class="ti ti-flask lane-title-tester" aria-hidden="true"></i><span class="lane-title-tester">Tester</span></div>
       <div class="lane-capacity">
         ${_smgmtLaneDotsHtml(testerWorking.length, maxTester, 'filled-tester')}
         <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
       </div>
     </div>
     <div class="lane-body">
-      ${renderGroup(testerWorking, 'Working', 'tester', live)}
-      ${renderGroup(testerWaiting, 'Waiting', 'tester', live)}
+      ${renderChipGroup(testerWorking, 'Working', true)}
+      ${renderChipGroup(testerWaiting, 'Waiting', false)}
     </div>
   </div>`;
 

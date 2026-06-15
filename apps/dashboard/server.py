@@ -8114,28 +8114,6 @@ def _outcome_from_ingested_row(
     }
 
 
-def _child_sprint_labels_for_parent(project_root: Path, parent_label: str) -> list[str]:
-    """Direct child re-run labels spawned from parent_label."""
-    children: list[str] = []
-    rerun = _sprint_rerun_into_map(project_root)
-    for parent, child in rerun.items():
-        if parent == parent_label and child not in children:
-            children.append(child)
-    sprints_dir = _commander_dir(project_root) / "sprints"
-    if sprints_dir.is_dir():
-        for plan_file in sprints_dir.glob("sprint-*-plan.json"):
-            label = plan_file.name[: -len("-plan.json")]
-            plan = _read_plan_json(project_root, label)
-            if plan and plan.get("parent") == parent_label and label not in children:
-                children.append(label)
-
-    def _sub_idx(lbl: str) -> float:
-        m = re.match(r"^sprint-\d+\.(\d+)$", lbl)
-        return float(m.group(1)) if m else 0.0
-
-    return sorted(children, key=_sub_idx)
-
-
 _CHILD_SETTLED_STATES = frozenset({"completed", "deleted", "ready_to_merge"})
 _SPRINT_WORK_EXCLUDE_LABELS = frozenset({"sprint-summary", "docs", "documentation"})
 _SPRINT_UAT_LABELS = frozenset({"UAT", "UAT-approved", "released"})
@@ -8177,7 +8155,7 @@ def _derive_outcome_lifecycle(
     failed_count: int,
 ) -> str:
     """Board/history lifecycle — derives partial_finished when a re-run child is in flight."""
-    children = _child_sprint_labels_for_parent(project_root, sprint_label)
+    children = children_of(sprint_label, project_root)
     if children:
         unsettled = [c for c in children if not _child_sprint_settled(project_root, project, c)]
         if unsettled:
@@ -10082,19 +10060,45 @@ def _sprint_branch_name(label: str) -> str:
     return f"sprint/{label}"
 
 
-def _child_sprint_labels_from_plans(project_root: Path, base_label: str) -> list[str]:
-    """Return child sprint labels under base_label, sorted by sub-index."""
+def children_of(parent_label: str, project_root: Path | None = None) -> list[str]:
+    """Return child sprint labels whose parent is parent_label, sorted by sub-index.
+
+    Primary: queries sprints DB WHERE parent_label matches.
+    Fallback (rows predating parent-linkage tracking): plan.json disk glob.
+    """
+    try:
+        with db.get_conn() as conn:
+            db._create_sprint_lifecycle_tables(conn)
+            rows = conn.execute(
+                "SELECT label FROM sprints WHERE parent_label = ?",
+                (parent_label,),
+            ).fetchall()
+        if rows:
+            return sorted([r["label"] for r in rows], key=_sprint_label_sub_index)
+    except Exception:
+        pass
+    if project_root is None:
+        return []
+    # Fallback: disk glob for sprints predating DB parent-linkage tracking
     sprints_dir = _commander_dir(project_root) / "sprints"
     if not sprints_dir.is_dir():
         return []
-    m = re.match(r"^sprint-(\d+)$", base_label)
-    if not m:
-        return []
-    n = m.group(1)
-    children: list[str] = []
-    for path in sprints_dir.glob(f"sprint-{n}.*-plan.json"):
-        lbl = path.name.replace("-plan.json", "")
-        if _is_child_sprint_label(lbl):
+    base_m = re.match(r"^sprint-(\d+)$", parent_label)
+    if base_m:
+        # Fast path: base sprint → glob sprint-N.* directly
+        n = base_m.group(1)
+        children: list[str] = []
+        for path in sprints_dir.glob(f"sprint-{n}.*-plan.json"):
+            lbl = path.name.replace("-plan.json", "")
+            if _is_child_sprint_label(lbl):
+                children.append(lbl)
+        return sorted(children, key=_sprint_label_sub_index)
+    # General path: child sprint as parent — scan all plan files for parent match
+    children = []
+    for plan_file in sprints_dir.glob("sprint-*-plan.json"):
+        lbl = plan_file.name[: -len("-plan.json")]
+        plan = _read_plan_json(project_root, lbl)
+        if plan and plan.get("parent") == parent_label and lbl not in children:
             children.append(lbl)
     return sorted(children, key=_sprint_label_sub_index)
 
@@ -10145,7 +10149,7 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
 def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
-    for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+    for child_label in children_of(base_label, project_root):
         if not _bulk_complete_lineage_settled(project_root, child_label):
             unsettled.append(child_label)
     return unsettled
@@ -10243,7 +10247,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    children = _child_sprint_labels_from_plans(project_root, base_label)
+    children = children_of(base_label, project_root)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -10283,7 +10287,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    children = _child_sprint_labels_from_plans(project_root, base_label)
+    children = children_of(base_label, project_root)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -10395,7 +10399,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         else:
             sprint_issues = _get_sprint_issues(repo, base_label)
             seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-            for child_label in _child_sprint_labels_from_plans(project_root, base_label):
+            for child_label in children_of(base_label, project_root):
                 try:
                     for iss in _get_sprint_issues(repo, child_label):
                         if iss["number"] not in seen_nums:
@@ -10495,7 +10499,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     repo = f"{owner}/{repo_name}"
     project_root = _project_root_path(repo)
     base_label = _sprint_label_base(label)
-    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    child_labels = children_of(base_label, project_root)
     is_child = _is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
     finish_labels = [label] if is_child else all_labels
@@ -10654,7 +10658,7 @@ def _open_summary_issues_for_labels(repo: str, labels: list[str]) -> list[dict]:
 def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str) -> tuple[list[str], list[dict]]:
     if not re.match(r"^sprint-\d+$", base_label):
         raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
-    child_labels = _child_sprint_labels_from_plans(project_root, base_label)
+    child_labels = children_of(base_label, project_root)
     if not child_labels:
         raise HTTPException(400, detail=f"No child sprints found under {base_label}")
     all_labels = [base_label, *child_labels]

@@ -316,7 +316,7 @@ def _make_mock_server(close_error=None):
     srv._sprint_label_base.return_value = "sprint-73"
     srv._merge_sprint_branch_chain.return_value = []
     srv._project_root_path.return_value = Path("/tmp/test-project")
-    srv._child_sprint_labels_from_plans.return_value = []
+    srv.children_of.return_value = []
     srv._plan_json_set_state.return_value = None
 
     gh = MagicMock()

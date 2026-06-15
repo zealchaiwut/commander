@@ -220,6 +220,11 @@ async def run_finish_sprint(
                 except Exception as exc:
                     errors.append(f"plan.json update failed for {lbl}: {exc}")
                     _log(f"plan.json error for {lbl}: {exc}")
+                srv._sprint_db_set_state(
+                    lbl, repo, "completed",
+                    ended_at=datetime.now(timezone.utc).isoformat(),
+                    end_reason="merge_sprint",
+                )
         except Exception as exc:
             errors.append(f"Cleanup error: {exc}")
             _log(f"Cleanup error: {exc}")

@@ -4226,7 +4226,19 @@ ${data.errors.join("\n")}`);
       return;
     }
     if (!silent) {
-      listEl.innerHTML = '<div class="loading-msg">Loading sprints\u2026</div>';
+      listEl.innerHTML = `<div class="smgmt-skeleton" aria-busy="true" aria-label="Loading sprints">
+      <div class="smgmt-skeleton-card">
+        <div class="smgmt-skeleton-header"></div>
+        <div class="smgmt-skeleton-row"></div>
+        <div class="smgmt-skeleton-row smgmt-skeleton-row--short"></div>
+        <div class="smgmt-skeleton-row"></div>
+      </div>
+      <div class="smgmt-skeleton-card">
+        <div class="smgmt-skeleton-header"></div>
+        <div class="smgmt-skeleton-row"></div>
+        <div class="smgmt-skeleton-row smgmt-skeleton-row--short"></div>
+      </div>
+    </div>`;
       for (const k of Object.keys(_smgmtFinishCards))
         delete _smgmtFinishCards[k];
     }
@@ -4452,7 +4464,7 @@ ${data.errors.join("\n")}`);
       cards += sectionLabel("Planning", "smgmt-section-planning smgmt-planning-section");
       cards += _buildCard(planningLabel);
     }
-    listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
+    listEl.innerHTML = cards || '<div class="smgmt-empty-state"><i class="ti ti-inbox" aria-hidden="true"></i><p>No sprints yet \u2014 create one with <strong>+ New Sprint</strong>.</p></div>';
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
     _smgmtEnsureCapData(false);
@@ -5235,7 +5247,7 @@ ${data.errors.join("\n")}`);
       const runTicketLabels = escHtml(
         (t.labels || []).map((l) => l.name).join(",")
       );
-      return sepHtml + `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
+      return sepHtml + `<div class="smgmt-ticket smgmt-ticket-enter" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -5556,10 +5568,13 @@ ${data.errors.join("\n")}`);
     const schedDepHtml = _smgmtSchedDepHtml(ticket);
     const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const sk = escHtml(label);
+    const _ariaLabel = escHtml(`#${ticket.number} ${ticket.title} \u2014 ${statusLabel}${sk ? ` \u2014 ${sk}` : ""}`);
     return `
-    <div class="smgmt-ticket${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
-         tabindex="-1"
+    <div class="smgmt-ticket smgmt-ticket-enter${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+         tabindex="0"
          draggable="true"
+         role="row"
+         aria-label="${_ariaLabel}"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
@@ -5569,6 +5584,7 @@ ${data.errors.join("\n")}`);
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
          onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_smgmtRowClick(event,${ticket.number},'${sk}');}"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? "checked" : ""}
@@ -6080,4 +6096,3 @@ ${data.errors.join("\n")}`);
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 })();
-//# sourceMappingURL=bundle.js.map

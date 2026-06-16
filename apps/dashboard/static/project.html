@@ -2607,6 +2607,9 @@
     .smgmt-sprint-header-right {
       display: flex; align-items: center; gap: 6px; flex-shrink: 0;
     }
+    @media (max-width: 480px) {
+      .smgmt-sprint-header { flex-direction: column; align-items: flex-start; }
+    }
     /* ── Action buttons ── */
     .smgmt-run-btn {
       padding: 4px 12px; font-size: 11px; font-weight: 600;

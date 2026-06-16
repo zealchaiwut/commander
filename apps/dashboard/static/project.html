@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commander — Project</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="/static/css/tokens.css">
   <script>
   (function() {
     var m = window.location.pathname.match(/^\/project\/([^/]+)/);
@@ -8097,22 +8098,61 @@
 
     /* ── Advisor tab (issue #881) ──────────────────────────────────────────── */
     #pane-advisor { padding: 16px 0; }
-    .adv-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .adv-title { font-size: 15px; font-weight: 700; color: var(--text); }
-    .adv-run-btn { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .adv-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+    }
+    .adv-header-left { display: flex; flex-direction: column; gap: 2px; }
+    .adv-title { font-size: 16px; font-weight: 700; color: var(--text); }
+    .adv-subtitle { font-size: 12px; color: var(--text-muted); }
+    .adv-run-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; background: var(--blue); color: #fff;
+      border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: opacity .15s;
+    }
+    .adv-run-btn:hover:not(:disabled) { opacity: .88; }
     .adv-run-btn:disabled { opacity: .5; cursor: default; }
-    .adv-empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
-    .adv-card-list { display: flex; flex-direction: column; gap: 10px; }
-    .adv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
-    .adv-card-pitch { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .adv-card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-    .adv-scope { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
-    .adv-scope-S { background: #d1fae5; color: #065f46; }
-    .adv-scope-M { background: #dbeafe; color: #1e40af; }
-    .adv-scope-L { background: #fde68a; color: #92400e; }
-    .adv-milestone { font-size: 12px; color: var(--text-sub); }
-    .adv-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
-    .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+    .adv-empty {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 48px 24px; text-align: center; gap: 8px;
+    }
+    .adv-empty-icon { font-size: 28px; color: var(--text-sub); opacity: .7; }
+    .adv-empty-title { font-size: 14px; font-weight: 600; color: var(--text-sub); margin: 0; }
+    .adv-empty-sub { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+    .adv-card-list { display: flex; flex-direction: column; gap: 12px; }
+    .adv-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .adv-card-pitch { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .adv-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .adv-scope { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .adv-scope-S { background: var(--green-bg); color: var(--green); }
+    .adv-scope-M { background: var(--blue-bg); color: var(--blue); }
+    .adv-scope-L { background: var(--amber-bg); color: var(--amber); }
+    .adv-milestone { font-size: 12px; color: var(--text-sub); display: flex; align-items: center; gap: 3px; }
+    .adv-rationale { font-size: 13px; color: var(--text-sub); line-height: 1.55; }
+    .adv-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .adv-accept-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 14px; background: var(--blue); color: #fff;
+      border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: opacity .15s;
+    }
+    .adv-accept-btn:hover:not(:disabled) { opacity: .88; }
+    .adv-accept-btn:disabled { opacity: .45; cursor: default; }
+    .adv-dismiss-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 12px; background: transparent; color: var(--text-sub);
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .adv-dismiss-btn:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
+    .adv-dismiss-btn:disabled { opacity: .45; cursor: default; }
+    .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
 
     /* Roadmap look-ahead section (issue #883) */
     .rm-look-ahead-section { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
@@ -9880,13 +9920,20 @@
       <!-- ── Advisor tab (issue #881) ── -->
       <div class="tab-pane" id="pane-advisor" role="tabpanel" aria-labelledby="stab-advisor">
         <div class="adv-header">
-          <span class="adv-title"><i class="ti ti-bulb" style="margin-right:6px"></i>Next-Build Advisor</span>
-          <button class="adv-run-btn" id="adv-run-btn" onclick="advRun()">
+          <div class="adv-header-left">
+            <span class="adv-title"><i class="ti ti-bulb" style="margin-right:6px"></i>Next-Build Advisor</span>
+            <span class="adv-subtitle">AI-generated suggestions for your next sprint</span>
+          </div>
+          <button class="adv-run-btn" id="adv-run-btn" onclick="advRun()" aria-label="Run advisor to generate suggestions">
             <i class="ti ti-player-play"></i>Run advisor
           </button>
         </div>
         <div id="adv-root">
-          <div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>
+          <div class="adv-empty">
+            <i class="ti ti-bulb adv-empty-icon"></i>
+            <p class="adv-empty-title">No suggestions yet</p>
+            <p class="adv-empty-sub">Click <strong>Run advisor</strong> to generate recommendations for your next sprint.</p>
+          </div>
         </div>
       </div><!-- /pane-advisor -->
 
@@ -28791,28 +28838,41 @@ function _advFetch() {
       _advRender(Array.isArray(data) ? data : (data.suggestions || []));
     })
     .catch(function() {
-      if (root) root.innerHTML = '<div class="adv-empty">Failed to load suggestions.</div>';
+      if (root) root.innerHTML = _advEmptyHtml('Failed to load suggestions.');
     });
+}
+
+function _advEmptyHtml(msg) {
+  return '<div class="adv-empty">'
+    + '<i class="ti ti-bulb adv-empty-icon"></i>'
+    + '<p class="adv-empty-title">No suggestions yet</p>'
+    + '<p class="adv-empty-sub">' + escHtml(msg || 'Click Run advisor to generate recommendations for your next sprint.') + '</p>'
+    + '</div>';
 }
 
 function _advRender(suggestions) {
   var root = document.getElementById('adv-root');
   if (!root) return;
   if (!suggestions || suggestions.length === 0) {
-    root.innerHTML = '<div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>';
+    root.innerHTML = _advEmptyHtml('Click <strong>Run advisor</strong> to generate recommendations for your next sprint.');
     return;
   }
   var runAt = suggestions[0] && suggestions[0].run_at ? suggestions[0].run_at.slice(0, 16).replace('T', ' ') + ' UTC' : '';
   var h = '<div class="adv-card-list">';
   suggestions.forEach(function(s) {
+    var sid = s.id;
     var scopeCls = 'adv-scope adv-scope-' + (s.scope || 'M');
-    h += '<div class="adv-card">';
+    h += '<div class="adv-card" id="adv-card-' + sid + '">';
     h += '<div class="adv-card-pitch">' + escHtml(s.pitch || '') + '</div>';
     h += '<div class="adv-card-meta">';
     h += '<span class="' + scopeCls + '">' + escHtml(s.scope || '?') + '</span>';
-    h += '<span class="adv-milestone"><i class="ti ti-flag-3" style="margin-right:3px"></i>' + escHtml(s.milestone || '') + '</span>';
+    h += '<span class="adv-milestone"><i class="ti ti-flag-3"></i>' + escHtml(s.milestone || '') + '</span>';
     h += '</div>';
     h += '<div class="adv-rationale">' + escHtml(s.rationale || '') + '</div>';
+    h += '<div class="adv-card-actions">';
+    h += '<button class="adv-accept-btn" id="adv-accept-' + sid + '" onclick="sugAccept(' + sid + ')" title="Accept — expand into tickets via BA"><i class="ti ti-check"></i>Accept</button>';
+    h += '<button class="adv-dismiss-btn" id="adv-dismiss-' + sid + '" onclick="sugDismiss(' + sid + ')" title="Dismiss — hide and never re-suggest"><i class="ti ti-x"></i>Dismiss</button>';
+    h += '</div>';
     h += '</div>';
   });
   h += '</div>';
@@ -28824,7 +28884,7 @@ function advRun() {
   var btn = document.getElementById('adv-run-btn');
   var root = document.getElementById('adv-root');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>Running…'; }
-  if (root) root.innerHTML = '<div class="adv-empty">Running advisor agent…</div>';
+  if (root) root.innerHTML = _advEmptyHtml('Running advisor agent…');
   var projectKey = _advProjectKey();
   fetch('/api/projects/' + encodeURIComponent(projectKey) + '/advisor/run', { method: 'POST' })
     .then(function(r) { return r.json(); })
@@ -28834,7 +28894,7 @@ function advRun() {
       if (typeof _rmRefresh === 'function') _rmRefresh();
     })
     .catch(function() {
-      if (root) root.innerHTML = '<div class="adv-empty">Advisor run failed. Check the dashboard logs.</div>';
+      if (root) root.innerHTML = _advEmptyHtml('Advisor run failed. Check the dashboard logs.');
     })
     .finally(function() {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-player-play"></i>Run advisor'; }

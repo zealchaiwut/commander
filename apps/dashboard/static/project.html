@@ -2096,6 +2096,27 @@
       font-variant-numeric: tabular-nums; border: 1px solid var(--border);
     }
     .hist-badge i { font-size: 12px; }
+    @media (max-width: 640px) {
+      .est-bar { width: 100%; flex: none; }
+      .hist-badge { flex-shrink: 1; flex-grow: 0; }
+    }
+    @media (max-width: 600px) {
+      .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+      .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+      .hist-card-head {
+        display: flex; flex-direction: column; gap: 8px; overflow-x: hidden;
+      }
+      .hist-card-head-left, .hist-card-head-right {
+        flex-basis: 100%; width: 100%;
+      }
+      .hist-card-head-right {
+        justify-content: flex-start; margin-left: 0; grid-column: unset; grid-row: unset;
+      }
+      .hist-head-actions { flex-wrap: wrap; gap: 6px; }
+      .hist-verbs        { flex-wrap: wrap; gap: 6px; }
+      .hist-head-btn     { flex: 1 1 auto; min-width: 80px; min-height: 44px; }
+      .hist-verb         { flex: 1 1 auto; min-width: 80px; min-height: 44px; }
+    }
 
     /* Post-sprint reconciliation checklist (issue #856) */
     .recon { padding: 4px 12px 6px; }
@@ -2239,6 +2260,16 @@
     .iss-chip.crashed { color: var(--red);   background: var(--red-bg); }
     .iss-chip.notrun  { color: var(--amber); background: transparent; border: 1px solid var(--amber-bg); }
     .iss-time { margin-left: auto; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
+
+    /* Sprint History gantt horizontal-scroll container (issue #1197) */
+    .hist-gantt { overflow-x: auto; }
+
+    /* Mobile: stack issue-list title above time metadata (issue #1197) */
+    @media (max-width: 600px) {
+      .iss-row    { flex-wrap: wrap; }
+      .iss-title  { flex: 1 1 100%; }
+      .iss-time   { flex: 0 0 100%; margin-left: 0; margin-top: 4px; }
+    }
 
     /* Lock note on terminal sprints */
     .lock-note {
@@ -2692,6 +2723,9 @@
     }
     .smgmt-sprint-header-right {
       display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    @media (max-width: 480px) {
+      .smgmt-sprint-header { flex-direction: column; align-items: flex-start; }
     }
     /* ── Action buttons ── */
     .smgmt-run-btn {
@@ -3959,6 +3993,9 @@
       .bl-actions { gap: 8px; }
       .bl-target, .bl-add-btn { flex: 1 1 auto; }
       .bl-row { flex-wrap: wrap; }
+    }
+    @media (max-width: 620px) {
+      .bl-filter { flex-wrap: wrap; gap: 6px; }
     }
 
     /* "Move to" button on backlog ticket rows */
@@ -5651,6 +5688,12 @@
       min-width: 180px;
     }
     .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
+    @media (max-width: 600px) {
+      .bc-settings-bar { flex-direction: column; }
+      .bc-settings-field { width: 100%; }
+      .bc-select, .bc-text-input { width: 100%; box-sizing: border-box; min-width: 0; }
+      .bc-prompt-row { flex-direction: column; }
+    }
 
     /* Counter */
     .bc-counter-row { padding: 8px 28px 4px; display: flex; align-items: center; gap: 12px; }
@@ -5664,7 +5707,7 @@
 
     /* Textarea */
     .bc-textarea {
-      display: block; width: 100%; box-sizing: border-box;
+      display: block; width: 100%; max-width: 100%; box-sizing: border-box;
       min-height: 260px; resize: vertical;
       font-family: var(--mono); font-size: 12px;
       border: none;
@@ -6130,6 +6173,10 @@
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
     }
     .bc-pg-entry--success .bc-pg-entry-badge { color: var(--green); }
+    @media (max-width: 560px) {
+      .bc-pg-entry { flex-wrap: wrap; }
+      .bc-pg-entry-badge { flex: 1 1 auto; }
+    }
 
     /* Ticket card */
     .bc-card {
@@ -6265,6 +6312,11 @@
     .bc-action-btn--retry:hover { background: var(--blue-bg); }
     .bc-action-btn--skip { color: var(--text-muted); }
     .bc-action-btn--skip:hover { color: var(--red); background: var(--surface-2); }
+
+    @media (max-width:600px) {
+      .bc-card-head { flex-direction: column; align-items: flex-start; }
+      .bc-card-actions { flex-wrap: wrap; flex-shrink: unset; }
+    }
 
     /* Failed card expanded area */
     .bc-fail-detail {
@@ -6788,6 +6840,7 @@
       padding: 14px 20px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
     .logs-filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    @media (max-width:640px) { .logs-filter-bar { display:grid; grid-template-columns:1fr 1fr; gap:8px; } }
     .logs-chip-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .logs-chip-label {
       font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
@@ -6946,6 +6999,10 @@
     .logs-live-dot {
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
+    }
+    @media (max-width: 600px) {
+      .logs-run-id { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .logs-ticket-fail { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-wrap: nowrap; }
     }
     /* ── Events Activity Log (issue #633) ── */
     .evl-bundle-row { border-bottom: 1px solid var(--border); }
@@ -7205,6 +7262,17 @@
       .logs-search-wrap { max-width: 100%; }
     }
 
+    @media (max-width: 620px) {
+      .logs-toolbar-row2 { flex-direction: column; align-items: stretch; }
+      .logs-search-wrap { max-width: 100%; width: 100%; }
+      .logs-view-toggle { width: 100%; }
+    }
+
+    @media (max-width:640px) {
+      .logs-raw-stream { overflow-x:auto; }
+      .logs-raw-line { white-space:pre; }
+    }
+
     /* Touch devices have no hover, so hover-revealed row actions never appear.
        Keep the actionable controls visible (the drag grip is intentionally left
        hidden — HTML5 drag-and-drop doesn't work on touch; use the ≡ row menu). */
@@ -7218,6 +7286,11 @@
       /* Give rows a ~44px touch target without changing desktop density. */
       .smgmt-ticket { padding-top: 11px; padding-bottom: 11px; }
       #pane-sprint-mgmt.smgmt-compact .smgmt-ticket { padding-top: 8px; padding-bottom: 8px; }
+      /* Backlog header controls: 44px tap targets (WCAG 2.5.5 / Apple HIG). */
+      .bl-target { min-height: 44px; }
+      .bl-add-header-btn { min-height: 44px; }
+      .bl-select { min-height: 44px; }
+      .smgmt-bulk-est-btn { min-height: 44px; }
     }
 
     /* ── Toast notifications (issue #426) ── */
@@ -7607,6 +7680,17 @@
       .node.tester-active .node-state-icon { animation: none; }
     }
 
+    /* ── Rail node mobile overflow fix (issue #1191) ────────────────────────
+       Prevent horizontal overflow on narrow viewports by wrapping badges
+       below the title row. Scoped strictly to ≤600 px; desktop is untouched. */
+    @media (max-width: 600px) {
+      .node { flex-wrap: wrap; }
+      .node-title { flex: 1 1 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .node-size, .node-time, .node-badge, .node-fix-badge,
+      .node-agent, .node-queued-est, .node-backend-badge,
+      .node-coded-badge { flex: 0 1 auto; }
+    }
+
     /* ── Running metrics strip (issue #803) ──────────────────────────────────
        Five compact metric cards above the level-rail. Mock v5 contract:
        .metrics container + .metric cards with metric-done/active/fix/tokens/time
@@ -7643,6 +7727,11 @@
     .metric.amber .metric-label,
     .metric.amber .metric-value { color: var(--amber); }
     @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
+    @media (max-width: 640px) {
+      .metrics { gap: 6px; }
+      .metric { flex: 1 1 auto; min-width: 120px; }
+      .metric-label { font-size: 9px; }
+    }
 
     /* ── Two-queue coder/tester lane view (issue #927) ───────────────────────
        Two side-by-side lanes (Coder / Tester). Each lane has a capacity header
@@ -7692,6 +7781,10 @@
       font-size: 12px; color: var(--text-muted); opacity: .85; }
     .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
     @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) {
+      .lane-capacity { flex-direction: column; gap: 4px; }
+      .lane-dots { flex-wrap: wrap; }
+    }
 
     /* ── Chip-only assignment map (issue #1108) ────────────────────────────
        Number-only issue chips replace full lane cards. Working = blue tint +
@@ -7917,6 +8010,34 @@
     .log-empty { color: var(--text-muted); font-style: italic; }
     .log-fallback-note { color: var(--text-muted); font-size: 11px; line-height: 1.5;
       padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+    /* ── Inspector mobile bottom sheet (issue #1193) ────────────────────────
+       At ≤640px the inspector panel leaves the document flow and pins to the
+       bottom of the viewport as a full-width overlay. The hidden attribute on
+       the element keeps it invisible when closed; no z-index needed while
+       display:none applies. overflow-y:auto lets the sheet content scroll
+       without scrolling the page behind it. */
+    @media (max-width: 640px) {
+      .inspector {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin: 0;
+        max-height: 55vh;
+        overflow-y: auto;
+        border-radius: 10px 10px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        z-index: 200;
+      }
+      .log-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+    }
 
     /* ── Orchestrator + All Issues panels (issue #1106) ─────────────────────── */
     .orch-panel { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 10px;
@@ -8726,6 +8847,9 @@
             <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
           </div>
+          <!-- Node inspector panel (issue #1193) — bottom sheet on mobile ≤640px,
+               inline below the run-shell on desktop. Toggled by _smgmtInspectorFeed. -->
+          <div class="inspector" id="smgmt-inspector" hidden></div>
         </div><!-- /smgmt-subview-running -->
 
         <!-- History sub-view (issue #716) — finished-sprint summaries -->

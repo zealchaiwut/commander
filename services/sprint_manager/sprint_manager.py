@@ -2966,8 +2966,16 @@ def _gate_merge_preview(
 
     merge_ok = False
     combined = ""
+    stashed = False
 
     try:
+        # Step 0: stash any unstaged/untracked changes so the worktree is clean
+        # (a dirty worktree causes `git rebase` to abort with "unstaged changes")
+        stash_rc, stash_out, stash_err = _run_timed(
+            "git", "stash", "--include-untracked", cwd=worktester_root
+        )
+        stashed = "No local changes to save" not in stash_out and stash_rc == 0
+
         # Step 1: fetch
         _run("git", "fetch", "origin", cwd=worktester_root, check=False)
 
@@ -3053,6 +3061,9 @@ def _gate_merge_preview(
         _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
         # Delete tmp branch if it exists
         _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+        # Restore any stashed changes
+        if stashed:
+            _run("git", "stash", "pop", cwd=worktester_root, check=False)
 
     if not merge_ok:
         _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)

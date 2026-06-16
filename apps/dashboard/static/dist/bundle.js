@@ -1223,7 +1223,7 @@ Replace the existing draft (${data.existing_label})?`
     }).join("");
     return `<div class="stats-block">
     <div class="stats-section-label">Timeline</div>
-    <div class="gantt">${rows}</div>
+    <div class="hist-gantt"><div class="gantt">${rows}</div></div>
   </div>`;
   }
   function _histStatsHtml(s) {

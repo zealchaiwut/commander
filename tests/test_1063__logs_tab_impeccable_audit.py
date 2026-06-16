@@ -13,7 +13,6 @@ AC8: Bundle integrity verified (no broken imports, no build errors)
 
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -46,8 +45,8 @@ def test_ac1_zero_impeccable_findings_logpanel():
     output = (result.stdout + result.stderr).strip()
     # impeccable detect outputs filename line then findings; if only filename → zero findings
     # Strip the filename line; any remaining lines are findings
-    lines = [l for l in output.splitlines() if l.strip() and not l.strip().startswith(str(LOGPANEL).split("/")[-1]) and not l.strip() == str(LOGPANEL)]
-    assert not any("[" in l for l in lines), f"impeccable findings in logpanel.js:\n{output}"
+    lines = [line for line in output.splitlines() if line.strip() and not line.strip().startswith(str(LOGPANEL).split("/")[-1]) and not line.strip() == str(LOGPANEL)]
+    assert not any("[" in line for line in lines), f"impeccable findings in logpanel.js:\n{output}"
 
 
 def test_ac1_zero_impeccable_findings_progress_activity():
@@ -60,8 +59,8 @@ def test_ac1_zero_impeccable_findings_progress_activity():
         timeout=60,
     )
     output = (result.stdout + result.stderr).strip()
-    lines = [l for l in output.splitlines() if l.strip() and not l.strip() == str(PROGRESS)]
-    assert not any("[" in l for l in lines), f"impeccable findings in progress-activity.js:\n{output}"
+    lines = [line for line in output.splitlines() if line.strip() and not line.strip() == str(PROGRESS)]
+    assert not any("[" in line for line in lines), f"impeccable findings in progress-activity.js:\n{output}"
 
 
 # ── AC2: No hardcoded hex colors in src modules ──────────────────────────────
@@ -171,7 +170,7 @@ def test_ac4_pa_css_spacing_scale_compliance():
                 off_scale.append(f"{prop_name}: ...{val}px...")
 
     assert not off_scale, (
-        f"Off-scale spacing/gap/margin/padding values in PA_CSS:\n  "
+        "Off-scale spacing/gap/margin/padding values in PA_CSS:\n  "
         + "\n  ".join(sorted(set(off_scale)))
         + f"\nAllowed px values: {sorted(ALLOWED_SPACING_PX)}"
     )

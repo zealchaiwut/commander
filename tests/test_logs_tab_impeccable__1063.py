@@ -2,8 +2,6 @@
 import os
 import pytest
 import httpx
-import subprocess
-import json
 
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.

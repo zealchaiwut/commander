@@ -28209,7 +28209,16 @@ function _deployIsSelfRestart(res) {
   var d = res.data || {};
   var r = d.restart || d;
   return res.status === 202
-    && (d.detached === true || r.detached === true || d.method === 'launchd-self' || r.method === 'launchd-self');
+    && (d.detached === true || r.detached === true || d.method === 'launchd-self' || r.method === 'launchd-self'
+        || r.method === 'scripts-self-detached' || d.method === 'scripts-self-detached');
+}
+
+// True when the env card's port is the port this page loaded on (self-restart).
+function _deployTouchesThisServer(i) {
+  var c = _deployCards[i];
+  if (!c || c.host === 'render' || c.port == null) return false;
+  var locPort = window.location.port;
+  return locPort !== '' && String(c.port) === String(locPort);
 }
 
 function _deployExecDeploy(i) {
@@ -28260,6 +28269,8 @@ function _deployExecDeploy(i) {
       });
     })
     .catch(function(e) {
+      // Network drop mid-restart (older servers) — reconnect instead of FAILED.
+      if (_deployTouchesThisServer(i)) { _deployShowReconnectOverlay(); return; }
       _deploySetStatus(i, 'failed');
       _deployLogFinishFailure(i, 'Deploy error: ' + e);    // AC9
       _deployResetActions(i);
@@ -28307,6 +28318,7 @@ function _deployExecRestart(i) {
       });
     })
     .catch(function(e) {
+      if (_deployTouchesThisServer(i)) { _deployShowReconnectOverlay(); return; }
       _deploySetStatus(i, 'failed');
       _deployLogFinishFailure(i, 'Restart error: ' + e);   // AC9
       _deployResetActions(i);

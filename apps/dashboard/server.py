@@ -1981,6 +1981,15 @@ from services.sprint_manager.deploy_config_schema import enrich_local_working_di
 from services.sprint_manager import deploy_actions as _deploy_actions
 
 
+def _dashboard_listen_port() -> Optional[int]:
+    """Port this dashboard process is bound to (from PORT env, default 8000)."""
+    raw = os.environ.get("PORT", "8000")
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return None
+
+
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
     """Fill working_dir for local entries (honours ``shared_working_dir`` seeds)."""
     envs = projects_module.get_project_environments(repo)
@@ -2114,7 +2123,8 @@ def _restart_environment(entry: dict) -> dict:
     # `start` runs (cause of "Failed to fetch" + a dashboard that never comes
     # back). Detach a `sleep; stop; start` helper in a new session so the
     # response flushes first and the helper survives the stop to run start.
-    if _deploy_actions.is_self_restart_dir(entry, str(_REPO_ROOT)):
+    listen_port = _dashboard_listen_port()
+    if _deploy_actions.is_script_self_restart(entry, str(_REPO_ROOT), listen_port):
         cmd = _deploy_actions.build_detached_restart_command(stop, start)
         popen_kw: dict = {
             "start_new_session": True,

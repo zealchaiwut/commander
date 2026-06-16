@@ -500,6 +500,31 @@ def is_self_restart_dir(entry: dict, self_dir: Optional[str]) -> bool:
         return False
 
 
+def is_self_restart_port(entry: dict, listen_port: Optional[int]) -> bool:
+    """True when *entry*'s configured port is the port this dashboard listens on.
+
+    Commander's uat env uses ``shared_working_dir`` (the prd clone) for git sync
+    while ``stop_all.sh uat`` kills the process on the uat port — so
+    ``is_self_restart_dir`` misses it when the dashboard runs from the uat
+    clone. Matching on port catches that case.
+    """
+    if listen_port is None:
+        return False
+    configured = restart_port(entry)
+    return configured is not None and configured == listen_port
+
+
+def is_script_self_restart(
+    entry: dict,
+    self_dir: Optional[str],
+    listen_port: Optional[int] = None,
+) -> bool:
+    """True when a script stop+start restart would kill the serving dashboard."""
+    return is_self_restart_dir(entry, self_dir) or is_self_restart_port(
+        entry, listen_port
+    )
+
+
 def build_detached_restart_command(
     stop: Optional[str], start: Optional[str], delay_seconds: float = 1.0
 ) -> list[str]:

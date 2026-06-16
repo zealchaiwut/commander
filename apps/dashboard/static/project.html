@@ -6859,6 +6859,7 @@
     }
     .logs-level-seg button:last-child { border-right: none; }
     .logs-level-seg button.active { background: var(--text); color: var(--surface); font-weight: 600; }
+    .logs-level-seg button[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 600; }
     .lsr-label { font-size: 11px; color: var(--text-sub); font-weight: 500; }
     .lsr-input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); width: 100%; }
     .lsr-input:focus { outline: none; border-color: var(--blue); }
@@ -8820,54 +8821,50 @@
                 <i class="ti ti-refresh"></i>
               </button>
             </div>
-            <div class="logs-toolbar-filters" id="logs-activity-filters">
+            <div class="logs-toolbar-filters" id="logs-toolbar-filters">
               <div class="logs-search-wrap">
                 <i class="ti ti-filter logs-search-icon"></i>
                 <input type="text" class="logs-search" id="logs-search"
                        placeholder="Filter by issue # or run…" autocomplete="off"
                        oninput="logsOnSearch(this.value)">
               </div>
-              <select class="logs-filter-select" id="logs-filter-sprint" onchange="logsFilterSprintSelect(this)">
+              <select class="logs-filter-select" id="logs-filter-sprint"
+                      aria-label="Filter by sprint" onchange="logsFilterSprintSelect(this)">
                 <option value="">All sprints</option>
               </select>
-              <select class="logs-filter-select" id="logs-filter-agent" onchange="evlSetAgentFilter(this.value)">
+              <select class="logs-filter-select" id="logs-filter-agent"
+                      aria-label="Filter by agent" onchange="logsFilterAgentSelect(this)">
                 <option value="">All agents</option>
+                <option value="agent">agent</option>
                 <option value="coder">coder</option>
                 <option value="tester">tester</option>
                 <option value="ba">ba</option>
+                <option value="estimator">estimator</option>
+                <option value="documenter">documenter</option>
+                <option value="reviewer">reviewer</option>
               </select>
-              <select class="logs-filter-select" id="logs-filter-source" onchange="evlSetFilter(this.value || 'all')">
-                <option value="">All sources</option>
-                <option value="agent">Agent &amp; sprint</option>
+              <select class="logs-filter-select" id="logs-filter-source"
+                      aria-label="Filter by source" onchange="logsFilterSourceSelect(this)">
+                <option value="all">All sources</option>
+                <option value="sprint">Sprint</option>
                 <option value="dashboard">Dashboard</option>
                 <option value="github">GitHub</option>
+                <option value="agent">Agent</option>
               </select>
-              <div class="logs-level-seg" role="group" aria-label="Filter by level">
-                <button type="button" class="active" data-level="all" onclick="evlSetLevelFilter('all', this)">All</button>
-                <button type="button" data-level="info" onclick="evlSetLevelFilter('info', this)">Info</button>
-                <button type="button" data-level="warn" onclick="evlSetLevelFilter('warn', this)">Warn</button>
-                <button type="button" data-level="error" onclick="evlSetLevelFilter('error', this)">Error</button>
+              <div class="logs-level-seg" id="logs-severity-seg" role="group" aria-label="Filter by severity">
+                <button type="button" class="active" data-level="all" aria-pressed="true"
+                        onclick="logsSetSeverityFilter('all', this)">All</button>
+                <button type="button" data-level="info" aria-pressed="false"
+                        onclick="logsSetSeverityFilter('info', this)">Info</button>
+                <button type="button" data-level="warn" aria-pressed="false"
+                        onclick="logsSetSeverityFilter('warn', this)">Warn</button>
+                <button type="button" data-level="error" aria-pressed="false"
+                        onclick="logsSetSeverityFilter('error', this)">Error</button>
               </div>
-            </div>
-            <div class="logs-filter-bar hidden" id="logs-runs-filters">
-              <div class="logs-chip-group">
-                <span class="logs-chip-label">Sprint</span>
-                <div id="logs-chips-sprint" style="display:contents"></div>
-              </div>
-              <div class="logs-chip-group" role="group" aria-label="Filter by role">
-                <span class="logs-chip-label">Role</span>
-                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
-                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
-                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
-              </div>
-              <div class="logs-chip-group" role="group" aria-label="Filter by level">
-                <span class="logs-chip-label">Level</span>
-                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
-                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
-                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
-                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
-              </div>
-              <button class="logs-chip logs-tags-see-more-btn hidden" id="logs-tags-see-more" onclick="_logsTagsToggle()">See more</button>
+              <select class="logs-filter-select hidden" id="logs-filter-raw-level"
+                      aria-label="Filter by log level" onchange="logsFilterRawLevelSelect(this)">
+                <option value="">All levels</option>
+              </select>
             </div>
           </div>
           <!-- Body -->
@@ -22561,18 +22558,25 @@ document.addEventListener('DOMContentLoaded', init);
 
 const _logsState = {
   runs: [],
-  chips: { sprint_label: new Set(), agent_role: new Set(), event_level: new Set() },
   search: '',
+  filter: {
+    sprint: '',
+    agent: '',
+    source: 'all',
+    severity: 'all',
+    rawLevel: '',
+  },
   expanded: new Set(),
   events: {},
   loadingEvents: new Set(),
-  ticketStats: {},         // runId -> per-ticket timing/token/failure rows (#858)
+  ticketStats: {},
   loadingStats: new Set(),
-  issues: null,            // per-issue browse list (lazy-loaded)
-  viewMode: 'activity',    // 'timeline' (Runs) | 'raw' | 'activity'
+  issues: null,
+  viewMode: 'activity',
   pollTimer: null,
   liveEs: null,
   liveRunId: null,
+  rawLines: null,
 };
 let _logsLoaded = false;
 let _logsSearchTimer = null;
@@ -22583,6 +22587,7 @@ function logsInit() {
 
   if (!_logsLoaded) {
     _logsLoaded = true;
+    _logsPopulateRawLevelDropdown();
     logsFetchRuns();
     logsSyncGitHub();
     evlFetch();
@@ -22630,7 +22635,7 @@ async function logsFetchRuns() {
     const added = newRuns.filter(r => !existingIds.has(r.run_id));
 
     _logsState.runs = newRuns;
-    _logsPopulateSprintChips();
+    _logsPopulateSprintDropdown();
 
     if (!_logsLoaded || existingIds.size === 0) {
       logsRenderTimeline();
@@ -22648,101 +22653,88 @@ async function logsFetchRuns() {
   } catch (_) {}
 }
 
-const LOGS_TAG_LIMIT = 10;
-let _logsTagsExpanded = false;
-
-function _logsPopulateSprintChips() {
-  const container = document.getElementById('logs-chips-sprint');
-  if (!container) return;
-
-  // Build sprint_label → max start_time map for recency
-  const sprintRecency = {};
-  for (const run of _logsState.runs) {
-    const label = run.sprint_label;
-    if (!sprintRecency[label] || run.start_time > sprintRecency[label]) {
-      sprintRecency[label] = run.start_time;
-    }
-  }
-
-  // Create missing sprint chips with recency; update existing ones
-  const existingChips = [...container.querySelectorAll('.logs-chip')];
-  const existingMap = Object.fromEntries(existingChips.map(c => [c.dataset.value, c]));
-  for (const [label, recency] of Object.entries(sprintRecency)) {
-    if (existingMap[label]) {
-      existingMap[label].dataset.tagRecency = recency;
-    } else {
-      const btn = document.createElement('button');
-      btn.className = 'logs-chip';
-      btn.setAttribute('aria-pressed', 'false');
-      btn.dataset.group = 'sprint_label';
-      btn.dataset.value = label;
-      btn.dataset.tagRecency = recency;
-      btn.onclick = () => logsToggleChip(btn);
-      btn.textContent = label;
-      container.appendChild(btn);
-    }
-  }
-
-  // Assign recency to static role/level chips: global max run time (used in every run)
-  const globalMax = _logsState.runs.length > 0
-    ? _logsState.runs.reduce((m, r) => r.start_time > m ? r.start_time : m, '')
-    : '';
-  document.querySelectorAll(
-    '#pane-logs .logs-chip[data-group="agent_role"], #pane-logs .logs-chip[data-group="event_level"]'
-  ).forEach(btn => { btn.dataset.tagRecency = globalMax; });
-
-  _logsApplyTagLimit();
+function _logsApplyFilters() {
+  if (_logsState.viewMode === 'activity') evlRender();
+  else if (_logsState.viewMode === 'raw') _logsRenderRawStream();
+  else logsRenderTimeline();
 }
 
-function _logsApplyTagLimit() {
-  const allChips = [...document.querySelectorAll('#pane-logs .logs-filter-bar .logs-chip:not(#logs-tags-see-more)')];
-  const seeMoreBtn = document.getElementById('logs-tags-see-more');
-  const total = allChips.length;
-
-  // Sort by recency desc; DOM insertion index is the stable tiebreaker
-  const indexed = allChips.map((chip, i) => ({ chip, recency: chip.dataset.tagRecency || '', idx: i }));
-  indexed.sort((a, b) => b.recency.localeCompare(a.recency) || a.idx - b.idx);
-
-  if (_logsTagsExpanded || total <= LOGS_TAG_LIMIT) {
-    indexed.forEach(({ chip }) => chip.classList.remove('logs-chip--hidden'));
-  } else {
-    indexed.forEach(({ chip }, i) => chip.classList.toggle('logs-chip--hidden', i >= LOGS_TAG_LIMIT));
-  }
-
-  if (!seeMoreBtn) return;
-  if (total <= LOGS_TAG_LIMIT) {
-    seeMoreBtn.classList.add('hidden');
-  } else {
-    seeMoreBtn.classList.remove('hidden');
-    seeMoreBtn.textContent = _logsTagsExpanded
-      ? 'See less'
-      : `See more (${total - LOGS_TAG_LIMIT} more)`;
-  }
+function logsFilterSprintSelect(sel) {
+  _logsState.filter.sprint = sel.value || '';
+  _logsApplyFilters();
 }
 
-function _logsTagsToggle() {
-  _logsTagsExpanded = !_logsTagsExpanded;
-  _logsApplyTagLimit();
+function logsFilterAgentSelect(sel) {
+  _logsState.filter.agent = sel.value || '';
+  _logsApplyFilters();
 }
 
-function logsToggleChip(btn) {
-  const group = btn.dataset.group;
-  const value = btn.dataset.value;
-  const set = _logsState.chips[group];
-  if (set.has(value)) { set.delete(value); btn.classList.remove('active'); }
-  else { set.add(value); btn.classList.add('active'); }
-  btn.setAttribute('aria-pressed', btn.classList.contains('active') ? 'true' : 'false');
-  logsRenderTimeline();
-  if (_logsState.viewMode === 'raw') logsLoadRawView();
+function logsFilterSourceSelect(sel) {
+  _logsState.filter.source = sel.value || 'all';
+  _logsApplyFilters();
+}
+
+function logsSetSeverityFilter(level, btnEl) {
+  _logsState.filter.severity = level || 'all';
+  document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+    var on = b === btnEl || b.dataset.level === level;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  _logsApplyFilters();
+}
+
+function logsFilterRawLevelSelect(sel) {
+  _logsState.filter.rawLevel = sel.value || '';
+  _logsApplyFilters();
+}
+
+function _logsPopulateSprintDropdown() {
+  var sel = document.getElementById('logs-filter-sprint');
+  if (!sel) return;
+  var current = _logsState.filter.sprint;
+  var recency = {};
+  (_logsState.runs || []).forEach(function(run) {
+    var lbl = run.sprint_label;
+    if (!lbl) return;
+    if (!recency[lbl] || run.start_time > recency[lbl]) recency[lbl] = run.start_time;
+  });
+  if (_evlState.events) {
+    _evlState.events.forEach(function(ev) {
+      var d = ev.detail || {};
+      [d.sprint_id, d.sprint_label, d.from_sprint, d.to_sprint, d.sub_label].forEach(function(lbl) {
+        if (lbl && !recency[lbl]) recency[lbl] = ev.timestamp || '';
+      });
+    });
+  }
+  var sorted = Object.keys(recency).sort(function(a, b) {
+    return (recency[b] || '').localeCompare(recency[a] || '');
+  });
+  var html = '<option value="">All sprints</option>';
+  sorted.forEach(function(lbl) {
+    html += '<option value="' + escHtml(lbl) + '"' + (lbl === current ? ' selected' : '') + '>'
+      + escHtml(lbl) + '</option>';
+  });
+  sel.innerHTML = html;
+}
+
+function _logsPopulateRawLevelDropdown() {
+  var sel = document.getElementById('logs-filter-raw-level');
+  if (!sel) return;
+  var current = _logsState.filter.rawLevel;
+  var html = '<option value="">All levels</option>';
+  _LOGS_RAW_LEVELS.forEach(function(lvl) {
+    html += '<option value="' + escHtml(lvl) + '"' + (lvl === current ? ' selected' : '') + '>'
+      + escHtml(lvl) + '</option>';
+  });
+  sel.innerHTML = html;
 }
 
 function logsOnSearch(value) {
   clearTimeout(_logsSearchTimer);
   _logsSearchTimer = setTimeout(() => {
     _logsState.search = value.trim().toLowerCase();
-    if (_logsState.viewMode === 'raw') logsLoadRawView();
-    else if (_logsState.viewMode === 'activity') evlRender();
-    else logsRenderTimeline();
+    _logsApplyFilters();
   }, 280);
 }
 
@@ -22752,8 +22744,8 @@ function logsSetView(mode) {
   const timelineEl = document.getElementById('logs-timeline');
   const rawEl      = document.getElementById('logs-raw');
   const activityEl = document.getElementById('logs-activity');
-  const actFilters = document.getElementById('logs-activity-filters');
-  const runFilters = document.getElementById('logs-runs-filters');
+  const sevSeg     = document.getElementById('logs-severity-seg');
+  const rawLvlSel  = document.getElementById('logs-filter-raw-level');
   const segBtns = ['activity', 'timeline', 'raw'];
   segBtns.forEach(function(m) {
     var btn = document.getElementById('logs-view-' + (m === 'timeline' ? 'timeline' : m));
@@ -22766,8 +22758,8 @@ function logsSetView(mode) {
   timelineEl?.classList.toggle('hidden', mode !== 'timeline');
   rawEl?.classList.toggle('hidden', mode !== 'raw');
   activityEl?.classList.toggle('hidden', mode !== 'activity');
-  actFilters?.classList.toggle('hidden', mode !== 'activity');
-  runFilters?.classList.toggle('hidden', mode !== 'timeline');
+  sevSeg?.classList.toggle('hidden', mode !== 'activity');
+  rawLvlSel?.classList.toggle('hidden', mode === 'activity');
   if (mode === 'raw')      logsLoadRawView();
   if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
   else if (mode === 'timeline') logsRenderTimeline();
@@ -22881,17 +22873,9 @@ function _lsrOpenResult(match) {
   const lineOffset = match.line_offset ?? 0;
 
   if (sprint) {
-    // Activate the sprint chip so logsLoadRawView picks the right log
-    const chip = document.querySelector(
-      `#logs-chips-sprint .logs-chip[data-value="${CSS.escape(sprint)}"]`
-    );
-    if (chip && !chip.classList.contains('active')) {
-      // Clear other active sprint chips first
-      document.querySelectorAll('#logs-chips-sprint .logs-chip.active')
-        .forEach(c => { c.classList.remove('active'); _logsState.chips.sprint_label.delete(c.dataset.value); });
-      chip.classList.add('active');
-      _logsState.chips.sprint_label.add(sprint);
-    }
+    _logsState.filter.sprint = sprint;
+    const sel = document.getElementById('logs-filter-sprint');
+    if (sel) sel.value = sprint;
   }
 
   logsSetView('raw');
@@ -22997,11 +22981,10 @@ function _logsRenderIssues() {
 
 function _logsFilteredRuns() {
   let runs = _logsState.runs;
-  const { sprint_label } = _logsState.chips;
   const q = _logsState.search;
-  if (sprint_label.size > 0) runs = runs.filter(r => sprint_label.has(r.sprint_label));
+  const sprint = _logsState.filter.sprint;
+  if (sprint) runs = runs.filter(r => r.sprint_label === sprint);
   if (q) runs = runs.filter(r => r.run_id.toLowerCase().includes(q) || r.sprint_label.toLowerCase().includes(q));
-  // Newest first (copy so we never mutate _logsState.runs)
   return [...runs].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
 }
 
@@ -23016,14 +22999,32 @@ function _logsAutoExpandFirst() {
   if (header) logsToggleRun(header);
 }
 
-function _logsFilterEvents(events) {
-  let filtered = events;
-  const { agent_role, event_level } = _logsState.chips;
+function _logsClassifyLine(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return 'event';
+  if (s.startsWith('→') || s.startsWith('---') || s.includes('start_feature') || s.includes('Dispatching')) return 'dispatch';
+  if (s.startsWith('✓') || /promoted|merged|completed|done/i.test(s)) return 'success';
+  if (/warning|\[retry\]/i.test(s) || /^warn/i.test(s)) return 'warn';
+  if (/error|fail|skipped|retry_exhausted/i.test(s) || /^err/i.test(s)) return 'fail';
+  if (/^info\b/i.test(s)) return 'info';
+  return 'event';
+}
+
+function _logsRunEventMatches(entry) {
+  const f = _logsState.filter;
   const q = _logsState.search;
-  if (event_level.size > 0) filtered = filtered.filter(e => event_level.has(e.type));
-  if (agent_role.size > 0) filtered = filtered.filter(e => [...agent_role].some(r => e.message.toLowerCase().includes(r)));
-  if (q) filtered = filtered.filter(e => e.message.toLowerCase().includes(q));
-  return filtered;
+  if (f.rawLevel && entry.type !== f.rawLevel) return false;
+  if (f.agent) {
+    const msg = (entry.message || '').toLowerCase();
+    const role = f.agent.toLowerCase();
+    if (!msg.includes(role) && entry.type !== role) return false;
+  }
+  if (q && !(entry.message || '').toLowerCase().includes(q)) return false;
+  return true;
+}
+
+function _logsFilterEvents(events) {
+  return (events || []).filter(_logsRunEventMatches);
 }
 
 function logsRenderTimeline() {
@@ -23200,11 +23201,7 @@ function _logsParseLines(lines) {
   for (const raw of lines) {
     const s = raw.trim();
     if (!s) continue;
-    let type = 'event';
-    if (s.startsWith('→') || s.startsWith('---') || s.includes('start_feature') || s.includes('Dispatching')) type = 'dispatch';
-    else if (s.startsWith('✓') || /promoted|merged|completed|done/i.test(s)) type = 'success';
-    else if (/warning|\[retry\]/i.test(s) || /^warn/i.test(s)) type = 'warn';
-    else if (/error|fail|skipped/i.test(s) || /^err/i.test(s)) type = 'fail';
+    const type = _logsClassifyLine(s);
     entries.push({ timestamp: '—', type, message: s });
   }
   return entries;
@@ -23225,18 +23222,18 @@ function _logsAppendRunRow(run) {
 async function logsLoadRawView() {
   const streamEl = document.getElementById('logs-raw-stream');
   if (!streamEl) return;
-  let sprintLabel = null;
+  let sprintLabel = _logsState.filter.sprint || null;
   let project = _projectData?.repo;
-  if (_logsState.chips.sprint_label.size === 1) {
-    sprintLabel = [..._logsState.chips.sprint_label][0];
-    const run = _logsState.runs.find(r => r.sprint_label === sprintLabel);
-    if (run) project = run.project;
-  } else if (_logsState.runs.length > 0) {
+  if (!sprintLabel && _logsState.runs.length > 0) {
     sprintLabel = _logsState.runs[0].sprint_label;
     project = _logsState.runs[0].project;
+  } else if (sprintLabel) {
+    const run = _logsState.runs.find(r => r.sprint_label === sprintLabel);
+    if (run) project = run.project;
   }
   if (!sprintLabel) {
-    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Select a Sprint chip to load its raw log output.</div>';
+    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint to view raw output…</div>';
+    _logsState.rawLines = null;
     return;
   }
   streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Loading…</div>';
@@ -23245,10 +23242,43 @@ async function logsLoadRawView() {
     const resp = await fetch(url);
     if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
     const data = await resp.json();
-    if (!data.found || !data.tail) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>'; return; }
-    streamEl.innerHTML = data.tail.split('\n').map(line => `<div class="logs-raw-line">${colorizeLogLine(line, project || '')}</div>`).join('');
-    streamEl.scrollTop = streamEl.scrollHeight;
+    if (!data.found || !data.tail) {
+      streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>';
+      _logsState.rawLines = null;
+      return;
+    }
+    _logsState.rawLines = data.tail.split('\n');
+    _logsRenderRawStream();
   } catch (_) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Error loading log.</div>'; }
+}
+
+function _logsRawLineMatches(line) {
+  const f = _logsState.filter;
+  const q = _logsState.search;
+  const s = String(line || '');
+  if (f.rawLevel && _logsClassifyLine(s) !== f.rawLevel) return false;
+  if (q && !s.toLowerCase().includes(q)) return false;
+  return true;
+}
+
+function _logsRenderRawStream() {
+  const streamEl = document.getElementById('logs-raw-stream');
+  if (!streamEl) return;
+  const project = _projectData?.repo || '';
+  const lines = _logsState.rawLines;
+  if (!lines || lines.length === 0) {
+    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log output.</div>';
+    return;
+  }
+  const visible = lines.filter(_logsRawLineMatches);
+  if (visible.length === 0) {
+    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No lines match current filters.</div>';
+    return;
+  }
+  streamEl.innerHTML = visible.map(line =>
+    `<div class="logs-raw-line">${colorizeLogLine(line, project)}</div>`
+  ).join('');
+  streamEl.scrollTop = streamEl.scrollHeight;
 }
 
 function _logsConnectLive(runId, sprintLabel, project) {
@@ -23303,13 +23333,82 @@ const _EVL_LIFECYCLE_SOURCES = new Set(['sprint_manager']);
 const _EVL_PROTECTED_BRANCHES = new Set(['develop', 'master', 'main', 'attachments']);
 const _EVL_STALE_BRANCH_RE = /^(feat|feature|sprint)\//;
 
+// Raw log levels for Runs/Raw filters (unbucketed). Activity maps these into
+// Info / Warn / Error via _evlSeverityBucket — no level is dropped.
+const _LOGS_RAW_LEVELS = [
+  'dispatch', 'success', 'info', 'event',
+  'dispatched', 'started', 'finished', 'resumed', 'transitioned',
+  'warn', 'partial',
+  'fail', 'error', 'failed', 'killed',
+  'retry_exhausted', 'crash', 'hang', 'gate_fail', 'lint_fail', 'pytest_fail',
+  'merge_conflict', 'coder_no_work', 'tester_rejected', 'timed_out', 'ticket_failed',
+];
+
+const _LOGS_INFO_LEVELS = new Set([
+  'dispatch', 'success', 'info', 'event',
+  'dispatched', 'started', 'finished', 'resumed', 'transitioned',
+  'sprint_started', 'sprint_finished', 'sprint_rerun', 'sprint_created', 'sprint_run',
+  'sprint_cancelled', 'ticket_dispatched', 'ticket_agent_finished', 'ticket_moved',
+  'ticket_label_changed', 'label_added', 'label_removed',
+  'issue_opened', 'issue_closed', 'branch_created', 'pr_opened', 'pr_merged',
+  'bulk_created', 'coder_backend_escalated',
+]);
+
+const _LOGS_WARN_LEVELS = new Set([
+  'warn', 'partial', 'hang', 'warning',
+]);
+
+const _LOGS_ERROR_LEVELS = new Set([
+  'fail', 'error', 'failed', 'retry_exhausted', 'crash', 'gate_fail', 'lint_fail',
+  'pytest_fail', 'merge_conflict', 'coder_no_work', 'tester_rejected', 'timed_out',
+  'ticket_failed',
+]);
+
+function _evlNormLevel(s) {
+  return String(s || '').toLowerCase().replace(/\s+/g, '_');
+}
+
+function _evlRawLevel(ev) {
+  var detail = ev.detail || {};
+  var fc = _evlNormLevel(detail.failure_class || detail.category || '');
+  if (fc && _LOGS_RAW_LEVELS.indexOf(fc) >= 0) return fc;
+  if (fc === 'retry_exhausted') return 'retry_exhausted';
+  if (fc === 'gate_fail' || fc === 'gate_failed') return 'gate_fail';
+  if (fc === 'hang') return 'hang';
+  if (fc === 'crash') return 'crash';
+  if (fc === 'lint_fail') return 'lint_fail';
+  if (fc === 'pytest_fail') return 'pytest_fail';
+  if (fc === 'merge_conflict') return 'merge_conflict';
+  if (fc === 'coder_no_work') return 'coder_no_work';
+  if (fc === 'tester_rejected') return 'tester_rejected';
+
+  var st = _evlNormLevel(detail.status || '');
+  if (st === 'timed_out') return 'timed_out';
+  if (st === 'partial') return 'partial';
+  if (st === 'error' || st === 'failed') return 'error';
+
+  if (ev.category === 'error' || ev.category === 'gate') return 'fail';
+  if (ev.category === 'sprint') return 'info';
+
+  var type = _evlNormLevel(ev.type || '');
+  if (type === 'ticket_failed') return 'ticket_failed';
+  if (_LOGS_RAW_LEVELS.indexOf(type) >= 0) return type;
+  if (type.indexOf('sprint_') === 0) return 'info';
+  if (type === 'agent_finished' && (st === 'error' || st === 'timed_out')) return 'error';
+  if (type === 'agent_finished' && st === 'partial') return 'partial';
+  return 'info';
+}
+
+function _evlSeverityBucket(ev) {
+  var raw = _evlRawLevel(ev);
+  if (_LOGS_ERROR_LEVELS.has(raw)) return 'error';
+  if (_LOGS_WARN_LEVELS.has(raw)) return 'warn';
+  return 'info';
+}
+
 const _evlState = {
   events: null,
-  sourceFilter: 'all',
-  agentFilter: '',
-  levelFilter: 'all',
-  sprintFilter: '',
-  errorsOnly: false,   // deck deep-link `filter=errors`
+  errorsOnly: false,
   loading: false,
   staleBranches: new Set(),
   sprintFeatMap: {},
@@ -23557,7 +23656,7 @@ function evlRender() {
 
   if (skEl) skEl.classList.add('hidden');
 
-  const rendered = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  const rendered = evlRenderTimeline(_evlState.events);
   // evlRenderTimeline returns empty-state HTML when empty; inject after skeleton/empty els
   const staticEls = listEl.querySelectorAll('#evl-skeleton, #evl-empty');
   // Remove any previous dynamic content
@@ -23579,8 +23678,11 @@ function evlRender() {
   if (_errBtn) {
     _errBtn.classList.toggle('active', _evlState.errorsOnly);
     _errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
-    var lvlErr = document.querySelector('.logs-level-seg button[data-level="error"]');
-    if (_evlState.errorsOnly && lvlErr) evlSetLevelFilter('error', lvlErr);
+    if (_evlState.errorsOnly) {
+      _logsState.filter.severity = 'error';
+      var lvlErr = document.querySelector('#logs-severity-seg button[data-level="error"]');
+      if (lvlErr) logsSetSeverityFilter('error', lvlErr);
+    }
   }
   _evlUpdateBanner();
 }
@@ -23613,7 +23715,8 @@ async function evlFetch() {
 
   await evlFetchStaleBranches();
   _evlState.loading = false;
-  _evlPopulateSprintFilter(_evlState.events);
+  _logsPopulateSprintDropdown();
+  _logsPopulateRawLevelDropdown();
   if (_logsState.viewMode === 'activity') evlRender();
 }
 
@@ -23634,58 +23737,15 @@ async function evlFetchStaleBranches() {
   } catch (_) {}
 }
 
-function evlSetSource(source) {
-  _evlState.sourceFilter = source;
-  document.getElementById('evl-source-all')?.classList.toggle('active', source === 'all');
-  document.getElementById('evl-source-github')?.classList.toggle('active', source === 'github');
-  evlRender();
-}
-
 function evlSetFilter(filter) {
-  _evlState.sourceFilter = filter || 'all';
   var sel = document.getElementById('logs-filter-source');
-  if (sel && sel.value !== _evlState.sourceFilter) sel.value = _evlState.sourceFilter === 'all' ? '' : _evlState.sourceFilter;
+  if (sel) sel.value = filter || 'all';
+  _logsState.filter.source = filter || 'all';
   evlRender();
 }
 
-function evlSetAgentFilter(agent) {
-  _evlState.agentFilter = agent || '';
-  evlRender();
-}
-
-function evlSetLevelFilter(level, btnEl) {
-  _evlState.levelFilter = level || 'all';
-  document.querySelectorAll('.logs-level-seg button').forEach(function(b) {
-    b.classList.toggle('active', b === btnEl || b.dataset.level === level);
-  });
-  evlRender();
-}
-
-function logsFilterSprintSelect(sel) {
-  _evlState.sprintFilter = sel.value || '';
-  evlRender();
-}
-
-function _evlPopulateSprintFilter(events) {
-  var sel = document.getElementById('logs-filter-sprint');
-  if (!sel || !events) return;
-  var current = _evlState.sprintFilter;
-  var labels = new Set();
-  events.forEach(function(ev) {
-    var d = ev.detail || {};
-    if (d.sprint_id) labels.add(d.sprint_id);
-    if (d.sprint_label) labels.add(d.sprint_label);
-    if (d.from_sprint) labels.add(d.from_sprint);
-    if (d.to_sprint) labels.add(d.to_sprint);
-    if (d.sub_label) labels.add(d.sub_label);
-  });
-  var sorted = Array.from(labels).sort().reverse();
-  var html = '<option value="">All sprints</option>';
-  sorted.forEach(function(lbl) {
-    html += '<option value="' + escHtml(lbl) + '"' + (lbl === current ? ' selected' : '') + '>'
-      + escHtml(lbl) + '</option>';
-  });
-  sel.innerHTML = html;
+function evlSetSource(source) {
+  evlSetFilter(source);
 }
 
 function _evlDayLabel(ts) {
@@ -23703,15 +23763,59 @@ function _evlDayLabel(ts) {
 }
 
 function _evlSeverity(ev) {
-  var type = ev.type || '';
-  var detail = ev.detail || {};
-  if (type === 'ticket_failed') return 'error';
-  if (type === 'agent_finished') {
-    var st = detail.status || '';
-    if (st === 'error' || st === 'timed_out') return 'error';
-    if (st === 'partial') return 'warn';
+  return _evlSeverityBucket(ev);
+}
+
+function _evlMatchesFilter(ev) {
+  var f = _logsState.filter;
+  if (_evlState.errorsOnly && !_evlIsError(ev)) return false;
+
+  if (f.severity && f.severity !== 'all') {
+    if (_evlSeverityBucket(ev) !== f.severity) return false;
   }
-  return 'info';
+
+  if (f.agent) {
+    var d = ev.detail || {};
+    var role = (d.agent || d.role || ev.actor || '').toLowerCase();
+    if (f.agent === 'agent') {
+      if (role && role !== 'agent' && role !== 'sprint_manager' && role !== 'dispatch') return false;
+      if (!role && ev.source !== 'agent') return false;
+    } else if (role !== f.agent) {
+      return false;
+    }
+  }
+
+  if (f.sprint) {
+    var det = ev.detail || {};
+    var sf = f.sprint;
+    var inSprint = det.sprint_id === sf || det.sprint_label === sf
+      || det.from_sprint === sf || det.to_sprint === sf || det.sub_label === sf
+      || ev.sprint_label === sf || (ev.target || '') === sf;
+    if (!inSprint) return false;
+  }
+
+  var q = (_logsState.search || '').trim();
+  if (q) {
+    var blob = JSON.stringify(ev).toLowerCase();
+    var issueNum = _evlParseIssueNum(ev);
+    if (!blob.includes(q) && !(issueNum && ('#' + issueNum).includes(q))) return false;
+  }
+
+  var srcFilter = f.source || 'all';
+  if (srcFilter === 'all') return true;
+  var evSrc = ev.source || '';
+  var evType = ev.type || '';
+  if (srcFilter === 'sprint') {
+    return evType.indexOf('sprint_') === 0 || evType === 'sprint_rerun' || ev.category === 'sprint';
+  }
+  if (srcFilter === 'github') return evSrc === 'github';
+  if (srcFilter === 'dashboard') {
+    return evSrc === 'dashboard' && evType.indexOf('sprint_') !== 0;
+  }
+  if (srcFilter === 'agent') {
+    return evSrc === 'agent' && evType.indexOf('sprint_') !== 0;
+  }
+  return evSrc === srcFilter;
 }
 
 function _evlBadgeLabel(source, type) {
@@ -23731,47 +23835,6 @@ function _evlBadgeCls(label) {
   if (label === 'DASH') return 'dash';
   if (label === 'SPRINT') return 'sprint';
   return 'agent';
-}
-
-function _evlMatchesFilter(ev, filter) {
-  if (_evlState.errorsOnly && !_evlIsError(ev)) return false;
-
-  if (_evlState.levelFilter && _evlState.levelFilter !== 'all') {
-    var sev = _evlSeverity(ev);
-    if (_evlState.levelFilter !== sev) return false;
-  }
-
-  if (_evlState.agentFilter) {
-    var d = ev.detail || {};
-    var role = (d.agent || d.role || '').toLowerCase();
-    if (role !== _evlState.agentFilter) return false;
-  }
-
-  if (_evlState.sprintFilter) {
-    var det = ev.detail || {};
-    var sf = _evlState.sprintFilter;
-    var inSprint = det.sprint_id === sf || det.sprint_label === sf
-      || det.from_sprint === sf || det.to_sprint === sf || det.sub_label === sf
-      || (ev.target || '') === sf;
-    if (!inSprint) return false;
-  }
-
-  var q = (_logsState.search || '').trim();
-  if (q) {
-    var blob = JSON.stringify(ev).toLowerCase();
-    var issueNum = _evlParseIssueNum(ev);
-    if (!blob.includes(q) && !(issueNum && ('#' + issueNum).includes(q))) return false;
-  }
-
-  if (filter === 'all') return true;
-  if (filter === 'agent') {
-    var src = ev.source || '';
-    var type = ev.type || '';
-    if (src === 'agent') return true;
-    if (src === 'dashboard' && type.indexOf('sprint_') === 0) return true;
-    return false;
-  }
-  return ev.source === filter;
 }
 
 function _evlParseIssueNum(ev) {
@@ -24107,10 +24170,10 @@ function _evlDurationPill(ev) {
   return prefix + '<span class="evl-dur-pill' + (warn ? ' warn' : '') + '">' + escHtml(txt) + '</span>';
 }
 
-function evlRenderTimeline(events, filter) {
+function evlRenderTimeline(events) {
   if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
 
-  var visible = events.filter(function(e) { return _evlMatchesFilter(e, filter); });
+  var visible = events.filter(function(e) { return _evlMatchesFilter(e); });
 
   if (visible.length === 0) return '<div class="logs-empty">No events</div>';
 
@@ -24147,7 +24210,7 @@ function evlRenderTimeline(events, filter) {
   for (var j = 0; j < byDay.length; j++) {
     var bucket = byDay[j];
     var visibleInDay = bucket.events.filter(function(e) {
-      return _evlMatchesFilter(e, filter);
+      return _evlMatchesFilter(e);
     });
     if (visibleInDay.length === 0) continue;
 
@@ -24157,7 +24220,7 @@ function evlRenderTimeline(events, filter) {
     var lastSig = null;
     for (var k = 0; k < bucket.events.length; k++) {
       var evK = bucket.events[k];
-      if (!_evlMatchesFilter(evK, filter)) continue;
+      if (!_evlMatchesFilter(evK)) continue;
       var sigK = _evlDedupSignature(evK);
       if (sigK === lastSig && compressed.length > 0) {
         compressed[compressed.length - 1].count += 1;

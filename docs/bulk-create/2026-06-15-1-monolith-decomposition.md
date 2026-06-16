@@ -1,217 +1,117 @@
-# Bulk Create — Monolith Decomposition (server.py + sprint_manager.py)
+# Monolith decomposition — server.py + sprint_manager.py
 
-> **Goal:** shrink the two files that get edited every sprint and break on every
-> change. **Pure moves, same logic** — extract cohesive function groups into
-> modules behind stable imports. No behaviour changes; discuss redesign later.
->
-> **Sizing rule:** S/M only. Anything that looks L below is **split into 2–3
-> S/M tickets** — never ship an XL "move the whole thing" ticket.
->
-> Current sizes (2026-06-15): `server.py` 14,356 lines / 166 routes ·
-> `sprint_manager.py` 9,998 lines · 51 router modules already extracted under
-> `apps/dashboard/routers/`.
+**Date:** 2026-06-15
+**Sprint label:** NEW
+**Default labels:** enhancement
+**Status:** drafted
 
-## Invariants every ticket must hold (put in each issue's AC)
+## Notes
 
-- **No logic change.** Diff is cut-paste + import wiring only. If a behaviour
-  changes, the ticket is wrong.
-- **No new routes in `server.py`** — the `COMMANDER_GATE_MONOLITH` gate must
-  stay green. New routes live in `routers/`.
-- Follow the existing **router → `*_service` → repo** split already used by the
-  51 modules in `routers/`.
-- After the move: `python -m py_compile` the touched files; dashboard imports
-  clean; `sprint_manager.py --help` works; smoke suite green.
-- One cluster per ticket. Keep PRs small so a bad move reverts cleanly.
+**Goal:** shrink `server.py` (14,356 lines / 166 routes) and `sprint_manager.py` (~10k lines)
+via pure moves — same logic, no behaviour changes. S/M tickets only; never one XL "move
+everything" ticket.
 
-## Sequencing
+**Invariants (every ticket):** no logic change (cut-paste + import wiring); no new routes
+in `server.py` (`COMMANDER_GATE_MONOLITH` stays green); follow router → `*_service` → repo;
+`python -m py_compile` on touched files; dashboard imports clean; `sprint_manager.py --help`
+works; smoke tests green.
 
-Do the **leaf** tickets first (no deps): data classes, config, constants,
-pure helpers. Then the cohesive service groups. The big orchestrators
-(`run_sprint`, bulk-ticket job machine, `/api/sprints/run`) are **last** and
-are pre-split into pieces below.
+**Rollout:** Sprint N — leaf S tickets (A1–A5, B1–B7). Sprint N+1 — M service groups
+(A6–A13, B8–B13). Sprint N+2 — pre-split big clusters (A14–A16, B14–B18) one PR each.
+Close-out — A17 + B18 thinning; route inventory diff = 0.
 
+## Prompts
+
+Paste one code block into the Bulk Create textarea. Prompts are `---`-separated.
+
+```
+Extract system/health/version routes from server.py to routers/system.py. Move GET /api/health, /api/environment, /api/version, /api/gh-auth-status, /api/repo/config, /api/github/labels* and thin wrappers. Read-only cluster, zero deps — first move. Acceptance: routes behave identically; no new routes in server.py; py_compile clean; route count unchanged.
 ---
-
-## Batch A — server.py extractions
-
-### A1 — Extract system/health/version routes to `routers/system.py` (S)
-Move `/api/health`, `/api/environment`, `/api/version`, `/api/gh-auth-status`,
-`/api/repo/config`, `/api/github/labels*` and their thin wrappers. Read-only,
-zero deps — ideal first move.
-
-### A2 — Extract HTML page + static serving to `routers/pages.py` (S)
-Move `GET /`, `/home`, `/overview`, `/project/*` page handlers and the version-
-hash injection helper. Pure serving.
-
-### A3 — Extract project CRUD routes to `routers/projects.py` (S)
-`GET/POST /api/projects`, `DELETE /api/projects/{owner}/{repo}`. Delegates to the
-existing `projects` data module — move the route shells only.
-
-### A4 — Extract project branch routes to `routers/project_branches.py` (S)
-`/api/projects/{owner}/{repo}/branches/*` (`get_stale_branches`,
-`delete_project_branch`). Small, isolated.
-
-### A5 — Extract issue-approval routes to `routers/issues.py` (S)
-`/api/issues/{id}/approve|reject|close`, `GET /api/issues/{id}/test-report`,
-`GET /api/issues`. Issue state transitions + test-report fetch.
-
-### A6 — Extract analytics/metrics routes to `routers/sprint_analytics.py` (M)
-`/api/sprints/{label}/estimate-summary|estimate|outcome|estimate-vs-actual`,
-`/api/estimates/batch`, `/api/calibration`, `/api/metrics/sprints`. Delegates to
-estimates JSON + `token_usage`. (`outcome` already partly in a service — finish
-the move.)
-
-### A7 — Extract mis-sizing routes to `routers/mis_sizing.py` (S)
-`/api/sprints/{label}/mis-sizing-flags*`, `/api/mis-sizing/*`. Calls the existing
-`_mis_sizing` module.
-
-### A8 — Extract preflight + DAG routes to `routers/sprint_preflight.py` (M)
-`/api/sprints/{label}/preflight`, `preflight-fix`, `cycle-check`, `conflicts`,
-`dep-order`. Uses `_dag_build` + cycle detection.
-
-### A9 — Extract sprint state/live/log routes to `routers/sprint_live.py` (M)
-`GET /api/sprints/{label}/state*|live*`, `issue/{num}/log`, `/api/logs/runs`,
-`POST /api/logs/sync-github`. HTTP delegation to state JSON + SSE.
-
-### A10 — Extract planning/nav routes to `routers/sprint_planning.py` (M)
-`/api/sprint-nav-status`, `/api/sprint-progress`, `/api/sprint-nav-summary`,
-`/api/sprint-planning/*`, `/api/open-issues`, `POST /api/issues/{id}/sprint-label`.
-(Keep `_settled_done_from_columns` with `sprint-progress`.)
-
-### A11 — Extract sprint CRUD routes to `routers/sprint_crud.py` (M)
-`POST /api/sprints/create|{label}/rename|{label}/tickets/reorder|{label}/plan`,
-`DELETE /api/sprints/{label}`, `delete-empty`, `cleanup-empty`. Label/branch ops.
-
-### A12 — Extract timeline/summaries/home to `routers/sprint_summaries.py` (M)
-`GET /api/sprints/timeline|summaries`, `/api/sprint-history*`,
-`GET/POST /api/sprint-status`, `/api/sprint-summary`, `/api/home`.
-
-### A13 — Extract alerts/docs/deploy-overview/misc to `routers/system_misc.py` (M)
-`/api/alerts*`, `/api/docs-freshness/*`, `/api/deploy/overview`,
-`/api/maintenance/sprints/cleanup`, `/api/plan-usage`, `/api/estimator/health`,
-`POST /api/issues/{id}/estimate`.
-
-### A14 — Split finish/bulk-complete routes into `routers/sprint_finish.py` (M)
-`finish-preview`, `POST finish`, `bulk-complete-preview`, `POST bulk-complete`.
-**If the orchestration body is large, split A14 into A14a (preview/read paths,
-S) + A14b (the finish/bulk-complete write paths, M).**
-
-### A15 — Split `/api/sprints/run|rerun|branch-status` into `routers/sprint_run.py` (M ×2)
-This is the biggest server cluster (~1.2k lines). **Split into:**
-- **A15a (M):** read/preview routes — `branch-status`, `rerun-preview`,
-  `GET .../rerun`, `deploy/promote`, `reports/daily`.
-- **A15b (M):** the write/dispatch routes — `POST /api/sprints/run`,
-  `POST .../rerun`, `DELETE /api/sprints/run/{label}` + their subprocess glue
-  into a `sprint_run_service.py`.
-
-### A16 — Split the bulk-ticket job machine into `routers/bulk_tickets.py` (M ×3)
-~2.5k lines of bulk-create state machine. **Split into three:**
-- **A16a (M):** job lifecycle reads — `GET /api/tickets/bulk/{job_id}*`,
-  `_get_bulk_job` loader.
-- **A16b (M):** draft/create — `POST /api/tickets/draft|create|bulk`,
-  `post-selected`.
-- **A16c (M):** per-job actions — `skip|retry|redraft|estimate|retry-with-*|
-  size-remedy-*`.
-
-### A17 — Reduce `server.py` to a thin app-factory (M)
-After A1–A16: leave only app construction, middleware, lifespan, and
-`include_router` wiring. Target **< 400 lines**. Pure deletion of moved code +
-import list. Verify route count unchanged (`/api` inventory diff = 0).
-
+Extract HTML page and static serving from server.py to routers/pages.py. Move GET /, /home, /overview, /project/* page handlers and version-hash injection helper. Pure serving only. Acceptance: pages load identically; no new routes in server.py; py_compile clean; route count unchanged.
 ---
-
-## Batch B — sprint_manager.py extractions
-
-### B1 — Extract data classes to `services/sprint_manager/state.py` (S)
-`IssueState`, `SprintState`, `GateResult`, `SprintSummary`. Leaf, no deps.
-
-### B2 — Extract config loading to `config.py` (S)
-`SprintConfig`, `load_config`, `discover_config`, `_default_config`,
-`_resolve_path`. (~350 lines, but mechanical.)
-
-### B3 — Extract path/constant helpers to `paths.py` (S)
-`_pid_file_path`, `_plan_json_path`, `_state_path`, `_summary_path`,
-`_sprint_number`, `_label_base`, etc. Pure string/path ops.
-
-### B4 — Extract alert channels to `alerts.py` (S)
-`HangDetector`, `dispatch_alerts`, `_alert_dashboard_banner|email|discord|ntfy|
-file`.
-
-### B5 — Extract event emission to `events.py` (S)
-`_emit_sprint_lifecycle_event`, `_failure_event_detail`, `_emit_ticket_failed`,
-`_post_agent_event`, `_post_sprint_status`.
-
-### B6 — Extract model routing to `model_routing.py` (S)
-`_resolve_coder_model`, `_effective_coder_backend`, `_select_coder_backend`,
-size/risk routing.
-
-### B7 — Extract time/PID/pause helpers to `timekeeping.py` (S)
-`_token_window_sums`, `_utcnow`, `_bangkok_now`, `_wait_if_paused`,
-`_setup_pid_file`, `_acquire/_release_pid_lock`.
-
-### B8 — Extract DB-write helpers to `db_writes.py` (M)
-`_sprint_db_set_state_sm`, `_db_agent_start_sm`, `_db_agent_finish_sm`,
-`_db_ingest_run_sm`, `_plan_json_set_state_sm`. Serialized SQLite writes.
-
-### B9 — Extract failure handling to `failures.py` (M)
-`record_failure`, `_build_failure_suffix`, `FailureCategory`,
-`_generate_gate_failure_analysis`, `_publish_gate_failure_analyses`.
-
-### B10 — Extract quality gates to `gates.py` (M ×2)
-~1.1k lines. **Split:**
-- **B10a (M):** `_gate_pytest`, `_gate_lint` (+ the new `_lint_autofix_commit`),
-  `_run_frontend_lint`, `_changed_*_files`.
-- **B10b (M):** `_gate_typecheck`, `_gate_design`, `_gate_merge_preview`,
-  `_gate_monolith`, `_run_quality_gates` orchestrator.
-
-### B11 — Extract label transitions to `label_transitions.py` (M)
-`_get_issue_labels`, `_current_status_labels`, `_sweep_stale_status`,
-`_transition_safe`, `_add_blocked_label`, `_emit_label_transition_event`.
-
-### B12 — Extract worktree/env to `worktree.py` (M)
-`_resolve_uat_env_for_tester`, `_worktree_hygiene`, `_crg_update_worktree`,
-`_stash_to_quarantine`, `_detect_port`.
-
-### B13 — Extract feature-branch + post-tester to `feature_tracking.py` (M)
-`_find_feature_branch`, `_is_branch_merged_into`, `_was_feature_merged_via_log`,
-`handle_post_tester`.
-
-### B14 — Extract agent dispatch to `dispatch.py` (M ×2)
-`_dispatch_coder` (~453) + `_dispatch_tester` (~516) are big. **Split:**
-- **B14a (M):** `_dispatch_coder` + `_load_agent_persona` + `_agent_identity_env`.
-- **B14b (M):** `_dispatch_tester` + `_doctor_probe_auth` + `_dispatch_doctor`.
-
-### B15 — Extract summary generation to `summary.py` (M)
-`generate_sprint_summary`, `write_sprint_summary`, `create_summary_github_issue`,
-`_prompt_learnings`.
-
-### B16 — Extract post-sprint agents to `post_sprint.py` (M)
-`_create_sprint_pr`, `_dispatch_documenter`, `_dispatch_reviewer`,
-`_dispatch_ba_for_followup`, `_dispatch_estimator_for_followup`,
-`_enrich_followup_tickets`.
-
-### B17 — Extract pipeline dispatch to `pipeline.py` (M)
-`_run_pipeline_dispatch`, `_compute_dispatch_levels`, `_build_sprint_dag_layers`,
-`_warn_file_conflicts`, `list_backlog_issues`.
-
-### B18 — Thin `run_sprint` to an orchestrator (M ×2)
-`run_sprint` is ~1,237 lines. **Do NOT move as one ticket.** After B1–B17 the
-body should already shrink (it now calls the extracted services). **Split:**
-- **B18a (M):** extract the preflight + branch-setup portion into
-  `run_sprint_preflight()` helper.
-- **B18b (M):** extract the per-ticket loop body into a `run_sprint_loop()`
-  helper; leave `run_sprint` as the sequence of phase calls.
-Target: `run_sprint` reads as ~150 lines of phase calls.
-
+Extract project CRUD routes from server.py to routers/projects.py. Move GET/POST /api/projects and DELETE /api/projects/{owner}/{repo}. Delegate to existing projects data module — move route shells only. Acceptance: project CRUD unchanged; no new routes in server.py; py_compile clean.
 ---
+Extract project branch routes from server.py to routers/project_branches.py. Move /api/projects/{owner}/{repo}/branches/* (get_stale_branches, delete_project_branch). Small isolated cluster. Acceptance: branch endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract issue-approval routes from server.py to routers/issues.py. Move /api/issues/{id}/approve|reject|close, GET /api/issues/{id}/test-report, GET /api/issues. Issue state transitions and test-report fetch. Acceptance: issue endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract analytics and metrics routes from server.py to routers/sprint_analytics.py. Move /api/sprints/{label}/estimate-summary|estimate|outcome|estimate-vs-actual, /api/estimates/batch, /api/calibration, /api/metrics/sprints. Delegate to estimates JSON and token_usage; finish partial outcome service move. Acceptance: analytics endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract mis-sizing routes from server.py to routers/mis_sizing.py. Move /api/sprints/{label}/mis-sizing-flags* and /api/mis-sizing/*; call existing _mis_sizing module. Acceptance: mis-sizing endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract preflight and DAG routes from server.py to routers/sprint_preflight.py. Move /api/sprints/{label}/preflight, preflight-fix, cycle-check, conflicts, dep-order. Uses _dag_build and cycle detection. Acceptance: preflight endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract sprint state, live, and log routes from server.py to routers/sprint_live.py. Move GET /api/sprints/{label}/state*|live*, issue/{num}/log, /api/logs/runs, POST /api/logs/sync-github. HTTP delegation to state JSON and SSE. Acceptance: live/log endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract planning and nav routes from server.py to routers/sprint_planning.py. Move /api/sprint-nav-status, /api/sprint-progress, /api/sprint-nav-summary, /api/sprint-planning/*, /api/open-issues, POST /api/issues/{id}/sprint-label. Keep _settled_done_from_columns with sprint-progress. Acceptance: planning/nav endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract sprint CRUD routes from server.py to routers/sprint_crud.py. Move POST /api/sprints/create|{label}/rename|{label}/tickets/reorder|{label}/plan, DELETE /api/sprints/{label}, delete-empty, cleanup-empty. Label and branch ops. Acceptance: sprint CRUD unchanged; no new routes in server.py; py_compile clean.
+---
+Extract timeline, summaries, and home routes from server.py to routers/sprint_summaries.py. Move GET /api/sprints/timeline|summaries, /api/sprint-history*, GET/POST /api/sprint-status, /api/sprint-summary, /api/home. Acceptance: summary/home endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract alerts, docs, deploy-overview, and misc routes from server.py to routers/system_misc.py. Move /api/alerts*, /api/docs-freshness/*, /api/deploy/overview, /api/maintenance/sprints/cleanup, /api/plan-usage, /api/estimator/health, POST /api/issues/{id}/estimate. Acceptance: misc endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract finish and bulk-complete preview routes from server.py to routers/sprint_finish.py (read paths). Move finish-preview and bulk-complete-preview read/preview handlers only; leave write paths for next ticket if split. Acceptance: preview endpoints unchanged; no new routes in server.py; py_compile clean.
+---
+Extract finish and bulk-complete write routes from server.py to routers/sprint_finish.py. Move POST finish and POST bulk-complete orchestration; colocate with preview routes from prior ticket. Acceptance: finish/bulk-complete writes unchanged; no new routes in server.py; py_compile clean.
+---
+Extract sprint run read/preview routes from server.py to routers/sprint_run.py. Move branch-status, rerun-preview, GET .../rerun, deploy/promote, reports/daily — read/preview half of the ~1.2k-line cluster. Acceptance: read routes unchanged; no new routes in server.py; py_compile clean.
+---
+Extract sprint run write/dispatch routes from server.py to sprint_run_service.py + routers/sprint_run.py. Move POST /api/sprints/run, POST .../rerun, DELETE /api/sprints/run/{label} and subprocess glue into sprint_run_service.py; wire router to service. Acceptance: run/rerun/cancel unchanged; no new routes in server.py; py_compile clean.
+---
+Extract bulk-ticket job lifecycle reads from server.py to routers/bulk_tickets.py. Move GET /api/tickets/bulk/{job_id}* and _get_bulk_job loader — first third of bulk state machine. Acceptance: bulk job reads unchanged; no new routes in server.py; py_compile clean.
+---
+Extract bulk-ticket draft/create routes from server.py to routers/bulk_tickets.py. Move POST /api/tickets/draft|create|bulk and post-selected — second third of bulk state machine. Acceptance: draft/create unchanged; no new routes in server.py; py_compile clean.
+---
+Extract bulk-ticket per-job action routes from server.py to routers/bulk_tickets.py. Move skip|retry|redraft|estimate|retry-with-*|size-remedy-* per-job actions — final third of bulk state machine. Acceptance: per-job actions unchanged; no new routes in server.py; py_compile clean.
+---
+Reduce server.py to thin app factory after A1–A16. Leave only app construction, middleware, lifespan, and include_router wiring. Target under 400 lines. Delete moved code; verify /api route inventory diff is zero. Acceptance: server.py under 400 lines; all routes served via routers; COMMANDER_GATE_MONOLITH green; full smoke pass.
+---
+Extract sprint_manager data classes to services/sprint_manager/state.py. Move IssueState, SprintState, GateResult, SprintSummary. Leaf module, no deps. Acceptance: pure move; sprint_manager.py --help works; py_compile clean; imports updated.
+---
+Extract sprint_manager config loading to services/sprint_manager/config.py. Move SprintConfig, load_config, discover_config, _default_config, _resolve_path (~350 lines, mechanical). Acceptance: pure move; config discovery unchanged; sprint_manager.py --help works.
+---
+Extract sprint_manager path/constant helpers to services/sprint_manager/paths.py. Move _pid_file_path, _plan_json_path, _state_path, _summary_path, _sprint_number, _label_base, etc. Pure string/path ops. Acceptance: pure move; path resolution unchanged; py_compile clean.
+---
+Extract sprint_manager alert channels to services/sprint_manager/alerts.py. Move HangDetector, dispatch_alerts, _alert_dashboard_banner|email|discord|ntfy|file. Acceptance: pure move; alert dispatch unchanged; py_compile clean.
+---
+Extract sprint_manager event emission to services/sprint_manager/events.py. Move _emit_sprint_lifecycle_event, _failure_event_detail, _emit_ticket_failed, _post_agent_event, _post_sprint_status. Acceptance: pure move; events unchanged; py_compile clean.
+---
+Extract sprint_manager model routing to services/sprint_manager/model_routing.py. Move _resolve_coder_model, _effective_coder_backend, _select_coder_backend, size/risk routing. Acceptance: pure move; model selection unchanged; py_compile clean.
+---
+Extract sprint_manager time/PID/pause helpers to services/sprint_manager/timekeeping.py. Move _token_window_sums, _utcnow, _bangkok_now, _wait_if_paused, _setup_pid_file, _acquire/_release_pid_lock. Acceptance: pure move; timekeeping unchanged; py_compile clean.
+---
+Extract sprint_manager DB-write helpers to services/sprint_manager/db_writes.py. Move _sprint_db_set_state_sm, _db_agent_start_sm, _db_agent_finish_sm, _db_ingest_run_sm, _plan_json_set_state_sm. Serialized SQLite writes. Acceptance: pure move; DB writes unchanged; py_compile clean.
+---
+Extract sprint_manager failure handling to services/sprint_manager/failures.py. Move record_failure, _build_failure_suffix, FailureCategory, _generate_gate_failure_analysis, _publish_gate_failure_analyses. Acceptance: pure move; failure handling unchanged; py_compile clean.
+---
+Extract sprint_manager pytest/lint gates to services/sprint_manager/gates.py (part 1). Move _gate_pytest, _gate_lint (+ _lint_autofix_commit), _run_frontend_lint, _changed_*_files from the ~1.1k-line gates cluster. Acceptance: pure move; gates behave identically; py_compile clean.
+---
+Extract sprint_manager typecheck/design/merge/monolith gates to services/sprint_manager/gates.py (part 2). Move _gate_typecheck, _gate_design, _gate_merge_preview, _gate_monolith, _run_quality_gates orchestrator. Acceptance: pure move; quality gate orchestration unchanged; py_compile clean.
+---
+Extract sprint_manager label transitions to services/sprint_manager/label_transitions.py. Move _get_issue_labels, _current_status_labels, _sweep_stale_status, _transition_safe, _add_blocked_label, _emit_label_transition_event. Acceptance: pure move; label transitions unchanged; py_compile clean.
+---
+Extract sprint_manager worktree/env helpers to services/sprint_manager/worktree.py. Move _resolve_uat_env_for_tester, _worktree_hygiene, _crg_update_worktree, _stash_to_quarantine, _detect_port. Acceptance: pure move; worktree ops unchanged; py_compile clean.
+---
+Extract sprint_manager feature-branch and post-tester logic to services/sprint_manager/feature_tracking.py. Move _find_feature_branch, _is_branch_merged_into, _was_feature_merged_via_log, handle_post_tester. Acceptance: pure move; feature tracking unchanged; py_compile clean.
+---
+Extract sprint_manager coder dispatch to services/sprint_manager/dispatch.py (part 1). Move _dispatch_coder, _load_agent_persona, _agent_identity_env (~453 lines). Acceptance: pure move; coder dispatch unchanged; py_compile clean.
+---
+Extract sprint_manager tester/doctor dispatch to services/sprint_manager/dispatch.py (part 2). Move _dispatch_tester, _doctor_probe_auth, _dispatch_doctor (~516 lines). Acceptance: pure move; tester dispatch unchanged; py_compile clean.
+---
+Extract sprint_manager summary generation to services/sprint_manager/summary.py. Move generate_sprint_summary, write_sprint_summary, create_summary_github_issue, _prompt_learnings. Acceptance: pure move; summary generation unchanged; py_compile clean.
+---
+Extract sprint_manager post-sprint agents to services/sprint_manager/post_sprint.py. Move _create_sprint_pr, _dispatch_documenter, _dispatch_reviewer, _dispatch_ba_for_followup, _dispatch_estimator_for_followup, _enrich_followup_tickets. Acceptance: pure move; post-sprint agents unchanged; py_compile clean.
+---
+Extract sprint_manager pipeline dispatch to services/sprint_manager/pipeline.py. Move _run_pipeline_dispatch, _compute_dispatch_levels, _build_sprint_dag_layers, _warn_file_conflicts, list_backlog_issues. Acceptance: pure move; pipeline dispatch unchanged; py_compile clean.
+---
+Extract run_sprint preflight and branch-setup into run_sprint_preflight() helper. After B1–B17, pull the preflight + branch-setup portion of run_sprint (~1,237 lines today) into a dedicated helper module/function; run_sprint calls it. Do not move run_sprint as one blob. Acceptance: pure refactor extract; run behaviour unchanged; sprint_manager.py --help works; smoke pass.
+---
+Extract run_sprint per-ticket loop into run_sprint_loop() helper. Pull the per-ticket loop body into run_sprint_loop(); leave run_sprint as a sequence of phase calls targeting ~150 lines. Acceptance: pure refactor extract; run behaviour unchanged; run_sprint reads as phase orchestration; smoke pass.
+```
 
-## Suggested rollout
+## Posted issues
 
-1. **Sprint N:** all leaf S tickets (A1–A5, B1–B7) — parallel-safe, mechanical.
-2. **Sprint N+1:** the M service groups (A6–A13, B8–B13).
-3. **Sprint N+2:** the pre-split big ones (A14–A16, B14–B18) one at a time, each
-   behind its own PR + full smoke.
-4. **Close-out:** A17 + B18 thinning, confirm route inventory + `--help` unchanged.
-
-After this, the two hot files stop being merge-conflict magnets and a typo in
-one cluster can't break the others.
+| # | Title | Size |
+|---|-------|------|
+| _pending_ | | |

@@ -7100,6 +7100,11 @@
       .logs-view-toggle { width: 100%; }
     }
 
+    @media (max-width:640px) {
+      .logs-raw-stream { overflow-x:auto; }
+      .logs-raw-line { white-space:pre; }
+    }
+
     /* Touch devices have no hover, so hover-revealed row actions never appear.
        Keep the actionable controls visible (the drag grip is intentionally left
        hidden — HTML5 drag-and-drop doesn't work on touch; use the ≡ row menu). */

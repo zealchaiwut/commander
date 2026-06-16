@@ -1276,74 +1276,8 @@ async def project_slug_tab(slug: str, tab: str):
     return _serve_html(STATIC_DIR / "project.html")
 
 
-@app.get("/api/health")
-async def health_check(request: Request):
-    """GET /api/health — structured operational health check (issue #474).
-
-    Checks uptime, gh auth scopes, disk pressure, running sprints, orphan PIDs,
-    and recent dispatch outcomes.  Always returns HTTP 200; the status field
-    carries the health signal ("ok", "degraded", or "unhealthy").
-    Response is cached 10 s.  No authentication required.
-    """
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/health", method="GET")
-    global _health_cache
-    now = time.monotonic()
-    if _health_cache is not None:
-        ts, cached = _health_cache
-        if now - ts < _HEALTH_CACHE_TTL:
-            return JSONResponse(content=cached, status_code=200)
-
-    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    loop = asyncio.get_event_loop()
-
-    try:
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                loop.run_in_executor(None, _health_collect_gh_auth_scopes),
-                loop.run_in_executor(None, _health_collect_disk),
-                loop.run_in_executor(None, _health_collect_sprints),
-                loop.run_in_executor(None, _health_collect_orphan_pids),
-                loop.run_in_executor(None, _health_collect_recent_dispatches),
-                return_exceptions=True,
-            ),
-            timeout=5.0,
-        )
-    except asyncio.TimeoutError:
-        results = [None, None, None, None, None]
-
-    def _safe(r):
-        return None if isinstance(r, Exception) else r
-
-    gh_auth = _safe(results[0])
-    disk = _safe(results[1])
-    sprints = _safe(results[2])
-    orphan_pids = _safe(results[3])
-    recent_dispatches = _safe(results[4])
-
-    status = _compute_health_status(gh_auth, disk, orphan_pids, recent_dispatches)
-
-    response = {
-        "status": status,
-        "uptime_seconds": int(time.monotonic() - _start_time),
-        "gh_auth_scopes": gh_auth,
-        "disk": disk,
-        "sprints": sprints,
-        "orphan_pids": orphan_pids,
-        "orphans_removed": _orphans_removed_total,
-        "recent_dispatches": recent_dispatches,
-        "checked_at": checked_at,
-    }
-    _health_cache = (now, response)
-    return JSONResponse(content=response, status_code=200)
-
-
-@app.get("/api/environment")
-def get_environment():
-    """Return the current runtime environment (prd or uat)."""
-    return {"environment": ENVIRONMENT}
-
-
-# /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
+# /api/health, /api/environment moved to routers/system.py (issue #1247)
+# /api/version, /api/gh-auth-status moved to routers/system.py (issue #794)
 # /api/agent-event, /api/token-usage, /api/events/test, /events moved to routers/logs.py
 
 
@@ -1384,49 +1318,7 @@ def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     return HTTPException(status_code=502, detail=detail)
 
 
-@app.get("/api/repo/config")
-def get_repo_config():
-    try:
-        return github_client.repo_config()
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-
-@app.get("/api/github/labels")
-def get_github_labels(repo: Optional[str] = None):
-    """Return all GitHub labels for the repo (cached 30 s)."""
-    try:
-        return github_client.list_labels(repo_name=repo)
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-
-class CreateLabelBody(BaseModel):
-    name: str
-    color: str = "a2eeef"
-    description: str = ""
-    repo: Optional[str] = None
-
-
-@app.post("/api/github/labels")
-def post_create_label(body: CreateLabelBody):
-    """Create a new GitHub label in the repo; returns updated label list."""
-    body.name = body.name.strip()
-    if not body.name:
-        raise HTTPException(400, detail="Label name is required.")
-    try:
-        github_client.create_label(
-            body.name, body.color,
-            description=body.description,
-            repo_name=body.repo,
-        )
-        return github_client.list_labels(repo_name=body.repo)
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+# /api/repo/config, /api/github/labels (GET+POST) moved to routers/system.py (issue #1247)
 
 
 @app.get("/api/sprint-nav-status")

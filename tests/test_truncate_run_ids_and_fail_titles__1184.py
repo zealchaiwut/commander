@@ -76,14 +76,12 @@ def test_truncate_run_ids_and_fail_titles__desktop_no_truncation(client):
     # The max-width: 80px should ONLY be in the @media (max-width: 600px) block
     lines = html.split("\n")
     media_start = None
-    media_end = None
     for i, line in enumerate(lines):
         if "@media (max-width: 600px)" in line:
             media_start = i
         if media_start is not None and i > media_start and ("}" in line and "@media" not in line):
             # Found the closing brace of the media query (simplified check)
             if i > media_start + 1:  # ensure there's content between
-                media_end = i
                 break
 
     # Just verify that the base .logs-run-id CSS is unrestricted

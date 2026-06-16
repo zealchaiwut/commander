@@ -2010,6 +2010,10 @@
       font-variant-numeric: tabular-nums; border: 1px solid var(--border);
     }
     .hist-badge i { font-size: 12px; }
+    @media (max-width: 600px) {
+      .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+      .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+    }
 
     /* Post-sprint reconciliation checklist (issue #856) */
     .recon { padding: 4px 12px 6px; }

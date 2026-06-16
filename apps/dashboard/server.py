@@ -8207,13 +8207,18 @@ def _outcome_from_ingested_row(
         from routers import sprint_history_service  # noqa: PLC0415
         _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
         for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
-            _eid = str(_extra.get("number"))
-            if not _eid or _eid in _seen:
+            _tid = _extra.get("ticket_id")
+            if _tid is None:
+                _tid = _extra.get("number")
+            if _tid is None or int(_tid) <= 0:
+                continue
+            _eid = str(_tid)
+            if _eid in _seen:
                 continue
             _st = (_extra.get("state") or "").lower()  # merged | closed | open
             _oc = "done" if _st == "merged" else ("failed" if _st == "closed" else "skipped")
             result_issues.append({
-                "number": _extra.get("number"),
+                "number": int(_tid),
                 "title": _extra.get("title", ""),
                 "outcome": _oc,
                 "elapsed_secs": None,

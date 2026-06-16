@@ -7521,6 +7521,17 @@
       .node.tester-active .node-state-icon { animation: none; }
     }
 
+    /* ── Rail node mobile overflow fix (issue #1191) ────────────────────────
+       Prevent horizontal overflow on narrow viewports by wrapping badges
+       below the title row. Scoped strictly to ≤600 px; desktop is untouched. */
+    @media (max-width: 600px) {
+      .node { flex-wrap: wrap; }
+      .node-title { flex: 1 1 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .node-size, .node-time, .node-badge, .node-fix-badge,
+      .node-agent, .node-queued-est, .node-backend-badge,
+      .node-coded-badge { flex: 0 1 auto; }
+    }
+
     /* ── Running metrics strip (issue #803) ──────────────────────────────────
        Five compact metric cards above the level-rail. Mock v5 contract:
        .metrics container + .metric cards with metric-done/active/fix/tokens/time

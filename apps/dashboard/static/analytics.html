@@ -37,7 +37,8 @@
       --blue-bg:      #dbeafe;
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
-      --mono: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      --sans: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --mono: 'SF Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
     }
     [data-theme="dark"] {
       --bg:           #0d0d0d;
@@ -64,7 +65,7 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-family: var(--sans);
       font-size: 14px;
       min-height: 100dvh;
       display: flex;
@@ -131,9 +132,10 @@
     .anl-title {
       font-size: 18px;
       font-weight: 700;
+      font-family: var(--sans);
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 8px;
     }
     .anl-title .proj-slug {
       font-family: var(--mono);
@@ -146,7 +148,7 @@
     .scope-pill {
       font-family: var(--mono);
       font-size: 12px;
-      padding: 5px 11px;
+      padding: 4px 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -154,7 +156,7 @@
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       transition: border-color .15s, color .15s;
     }
     .scope-pill:hover { border-color: var(--text-muted); color: var(--text); }
@@ -166,6 +168,11 @@
       font: inherit;
       cursor: pointer;
       padding: 0;
+    }
+    .scope-pill:focus-within {
+      border-color: var(--blue);
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
     }
 
     /* ── Sub-tab bar — underline style with blue accent ── */
@@ -182,6 +189,7 @@
       padding: 8px 16px;
       font-size: 13px;
       font-weight: 500;
+      font-family: var(--sans);
       color: var(--text-muted);
       cursor: pointer;
       transition: color .15s, border-bottom-color .15s;
@@ -215,7 +223,7 @@
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 8px;
     }
     .anl-card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
     .anl-card-title { font-size: 14px; font-weight: 700; }
@@ -232,7 +240,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
     }
-    .anl-panel-empty i { font-size: 28px; display: block; margin-bottom: 10px; color: var(--text-sub); }
+    .anl-panel-empty i { font-size: 28px; display: block; margin-bottom: 8px; color: var(--text-muted); }
 
     /* ── Velocity bar chart (Trends panel) ── */
     .anl-velocity-chart {
@@ -244,7 +252,7 @@
       display: grid;
       grid-template-columns: 90px 1fr 56px;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       font-size: 12px;
     }
     .anl-velocity-label {
@@ -288,14 +296,14 @@
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
-      color: var(--text-sub);
-      padding: 7px 12px;
+      color: var(--text-muted);
+      padding: 8px 12px;
       border-bottom: 1px solid var(--border);
     }
     .anl-cal-table th:first-child { text-align: left; }
     .anl-cal-table th:last-child  { text-align: left; }
     .anl-cal-table td {
-      padding: 9px 12px;
+      padding: 8px 12px;
       border-bottom: 1px solid var(--border);
       text-align: right;
       font-family: var(--mono);
@@ -307,20 +315,20 @@
     /* ── Scatter (Calibration panel) ── */
     .anl-scatter-wrap {
       display: flex;
-      gap: 18px;
+      gap: 16px;
       align-items: flex-start;
       flex-wrap: wrap;
     }
     .anl-scatter-legend {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
       font-family: var(--mono);
       font-size: 12px;
       color: var(--text-muted);
-      padding-top: 22px;
+      padding-top: 24px;
     }
-    .anl-legend-item { display: flex; align-items: center; gap: 6px; }
+    .anl-legend-item { display: flex; align-items: center; gap: 8px; }
     .anl-legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
     .anl-sz-S-dot  { background: var(--green); }
     .anl-sz-M-dot  { background: var(--blue); }
@@ -356,22 +364,23 @@
     .btn-apply {
       font-family: var(--mono);
       font-size: 10px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 1px 7px;
+      padding: 2px 8px;
       background: var(--surface);
       cursor: pointer;
-      margin-left: 6px;
+      margin-left: 8px;
       transition: border-color .15s, color .15s;
     }
     .btn-apply:hover { border-color: var(--text-muted); color: var(--text); }
+    .btn-apply:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .btn-apply:disabled { opacity: .5; cursor: default; }
 
     /* ── Cal note ── */
     .anl-cal-note {
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       margin-top: 12px;
       display: flex;
       align-items: flex-start;
@@ -397,10 +406,10 @@
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
-      color: var(--text-sub);
+      color: var(--text-muted);
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
     .metric-val {
       font-size: 28px;
@@ -422,7 +431,7 @@
     .metric-delta {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
+      gap: 4px;
       font-size: 12px;
       font-weight: 600;
       font-family: var(--mono);
@@ -454,12 +463,12 @@
     }
     .breakdown {
       display: flex;
-      gap: 10px;
-      margin-top: 10px;
+      gap: 8px;
+      margin-top: 8px;
       flex-wrap: wrap;
       font-family: var(--mono);
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       line-height: 1.6;
     }
     .breakdown span { white-space: nowrap; }
@@ -468,7 +477,7 @@
     .metric-empty {
       display: none;
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       font-style: italic;
       margin-top: 8px;
     }
@@ -482,7 +491,7 @@
     /* ── Data-source footnote ── */
     .src-note {
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       font-family: var(--mono);
       line-height: 1.6;
       padding-top: 4px;
@@ -497,7 +506,7 @@
       color: var(--amber);
       background: var(--amber-bg);
       border-radius: 4px;
-      padding: 1px 5px;
+      padding: 2px 8px;
       vertical-align: middle;
       margin-left: 4px;
     }

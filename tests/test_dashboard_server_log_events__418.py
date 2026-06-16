@@ -63,7 +63,14 @@ def _find_slog_event_calls(src: str) -> list[dict]:
     return calls
 
 
-_ALL_EVENT_CALLS = _find_slog_event_calls(_SERVER_SRC)
+# Also scan routers/system.py — health, environment, repo/config, and labels
+# handlers were extracted from server.py in issue #1247; their log.event() calls
+# now live in the router file. Expanding the scan preserves AC-1 coverage.
+_SYSTEM_ROUTER_SRC = (DASHBOARD_DIR / "routers" / "system.py").read_text()
+_ALL_EVENT_CALLS = (
+    _find_slog_event_calls(_SERVER_SRC) +
+    _find_slog_event_calls(_SYSTEM_ROUTER_SRC)
+)
 
 
 def _calls_by_name(name: str) -> list[dict]:

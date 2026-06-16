@@ -46,7 +46,7 @@ def _extract_media_max_width(source: str, px: int) -> str:
             elif source[i] == "}":
                 depth -= 1
             i += 1
-        blocks.append(source[start + 1 : i - 1])
+        blocks.append(source[start + 1: i - 1])
         pos = i
     return "\n".join(blocks)
 
@@ -80,7 +80,7 @@ def _get_rule_body(block: str, selector: str) -> str | None:
         elif block[j] == "}":
             depth -= 1
         j += 1
-    return block[brace_start + 1 : j - 1]
+    return block[brace_start + 1: j - 1]
 
 
 MW600 = _extract_media_max_width(PROJECT_HTML, 600)

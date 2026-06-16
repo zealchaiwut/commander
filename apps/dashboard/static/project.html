@@ -5575,6 +5575,11 @@
       min-width: 180px;
     }
     .bc-select:focus, .bc-text-input:focus { outline: none; border-color: var(--blue); }
+    @media (max-width: 600px) {
+      .bc-settings-bar { flex-direction: column; }
+      .bc-settings-field { width: 100%; }
+      .bc-select, .bc-text-input { width: 100%; box-sizing: border-box; min-width: 0; }
+    }
 
     /* Counter */
     .bc-counter-row { padding: 8px 28px 4px; display: flex; align-items: center; gap: 12px; }

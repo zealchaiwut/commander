@@ -21,7 +21,7 @@ if not BASE_URL.startswith("http"):
         "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
     )
 
-DASHBOARD_ROOT = Path(__file__).resolve().parent.parent.parent / "apps" / "dashboard"
+DASHBOARD_ROOT = Path(__file__).resolve().parent.parent / "apps" / "dashboard"
 
 
 @pytest.fixture

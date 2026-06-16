@@ -625,12 +625,6 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
 
     for rec in records:
         label = rec.get("label") or ""
-        if not rec.get("post_sprint"):
-            # Pre-P3 rows: post_sprint may only exist on disk.
-            state = _read_state_file(sprints_dirs, label)
-            if state:
-                rec["post_sprint"] = _build_post_sprint(state)
-
         if not rec.get("issues"):
             run_issues = _issues_from_agent_runs(label)
             if run_issues:
@@ -766,7 +760,7 @@ def _github_summary_by_label(project: str) -> dict[str, dict]:
 
 
 def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
-    """Backfill PR / summary targets from disk, events, GitHub cache, and parents."""
+    """Backfill PR / summary targets from events, GitHub cache, and parents (DB-only; no disk reads)."""
     by_label = {r.get("label"): r for r in records if r.get("label")}
     github_by_project: dict[str, dict[str, dict]] = {}
 
@@ -774,16 +768,6 @@ def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) ->
         label = rec.get("label")
         if not label:
             continue
-
-        disk = _enrich_from_state(label, sprints_dirs)
-        if rec.get("pr_number") is None and disk.get("pr_number") is not None:
-            rec["pr_number"] = disk["pr_number"]
-        if not rec.get("summary_issue_url") and disk.get("summary_issue_url"):
-            rec["summary_issue_url"] = disk["summary_issue_url"]
-        if rec.get("summary_issue_num") is None and disk.get("summary_issue_num") is not None:
-            rec["summary_issue_num"] = disk["summary_issue_num"]
-        if not rec.get("summary_path") and disk.get("summary_path"):
-            rec["summary_path"] = disk["summary_path"]
 
         if rec.get("pr_number") is None:
             rec["pr_number"] = _pr_from_issues(rec.get("issues"))

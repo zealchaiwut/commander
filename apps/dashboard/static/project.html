@@ -7852,6 +7852,34 @@
     .log-fallback-note { color: var(--text-muted); font-size: 11px; line-height: 1.5;
       padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
 
+    /* ── Inspector mobile bottom sheet (issue #1193) ────────────────────────
+       At ≤640px the inspector panel leaves the document flow and pins to the
+       bottom of the viewport as a full-width overlay. The hidden attribute on
+       the element keeps it invisible when closed; no z-index needed while
+       display:none applies. overflow-y:auto lets the sheet content scroll
+       without scrolling the page behind it. */
+    @media (max-width: 640px) {
+      .inspector {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin: 0;
+        max-height: 55vh;
+        overflow-y: auto;
+        border-radius: 10px 10px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        z-index: 200;
+      }
+      .log-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+    }
+
     /* ── Orchestrator + All Issues panels (issue #1106) ─────────────────────── */
     .orch-panel { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 10px;
       background: var(--surface); overflow: hidden; }
@@ -8631,6 +8659,9 @@
             <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
           </div>
+          <!-- Node inspector panel (issue #1193) — bottom sheet on mobile ≤640px,
+               inline below the run-shell on desktop. Toggled by _smgmtInspectorFeed. -->
+          <div class="inspector" id="smgmt-inspector" hidden></div>
         </div><!-- /smgmt-subview-running -->
 
         <!-- History sub-view (issue #716) — finished-sprint summaries -->

@@ -7622,6 +7622,10 @@
       font-size: 12px; color: var(--text-muted); opacity: .85; }
     .lane-upcoming-dep { font-size: 11px; font-family: var(--mono); color: var(--text-sub); }
     @media (max-width: 620px) { .lanes-row { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) {
+      .lane-capacity { flex-direction: column; gap: 4px; }
+      .lane-dots { flex-wrap: wrap; }
+    }
 
     /* ── Chip-only assignment map (issue #1108) ────────────────────────────
        Number-only issue chips replace full lane cards. Working = blue tint +

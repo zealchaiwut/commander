@@ -28,8 +28,7 @@ def _style():
 
 
 def _script():
-    m = re.search(r"<script>(.*?)</script>", _html(), re.DOTALL | re.IGNORECASE)
-    # May have multiple script tags; collect the main inline one
+    # Collect all inline script tags
     scripts = re.findall(r"<script>(.*?)</script>", _html(), re.DOTALL | re.IGNORECASE)
     return "\n".join(scripts)
 

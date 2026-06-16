@@ -540,10 +540,11 @@
     const prev = _payloadById.get(paId) || {};
     const steps = Array.isArray(prev.steps) ? prev.steps.slice() : [];
     const idx = steps.findIndex((s) => s && s.key === stepKey);
+    const normState = state === "fail" ? "failed" : state;
     if (idx >= 0) {
-      steps[idx] = Object.assign({}, steps[idx], { state, note: note || "" });
+      steps[idx] = Object.assign({}, steps[idx], { state: normState, note: note || "" });
     } else {
-      steps.push({ key: stepKey, label: stepKey, state, note: note || "" });
+      steps.push({ key: stepKey, label: stepKey, state: normState, note: note || "" });
     }
     return patchProgressActivity(
       hostEl,
@@ -2143,10 +2144,11 @@ Replace the existing draft (${data.existing_label})?`
       }
       _rrClose();
     } catch (e) {
-      _rrShowCreateProgress(0, 3, "", "error", "Failed to create re-run sprint");
+      _rrShowCreateProgress(0, 3, "", "error", e.message || "Failed to create re-run sprint");
       const errEl = document.getElementById("rr-error");
       errEl.textContent = "Failed to re-run sprint: " + e.message;
       errEl.classList.remove("hidden");
+      document.getElementById("rr-loading").classList.add("hidden");
       document.getElementById("rr-content").classList.remove("hidden");
       if (confirmBtn) {
         confirmBtn.disabled = false;
@@ -2163,7 +2165,6 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _fsClose() {
     document.getElementById("fs-backdrop").classList.add("hidden");
-    document.getElementById("fs-modal").classList.remove("hidden");
     document.getElementById("fs-modal").classList.add("hidden");
     _clearBodyInert();
     if (_fsActiveJob && _fsActiveJob.es) {
@@ -3262,6 +3263,7 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _pfShowError(msg) {
     document.getElementById("pf-loading").classList.add("hidden");
+    unmountProgressActivity("pf-stepper-steps");
     document.getElementById("pf-content").classList.add("hidden");
     document.getElementById("pf-error-msg").textContent = msg;
     document.getElementById("pf-error").classList.remove("hidden");
@@ -4428,11 +4430,14 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtBoardProgress2(done, total) {
     if (_smgmtBoardOverlayHasProgress) {
+      const d = Number(done || 0);
+      const t = Number(total || 0);
       patchProgressActivity("smgmt-op-pa-host", {
-        done: Number(done || 0),
-        total: Number(total || 0),
+        done: d,
+        total: t,
         mode: "bar",
-        status: "running"
+        status: "running",
+        current: t > 0 ? `${d} of ${t}` : ""
       }, { id: BOARD_OVERLAY_PA_ID });
       return;
     }

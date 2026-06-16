@@ -194,10 +194,11 @@ export async function _rrConfirm() {
     }
     _rrClose();
   } catch (e) {
-    _rrShowCreateProgress(0, 3, '', 'error', 'Failed to create re-run sprint');
+    _rrShowCreateProgress(0, 3, '', 'error', e.message || 'Failed to create re-run sprint');
     const errEl = document.getElementById('rr-error');
     errEl.textContent = 'Failed to re-run sprint: ' + e.message;
     errEl.classList.remove('hidden');
+    document.getElementById('rr-loading').classList.add('hidden');
     document.getElementById('rr-content').classList.remove('hidden');
     if (confirmBtn) {
       confirmBtn.disabled = false;

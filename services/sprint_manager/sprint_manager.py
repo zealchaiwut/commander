@@ -490,6 +490,11 @@ class SprintConfig:
     coder_backend:     str  = "claude-code"
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
+    # Provider-specific model id for the cline backend. Cline providers (e.g. the
+    # IBM ICA openai-compatible gateway) expect ids like
+    # global/anthropic.claude-sonnet-4-5-... — not Commander's internal coder_model.
+    # When set, used as the `cline -m` value; empty falls back to coder_model.
+    cline_model:       str  = ""
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -684,6 +689,13 @@ def load_config(path: Path) -> "SprintConfig":
         if _ucf is not None:
             use_cline_followups = bool(_ucf)
 
+    # ── agent_config.cline.model — provider model id for the cline backend ────
+    cline_model: str = ""
+    if isinstance(agent_cfg, dict):
+        _cline_sub = agent_cfg.get("cline") or {}
+        if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
+            cline_model = str(_cline_sub["model"])
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -712,6 +724,7 @@ def load_config(path: Path) -> "SprintConfig":
         coder_by_size               = coder_by_size,
         coder_backend               = coder_backend,
         use_cline_followups         = use_cline_followups,
+        cline_model                 = cline_model,
     )
 
 
@@ -5074,7 +5087,11 @@ def _dispatch_coder(
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
         full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
-        cmd = ["cline", "-y", "-m", coder_model, full_prompt]
+        # Cline's provider expects its own model id (cfg.cline_model); fall back
+        # to coder_model when unset (issue #1155 — IBM ICA gateway needs the
+        # global/anthropic.* id, not Commander's internal claude-sonnet-4-6).
+        _cline_m = (getattr(cfg, "cline_model", "") or coder_model)
+        cmd = ["cline", "-y", "-m", _cline_m, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
         # Claude Code (existing default behavior, byte-for-byte unchanged).

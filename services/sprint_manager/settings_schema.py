@@ -53,6 +53,8 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "tester_test_repo": {"secret": False, "default": ""},
     # Post-sprint wrap-up agents (issue #1146)
     "reviewer_enabled": {"secret": False, "default": False},
+    # Coder dispatch CLI — claude-code (subscription) default; cline opt-in (issue #917)
+    "coder_backend": {"secret": False, "default": "claude-code"},
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},

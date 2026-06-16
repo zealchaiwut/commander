@@ -39,6 +39,7 @@ def _make_cfg(tmp_path: Path, backend: str = "claude-code") -> MagicMock:
     cfg.coder_backend = backend
     cfg.use_cline_followups = False  # issue #918: disable follow-up routing by default
     cfg.coder_model = "claude-sonnet-4-6"
+    cfg.cline_model = None
     cfg.coder_by_size = {
         "S": "claude-haiku-4-5",
         "M": "claude-sonnet-4-6",
@@ -139,6 +140,31 @@ class TestAC1BackendConfigDefault:
             f"load_config must parse coder.backend='cline', got {cfg.coder_backend!r}"
         )
 
+    def test_load_config_parses_cline_model_from_yaml(self, tmp_path):
+        """load_config must parse agent_config.cline.model for Cline dispatches."""
+        yaml_text = textwrap.dedent("""
+            repo_name: test/repo
+            worktrees:
+              coder: {coder}
+              tester: {tester}
+            agent_config:
+              coder:
+                backend: cline
+              cline:
+                model: global/anthropic.claude-sonnet-4-5-20250929-v1:0
+        """).format(coder=str(tmp_path / "coder"), tester=str(tmp_path / "tester"))
+
+        for subdir in ("coder", "tester"):
+            (tmp_path / subdir).mkdir(parents=True, exist_ok=True)
+
+        yaml_path = tmp_path / "sprint.yaml"
+        yaml_path.write_text(yaml_text, encoding="utf-8")
+
+        cfg = sm.load_config(yaml_path)
+        assert cfg.cline_model == "global/anthropic.claude-sonnet-4-5-20250929-v1:0", (
+            f"load_config must parse cline.model, got {cfg.cline_model!r}"
+        )
+
     def test_load_config_defaults_to_claude_code_when_backend_absent(self, tmp_path):
         """load_config must default coder_backend to 'claude-code' when not in YAML."""
         yaml_text = textwrap.dedent("""
@@ -199,6 +225,16 @@ class TestAC2ClineCLICommand:
         assert m_idx + 1 < len(cmd), "-m must be followed by model name"
         assert "sonnet" in cmd[m_idx + 1] or "haiku" in cmd[m_idx + 1], (
             f"Model name must follow -m, got {cmd[m_idx + 1]!r}"
+        )
+
+    def test_cline_backend_uses_cline_model_from_config(self, tmp_path):
+        """When agent_config.cline.model is set, Cline -m must use it (not coder_model)."""
+        cfg = _make_cfg(tmp_path, backend="cline")
+        cfg.cline_model = "global/anthropic.claude-sonnet-4-5-20250929-v1:0"
+        _, _, cmd, _ = _run_dispatch(cfg)
+        m_idx = cmd.index("-m")
+        assert cmd[m_idx + 1] == "global/anthropic.claude-sonnet-4-5-20250929-v1:0", (
+            f"Cline must use agent_config.cline.model, got {cmd[m_idx + 1]!r}"
         )
 
     def test_cline_backend_does_not_use_p_flag(self, tmp_path):

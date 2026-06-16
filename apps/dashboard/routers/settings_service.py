@@ -89,6 +89,7 @@ _AGENT_MODEL_KEYS = (
     "default_model", "coder_model", "tester_model",
     "estimator_model", "documentor_model",
 )
+_VALID_CODER_BACKENDS = frozenset({"cline", "claude-code"})
 
 _PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
@@ -185,15 +186,27 @@ def _validate_settings_body(body: dict) -> None:
                 f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}"
             ),
         )
+    if "coder_backend" in body and body["coder_backend"] not in _VALID_CODER_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid coder_backend {body['coder_backend']!r}; "
+                "must be 'claude-code' or 'cline'."
+            ),
+        )
 
 
 def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
-    """Write agent-model fields from a settings Save into each project's sprint.yaml."""
+    """Write agent-model and coder-backend fields from settings into sprint.yaml."""
     model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if not model_cfg:
+    coder_backend = body.get("coder_backend") if "coder_backend" in body else None
+    if not model_cfg and coder_backend is None:
         return []
     try:
-        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+        from services.sprint_manager.settings_sync import (
+            _set_sprint_yaml_coder_backend,
+            _update_sprint_yaml_agent_config,
+        )
     except Exception:
         return []
     updated: list[str] = []
@@ -203,9 +216,13 @@ def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
             continue
         try:
             sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if sy.exists():
+            if not sy.exists():
+                continue
+            if model_cfg:
                 _update_sprint_yaml_agent_config(sy, model_cfg)
-                updated.append(repo)
+            if coder_backend is not None:
+                _set_sprint_yaml_coder_backend(sy, str(coder_backend))
+            updated.append(repo)
         except Exception:
             continue
     return updated
@@ -276,12 +293,19 @@ def put_project_settings(slug: str, body: dict) -> dict:
     merged = {**current_project_override, **body}
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if model_cfg:
+    coder_backend = body.get("coder_backend") if "coder_backend" in body else None
+    if model_cfg or coder_backend is not None:
         try:
-            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+            from services.sprint_manager.settings_sync import (
+                _set_sprint_yaml_coder_backend,
+                _update_sprint_yaml_agent_config,
+            )
             sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
             if sy.exists():
-                _update_sprint_yaml_agent_config(sy, model_cfg)
+                if model_cfg:
+                    _update_sprint_yaml_agent_config(sy, model_cfg)
+                if coder_backend is not None:
+                    _set_sprint_yaml_coder_backend(sy, str(coder_backend))
         except Exception:
             pass
     display_patch: dict = {}

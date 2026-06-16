@@ -4757,6 +4757,9 @@ ${data.errors.join("\n")}`);
     _preflightLoadBanners(orderedLabels, bySprint);
     _smgmtLoadConflicts(orderedLabels, bySprint);
     _smgmtLoadDepOrder(orderedLabels, bySprint);
+    if (typeof _smgmtMiniRailRestoreCached === "function") {
+      _smgmtMiniRailRestoreCached(orderedLabels, bySprint);
+    }
     _smgmtLoadMiniRail(orderedLabels, bySprint);
     _smgmtUpdateCleanupBtn(data);
     _smgmtLabelFilterRender(issues);

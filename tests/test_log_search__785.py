@@ -380,11 +380,14 @@ def _html() -> str:
 
 
 def test_ui_search_view_button_exists():
-    """AC6/UI: a Search view button exists in the logs view toggle."""
+    """Logs view switcher is Activity / Runs / Raw only (Search tab removed in redesign)."""
     src = _html()
-    assert "logsSetView('search')" in src or "logs-view-search" in src, (
-        "No search view button found in logs view toggle"
+    assert 'class="logs-seg"' in src or "logs-seg-btn" in src, (
+        "Missing compact segmented logs view switcher"
     )
+    assert "logsSetView('activity')" in src
+    assert "logsSetView('timeline')" in src or "logsSetView('raw')" in src
+    assert "logs-view-search" not in src, "Search view tab should be removed from switcher"
 
 
 def test_ui_search_input_exists():

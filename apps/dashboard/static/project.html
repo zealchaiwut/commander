@@ -1469,14 +1469,14 @@
 
     .ticket-group-hdr {
       display: flex; align-items: center; gap: 8px;
-      padding: 10px 0 6px;
+      padding: 8px 0;
       font-size: 10px; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
     }
     .ticket-group-rollup {
       margin-left: auto;
       font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
-      color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
+      color: var(--text-muted); font-family: var(--mono); white-space: nowrap;
     }
     .ticket-grp-uat-close-btn {
       flex-shrink: 0;
@@ -1488,23 +1488,23 @@
     }
     .ticket-grp-uat-close-btn:hover { background: var(--amber-bg); }
     .ticket-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 0;
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 0;
       border-top: 1px solid var(--border);
       font-size: 13px;
     }
     .ticket-status-pill {
       font-size: 10px; font-weight: 600;
-      padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+      padding: 2px 8px; border-radius: 10px; white-space: nowrap;
     }
     .ticket-status-pill.SIT      { background: var(--blue-bg);   color: var(--blue); }
     .ticket-status-pill.UAT      { background: var(--amber-bg);  color: var(--amber); }
     .ticket-status-pill.in-progress { background: var(--green-bg);  color: var(--green); }
     .ticket-status-pill.blocked  { background: var(--red-bg);    color: var(--red); }
-    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
     .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ticket-num   { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
-    .empty-msg { color: var(--text-sub); font-size: 13px; padding: 12px 0; font-style: italic; }
+    .ticket-num   { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .empty-msg { color: var(--text-muted); font-size: 13px; padding: 12px 0; font-style: italic; }
     .ticket-close-btn {
       padding: 2px 8px; font-size: 11px; font-weight: 500;
       border: 1px solid var(--border); border-radius: 4px;
@@ -1518,7 +1518,7 @@
       padding: 1px 5px; border-radius: 3px;
       font-size: 10px; font-weight: 700;
       font-family: var(--mono);
-      background: var(--surface-2); color: var(--text-sub);
+      background: var(--surface-2); color: var(--text-muted);
     }
     .ticket-est-size-pill.sz-S  { background: var(--green-bg); color: var(--green); }
     .ticket-est-size-pill.sz-M  { background: var(--blue-bg);  color: var(--blue); }
@@ -1526,7 +1526,7 @@
     .ticket-est-size-pill.sz-XL { background: var(--red-bg);   color: var(--red); }
     /* ── GitHub label chips (issue #1059) ── */
     .tkt-labels-row {
-      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
       width: 100%; padding-bottom: 4px;
     }
     .tkt-gh-label {
@@ -1534,17 +1534,17 @@
       padding: 2px 8px; border-radius: 10px;
       font-size: 10px; font-weight: 600; white-space: nowrap;
       background: var(--surface-2); border: 1px solid var(--border);
-      color: var(--text-sub);
+      color: var(--text-muted);
     }
     /* ── Empty state (issue #1059) ── */
     .tkt-empty-state {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 56px 24px; text-align: center; gap: 10px;
+      padding: 56px 24px; text-align: center; gap: 8px;
     }
     .tkt-empty-icon { font-size: 36px; color: var(--text-sub); }
     .tkt-empty-title { font-size: 15px; font-weight: 600; color: var(--text-muted); }
     .tkt-empty-sub {
-      font-size: 13px; color: var(--text-sub);
+      font-size: 13px; color: var(--text-muted);
       max-width: 340px; line-height: 1.55;
     }
     .ticket-est-confidence-pill {
@@ -1557,18 +1557,18 @@
     .ticket-est-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
     .ticket-est-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
     .ticket-no-estimate {
-      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      flex-shrink: 0; font-size: 10px; color: var(--text-muted);
       font-style: italic; white-space: nowrap;
     }
     /* ── Dependency chips (issue #432) ── */
     .ticket-row { flex-wrap: wrap; }
     .dep-chips-row {
-      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
       width: 100%; padding-bottom: 4px;
     }
-    .dep-chip-sep { width: 10px; }
+    .dep-chip-sep { width: 8px; }
     .dep-chip-label {
-      font-size: 10px; font-weight: 700; color: var(--text-sub);
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
       text-transform: uppercase; letter-spacing: .06em; flex-shrink: 0;
     }
     .dep-chip {

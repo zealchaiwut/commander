@@ -898,6 +898,7 @@ from routers import (  # noqa: E402
     advisor_router,
     analytics_router,
     backup_router,
+    bulk_tickets_router,
     doctor_router,
     finish_progress_router,
     home_milestone_router,
@@ -925,6 +926,9 @@ from routers import (  # noqa: E402
     tickets_router,
     timeline_router,
 )
+# _get_bulk_job is defined in routers/bulk_tickets.py; import here so all
+# existing call sites in this file continue to work unchanged (issue #1264).
+from routers.bulk_tickets import _get_bulk_job  # noqa: E402
 # broadcast and _subscribers are now owned by routers/logs_service.py; import
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
@@ -959,6 +963,7 @@ app.include_router(sprint_preflight_router)
 app.include_router(sprint_summaries_router)
 app.include_router(sprint_finish_router)
 app.include_router(sprint_run_router)
+app.include_router(bulk_tickets_router)
 app.include_router(system_misc_router)
 
 logger = logging.getLogger(__name__)
@@ -8522,33 +8527,6 @@ def _bulk_job_created_at(job: dict) -> float:
     return time.time()
 
 
-def _get_bulk_job(job_id: str) -> dict | None:
-    """Return job from memory, or lazy-load from disk (e.g. after server restart).
-
-    If found on disk and not in memory, the job is restored to _bulk_jobs so
-    subsequent calls hit memory. Returns None if not found anywhere.
-    """
-    job = _bulk_jobs.get(job_id)
-    if job is not None:
-        return job
-    # Disk fallback — covers server reload / restart scenarios
-    try:
-        jobs_dir = _bulk_jobs_dir()
-        path = jobs_dir / f"{job_id}.json"
-        if path.exists():
-            job = json.loads(path.read_text(encoding="utf-8"))
-            # A job that was 'running' when the server restarted can never
-            # resume — its in-flight BA processes are gone. Mark it cancelled
-            # so the client gets accurate state instead of a perpetual spinner.
-            if job.get("status") == "running":
-                _bulk_cancel_interrupted(job)
-            _bulk_jobs[job_id] = job
-            return job
-    except Exception:
-        pass
-    return None
-
-
 def _bulk_cancel_interrupted(job: dict) -> None:
     """Mark a job interrupted by a server restart as cancelled and persist to disk."""
     _NON_TERMINAL = {"pending", "drafting", "estimating"}
@@ -9106,89 +9084,8 @@ async def bulk_create_start(
     return {"job_id": job_id}
 
 
-@app.get("/api/tickets/bulk/{job_id}")
-async def bulk_get_job(job_id: str):
-    """Return the current state of a bulk job."""
-    job = _get_bulk_job(job_id)
-    if not job:
-        # Try to load from disk
-        try:
-            path = _bulk_jobs_dir() / f"{job_id}.json"
-            if path.exists():
-                job = json.loads(path.read_text())
-                _bulk_jobs[job_id] = job
-        except Exception:
-            pass
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-    # Strip internal fields from response
-    tickets = [
-        {k: v for k, v in t.items() if not k.startswith("_")}
-        for t in job["tickets"]
-    ]
-    return {
-        "job_id": job["job_id"],
-        "repo": job.get("repo", ""),
-        "status": job["status"],
-        "concurrency": job["concurrency"],
-        "default_labels": job.get("default_labels", []),
-        "tickets": tickets,
-    }
-
-
-@app.get("/api/tickets/bulk/{job_id}/stream")
-async def bulk_job_stream(job_id: str, request: Request):
-    """SSE stream of state-change events for a bulk job."""
-    job = _get_bulk_job(job_id)
-    if not job:
-        # Rehydrate from disk if the job was persisted but evicted from memory
-        # (e.g. server restart). Mirrors bulk_get_job so a reconnecting client
-        # doesn't get a fatal 404 for a job that still exists on disk.
-        try:
-            path = _bulk_jobs_dir() / f"{job_id}.json"
-            if path.exists():
-                job = json.loads(path.read_text())
-                _bulk_jobs[job_id] = job
-        except Exception:
-            pass
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-
-    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
-
-    # Register this subscriber
-    if job_id not in _bulk_job_queues:
-        _bulk_job_queues[job_id] = []
-    _bulk_job_queues[job_id].append(queue)
-
-    async def generator():
-        try:
-            # On connect: send full current state first
-            state_snapshot = await bulk_get_job(job_id)
-            yield f"event: snapshot\ndata: {json.dumps(state_snapshot)}\n\n"
-
-            while True:
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"event: update\ndata: {data}\n\n"
-                    # Stop streaming if job is done
-                    parsed = json.loads(data)
-                    if parsed.get("type") == "job_done":
-                        break
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                except Exception:
-                    break
-        finally:
-            qlist = _bulk_job_queues.get(job_id, [])
-            if queue in qlist:
-                qlist.remove(queue)
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# GET /api/tickets/bulk/{job_id} and GET /api/tickets/bulk/{job_id}/stream
+# extracted to routers/bulk_tickets.py (issue #1264).
 
 
 class BulkStopBody(BaseModel):

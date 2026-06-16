@@ -36,6 +36,7 @@ from .sprint_summaries import router as sprint_summaries_router
 from .system_misc import router as system_misc_router
 from .sprint_finish import router as sprint_finish_router
 from .sprint_run import router as sprint_run_router
+from .bulk_tickets import router as bulk_tickets_router
 
 __all__ = [
     "activity_router",
@@ -69,4 +70,5 @@ __all__ = [
     "system_misc_router",
     "sprint_finish_router",
     "sprint_run_router",
+    "bulk_tickets_router",
 ]

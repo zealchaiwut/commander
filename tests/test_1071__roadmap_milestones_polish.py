@@ -255,9 +255,7 @@ class TestEmptyState:
             html, re.DOTALL | re.MULTILINE
         )
         assert fn_match, "_rmRender must exist"
-        fn_body = fn_match.group(0)
         # The empty state must have more than just "No milestones yet." — needs to feel friendly
-        empty_block = re.search(r'rm-empty[^"]*"([^"]*)"', fn_body, re.DOTALL)
         # Check the roadmapInit path (may be in _rmRender or roadmapInit)
         ctx = re.search(
             r'(No milestones|milestone yet|Get started|Add your first|plan your roadmap|roadmap is empty)',

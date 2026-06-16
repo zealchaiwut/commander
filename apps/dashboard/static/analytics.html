@@ -200,16 +200,35 @@
       font-weight: 600;
       border-bottom-color: var(--blue);
     }
-    .anl-tab-btn:hover:not(.active) { color: var(--text); }
+    .anl-tab-btn:hover:not(.active) { color: var(--text); background: var(--surface-2); border-radius: 4px 4px 0 0; }
     .anl-tab-btn:focus-visible {
       outline: 2px solid var(--blue);
-      outline-offset: -2px;
+      outline-offset: 2px;
       border-radius: 4px;
     }
 
     /* ── Panels ── */
     .anl-panel { display: none; flex-direction: column; gap: 16px; margin-top: 16px; }
-    .anl-panel.show { display: flex; }
+    .anl-panel.show { display: flex; animation: anlFadeIn 0.18s ease; }
+
+    @keyframes anlFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Loading skeleton ── */
+    .anl-skeleton {
+      background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-hover) 50%, var(--surface-2) 75%);
+      background-size: 200% 100%;
+      animation: anlSkeletonPulse 1.4s ease infinite;
+      border-radius: 4px;
+      height: 16px;
+      margin: 6px 0;
+    }
+    @keyframes anlSkeletonPulse {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
 
     /* ── Card ── */
     .anl-card {
@@ -520,6 +539,12 @@
     @media (max-width: 480px) {
       .page-content { padding: 16px 12px 32px; }
       .scope-sel { flex-wrap: wrap; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .anl-panel.show { animation: none; }
+      .anl-skeleton { animation: none; background: var(--surface-2); }
+      .anl-velocity-bar { transition: none; }
+      .bar > span { transition: none; }
     }
   </style>
 </head>
@@ -913,6 +938,27 @@
       }
     };
 
+    /* ── Arrow-key keyboard navigation on tab bar ── */
+    (function() {
+      var tabBar = document.querySelector('.anl-tab-bar');
+      if (!tabBar) return;
+      tabBar.addEventListener('keydown', function(e) {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        var activeBtn = tabBar.querySelector('[aria-selected="true"]');
+        var activeId = activeBtn ? activeBtn.id.replace('anl-tab-', '') : _ANL_TABS[0];
+        var idx = _ANL_TABS.indexOf(activeId);
+        if (e.key === 'ArrowRight') {
+          idx = (idx + 1) % _ANL_TABS.length;
+        } else {
+          idx = (idx - 1 + _ANL_TABS.length) % _ANL_TABS.length;
+        }
+        e.preventDefault();
+        anlShowTab(_ANL_TABS[idx]);
+        var nextBtn = document.getElementById('anl-tab-' + _ANL_TABS[idx]);
+        if (nextBtn) nextBtn.focus();
+      });
+    })();
+
     /* ── Scope selector ── */
     window.onScopeChange = function() {
       /* Re-fetch whichever panel is active */
@@ -940,9 +986,48 @@
       return '$' + c.toFixed(4);
     }
 
+    /* ── Loading helpers ── */
+    function _skeletonRows(count, widths) {
+      var html = '<div aria-busy="true" aria-label="Loading">';
+      for (var i = 0; i < count; i++) {
+        var w = widths ? widths[i % widths.length] : 100;
+        html += '<div class="anl-skeleton" style="width:' + w + '%"></div>';
+      }
+      return html + '</div>';
+    }
+
+    function _showLoadingVelocity() {
+      var wrap = document.getElementById('anl-velocity-wrap');
+      if (!wrap) return;
+      var html = '<div aria-busy="true" aria-label="Loading sprint velocity">';
+      [100, 75, 90, 55, 40].forEach(function(w) {
+        html += '<div class="anl-velocity-row">'
+          + '<div class="anl-skeleton" style="width:80px"></div>'
+          + '<div class="anl-skeleton" style="width:' + w + '%"></div>'
+          + '<div class="anl-skeleton" style="width:40px"></div>'
+          + '</div>';
+      });
+      wrap.innerHTML = html + '</div>';
+    }
+
+    function _showLoadingCalibration() {
+      var svg = document.getElementById('scatter-svg');
+      if (svg) {
+        svg.innerHTML = '<text x="320" y="160" font-size="13" fill="var(--text-muted)" '
+          + 'text-anchor="middle" font-family="monospace">Loading…</text>';
+      }
+      var tbody = document.getElementById('cal-table-body');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="7">'
+          + _skeletonRows(4, [80, 60, 70, 50])
+          + '</td></tr>';
+      }
+    }
+
     /* ── fetchCost: populates Trends + Status panels ── */
     window.fetchCost = function() {
       if (!_slug) return;
+      _showLoadingVelocity();
       fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost')
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1328,6 +1413,7 @@
     window.fetchCalibration = function() {
       var url = _buildCalUrl();
       if (!url) return;
+      _showLoadingCalibration();
       fetch(url)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);

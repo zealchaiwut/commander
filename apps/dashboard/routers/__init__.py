@@ -35,6 +35,7 @@ from .sprint_preflight import router as sprint_preflight_router
 from .sprint_summaries import router as sprint_summaries_router
 from .system_misc import router as system_misc_router
 from .sprint_finish import router as sprint_finish_router
+from .sprint_run import router as sprint_run_router
 
 __all__ = [
     "activity_router",
@@ -67,4 +68,5 @@ __all__ = [
     "sprint_summaries_router",
     "system_misc_router",
     "sprint_finish_router",
+    "sprint_run_router",
 ]

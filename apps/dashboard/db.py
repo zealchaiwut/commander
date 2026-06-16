@@ -887,6 +887,36 @@ def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
         conn.commit()
 
 
+def update_sprint_run_counts(
+    label: str,
+    issues_json: str,
+    summary_settled_done: int,
+    summary_uat_count: int,
+    summary_failure_count: int,
+) -> None:
+    """Overwrite issues_json and denormalized count columns (reconcile path)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            UPDATE sprints SET
+                issues_json = ?,
+                summary_settled_done = ?,
+                summary_uat_count = ?,
+                summary_failure_count = ?
+            WHERE label = ?
+            """,
+            (
+                issues_json,
+                int(summary_settled_done),
+                int(summary_uat_count),
+                int(summary_failure_count),
+                label,
+            ),
+        )
+        conn.commit()
+
+
 # ── Sprint history records (issue #805) ───────────────────────────────────────
 #
 # A queryable, append-only ledger of terminal sprint events for the history

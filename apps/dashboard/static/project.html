@@ -6152,7 +6152,7 @@
     }
     .bc-pg-log {
       display: flex; flex-direction: column; gap: 4px;
-      max-height: 320px; overflow-y: auto;
+      max-height: min(480px, 60vh); overflow-y: auto;
       scrollbar-width: thin; scrollbar-color: var(--border) transparent;
     }
     .bc-pg-log::-webkit-scrollbar { width: 4px; }
@@ -6175,6 +6175,18 @@
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
     }
     .bc-pg-entry--success .bc-pg-entry-badge { color: var(--green); }
+    .bc-pg-entry--active .bc-pg-entry-title { font-weight: 600; color: var(--blue); }
+    .bc-pg-entry--active .bc-pg-entry-badge { color: var(--blue); }
+    .bc-pg-entry-check {
+      width: 18px; height: 18px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 15px; color: var(--text-muted);
+    }
+    .bc-pg-entry--success .bc-pg-entry-check { color: var(--green); }
+    .bc-pg-entry--error .bc-pg-entry-check { color: var(--red); }
+    .bc-pg-entry--skipped .bc-pg-entry-check { color: var(--text-muted); }
+    .bc-pg-entry--active .bc-pg-entry-check { color: var(--blue); }
+    .bc-pg-spin { display: inline-block; animation: tkt-spin .7s linear infinite; }
     @media (max-width: 560px) {
       .bc-pg-entry { flex-wrap: wrap; }
       .bc-pg-entry-badge { flex: 1 1 auto; }
@@ -8100,6 +8112,7 @@
       flex-shrink: 0; }
     .orch-more-btn:hover { background: var(--surface-hover); }
     .orch-more-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .orch-header-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .orch-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border);
       flex-shrink: 0; display: inline-block; }
     .orch-live-dot--active { background: var(--green); animation: orchDotPulse 2s ease-in-out infinite; }
@@ -14856,6 +14869,7 @@ let _smgmtInspectorPollId = null;  // streaming poll handle for the active log t
 
 // ── All Issues panel state (issue #1106) ──────────────────────────────────────
 let _smgmtOrchExpanded = false;    // true when orchestrator panel is in "show more" mode
+let _smgmtOrchLastTail = '';       // plain-text dispatch log tail (for clipboard copy)
 let _smgmtAiLabel = '';            // sprint label bound to the All Issues panel
 let _smgmtAiExpandedNums = new Set(); // issue numbers whose inline log is currently open
 
@@ -15130,6 +15144,7 @@ function _smgmtOrchFetchLines(label, tailLines) {
       const el = document.getElementById('smgmt-orch-body');
       if (!el) return;
       const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+      _smgmtOrchLastTail = tail;
       if (tail.trim()) {
         const lines = tail.split('\n').filter(function(l) { return l; }).slice(-tailLines);
         el.innerHTML = lines.map(function(line) {
@@ -15144,10 +15159,40 @@ function _smgmtOrchFetchLines(label, tailLines) {
 /** Toggle the orchestrator panel between ~3 lines (collapsed) and ~15 lines (expanded). */
 function _smgmtOrchToggleMore(label) {
   _smgmtOrchExpanded = !_smgmtOrchExpanded;
-  const btn = document.querySelector('.orch-more-btn');
+  const btn = document.querySelector('.orch-toggle-btn');
   if (btn) btn.textContent = _smgmtOrchExpanded ? 'Show less' : 'Show more';
   const tailLines = _smgmtOrchExpanded ? 15 : 3;
   _smgmtOrchFetchLines(label || _smgmtAiLabel, tailLines);
+}
+
+/** Copy the full orchestrator dispatch log to the clipboard (fetches up to 2000 lines). */
+async function _smgmtOrchCopyLog(label) {
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+  const lbl = label || _smgmtAiLabel;
+  if (!repo || !lbl) {
+    _smgmtShowToast('No running sprint log to copy');
+    return;
+  }
+  let text = (_smgmtOrchLastTail || '').trim();
+  try {
+    if (!text) {
+      const resp = await fetch('/api/sprints/' + encodeURIComponent(lbl) + '/dispatch-log'
+        + '?project=' + encodeURIComponent(repo) + '&tail_lines=2000');
+      if (resp.ok) {
+        const data = await resp.json();
+        text = ((data && data.tail) || '').trim();
+        _smgmtOrchLastTail = text;
+      }
+    }
+    if (!text) {
+      _smgmtShowToast('No orchestrator log to copy yet');
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    _smgmtShowToast('Orchestrator log copied to clipboard');
+  } catch (e) {
+    _smgmtShowToast('Copy failed — try again');
+  }
 }
 
 /** Render or refresh the orchestrator panel. Called on every live tick. */
@@ -15164,8 +15209,12 @@ function _smgmtOrchPanelUpdate(label, live) {
     el.innerHTML = '<div class="orch-panel-header">'
       + '<span class="' + dotClass + '" aria-hidden="true"></span>'
       + '<span class="orch-panel-title">Orchestrator</span>'
+      + '<div class="orch-header-actions">'
+      + '<button type="button" class="orch-more-btn" aria-label="Copy orchestrator log to clipboard"'
+      + ' onclick="_smgmtOrchCopyLog(\'' + safeLabel + '\')"><i class="ti ti-copy"></i> Copy</button>'
       + '<button type="button" class="orch-more-btn" aria-label="Toggle orchestrator log"'
       + ' onclick="_smgmtOrchToggleMore(\'' + safeLabel + '\')">' + btnText + '</button>'
+      + '</div>'
       + '</div>'
       + '<div class="orch-panel-body" id="smgmt-orch-body">'
       + '<span class="log-empty">Loading…</span>'
@@ -20786,92 +20835,78 @@ function _bcRenderStep2() {
 }
 
 /**
- * _bcRenderPostingProgress — update the shared ProgressActivity component (bar mode)
- * for the posting stage. Called from _bcRenderStep2 when stage === 'posting' or 'done'.
- *
- * Ticket state mapping (issue #931 AC3):
- *   drafting     → current item in progress (shown in label)
- *   created      → success log entry
- *   failed       → error log entry
- *   draft_ready  → skipped log entry (not selected or queue halted)
- *   size_warning → skipped log entry (body too large, not posted)
+ * _bcRenderPostingProgress — full ticket checklist with per-row status during Post.
+ * Shows every selected ticket upfront; rows tick to ✓ as each issue is created.
  */
+function _bcPostingEntryRow(t) {
+  const title = escHtml(t.title || `Ticket ${t.index + 1}`);
+  let rowClass = 'bc-pg-entry';
+  let icon = '<i class="ti ti-circle bc-pg-entry-check" aria-hidden="true"></i>';
+  let badge = 'Waiting';
+
+  if (t.state === 'drafting') {
+    rowClass += ' bc-pg-entry--active';
+    icon = '<i class="ti ti-loader-2 bc-pg-entry-check bc-pg-spin" aria-hidden="true"></i>';
+    badge = 'Posting…';
+  } else if (t.state === 'created') {
+    rowClass += ' bc-pg-entry--success';
+    icon = '<i class="ti ti-check bc-pg-entry-check" aria-hidden="true"></i>';
+    badge = t.issue_num ? `#${t.issue_num}` : 'Created';
+  } else if (t.state === 'failed') {
+    rowClass += ' bc-pg-entry--error';
+    icon = '<i class="ti ti-x bc-pg-entry-check" aria-hidden="true"></i>';
+    badge = (t.error || 'Failed').slice(0, 48);
+  } else if (t.state === 'size_warning') {
+    rowClass += ' bc-pg-entry--skipped';
+    icon = '<i class="ti ti-minus bc-pg-entry-check" aria-hidden="true"></i>';
+    badge = 'Skipped';
+  }
+
+  return `<div class="${rowClass}" data-bc-index="${t.index}">`
+    + icon
+    + `<span class="bc-pg-entry-title" title="${title}">${title}</span>`
+    + `<span class="bc-pg-entry-badge">${escHtml(badge)}</span>`
+    + '</div>';
+}
+
 function _bcRenderPostingProgress(tickets, postingTicketIndices) {
   const pgWrap = document.getElementById('bc-posting-progress');
   if (!pgWrap) return;
 
-  // Only operate on the tickets that were selected for posting
+  // State mapping: drafting → active; created → success; failed → error; size_warning → skipped
   const postingSet = new Set(postingTicketIndices || []);
   const relevant = postingSet.size > 0
     ? tickets.filter(t => postingSet.has(t.index))
     : tickets;
 
   const total      = relevant.length;
-  const created    = relevant.filter(t => t.state === 'created').length;
-  const inProgress = relevant.filter(t => t.state === 'drafting').length;
-
-  // Progress fraction: count of resolved tickets (created + failed + skipped)
   const resolved = relevant.filter(t =>
-    t.state === 'created' || t.state === 'failed' ||
-    t.state === 'size_warning'
+    t.state === 'created' || t.state === 'failed' || t.state === 'size_warning'
   ).length;
+  const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
 
-  // Current item label
-  let current = '';
+  let current = 'Waiting…';
   const draftingTicket = relevant.find(t => t.state === 'drafting');
   if (draftingTicket) {
     current = `Posting: ${draftingTicket.title || `ticket ${draftingTicket.index + 1}`}`;
   } else if (resolved === total && total > 0) {
     current = 'All done.';
-  } else if (inProgress === 0 && resolved < total) {
-    current = 'Waiting…';
   }
 
-  // Log entries: created → success, failed → error, size_warning/draft_ready after stop → skipped
-  const logTail = relevant
-    .filter(t => t.state === 'created' || t.state === 'failed' || t.state === 'size_warning')
-    .map(t => {
-      if (t.state === 'created') {
-        const numLabel = t.issue_num ? `#${t.issue_num}` : 'Created';
-        return {
-          type: 'success',
-          message: `${t.title || ''} — ${numLabel}`,
-          timestamp: '—',
-        };
-      } else if (t.state === 'failed') {
-        return {
-          type: 'fail',
-          message: `${t.title || ''} — ${(t.error || 'Failed').slice(0, 60)}`,
-          timestamp: '—',
-        };
-      } else {
-        return {
-          type: 'warn',
-          message: `${t.title || ''} — Skipped`,
-          timestamp: '—',
-        };
-      }
-    });
+  const rowsHtml = relevant.map(_bcPostingEntryRow).join('');
 
-  if (typeof mountProgressActivity === 'function') {
-    const payload = {
-      status: resolved === total && total > 0 ? 'done' : 'running',
-      mode: 'bar',
-      done: resolved,
-      total,
-      current,
-      result: resolved === total && total > 0 ? `Posted ${resolved} of ${total}` : '',
-      log_tail: logTail,
-    };
-    const existing = typeof getProgressActivityPayload === 'function'
-      ? getProgressActivityPayload('bc-posting-progress')
-      : null;
-    if (existing && typeof patchProgressActivity === 'function') {
-      patchProgressActivity('bc-posting-progress', payload, { id: 'bc-posting-pa' });
-    } else {
-      mountProgressActivity(pgWrap, payload, { id: 'bc-posting-pa' });
-    }
-  }
+  pgWrap.innerHTML = ''
+    + '<div class="bc-pg-wrap">'
+    + '  <div class="bc-pg-header">'
+    + `    <span class="bc-pg-current">${escHtml(current)}</span>`
+    + `    <span class="bc-pg-count">${resolved} of ${total}</span>`
+    + '  </div>'
+    + `  <div class="bc-pg-bar-track"><div class="bc-pg-bar" style="width:${pct}%"></div></div>`
+    + `  <div class="bc-pg-log" id="bc-pg-log">${rowsHtml}</div>`
+    + '</div>';
+
+  const activeRow = pgWrap.querySelector('.bc-pg-entry--active');
+  if (activeRow) activeRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
   // Show component, hide ticket list and parallel banner
   pgWrap.classList.remove('hidden');
@@ -20889,7 +20924,7 @@ function _bcHidePostingProgress() {
   const list   = document.getElementById('bc-ticket-list');
   const banner = document.getElementById('bc-parallel-banner');
   const bulk   = document.getElementById('bc-bulk-controls');
-  if (pgWrap) pgWrap.classList.add('hidden');
+  if (pgWrap) { pgWrap.classList.add('hidden'); pgWrap.innerHTML = ''; }
   if (list)   list.classList.remove('hidden');
   if (banner) banner.classList.remove('hidden');
 }

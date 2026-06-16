@@ -29,6 +29,7 @@ from .system import router as system_router
 from .tickets import router as tickets_router
 from .timeline import router as timeline_router
 from .project_branches import router as project_branches_router
+from .sprint_live import router as sprint_live_router
 from .sprint_preflight import router as sprint_preflight_router
 
 __all__ = [
@@ -56,5 +57,6 @@ __all__ = [
     "tickets_router",
     "timeline_router",
     "project_branches_router",
+    "sprint_live_router",
     "sprint_preflight_router",
 ]

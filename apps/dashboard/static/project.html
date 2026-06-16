@@ -6712,6 +6712,7 @@
       padding: 14px 20px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
     .logs-filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    @media (max-width:640px) { .logs-filter-bar { display:grid; grid-template-columns:1fr 1fr; gap:8px; } }
     .logs-chip-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .logs-chip-label {
       font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;

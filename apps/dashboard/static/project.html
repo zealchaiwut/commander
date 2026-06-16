@@ -7384,10 +7384,11 @@
     .anl-scope { display: flex; gap: 8px; }
     .anl-scope-pill { font-family: var(--mono); font-size: 12px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
     .anl-scope-pill select { background: none; border: none; outline: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
-    .anl-tab-bar { display: flex; gap: 6px; margin-bottom: 16px; }
-    .anl-tab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-    .anl-tab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
-    .anl-tab-btn:hover:not(.active) { background: var(--surface); }
+    .anl-tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+    .anl-tab-btn { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: color .15s, border-bottom-color .15s; white-space: nowrap; }
+    .anl-tab-btn.active { color: var(--text); font-weight: 600; border-bottom-color: var(--blue); }
+    .anl-tab-btn:hover:not(.active) { color: var(--text); }
+    .anl-tab-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
     /* Sprint sub-nav: Board / Running / History (issue #798) */
@@ -9212,16 +9213,16 @@
           </div>
         </div>
 
-        <!-- Sub-tab bar -->
+        <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
         <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
-          <button class="anl-tab-btn active" id="anl-tab-calibration" role="tab"
-                  aria-selected="true" onclick="anlShowTab('calibration')">Calibration</button>
-          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
-                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn active" id="anl-tab-trends" role="tab"
+                  aria-selected="true" onclick="anlShowTab('trends')">Trends</button>
           <button class="anl-tab-btn" id="anl-tab-status" role="tab"
                   aria-selected="false" onclick="anlShowTab('status')">Status</button>
-          <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
-                  aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
+          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
+                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
+                  aria-selected="false" onclick="anlShowTab('calibration')">Calibration</button>
         </div>
 
         <!-- Calibration panel -->
@@ -26153,10 +26154,9 @@ document.addEventListener('keydown', function(e) {
     else window.anlFetchCalibration();
   };
 
-  // Override metricsInit (the velocity-charts version is retired): the Analytics
-  // tab opens on Calibration and fetches both panels' data.
+  // Override metricsInit: Analytics tab opens on Trends (first tab) and lazy-loads data.
   window.metricsInit = function () {
-    window.anlShowTab('calibration');
+    window.anlShowTab('trends');
   };
 }());
 

@@ -1475,6 +1475,35 @@ def upsert_issues(repo: str, issues: list[dict]) -> int:
     return len(issues)
 
 
+def mark_issues_closed(repo: str, numbers: list[int]) -> int:
+    """Flip mirrored issues to closed by number (issue-mirror reconcile).
+
+    Mirror reads reconstruct from the `raw` JSON (see _row_to_issue), so the
+    state column alone is not enough — the raw blob's `$.state` is patched too,
+    via json_set, preserving every other field (title, labels, body). Used by
+    the open-set reconcile to correct rows that the incremental poll missed
+    closing (an issue can fall off the recently-updated window before its close
+    is observed, leaving a permanently-stale `open` row that keeps a finished
+    sprint on the board). Returns the number of rows updated.
+    """
+    if not numbers:
+        return 0
+    updated = 0
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        for number in numbers:
+            cur = conn.execute(
+                """UPDATE issues
+                       SET state = 'closed',
+                           raw   = json_set(raw, '$.state', 'closed')
+                   WHERE repo = ? AND issue_number = ? AND state = 'open'""",
+                (repo, int(number)),
+            )
+            updated += cur.rowcount
+        conn.commit()
+    return updated
+
+
 def _row_to_issue(row: sqlite3.Row) -> dict:
     """Reconstruct a gh-CLI-shaped issue dict from a mirror row."""
     if row["raw"]:

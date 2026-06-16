@@ -21,6 +21,15 @@ import {
   paToggleLog,
   injectProgressActivityCss,
 } from "./progress-activity.js";
+import {
+  mountProgressActivity,
+  patchProgressActivity,
+  patchProgressActivityStep,
+  unmountProgressActivity,
+  appendProgressActivityLog,
+  getProgressActivityPayload,
+  BOARD_OVERLAY_PA_ID,
+} from "./progress-host.js";
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
 import "./sprint-board/index.js";
 
@@ -37,6 +46,13 @@ root.AGENT_NAMES = AGENT_NAMES;
 root.renderProgressActivity = renderProgressActivity;
 root.updateProgressActivityLog = updateProgressActivityLog;
 root.paToggleLog = paToggleLog;
+root.mountProgressActivity = mountProgressActivity;
+root.patchProgressActivity = patchProgressActivity;
+root.patchProgressActivityStep = patchProgressActivityStep;
+root.unmountProgressActivity = unmountProgressActivity;
+root.appendProgressActivityLog = appendProgressActivityLog;
+root.getProgressActivityPayload = getProgressActivityPayload;
+root.BOARD_OVERLAY_PA_ID = BOARD_OVERLAY_PA_ID;
 injectProgressActivityCss();
 root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;

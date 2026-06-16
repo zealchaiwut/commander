@@ -349,6 +349,16 @@ automatically when npm is present (skip with `SETUP_MACHINE_SKIP_NPM=1`); its
 doctor reports npm as informational, never a hard fail. CI rebuilds the bundle
 and runs a design gate over `static/src/` on every push.
 
+### Design tokens
+
+Shared visual constants — colors, spacing, type scale, radii, shadows, and
+z-index — live in `apps/dashboard/static/css/tokens.css` (issue #1045) as the
+single source of truth, and the file is linked from every page. Values are
+sampled from the existing pages (no invented values), and each page's own
+`:root` overrides load after the token sheet, so linking it never restyles a
+page on its own. Prefer these tokens over hardcoded hex/px values when editing
+frontend markup or styles.
+
 ---
 
 ## Backup & Restore

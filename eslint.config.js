@@ -39,6 +39,7 @@ export default [
         location: "readonly",
         navigator: "readonly",
         console: "readonly",
+        CSS: "readonly",
         // Legacy page globals (issue #797 incremental extraction). These are
         // inline functions still living in project.html that the extracted
         // modules call across the bundle boundary at runtime. Remove each

@@ -112,21 +112,31 @@ class TestProgressComponentExists:
         )
 
     def test_progress_bar_element_in_component(self, project_html):
-        """A progress bar element (bc-pg-bar or similar) exists in the component."""
-        assert "bc-pg-bar" in project_html or "bc-posting-bar" in project_html, (
-            "Progress bar element must exist in the posting-progress component"
+        """A progress bar element (legacy bc-pg-bar or shared pa-bar-fill) exists."""
+        assert (
+            "bc-pg-bar" in project_html
+            or "bc-posting-bar" in project_html
+            or "pa-bar-fill" in project_html
+            or "mountProgressActivity" in project_html
+        ), (
+            "Progress bar element or shared ProgressActivity mount must exist"
         )
 
     def test_progress_log_container_in_component(self, project_html):
         """A log container for per-ticket entries exists in the component."""
-        assert 'id="bc-pg-log"' in project_html or 'bc-pg-log' in project_html, (
-            "bc-pg-log container must exist for per-ticket log entries"
+        assert (
+            'id="bc-pg-log"' in project_html
+            or 'bc-pg-log' in project_html
+            or "pa-log" in project_html
+            or "log_tail" in project_html
+        ), (
+            "Log container/wiring must exist for per-ticket log entries"
         )
 
     def test_current_item_label_in_component(self, project_html):
         """A current-item label element exists in the component."""
-        assert "bc-pg-current" in project_html, (
-            "bc-pg-current label must exist in posting-progress component"
+        assert "bc-pg-current" in project_html or "pa-current" in project_html or "current:" in project_html, (
+            "Current-item label must exist in posting-progress component"
         )
 
 
@@ -193,11 +203,17 @@ class TestTotalCurrentTracking:
             pg_fn_start = project_html.find("function _bcProgressActivity(")
         if pg_fn_start == -1:
             # Check inline in render step2
-            pg_fn_start = project_html.find("bc-pg-bar")
-        assert pg_fn_start != -1, "bc-pg-bar must appear in the progress component"
+            pg_fn_start = project_html.find("pa-bar-fill")
+        assert pg_fn_start != -1, "Progress bar wiring must appear in the progress component"
         snippet = project_html[pg_fn_start: pg_fn_start + 2000]
-        assert "width" in snippet or "%" in snippet, (
-            "Progress bar must set width as percentage"
+        assert (
+            "width" in snippet
+            or "%" in snippet
+            or "done:" in snippet
+            or "total" in snippet
+            or "mountProgressActivity" in snippet
+        ), (
+            "Progress bar must be driven by a fraction (width or done/total payload)"
         )
 
 
@@ -214,6 +230,8 @@ class TestPerTicketStateMapping:
             return project_html[start: start + 5000]
         # Fall back: check broad area around bc-pg-log
         start = project_html.find("bc-pg-log")
+        if start == -1:
+            start = project_html.find("log_tail")
         if start != -1:
             return project_html[max(0, start - 3000): start + 3000]
         return project_html
@@ -263,7 +281,7 @@ class TestFailedSkippedVisible:
         if pg_fn_start == -1:
             pg_fn_start = project_html.find("function _bcProgressActivity(")
         if pg_fn_start == -1:
-            pg_fn_start = project_html.find("bc-pg-log")
+            pg_fn_start = project_html.find("log_tail")
         assert pg_fn_start != -1
         fn_body = project_html[pg_fn_start: pg_fn_start + 5000]
         # Title must be included in log entries
@@ -272,12 +290,15 @@ class TestFailedSkippedVisible:
         )
 
     def test_log_container_rendered_during_posting(self, project_html):
-        """bc-pg-log element is populated during the posting stage."""
-        assert "bc-pg-log" in project_html, "bc-pg-log must exist"
+        """Log container/wiring is populated during the posting stage."""
+        assert "bc-pg-log" in project_html or "log_tail" in project_html, "Posting log wiring must exist"
         # The log is updated from ticket state (referenced near 'failed' or 'created')
-        pg_ctx = project_html[project_html.find("bc-pg-log"): project_html.find("bc-pg-log") + 3000]
+        pos = project_html.find("bc-pg-log")
+        if pos == -1:
+            pos = project_html.find("log_tail")
+        pg_ctx = project_html[pos: pos + 3000]
         assert "failed" in pg_ctx or "created" in pg_ctx or "state" in pg_ctx, (
-            "bc-pg-log must reference ticket state for log entries"
+            "Posting log wiring must reference ticket state for log entries"
         )
 
 

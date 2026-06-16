@@ -337,7 +337,7 @@ export async function smgmtFinishSprint(label) {
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
     }
     actionRows.push(
-      '<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>',
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} sprint ticket${allTickets.length !== 1 ? 's' : ''}</div>`,
     );
     actionsEl.innerHTML = actionRows.join("");
 
@@ -359,16 +359,13 @@ export async function _fsConfirm() {
   const owner = parts[0];
   const repoName = parts.slice(1).join("/");
 
-  // Collect selected tickets (number + title for progress labels — AC3).
-  const checkboxes = Array.from(
-    document.querySelectorAll("#fs-ticket-list input[type=checkbox]"),
-  );
-  const selectedTickets = checkboxes
-    .filter((c) => c.checked)
-    .map((c) => ({
-      number: parseInt(c.dataset.issue, 10),
-      title: c.dataset.title || `#${c.dataset.issue}`,
-    }));
+  // Always close every open ticket in the sprint preview (operator can uncheck
+  // for visibility, but confirm sends the full set).
+  const allTickets = _fsPreview.all_tickets || [];
+  const selectedTickets = allTickets.map((t) => ({
+    number: t.number,
+    title: t.title || `#${t.number}`,
+  }));
   const selectedNums = selectedTickets.map((t) => t.number);
 
   const confirmBtn = document.getElementById("fs-confirm-btn");

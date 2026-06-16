@@ -2462,13 +2462,17 @@ def environment_run_state(slug: str, env: str):
             detail="Run state is only available for host=local environments",
         )
     label = _deploy_actions.restart_label(entry)
-    if not label:
-        return {"ok": True, "env": env, "host": "local", "state": "idle"}
-    result = subprocess.run(
-        _deploy_actions.build_print_command(label), capture_output=True, text=True
-    )
-    state = _deploy_actions.interpret_run_state(result.returncode)
-    return {"ok": True, "env": env, "host": "local", "state": state}
+    if label:
+        result = subprocess.run(
+            _deploy_actions.build_print_command(label), capture_output=True, text=True
+        )
+        state = _deploy_actions.interpret_run_state(result.returncode)
+        return {"ok": True, "env": env, "host": "local", "state": state, "probe": "launchd"}
+
+    port_state = _deploy_actions.interpret_script_run_state(entry)
+    if port_state != "idle":
+        return {"ok": True, "env": env, "host": "local", "state": port_state, "probe": "port"}
+    return {"ok": True, "env": env, "host": "local", "state": "idle"}
 
 
 @app.get("/api/projects/{slug}/environments/{env}/deploy-status")
@@ -11166,6 +11170,7 @@ def sprint_branch_merge(owner: str, repo_name: str, body: SprintBranchMergeBody)
 class BulkCompleteSprintBody(BaseModel):
     confirmed: bool
     selected_ticket_numbers: list[int] = []
+    skip_issue_close: bool = False
 
 
 @app.post("/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete")
@@ -11212,16 +11217,17 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     closed = 0
     errors: list[str] = []
 
-    for iss in sprint_issues:
-        issue_num = iss["number"]
-        if selected is not None and issue_num not in selected:
-            continue
-        try:
-            github_client.close_issue(issue_num, repo_name=repo, reason="completed")
-            closed += 1
-        except subprocess.CalledProcessError as exc:
-            err_msg = exc.stderr.strip() if exc.stderr else str(exc)
-            errors.append(f"#{issue_num}: {err_msg}")
+    if not body.skip_issue_close:
+        for iss in sprint_issues:
+            issue_num = iss["number"]
+            if selected is not None and issue_num not in selected:
+                continue
+            try:
+                github_client.close_issue(issue_num, repo_name=repo, reason="completed")
+                closed += 1
+            except subprocess.CalledProcessError as exc:
+                err_msg = exc.stderr.strip() if exc.stderr else str(exc)
+                errors.append(f"#{issue_num}: {err_msg}")
 
     completed = 0
     now = datetime.now(timezone.utc).isoformat()

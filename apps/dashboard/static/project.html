@@ -6929,8 +6929,8 @@
       font-size: 11px; font-weight: 600; padding: 1px 6px;
       border-radius: 10px; border: 1px solid; white-space: nowrap;
     }
-    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: rgba(34,197,94,.25); }
-    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: rgba(239,68,68,.25); }
+    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: var(--green); }
+    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: var(--red); }
     .evl-effect-chip--neutral{ background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     .evl-count-badge {
       font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
@@ -6985,8 +6985,8 @@
     .lr-badge.agent  { background: var(--green-bg);  color: var(--green); }
     .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
     .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
-    .lr-badge.error  { background: #fee2e2; color: #ef4444; }
-    .lr-badge.sprint { background: #d1fae5; color: #065f46; }
+    .lr-badge.error  { background: var(--red-bg);   color: var(--red); }
+    .lr-badge.sprint { background: var(--green-bg); color: var(--green); }
     .lr-body {
       flex: 1; min-width: 0; display: flex; align-items: baseline;
       gap: 8px; flex-wrap: wrap;
@@ -7035,6 +7035,15 @@
     .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
     .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
 
+    /* ── Severity chips (issue #1062) ── */
+    .evl-sev-chip {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 44px; text-align: center;
+    }
+    .evl-sev-chip--info  { background: var(--surface-2); color: var(--text-sub); }
+    .evl-sev-chip--warn  { background: var(--amber-bg);  color: var(--amber); }
+    .evl-sev-chip--error { background: var(--red-bg);    color: var(--red); }
+
     /* Activity log entity chips */
     .evl-chip {
       display: inline-flex; align-items: center; gap: 3px;
@@ -7042,13 +7051,13 @@
       border-radius: 99px; line-height: 1.45; vertical-align: 1px;
     }
     .evl-chip--issue {
-      background: #e0f2fe; color: #0369a1; text-decoration: none;
+      background: var(--blue-bg); color: var(--blue); text-decoration: none;
     }
     a.evl-chip--issue:hover { text-decoration: underline; }
-    .evl-chip--sprint { background: #d1fae5; color: #065f46; }
+    .evl-chip--sprint { background: var(--green-bg); color: var(--green); }
     .evl-chip--branch {
       font-family: var(--mono); font-size: 10px;
-      background: #f3f4f6; color: #111827; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
     }
     .evl-chip--branch i { font-size: 10px; opacity: .65; }
     .evl-chip--agent { text-transform: lowercase; }
@@ -7060,38 +7069,38 @@
       background: var(--surface-2); color: var(--text-sub);
       border: 1px solid var(--border);
     }
-    .evl-dur-pill.warn { background: #fef3c7; color: #92400e; border-color: rgba(217,119,6,.25); }
-    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: rgba(37,99,235,.2); }
+    .evl-dur-pill.warn { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
+    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
     /* issue #920: backend label chip (cline / claude-code) in activity pills */
     .evl-backend-chip {
       display: inline-block;
       font-size: 10px; font-weight: 600; text-transform: lowercase;
       padding: 1px 6px; border-radius: 99px;
-      background: var(--purple-bg, #ede9fe); color: var(--purple, #7c3aed);
-      border: 1px solid rgba(124,58,237,.2);
+      background: var(--purple-bg); color: var(--purple);
+      border: 1px solid var(--purple);
       vertical-align: middle;
     }
 
     /* Error rows — red tint + expandable detail panel */
     .evl-log-row.evl-row-error {
-      background: #fef2f2;
-      border-left: 3px solid #ef4444;
+      background: var(--red-bg);
+      border-left: 3px solid var(--red);
       padding-left: 13px;
       flex-wrap: wrap;
     }
-    .evl-log-row.evl-row-error:hover { background: #fee2e2; }
+    .evl-log-row.evl-row-error:hover { background: var(--red-bg); }
     .evl-error-panel {
       flex: 1 1 100%;
       margin: 6px 0 2px calc(54px + 62px + 11px);
       padding: 10px 12px;
       background: var(--surface);
-      border: 1px solid #fecaca;
+      border: 1px solid var(--red);
       border-radius: 8px;
       font-size: 12px;
       line-height: 1.5;
     }
     .evl-error-head {
-      font-weight: 700; color: #ef4444; margin-bottom: 4px;
+      font-weight: 700; color: var(--red); margin-bottom: 4px;
     }
     .evl-error-loc {
       color: var(--blue); font-family: var(--mono); font-size: 11px;
@@ -7111,9 +7120,9 @@
     }
     .evl-error-btn:hover { background: var(--surface-hover); color: var(--text); }
     .evl-error-btn--action {
-      border-color: #d97706; color: #d97706; background: #fffbeb;
+      border-color: var(--amber); color: var(--amber); background: var(--amber-bg);
     }
-    .evl-error-btn--action:hover { background: #fef3c7; }
+    .evl-error-btn--action:hover { background: var(--amber-bg); }
 
     /* ── Branch cleanup controls (issue #634) ── */
     .evl-stale-banner-inner {
@@ -23384,6 +23393,18 @@ function _evlDayLabel(ts) {
   return base;
 }
 
+function _evlSeverity(ev) {
+  var type = ev.type || '';
+  var detail = ev.detail || {};
+  if (type === 'ticket_failed') return 'error';
+  if (type === 'agent_finished') {
+    var st = detail.status || '';
+    if (st === 'error' || st === 'timed_out') return 'error';
+    if (st === 'partial') return 'warn';
+  }
+  return 'info';
+}
+
 function _evlBadgeLabel(source, type) {
   if (type === 'ticket_failed') return 'ERROR';
   if (source === 'github') return 'GITHUB';
@@ -23755,6 +23776,9 @@ function evlRenderTimeline(events, filter) {
       var timePart = (ev.timestamp || '').substring(11, 16);
       var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
       var badgeCls = _evlBadgeCls(badgeLabel);
+      var sev = _evlSeverity(ev);
+      var sevChip = '<span class="evl-sev-chip evl-sev-chip--' + escHtml(sev) + '">'
+        + (sev === 'error' ? 'ERROR' : sev === 'warn' ? 'WARN' : 'INFO') + '</span>';
       var desc = _evlDescHtml(ev);
       var actor = (ev.source === 'github' && ev.actor)
         ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
@@ -23768,6 +23792,7 @@ function evlRenderTimeline(events, filter) {
         + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '">'
         + '<span class="lr-time">' + escHtml(timePart) + '</span>'
         + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+        + sevChip
         + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
         + durPill
         + errPanel

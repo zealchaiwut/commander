@@ -1531,7 +1531,7 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
             <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
-          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
+          <span class="smgmt-sprint-name">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${completeCount}/${totalCount}` : "—"}
           </span>
@@ -1761,6 +1761,14 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
 
+  // Agent chip derived from ticket status for consistent card anatomy (issue #1055)
+  const _planningAgent =
+    ticket.status === "in-progress" ? "coder" :
+    ticket.status === "sit" ? "tester" : null;
+  const planningAgentHtml = _planningAgent
+    ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(_planningAgent)}">${escHtml(_planningAgent.toUpperCase())}</span>`
+    : "";
+
   const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
   const sk = escHtml(label);
 
@@ -1791,6 +1799,7 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
       ${_smgmtTicketEstHtml(ticket)}
+      ${planningAgentHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
@@ -1856,7 +1865,7 @@ export function _smgmtRenderBacklog(tickets) {
       _blBacklogAll.length === 0
         ? "No backlog tickets — all caught up"
         : "No tickets match the active filters";
-    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">${msg}</div>`;
+    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:var(--space-3) var(--space-4);text-align:center;">${msg}</div>`;
   } else {
     ticketsEl.innerHTML = sorted
       .map((t) => _smgmtBacklogTicketHtml(t, allSprintNums))

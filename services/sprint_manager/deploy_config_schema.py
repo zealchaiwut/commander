@@ -87,11 +87,6 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "port": 8011,
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
-            "deploy_not_ready_message": (
-                "Deploy lifecycle is not ready in vector-search-demo yet — "
-                "ship scripts/deploy-start.sh and scripts/deploy-stop.sh "
-                "(plus Milvus start/stop) on this branch before using Deploy."
-            ),
         },
         "uat": {
             "host": "local",
@@ -99,11 +94,6 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "port": 8010,
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
-            "deploy_not_ready_message": (
-                "Deploy lifecycle is not ready in vector-search-demo yet — "
-                "scripts/deploy-start.sh and scripts/deploy-stop.sh are missing "
-                "on develop; add them in the vector-search-demo repo first."
-            ),
         },
     },
 }

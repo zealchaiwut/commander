@@ -425,6 +425,83 @@ def full_sync_issues_mirror(repo: str, db_module=None) -> dict:
     return {"status": 200, "synced": total, "rate_limited": False}
 
 
+# How often (in sync-loop sweeps) to run the open-set reconcile. The incremental
+# poll already captures most closures via sort=updated; the reconcile is a slower
+# safety net for closures it missed, so it need not run every sweep.
+RECONCILE_EVERY_SWEEPS = int(os.environ.get("MIRROR_RECONCILE_EVERY_SWEEPS", "20"))
+
+
+def _fetch_open_issue_numbers(owner: str, repo_name: str) -> set[int]:
+    """Return the set of currently-open issue numbers on GitHub (REST, paginated).
+
+    Excludes PRs. Raises on HTTP error so the caller can skip the reconcile and
+    leave the mirror untouched rather than mass-closing on a transient failure.
+    """
+    token = _get_gh_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/issues"
+    open_nums: set[int] = set()
+    for page in range(1, FULL_SYNC_MAX_PAGES + 1):
+        resp = httpx.get(
+            url, headers=headers,
+            params={"state": "open", "per_page": ISSUES_PER_PAGE, "page": page,
+                    "sort": "created", "direction": "asc"},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        open_nums.update(
+            it["number"] for it in payload if "pull_request" not in it
+        )
+        if len(payload) < ISSUES_PER_PAGE:
+            break
+    return open_nums
+
+
+def reconcile_closed_issues(repo: str, db_module=None) -> dict:
+    """Mark mirror rows closed when GitHub no longer reports them open (#756).
+
+    The incremental ETag poll can miss a closure (sync down, rate-limited, or the
+    issue paged off the recently-updated window), leaving a stale `open` row that
+    keeps a finished sprint on the board. This diffs the mirror's open set against
+    GitHub's live open set and closes the difference. Returns {reconciled: N} or
+    {error: ...} (mirror left untouched on fetch failure).
+    """
+    if db_module is None:
+        import db as db_module  # type: ignore[assignment]
+
+    if "/" in repo:
+        owner, repo_name = repo.split("/", 1)
+    else:
+        owner, repo_name = repo, repo
+
+    mirror_open = {
+        i["number"] for i in db_module.get_mirrored_issues(repo, state="open")
+        if i.get("number") is not None
+    }
+    if not mirror_open:
+        return {"reconciled": 0}
+
+    try:
+        gh_open = _fetch_open_issue_numbers(owner, repo_name)
+    except Exception as exc:
+        logger.warning("issues mirror reconcile fetch failed for %s: %s", repo, exc)
+        return {"status": 0, "reconciled": 0, "error": str(exc)}
+
+    stale = sorted(mirror_open - gh_open)
+    n = db_module.mark_issues_closed(repo, stale) if stale else 0
+    if n:
+        logger.info(
+            "issues mirror %s: reconciled %d stale-open row(s) to closed: %s",
+            repo, n, stale,
+        )
+    return {"reconciled": n, "stale": stale}
+
+
 BOOTSTRAP_RESTORE_NOTICE = (
     "history/order/settings start empty — restore from backup if migrating "
     "(backup restore / restore-db)"
@@ -529,6 +606,14 @@ async def run_issues_sync_loop(
                 github_milestones.sync_milestones_mirror(repo, db_module=db_module)
             except Exception as exc:  # never let the background task die
                 logger.warning("milestones mirror sync error for %s: %s", repo, exc)
+            # Open-set reconcile (#756): periodic safety net that closes mirror
+            # rows the incremental poll missed closing — runs every Nth sweep so
+            # it adds little quota. Never let it kill the loop.
+            if RECONCILE_EVERY_SWEEPS > 0 and count % RECONCILE_EVERY_SWEEPS == 0:
+                try:
+                    reconcile_closed_issues(repo, db_module=db_module)
+                except Exception as exc:
+                    logger.warning("issues mirror reconcile error for %s: %s", repo, exc)
         count += 1
         if iterations is not None and count >= iterations:
             return

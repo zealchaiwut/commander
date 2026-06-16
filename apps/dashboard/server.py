@@ -4730,6 +4730,41 @@ def _read_plan_json(project_root: Path, sprint_label: str) -> Optional[dict]:
     return None
 
 
+
+
+def _locally_signed_off_sprint_labels(project_root: Path) -> set[str]:
+    """Sprint labels signed off via Merge Sprint without a GitHub Executive Summary.
+
+    Board panes hide when ticket count is zero AND the sprint is finished.
+    ``finished_sprints`` normally comes from the Executive Summary issue; this
+    set covers merge_sprint / bulk_complete sign-offs that closed tickets but
+    never posted (or failed to post) the summary issue.
+    """
+    labels: set[str] = set()
+    sprints_dir = _commander_dir(project_root) / "sprints"
+    if not sprints_dir.exists():
+        return labels
+    for plan_file in sprints_dir.glob("*-plan.json"):
+        label = plan_file.name[: -len("-plan.json")]
+        if not _SPRINT_LABEL_RE.match(label):
+            continue
+        plan = _read_plan_json(project_root, label)
+        if not plan:
+            continue
+        if (plan.get("state") or "").lower() != "completed":
+            continue
+        er = (plan.get("end_reason") or "").lower()
+        if er in ("merge_sprint", "bulk_complete"):
+            labels.add(label)
+    return labels
+
+
+def _parse_pr_number_from_url(url: str | None) -> int | None:
+    if not url:
+        return None
+    m = re.search(r"/pull/(\d+)", str(url))
+    return int(m.group(1)) if m else None
+
 def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
     """Map parent sprint labels → child re-run sub-sprint labels still in play."""
     sprints_dir = _commander_dir(project_root) / "sprints"
@@ -5383,9 +5418,12 @@ def get_sprint_management_issues(repo: str):
         and n < min_active_sprint
     ]
 
-    # Finished sprints = those with a posted "Sprint N Executive Summary" issue.
+    project_root = _project_root_path(repo)
+
+    # Finished sprints = those with a posted "Sprint N Executive Summary" issue,
+    # plus locally signed-off merges (merge_sprint / bulk_complete).
     finished_map = _finished_sprint_summaries(repo)
-    finished_set = set(finished_map.keys())
+    finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
@@ -5395,7 +5433,6 @@ def get_sprint_management_issues(repo: str):
         lbl for lbl in all_sprint_labels
         if sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set
     ]
-    project_root = _project_root_path(repo)
     order = _load_sprint_order(project_root, renderable_sprint_labels)
 
     # Apply per-sprint plan.json ordering; fallback to ascending issue number (issue #441)
@@ -8207,13 +8244,18 @@ def _outcome_from_ingested_row(
         from routers import sprint_history_service  # noqa: PLC0415
         _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
         for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
-            _eid = str(_extra.get("number"))
-            if not _eid or _eid in _seen:
+            _tid = _extra.get("ticket_id")
+            if _tid is None:
+                _tid = _extra.get("number")
+            if _tid is None or int(_tid) <= 0:
+                continue
+            _eid = str(_tid)
+            if _eid in _seen:
                 continue
             _st = (_extra.get("state") or "").lower()  # merged | closed | open
             _oc = "done" if _st == "merged" else ("failed" if _st == "closed" else "skipped")
             result_issues.append({
-                "number": _extra.get("number"),
+                "number": int(_tid),
                 "title": _extra.get("title", ""),
                 "outcome": _oc,
                 "elapsed_secs": None,
@@ -8239,6 +8281,14 @@ def _outcome_from_ingested_row(
 
     surl = enrich.get("summary_issue_url")
     summary_issue_num = enrich.get("summary_issue_num")
+    pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich.get("pr_number")
+    pr_url = None
+    if pr_number:
+        try:
+            pr_repo = github_client.get_repo_for_operation(project)
+            pr_url = f"https://github.com/{pr_repo}/pull/{int(pr_number)}"
+        except Exception:
+            pr_url = None
 
     return {
         "sprint_label": sprint_label,
@@ -8257,6 +8307,8 @@ def _outcome_from_ingested_row(
         "log_line_count": 0,
         "summary_issue_url": surl,
         "summary_issue_num": summary_issue_num,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
     }
 
 
@@ -10504,7 +10556,7 @@ def _gh_merge_branch_via_pr(
     base: str,
     title: str,
     delete_branch: bool = True,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, int | None]:
     """Create (or reuse) a PR head→base and merge it. Returns (ok, detail)."""
     pr_url: Optional[str] = None
     try:
@@ -10529,7 +10581,7 @@ def _gh_merge_branch_via_pr(
                 if m and ("already exists" in stderr or "already have" in stderr.lower()):
                     pr_url = m.group(0)
                 else:
-                    return False, stderr or "PR create failed"
+                    return False, stderr or "PR create failed", None
             else:
                 pr_url = create.stdout.strip()
         merge_args = ["gh", "pr", "merge", pr_url, "--repo", repo, "--merge"]
@@ -10537,10 +10589,10 @@ def _gh_merge_branch_via_pr(
             merge_args.append("--delete-branch")
         merge_res = subprocess.run(merge_args, capture_output=True, text=True, timeout=120)
         if merge_res.returncode != 0:
-            return False, merge_res.stderr.strip() or "PR merge failed"
-        return True, pr_url or f"{head} → {base}"
+            return False, merge_res.stderr.strip() or "PR merge failed", None
+        return True, pr_url or f"{head} → {base}", _parse_pr_number_from_url(pr_url)
     except Exception as exc:
-        return False, str(exc)
+        return False, str(exc), None
 
 
 def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
@@ -10622,7 +10674,7 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
     errors: list[str] = []
     project_root = _project_root_path(repo)
     for step in _merge_steps_for_sprint_chain(project_root, repo, base_label):
-        ok, detail = _gh_merge_branch_via_pr(
+        ok, detail, _pr_num = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
             delete_branch=step["delete_branch"],
@@ -10653,19 +10705,26 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     return _merge_steps_for_sprint_chain(project_root, repo, base_label)
 
 
-def _merge_sprint_branches_for_label(repo: str, label: str) -> list[str]:
-    """Execute merge steps for Merge Sprint on the requested label. Returns errors."""
+def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], int | None]:
+    """Execute merge steps for Merge Sprint on the requested label.
+
+    Returns (errors, develop_pr_number) where develop_pr_number is parsed from
+    the sprint branch → develop merge PR (for History / outcome links).
+    """
     errors: list[str] = []
+    develop_pr: int | None = None
     project_root = _project_root_path(repo)
     for step in _finish_merge_steps(project_root, repo, label):
-        ok, detail = _gh_merge_branch_via_pr(
+        ok, detail, pr_num = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
             delete_branch=step["delete_branch"],
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
-    return errors
+        elif step.get("base") == "develop" and pr_num:
+            develop_pr = pr_num
+    return errors, develop_pr
 
 
 def _next_sprint_number(sprint_label: str) -> int:
@@ -10851,7 +10910,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     errors: list[str] = []
 
     # 1. Merge sprint branches for this label only
-    errors.extend(_merge_sprint_branches_for_label(repo, label))
+    merge_errors, merge_pr_number = _merge_sprint_branches_for_label(repo, label)
+    errors.extend(merge_errors)
 
     # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)
     if body.merge_pr and body.sprint_pr_url:
@@ -10896,6 +10956,12 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             ended_at=_ended_at,
             end_reason="merge_sprint",
         )
+
+    if merge_pr_number:
+        try:
+            db.update_sprint_pr_number(base_label, merge_pr_number)
+        except Exception:
+            pass
 
     # Invalidate caches so board refreshes
     github_client.invalidate("open_issues_body:")
@@ -11075,7 +11141,7 @@ def sprint_branch_merge(owner: str, repo_name: str, body: SprintBranchMergeBody)
 
     repo = f"{owner}/{repo_name}"
     title = body.title.strip() or f"Merge `{body.head}` → `{body.base}`"
-    ok, detail = _gh_merge_branch_via_pr(
+    ok, detail, _pr_num = _gh_merge_branch_via_pr(
         repo, body.head, body.base, title, body.delete_branch,
     )
     if not ok:

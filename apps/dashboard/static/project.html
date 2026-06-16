@@ -2010,6 +2010,10 @@
       font-variant-numeric: tabular-nums; border: 1px solid var(--border);
     }
     .hist-badge i { font-size: 12px; }
+    @media (max-width: 640px) {
+      .est-bar { width: 100%; flex: none; }
+      .hist-badge { flex-shrink: 1; flex-grow: 0; }
+    }
     @media (max-width: 600px) {
       .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }

@@ -7094,6 +7094,12 @@
       .logs-search-wrap { max-width: 100%; }
     }
 
+    @media (max-width: 620px) {
+      .logs-toolbar-row2 { flex-direction: column; align-items: stretch; }
+      .logs-search-wrap { max-width: 100%; width: 100%; }
+      .logs-view-toggle { width: 100%; }
+    }
+
     /* Touch devices have no hover, so hover-revealed row actions never appear.
        Keep the actionable controls visible (the drag grip is intentionally left
        hidden — HTML5 drag-and-drop doesn't work on touch; use the ≡ row menu). */

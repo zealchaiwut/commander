@@ -469,8 +469,12 @@ def _sweep_plan_json_states(projects: list) -> None:
                 if age < COMMANDER_SWEEP_GRACE_SECONDS:
                     print(f"[startup-sweep] {label}: grace {age:.0f}s < {COMMANDER_SWEEP_GRACE_SECONDS}s — skip")
                     continue
-                # All three conditions met — route through the guarded writer (AC2)
-                ok, rejection = db.transition_sprint_state(label, "needs_rework", actor="reconcile", end_reason="process lost")
+                # All three conditions met — route through the guarded writer (AC2).
+                # transition_sprint_state returns a TransitionResult (not a tuple);
+                # read .accepted/.reason — unpacking it raised TypeError and the
+                # sweep silently skipped every stale sprint (caught below).
+                _tr = db.transition_sprint_state(label, "needs_rework", actor="reconcile", end_reason="process lost")
+                ok, rejection = _tr.accepted, _tr.reason
                 if ok:
                     _plan_json_set_state(project_root, label, "needs_rework", end_reason="process lost")
                     reconciled += 1

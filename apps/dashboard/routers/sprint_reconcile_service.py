@@ -151,13 +151,17 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     if not patch:
         return False
     # AC4: all writes go through transition_sprint_state, not direct DB calls.
+    # The local transition_sprint_state wrapper (above) returns a bool — True when
+    # the transition was applied — so return it directly. (It previously did
+    # `result.accepted`, which raised AttributeError on every settle: a bool has
+    # no `.accepted`. The DB-layer TransitionResult is a separate type.)
     result = transition_sprint_state(
         label,
         patch["state"],
         actor="reconcile",
         end_reason=patch.get("end_reason"),
     )
-    return result.accepted
+    return result
 
 
 def reconcile_project(project: str, limit: int = 40) -> list[str]:

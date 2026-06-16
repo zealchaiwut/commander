@@ -115,3 +115,34 @@ def test_tester_path_still_fatal_on_conflict(tmp_path):
     # Feature branch preserved (not deleted) for the tester path.
     branches = _git(clone, "branch", "--list", "feature/1073-conflict")
     assert "feature/1073-conflict" in branches
+
+
+def test_recovery_reset_failure_falls_through_to_merge(tmp_path, monkeypatch):
+    """If the recovery `git reset --hard` fails, the worktree is NOT on base — the
+    coder must NOT be dispatched into it. Hygiene falls through to a merge failure
+    instead of returning a clean recovery with a stale SHA."""
+    bare, clone = _setup_repos(tmp_path)
+    _make_conflicting_feature(clone, "feature/1073-conflict")
+
+    real_try = sm._try
+
+    def flaky_try(*cmd, cwd=None):
+        # Force only the recovery reset-to-base to fail; everything else is real.
+        if cmd[:3] == ("git", "reset", "--hard") and "origin/main" in cmd:
+            return (False, "", "simulated reset failure")
+        return real_try(*cmd, cwd=cwd)
+
+    monkeypatch.setattr(sm, "_try", flaky_try)
+
+    _, _, err = sm._worktree_hygiene(
+        worktree=clone,
+        ticket_id=1073,
+        merge_target="main",
+        is_retry=True,
+        repo_root=tmp_path,
+        recover_on_rebase_conflict=True,
+    )
+
+    assert err == "merge", f"failed recovery must fall through to 'merge', got {err!r}"
+    sidecar = tmp_path / ".commander" / "runtime" / "last-failure-1073.json"
+    assert sidecar.exists(), "a failed recovery must record the merge failure sidecar"

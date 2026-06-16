@@ -22,6 +22,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 
 from apps.dashboard import server  # noqa: E402
+from db import TransitionResult  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +73,11 @@ def _run_sweep(tmp_path: Path, projects: list, grace: int = 30,
 
     def fake_transition(label, to_state, actor, end_reason=None):
         calls["transition"].append((label, to_state, actor, end_reason))
-        return transition_result
+        # Production db.transition_sprint_state returns a TransitionResult, not a
+        # tuple — mirror that so the sweep's `.accepted/.reason` access is exercised
+        # (a tuple mock masked the prod unpack bug).
+        accepted, reason = transition_result
+        return TransitionResult(accepted=accepted, reason=reason or "")
 
     def fake_plan_json_set(project_root, sprint_label, state, **kw):
         calls["plan_json_set"].append((sprint_label, state, kw))

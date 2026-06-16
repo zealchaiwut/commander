@@ -16,14 +16,21 @@
  * itself re-tokenized, and keeps tokenization O(n) over a 5 000-line log.
  */
 
-export const AGENT_NAMES = ['coder', 'tester', 'reviewer', 'documenter', 'estimator', 'BA'];
+export const AGENT_NAMES = [
+  "coder",
+  "tester",
+  "reviewer",
+  "documenter",
+  "estimator",
+  "BA",
+];
 
 export function escapeLogHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // #NNN issue ref OR a word-bounded, case-insensitive agent name. Run over the
@@ -40,12 +47,14 @@ const TOKEN_RE = /(#\d+)|\b(coder|tester|reviewer|documenter|estimator|BA)\b/gi;
  * rendering for old log files while transparently unwrapping new envelopes.
  */
 export function extractRaw(text) {
-  const s = String(text == null ? '' : text).trim();
-  if (s.length === 0 || s[0] !== '{') return s;
+  const s = String(text == null ? "" : text).trim();
+  if (s.length === 0 || s[0] !== "{") return s;
   try {
     const obj = JSON.parse(s);
-    if (typeof obj.raw === 'string') return obj.raw;
-  } catch (_) { /* not JSON — fall through */ }
+    if (typeof obj.raw === "string") return obj.raw;
+  } catch (_) {
+    /* not JSON — fall through */
+  }
   return s;
 }
 
@@ -54,16 +63,16 @@ export function extractRaw(text) {
  * Returns 'error', 'warn', or 'info'.
  */
 export function evlSeverity(ev) {
-  if (!ev) return 'info';
-  const type = ev.type || '';
+  if (!ev) return "info";
+  const type = ev.type || "";
   const detail = ev.detail || {};
-  if (type === 'ticket_failed') return 'error';
-  if (type === 'agent_finished') {
-    const st = detail.status || '';
-    if (st === 'error' || st === 'timed_out') return 'error';
-    if (st === 'partial') return 'warn';
+  if (type === "ticket_failed") return "error";
+  if (type === "agent_finished") {
+    const st = detail.status || "";
+    if (st === "error" || st === "timed_out") return "error";
+    if (st === "partial") return "warn";
   }
-  return 'info';
+  return "info";
 }
 
 /**
@@ -74,8 +83,14 @@ export function evlSeverity(ev) {
  */
 export function evlSevChipHtml(sev, esc) {
   const e = esc || escapeLogHtml;
-  const label = sev === 'error' ? 'ERROR' : sev === 'warn' ? 'WARN' : 'INFO';
-  return '<span class="evl-sev-chip evl-sev-chip--' + e(sev) + '">' + label + '</span>';
+  const label = sev === "error" ? "ERROR" : sev === "warn" ? "WARN" : "INFO";
+  return (
+    '<span class="evl-sev-chip evl-sev-chip--' +
+    e(sev) +
+    '">' +
+    label +
+    "</span>"
+  );
 }
 
 export function colorizeLogLine(text, repo) {
@@ -83,12 +98,22 @@ export function colorizeLogLine(text, repo) {
   return escaped.replace(TOKEN_RE, function (match, issue, agent) {
     if (issue) {
       const num = issue.slice(1);
-      const href = repo ? 'https://github.com/' + repo + '/issues/' + num : '#';
-      return '<a class="log-chip log-chip--issue" href="' + escapeLogHtml(href) +
-        '" target="_blank" rel="noopener">' + issue + '</a>';
+      const href = repo ? "https://github.com/" + repo + "/issues/" + num : "#";
+      return (
+        '<a class="log-chip log-chip--issue" href="' +
+        escapeLogHtml(href) +
+        '" target="_blank" rel="noopener">' +
+        issue +
+        "</a>"
+      );
     }
     const key = agent.toLowerCase();
-    return '<span class="log-chip log-chip--agent log-agent-' + key + '">' +
-      agent + '</span>';
+    return (
+      '<span class="log-chip log-chip--agent log-agent-' +
+      key +
+      '">' +
+      agent +
+      "</span>"
+    );
   });
 }

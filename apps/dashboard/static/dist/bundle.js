@@ -1,6 +1,13 @@
 (() => {
   // apps/dashboard/static/src/logpanel.js
-  var AGENT_NAMES = ["coder", "tester", "reviewer", "documenter", "estimator", "BA"];
+  var AGENT_NAMES = [
+    "coder",
+    "tester",
+    "reviewer",
+    "documenter",
+    "estimator",
+    "BA"
+  ];
   function escapeLogHtml(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }

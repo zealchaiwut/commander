@@ -4558,6 +4558,7 @@ def _worktree_hygiene(
     merge_target: str,
     is_retry: bool = False,
     repo_root: Optional[Path] = None,
+    recover_on_rebase_conflict: bool = False,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Pre-dispatch hygiene sequence for coder/tester worktrees (issue #788).
 
@@ -4572,6 +4573,15 @@ def _worktree_hygiene(
     Returns (worktree_sha, base_sha, error_category).
       error_category is None on success, 'merge' on rebase conflict,
       or 'divergent-branch' if a fresh-ticket finds a divergent feature branch.
+
+    recover_on_rebase_conflict: when True (coder path only), a 5b rebase
+    conflict is NOT fatal — instead of dead-ending the ticket as 'merge', the
+    stale feature branch is deleted and the worktree hard-reset to base so the
+    coder rebuilds the branch fresh against the current base (mirrors 5a). This
+    breaks the deadlock where a rerun-child sub-sprint forever skips a ticket
+    whose stale branch overlaps another ticket's already-merged files (#1073).
+    The tester path leaves this False — a tester must not delete the coder's
+    just-built branch.
     """
     effective_root = repo_root or REPO_ROOT
     sys.stdout.write(str(f"  [hygiene] Pre-dispatch hygiene for ticket #{ticket_id} in {worktree}") + "\n")
@@ -4665,6 +4675,39 @@ def _worktree_hygiene(
                 sys.stdout.write(str(f"  [hygiene] Rebase conflict for #{ticket_id}: {rebase_err}") + "\n")
                 sys.stdout.flush()
                 _try("git", "rebase", "--abort", cwd=worktree)
+
+                if recover_on_rebase_conflict and base_sha:
+                    # Self-heal (coder path): the stale feature branch can't be
+                    # rebased onto the current base (typically it overlaps files
+                    # already merged from another ticket). Rather than dead-end
+                    # the ticket, drop the local branch and reset to base so the
+                    # coder recreates it fresh — the conflicting tip stays
+                    # recoverable via reflog, and the failure sidecar carries the
+                    # prior-attempt context. (#1073 deadlock.)
+                    detail = (
+                        f"Rebase of {feature_branch} onto origin/{merge_target} "
+                        f"conflicted — deleting stale branch and resetting to base "
+                        f"so the coder rebuilds fresh"
+                    )
+                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+                    sys.stdout.flush()
+                    _try("git", "checkout", "--detach", cwd=worktree)
+                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
+                    _try("git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree)
+                    ok_sha, wt_sha2, _ = _try("git", "rev-parse", "HEAD", cwd=worktree)
+                    worktree_sha = wt_sha2.strip() if ok_sha and wt_sha2.strip() else worktree_sha
+                    try:
+                        structured_log.warn(
+                            "rebase_conflict_recovered",
+                            f"deleted conflicting {feature_branch} and reset to base "
+                            f"before fresh dispatch of #{ticket_id}",
+                            issue_num=int(ticket_id), branch=feature_branch,
+                            base_sha=base_sha,
+                        )
+                    except Exception:
+                        pass
+                    return worktree_sha, base_sha, None
+
                 detail = (
                     f"Rebase of {feature_branch} onto origin/{merge_target} "
                     f"failed with conflict"
@@ -4852,6 +4895,7 @@ def _dispatch_coder(
         ticket_id=issue_num,
         merge_target=sprint_branch,
         is_retry=_is_retry,
+        recover_on_rebase_conflict=True,
     )
     if sprint_label:
         _db_update_worktree_shas_sm(issue_num, sprint_label, "coder", _wt_sha, _base_sha)
@@ -6377,15 +6421,31 @@ def create_summary_github_issue(
         pass
     _ensure_github_labels(labels, repo_name=repo_name)
 
-    try:
-        issue_num, url = github_client.create_issue(
-            title=title, body=content, labels=labels, repo_name=repo_name
-        )
-        sys.stdout.write(str(f"  Summary GitHub issue created: {url}") + "\n")
-        return issue_num, url
-    except Exception as e:
-        structured_log.warn("summary_issue_create_failed", f"failed to create summary GitHub issue: {e}", exc=str(e))
-        return None, None
+    # Retry the create on transient gh failures — a single failed `gh` call here
+    # (e.g. a flaky `gh issue list`/`create`) is what dropped sprint 79's summary
+    # issue, leaving the sprint stuck on the board (no cross-machine finished
+    # signal). Best-effort still: give up to 3 attempts before returning None.
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            issue_num, url = github_client.create_issue(
+                title=title, body=content, labels=labels, repo_name=repo_name
+            )
+            sys.stdout.write(str(f"  Summary GitHub issue created: {url}") + "\n")
+            return issue_num, url
+        except Exception as e:
+            last_exc = e
+            if attempt < 2:
+                sys.stdout.write(str(
+                    f"  [summary] create attempt {attempt + 1} failed ({e}); retrying...") + "\n")
+                sys.stdout.flush()
+                time.sleep(2 * (attempt + 1))
+    structured_log.warn(
+        "summary_issue_create_failed",
+        f"failed to create summary GitHub issue after 3 attempts: {last_exc}",
+        exc=str(last_exc),
+    )
+    return None, None
 
 
 def _close_cancelled_sprint_summary(

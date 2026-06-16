@@ -1,6 +1,13 @@
 (() => {
   // apps/dashboard/static/src/logpanel.js
-  var AGENT_NAMES = ["coder", "tester", "reviewer", "documenter", "estimator", "BA"];
+  var AGENT_NAMES = [
+    "coder",
+    "tester",
+    "reviewer",
+    "documenter",
+    "estimator",
+    "BA"
+  ];
   function escapeLogHtml(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -208,7 +215,7 @@
 /* \u2500\u2500 Bar mode \u2500\u2500 */
 .pa-bar-track {
   height: 4px;
-  background: rgba(22,163,74,.18);
+  background: var(--green-bg);
   border-radius: 2px;
   overflow: hidden;
   position: relative;
@@ -228,14 +235,14 @@
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.55) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.1) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 .pa-bar-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 16px 0;
+  padding: 4px 16px 0;
   font-size: 12px;
   color: var(--text-muted);
   min-height: 22px;
@@ -268,7 +275,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 5px 0;
+  padding: 4px 0;
   min-height: 28px;
 }
 .pa-step-icon {
@@ -307,14 +314,14 @@
 .pa-indeterminate {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 8px 16px;
 }
 .pa-spinner {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border: 2px solid rgba(22,163,74,.2);
+  border: 2px solid var(--green-bg);
   border-top-color: var(--green);
   border-radius: 50%;
   animation: pa-spin .8s linear infinite;
@@ -322,7 +329,7 @@
 .pa-indet-shimmer {
   height: 4px;
   flex: 1;
-  background: rgba(22,163,74,.15);
+  background: var(--green-bg);
   border-radius: 2px;
   position: relative;
   overflow: hidden;
@@ -332,7 +339,7 @@
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(22,163,74,.45) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--green-bg) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 
@@ -341,7 +348,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 16px;
 }
 .pa-done-icon {
   color: var(--green);
@@ -355,7 +362,7 @@
 
 /* \u2500\u2500 Error end state \u2500\u2500 */
 .pa-error {
-  padding: 10px 16px;
+  padding: 8px 16px;
 }
 .pa-error-msg {
   font-size: 13px;
@@ -365,8 +372,8 @@
 .pa-retry-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
+  gap: 4px;
+  padding: 4px 12px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
@@ -388,7 +395,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 16px;
+  padding: 8px 16px;
   font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
   font-size: 11px;
   color: var(--text-muted);
@@ -423,12 +430,12 @@
   font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
   font-size: 11px;
   line-height: 1.7;
-  padding: 0 16px 10px;
+  padding: 0 16px 8px;
 }
 .pa-log-stream.pa-log-collapsed { display: none; }
 .pa-log-line {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 .pa-log-time {
   color: var(--text-sub);

@@ -26,8 +26,8 @@
       --surface-hover:#f5f6f8;
       --border:       #e5e7eb;
       --text:         #111827;
-      --text-muted:   #5f6676;
-      --text-sub:     #6b7280;
+      --text-muted:   #6b7280;
+      --text-sub:     #9ca3af;
       --green:        #16a34a;
       --green-bg:     #dcfce7;
       --amber:        #d97706;
@@ -38,7 +38,8 @@
       --blue-bg:      #dbeafe;
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
-      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --sans: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --mono: 'SF Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
     }
     [data-theme="dark"] {
       --bg:           #0d0d0d;
@@ -65,7 +66,7 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-family: var(--sans);
       font-size: 14px;
       min-height: 100dvh;
       display: flex;
@@ -132,9 +133,10 @@
     .anl-title {
       font-size: 18px;
       font-weight: 700;
+      font-family: var(--sans);
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 8px;
     }
     .anl-title .proj-slug {
       font-family: var(--mono);
@@ -147,7 +149,7 @@
     .scope-pill {
       font-family: var(--mono);
       font-size: 12px;
-      padding: 5px 11px;
+      padding: 4px 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -155,7 +157,7 @@
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       transition: border-color .15s, color .15s;
     }
     .scope-pill:hover { border-color: var(--text-muted); color: var(--text); }
@@ -168,100 +170,190 @@
       cursor: pointer;
       padding: 0;
     }
+    .scope-pill:focus-within {
+      border-color: var(--blue);
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
 
-    /* ── Tab bar ── */
-    .tab-bar { display: flex; gap: 6px; }
-    .tab-btn {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 16px;
+    /* ── Sub-tab bar — underline style with blue accent ── */
+    .anl-tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .anl-tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      padding: 8px 16px;
       font-size: 13px;
+      font-weight: 500;
+      font-family: var(--sans);
       color: var(--text-muted);
       cursor: pointer;
-      transition: background .15s, border-color .15s, color .15s;
+      transition: color .15s, border-bottom-color .15s;
+      white-space: nowrap;
     }
-    .tab-btn.active {
-      background: var(--surface);
-      border-color: var(--text-muted);
+    .anl-tab-btn.active {
       color: var(--text);
       font-weight: 600;
+      border-bottom-color: var(--blue);
     }
-    .tab-btn:hover:not(.active) { background: var(--surface); }
+    .anl-tab-btn:hover:not(.active) { color: var(--text); background: var(--surface-2); border-radius: 4px 4px 0 0; }
+    .anl-tab-btn:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
 
     /* ── Panels ── */
-    .panel { display: none; flex-direction: column; gap: 16px; }
-    .panel.show { display: flex; }
+    .anl-panel { display: none; flex-direction: column; gap: 16px; margin-top: 16px; }
+    .anl-panel.show { display: flex; animation: anlFadeIn 0.18s ease; }
+
+    @keyframes anlFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Loading skeleton ── */
+    .anl-skeleton {
+      background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-hover) 50%, var(--surface-2) 75%);
+      background-size: 200% 100%;
+      animation: anlSkeletonPulse 1.4s ease infinite;
+      border-radius: 4px;
+      height: 16px;
+      margin: 6px 0;
+    }
+    @keyframes anlSkeletonPulse {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
 
     /* ── Card ── */
-    .card {
+    .anl-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
       overflow: hidden;
     }
-    .card-head {
+    .anl-card-head {
       padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 8px;
     }
-    .card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
-    .card-title { font-size: 14px; font-weight: 700; }
-    .card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
-    .card-body { padding: 16px; }
+    .anl-card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
+    .anl-card-title { font-size: 14px; font-weight: 700; }
+    .anl-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+    .anl-card-body { padding: 16px; }
 
-    /* ── Scatter ── */
-    .scatter-wrap {
-      display: flex;
-      gap: 18px;
-      align-items: flex-start;
-      flex-wrap: wrap;
+    /* ── Panel-level empty state ── */
+    .anl-panel-empty {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
     }
-    .scatter-legend {
+    .anl-panel-empty i { font-size: 28px; display: block; margin-bottom: 8px; color: var(--text-muted); }
+
+    /* ── Velocity bar chart (Trends panel) ── */
+    .anl-velocity-chart {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
+    }
+    .anl-velocity-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 56px;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .anl-velocity-label {
+      font-family: var(--mono);
+      color: var(--text-muted);
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .anl-velocity-bar-wrap {
+      height: 20px;
+      background: var(--surface-2);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .anl-velocity-bar {
+      height: 100%;
+      background: var(--blue);
+      border-radius: 3px;
+      transition: width .4s ease;
+      min-width: 2px;
+    }
+    .anl-velocity-val {
       font-family: var(--mono);
       font-size: 12px;
       color: var(--text-muted);
-      padding-top: 22px;
+      text-align: right;
     }
-    .legend-item { display: flex; align-items: center; gap: 6px; }
-    .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .sz-S-dot { background: var(--green); }
-    .sz-M-dot { background: var(--blue); }
-    .sz-L-dot { background: var(--amber); }
-    .sz-XL-dot { background: var(--red); }
 
-    /* ── Calibration table ── */
-    .cal-table {
+    /* ── Status panel tables ── */
+    .anl-cal-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
     }
-    .cal-table th {
+    .anl-cal-table th {
       text-align: right;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
-      color: var(--text-sub);
-      padding: 7px 12px;
+      color: var(--text-muted);
+      padding: 8px 12px;
       border-bottom: 1px solid var(--border);
     }
-    .cal-table th:first-child { text-align: left; }
-    .cal-table th:last-child  { text-align: left; }
-    .cal-table td {
-      padding: 9px 12px;
+    .anl-cal-table th:first-child { text-align: left; }
+    .anl-cal-table th:last-child  { text-align: left; }
+    .anl-cal-table td {
+      padding: 8px 12px;
       border-bottom: 1px solid var(--border);
       text-align: right;
       font-family: var(--mono);
     }
-    .cal-table td:first-child { text-align: left; font-family: inherit; }
-    .cal-table td:last-child  { text-align: left; }
-    .cal-table tr:last-child td { border-bottom: none; }
+    .anl-cal-table td:first-child { text-align: left; font-family: inherit; }
+    .anl-cal-table td:last-child  { text-align: left; }
+    .anl-cal-table tr:last-child td { border-bottom: none; }
+
+    /* ── Scatter (Calibration panel) ── */
+    .anl-scatter-wrap {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .anl-scatter-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      padding-top: 24px;
+    }
+    .anl-legend-item { display: flex; align-items: center; gap: 8px; }
+    .anl-legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .anl-sz-S-dot  { background: var(--green); }
+    .anl-sz-M-dot  { background: var(--blue); }
+    .anl-sz-L-dot  { background: var(--amber); }
+    .anl-sz-XL-dot { background: var(--red); }
 
     /* ── Size badges ── */
     .sz-badge {
@@ -292,41 +384,32 @@
     .btn-apply {
       font-family: var(--mono);
       font-size: 10px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 1px 7px;
+      padding: 2px 8px;
       background: var(--surface);
       cursor: pointer;
-      margin-left: 6px;
+      margin-left: 8px;
       transition: border-color .15s, color .15s;
     }
     .btn-apply:hover { border-color: var(--text-muted); color: var(--text); }
+    .btn-apply:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .btn-apply:disabled { opacity: .5; cursor: default; }
 
-    /* ── Cal note + empty ── */
-    .cal-note {
+    /* ── Cal note ── */
+    .anl-cal-note {
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       margin-top: 12px;
       display: flex;
       align-items: flex-start;
       gap: 6px;
       line-height: 1.5;
     }
-    .cal-note .ti { margin-top: 1px; flex-shrink: 0; }
-    .cal-empty {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 40px 24px;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-    .cal-empty i { font-size: 28px; display: block; margin-bottom: 10px; color: var(--text-sub); }
+    .anl-cal-note .ti { margin-top: 1px; flex-shrink: 0; }
 
-    /* ── Metric grid ── */
+    /* ── Metric grid (Metrics panel) ── */
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -339,14 +422,14 @@
       padding: 16px;
     }
     .metric-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       letter-spacing: .05em;
       text-transform: uppercase;
-      color: var(--text-sub);
+      color: var(--text-muted);
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
     .metric-val {
       font-size: 28px;
@@ -364,6 +447,21 @@
       font-weight: 400;
       font-family: inherit;
     }
+    /* optional delta indicator */
+    .metric-delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--mono);
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+    .metric-delta:empty { display: none; }
+    .metric-delta.delta-up   { color: var(--green); background: var(--green-bg); }
+    .metric-delta.delta-down { color: var(--red);   background: var(--red-bg);   }
     .metric-sub {
       font-size: 12px;
       color: var(--text-muted);
@@ -385,26 +483,27 @@
     }
     .breakdown {
       display: flex;
-      gap: 10px;
-      margin-top: 10px;
+      gap: 8px;
+      margin-top: 8px;
       flex-wrap: wrap;
       font-family: var(--mono);
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       line-height: 1.6;
     }
     .breakdown span { white-space: nowrap; }
 
-    /* ── Empty state ── */
+    /* ── Metric card empty state ── */
     .metric-empty {
       display: none;
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       font-style: italic;
       margin-top: 8px;
     }
     .metric-card.is-empty .metric-val,
     .metric-card.is-empty .metric-sub,
+    .metric-card.is-empty .metric-delta,
     .metric-card.is-empty .bar,
     .metric-card.is-empty .breakdown { display: none; }
     .metric-card.is-empty .metric-empty { display: block; }
@@ -412,13 +511,13 @@
     /* ── Data-source footnote ── */
     .src-note {
       font-size: 12px;
-      color: var(--text-sub);
+      color: var(--text-muted);
       font-family: var(--mono);
       line-height: 1.6;
       padding-top: 4px;
     }
 
-    /* ── Cost tab ── */
+    /* ── Estimate badge ── */
     .estimate-badge {
       display: inline-block;
       font-size: 10px;
@@ -427,7 +526,7 @@
       color: var(--amber);
       background: var(--amber-bg);
       border-radius: 4px;
-      padding: 1px 5px;
+      padding: 2px 8px;
       vertical-align: middle;
       margin-left: 4px;
     }
@@ -441,6 +540,12 @@
     @media (max-width: 480px) {
       .page-content { padding: 16px 12px 32px; }
       .scope-sel { flex-wrap: wrap; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .anl-panel.show { animation: none; }
+      .anl-skeleton { animation: none; background: var(--surface-2); }
+      .anl-velocity-bar { transition: none; }
+      .bar > span { transition: none; }
     }
   </style>
 </head>
@@ -474,7 +579,7 @@
       <div class="anl-title">
         <i class="ti ti-chart-histogram" style="color:var(--text-muted)"></i>
         Analytics
-        <span class="anl-title proj-slug" id="anl-proj-slug"></span>
+        <span class="proj-slug" id="anl-proj-slug"></span>
       </div>
       <div class="anl-header-gap"></div>
       <div class="scope-sel" aria-label="Scope selector">
@@ -496,62 +601,252 @@
       </div>
     </div>
 
-    <!-- Tab bar -->
-    <div class="tab-bar" role="tablist" aria-label="Analytics tabs">
-      <button class="tab-btn active" id="tab-calibration" role="tab"
-              aria-selected="true" aria-controls="panel-calibration"
-              onclick="showTab('calibration')">
-        Calibration
+    <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
+    <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
+      <button class="anl-tab-btn active" id="anl-tab-trends" role="tab"
+              aria-selected="true" aria-controls="anl-panel-trends"
+              onclick="anlShowTab('trends')">
+        Trends
       </button>
-      <button class="tab-btn" id="tab-metrics" role="tab"
-              aria-selected="false" aria-controls="panel-metrics"
-              onclick="showTab('metrics')">
+      <button class="anl-tab-btn" id="anl-tab-status" role="tab"
+              aria-selected="false" aria-controls="anl-panel-status"
+              onclick="anlShowTab('status')">
+        Status
+      </button>
+      <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
+              aria-selected="false" aria-controls="anl-panel-metrics"
+              onclick="anlShowTab('metrics')">
         Metrics
       </button>
-      <button class="tab-btn" id="tab-cost" role="tab"
-              aria-selected="false" aria-controls="panel-cost"
-              onclick="showTab('cost')">
-        Cost
+      <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
+              aria-selected="false" aria-controls="anl-panel-calibration"
+              onclick="anlShowTab('calibration')">
+        Calibration
       </button>
     </div>
 
-    <!-- Calibration panel -->
-    <div class="panel show" id="panel-calibration" role="tabpanel" aria-labelledby="tab-calibration">
+    <!-- Trends panel: sprint velocity -->
+    <div class="anl-panel show" id="anl-panel-trends" role="tabpanel" aria-labelledby="anl-tab-trends">
 
-      <!-- Scatter plot card -->
-      <div class="card">
-        <div class="card-head">
-          <i class="ti ti-target-arrow"></i>
+      <div class="anl-card">
+        <div class="anl-card-head">
+          <i class="ti ti-trending-up"></i>
           <div>
-            <div class="card-title">Estimated vs actual</div>
-            <div class="card-sub">each dot is a ticket · diagonal = perfect estimate · above the line = took longer than estimated</div>
+            <div class="anl-card-title">Sprint Velocity</div>
+            <div class="anl-card-sub">tokens consumed per sprint · newest first</div>
           </div>
         </div>
-        <div class="card-body">
-          <div class="scatter-wrap">
+        <div class="anl-card-body">
+          <div id="anl-velocity-wrap">
+            <div style="color:var(--text-muted);font-size:13px;padding:8px 0">Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state (no sprint data) -->
+      <div class="anl-panel-empty" id="anl-trends-empty" style="display:none" aria-live="polite">
+        <i class="ti ti-trending-up"></i>
+        <p>No sprint data yet. Run some sprints to see velocity trends.</p>
+      </div>
+
+    </div>
+
+    <!-- Status panel: agent breakdown + top tickets -->
+    <div class="anl-panel" id="anl-panel-status" role="tabpanel" aria-labelledby="anl-tab-status">
+
+      <div class="anl-card">
+        <div class="anl-card-head">
+          <i class="ti ti-robot"></i>
+          <div>
+            <div class="anl-card-title">By agent</div>
+            <div class="anl-card-sub">token totals split by agent role</div>
+          </div>
+        </div>
+        <div class="anl-card-body">
+          <table class="anl-cal-table" id="anl-status-agent-table" aria-label="Tokens by agent">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th style="text-align:right">Tokens</th>
+                <th id="anl-status-agent-cost-hdr" style="text-align:right;display:none">
+                  Cost <span class="estimate-badge">estimate</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="anl-status-agent-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="anl-card">
+        <div class="anl-card-head">
+          <i class="ti ti-ticket"></i>
+          <div>
+            <div class="anl-card-title">Top 10 tickets by tokens</div>
+            <div class="anl-card-sub">highest-cost issues across all sprints</div>
+          </div>
+        </div>
+        <div class="anl-card-body">
+          <table class="anl-cal-table" id="anl-status-ticket-table" aria-label="Top tickets by token usage">
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th style="text-align:right">Tokens</th>
+                <th id="anl-status-ticket-cost-hdr" style="text-align:right;display:none">
+                  Cost <span class="estimate-badge">estimate</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="anl-status-ticket-tbody">
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="anl-card">
+        <div class="anl-card-head">
+          <i class="ti ti-chart-bar"></i>
+          <div>
+            <div class="anl-card-title">Tokens by size</div>
+            <div class="anl-card-sub">average total tokens per ticket size · used for M6 model routing</div>
+          </div>
+        </div>
+        <div class="anl-card-body">
+          <table class="anl-cal-table" id="anl-status-size-table" aria-label="Average tokens by ticket size">
+            <thead>
+              <tr>
+                <th>Size</th>
+                <th style="text-align:right">Tickets</th>
+                <th style="text-align:right">Avg tokens</th>
+              </tr>
+            </thead>
+            <tbody id="anl-status-size-tbody">
+              <tr><td style="font-weight:600">S</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
+              <tr><td style="font-weight:600">M</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
+              <tr><td style="font-weight:600">L</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
+              <tr><td style="font-weight:600">XL</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Empty state (no token data) -->
+      <div class="anl-panel-empty" id="anl-status-empty" style="display:none" aria-live="polite">
+        <i class="ti ti-database-off"></i>
+        <p>No token data yet. Run some sprints to see agent and ticket breakdowns.</p>
+      </div>
+
+    </div>
+
+    <!-- Metrics panel: delivery-health cards -->
+    <div class="anl-panel" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
+
+      <div class="metric-grid" id="metric-grid">
+
+        <!-- First-pass rate -->
+        <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
+          <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
+          <div class="metric-val"><span id="fpr-val">–</span><span class="unit">%</span></div>
+          <div class="metric-delta" id="fpr-delta"></div>
+          <div class="metric-sub" id="fpr-sub"></div>
+          <div class="bar"><span id="fpr-bar" style="width:0%;background:var(--green)"></span></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+        <!-- Rework rate -->
+        <div class="metric-card" id="card-rework" role="region" aria-label="Rework rate">
+          <div class="metric-label"><i class="ti ti-refresh" style="font-size:13px"></i> Rework rate</div>
+          <div class="metric-val"><span id="rwr-val">–</span><span class="unit">%</span></div>
+          <div class="metric-delta" id="rwr-delta"></div>
+          <div class="metric-sub" id="rwr-sub"></div>
+          <div class="bar"><span id="rwr-bar" style="width:0%;background:var(--amber)"></span></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+        <!-- Avg duration by agent -->
+        <div class="metric-card" id="card-duration" role="region" aria-label="Average duration by agent">
+          <div class="metric-label"><i class="ti ti-clock" style="font-size:13px"></i> Avg duration by agent</div>
+          <div class="metric-val"><span id="dur-val">–</span></div>
+          <div class="metric-delta" id="dur-delta"></div>
+          <div class="breakdown" id="dur-breakdown"></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+        <!-- Throughput -->
+        <div class="metric-card" id="card-throughput" role="region" aria-label="Throughput">
+          <div class="metric-label"><i class="ti ti-stack-2" style="font-size:13px"></i> Throughput</div>
+          <div class="metric-val"><span id="thr-val">–</span><span class="unit">tickets / sprint</span></div>
+          <div class="metric-delta" id="thr-delta"></div>
+          <div class="metric-sub" id="thr-sub"></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+        <!-- Cost per sprint -->
+        <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
+          <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
+          <div class="metric-val"><span id="cps-val">–</span></div>
+          <div class="metric-delta" id="cps-delta"></div>
+          <div class="breakdown" id="cps-breakdown"></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+        <!-- Cost per ticket -->
+        <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
+          <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
+          <div class="metric-val"><span id="cpt-val">–</span></div>
+          <div class="metric-delta" id="cpt-delta"></div>
+          <div class="metric-sub" id="cpt-sub"></div>
+          <div class="metric-empty">No data for this period</div>
+        </div>
+
+      </div><!-- .metric-grid -->
+
+      <div class="src-note" aria-label="Data source note">
+        sources: first-pass/rework from sprint state (tester_attempt_count) ·
+        durations from coder/tester timestamps · cost from token_usage × model price ·
+        throughput from sprint state files
+      </div>
+
+    </div><!-- #anl-panel-metrics -->
+
+    <!-- Calibration panel: scatter + by-size table -->
+    <div class="anl-panel" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
+
+      <div class="anl-card">
+        <div class="anl-card-head">
+          <i class="ti ti-target-arrow"></i>
+          <div>
+            <div class="anl-card-title">Estimated vs actual</div>
+            <div class="anl-card-sub">each dot is a ticket · diagonal = perfect estimate · above the line = took longer than estimated</div>
+          </div>
+        </div>
+        <div class="anl-card-body">
+          <div class="anl-scatter-wrap">
             <svg id="scatter-svg" viewBox="0 0 640 300" width="640" height="300"
                  style="max-width:100%;height:auto" aria-label="Estimated vs actual scatter plot"></svg>
-            <div class="scatter-legend" aria-label="Size color legend">
-              <div class="legend-item"><span class="legend-dot sz-S-dot"></span> S</div>
-              <div class="legend-item"><span class="legend-dot sz-M-dot"></span> M</div>
-              <div class="legend-item"><span class="legend-dot sz-L-dot"></span> L</div>
-              <div class="legend-item"><span class="legend-dot sz-XL-dot"></span> XL</div>
+            <div class="anl-scatter-legend" aria-label="Size color legend">
+              <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-S-dot"></span> S</div>
+              <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-M-dot"></span> M</div>
+              <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-L-dot"></span> L</div>
+              <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-XL-dot"></span> XL</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Calibration table card -->
-      <div class="card">
-        <div class="card-head">
+      <div class="anl-card">
+        <div class="anl-card-head">
           <i class="ti ti-ruler-measure"></i>
           <div>
-            <div class="card-title">Calibration by size</div>
-            <div class="card-sub">actual time grouped by estimated size · source of the Settings "suggested" column</div>
+            <div class="anl-card-title">Calibration by size</div>
+            <div class="anl-card-sub">actual time grouped by estimated size · source of the Settings "suggested" column</div>
           </div>
         </div>
-        <div class="card-body">
-          <table class="cal-table" aria-label="Calibration by size">
+        <div class="anl-card-body">
+          <table class="anl-cal-table" aria-label="Calibration by size">
             <thead>
               <tr>
                 <th>Size</th>
@@ -567,7 +862,7 @@
               <!-- populated by fetchCalibration() -->
             </tbody>
           </table>
-          <div class="cal-note">
+          <div class="anl-cal-note">
             <i class="ti ti-info-circle"></i>
             "Apply" writes the avg as the project's configured estimate for that size. Manual equivalent of the Settings auto-suggest.
           </div>
@@ -575,192 +870,12 @@
       </div>
 
       <!-- Empty state (no calibration data for scope) -->
-      <div class="cal-empty" id="cal-empty" style="display:none" aria-live="polite">
+      <div class="anl-panel-empty" id="cal-empty" style="display:none" aria-live="polite">
         <i class="ti ti-database-off"></i>
         <p>No calibration data for this scope. Complete some tickets with size estimates to see estimates vs actuals.</p>
       </div>
 
-    </div>
-
-    <!-- Metrics panel -->
-    <div class="panel" id="panel-metrics" role="tabpanel" aria-labelledby="tab-metrics">
-
-      <div class="metric-grid" id="metric-grid">
-
-        <!-- First-pass rate card -->
-        <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
-          <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
-          <div class="metric-val"><span id="fpr-val">–</span><span class="unit">%</span></div>
-          <div class="metric-sub" id="fpr-sub"></div>
-          <div class="bar"><span id="fpr-bar" style="width:0%;background:var(--green)"></span></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-        <!-- Rework rate card -->
-        <div class="metric-card" id="card-rework" role="region" aria-label="Rework rate">
-          <div class="metric-label"><i class="ti ti-refresh" style="font-size:13px"></i> Rework rate</div>
-          <div class="metric-val"><span id="rwr-val">–</span><span class="unit">%</span></div>
-          <div class="metric-sub" id="rwr-sub"></div>
-          <div class="bar"><span id="rwr-bar" style="width:0%;background:var(--amber)"></span></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-        <!-- Avg duration by agent card -->
-        <div class="metric-card" id="card-duration" role="region" aria-label="Average duration by agent">
-          <div class="metric-label"><i class="ti ti-clock" style="font-size:13px"></i> Avg duration by agent</div>
-          <div class="metric-val"><span id="dur-val">–</span></div>
-          <div class="breakdown" id="dur-breakdown"></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-        <!-- Throughput card -->
-        <div class="metric-card" id="card-throughput" role="region" aria-label="Throughput">
-          <div class="metric-label"><i class="ti ti-stack-2" style="font-size:13px"></i> Throughput</div>
-          <div class="metric-val"><span id="thr-val">–</span><span class="unit">tickets / sprint</span></div>
-          <div class="metric-sub" id="thr-sub"></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-        <!-- Cost per sprint card -->
-        <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
-          <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
-          <div class="metric-val"><span id="cps-val">–</span></div>
-          <div class="breakdown" id="cps-breakdown"></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-        <!-- Cost per ticket card -->
-        <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
-          <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
-          <div class="metric-val"><span id="cpt-val">–</span></div>
-          <div class="metric-sub" id="cpt-sub"></div>
-          <div class="metric-empty">No data for this period</div>
-        </div>
-
-      </div><!-- .metric-grid -->
-
-      <!-- Data-source footnote -->
-      <div class="src-note" aria-label="Data source note">
-        sources: first-pass/rework from sprint state (tester_attempt_count) ·
-        durations from coder/tester timestamps · cost from token_usage × model price ·
-        throughput from sprint state files
-      </div>
-
-    </div><!-- #panel-metrics -->
-
-    <!-- Cost panel (issue #786) -->
-    <div class="panel" id="panel-cost" role="tabpanel" aria-labelledby="tab-cost">
-
-      <!-- Sprint totals -->
-      <div class="card">
-        <div class="card-head">
-          <i class="ti ti-coins"></i>
-          <div>
-            <div class="card-title">Sprint totals</div>
-            <div class="card-sub">total tokens per sprint · sorted newest first</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <table class="cal-table" id="cost-sprint-table">
-            <thead>
-              <tr>
-                <th>Sprint</th>
-                <th style="text-align:right">Tokens</th>
-                <th id="cost-sprint-cost-header" style="text-align:right;display:none">
-                  Cost <span class="estimate-badge">estimate</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody id="cost-sprint-tbody">
-              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Top-10 most expensive tickets -->
-      <div class="card">
-        <div class="card-head">
-          <i class="ti ti-ticket"></i>
-          <div>
-            <div class="card-title">Top 10 tickets by tokens</div>
-            <div class="card-sub">highest-cost issues across all sprints</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <table class="cal-table" id="cost-ticket-table">
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th style="text-align:right">Tokens</th>
-                <th id="cost-ticket-cost-header" style="text-align:right;display:none">
-                  Cost <span class="estimate-badge">estimate</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody id="cost-ticket-tbody">
-              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Per-agent token split -->
-      <div class="card">
-        <div class="card-head">
-          <i class="ti ti-robot"></i>
-          <div>
-            <div class="card-title">By agent</div>
-            <div class="card-sub">token totals split by agent role</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <table class="cal-table" id="cost-agent-table">
-            <thead>
-              <tr>
-                <th>Agent</th>
-                <th style="text-align:right">Tokens</th>
-                <th id="cost-agent-cost-header" style="text-align:right;display:none">
-                  Cost <span class="estimate-badge">estimate</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody id="cost-agent-tbody">
-              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:20px">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Tokens per size (per_size_avg_tokens) -->
-      <div class="card">
-        <div class="card-head">
-          <i class="ti ti-chart-bar"></i>
-          <div>
-            <div class="card-title">Tokens by size</div>
-            <div class="card-sub">average total tokens per ticket size · used for M6 model routing</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <table class="cal-table" id="cost-size-table">
-            <thead>
-              <tr>
-                <th>Size</th>
-                <th style="text-align:right">Tickets</th>
-                <th style="text-align:right">Avg tokens</th>
-              </tr>
-            </thead>
-            <tbody id="cost-size-tbody">
-              <tr><td style="font-weight:600">S</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
-              <tr><td style="font-weight:600">M</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
-              <tr><td style="font-weight:600">L</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
-              <tr><td style="font-weight:600">XL</td><td style="text-align:right">–</td><td style="text-align:right;font-family:var(--mono)">–</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div><!-- #panel-cost -->
+    </div><!-- #anl-panel-calibration -->
 
   </main>
 
@@ -801,27 +916,244 @@
     }
     _applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
 
-    /* ── Tab switching ── */
-    window.showTab = function(name) {
-      document.querySelectorAll('.tab-btn').forEach(function(b) {
-        var active = b.id === 'tab-' + name;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-selected', String(active));
+    /* ── Sub-tab switching (anlShowTab) ── */
+    var _ANL_TABS = ['trends', 'status', 'metrics', 'calibration'];
+
+    window.anlShowTab = function(name) {
+      _ANL_TABS.forEach(function(n) {
+        var btn   = document.getElementById('anl-tab-' + n);
+        var panel = document.getElementById('anl-panel-' + n);
+        var active = n === name;
+        if (btn) {
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-selected', String(active));
+        }
+        if (panel) panel.classList.toggle('show', active);
       });
-      document.querySelectorAll('.panel').forEach(function(p) {
-        p.classList.toggle('show', p.id === 'panel-' + name);
-      });
-      if (name === 'metrics') fetchMetrics();
-      if (name === 'calibration') fetchCalibration();
+      if (name === 'trends' || name === 'status') {
+        fetchCost();
+      } else if (name === 'metrics') {
+        fetchMetrics();
+      } else {
+        fetchCalibration();
+      }
     };
+
+    /* ── Arrow-key keyboard navigation on tab bar ── */
+    (function() {
+      var tabBar = document.querySelector('.anl-tab-bar');
+      if (!tabBar) return;
+      tabBar.addEventListener('keydown', function(e) {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        var activeBtn = tabBar.querySelector('[aria-selected="true"]');
+        var activeId = activeBtn ? activeBtn.id.replace('anl-tab-', '') : _ANL_TABS[0];
+        var idx = _ANL_TABS.indexOf(activeId);
+        if (e.key === 'ArrowRight') {
+          idx = (idx + 1) % _ANL_TABS.length;
+        } else {
+          idx = (idx - 1 + _ANL_TABS.length) % _ANL_TABS.length;
+        }
+        e.preventDefault();
+        anlShowTab(_ANL_TABS[idx]);
+        var nextBtn = document.getElementById('anl-tab-' + _ANL_TABS[idx]);
+        if (nextBtn) nextBtn.focus();
+      });
+    })();
 
     /* ── Scope selector ── */
     window.onScopeChange = function() {
-      fetchMetrics();
-      fetchCalibration();
+      /* Re-fetch whichever panel is active */
+      _ANL_TABS.forEach(function(n) {
+        var panel = document.getElementById('anl-panel-' + n);
+        if (panel && panel.classList.contains('show')) {
+          if (n === 'trends' || n === 'status') fetchCost();
+          else if (n === 'metrics') fetchMetrics();
+          else fetchCalibration();
+        }
+      });
     };
 
-    /* ── ANL-3 fetch ── */
+    /* ── Helper: format tokens ── */
+    function _fmtTokens(n) {
+      if (!n && n !== 0) return '–';
+      if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+      if (n >= 1000)    return (n / 1000).toFixed(1) + 'k';
+      return String(n);
+    }
+
+    function _fmtCost(c) {
+      if (c == null) return '';
+      if (c < 0.01)  return '<$0.01';
+      return '$' + c.toFixed(4);
+    }
+
+    /* ── Loading helpers ── */
+    function _skeletonRows(count, widths) {
+      var html = '<div aria-busy="true" aria-label="Loading">';
+      for (var i = 0; i < count; i++) {
+        var w = widths ? widths[i % widths.length] : 100;
+        html += '<div class="anl-skeleton" style="width:' + w + '%"></div>';
+      }
+      return html + '</div>';
+    }
+
+    function _showLoadingVelocity() {
+      var wrap = document.getElementById('anl-velocity-wrap');
+      if (!wrap) return;
+      var html = '<div aria-busy="true" aria-label="Loading sprint velocity">';
+      [100, 75, 90, 55, 40].forEach(function(w) {
+        html += '<div class="anl-velocity-row">'
+          + '<div class="anl-skeleton" style="width:80px"></div>'
+          + '<div class="anl-skeleton" style="width:' + w + '%"></div>'
+          + '<div class="anl-skeleton" style="width:40px"></div>'
+          + '</div>';
+      });
+      wrap.innerHTML = html + '</div>';
+    }
+
+    function _showLoadingCalibration() {
+      var svg = document.getElementById('scatter-svg');
+      if (svg) {
+        svg.innerHTML = '<text x="320" y="160" font-size="13" fill="var(--text-muted)" '
+          + 'text-anchor="middle" font-family="monospace">Loading…</text>';
+      }
+      var tbody = document.getElementById('cal-table-body');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="7">'
+          + _skeletonRows(4, [80, 60, 70, 50])
+          + '</td></tr>';
+      }
+    }
+
+    /* ── fetchCost: populates Trends + Status panels ── */
+    window.fetchCost = function() {
+      if (!_slug) return;
+      _showLoadingVelocity();
+      fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost')
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          _renderTrendsPanel(data);
+          _renderStatusPanel(data);
+        })
+        .catch(function(err) {
+          console.error('Cost fetch failed:', err);
+          _renderTrendsPanelEmpty();
+          _renderStatusPanelEmpty();
+        });
+    };
+
+    /* ── Trends panel: sprint velocity bar chart ── */
+    function _renderTrendsPanelEmpty() {
+      var wrap  = document.getElementById('anl-velocity-wrap');
+      var empty = document.getElementById('anl-trends-empty');
+      if (wrap)  wrap.innerHTML = '';
+      if (empty) empty.style.display = '';
+    }
+
+    function _renderTrendsPanel(data) {
+      var sprints = (data.by_sprint || []).slice().reverse(); // newest first
+      var wrap    = document.getElementById('anl-velocity-wrap');
+      var empty   = document.getElementById('anl-trends-empty');
+      if (!wrap) return;
+
+      if (!sprints.length) {
+        wrap.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+      }
+      if (empty) empty.style.display = 'none';
+
+      var maxTokens = sprints.reduce(function(m, s) {
+        return Math.max(m, s.total_tokens || 0);
+      }, 0);
+
+      var html = '<div class="anl-velocity-chart">';
+      sprints.slice(0, 12).forEach(function(s) {
+        var pct = maxTokens > 0 ? ((s.total_tokens || 0) / maxTokens * 100) : 0;
+        html += '<div class="anl-velocity-row">'
+          + '<div class="anl-velocity-label">' + _esc(s.sprint_label) + '</div>'
+          + '<div class="anl-velocity-bar-wrap">'
+          + '<div class="anl-velocity-bar" style="width:' + pct.toFixed(1) + '%"></div>'
+          + '</div>'
+          + '<div class="anl-velocity-val">' + _fmtTokens(s.total_tokens) + '</div>'
+          + '</div>';
+      });
+      html += '</div>';
+      wrap.innerHTML = html;
+    }
+
+    /* ── Status panel: agent/ticket breakdown ── */
+    function _renderStatusPanelEmpty() {
+      var empty = document.getElementById('anl-status-empty');
+      if (empty) empty.style.display = '';
+    }
+
+    function _renderStatusPanel(data) {
+      var pm = data.price_map_configured;
+      var empty = document.getElementById('anl-status-empty');
+
+      /* Agent cost headers */
+      var agentCostHdr  = document.getElementById('anl-status-agent-cost-hdr');
+      var ticketCostHdr = document.getElementById('anl-status-ticket-cost-hdr');
+      if (agentCostHdr)  agentCostHdr.style.display  = pm ? '' : 'none';
+      if (ticketCostHdr) ticketCostHdr.style.display = pm ? '' : 'none';
+
+      /* By agent */
+      var aTbody = document.getElementById('anl-status-agent-tbody');
+      var agents = data.by_agent || [];
+      if (aTbody) {
+        if (!agents.length) {
+          aTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
+        } else {
+          aTbody.innerHTML = agents.map(function(a) {
+            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(a.cost_usd) + '</td>' : '';
+            return '<tr><td>' + _esc(a.agent) + '</td>'
+              + '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(a.total_tokens) + '</td>'
+              + cost + '</tr>';
+          }).join('');
+        }
+      }
+
+      /* Top tickets */
+      var tTbody = document.getElementById('anl-status-ticket-tbody');
+      var tickets = data.by_ticket || [];
+      if (tTbody) {
+        if (!tickets.length) {
+          tTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
+        } else {
+          tTbody.innerHTML = tickets.map(function(t) {
+            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(t.cost_usd) + '</td>' : '';
+            return '<tr><td style="font-family:var(--mono)">#' + (t.issue_number || '–') + '</td>'
+              + '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(t.total_tokens) + '</td>'
+              + cost + '</tr>';
+          }).join('');
+        }
+      }
+
+      /* Tokens by size */
+      var szTbody = document.getElementById('anl-status-size-tbody');
+      if (szTbody) {
+        var psat = data.per_size_avg_tokens || {};
+        szTbody.innerHTML = ['S', 'M', 'L', 'XL'].map(function(sz) {
+          var entry = psat[sz] || { count: 0, avg_tokens: null };
+          return '<tr>'
+            + '<td style="font-weight:600">' + sz + '</td>'
+            + '<td style="text-align:right">' + (entry.count || 0) + '</td>'
+            + '<td style="text-align:right;font-family:var(--mono)">'
+            + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '–') + '</td>'
+            + '</tr>';
+        }).join('');
+      }
+
+      /* Show/hide panel-level empty state */
+      var hasAny = agents.length > 0 || tickets.length > 0;
+      if (empty) empty.style.display = hasAny ? 'none' : '';
+    }
+
+    /* ── Metrics panel (delivery-health) ── */
     var _lastMetrics = null;
 
     function _buildMetricsUrl() {
@@ -842,10 +1174,7 @@
     window.fetchMetrics = function() {
       var url = _buildMetricsUrl();
       if (!url) return;
-
-      /* Clear stale values before re-render */
-      _clearCards();
-
+      _clearMetricCards();
       fetch(url)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -857,18 +1186,18 @@
         })
         .catch(function(err) {
           console.error('Analytics metrics fetch failed:', err);
-          _renderEmpty();
+          _emptyMetricCards();
         });
     };
 
-    function _clearCards() {
-      ['fpr-val', 'fpr-sub', 'rwr-val', 'rwr-sub',
-       'dur-val', 'dur-breakdown', 'thr-val', 'thr-sub',
-       'cps-val', 'cps-breakdown', 'cpt-val', 'cpt-sub'].forEach(function(id) {
+    function _clearMetricCards() {
+      ['fpr-val','fpr-sub','rwr-val','rwr-sub',
+       'dur-val','dur-breakdown','thr-val','thr-sub',
+       'cps-val','cps-breakdown','cpt-val','cpt-sub'].forEach(function(id) {
         var el = document.getElementById(id);
-        if (el) el.textContent = '—';
+        if (el) el.textContent = '–';
       });
-      ['fpr-bar', 'rwr-bar'].forEach(function(id) {
+      ['fpr-bar','rwr-bar'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.style.width = '0%';
       });
@@ -877,7 +1206,7 @@
       });
     }
 
-    function _renderEmpty() {
+    function _emptyMetricCards() {
       document.querySelectorAll('.metric-card').forEach(function(c) {
         c.classList.add('is-empty');
       });
@@ -892,33 +1221,27 @@
     function _pct(r) { return Math.round((r || 0) * 100); }
 
     function _renderMetrics(d) {
-      var fpr = d.first_pass_rate || {};
-      var rwr = d.rework_rate || {};
-      var dur = d.avg_duration || {};
-      var thr = d.throughput || {};
+      var fpr  = d.first_pass_rate || {};
+      var rwr  = d.rework_rate || {};
+      var dur  = d.avg_duration || {};
+      var thr  = d.throughput || {};
       var cost = d.cost || {};
-      var ps = cost.per_sprint || {};
-      var pt = cost.per_ticket || {};
+      var ps   = cost.per_sprint || {};
+      var pt   = cost.per_ticket || {};
 
-      var hasData = (fpr.total_completed || 0) > 0;
-      if (!hasData) {
-        _renderEmpty();
-        return;
-      }
+      if ((fpr.total_completed || 0) === 0) { _emptyMetricCards(); return; }
 
       /* First-pass rate */
       var fprPct = _pct(fpr.rate);
       _set('fpr-val', fprPct);
-      _set('fpr-sub', (fpr.passed || 0) + ' of ' + (fpr.total_completed || 0) +
-           ' tickets passed tester on the first try');
+      _set('fpr-sub', (fpr.passed || 0) + ' of ' + (fpr.total_completed || 0) + ' tickets passed tester on the first try');
       var fprBar = document.getElementById('fpr-bar');
       if (fprBar) fprBar.style.width = fprPct + '%';
 
       /* Rework rate */
       var rwrPct = _pct(rwr.rate);
       _set('rwr-val', rwrPct);
-      _set('rwr-sub', (rwr.count || 0) + ' tickets tester-rejected at least once · ' +
-           (rwr.rework_2plus || 0) + ' tickets needed 2+ rounds');
+      _set('rwr-sub', (rwr.count || 0) + ' tickets tester-rejected at least once · ' + (rwr.rework_2plus || 0) + ' tickets needed 2+ rounds');
       var rwrBar = document.getElementById('rwr-bar');
       if (rwrBar) rwrBar.style.width = rwrPct + '%';
 
@@ -927,34 +1250,28 @@
       var testerMin = dur.tester_minutes || 0;
       _set('dur-val', _fmtMin(coderMin) + ' coder · ' + _fmtMin(testerMin) + ' tester');
       var bySize = dur.coder_by_size || {};
-      var sizeOrder = ['S', 'M', 'L', 'XL'];
-      var sizeParts = sizeOrder
+      var sizeParts = ['S','M','L','XL']
         .filter(function(s) { return bySize[s] !== undefined; })
         .map(function(s) { return '<span>' + s + ': ' + _fmtMin(bySize[s]) + '</span>'; });
       var bkEl = document.getElementById('dur-breakdown');
-      if (bkEl) bkEl.innerHTML = sizeParts.length
-        ? 'coder by size: ' + sizeParts.join(' · ')
-        : '';
+      if (bkEl) bkEl.innerHTML = sizeParts.length ? 'coder by size: ' + sizeParts.join(' · ') : '';
 
       /* Throughput */
       _set('thr-val', (thr.avg_tickets_per_sprint || 0).toFixed(1));
-      var sprintLen = thr.avg_sprint_length_minutes || 0;
-      _set('thr-sub', _fmtMin(sprintLen) + ' avg sprint length');
+      _set('thr-sub', _fmtMin(thr.avg_sprint_length_minutes || 0) + ' avg sprint length');
 
       /* Cost per sprint */
       _set('cps-val', _fmt$(ps.total));
       var byRole = ps.by_role || {};
-      var roleParts = ['coder', 'tester', 'estimator']
-        .map(function(r) { return '<span>' + r + ' ' + _fmt$(byRole[r]) + '</span>'; });
       var cpsEl = document.getElementById('cps-breakdown');
-      if (cpsEl) cpsEl.innerHTML = roleParts.join(' · ');
+      if (cpsEl) cpsEl.innerHTML = ['coder','tester','estimator']
+        .map(function(r) { return '<span>' + r + ' ' + _fmt$(byRole[r]) + '</span>'; })
+        .join(' · ');
 
       /* Cost per ticket */
       _set('cpt-val', _fmt$(pt.avg));
       var rwCost = pt.rework_cost_annotation || 0;
-      _set('cpt-sub', rwCost > 0
-        ? 'rework adds ~' + _fmt$(rwCost) + '/ticket on rejected ones'
-        : '');
+      _set('cpt-sub', rwCost > 0 ? 'rework adds ~' + _fmt$(rwCost) + '/ticket on rejected ones' : '');
     }
 
     function _set(id, text) {
@@ -962,7 +1279,7 @@
       if (el) el.textContent = text;
     }
 
-    /* ── Calibration constants ── */
+    /* ── Calibration panel ── */
     var _SZ_COLORS = {
       'S':  'var(--green)',
       'M':  'var(--blue)',
@@ -979,61 +1296,43 @@
 
     function _scatterAxisMax(bySize) {
       var bs = bySize || {};
-      var lCfg = (bs.L && bs.L.configured_minutes != null) ? bs.L.configured_minutes : 30;
+      var lCfg  = (bs.L  && bs.L.configured_minutes  != null) ? bs.L.configured_minutes  : 30;
       var xlCfg = (bs.XL && bs.XL.configured_minutes != null) ? bs.XL.configured_minutes : 90;
       return Math.ceil(Math.max(lCfg, xlCfg) * 1.2);
     }
 
     function _scatterTicks(axisMax) {
-      return [0, 1, 2, 3, 4].map(function(i) { return axisMax * i / 4; });
+      return [0,1,2,3,4].map(function(i) { return axisMax * i / 4; });
     }
 
-    /* ── Scatter plot renderer ── */
     function _renderScatter(points, bySize) {
       var svg = document.getElementById('scatter-svg');
       if (!svg) return;
       var axisMax = _scatterAxisMax(bySize);
-      var ticks = _scatterTicks(axisMax);
-      function _xm(v) { return _SVG_L + (v / axisMax) * (_SVG_R - _SVG_L); }
-      function _ym(v) { return _SVG_B - (v / axisMax) * (_SVG_B - _SVG_T); }
+      var ticks   = _scatterTicks(axisMax);
+      function xm(v) { return _SVG_L + (v / axisMax) * (_SVG_R - _SVG_L); }
+      function ym(v) { return _SVG_B - (v / axisMax) * (_SVG_B - _SVG_T); }
       var p = '';
       ticks.forEach(function(v) {
         var lbl = Math.round(v) + 'm';
-        p += '<line x1="' + _xm(v) + '" y1="' + _SVG_T + '" x2="' + _xm(v) + '" y2="' + _SVG_B + '"'
-           + ' stroke="var(--border)" stroke-width="1"/>';
-        p += '<text x="' + _xm(v) + '" y="' + (_SVG_B + 15) + '" font-size="10"'
-           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + lbl + '</text>';
-        p += '<line x1="' + _SVG_L + '" y1="' + _ym(v) + '" x2="' + _SVG_R + '" y2="' + _ym(v) + '"'
-           + ' stroke="var(--border)" stroke-width="1"/>';
-        p += '<text x="' + (_SVG_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10"'
-           + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + lbl + '</text>';
+        p += '<line x1="' + xm(v) + '" y1="' + _SVG_T + '" x2="' + xm(v) + '" y2="' + _SVG_B + '" stroke="var(--border)" stroke-width="1"/>';
+        p += '<text x="' + xm(v) + '" y="' + (_SVG_B+15) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + lbl + '</text>';
+        p += '<line x1="' + _SVG_L + '" y1="' + ym(v) + '" x2="' + _SVG_R + '" y2="' + ym(v) + '" stroke="var(--border)" stroke-width="1"/>';
+        p += '<text x="' + (_SVG_L-8) + '" y="' + (ym(v)+3) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + lbl + '</text>';
       });
-      // Axis lines
-      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_B + '" x2="' + _SVG_R + '" y2="' + _SVG_B + '"'
-         + ' stroke="var(--text-sub)" stroke-width="1.5"/>';
-      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_T + '" x2="' + _SVG_L + '" y2="' + _SVG_B + '"'
-         + ' stroke="var(--text-sub)" stroke-width="1.5"/>';
-      // Dashed diagonal: est = actual
-      p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(axisMax) + '" y2="' + _ym(axisMax) + '"'
-         + ' stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
-      p += '<text x="' + (_xm(axisMax) - 6) + '" y="' + (_ym(axisMax) - 6) + '" font-size="10"'
-         + ' fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
-      // Axis titles
-      p += '<text x="' + ((_SVG_L + _SVG_R) / 2) + '" y="' + (_SVG_B + 32) + '" font-size="10"'
-         + ' fill="var(--text-muted)" font-family="monospace" text-anchor="middle">estimated (min)</text>';
-      p += '<text x="18" y="' + ((_SVG_T + _SVG_B) / 2) + '" font-size="10"'
-         + ' fill="var(--text-muted)" font-family="monospace" text-anchor="middle"'
-         + ' transform="rotate(-90 18 ' + ((_SVG_T + _SVG_B) / 2) + ')">actual (min)</text>';
-      // Data dots colored by size
+      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_B + '" x2="' + _SVG_R + '" y2="' + _SVG_B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
+      p += '<line x1="' + _SVG_L + '" y1="' + _SVG_T + '" x2="' + _SVG_L + '" y2="' + _SVG_B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
+      p += '<line x1="' + xm(0) + '" y1="' + ym(0) + '" x2="' + xm(axisMax) + '" y2="' + ym(axisMax) + '" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
+      p += '<text x="' + (xm(axisMax)-6) + '" y="' + (ym(axisMax)-6) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
+      p += '<text x="' + ((_SVG_L+_SVG_R)/2) + '" y="' + (_SVG_B+32) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle">estimated (min)</text>';
+      p += '<text x="18" y="' + ((_SVG_T+_SVG_B)/2) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle" transform="rotate(-90 18 ' + ((_SVG_T+_SVG_B)/2) + ')">actual (min)</text>';
       (points || []).forEach(function(pt) {
         var col = _SZ_COLORS[pt.estimated_size] || 'var(--text-muted)';
-        p += '<circle cx="' + _xm(pt.estimated_minutes) + '" cy="' + _ym(pt.actual_minutes) + '"'
-           + ' r="5" fill="' + col + '" fill-opacity="0.78"/>';
+        p += '<circle cx="' + xm(pt.estimated_minutes) + '" cy="' + ym(pt.actual_minutes) + '" r="5" fill="' + col + '" fill-opacity="0.78"/>';
       });
       svg.innerHTML = p;
     }
 
-    /* ── Verdict computation ── */
     function _verdict(avgMin, configuredMin) {
       if (avgMin === null || avgMin === undefined || !configuredMin) return 'on-target';
       var ratio = avgMin / configuredMin;
@@ -1042,41 +1341,38 @@
       return 'on-target';
     }
 
-    /* ── Calibration table renderer ── */
     function _renderCalTable(bySize) {
       var tbody = document.getElementById('cal-table-body');
       if (!tbody) return;
-      var sizes = ['S', 'M', 'L', 'XL'];
+      var sizes = ['S','M','L','XL'];
       var html = '';
       sizes.forEach(function(sz) {
-        var row = (bySize || {})[sz] || {};
+        var row  = (bySize || {})[sz] || {};
         var count = row.count || 0;
-        var avg  = row.avg_minutes;
-        var min  = row.min_minutes;
-        var max  = row.max_minutes;
-        var cfg  = row.configured_minutes;
+        var avg   = row.avg_minutes;
+        var min   = row.min_minutes;
+        var max   = row.max_minutes;
+        var cfg   = row.configured_minutes;
         var v    = count > 0 ? _verdict(avg, cfg) : 'on-target';
         var vCls = v === 'over' ? 'v-over' : v === 'under' ? 'v-under' : 'v-ok';
         var applyBtn = '';
         if (count > 0 && avg !== null && avg !== undefined && v !== 'on-target') {
           var rounded = Math.round(avg);
-          applyBtn = ' <button class="btn-apply" onclick="applyCalibration(\'' + sz + '\',' + avg + ')">'
-                   + 'apply ' + rounded + 'm</button>';
+          applyBtn = ' <button class="btn-apply" onclick="applyCalibration(\'' + sz + '\',' + avg + ')">apply ' + rounded + 'm</button>';
         }
-        html += '<tr>';
-        html += '<td><span class="sz-badge sz-' + sz + '">' + sz + '</span></td>';
-        html += '<td>' + (cfg !== null && cfg !== undefined ? Math.round(cfg) + 'm' : '—') + '</td>';
-        html += '<td>' + count + '</td>';
-        html += '<td>' + (min !== null && min !== undefined ? Math.round(min) + 'm' : '—') + '</td>';
-        html += '<td>' + (avg !== null && avg !== undefined ? Math.round(avg) + 'm' : '—') + '</td>';
-        html += '<td>' + (max !== null && max !== undefined ? Math.round(max) + 'm' : '—') + '</td>';
-        html += '<td><span class="verdict ' + vCls + '">' + v + '</span>' + applyBtn + '</td>';
-        html += '</tr>';
+        html += '<tr>'
+          + '<td><span class="sz-badge sz-' + sz + '">' + sz + '</span></td>'
+          + '<td>' + (cfg !== null && cfg !== undefined ? Math.round(cfg) + 'm' : '–') + '</td>'
+          + '<td>' + count + '</td>'
+          + '<td>' + (min !== null && min !== undefined ? Math.round(min) + 'm' : '–') + '</td>'
+          + '<td>' + (avg !== null && avg !== undefined ? Math.round(avg) + 'm' : '–') + '</td>'
+          + '<td>' + (max !== null && max !== undefined ? Math.round(max) + 'm' : '–') + '</td>'
+          + '<td><span class="verdict ' + vCls + '">' + v + '</span>' + applyBtn + '</td>'
+          + '</tr>';
       });
       tbody.innerHTML = html;
     }
 
-    /* ── Apply calibration override ── */
     window.applyCalibration = function(size, avgMin) {
       if (!_slug) return;
       var key = _SZ_SETTING_KEYS[size];
@@ -1100,7 +1396,6 @@
       });
     };
 
-    /* ── Build calibration URL with current scope ── */
     function _buildCalUrl() {
       if (!_slug) return null;
       var params = new URLSearchParams();
@@ -1116,10 +1411,10 @@
       return '/api/projects/' + encodeURIComponent(_slug) + '/analytics/calibration' + (qs ? '?' + qs : '');
     }
 
-    /* ── Fetch calibration data and render scatter + table ── */
     window.fetchCalibration = function() {
       var url = _buildCalUrl();
       if (!url) return;
+      _showLoadingCalibration();
       fetch(url)
         .then(function(r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1128,129 +1423,34 @@
         .then(function(data) {
           _renderScatter(data.points || [], data.by_size || {});
           _renderCalTable(data.by_size || {});
-          var empty = document.getElementById('cal-empty');
+          var empty   = document.getElementById('cal-empty');
           var hasData = (data.points || []).length > 0;
-          if (empty) empty.style.display = hasData ? 'none' : 'block';
+          if (empty) empty.style.display = hasData ? 'none' : '';
         })
         .catch(function(err) {
           console.error('Calibration fetch failed:', err);
         });
     };
 
-    /* ── Cost tab ── */
-    window.fetchCost = function() {
-      if (!_slug) return;
-      var url = '/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost';
-      fetch(url)
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function(data) {
-          _renderCostTab(data);
-        })
-        .catch(function(err) {
-          console.error('Cost fetch failed:', err);
-        });
-    };
-
-    function _fmtTokens(n) {
-      if (!n && n !== 0) return '—';
-      if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-      return String(n);
+    /* ── HTML escape helper ── */
+    function _esc(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
-
-    function _fmtCost(c) {
-      if (c == null) return '';
-      if (c < 0.01) return '<$0.01';
-      return '$' + c.toFixed(4);
-    }
-
-    function _renderCostTab(data) {
-      var pm = data.price_map_configured;
-      // Show/hide cost column headers
-      ['sprint', 'ticket', 'agent'].forEach(function(area) {
-        var hdr = document.getElementById('cost-' + area + '-cost-header');
-        if (hdr) hdr.style.display = pm ? '' : 'none';
-      });
-
-      // Sprint totals
-      var sTbody = document.getElementById('cost-sprint-tbody');
-      if (sTbody) {
-        var sprints = (data.by_sprint || []).slice().reverse();
-        if (!sprints.length) {
-          sTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
-        } else {
-          sTbody.innerHTML = sprints.map(function(s) {
-            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(s.cost_usd) + '</td>' : '';
-            return '<tr><td style="font-family:var(--mono)">' + s.sprint_label + '</td>' +
-              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(s.total_tokens) + '</td>' + cost + '</tr>';
-          }).join('');
-        }
-      }
-
-      // Top tickets
-      var tTbody = document.getElementById('cost-ticket-tbody');
-      if (tTbody) {
-        var tickets = data.by_ticket || [];
-        if (!tickets.length) {
-          tTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
-        } else {
-          tTbody.innerHTML = tickets.map(function(t) {
-            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(t.cost_usd) + '</td>' : '';
-            return '<tr><td><a href="#" style="color:var(--blue)">#' + t.issue_number + '</a></td>' +
-              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(t.total_tokens) + '</td>' + cost + '</tr>';
-          }).join('');
-        }
-      }
-
-      // By agent
-      var aTbody = document.getElementById('cost-agent-tbody');
-      if (aTbody) {
-        var agents = data.by_agent || [];
-        if (!agents.length) {
-          aTbody.innerHTML = '<tr><td colspan="' + (pm ? 3 : 2) + '" style="color:var(--text-muted);text-align:center;padding:20px">No data yet</td></tr>';
-        } else {
-          aTbody.innerHTML = agents.map(function(a) {
-            var cost = pm ? '<td style="text-align:right;font-family:var(--mono)">' + _fmtCost(a.cost_usd) + '</td>' : '';
-            return '<tr><td>' + a.agent + '</td>' +
-              '<td style="text-align:right;font-family:var(--mono)">' + _fmtTokens(a.total_tokens) + '</td>' + cost + '</tr>';
-          }).join('');
-        }
-      }
-
-      // Per-size avg tokens
-      var szTbody = document.getElementById('cost-size-tbody');
-      if (szTbody) {
-        var psat = data.per_size_avg_tokens || {};
-        szTbody.innerHTML = ['S', 'M', 'L', 'XL'].map(function(sz) {
-          var entry = psat[sz] || {count: 0, avg_tokens: null};
-          return '<tr><td style="font-weight:600">' + sz + '</td>' +
-            '<td style="text-align:right">' + (entry.count || 0) + '</td>' +
-            '<td style="text-align:right;font-family:var(--mono)">' + (entry.avg_tokens != null ? _fmtTokens(entry.avg_tokens) : '—') + '</td></tr>';
-        }).join('');
-      }
-    }
-
-    /* ── Override showTab to load cost data ── */
-    var _origShowTab = window.showTab;
-    window.showTab = function(name) {
-      _origShowTab(name);
-      if (name === 'cost') fetchCost();
-    };
 
     /* ── Init ── */
     document.addEventListener('DOMContentLoaded', function() {
-      /* Auto-switch to metrics tab if URL hash says so */
-      if (window.location.hash === '#metrics') {
-        showTab('metrics');
+      /* Honour URL hash for deep-linking to a specific tab */
+      var hash = window.location.hash.replace('#', '');
+      if (['trends','status','metrics','calibration'].indexOf(hash) !== -1) {
+        anlShowTab(hash);
+      } else {
+        /* Default: Trends tab — fetch cost data */
+        fetchCost();
       }
-      if (window.location.hash === '#cost') {
-        showTab('cost');
-      }
-      /* Load calibration data for default tab */
-      fetchCalibration();
     });
 
   })();

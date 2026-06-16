@@ -1489,14 +1489,14 @@
 
     .ticket-group-hdr {
       display: flex; align-items: center; gap: 8px;
-      padding: 10px 0 6px;
+      padding: 8px 0;
       font-size: 10px; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
     }
     .ticket-group-rollup {
       margin-left: auto;
       font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none;
-      color: var(--text-sub); font-family: var(--mono); white-space: nowrap;
+      color: var(--text-muted); font-family: var(--mono); white-space: nowrap;
     }
     .ticket-grp-uat-close-btn {
       flex-shrink: 0;
@@ -1508,23 +1508,24 @@
     }
     .ticket-grp-uat-close-btn:hover { background: var(--amber-bg); }
     .ticket-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 0;
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 0;
       border-top: 1px solid var(--border);
       font-size: 13px;
+      transition: background .12s;
     }
     .ticket-status-pill {
       font-size: 10px; font-weight: 600;
-      padding: 2px 7px; border-radius: 10px; white-space: nowrap;
+      padding: 2px 8px; border-radius: 10px; white-space: nowrap;
     }
     .ticket-status-pill.SIT      { background: var(--blue-bg);   color: var(--blue); }
     .ticket-status-pill.UAT      { background: var(--amber-bg);  color: var(--amber); }
     .ticket-status-pill.in-progress { background: var(--green-bg);  color: var(--green); }
     .ticket-status-pill.blocked  { background: var(--red-bg);    color: var(--red); }
-    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
     .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ticket-num   { font-size: 11px; color: var(--text-sub); flex-shrink: 0; }
-    .empty-msg { color: var(--text-sub); font-size: 13px; padding: 12px 0; font-style: italic; }
+    .ticket-num   { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .empty-msg { color: var(--text-muted); font-size: 13px; padding: 12px 0; font-style: italic; }
     .ticket-close-btn {
       padding: 2px 8px; font-size: 11px; font-weight: 500;
       border: 1px solid var(--border); border-radius: 4px;
@@ -1538,7 +1539,34 @@
       padding: 1px 5px; border-radius: 3px;
       font-size: 10px; font-weight: 700;
       font-family: var(--mono);
-      background: var(--surface-2); color: var(--text-sub);
+      background: var(--surface-2); color: var(--text-muted);
+    }
+    .ticket-est-size-pill.sz-S  { background: var(--green-bg); color: var(--green); }
+    .ticket-est-size-pill.sz-M  { background: var(--blue-bg);  color: var(--blue); }
+    .ticket-est-size-pill.sz-L  { background: var(--amber-bg); color: var(--amber); }
+    .ticket-est-size-pill.sz-XL { background: var(--red-bg);   color: var(--red); }
+    /* ── GitHub label chips (issue #1059) ── */
+    .tkt-labels-row {
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+      width: 100%; padding-bottom: 4px;
+    }
+    .tkt-gh-label {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 10px;
+      font-size: 10px; font-weight: 600; white-space: nowrap;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    /* ── Empty state (issue #1059) ── */
+    .tkt-empty-state {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 56px 24px; text-align: center; gap: 8px;
+    }
+    .tkt-empty-icon { font-size: 36px; color: var(--text-sub); }
+    .tkt-empty-title { font-size: 15px; font-weight: 600; color: var(--text-muted); }
+    .tkt-empty-sub {
+      font-size: 13px; color: var(--text-muted);
+      max-width: 340px; line-height: 1.55;
     }
     .ticket-est-confidence-pill {
       flex-shrink: 0;
@@ -1550,18 +1578,18 @@
     .ticket-est-confidence-pill.conf-medium { background: var(--amber-bg); color: var(--amber); }
     .ticket-est-confidence-pill.conf-low    { background: var(--red-bg);   color: var(--red); }
     .ticket-no-estimate {
-      flex-shrink: 0; font-size: 10px; color: var(--text-sub);
+      flex-shrink: 0; font-size: 10px; color: var(--text-muted);
       font-style: italic; white-space: nowrap;
     }
     /* ── Dependency chips (issue #432) ── */
     .ticket-row { flex-wrap: wrap; }
     .dep-chips-row {
-      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
       width: 100%; padding-bottom: 4px;
     }
-    .dep-chip-sep { width: 10px; }
+    .dep-chip-sep { width: 8px; }
     .dep-chip-label {
-      font-size: 10px; font-weight: 700; color: var(--text-sub);
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
       text-transform: uppercase; letter-spacing: .06em; flex-shrink: 0;
     }
     .dep-chip {
@@ -1574,6 +1602,44 @@
     .dep-chip--blocks    { background: var(--red-bg); color: var(--red); }
     .dep-chip--blocked-by { background: var(--purple-bg); color: var(--purple); }
     .dep-chip--missing   { opacity: .55; cursor: default; text-decoration: line-through; }
+    /* ── Ticket row hover + focus + keyboard (issue #1061) ── */
+    .ticket-row:hover { background: var(--surface-hover); }
+    .ticket-row:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
+    .ticket-row a:focus-visible,
+    .ticket-row button:focus-visible,
+    .ticket-row input[type=checkbox]:focus-visible {
+      outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px;
+    }
+    /* ── Ticket group sections (filter targets, issue #1061) ── */
+    .tkt-group-section { transition: opacity .2s; }
+    /* ── Ticket filter chips (issue #1061) ── */
+    .tkt-filter-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .tkt-filter-chip {
+      padding: 3px 10px; font-size: 11px; font-weight: 600; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .tkt-filter-chip:hover { background: var(--surface-hover); color: var(--text); }
+    .tkt-filter-chip.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
+    .tkt-filter-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+    /* ── Ticket loading spinner (issue #1061) ── */
+    .tkt-loading {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 56px 24px; gap: 12px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .tkt-loading-spinner {
+      width: 24px; height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: tkt-spin .7s linear infinite;
+    }
+    @keyframes tkt-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .ticket-row, .tkt-group-section, .tkt-filter-chip, .tkt-loading-spinner { transition: none; animation: none; }
+    }
     /* ── Ticket detail panel (issue #432) ── */
     .tdp {
       display: none; position: fixed;
@@ -6731,6 +6797,7 @@
     }
     .logs-chip:hover { background: var(--surface-2); color: var(--text); }
     .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .logs-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     /* Errors-only overlay pill reads in red when active (distinct from the blue
        source filters); deck filter=errors lands here. */
     .logs-chip--errors.active { background: var(--red-bg); border-color: var(--red); color: var(--red); }
@@ -6759,6 +6826,7 @@
     .logs-view-btn:last-child { border-right: none; }
     .logs-view-btn:hover { background: var(--surface-2); color: var(--text); }
     .logs-view-btn.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+    .logs-view-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; z-index: 1; position: relative; }
     .lsr-label { font-size: 11px; color: var(--text-sub); font-weight: 500; }
     .lsr-input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); width: 100%; }
     .lsr-input:focus { outline: none; border-color: var(--blue); }
@@ -6771,6 +6839,16 @@
     .lsr-truncation { padding: 8px 12px; font-size: 11px; color: var(--text-sub); background: var(--surface-2); text-align: center; }
     .logs-body { flex: 1; overflow-y: auto; min-height: 0; }
     .logs-empty { padding: 40px 20px; text-align: center; color: var(--text-sub); font-size: 13px; }
+    /* Loading skeleton for activity list */
+    .logs-skeleton { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .logs-skeleton-row {
+      height: 36px; border-radius: 6px;
+      background: var(--surface-2); opacity: .7;
+      animation: logs-shimmer 1.4s ease-in-out infinite;
+    }
+    .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
+    .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
+    @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
     /* Logs › Issues view */
     .logs-issue-group { border-bottom: 1px solid var(--border); }
     .logs-issue-group-label {
@@ -6791,6 +6869,7 @@
     }
     .logs-issue-row:first-of-type { border-top: none; }
     .logs-issue-row:hover { background: var(--surface-hover); }
+    .logs-issue-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
     .logs-issue-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
     .logs-issue-title {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -6871,6 +6950,7 @@
       padding: 10px 16px; cursor: pointer; user-select: none;
     }
     .evl-bundle-header:hover { background: var(--surface-hover); }
+    .evl-bundle-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
     .evl-bundle-row.evl-single .evl-bundle-header { cursor: default; }
     .evl-bundle-row.evl-single .evl-bundle-header:hover { background: transparent; }
     .evl-headline { font-size: 13px; font-weight: 500; color: var(--text); flex-shrink: 0; }
@@ -6879,8 +6959,8 @@
       font-size: 11px; font-weight: 600; padding: 1px 6px;
       border-radius: 10px; border: 1px solid; white-space: nowrap;
     }
-    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: rgba(34,197,94,.25); }
-    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: rgba(239,68,68,.25); }
+    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: var(--green); }
+    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: var(--red); }
     .evl-effect-chip--neutral{ background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
     .evl-count-badge {
       font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
@@ -6935,8 +7015,8 @@
     .lr-badge.agent  { background: var(--green-bg);  color: var(--green); }
     .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
     .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
-    .lr-badge.error  { background: #fee2e2; color: #ef4444; }
-    .lr-badge.sprint { background: #d1fae5; color: #065f46; }
+    .lr-badge.error  { background: var(--red-bg);   color: var(--red); }
+    .lr-badge.sprint { background: var(--green-bg); color: var(--green); }
     .lr-body {
       flex: 1; min-width: 0; display: flex; align-items: baseline;
       gap: 8px; flex-wrap: wrap;
@@ -6985,6 +7065,15 @@
     .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
     .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
 
+    /* ── Severity chips (issue #1062) ── */
+    .evl-sev-chip {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 44px; text-align: center;
+    }
+    .evl-sev-chip--info  { background: var(--surface-2); color: var(--text-muted); }
+    .evl-sev-chip--warn  { background: var(--amber-bg);  color: var(--amber); }
+    .evl-sev-chip--error { background: var(--red-bg);    color: var(--red); }
+
     /* Activity log entity chips */
     .evl-chip {
       display: inline-flex; align-items: center; gap: 3px;
@@ -6992,13 +7081,13 @@
       border-radius: 99px; line-height: 1.45; vertical-align: 1px;
     }
     .evl-chip--issue {
-      background: #e0f2fe; color: #0369a1; text-decoration: none;
+      background: var(--blue-bg); color: var(--blue); text-decoration: none;
     }
     a.evl-chip--issue:hover { text-decoration: underline; }
-    .evl-chip--sprint { background: #d1fae5; color: #065f46; }
+    .evl-chip--sprint { background: var(--green-bg); color: var(--green); }
     .evl-chip--branch {
       font-family: var(--mono); font-size: 10px;
-      background: #f3f4f6; color: #111827; border: 1px solid var(--border);
+      background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
     }
     .evl-chip--branch i { font-size: 10px; opacity: .65; }
     .evl-chip--agent { text-transform: lowercase; }
@@ -7010,38 +7099,38 @@
       background: var(--surface-2); color: var(--text-sub);
       border: 1px solid var(--border);
     }
-    .evl-dur-pill.warn { background: #fef3c7; color: #92400e; border-color: rgba(217,119,6,.25); }
-    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: rgba(37,99,235,.2); }
+    .evl-dur-pill.warn { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
+    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
     /* issue #920: backend label chip (cline / claude-code) in activity pills */
     .evl-backend-chip {
       display: inline-block;
       font-size: 10px; font-weight: 600; text-transform: lowercase;
       padding: 1px 6px; border-radius: 99px;
-      background: var(--purple-bg, #ede9fe); color: var(--purple, #7c3aed);
-      border: 1px solid rgba(124,58,237,.2);
+      background: var(--purple-bg); color: var(--purple);
+      border: 1px solid var(--purple);
       vertical-align: middle;
     }
 
     /* Error rows — red tint + expandable detail panel */
     .evl-log-row.evl-row-error {
-      background: #fef2f2;
-      border-left: 3px solid #ef4444;
+      background: var(--red-bg);
+      border-left: 3px solid var(--red);
       padding-left: 13px;
       flex-wrap: wrap;
     }
-    .evl-log-row.evl-row-error:hover { background: #fee2e2; }
+    .evl-log-row.evl-row-error:hover { background: var(--red-bg); }
     .evl-error-panel {
       flex: 1 1 100%;
       margin: 6px 0 2px calc(54px + 62px + 11px);
       padding: 10px 12px;
       background: var(--surface);
-      border: 1px solid #fecaca;
+      border: 1px solid var(--red);
       border-radius: 8px;
       font-size: 12px;
       line-height: 1.5;
     }
     .evl-error-head {
-      font-weight: 700; color: #ef4444; margin-bottom: 4px;
+      font-weight: 700; color: var(--red); margin-bottom: 4px;
     }
     .evl-error-loc {
       color: var(--blue); font-family: var(--mono); font-size: 11px;
@@ -7061,9 +7150,9 @@
     }
     .evl-error-btn:hover { background: var(--surface-hover); color: var(--text); }
     .evl-error-btn--action {
-      border-color: #d97706; color: #d97706; background: #fffbeb;
+      border-color: var(--amber); color: var(--amber); background: var(--amber-bg);
     }
-    .evl-error-btn--action:hover { background: #fef3c7; }
+    .evl-error-btn--action:hover { background: var(--amber-bg); }
 
     /* ── Branch cleanup controls (issue #634) ── */
     .evl-stale-banner-inner {
@@ -7090,6 +7179,19 @@
     }
     .evl-sprint-cleanup:hover { border-color: var(--purple); background: var(--purple-bg); }
     .evl-sprint-cleanup:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* List filter fade transition */
+    .evl-list { transition: opacity .15s ease; }
+    .evl-list.logs-filtering { opacity: .5; }
+    .evl-bundle-row { transition: opacity .12s ease; }
+
+    /* Suppress all Logs tab motion when user prefers reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .logs-chip, .logs-view-btn, .logs-issue-row, .logs-run-header,
+      .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
+      .evl-chevron, .logs-run-chevron, .logs-live-dot,
+      .logs-skeleton-row { transition: none !important; animation: none !important; }
+    }
 
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
@@ -7298,10 +7400,11 @@
     .anl-scope { display: flex; gap: 8px; }
     .anl-scope-pill { font-family: var(--mono); font-size: 12px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
     .anl-scope-pill select { background: none; border: none; outline: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
-    .anl-tab-bar { display: flex; gap: 6px; margin-bottom: 16px; }
-    .anl-tab-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-    .anl-tab-btn.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
-    .anl-tab-btn:hover:not(.active) { background: var(--surface); }
+    .anl-tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+    .anl-tab-btn { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: color .15s, border-bottom-color .15s; white-space: nowrap; }
+    .anl-tab-btn.active { color: var(--text); font-weight: 600; border-bottom-color: var(--blue); }
+    .anl-tab-btn:hover:not(.active) { color: var(--text); }
+    .anl-tab-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
     .anl-panel { display: none; flex-direction: column; gap: 16px; }
     .anl-panel.show { display: flex; }
     /* Sprint sub-nav: Board / Running / History (issue #798) */
@@ -8050,7 +8153,8 @@
     .rm-look-ahead-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 10px; }
     .rm-look-ahead-entry { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-faint, var(--border)); font-size: 13px; color: var(--text); }
     .rm-look-ahead-entry:last-child { border-bottom: none; }
-    .rm-look-ahead-num { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--surface); border-radius: 50%; font-size: 11px; font-weight: 700; }
+    .rm-look-ahead-num { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; background: var(--blue); color: var(--surface); border-radius: 50%; font-size: 11px; font-weight: 700; }
+    .rm-look-ahead-icon { margin-right: 5px; }
 
     /* Roadmap Suggestions panel (issue #882) */
     #sug-root { margin-top: 24px; }
@@ -8074,13 +8178,17 @@
 
     .rm-toolbar { display: flex; align-items: center; gap: 10px; }
     .rm-toolbar-gap { flex: 1; }
-    .rm-list { display: flex; flex-direction: column; gap: 10px; }
+    .rm-toolbar-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .rm-list { display: flex; flex-direction: column; gap: 16px; }
     .rm-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 16px;
+      transition: border-color .15s, background .15s;
     }
+    .rm-card:hover { background: var(--surface-hover); border-color: var(--border); }
+    .rm-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .rm-card.rm-active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
     .rm-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
     .rm-card-title { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; }
@@ -8095,9 +8203,14 @@
       flex: 1; min-width: 120px;
       background: var(--surface-2); border-radius: 5px; height: 6px; overflow: hidden;
     }
-    .rm-progress-fill { height: 100%; background: var(--text); border-radius: 5px; }
+    .rm-progress-fill { height: 100%; width: var(--rm-pct, 0%); border-radius: 5px; transition: width .4s ease; }
+    .rm-prog-low  { background: var(--red); }
+    .rm-prog-mid  { background: var(--amber); }
+    .rm-prog-high { background: var(--green); }
     .rm-progress-text { font-size: 12px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
     .rm-due { font-size: 12px; color: var(--text-muted); }
+    .rm-empty-title { font-size: 15px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .rm-empty-sub  { font-size: 13px; color: var(--text-sub); }
     .rm-card-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
     .rm-btn {
       font-size: 12px; padding: 4px 10px; border-radius: 5px;
@@ -8126,6 +8239,7 @@
     .rm-history-row:last-child { border-bottom: none; }
     .rm-history-row-title { flex: 1; color: var(--text-muted); }
     .rm-empty { text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: 14px; }
+    .rm-empty > i { font-size: 28px; display: block; margin-bottom: 8px; }
     .rm-stale-notice {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border: 1px solid var(--amber, #b45309);
@@ -8136,6 +8250,23 @@
     .rm-add-card {
       border: 1px dashed var(--border); border-radius: 6px;
       padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .rm-history-icon { color: var(--text-muted); }
+    .rm-stale-retry { margin-left: auto; }
+    .rm-loading { padding: 32px; text-align: center; color: var(--text-muted); }
+
+    @keyframes rm-skeleton-shimmer {
+      0%   { opacity: .5; }
+      50%  { opacity: 1; }
+      100% { opacity: .5; }
+    }
+    .rm-skeleton { display: block; background: var(--surface-2); border-radius: 4px; animation: rm-skeleton-shimmer 1.4s ease-in-out infinite; }
+    .rm-skeleton-line { height: 12px; background: var(--surface-2); border-radius: 4px; animation: rm-skeleton-shimmer 1.4s ease-in-out infinite; }
+    .rm-skeleton-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .rm-progress-fill { transition: none; }
+      .rm-skeleton, .rm-skeleton-line { animation: none; }
     }
   </style>
 </head>
@@ -8621,18 +8752,18 @@
                 <span class="logs-chip-label">Sprint</span>
                 <div id="logs-chips-sprint" style="display:contents"></div>
               </div>
-              <div class="logs-chip-group">
+              <div class="logs-chip-group" role="group" aria-label="Filter by role">
                 <span class="logs-chip-label">Role</span>
-                <button class="logs-chip" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
-                <button class="logs-chip" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
-                <button class="logs-chip" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
               </div>
-              <div class="logs-chip-group">
+              <div class="logs-chip-group" role="group" aria-label="Filter by level">
                 <span class="logs-chip-label">Level</span>
-                <button class="logs-chip" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
-                <button class="logs-chip" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
-                <button class="logs-chip" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
-                <button class="logs-chip" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
               </div>
               <button class="logs-chip logs-tags-see-more-btn hidden" id="logs-tags-see-more" onclick="_logsTagsToggle()">See more</button>
             </div>
@@ -8660,12 +8791,12 @@
                   <i class="ti ti-search"></i> Search
                 </button>
               </div>
-              <div id="logs-evl-source-group" class="logs-chip-group" style="margin-left:8px">
-                <button class="logs-chip active" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
-                <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
-                <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
-                <button class="logs-chip" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
-                <button class="logs-chip logs-chip--errors" id="evl-filter-errors" onclick="evlToggleErrorsOnly()" title="Show only failures/errors">Errors</button>
+              <div id="logs-evl-source-group" class="logs-chip-group" role="group" aria-label="Filter by source" style="margin-left:8px">
+                <button class="logs-chip active" aria-pressed="true" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
+                <button class="logs-chip logs-chip--errors" aria-pressed="false" id="evl-filter-errors" onclick="evlToggleErrorsOnly()" title="Show only failures/errors">Errors</button>
               </div>
               <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
                 <i class="ti ti-refresh"></i>
@@ -8688,7 +8819,12 @@
             <div id="logs-activity">
               <div id="evl-stale-banner" class="hidden"></div>
               <div class="evl-list" id="evl-list">
-                <div class="logs-empty" id="evl-empty">Loading activity…</div>
+                <div class="logs-skeleton" id="evl-skeleton">
+                  <div class="logs-skeleton-row"></div>
+                  <div class="logs-skeleton-row"></div>
+                  <div class="logs-skeleton-row"></div>
+                </div>
+                <div class="logs-empty hidden" id="evl-empty">No events</div>
               </div>
             </div>
             <!-- Search panel (issue #785) -->
@@ -9121,16 +9257,16 @@
           </div>
         </div>
 
-        <!-- Sub-tab bar -->
+        <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
         <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
-          <button class="anl-tab-btn active" id="anl-tab-calibration" role="tab"
-                  aria-selected="true" onclick="anlShowTab('calibration')">Calibration</button>
-          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
-                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn active" id="anl-tab-trends" role="tab"
+                  aria-selected="true" onclick="anlShowTab('trends')">Trends</button>
           <button class="anl-tab-btn" id="anl-tab-status" role="tab"
                   aria-selected="false" onclick="anlShowTab('status')">Status</button>
-          <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
-                  aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
+          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
+                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
+                  aria-selected="false" onclick="anlShowTab('calibration')">Calibration</button>
         </div>
 
         <!-- Calibration panel -->
@@ -10784,7 +10920,7 @@ async function loadTickets() {
   }
 
   _ticketsRepo = repo;
-  container.innerHTML = '<div class="loading-msg">Loading tickets…</div>';
+  container.innerHTML = '<div class="tkt-loading"><div class="tkt-loading-spinner" aria-hidden="true"></div>Loading tickets…</div>';
 
   try {
     const resp = await fetch('/api/project-details?repo=' + encodeURIComponent(repo));
@@ -10822,20 +10958,29 @@ function renderTickets(data, repo) {
 
   let ticketsHtml;
   if (groups.length === 0) {
-    ticketsHtml = '<div class="loading-msg">No open tickets.</div>';
+    ticketsHtml = `<div class="tkt-empty-state">
+      <i class="ti ti-ticket tkt-empty-icon"></i>
+      <div class="tkt-empty-title">No open tickets</div>
+      <div class="tkt-empty-sub">All caught up — create new tickets via Bulk Create or directly on GitHub.</div>
+    </div>`;
   } else {
     ticketsHtml = groups.map(g => {
       const rows = g.items.map(t => {
         const deps = _parseDeps(t.body || '');
         const chipsHtml = _depChipsHtml(deps, ticketNums);
+        const labelChipsHtml = _tktGhLabelChipsHtml(t.labels || []);
         return `
-        <div class="ticket-row" id="ticket-row-${t.number}">
-          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
-          <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(t.status)}</span>
+        <div class="ticket-row" id="ticket-row-${t.number}" tabindex="0"
+             aria-label="Issue #${t.number}: ${escHtml(t.title)}, status ${escHtml(_tktStatusLabel(t.status))}">
+          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}"
+                 aria-label="Select ticket #${t.number}" onchange="_onTicketCheckbox(this)">
+          <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(_tktStatusLabel(t.status))}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
           <span class="ticket-est-wrap" id="ticket-est-${t.number}"></span>
-          <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
+          <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}"
+                  aria-label="Close ticket #${t.number}: ${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
+          ${labelChipsHtml}
           ${chipsHtml}
         </div>`;
       }).join('');
@@ -10844,14 +10989,22 @@ function renderTickets(data, repo) {
         ? `<button type="button" class="ticket-grp-uat-close-btn" onclick="openBulkCloseUatModal()"
                   title="Bulk close UAT tickets left open after sprint sign-off">Close all UAT</button>`
         : '';
-      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span>${uatBtn}</div>${rows}`;
+      return `<div class="tkt-group-section" data-group="${escHtml(g.label)}"><div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span>${uatBtn}</div>${rows}</div>`;
     }).join('');
   }
+
+  const filterChipsHtml = groups.length > 1
+    ? `<div class="tkt-filter-chips" role="group" aria-label="Filter by status">
+        <button class="tkt-filter-chip active" data-filter="all" onclick="tktSetFilter(this)">All</button>
+        ${groups.map(g => `<button class="tkt-filter-chip" data-filter="${escHtml(g.label)}" onclick="tktSetFilter(this)">${escHtml(g.label)}</button>`).join('')}
+      </div>`
+    : '';
 
   container.innerHTML = `
     <div class="tickets-toolbar">
       <div class="tickets-toolbar-left">
         <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open ticket${tickets.length !== 1 ? 's' : ''}</span>
+        ${filterChipsHtml}
       </div>
       <div class="tickets-toolbar-right">
         <button class="btn-create-label" onclick="openCreateLabelModal()">
@@ -10881,7 +11034,8 @@ async function _ticketsLoadEstimates(tickets, repo) {
       if (est && (est.size || est.confidence)) {
         let html = '';
         if (est.size) {
-          html += `<span class="ticket-est-size-pill">${escHtml(est.size)}</span>`;
+          const szClass = `sz-${escHtml(est.size)}`;
+          html += `<span class="ticket-est-size-pill ${szClass}">${escHtml(est.size)}</span>`;
         }
         if (est.confidence) {
           const confClass = `conf-${est.confidence.toLowerCase()}`;
@@ -10920,6 +11074,37 @@ function _ticketsUpdateGroupHeaders() {
     const el = document.getElementById(`ticket-grp-rollup-${g.label.replace(/\s+/g, '-')}`);
     if (el) el.textContent = _ticketsRollupText(g.items);
   }
+}
+
+// ── Tickets tab helpers (issue #1059) ─────────────────────────────────────────
+const _TKT_STATUS_LABEL = {
+  'SIT': 'SIT', 'UAT': 'UAT', 'in-progress': 'In Progress',
+  'blocked': 'Blocked', 'backlog': 'Backlog',
+};
+
+function _tktStatusLabel(status) {
+  return _TKT_STATUS_LABEL[status] || status;
+}
+
+const _TKT_LABEL_SKIP = /^(in-progress|SIT|UAT|blocked|backlog|sprint-\d+|size-[SMLX]+|estimated)$/;
+
+function _tktGhLabelChipsHtml(labels) {
+  if (!labels || !labels.length) return '';
+  const chips = labels.filter(l => !_TKT_LABEL_SKIP.test(l));
+  if (!chips.length) return '';
+  return `<div class="tkt-labels-row">${chips.map(l => `<span class="tkt-gh-label">${escHtml(l)}</span>`).join('')}</div>`;
+}
+
+// ── Tickets filter (issue #1061) ─────────────────────────────────────────────
+function tktSetFilter(chipEl) {
+  const filter = chipEl.dataset.filter;
+  document.querySelectorAll('#tickets-content .tkt-filter-chip').forEach(c =>
+    c.classList.toggle('active', c === chipEl)
+  );
+  document.querySelectorAll('#tickets-content .tkt-group-section').forEach(g => {
+    const show = filter === 'all' || g.dataset.group === filter;
+    g.style.display = show ? '' : 'none';
+  });
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────
@@ -22400,6 +22585,7 @@ function _logsPopulateSprintChips() {
     } else {
       const btn = document.createElement('button');
       btn.className = 'logs-chip';
+      btn.setAttribute('aria-pressed', 'false');
       btn.dataset.group = 'sprint_label';
       btn.dataset.value = label;
       btn.dataset.tagRecency = recency;
@@ -22457,6 +22643,7 @@ function logsToggleChip(btn) {
   const set = _logsState.chips[group];
   if (set.has(value)) { set.delete(value); btn.classList.remove('active'); }
   else { set.add(value); btn.classList.add('active'); }
+  btn.setAttribute('aria-pressed', btn.classList.contains('active') ? 'true' : 'false');
   logsRenderTimeline();
   if (_logsState.viewMode === 'raw') logsLoadRawView();
 }
@@ -23215,26 +23402,61 @@ function evlRender() {
   const listEl = document.getElementById('evl-list');
   if (!listEl) return;
 
+  // Hide skeleton once we have data (loaded or empty)
+  const skEl = document.getElementById('evl-skeleton');
+  const emEl = document.getElementById('evl-empty');
+
   if (!_evlState.events) {
-    listEl.innerHTML = '<div class="logs-empty">Loading activity…</div>';
+    if (skEl) skEl.classList.remove('hidden');
+    if (emEl) emEl.classList.add('hidden');
     return;
   }
 
-  listEl.innerHTML = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  if (skEl) skEl.classList.add('hidden');
+
+  const rendered = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  // evlRenderTimeline returns empty-state HTML when empty; inject after skeleton/empty els
+  const staticEls = listEl.querySelectorAll('#evl-skeleton, #evl-empty');
+  // Remove any previous dynamic content
+  [...listEl.children].forEach(function(c) {
+    if (c.id !== 'evl-skeleton' && c.id !== 'evl-empty') c.remove();
+  });
+
+  if (!rendered || rendered.includes('logs-empty')) {
+    // Show the dedicated empty element
+    if (emEl) { emEl.textContent = 'No events'; emEl.classList.remove('hidden'); }
+  } else {
+    if (emEl) emEl.classList.add('hidden');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = rendered;
+    while (tmp.firstChild) listEl.appendChild(tmp.firstChild);
+  }
+
   const _errBtn = document.getElementById('evl-filter-errors');
-  if (_errBtn) _errBtn.classList.toggle('active', _evlState.errorsOnly);
+  if (_errBtn) {
+    _errBtn.classList.toggle('active', _evlState.errorsOnly);
+    _errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
+  }
   _evlUpdateBanner();
 }
 
 // Errors-only overlay toggle (also seeded by the deck `filter=errors` deep link).
 function evlToggleErrorsOnly() {
   _evlState.errorsOnly = !_evlState.errorsOnly;
+  var errBtn = document.getElementById('evl-filter-errors');
+  if (errBtn) errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
   evlRender();
 }
 
 async function evlFetch() {
   if (!_projectData || _evlState.loading) return;
   _evlState.loading = true;
+
+  // Show skeleton while loading
+  const skEl = document.getElementById('evl-skeleton');
+  const emEl = document.getElementById('evl-empty');
+  if (skEl) skEl.classList.remove('hidden');
+  if (emEl) emEl.classList.add('hidden');
 
   const slug = (_projectData.repo || '').split('/').pop();
   try {
@@ -23277,7 +23499,10 @@ function evlSetFilter(filter) {
   _evlState.sourceFilter = filter;
   ['all', 'agent', 'dashboard', 'github'].forEach(function(f) {
     var el = document.getElementById('evl-filter-' + f);
-    if (el) el.classList.toggle('active', f === filter);
+    if (el) {
+      el.classList.toggle('active', f === filter);
+      el.setAttribute('aria-pressed', f === filter ? 'true' : 'false');
+    }
   });
   evlRender();
 }
@@ -23294,6 +23519,18 @@ function _evlDayLabel(ts) {
   if (evDay.getTime() === today.getTime()) return 'Today · ' + base;
   if (evDay.getTime() === yesterday.getTime()) return 'Yesterday · ' + base;
   return base;
+}
+
+function _evlSeverity(ev) {
+  var type = ev.type || '';
+  var detail = ev.detail || {};
+  if (type === 'ticket_failed') return 'error';
+  if (type === 'agent_finished') {
+    var st = detail.status || '';
+    if (st === 'error' || st === 'timed_out') return 'error';
+    if (st === 'partial') return 'warn';
+  }
+  return 'info';
 }
 
 function _evlBadgeLabel(source, type) {
@@ -23615,11 +23852,11 @@ function _evlDurationPill(ev) {
 }
 
 function evlRenderTimeline(events, filter) {
-  if (!events || events.length === 0) return '<div class="logs-empty">No events found.</div>';
+  if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
 
   var visible = events.filter(function(e) { return _evlMatchesFilter(e, filter); });
 
-  if (visible.length === 0) return '<div class="logs-empty">No events for this filter.</div>';
+  if (visible.length === 0) return '<div class="logs-empty">No events</div>';
 
   // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
   var sprintFeatMap = {};
@@ -23667,6 +23904,9 @@ function evlRenderTimeline(events, filter) {
       var timePart = (ev.timestamp || '').substring(11, 16);
       var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
       var badgeCls = _evlBadgeCls(badgeLabel);
+      var sev = _evlSeverity(ev);
+      var sevChip = '<span class="evl-sev-chip evl-sev-chip--' + escHtml(sev) + '">'
+        + (sev === 'error' ? 'ERROR' : sev === 'warn' ? 'WARN' : 'INFO') + '</span>';
       var desc = _evlDescHtml(ev);
       var actor = (ev.source === 'github' && ev.actor)
         ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
@@ -23680,6 +23920,7 @@ function evlRenderTimeline(events, filter) {
         + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '">'
         + '<span class="lr-time">' + escHtml(timePart) + '</span>'
         + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+        + sevChip
         + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
         + durPill
         + errPanel
@@ -23687,7 +23928,7 @@ function evlRenderTimeline(events, filter) {
     }
   }
 
-  return html || '<div class="logs-empty">No events for this filter.</div>';
+  return html || '<div class="logs-empty">No events</div>';
 }
 
 // ── Branch cleanup helpers (issue #634) ──────────────────────────────────────
@@ -25968,10 +26209,9 @@ document.addEventListener('keydown', function(e) {
     else window.anlFetchCalibration();
   };
 
-  // Override metricsInit (the velocity-charts version is retired): the Analytics
-  // tab opens on Calibration and fetches both panels' data.
+  // Override metricsInit: Analytics tab opens on Trends (first tab) and lazy-loads data.
   window.metricsInit = function () {
-    window.anlShowTab('calibration');
+    window.anlShowTab('trends');
   };
 }());
 
@@ -28440,14 +28680,14 @@ function roadmapInit() {
   if (_rmLoaded) { _rmRender(); sugInit(); return; }
   _rmLoaded = true;
   var root = document.getElementById('rm-root');
-  if (root) root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Loading…</div>';
+  if (root) root.innerHTML = '<div class="rm-skeleton-card"><span class="rm-skeleton rm-skeleton-line" style="width:60%;display:block"></span><span class="rm-skeleton rm-skeleton-line" style="width:40%;display:block;margin-top:8px"></span></div>';
   var repo = _cachedFullRepo[_slug] || _slug;
   fetch('/api/roadmap?repo=' + encodeURIComponent(repo))
     .then(function(r) { return r.json(); })
     .then(function(data) { _rmData = data; _rmRender(); sugInit(); })
     .catch(function() {
       var r2 = document.getElementById('rm-root');
-      if (r2) r2.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Failed to load roadmap.</div>';
+      if (r2) r2.innerHTML = '<div class="rm-loading">Failed to load roadmap.</div>';
       sugInit();
     });
 }
@@ -28469,11 +28709,11 @@ function _rmRender() {
       : 'GitHub unreachable — couldn’t refresh milestones. Try again shortly.';
     h += '<div class="rm-stale-notice" role="status">'
        + '<i class="ti ti-cloud-off"></i><span>' + _msg + '</span>'
-       + '<button class="rm-btn" onclick="_rmRefresh()" style="margin-left:auto"><i class="ti ti-refresh"></i> Retry</button>'
+       + '<button class="rm-btn rm-stale-retry" onclick="_rmRefresh()"><i class="ti ti-refresh"></i> Retry</button>'
        + '</div>';
   }
   h += '<div class="rm-toolbar">';
-  h += '<span style="font-size:14px;font-weight:700">Milestones</span>';
+  h += '<span class="rm-toolbar-title">Milestones</span>';
   h += '<span class="rm-toolbar-gap"></span>';
   h += '<button class="rm-btn" onclick="_rmShowAdd()"><i class="ti ti-plus"></i> Add milestone</button>';
   h += '</div>';
@@ -28492,7 +28732,10 @@ function _rmRender() {
     milestones.forEach(function(ms) { h += _rmCardHtml(ms); });
     h += '</div>';
   } else if (closed.length === 0) {
-    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>No milestones yet.</div>';
+    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>'
+       + '<div class="rm-empty-title">No milestones yet</div>'
+       + '<div class="rm-empty-sub">Plan your roadmap by adding a milestone above.</div>'
+       + '</div>';
   }
   if (closed.length > 0) {
     h += '<div class="rm-history-section">';
@@ -28503,7 +28746,7 @@ function _rmRender() {
   var lookAhead = _rmData.look_ahead || [];
   if (lookAhead.length > 0) {
     h += '<div class="rm-look-ahead-section">';
-    h += '<div class="rm-look-ahead-label"><i class="ti ti-road" style="margin-right:5px"></i>Sprint look-ahead</div>';
+    h += '<div class="rm-look-ahead-label"><i class="ti ti-road rm-look-ahead-icon"></i>Sprint look-ahead</div>';
     lookAhead.forEach(function(entry, i) {
       h += '<div class="rm-look-ahead-entry">'
         + '<span class="rm-look-ahead-num">' + (i + 1) + '</span>'
@@ -28513,6 +28756,11 @@ function _rmRender() {
     h += '</div>';
   }
   root.innerHTML = h;
+  requestAnimationFrame(function() {
+    document.querySelectorAll('#rm-root [data-pct]').forEach(function(el) {
+      el.style.setProperty('--rm-pct', el.getAttribute('data-pct') + '%');
+    });
+  });
   _rmInitDnd();
 }
 
@@ -28520,18 +28768,20 @@ function _rmCardHtml(ms) {
   var prog = ms.progress || {};
   var done = prog.completed || 0;
   var total = prog.total || 0;
+  var open = total - done;
   var pct = total > 0 ? Math.round(done / total * 100) : 0;
+  var progClass = pct <= 33 ? 'rm-prog-low' : pct <= 66 ? 'rm-prog-mid' : 'rm-prog-high';
   var due = ms.due_on ? ms.due_on.substring(0, 10) : null;
   var active = ms.active;
-  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '">';
+  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '" tabindex="0" aria-label="Milestone: ' + _rmEsc(ms.title) + '" onkeydown="if(event.key===\'Enter\'){_rmEditCard(' + ms.number + ')}">';
   h += '<div class="rm-card-head">';
   h += '<span class="rm-card-title">' + _rmEsc(ms.title) + '</span>';
   if (active) h += '<span class="rm-active-badge">Active</span>';
   h += '</div>';
   if (ms.description) h += '<div class="rm-card-desc">' + _rmEsc(ms.description) + '</div>';
   h += '<div class="rm-card-meta">';
-  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill" style="width:' + pct + '%"></div></div>';
-  h += '<span class="rm-progress-text">' + done + ' / ' + total + '</span>';
+  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill ' + progClass + '" data-pct="' + pct + '"></div></div>';
+  h += '<span class="rm-progress-text">' + done + ' closed \xb7 ' + open + ' open</span>';
   if (due) h += '<span class="rm-due"><i class="ti ti-calendar-event"></i> ' + due + '</span>';
   h += '</div><div class="rm-card-actions">';
   if (!active) h += '<button class="rm-btn" onclick="_rmMarkActive(' + ms.number + ')">Mark active</button>';
@@ -28543,9 +28793,13 @@ function _rmCardHtml(ms) {
 
 function _rmHistoryHtml(ms) {
   return '<div class="rm-history-row" id="rm-hist-' + ms.number + '">' +
-    '<i class="ti ti-circle-check" style="color:var(--text-muted)"></i>' +
+    '<i class="ti ti-circle-check rm-history-icon"></i>' +
     '<span class="rm-history-row-title">' + _rmEsc(ms.title) + '</span>' +
     '<button class="rm-btn" onclick="_rmReopen(' + ms.number + ')">Re-open</button></div>';
+}
+
+function _rmCardKeydown(e, num) {
+  if (e.key === 'Enter') { _rmEditCard(num); }
 }
 
 function _rmEsc(s) {

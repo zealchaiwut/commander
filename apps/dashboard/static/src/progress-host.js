@@ -76,10 +76,11 @@ export function patchProgressActivityStep(host, stepKey, state, note, opts) {
   const prev = _payloadById.get(paId) || {};
   const steps = Array.isArray(prev.steps) ? prev.steps.slice() : [];
   const idx = steps.findIndex((s) => s && s.key === stepKey);
+  const normState = state === "fail" ? "failed" : state;
   if (idx >= 0) {
-    steps[idx] = Object.assign({}, steps[idx], { state, note: note || "" });
+    steps[idx] = Object.assign({}, steps[idx], { state: normState, note: note || "" });
   } else {
-    steps.push({ key: stepKey, label: stepKey, state, note: note || "" });
+    steps.push({ key: stepKey, label: stepKey, state: normState, note: note || "" });
   }
   return patchProgressActivity(
     hostEl,

@@ -16,6 +16,7 @@
 import {
   mountProgressActivity,
   patchProgressActivityStep,
+  unmountProgressActivity,
 } from "../progress-host.js";
 
 // ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
@@ -623,6 +624,7 @@ export function _pfUpdateSections() {
 
 export function _pfShowError(msg) {
   document.getElementById('pf-loading').classList.add('hidden');
+  unmountProgressActivity('pf-stepper-steps');
   document.getElementById('pf-content').classList.add('hidden');
   document.getElementById('pf-error-msg').textContent = msg;
   document.getElementById('pf-error').classList.remove('hidden');

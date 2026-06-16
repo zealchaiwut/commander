@@ -39,6 +39,7 @@
       --purple:       #7c3aed;
       --purple-bg:    #ede9fe;
       --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --text-on-primary: #fff;
       --indigo:       #6d28d9;
       --indigo-bg:    #ede9fe;
       --steel:        #4f7ab8;
@@ -1192,16 +1193,25 @@
     }
     .ps-machine-note .ti { margin-top: 1px; flex-shrink: 0; }
 
-    /* ── Deploy tab (issue #726) ── */
+    /* ── Deploy tab (issue #726, redesigned #1072) ── */
     .deploy-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 16px; max-width: 1280px;
+      display: flex; flex-direction: column; gap: 0;
+      max-width: 900px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     }
     .deploy-tab-intro { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 20px; max-width: 720px; }
     .deploy-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column;
     }
+    .deploy-card:last-child { border-bottom: none; }
+    /* Primary env row: name | runstate | port | host badge | actions */
+    .deploy-card__row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 12px 16px;
+    }
+    .deploy-card__row-name { font-size: 14px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+    .deploy-card__row-port { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+    /* Legacy head selectors kept for any external references */
     .deploy-card__head { display: flex; align-items: center; gap: 8px; }
     .deploy-card__title { font-size: 15px; font-weight: 700; color: var(--text); }
     .deploy-card__project { font-size: 12px; color: var(--text-muted); font-weight: 500; }
@@ -1216,11 +1226,12 @@
       padding: 10px 12px; border-radius: 6px;
       background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
       color: var(--text); font-size: 12.5px; line-height: 1.45;
+      margin: 0 16px 8px;
     }
     .deploy-card__alert .ti { color: var(--amber); font-size: 16px; flex-shrink: 0; margin-top: 1px; }
     .deploy-card__alert ul { margin: 4px 0 0; padding-left: 18px; }
     .deploy-card__alert li { margin: 2px 0; }
-    .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+    .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; padding: 0 16px 12px; }
     .deploy-card__meta-row { display: flex; gap: 8px; align-items: baseline; }
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
     .deploy-card__meta-val { color: var(--text); word-break: break-word; }
@@ -1256,7 +1267,7 @@
     .status-pill--building { background: var(--amber-bg); color: var(--amber); }
     .status-pill--live     { background: var(--green-bg); color: var(--green); }
     .status-pill--idle     { background: var(--green-bg); color: var(--green); }
-    .status-pill--failed   { background: var(--red-bg, #3f1d1d); color: var(--error, #ef4444); }
+    .status-pill--failed   { background: var(--red-bg); color: var(--red); }
     /* ── Run-state pill (issue #771) ── running / stopped / idle ── */
     .runstate-pill {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
@@ -1271,7 +1282,7 @@
     .runstate-pill--running { background: var(--green-bg); color: var(--green); }
     .runstate-pill--stopped { background: var(--red-bg); color: var(--red); }
     .runstate-pill--idle    { background: var(--surface-2); color: var(--text-sub); }
-    .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
     .deploy-btn {
       display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
       padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px;
@@ -1281,9 +1292,9 @@
     .deploy-btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--text-sub); }
     .deploy-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .deploy-btn:disabled { opacity: .5; cursor: default; }
-    .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: var(--text-on-primary); }
     .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
-    .deploy-btn--danger { color: var(--error, #ef4444); }
+    .deploy-btn--danger { color: var(--red); }
     .deploy-startstop-na {
       display: inline-flex; align-items: center; padding: 7px 0;
       font-size: 12px; color: var(--text-sub); cursor: help;
@@ -1301,10 +1312,10 @@
       padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
       max-height: 220px; overflow: auto; margin: 0;
     }
-    .deploy-card__log.is-error { color: var(--error, #ef4444); }
+    .deploy-card__log.is-error { color: var(--red); }
     /* ── Live log tail panel (issue #770) ── */
     .deploy-log {
-      margin: 4px 0 0; border: 1px solid var(--border); border-radius: 8px;
+      margin: 0 16px 12px; border: 1px solid var(--border); border-radius: 8px;
       background: var(--surface-2); overflow: hidden;
     }
     .deploy-log__head {
@@ -27328,6 +27339,8 @@ function _deployReadinessAlertHtml(c) {
 function _deployCardHtml(c, i) {
   var hostLabel = c.host === 'render' ? 'Render' : 'local';
   var hostClass = c.host === 'render' ? 'deploy-card__badge--render' : 'deploy-card__badge--local';
+  // Port shown in the primary row header (read-only display; editable via meta pencil)
+  var portDisplay = (c.port != null && c.port !== '') ? ':' + _deployEsc(String(c.port)) : '';
   var branchRow = c.host === 'render'
     ? (c.render_service_id
         ? '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Service</span>'
@@ -27338,15 +27351,18 @@ function _deployCardHtml(c, i) {
   return ''
     + '<article class="deploy-card" id="deploy-card-' + i + '" aria-label="'
       + _deployEsc(c.project + ' ' + c.env) + ' deployment">'
-    + '  <div class="deploy-card__head">'
-    + '    <span class="deploy-card__title">' + _deployEsc(c.env) + '</span>'
-    + '    <span class="deploy-card__project">' + _deployEsc(c.project) + '</span>'
-    + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
-    // issue #771 — run-state pill (running / stopped / idle) reads the real
-    // service state so the user knows what they're acting on before clicking.
+    // Primary row: env name | run-state | port | host badge | deploy status | actions
+    + '  <div class="deploy-card__row">'
+    + '    <span class="deploy-card__row-name">' + _deployEsc(c.env) + '</span>'
+    // issue #771 — run-state pill (running / stopped / idle)
     + '    <span class="runstate-pill runstate-pill--idle" id="deploy-card-runstate-' + i + '"'
     + '          role="status" aria-live="polite" title="Run state">idle</span>'
+    + (portDisplay ? '    <span class="deploy-card__row-port">' + portDisplay + '</span>' : '')
+    + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
     + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+    + '    <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
+    +        _deployIdleActionsHtml(i)
+    + '    </div>'
     + '  </div>'
     +      _deployReadinessAlertHtml(c)
     + '  <div class="deploy-card__meta">'
@@ -27361,9 +27377,6 @@ function _deployCardHtml(c, i) {
         ? '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Server started</span>'
           + '      <span class="deploy-card__meta-val" id="deploy-card-started-' + i + '">—</span></div>'
         : '')
-    + '  </div>'
-    + '  <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
-    +      _deployIdleActionsHtml(i)
     + '  </div>'
     +    _deployLogPanelHtml(i)
     + '</article>';

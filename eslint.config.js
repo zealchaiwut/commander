@@ -27,6 +27,7 @@ export default [
         alert: "readonly",
         prompt: "readonly",
         getComputedStyle: "readonly",
+        CSS: "readonly",
         CustomEvent: "readonly",
         Event: "readonly",
         DragEvent: "readonly",

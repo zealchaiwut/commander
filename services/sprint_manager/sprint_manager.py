@@ -4704,20 +4704,35 @@ def _worktree_hygiene(
                     sys.stdout.flush()
                     _try("git", "checkout", "--detach", cwd=worktree)
                     _try("git", "branch", "-D", feature_branch, cwd=worktree)
-                    _try("git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree)
+                    reset_ok, _, reset_err = _try(
+                        "git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree,
+                    )
                     ok_sha, wt_sha2, _ = _try("git", "rev-parse", "HEAD", cwd=worktree)
-                    worktree_sha = wt_sha2.strip() if ok_sha and wt_sha2.strip() else worktree_sha
-                    try:
-                        structured_log.warn(
-                            "rebase_conflict_recovered",
-                            f"deleted conflicting {feature_branch} and reset to base "
-                            f"before fresh dispatch of #{ticket_id}",
-                            issue_num=int(ticket_id), branch=feature_branch,
-                            base_sha=base_sha,
-                        )
-                    except Exception:
-                        pass
-                    return worktree_sha, base_sha, None
+                    new_sha = wt_sha2.strip() if ok_sha and wt_sha2.strip() else None
+                    # Only report a clean recovery when the worktree is verifiably
+                    # ON base. If the reset failed or HEAD didn't land on base, the
+                    # worktree is in an unknown state — do NOT dispatch the coder
+                    # into it; fall through to the merge-failure path so the ticket
+                    # is skipped rather than corrupted (returning a stale SHA here
+                    # would silently run the coder against the wrong tree).
+                    if reset_ok and new_sha == base_sha:
+                        worktree_sha = new_sha
+                        try:
+                            structured_log.warn(
+                                "rebase_conflict_recovered",
+                                f"deleted conflicting {feature_branch} and reset to base "
+                                f"before fresh dispatch of #{ticket_id}",
+                                issue_num=int(ticket_id), branch=feature_branch,
+                                base_sha=base_sha,
+                            )
+                        except Exception:
+                            pass
+                        return worktree_sha, base_sha, None
+                    sys.stdout.write(str(
+                        f"  [hygiene] recovery reset failed for #{ticket_id} "
+                        f"(reset_ok={reset_ok}, head={new_sha}, base={base_sha[:8]}, "
+                        f"err={reset_err!r}) — failing as merge") + "\n")
+                    sys.stdout.flush()
 
                 detail = (
                     f"Rebase of {feature_branch} onto origin/{merge_target} "

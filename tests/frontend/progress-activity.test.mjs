@@ -55,7 +55,10 @@ test('AC1: bar mode — root has pa-mode-bar class', () => {
 
 test('AC1: bar mode — fill width reflects done/total fraction', () => {
   const html = renderProgressActivity({ mode: 'bar', done: 3, total: 12 });
-  assert.ok(html.includes('width:25%'), `expected width:25% in bar fill, got: ${html.slice(0, 300)}`);
+  assert.ok(
+    html.includes('width:25%') || html.includes('transform:scaleX(0.25)'),
+    `expected 25% fill transform/width in bar fill, got: ${html.slice(0, 300)}`,
+  );
 });
 
 test('AC1: bar mode — current-item label rendered', () => {
@@ -88,7 +91,10 @@ test('AC1: bar mode — shimmer absent at 100%', () => {
 
 test('AC1: bar mode — zero/zero fraction does not crash and shows 0%', () => {
   const html = renderProgressActivity({ mode: 'bar', done: 0, total: 0 });
-  assert.ok(html.includes('width:0%'), 'expected 0% fill for 0/0');
+  assert.ok(
+    html.includes('width:0%') || html.includes('transform:scaleX(0)'),
+    'expected 0% fill for 0/0',
+  );
 });
 
 // ── AC1b: auto-detect bar mode from total ─────────────────────────────────────

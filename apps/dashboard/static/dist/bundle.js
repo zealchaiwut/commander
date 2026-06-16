@@ -462,6 +462,132 @@
     document.head.appendChild(style);
   }
 
+  // apps/dashboard/static/src/progress-host.js
+  var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
+  var _payloadById = /* @__PURE__ */ new Map();
+  var _MAX_LOG_LINES = 200;
+  function _resolveHost(host) {
+    if (!host)
+      return null;
+    if (typeof host === "string") {
+      if (typeof document === "undefined")
+        return null;
+      return document.getElementById(host);
+    }
+    return host;
+  }
+  function _resolvePaId(hostEl, explicitId) {
+    if (explicitId)
+      return explicitId;
+    if (hostEl && hostEl.dataset && hostEl.dataset.paId)
+      return hostEl.dataset.paId;
+    const hostId = hostEl && hostEl.id ? hostEl.id : "progress-activity-host";
+    return `${hostId}-pa`;
+  }
+  function _snapshot(payload) {
+    return JSON.parse(JSON.stringify(payload || {}));
+  }
+  function _storePayload(paId, payload) {
+    const snap = _snapshot(payload);
+    _payloadById.set(paId, snap);
+    return snap;
+  }
+  function _renderIntoHost(hostEl, payload, opts) {
+    if (!hostEl)
+      return;
+    const renderOpts = opts || {};
+    hostEl.innerHTML = renderProgressActivity2(payload, renderOpts);
+  }
+  function mountProgressActivity(host, payload, opts) {
+    const hostEl = _resolveHost(host);
+    if (!hostEl)
+      return null;
+    const paId = _resolvePaId(hostEl, opts && opts.id);
+    const renderOpts = Object.assign({}, opts || {}, { id: paId });
+    const next = _storePayload(paId, payload || {});
+    if (hostEl.dataset)
+      hostEl.dataset.paId = paId;
+    hostEl.hidden = false;
+    _renderIntoHost(hostEl, next, renderOpts);
+    return next;
+  }
+  function getProgressActivityPayload(host) {
+    const hostEl = _resolveHost(host);
+    const paId = hostEl ? _resolvePaId(hostEl) : typeof host === "string" ? host : null;
+    if (!paId)
+      return null;
+    const payload = _payloadById.get(paId);
+    return payload ? _snapshot(payload) : null;
+  }
+  function patchProgressActivity(host, patch, opts) {
+    const hostEl = _resolveHost(host);
+    if (!hostEl)
+      return null;
+    const paId = _resolvePaId(hostEl, opts && opts.id);
+    const prev = _payloadById.get(paId) || {};
+    const next = Object.assign({}, prev, patch || {});
+    if (hostEl.dataset)
+      hostEl.dataset.paId = paId;
+    _storePayload(paId, next);
+    _renderIntoHost(hostEl, next, Object.assign({}, opts || {}, { id: paId }));
+    return _snapshot(next);
+  }
+  function patchProgressActivityStep(host, stepKey, state, note, opts) {
+    const hostEl = _resolveHost(host);
+    if (!hostEl)
+      return null;
+    const paId = _resolvePaId(hostEl, opts && opts.id);
+    const prev = _payloadById.get(paId) || {};
+    const steps = Array.isArray(prev.steps) ? prev.steps.slice() : [];
+    const idx = steps.findIndex((s) => s && s.key === stepKey);
+    if (idx >= 0) {
+      steps[idx] = Object.assign({}, steps[idx], { state, note: note || "" });
+    } else {
+      steps.push({ key: stepKey, label: stepKey, state, note: note || "" });
+    }
+    return patchProgressActivity(
+      hostEl,
+      { steps, mode: prev.mode || "stepper" },
+      Object.assign({}, opts || {}, { id: paId })
+    );
+  }
+  function appendProgressActivityLog(host, line, type, opts) {
+    const hostEl = _resolveHost(host);
+    if (!hostEl)
+      return null;
+    const paId = _resolvePaId(hostEl, opts && opts.id);
+    const prev = _payloadById.get(paId) || {};
+    const nextTail = Array.isArray(prev.log_tail) ? prev.log_tail.slice() : [];
+    if (line != null && line !== "") {
+      if (typeof line === "string") {
+        nextTail.push({
+          type: type || "dispatch",
+          message: line,
+          timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
+        });
+      } else {
+        nextTail.push(line);
+      }
+    }
+    const logTail = nextTail.slice(-_MAX_LOG_LINES);
+    return patchProgressActivity(
+      hostEl,
+      { log_tail: logTail },
+      Object.assign({}, opts || {}, { id: paId })
+    );
+  }
+  function unmountProgressActivity(host) {
+    const hostEl = _resolveHost(host);
+    if (!hostEl)
+      return;
+    const paId = _resolvePaId(hostEl);
+    hostEl.innerHTML = "";
+    hostEl.hidden = true;
+    if (hostEl.dataset)
+      delete hostEl.dataset.paId;
+    _payloadById.delete(paId);
+  }
+
   // apps/dashboard/static/src/shell/tabs.js
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
@@ -1835,6 +1961,38 @@ Replace the existing draft (${data.existing_label})?`
   }
 
   // apps/dashboard/static/src/sprint-board/rerun-modal.js
+  function _rrShowPreviewLoading(current) {
+    const loading = document.getElementById("rr-loading");
+    if (!loading)
+      return;
+    loading.innerHTML = renderProgressActivity({
+      status: "running",
+      mode: "indeterminate",
+      current: current || "Loading preview\u2026"
+    }, {
+      id: "rr-preview-pa",
+      hideLog: true
+    });
+    loading.classList.remove("hidden");
+  }
+  function _rrShowCreateProgress(done, total, current, status, error) {
+    const loading = document.getElementById("rr-loading");
+    if (!loading)
+      return;
+    loading.innerHTML = renderProgressActivity({
+      status: status || "running",
+      mode: "bar",
+      done: done || 0,
+      total: total || 3,
+      current: current || "",
+      error: error || "",
+      result: status === "done" ? "Sub-sprint created" : ""
+    }, {
+      id: "rr-create-pa",
+      hideLog: true
+    });
+    loading.classList.remove("hidden");
+  }
   function _rrOpen() {
     _setBodyInert(["rr-backdrop", "rr-modal"]);
     document.getElementById("rr-backdrop").classList.remove("hidden");
@@ -1885,7 +2043,7 @@ Replace the existing draft (${data.existing_label})?`
     _rrLabel = label;
     _rrVersionedLabel = null;
     document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-    document.getElementById("rr-loading").classList.remove("hidden");
+    _rrShowPreviewLoading("Loading preview\u2026");
     document.getElementById("rr-content").classList.add("hidden");
     document.getElementById("rr-error").classList.add("hidden");
     document.getElementById("rr-error").textContent = "";
@@ -1945,6 +2103,8 @@ Replace the existing draft (${data.existing_label})?`
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Creating\u2026";
     }
+    _rrShowCreateProgress(0, 3, "Creating sprint\u2026", "running", "");
+    document.getElementById("rr-content").classList.add("hidden");
     try {
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(parentLabel)}/rerun?project=${encodeURIComponent(repo)}`,
@@ -1965,11 +2125,12 @@ Replace the existing draft (${data.existing_label})?`
       }
       const data = await res.json();
       const subLabel = data.sub_label;
-      _rrClose();
+      _rrShowCreateProgress(1, 3, "Applying local updates\u2026", "running", "");
       if (typeof _smgmtApplyRerunOptimistic === "function") {
         _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
       }
       await loadSprintMgmt(true);
+      _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
       if (data.errors && data.errors.length > 0) {
         _smgmtShowToast(`${subDisplay} created with label errors \u2014 check GitHub.`);
@@ -1977,12 +2138,16 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtShowToast(`${subDisplay} ready \u2014 confirm run`);
       }
       if (subLabel && typeof smgmtRunSprint === "function") {
+        _rrShowCreateProgress(3, 3, "Done", "done", "");
         smgmtRunSprint(subLabel);
       }
+      _rrClose();
     } catch (e) {
+      _rrShowCreateProgress(0, 3, "", "error", "Failed to create re-run sprint");
       const errEl = document.getElementById("rr-error");
       errEl.textContent = "Failed to re-run sprint: " + e.message;
       errEl.classList.remove("hidden");
+      document.getElementById("rr-content").classList.remove("hidden");
       if (confirmBtn) {
         confirmBtn.disabled = false;
         confirmBtn.textContent = _rrVersionedLabel ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}` : "Create sprint and run";
@@ -2033,6 +2198,20 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _fsPreviewSlot() {
     return document.getElementById("fs-content");
+  }
+  function _fsRenderPreviewLoading(current) {
+    const loading = document.getElementById("fs-loading");
+    if (!loading)
+      return;
+    loading.innerHTML = renderProgressActivity({
+      status: "running",
+      mode: "indeterminate",
+      current: current || "Loading preview\u2026"
+    }, {
+      id: "fs-preview-pa",
+      hideLog: true
+    });
+    loading.classList.remove("hidden");
   }
   function _fsEnterProgressView(snap) {
     document.getElementById("fs-loading").classList.add("hidden");
@@ -2201,7 +2380,7 @@ Replace the existing draft (${data.existing_label})?`
     _fsLabel = label;
     _fsPreview = null;
     document.getElementById("fs-modal-title").textContent = `Merge ${sprintLabelDisplay(label)}?`;
-    document.getElementById("fs-loading").classList.remove("hidden");
+    _fsRenderPreviewLoading("Loading preview\u2026");
     document.getElementById("fs-content").classList.add("hidden");
     document.getElementById("fs-error").classList.add("hidden");
     document.getElementById("fs-error").textContent = "";
@@ -2351,6 +2530,20 @@ Replace the existing draft (${data.existing_label})?`
   }
 
   // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
+  function _bcShowPreviewLoading(current) {
+    const loading = document.getElementById("bc-loading");
+    if (!loading)
+      return;
+    loading.innerHTML = renderProgressActivity({
+      status: "running",
+      mode: "indeterminate",
+      current: current || "Loading preview\u2026"
+    }, {
+      id: "bc-preview-pa",
+      hideLog: true
+    });
+    loading.classList.remove("hidden");
+  }
   function _bcOpen() {
     _setBodyInert(["bc-backdrop", "bc-modal"]);
     document.getElementById("bc-backdrop").classList.remove("hidden");
@@ -2389,7 +2582,7 @@ Replace the existing draft (${data.existing_label})?`
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
     document.getElementById("bc-modal-title").textContent = `Bulk complete ${sprintLabelDisplay(label)}?`;
-    document.getElementById("bc-loading").classList.remove("hidden");
+    _bcShowPreviewLoading("Loading preview\u2026");
     document.getElementById("bc-content").classList.add("hidden");
     document.getElementById("bc-error").classList.add("hidden");
     document.getElementById("bc-error").textContent = "";
@@ -2646,7 +2839,7 @@ Replace the existing draft (${data.existing_label})?`
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
-    _pfStepperInit();
+    _pfShowLoadingActivity("Loading pre-flight checks\u2026");
   }
   function _pfClose() {
     document.getElementById("pf-backdrop").classList.add("hidden");
@@ -2665,6 +2858,7 @@ Replace the existing draft (${data.existing_label})?`
   }
   async function _pfFetch() {
     _pfState = "loading";
+    _pfShowLoadingActivity("Loading pre-flight checks\u2026");
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
     try {
@@ -2731,6 +2925,7 @@ Replace the existing draft (${data.existing_label})?`
      </div>`;
     document.getElementById("pf-content").classList.remove("hidden");
     document.getElementById("pf-footer").classList.remove("hidden");
+    _pfStepperInit();
     document.getElementById("pf-cancel-btn").focus();
     if (_pfDagData && (_pfDagData.edges || []).length > 0) {
       requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
@@ -3091,20 +3286,40 @@ Replace the existing draft (${data.existing_label})?`
     _pfClose();
     await smgmtKickoffRun(label, repo);
   }
+  function _paStepState(state) {
+    return state === "fail" ? "failed" : state;
+  }
+  function _pfShowLoadingActivity(currentLabel) {
+    const stepsEl = document.getElementById("pf-stepper-steps");
+    if (!stepsEl)
+      return;
+    mountProgressActivity(stepsEl, {
+      status: "running",
+      mode: "indeterminate",
+      current: currentLabel || "Loading\u2026"
+    }, {
+      id: "pf-pa",
+      hideLog: true
+    });
+  }
   function _pfStepperInit() {
     _pfStepFails = 0;
     const stepsEl = document.getElementById("pf-stepper-steps");
     if (!stepsEl)
       return;
-    stepsEl.innerHTML = PF_STEPS.map(
-      (s) => `<div class="pf-step-item pf-step-item--pending" id="pf-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="pf-step-note-${s.key}"></span>
-      </div>
-    </div>`
-    ).join("");
+    mountProgressActivity(stepsEl, {
+      status: "running",
+      mode: "stepper",
+      steps: PF_STEPS.map((s) => ({
+        key: s.key,
+        label: s.label,
+        state: "pending",
+        note: ""
+      }))
+    }, {
+      id: "pf-pa",
+      hideLog: true
+    });
     const summaryEl = document.getElementById("pf-stepper-summary");
     if (summaryEl) {
       summaryEl.textContent = "";
@@ -3112,13 +3327,10 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
   function _pfStepState(key, state, note) {
-    const item = document.getElementById(`pf-step-${key}`);
-    if (!item)
-      return;
-    item.className = `pf-step-item pf-step-item--${state}`;
-    const noteEl = document.getElementById(`pf-step-note-${key}`);
-    if (noteEl)
-      noteEl.textContent = note || "";
+    patchProgressActivityStep("pf-stepper-steps", key, _paStepState(state), note || "", {
+      id: "pf-pa",
+      hideLog: true
+    });
   }
   async function _pfRunAutoFix(label, repo) {
     const resp = await fetch(
@@ -3237,27 +3449,28 @@ Replace the existing draft (${data.existing_label})?`
     const stepsEl = document.getElementById("smgmt-kickoff-steps");
     if (!stepsEl)
       return;
-    stepsEl.innerHTML = KS_STEPS.map(
-      (s) => `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
-      </div>
-    </div>`
-    ).join("");
+    mountProgressActivity(stepsEl, {
+      status: "running",
+      mode: "stepper",
+      steps: KS_STEPS.map((s) => ({
+        key: s.key,
+        label: s.label,
+        state: "pending",
+        note: ""
+      }))
+    }, {
+      id: "ks-pa",
+      hideLog: true
+    });
     const errEl = document.getElementById("smgmt-kickoff-error");
     if (errEl)
       errEl.hidden = true;
   }
   function _ksSetStep(key, state, note) {
-    const item = document.getElementById(`ks-step-${key}`);
-    if (!item)
-      return;
-    item.className = `pf-step-item pf-step-item--${state}`;
-    const noteEl = document.getElementById(`ks-step-note-${key}`);
-    if (noteEl)
-      noteEl.textContent = note || "";
+    patchProgressActivityStep("smgmt-kickoff-steps", key, _paStepState(state), note || "", {
+      id: "ks-pa",
+      hideLog: true
+    });
   }
   function _ksShow(label, repo) {
     _ksLabel = label;
@@ -3433,6 +3646,7 @@ Replace the existing draft (${data.existing_label})?`
   }
 
   // apps/dashboard/static/src/sprint-board/drag-drop.js
+  var _smgmtBoardOverlayHasProgress = false;
   function isDragBlocked(state) {
     return !!(state && state.moveLock);
   }
@@ -4170,6 +4384,7 @@ ${data.errors.join("\n")}`);
     _smgmtArStopTicker();
     const overlay = document.getElementById("smgmt-move-overlay");
     const msgEl = document.getElementById("smgmt-move-overlay-msg");
+    const paHost = document.getElementById("smgmt-op-pa-host");
     const progWrap = document.getElementById("smgmt-op-progress-wrap");
     const logEl = document.getElementById("smgmt-op-log");
     const text = message || "Moving\u2026";
@@ -4180,12 +4395,30 @@ ${data.errors.join("\n")}`);
       overlay.classList.add("active");
     }
     const showProgress = !!(opts && opts.progress);
+    _smgmtBoardOverlayHasProgress = showProgress;
     if (progWrap)
-      progWrap.hidden = !showProgress;
+      progWrap.hidden = true;
     if (logEl) {
-      logEl.hidden = !showProgress;
-      if (showProgress && opts.clearLog)
+      logEl.hidden = true;
+      if (opts && opts.clearLog)
         logEl.innerHTML = "";
+    }
+    if (paHost) {
+      paHost.hidden = !showProgress;
+      if (showProgress) {
+        mountProgressActivity(paHost, {
+          status: "running",
+          mode: "bar",
+          done: 0,
+          total: (opts && opts.total) != null ? opts.total : 1,
+          current: text,
+          log_tail: []
+        }, {
+          id: BOARD_OVERLAY_PA_ID
+        });
+      } else {
+        unmountProgressActivity(paHost);
+      }
     }
     if (showProgress && opts.total != null) {
       _smgmtBoardProgress2(0, opts.total);
@@ -4194,6 +4427,15 @@ ${data.errors.join("\n")}`);
     }
   }
   function _smgmtBoardProgress2(done, total) {
+    if (_smgmtBoardOverlayHasProgress) {
+      patchProgressActivity("smgmt-op-pa-host", {
+        done: Number(done || 0),
+        total: Number(total || 0),
+        mode: "bar",
+        status: "running"
+      }, { id: BOARD_OVERLAY_PA_ID });
+      return;
+    }
     const fill = document.getElementById("smgmt-op-progress-fill");
     const pctEl = document.getElementById("smgmt-op-progress-pct");
     const pct = total > 0 ? Math.round(done / total * 100) : 0;
@@ -4203,6 +4445,11 @@ ${data.errors.join("\n")}`);
       pctEl.textContent = pct + "%";
   }
   function _smgmtBoardLog2(line, kind) {
+    if (_smgmtBoardOverlayHasProgress) {
+      const mappedType = kind === "ok" ? "success" : kind === "err" ? "fail" : kind === "step" ? "dispatch" : "dispatch";
+      appendProgressActivityLog("smgmt-op-pa-host", line, mappedType, { id: BOARD_OVERLAY_PA_ID });
+      return;
+    }
     const logEl = document.getElementById("smgmt-op-log");
     if (!logEl)
       return;
@@ -4214,9 +4461,15 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtBoardUnlock2() {
     _smgmtMoveLock = false;
+    _smgmtBoardOverlayHasProgress = false;
     const overlay = document.getElementById("smgmt-move-overlay");
     if (overlay)
       overlay.classList.remove("active");
+    const paHost = document.getElementById("smgmt-op-pa-host");
+    if (paHost) {
+      unmountProgressActivity(paHost);
+      paHost.hidden = true;
+    }
     const progWrap = document.getElementById("smgmt-op-progress-wrap");
     const logEl = document.getElementById("smgmt-op-log");
     if (progWrap)
@@ -6091,6 +6344,13 @@ ${data.errors.join("\n")}`);
   root.renderProgressActivity = renderProgressActivity2;
   root.updateProgressActivityLog = updateProgressActivityLog;
   root.paToggleLog = paToggleLog;
+  root.mountProgressActivity = mountProgressActivity;
+  root.patchProgressActivity = patchProgressActivity;
+  root.patchProgressActivityStep = patchProgressActivityStep;
+  root.unmountProgressActivity = unmountProgressActivity;
+  root.appendProgressActivityLog = appendProgressActivityLog;
+  root.getProgressActivityPayload = getProgressActivityPayload;
+  root.BOARD_OVERLAY_PA_ID = BOARD_OVERLAY_PA_ID;
   injectProgressActivityCss();
   root.switchTab = switchTab;
   root.toggleStabDropdown = toggleStabDropdown;

@@ -4403,6 +4403,10 @@
     .smgmt-op-head { display: flex; align-items: center; gap: 12px; }
     .smgmt-op-progress-wrap { display: flex; align-items: center; gap: 10px; }
     .smgmt-op-progress-wrap[hidden] { display: none !important; }
+    .smgmt-op-pa-host { display: block; }
+    .smgmt-op-pa-host[hidden] { display: none !important; }
+    .smgmt-op-pa-host .pa-root { margin-top: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+    .smgmt-op-pa-host .pa-log-stream { max-height: 120px; }
     .smgmt-op-progress-bar {
       flex: 1; height: 6px; background: var(--surface-2);
       border-radius: 999px; overflow: hidden;
@@ -8547,6 +8551,7 @@
                       onclick="_smgmtBulkReEstBackground()" title="Background — keep running" hidden>×</button>
             </div>
             <div class="smgmt-op-current" id="smgmt-op-current" hidden></div>
+            <div id="smgmt-op-pa-host" class="smgmt-op-pa-host" hidden></div>
             <div class="smgmt-op-progress-wrap" id="smgmt-op-progress-wrap" hidden>
               <div class="smgmt-op-progress-bar"><div class="smgmt-op-progress-fill" id="smgmt-op-progress-fill"></div></div>
               <span class="smgmt-op-progress-pct" id="smgmt-op-progress-pct">0%</span>
@@ -9144,19 +9149,7 @@
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
 
           <!-- Posting-progress component (shared ProgressActivity — bar mode, issue #931) -->
-          <div id="bc-posting-progress" class="hidden">
-            <div class="bc-pg-wrap">
-              <div class="bc-pg-header">
-                <span>Posting to GitHub</span>
-                <span class="bc-pg-count" id="bc-pg-count">0 / 0</span>
-              </div>
-              <div class="bc-pg-bar-track">
-                <div class="bc-pg-bar" id="bc-pg-bar" style="width:0%"></div>
-              </div>
-              <div class="bc-pg-current" id="bc-pg-current"></div>
-              <div class="bc-pg-log" id="bc-pg-log"></div>
-            </div>
-          </div>
+          <div id="bc-posting-progress" class="hidden"></div>
 
           <!-- Review overlay: shown when user clicks Review & Post (issue #374) -->
           <div id="bc-review-overlay" class="bc-review-overlay hidden">
@@ -16226,10 +16219,22 @@ function _smgmtBulkReEstPatchRow(issueNum, data) {
 function _smgmtBulkReEstShowDone(doneCount) {
   const doneEl = document.getElementById('smgmt-op-done');
   const msgEl  = document.getElementById('smgmt-move-overlay-msg');
+  const errorEl = document.getElementById('smgmt-op-error');
   if (msgEl)  msgEl.textContent = 'Done';
+  if (errorEl) errorEl.hidden = true;
   if (doneEl) {
     doneEl.textContent = `${doneCount} reestimated`;
     doneEl.hidden = false;
+  }
+  if (typeof patchProgressActivity === 'function') {
+    patchProgressActivity('smgmt-op-pa-host', {
+      status: 'done',
+      mode: 'bar',
+      result: `${doneCount} reestimated`,
+    }, {
+      id: (typeof BOARD_OVERLAY_PA_ID === 'string' ? BOARD_OVERLAY_PA_ID : 'board-overlay-pa'),
+      hideLog: true,
+    });
   }
   // Replace spinner with close affordance
   const spinnerEl = document.getElementById('smgmt-move-spinner');
@@ -16244,16 +16249,33 @@ function _smgmtBulkReEstShowDone(doneCount) {
 
 function _smgmtBulkReEstShowError(failed, doneCount) {
   const errorEl = document.getElementById('smgmt-op-error');
+  const doneEl = document.getElementById('smgmt-op-done');
   const msgEl   = document.getElementById('smgmt-move-overlay-msg');
   if (msgEl) msgEl.textContent = `Done — ${failed.length} failed`;
+  if (doneEl) doneEl.hidden = true;
+  if (typeof patchProgressActivity === 'function') {
+    patchProgressActivity('smgmt-op-pa-host', {
+      status: 'error',
+      mode: 'bar',
+      error: `${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed (${doneCount} succeeded)`,
+    }, {
+      id: (typeof BOARD_OVERLAY_PA_ID === 'string' ? BOARD_OVERLAY_PA_ID : 'board-overlay-pa'),
+      retryFn: '_smgmtBulkReEstRetry',
+      hideLog: true,
+    });
+  }
   if (errorEl) {
-    errorEl.hidden = false;
-    errorEl.innerHTML = `<span>${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed</span>
-      <button class="smgmt-op-retry-btn" onclick="_smgmtBulkReEstRetry()">Retry failed</button>
-      <button class="smgmt-op-close-btn" style="margin-left:auto" onclick="_smgmtBulkReEstClose()">Close</button>`;
+    errorEl.hidden = true;
+    errorEl.innerHTML = '';
   }
   const spinnerEl = document.getElementById('smgmt-move-spinner');
   if (spinnerEl) spinnerEl.style.display = 'none';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'smgmt-op-close-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = _smgmtBulkReEstClose;
+  const head = document.querySelector('.smgmt-op-head');
+  if (head) head.appendChild(closeBtn);
 }
 
 function _smgmtBulkReEstRetry() {
@@ -20591,20 +20613,11 @@ function _bcRenderStep2() {
  *   size_warning → skipped log entry (body too large, not posted)
  */
 function _bcRenderPostingProgress(tickets, postingTicketIndices) {
-  const pgWrap    = document.getElementById('bc-posting-progress');
-  const pgCount   = document.getElementById('bc-pg-count');
-  const pgBar     = document.getElementById('bc-pg-bar');
-  const pgCurrent = document.getElementById('bc-pg-current');
-  const pgLog     = document.getElementById('bc-pg-log');
-  if (!pgWrap || !pgCount || !pgBar || !pgCurrent || !pgLog) return;
+  const pgWrap = document.getElementById('bc-posting-progress');
+  if (!pgWrap) return;
 
   // Only operate on the tickets that were selected for posting
   const postingSet = new Set(postingTicketIndices || []);
-  const posting = postingSet.size > 0
-    ? tickets.filter(t => postingSet.has(t.index))
-    : tickets.filter(t => t.state !== 'pending' && t.state !== 'draft_ready' || postingSet.has(t.index));
-
-  // For initial call where postingTicketIndices is unknown, use all non-pending tickets
   const relevant = postingSet.size > 0
     ? tickets.filter(t => postingSet.has(t.index))
     : tickets;
@@ -20619,50 +20632,56 @@ function _bcRenderPostingProgress(tickets, postingTicketIndices) {
     t.state === 'size_warning'
   ).length;
 
-  const pct = total > 0 ? Math.round((resolved / total) * 100) : 0;
-  pgCount.textContent = `${resolved} / ${total}`;
-  pgBar.style.width   = `${pct}%`;
-
   // Current item label
+  let current = '';
   const draftingTicket = relevant.find(t => t.state === 'drafting');
   if (draftingTicket) {
-    pgCurrent.textContent = `Posting: ${draftingTicket.title || `ticket ${draftingTicket.index + 1}`}`;
+    current = `Posting: ${draftingTicket.title || `ticket ${draftingTicket.index + 1}`}`;
   } else if (resolved === total && total > 0) {
-    pgCurrent.textContent = 'All done.';
+    current = 'All done.';
   } else if (inProgress === 0 && resolved < total) {
-    pgCurrent.textContent = 'Waiting…';
-  } else {
-    pgCurrent.textContent = '';
+    current = 'Waiting…';
   }
 
   // Log entries: created → success, failed → error, size_warning/draft_ready after stop → skipped
-  const logEntries = relevant
+  const logTail = relevant
     .filter(t => t.state === 'created' || t.state === 'failed' || t.state === 'size_warning')
     .map(t => {
       if (t.state === 'created') {
-        const link = t.issue_url
-          ? `<a class="bc-pg-entry-badge" href="${escHtml(t.issue_url)}" target="_blank" rel="noopener">#${t.issue_num}</a>`
-          : `<span class="bc-pg-entry-badge">Created</span>`;
-        return `<div class="bc-pg-entry bc-pg-entry--success">
-          <span class="bc-pg-entry-dot"></span>
-          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
-          ${link}
-        </div>`;
+        const numLabel = t.issue_num ? `#${t.issue_num}` : 'Created';
+        return {
+          type: 'success',
+          message: `${t.title || ''} — ${numLabel}`,
+          timestamp: '—',
+        };
       } else if (t.state === 'failed') {
-        return `<div class="bc-pg-entry bc-pg-entry--error">
-          <span class="bc-pg-entry-dot"></span>
-          <span class="bc-pg-entry-title" title="${escHtml(t.error || '')}">${escHtml(t.title || '')} — ${escHtml((t.error || 'Failed').slice(0, 60))}</span>
-          <span class="bc-pg-entry-badge">Failed</span>
-        </div>`;
+        return {
+          type: 'fail',
+          message: `${t.title || ''} — ${(t.error || 'Failed').slice(0, 60)}`,
+          timestamp: '—',
+        };
       } else {
-        return `<div class="bc-pg-entry bc-pg-entry--skipped">
-          <span class="bc-pg-entry-dot"></span>
-          <span class="bc-pg-entry-title">${escHtml(t.title || '')}</span>
-          <span class="bc-pg-entry-badge">Skipped</span>
-        </div>`;
+        return {
+          type: 'warn',
+          message: `${t.title || ''} — Skipped`,
+          timestamp: '—',
+        };
       }
     });
-  pgLog.innerHTML = logEntries.join('');
+
+  if (typeof mountProgressActivity === 'function') {
+    mountProgressActivity(pgWrap, {
+      status: resolved === total && total > 0 ? 'done' : 'running',
+      mode: 'bar',
+      done: resolved,
+      total,
+      current,
+      result: resolved === total && total > 0 ? `Posted ${resolved} of ${total}` : '',
+      log_tail: logTail,
+    }, {
+      id: 'bc-posting-pa',
+    });
+  }
 
   // Show component, hide ticket list and parallel banner
   pgWrap.classList.remove('hidden');

@@ -7,7 +7,21 @@
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
    _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
-   _bcLabel:writable, _bcPreview:writable */
+   _bcLabel:writable, _bcPreview:writable, renderProgressActivity */
+
+function _bcShowPreviewLoading(current) {
+  const loading = document.getElementById('bc-loading');
+  if (!loading) return;
+  loading.innerHTML = renderProgressActivity({
+    status: 'running',
+    mode: 'indeterminate',
+    current: current || 'Loading preview…',
+  }, {
+    id: 'bc-preview-pa',
+    hideLog: true,
+  });
+  loading.classList.remove('hidden');
+}
 
 export function _bcOpen() {
   _setBodyInert(['bc-backdrop', 'bc-modal']);
@@ -43,7 +57,7 @@ export async function smgmtBulkCompleteSprint(label) {
 
   document.getElementById('bc-modal-title').textContent =
     `Bulk complete ${sprintLabelDisplay(label)}?`;
-  document.getElementById('bc-loading').classList.remove('hidden');
+  _bcShowPreviewLoading('Loading preview…');
   document.getElementById('bc-content').classList.add('hidden');
   document.getElementById('bc-error').classList.add('hidden');
   document.getElementById('bc-error').textContent = '';

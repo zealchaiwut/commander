@@ -16,7 +16,6 @@ are accessed via the deferred ``_server()`` import to avoid circular imports.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import subprocess
 import uuid

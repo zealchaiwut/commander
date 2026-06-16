@@ -33,12 +33,15 @@ _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in sys.path:
     sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-import db
-import github_client
-import github_events_sync
-import live_metrics as _live_metrics
-import projects as projects_module
-from sizing import letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+import db  # noqa: E402
+import github_client  # noqa: E402
+import github_events_sync  # noqa: E402
+import live_metrics as _live_metrics  # noqa: E402
+import projects as projects_module  # noqa: E402
+from sizing import (  # noqa: E402
+    letter_from_minutes as _letter_from_minutes,
+    minutes_from_letter as _minutes_from_letter,
+)
 
 router = APIRouter(tags=["sprint_live"])
 
@@ -504,15 +507,15 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             iss = pending[0]
             current_ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
 
-    done_count    = sum(1 for i in issues if i.get("status") == "done")
-    failed_count  = sum(1 for i in issues if i.get("agent_status") == "failed")
+    done_count = sum(1 for i in issues if i.get("status") == "done")
+    failed_count = sum(1 for i in issues if i.get("agent_status") == "failed")
     skipped_count = sum(
         1 for i in issues
         if i.get("status") == "skipped" and i.get("agent_status") != "failed"
     )
-    total_count   = len(issues)
+    total_count = len(issues)
     complete_count = done_count + failed_count + skipped_count
-    pending_count  = total_count - complete_count
+    pending_count = total_count - complete_count
 
     estimates: dict = status_data.get("estimates", {})
     github_sizes = _live_issue_sizes_from_github(project, sprint_label)

@@ -848,6 +848,20 @@ def ingest_sprint_run_artifact(
         conn.commit()
 
 
+
+
+def update_sprint_pr_number(label: str, pr_number: int | None) -> None:
+    """Persist the sprint merge PR number after Merge Sprint (History links)."""
+    if pr_number is None:
+        return
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET pr_number = ? WHERE label = ?",
+            (int(pr_number), label),
+        )
+        conn.commit()
+
 def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
     """Refresh the ingested reconciliation block after a background reconcile."""
     with get_conn() as conn:

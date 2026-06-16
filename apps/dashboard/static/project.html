@@ -1207,8 +1207,10 @@
     /* Primary env row: name | runstate | port | host badge | actions */
     .deploy-card__row {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      padding: 12px 16px;
+      padding: 12px 16px; transition: background .15s;
     }
+    .deploy-card__row:hover { background: var(--surface-hover); }
+    .deploy-card__row:focus-within { background: var(--surface-hover); outline: none; }
     .deploy-card__row-name { font-size: 14px; font-weight: 600; color: var(--text); flex-shrink: 0; }
     .deploy-card__row-port { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
     /* Legacy head selectors kept for any external references */
@@ -1262,6 +1264,7 @@
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
       padding: 2px 10px; border-radius: 999px;
       background: var(--surface-2); color: var(--text-sub); margin-left: auto;
+      transition: background .2s, color .2s;
     }
     .status-pill--queued   { background: var(--surface-2); color: var(--text-sub); }
     .status-pill--building { background: var(--amber-bg); color: var(--amber); }
@@ -1274,6 +1277,7 @@
       padding: 2px 10px; border-radius: 999px;
       background: var(--surface-2); color: var(--text-sub);
       display: inline-flex; align-items: center; gap: 6px;
+      transition: background .2s, color .2s;
     }
     .runstate-pill::before {
       content: ""; width: 6px; height: 6px; border-radius: 999px;
@@ -1290,10 +1294,12 @@
       cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s;
     }
     .deploy-btn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--text-sub); }
+    .deploy-btn:active:not(:disabled) { background: var(--surface-2); filter: brightness(0.93); transform: translateY(1px); }
     .deploy-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-    .deploy-btn:disabled { opacity: .5; cursor: default; }
+    .deploy-btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
     .deploy-btn--primary { background: var(--blue); border-color: var(--blue); color: var(--text-on-primary); }
     .deploy-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--blue); }
+    .deploy-btn--primary:active:not(:disabled) { filter: brightness(0.88); transform: translateY(1px); }
     .deploy-btn--danger { color: var(--red); }
     .deploy-startstop-na {
       display: inline-flex; align-items: center; padding: 7px 0;
@@ -1349,7 +1355,33 @@
     .deploy-log--collapsed .deploy-log__body { display: none; }
     .deploy-log__line { display: block; }
     .deploy-log__line--error { color: var(--red); font-weight: 600; }
+    /* Scroll-to-bottom affordance (AC4 issue #1074) */
+    .deploy-log__scroll-btn {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 4px 10px; margin: 4px 12px 8px; border-radius: 6px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-muted); font-size: 11.5px; cursor: pointer;
+      font-family: inherit; width: fit-content;
+    }
+    .deploy-log__scroll-btn:hover { background: var(--surface-hover); color: var(--text); }
+    .deploy-log__scroll-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    /* Loading spinner for deploy data fetch (AC5 issue #1074) */
+    .deploy-loading {
+      display: flex; align-items: center; gap: 10px;
+      padding: 20px 16px; color: var(--text-muted); font-size: 13px;
+    }
+    .deploy-loading__spinner {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid var(--border); border-top-color: var(--blue);
+      animation: deploy-reconnect-spin .9s linear infinite; flex-shrink: 0;
+    }
     .deploy-spin { display: inline-block; animation: deploy-reconnect-spin .9s linear infinite; }
+    /* prefers-reduced-motion: suppress all deploy transitions and animations */
+    @media (prefers-reduced-motion: reduce) {
+      .deploy-card__row, .status-pill, .runstate-pill { transition: none; }
+      .deploy-btn { transition: none; }
+      .deploy-spin, .deploy-loading__spinner, .deploy-reconnect-overlay__spinner { animation: none; }
+    }
     /* Self-restart reconnect overlay (AC10/AC11) */
     .deploy-reconnect-overlay {
       position: fixed; inset: 0; z-index: 9999;
@@ -27281,6 +27313,10 @@ function deployTabInit() {
   deployTabDestroy();
   var grid = document.getElementById('deploy-grid');
   if (!grid) return;
+  // AC5 (issue #1074): show loading indicator while fetching
+  grid.innerHTML = '<div class="deploy-loading" id="deploy-loading-indicator">'
+    + '<div class="deploy-loading__spinner" aria-hidden="true"></div>'
+    + '<span>Loading environments…</span></div>';
   fetch('/api/deploy/overview')
     .then(function(r) { return r.ok ? r.json() : { environments: [] }; })
     .then(function(data) {
@@ -27302,7 +27338,9 @@ function _deployRenderGrid() {
   _deployCards = _deployFilterByProject(_deployAllCards, window._currentProjectSlug || _slug || '');
   if (!_deployCards.length) {
     grid.innerHTML = '<div class="deploy-tab-intro" id="deploy-grid-empty">'
-      + 'No deployable environments configured.</div>';
+      + 'No environments configured for this project. '
+      + 'Add deploy targets in <code>.commander/deploy.yaml</code> to enable Start, Stop, and Deploy actions here.'
+      + '</div>';
     return;
   }
   grid.innerHTML = _deployCards.map(function(c, i) { return _deployCardHtml(c, i); }).join('');
@@ -27359,7 +27397,8 @@ function _deployCardHtml(c, i) {
     + '          role="status" aria-live="polite" title="Run state">idle</span>'
     + (portDisplay ? '    <span class="deploy-card__row-port">' + portDisplay + '</span>' : '')
     + '    <span class="deploy-card__badge ' + hostClass + '">' + _deployEsc(hostLabel) + '</span>'
-    + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+    + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '"'
+    + '          role="status" aria-live="polite" aria-label="Deploy status: idle">idle</span>'
     + '    <div class="deploy-card__actions" id="deploy-card-actions-' + i + '">'
     +        _deployIdleActionsHtml(i)
     + '    </div>'
@@ -27713,6 +27752,11 @@ function _deployLogPanelHtml(i) {
     + '  </header>'
     + '  <pre class="deploy-log__body" id="deploy-log-body-' + i + '"'
     + '       aria-live="polite"></pre>'
+    + '  <button class="deploy-log__scroll-btn" type="button"'
+    + '    id="deploy-log-scrollbtn-' + i + '" style="display:none"'
+    + '    aria-label="Scroll to latest log line"'
+    + '    onclick="deployLogScrollToBottom(' + i + ')">'
+    + '    <i class="ti ti-arrow-down" aria-hidden="true"></i> Resume auto-scroll</button>'
     + '</section>';
 }
 
@@ -27721,12 +27765,31 @@ function _deployLogBodyEl(i) { return document.getElementById('deploy-log-body-'
 
 // AC1: open a fresh panel for this card (called when an action starts).
 function _deployLogReset(i) {
-  _deployLogState[i] = { lines: [], status: 'running', collapsed: false };
+  _deployLogState[i] = { lines: [], status: 'running', collapsed: false, userScrolled: false };
   var panel = _deployLogPanelEl(i);
   if (panel) { panel.style.display = ''; panel.classList.remove('deploy-log--collapsed'); }
   var toggle = document.getElementById('deploy-log-toggle-' + i);
   if (toggle) toggle.setAttribute('aria-expanded', 'true');
   _deployLogStatus(i, 'running', 'Running…');
+  // AC4 (issue #1074): attach scroll listener to detect when user scrolls up
+  var body = _deployLogBodyEl(i);
+  if (body && !body._deployScrollBound) {
+    body._deployScrollBound = true;
+    body.addEventListener('scroll', function() {
+      var st = _deployLogState[i];
+      if (!st) return;
+      var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+      if (atBottom) {
+        st.userScrolled = false;
+        var scrollBtn = document.getElementById('deploy-log-scrollbtn-' + i);
+        if (scrollBtn) scrollBtn.style.display = 'none';
+      } else {
+        st.userScrolled = true;
+        var scrollBtn = document.getElementById('deploy-log-scrollbtn-' + i);
+        if (scrollBtn) scrollBtn.style.display = '';
+      }
+    });
+  }
   _deployLogRender(i);
 }
 
@@ -27751,8 +27814,18 @@ function _deployLogRender(i) {
     return '<span class="deploy-log__line' + (l.error ? ' deploy-log__line--error' : '') + '">'
       + _deployEsc(l.text) + '</span>';
   }).join('\n');
-  // Follow new output to the bottom (tail -f), unless the user collapsed it.
-  if (!st.collapsed) body.scrollTop = body.scrollHeight;
+  // AC4 (issue #1074): only auto-scroll when user has not scrolled up to read history.
+  if (!st.collapsed && !st.userScrolled) body.scrollTop = body.scrollHeight;
+}
+
+// AC4 (issue #1074): jump to tail and resume auto-scroll.
+function deployLogScrollToBottom(i) {
+  var body = _deployLogBodyEl(i);
+  var st = _deployLogState[i];
+  if (st) st.userScrolled = false;
+  if (body) body.scrollTop = body.scrollHeight;
+  var scrollBtn = document.getElementById('deploy-log-scrollbtn-' + i);
+  if (scrollBtn) scrollBtn.style.display = 'none';
 }
 
 // AC7: set the completion indicator (running / success / failure).

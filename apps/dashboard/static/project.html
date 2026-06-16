@@ -1173,6 +1173,23 @@
       .ps-row-label { min-width: unset; width: 100%; }
     }
 
+    /* ── Settings interaction polish (issue #1077) ── */
+    .ps-inp:hover:not(:focus):not(:disabled) { border-color: var(--text-sub); }
+    .ps-inp:disabled { opacity: .5; cursor: not-allowed; background: var(--surface-2); }
+    .ps-inp.is-invalid { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
+    .ps-field-error { display: none; font-size: 11px; color: var(--red); margin-top: 3px; }
+    .ps-field-error.visible { display: block; }
+    .ps-btn:focus-visible,
+    .ps-btn-primary:focus-visible,
+    .ps-btn-ghost:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ps-btn-primary:hover { opacity: .88; }
+    .ps-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ps-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+    .ps-btn-browse:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .ps-btn-saved { background: var(--green); color: var(--text-on-primary); border-color: var(--green); animation: psSavePulse .3s ease; }
+    @keyframes psSavePulse { 0% { transform: scale(.96); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .ps-btn-saved { animation: none; } }
+
     /* ── Env paths card (issue #643) ── */
     .ps-path-inp {
       flex: 1; font-family: var(--mono); font-size: 12px;
@@ -8156,6 +8173,11 @@
     .adv-dismiss-btn:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
     .adv-dismiss-btn:disabled { opacity: .45; cursor: default; }
     .adv-run-at { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+    /* Advisor loading state (issue #1077) */
+    .adv-loading { display: flex; align-items: center; gap: 10px; padding: 32px 0; color: var(--text-muted); font-size: 13px; }
+    .adv-loading-spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: advSpin .7s linear infinite; flex-shrink: 0; }
+    @keyframes advSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .adv-loading-spinner { animation: none; border: 2px solid var(--text-muted); } }
 
     /* Roadmap look-ahead section (issue #883) */
     .rm-look-ahead-section { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
@@ -9648,22 +9670,38 @@
                 <tbody>
                   <tr>
                     <td><span class="ps-sz-badge ps-sz-S">S</span></td>
-                    <td><input class="ps-inp ps-num" id="ps-est-s" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td>
+                      <input class="ps-inp ps-num" id="ps-est-s" type="number" min="1" aria-label="Small estimate in minutes" aria-describedby="ps-est-s-err">
+                      <span class="ps-unit">min</span>
+                      <span class="ps-field-error" id="ps-est-s-err" role="alert"></span>
+                    </td>
                     <td id="ps-est-suggest-S"><span class="ps-suggest">—</span></td>
                   </tr>
                   <tr>
                     <td><span class="ps-sz-badge ps-sz-M">M</span></td>
-                    <td><input class="ps-inp ps-num" id="ps-est-m" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td>
+                      <input class="ps-inp ps-num" id="ps-est-m" type="number" min="1" aria-label="Medium estimate in minutes" aria-describedby="ps-est-m-err">
+                      <span class="ps-unit">min</span>
+                      <span class="ps-field-error" id="ps-est-m-err" role="alert"></span>
+                    </td>
                     <td id="ps-est-suggest-M"><span class="ps-suggest">—</span></td>
                   </tr>
                   <tr>
                     <td><span class="ps-sz-badge ps-sz-L">L</span></td>
-                    <td><input class="ps-inp ps-num" id="ps-est-l" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td>
+                      <input class="ps-inp ps-num" id="ps-est-l" type="number" min="1" aria-label="Large estimate in minutes" aria-describedby="ps-est-l-err">
+                      <span class="ps-unit">min</span>
+                      <span class="ps-field-error" id="ps-est-l-err" role="alert"></span>
+                    </td>
                     <td id="ps-est-suggest-L"><span class="ps-suggest">—</span></td>
                   </tr>
                   <tr>
                     <td><span class="ps-sz-badge ps-sz-XL">XL</span></td>
-                    <td><input class="ps-inp ps-num" id="ps-est-xl" type="number" min="1"> <span class="ps-unit">min</span></td>
+                    <td>
+                      <input class="ps-inp ps-num" id="ps-est-xl" type="number" min="1" aria-label="X-Large estimate in minutes" aria-describedby="ps-est-xl-err">
+                      <span class="ps-unit">min</span>
+                      <span class="ps-field-error" id="ps-est-xl-err" role="alert"></span>
+                    </td>
                     <td id="ps-est-suggest-XL"><span class="ps-suggest">—</span></td>
                   </tr>
                 </tbody>
@@ -9671,11 +9709,19 @@
               <div class="ps-buffer-rows">
                 <div class="ps-row">
                   <div class="ps-row-label">Buffer<span class="ps-hint">added to every estimate</span></div>
-                  <div class="ps-row-control"><input class="ps-inp ps-num" id="ps-buf" type="number" min="0" max="200"> <span class="ps-unit">%</span></div>
+                  <div class="ps-row-control">
+                    <input class="ps-inp ps-num" id="ps-buf" type="number" min="0" max="200" aria-label="Buffer percentage added to every estimate" aria-describedby="ps-buf-err">
+                    <span class="ps-unit">%</span>
+                    <span class="ps-field-error" id="ps-buf-err" role="alert"></span>
+                  </div>
                 </div>
                 <div class="ps-row">
                   <div class="ps-row-label">Thin-AC buffer<span class="ps-hint">used when AC is sparse</span></div>
-                  <div class="ps-row-control"><input class="ps-inp ps-num" id="ps-thin-buf" type="number" min="0" max="200"> <span class="ps-unit">%</span></div>
+                  <div class="ps-row-control">
+                    <input class="ps-inp ps-num" id="ps-thin-buf" type="number" min="0" max="200" aria-label="Thin AC buffer percentage" aria-describedby="ps-thin-buf-err">
+                    <span class="ps-unit">%</span>
+                    <span class="ps-field-error" id="ps-thin-buf-err" role="alert"></span>
+                  </div>
                 </div>
               </div>
               <div style="margin-top:12px">
@@ -9703,7 +9749,7 @@
               <div class="ps-row">
                 <div class="ps-row-label">Display name</div>
                 <div class="ps-row-control">
-                  <input class="ps-inp" id="ps-display-name" type="text" style="width:220px" placeholder="Project display name">
+                  <input class="ps-inp" id="ps-display-name" type="text" style="width:220px" placeholder="Project display name" aria-label="Project display name">
                 </div>
               </div>
               <div class="ps-row">
@@ -9751,25 +9797,25 @@
               <div class="ps-row">
                 <div class="ps-row-label">Default branch<span class="ps-hint" id="ps-default-branch-hint">global default: develop</span></div>
                 <div class="ps-row-control">
-                  <input class="ps-inp" id="ps-default-branch" type="text" style="width:160px" placeholder="develop">
+                  <input class="ps-inp" id="ps-default-branch" type="text" style="width:160px" placeholder="develop" aria-label="Default branch name">
                 </div>
               </div>
               <div class="ps-row">
                 <div class="ps-row-label">UAT branch<span class="ps-hint" id="ps-default-branch-uat-hint">global default: develop</span></div>
                 <div class="ps-row-control">
-                  <input class="ps-inp" id="ps-default-branch-uat" type="text" style="width:160px" placeholder="develop">
+                  <input class="ps-inp" id="ps-default-branch-uat" type="text" style="width:160px" placeholder="develop" aria-label="UAT branch name">
                 </div>
               </div>
               <div class="ps-row">
                 <div class="ps-row-label">PRD branch<span class="ps-hint" id="ps-default-branch-prd-hint">global default: master</span></div>
                 <div class="ps-row-control">
-                  <input class="ps-inp" id="ps-default-branch-prd" type="text" style="width:160px" placeholder="master">
+                  <input class="ps-inp" id="ps-default-branch-prd" type="text" style="width:160px" placeholder="master" aria-label="PRD branch name">
                 </div>
               </div>
               <div class="ps-row">
                 <div class="ps-row-label">Sprint budget<span class="ps-hint">capacity bar target</span></div>
                 <div class="ps-row-control">
-                  <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000"> <span class="ps-unit">min</span>
+                  <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000" aria-label="Sprint budget in minutes"> <span class="ps-unit">min</span>
                 </div>
               </div>
               <div class="ps-row">
@@ -9782,7 +9828,7 @@
               <div class="ps-row">
                 <div class="ps-row-label">Tester test repo<span class="ps-hint">GITHUB_ISSUE_TEST_REPO</span></div>
                 <div class="ps-row-control">
-                  <input class="ps-inp" id="ps-tester-repo" type="text" style="width:260px" placeholder="owner/repo-for-testing">
+                  <input class="ps-inp" id="ps-tester-repo" type="text" style="width:260px" placeholder="owner/repo-for-testing" aria-label="Tester test repository in owner/repo format">
                 </div>
               </div>
               <div class="ps-row">
@@ -26761,6 +26807,8 @@ async function _psUpdateInheritNotice(slug) {
 async function projSettingsSave() {
   const slug = _slug;
   if (!slug) return;
+  // Validate before attempting save (AC3 #1077)
+  if (!_psValidate()) return;
   _psSetStatus('Saving…', '');
 
   const body = {
@@ -26809,6 +26857,7 @@ async function projSettingsSave() {
     }
 
     _psSetStatus('Saved', 'ok');
+    _psTriggerSaveConfirm();  // visual micro-interaction (AC4 #1077)
     _psSyncIdentityToChrome();
     await loadHomeData(true);
     await _psUpdateInheritNotice(slug);
@@ -26867,6 +26916,60 @@ function _psSetStatus(msg, cls) {
   if (!el) return;
   el.textContent = msg;
   el.className = 'ps-status-msg' + (cls ? ' ' + cls : '');
+}
+
+// Save button micro-interaction: brief green pulse, skipped for prefers-reduced-motion (AC4 #1077)
+function _psTriggerSaveConfirm() {
+  const btn = document.querySelector('#pane-settings .ps-btn-primary');
+  if (!btn) return;
+  const original = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-check"></i> Saved';
+  btn.classList.add('ps-btn-saved');
+  // prefers-reduced-motion: CSS suppresses animation; we still swap text for 1.2s
+  setTimeout(function () {
+    btn.classList.remove('ps-btn-saved');
+    btn.innerHTML = original;
+  }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1200 : 2000);
+}
+
+// Validate numeric settings fields; mark invalid ones and return false if any fail (AC3 #1077)
+function _psValidate() {
+  var valid = true;
+  var numFields = [
+    { id: 'ps-est-s',    errId: 'ps-est-s-err',    min: 1,   max: null, label: 'S estimate' },
+    { id: 'ps-est-m',    errId: 'ps-est-m-err',    min: 1,   max: null, label: 'M estimate' },
+    { id: 'ps-est-l',    errId: 'ps-est-l-err',    min: 1,   max: null, label: 'L estimate' },
+    { id: 'ps-est-xl',   errId: 'ps-est-xl-err',   min: 1,   max: null, label: 'XL estimate' },
+    { id: 'ps-buf',      errId: 'ps-buf-err',      min: 0,   max: 200,  label: 'Buffer' },
+    { id: 'ps-thin-buf', errId: 'ps-thin-buf-err', min: 0,   max: 200,  label: 'Thin-AC buffer' },
+  ];
+  numFields.forEach(function (f) {
+    const inp = document.getElementById(f.id);
+    const errEl = document.getElementById(f.errId);
+    if (!inp) return;
+    const val = parseInt(inp.value, 10);
+    const empty = inp.value.trim() === '';
+    var msg = '';
+    if (!empty) {
+      if (isNaN(val) || val < f.min) {
+        msg = f.label + ' must be at least ' + f.min;
+      } else if (f.max !== null && val > f.max) {
+        msg = f.label + ' must be at most ' + f.max;
+      }
+    }
+    if (msg) {
+      inp.classList.add('is-invalid');
+      inp.setAttribute('aria-invalid', 'true');
+      if (errEl) { errEl.textContent = msg; errEl.classList.add('visible'); }
+      valid = false;
+    } else {
+      inp.classList.remove('is-invalid');
+      inp.setAttribute('aria-invalid', 'false');
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('visible'); }
+    }
+  });
+  if (!valid) _psSetStatus('Please fix the errors above', 'err');
+  return valid;
 }
 
 </script>
@@ -28834,6 +28937,11 @@ function _advProjectKey() {
 function _advFetch() {
   var root = document.getElementById('adv-root');
   if (!root) return;
+  // Show loading state immediately so there's no blank/unstyled flash (AC5 #1077)
+  root.innerHTML = '<div class="adv-loading">'
+    + '<span class="adv-loading-spinner" aria-hidden="true"></span>'
+    + '<span>Loading suggestions…</span>'
+    + '</div>';
   var projectKey = _advProjectKey();
   fetch('/api/projects/' + encodeURIComponent(projectKey) + '/advisor/suggestions')
     .then(function(r) { return r.json(); })

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,7 +17,13 @@
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;padding:28px 24px;min-height:100vh}
     .home{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
-    .theme-toggle{position:fixed;top:16px;right:16px;background:var(--surface);border:1px solid var(--border);padding:6px 11px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;font-family:var(--mono);z-index:100}
+    /* page header */
+    .page-hdr{display:flex;align-items:center;gap:10px;padding:14px 24px;background:var(--surface);border-bottom:1px solid var(--border)}
+    .page-hdr-brand{font-size:15px;font-weight:800;letter-spacing:-.01em;color:var(--text)}
+
+    /* card anatomy meta row (progress + last-activity in pbrief-head) */
+    .card-meta{display:flex;align-items:center;gap:8px;margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-muted)}
+    .card-meta-item{display:inline-flex;align-items:center;gap:4px}
 
     /* brief header */
     .brief-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -201,7 +207,9 @@
   </style>
 </head>
 <body>
-  <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark theme"><i class="ti ti-moon"></i> Theme</button>
+  <header class="page-hdr" aria-label="Commander">
+    <span class="page-hdr-brand">Commander</span>
+  </header>
 
   <div class="home" id="home">
     <div class="loading-state" id="boot-note"><i class="ti ti-loader-2"></i> Loading daily brief…</div>
@@ -259,11 +267,6 @@
       `<span class="pbname">${esc(name)}</span>` +
       `<span class="pbname-go" aria-hidden="true"><i class="ti ti-arrow-right"></i></span>` +
       `</a>`;
-  }
-
-  function toggleTheme(){
-    const r = document.documentElement;
-    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
   }
 
   function esc(s){
@@ -604,9 +607,10 @@
   function renderProjectsShell(projects, available){
     let blocks = '';
     if (!projects.length){
+      const _addCta = '<a class="btn btn-primary" href="/static/home-preview.html" onclick="return openAdd(event)">Add new project</a>';
       blocks = available
-        ? '<div class="empty-state"><i class="ti ti-folder-off"></i><div>No projects to report on for this date.</div></div>'
-        : '<div class="empty-state"><i class="ti ti-clipboard-off"></i><div>No brief was stored for this date.</div></div>';
+        ? '<div class="empty-state"><i class="ti ti-folder-off"></i><div>No projects to report on for this date.</div>' + _addCta + '</div>'
+        : '<div class="empty-state"><i class="ti ti-clipboard-off"></i><div>No brief was stored for this date.</div>' + _addCta + '</div>';
       // Still show the tracked projects so the page is navigable without a brief.
       const slugs = Object.keys(_repoBySlug);
       blocks += slugs.map(s => `
@@ -624,6 +628,24 @@
       ${blocks}
       <a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>
     </div>`;
+  }
+
+  // card-meta: compact progress % + last-activity timestamp in the card head (AC4)
+  function _cardMeta(p){
+    const pr = (p.in_progress && p.in_progress.progress) || {};
+    const pct = pr.percent != null ? esc(pr.percent) + '%' : null;
+    const acts = p.recent_activity || [];
+    const last = acts[0];
+    const lastTime = last && last.time ? new Date(last.time) : null;
+    const lastFmt = lastTime && !isNaN(lastTime)
+      ? String(lastTime.getMonth()+1).padStart(2,'0') + '/' + String(lastTime.getDate()).padStart(2,'0') + ' ' +
+        String(lastTime.getHours()).padStart(2,'0') + ':' + String(lastTime.getMinutes()).padStart(2,'0')
+      : null;
+    const items = [];
+    if (pct) items.push(`<span class="card-meta-item"><i class="ti ti-progress" style="font-size:10px" aria-hidden="true"></i>${pct}</span>`);
+    if (lastFmt) items.push(`<span class="card-meta-item"><i class="ti ti-clock" style="font-size:10px" aria-hidden="true"></i>${esc(lastFmt)}</span>`);
+    if (!items.length) return '';
+    return `<div class="card-meta" aria-label="Progress and activity">${items.join('')}</div>`;
   }
 
   function _statusPill(p){
@@ -725,6 +747,7 @@
             <span class="pb-ms-name"></span>
             <span class="pb-ms-count"></span>
           </a>
+          ${_cardMeta(p)}
           ${_statusPill(p)}
           <button class="pb-bottom-toggle" title="Hide/show shipped detail + to-do"
                   aria-label="Toggle bottom row" onclick="toggleBottom('${esc(slug)}')">

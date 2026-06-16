@@ -6096,4 +6096,3 @@ ${data.errors.join("\n")}`);
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 })();
-//# sourceMappingURL=bundle.js.map

@@ -1,84 +1,96 @@
-"""Tests for issue #1194: Stack Sprint History card header on mobile (runs against UAT)"""
-import os
+"""
+Tests for issue #1194 — Stack Sprint History card header on mobile (≤600px).
+Static CSS analysis against project.html — no live server required.
+"""
+import re
 import pytest
-import httpx
+
+HTML_FILE = "apps/dashboard/static/project.html"
 
 
-# Resolved from UAT .env at runtime; see tester skill Step 0.
-# Default kept only as a last-resort fallback if BASE_URL not exported.
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
-if not BASE_URL.startswith("http"):
-    raise RuntimeError(
-        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+@pytest.fixture(scope="module")
+def html_source():
+    with open(HTML_FILE, encoding="utf-8") as f:
+        return f.read()
+
+
+def _extract_media_600(source):
+    """Return all @media (max-width:600px) block bodies concatenated."""
+    header_re = re.compile(r"@media\s*\(\s*max-width\s*:\s*600px\s*\)")
+    blocks = []
+    pos = 0
+    while True:
+        m = header_re.search(source, pos)
+        if not m:
+            break
+        start = source.find("{", m.end())
+        if start == -1:
+            break
+        depth = 1
+        i = start + 1
+        while i < len(source) and depth > 0:
+            if source[i] == "{":
+                depth += 1
+            elif source[i] == "}":
+                depth -= 1
+            i += 1
+        blocks.append(source[start + 1 : i - 1])
+        pos = i
+    return "\n".join(blocks)
+
+
+def test_hist_card_stack__375px_viewport_stacks_to_column(html_source):
+    """AC: At ≤600px, .hist-card-head stacks into a column (flex-direction: column)."""
+    block = _extract_media_600(html_source)
+    assert block, "No @media (max-width:600px) block found"
+    assert re.search(r"\.hist-card-head\b[^{]*\{[^}]*flex-direction\s*:\s*column", block), (
+        ".hist-card-head must have flex-direction:column inside @media (max-width:600px)"
     )
 
 
-@pytest.fixture
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
-        yield c
+def test_hist_card_stack__600px_viewport_column_with_gap(html_source):
+    """AC: At ≤600px, .hist-card-head has gap:8px between stacked sections."""
+    block = _extract_media_600(html_source)
+    assert block, "No @media (max-width:600px) block found"
+    assert re.search(r"\.hist-card-head\b[^{]*\{[^}]*\bgap\s*:\s*8px", block), (
+        ".hist-card-head must have gap:8px inside @media (max-width:600px)"
+    )
 
 
-# --- Acceptance Criteria ---
-
-def test_hist_card_stack__375px_viewport_stacks_to_column(client):
-    # AC: At 375 px viewport width, `.hist-card-head` stacks into a column
-    # (title/badges on top, actions below)
-    # This is an HTTP-only verification that the page serves and contains the necessary CSS
-    r = client.get("/")
-    assert r.status_code == 200
-    # Verify the CSS rule exists for mobile breakpoint (375px and below)
-    assert "max-width: 600px" in r.text
-    assert "hist-card-head" in r.text
-    assert "flex-direction: column" in r.text
-    pytest.skip("visual verification — confirm via design-contract gate / agent-browser, not HTTP")
+def test_hist_card_stack__full_width_flex_basis_600px(html_source):
+    """AC: .hist-card-head-left and .hist-card-head-right each span full width at ≤600px."""
+    block = _extract_media_600(html_source)
+    assert block, "No @media (max-width:600px) block found"
+    assert re.search(
+        r"\.hist-card-head-(?:left|right)\b[^{]*\{[^}]*(?:flex-basis|width)\s*:\s*100%",
+        block,
+    ), ".hist-card-head-left/.hist-card-head-right must have flex-basis:100% or width:100% inside @media (max-width:600px)"
 
 
-def test_hist_card_stack__600px_viewport_column_with_gap(client):
-    # AC: At 600 px viewport width, same column layout applies with `gap: 8px` between sections
-    r = client.get("/")
-    assert r.status_code == 200
-    # Verify the CSS has gap: 8px in the media query
-    assert "max-width: 600px" in r.text
-    assert "gap: 8px" in r.text
-    pytest.skip("visual verification — confirm via design-contract gate / agent-browser, not HTTP")
+def test_hist_card_stack__no_overflow_at_600px(html_source):
+    """AC: No horizontal scrollbar/overflow on .hist-card-head at ≤600px."""
+    block = _extract_media_600(html_source)
+    assert block, "No @media (max-width:600px) block found"
+    assert re.search(r"\.hist-card-head\b[^{]*\{[^}]*overflow(?:-x)?\s*:\s*hidden", block), (
+        ".hist-card-head must have overflow(-x):hidden inside @media (max-width:600px)"
+    )
 
 
-def test_hist_card_stack__full_width_flex_basis_600px(client):
-    # AC: `.hist-card-head-left` and `.hist-card-head-right` each span full width
-    # (`flex-basis: 100%`) at ≤ 600 px
-    r = client.get("/")
-    assert r.status_code == 200
-    # Verify flex-basis: 100% is set in the mobile media query
-    assert "flex-basis: 100%" in r.text or "width: 100%" in r.text
-    pytest.skip("visual verification — confirm via design-contract gate / agent-browser, not HTTP")
+def test_hist_card_stack__desktop_unchanged(html_source):
+    """AC: Desktop layout (>600px) is visually unchanged — .hist-card-head uses grid."""
+    no_media = re.sub(r"@media\s*[^{]*\{(?:[^{}]|\{[^{}]*\})*\}", "", html_source)
+    base_matches = re.findall(r"\.hist-card-head\s*\{([^}]+)\}", no_media)
+    assert base_matches, "Could not find any base .hist-card-head { } rule"
+    found = any(
+        re.search(r"grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*auto", m)
+        for m in base_matches
+    )
+    assert found, (
+        "Base .hist-card-head must have grid-template-columns:minmax(0,1fr) auto for desktop"
+    )
 
 
-def test_hist_card_stack__no_overflow_at_600px(client):
-    # AC: No horizontal scrollbar or overflow on the card header at any width ≤ 600 px
-    r = client.get("/")
-    assert r.status_code == 200
-    # Verify overflow-x: hidden is set in media query
-    assert "overflow-x: hidden" in r.text or "overflow: hidden" in r.text
-    pytest.skip("visual verification — confirm via design-contract gate / agent-browser, not HTTP")
-
-
-def test_hist_card_stack__desktop_unchanged(client):
-    # AC: Desktop layout (> 600 px) is visually unchanged
-    # Verify the desktop CSS for hist-card-head is present (grid-template-columns)
-    r = client.get("/")
-    assert r.status_code == 200
-    # Desktop should use grid layout
-    assert "grid-template-columns: minmax(0, 1fr) auto" in r.text
-    pytest.skip("visual verification — confirm via design-contract gate / agent-browser, not HTTP")
-
-
-def test_hist_card_stack__button_interactions_functional(client):
-    # AC: All existing badge and action button interactions still function after layout change
-    # HTTP-only test: verify the page loads and action buttons are present
-    r = client.get("/")
-    assert r.status_code == 200
-    # Verify action button classes exist
-    assert "hist-head-actions" in r.text
-    assert "hist-head-btn" in r.text
-    pytest.skip("interaction verification — confirm via browser, not HTTP")
+def test_hist_card_stack__button_interactions_functional(html_source):
+    """AC: All badge/action button interactions still functional — classes are present."""
+    assert ".hist-head-actions" in html_source, ".hist-head-actions class must be defined"
+    assert ".hist-head-btn" in html_source, ".hist-head-btn class must be defined"

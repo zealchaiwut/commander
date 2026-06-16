@@ -283,7 +283,7 @@ export const PA_CSS = `
 /* ── Bar mode ── */
 .pa-bar-track {
   height: 4px;
-  background: rgba(22,163,74,.18);
+  background: var(--green-bg);
   border-radius: 2px;
   overflow: hidden;
   position: relative;
@@ -303,7 +303,7 @@ export const PA_CSS = `
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.55) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.1) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 .pa-bar-meta {
@@ -389,7 +389,7 @@ export const PA_CSS = `
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border: 2px solid rgba(22,163,74,.2);
+  border: 2px solid var(--green-bg);
   border-top-color: var(--green);
   border-radius: 50%;
   animation: pa-spin .8s linear infinite;
@@ -397,7 +397,7 @@ export const PA_CSS = `
 .pa-indet-shimmer {
   height: 4px;
   flex: 1;
-  background: rgba(22,163,74,.15);
+  background: var(--green-bg);
   border-radius: 2px;
   position: relative;
   overflow: hidden;
@@ -407,7 +407,7 @@ export const PA_CSS = `
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(22,163,74,.45) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--green-bg) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 

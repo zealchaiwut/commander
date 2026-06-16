@@ -49,6 +49,35 @@ export function extractRaw(text) {
   return s;
 }
 
+/**
+ * Classify an event object's severity level.
+ * Returns 'error', 'warn', or 'info'.
+ */
+export function evlSeverity(ev) {
+  if (!ev) return 'info';
+  const type = ev.type || '';
+  const detail = ev.detail || {};
+  if (type === 'ticket_failed') return 'error';
+  if (type === 'agent_finished') {
+    const st = detail.status || '';
+    if (st === 'error' || st === 'timed_out') return 'error';
+    if (st === 'partial') return 'warn';
+  }
+  return 'info';
+}
+
+/**
+ * Render a severity chip HTML string.
+ * @param {'error'|'warn'|'info'} sev
+ * @param {function} [esc] - HTML escape function; defaults to escapeLogHtml
+ * @returns {string}
+ */
+export function evlSevChipHtml(sev, esc) {
+  const e = esc || escapeLogHtml;
+  const label = sev === 'error' ? 'ERROR' : sev === 'warn' ? 'WARN' : 'INFO';
+  return '<span class="evl-sev-chip evl-sev-chip--' + e(sev) + '">' + label + '</span>';
+}
+
 export function colorizeLogLine(text, repo) {
   const escaped = escapeLogHtml(extractRaw(text));
   return escaped.replace(TOKEN_RE, function (match, issue, agent) {

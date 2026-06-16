@@ -7356,6 +7356,51 @@
     .run-head-meta { color: var(--text-sub); }
     .run-head-watchdog { color: var(--text-muted); font-size: 11px; }
 
+    /* ── Segmented progress gauge (issue #1107) ──────────────────────────────
+       Four-segment horizontal bar: done (green) · retrying (amber) ·
+       running (blue, shimmer) · queued (grey remainder). */
+    .rp-gauge-wrap {
+      padding: 10px 18px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .rp-gauge {
+      height: 8px; border-radius: 999px; background: var(--surface-2);
+      display: flex; overflow: hidden; border: 1px solid var(--border);
+    }
+    .rp-gauge-seg {
+      height: 100%; transition: width .4s ease;
+    }
+    .rp-gauge-seg--done    { background: var(--green); }
+    .rp-gauge-seg--retrying { background: var(--amber); }
+    .rp-gauge-seg--running {
+      background: var(--blue); position: relative; overflow: hidden;
+      animation: rp-gauge-shimmer 1.6s ease-in-out infinite;
+    }
+    .rp-gauge-seg--queued  { background: var(--surface-2); flex: 1 1 auto; }
+    @keyframes rp-gauge-shimmer {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .55; }
+    }
+    .rp-gauge-legend {
+      font-size: 11px; font-family: var(--mono); color: var(--text-muted);
+      display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    }
+    .rp-gauge-legend-done    { color: var(--green); font-weight: 700; }
+    .rp-gauge-legend-retrying { color: var(--amber); font-weight: 700; }
+    .rp-gauge-legend-running  { color: var(--blue); font-weight: 700; }
+    .rp-gauge-legend-queued   { color: var(--text-muted); }
+    .rp-gauge-legend-sep      { color: var(--border); }
+    .rp-gauge-summary {
+      font-size: 12px; font-weight: 700; color: var(--text-sub); font-family: var(--mono);
+    }
+    .rp-stat-row {
+      font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px;
+    }
+    .rp-stat-sep { color: var(--border); }
+    .rp-stat-amber { color: var(--amber); font-weight: 700; }
+
     /* ── Level-rail node board (issue #802) ──────────────────────────────────
        A vertical spine of level gates; each level holds per-ticket node cards.
        Tokens are the BA Path-A literal contract: .rail/.level/.level-dot/.nodes
@@ -7765,6 +7810,68 @@
     .log-empty { color: var(--text-muted); font-style: italic; }
     .log-fallback-note { color: var(--text-muted); font-size: 11px; line-height: 1.5;
       padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+    /* ── Orchestrator + All Issues panels (issue #1106) ─────────────────────── */
+    .orch-panel { margin: 0 0 12px; border: 1px solid var(--border); border-radius: 10px;
+      background: var(--surface); overflow: hidden; }
+    .orch-panel-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+      border-bottom: 1px solid var(--border); }
+    .orch-panel-title { font-size: 13px; font-weight: 700; color: var(--text); flex: 1 1 auto; }
+    .orch-more-btn { font-size: 11px; font-weight: 600; color: var(--blue); background: none;
+      border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer;
+      flex-shrink: 0; }
+    .orch-more-btn:hover { background: var(--surface-hover); }
+    .orch-more-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .orch-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border);
+      flex-shrink: 0; display: inline-block; }
+    .orch-live-dot--active { background: var(--green); animation: orchDotPulse 2s ease-in-out infinite; }
+    @keyframes orchDotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+    .orch-panel-body { padding: 10px 14px; font-family: var(--mono); font-size: 11px;
+      line-height: 1.55; overflow-y: auto; max-height: 260px; background: var(--bg); }
+
+    .all-issues-panel { border: 1px solid var(--border); border-radius: 10px;
+      background: var(--surface); overflow: hidden; margin-bottom: 12px; }
+    .ai-panel-title-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+      border-bottom: 1px solid var(--border); }
+    .ai-panel-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .ai-level--locked { opacity: .55; }
+    .ai-level-header { display: flex; align-items: center; gap: 6px; padding: 7px 14px 4px;
+      font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: .02em;
+      border-top: 1px solid var(--border); text-transform: uppercase; }
+    .ai-level:first-child .ai-level-header { border-top: none; }
+    .ai-level-meta { display: flex; align-items: center; gap: 5px; }
+    .ai-row { border-bottom: 1px solid var(--border); }
+    .ai-row:last-child { border-bottom: none; }
+    .ai-row-body { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px;
+      background: none; border: none; cursor: pointer; text-align: left; color: inherit;
+      font-size: 13px; }
+    .ai-row-body:hover { background: var(--surface-hover); }
+    .ai-row--locked .ai-row-body { cursor: default; }
+    .ai-row-icon { font-size: 13px; flex-shrink: 0; width: 18px; text-align: center;
+      display: inline-flex; align-items: center; justify-content: center; }
+    .ai-row-icon--done { color: var(--green); }
+    .ai-row-icon--running { color: var(--blue); }
+    .ai-row-icon--retrying { color: var(--amber); }
+    .ai-row-icon--queued { color: var(--text-sub); }
+    .ai-row-num { font-family: var(--mono); font-size: 11px; font-weight: 700;
+      color: var(--text-muted); flex-shrink: 0; }
+    .ai-row-title { flex: 1 1 auto; font-size: 13px; color: var(--text); min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ai-row-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+    .ai-row-size { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 5px; border-radius: 4px; color: var(--text-sub); background: var(--surface-2); }
+    .ai-row-fix { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 5px; border-radius: 4px; color: var(--amber); background: var(--amber-bg); }
+    .ai-row-agent { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; color: var(--blue); background: var(--blue-bg); }
+    .ai-row-state { font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      white-space: nowrap; }
+    .ai-row-log { padding: 8px 14px 8px 40px; background: var(--bg);
+      border-top: 1px solid var(--border); font-family: var(--mono); font-size: 11px;
+      line-height: 1.55; overflow-y: auto; max-height: 120px; }
+    .ai-full-log-link { display: block; margin-top: 6px; font-size: 11px; font-weight: 600;
+      color: var(--blue); text-decoration: none; }
+    .ai-full-log-link:hover { text-decoration: underline; }
 
     .smgmt-subview { display: none; }
     .smgmt-subview.show { display: block; animation: smgmt-fade-in .18s ease; }
@@ -8474,14 +8581,14 @@
             <div id="smgmt-run-head" aria-live="polite"></div>
             <!-- Running metrics strip (issue #803) -->
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics"></div>
-            <!-- Level-rail node board (issue #802) -->
-            <div class="rail" id="smgmt-rail" role="list" aria-label="Sprint level rail"></div>
+            <!-- Orchestrator log panel (issue #1106) -->
+            <div class="orch-panel" id="smgmt-orch-panel" role="region" aria-label="Orchestrator log"></div>
+            <!-- All issues panel (issue #1106) -->
+            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
             <!-- Two-queue coder/tester lane view (issue #927) -->
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
             <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
-            <!-- Node inspector panel (issue #804) -->
-            <div class="inspector" id="smgmt-inspector" role="region" aria-label="Node inspector" hidden></div>
           </div>
         </div><!-- /smgmt-subview-running -->
 
@@ -13275,14 +13382,92 @@ function _smgmtRunningViewUpdate(label, live) {
     shellEl.classList.toggle('linger', isLinger);
   }
   if (!showShell) {
-    if (typeof _smgmtInspectorClose === 'function') _smgmtInspectorClose();
     return;
   }
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
-  _smgmtRailUpdate(primary, snap);
+  _smgmtOrchPanelUpdate(primary, snap);
+  _smgmtAllIssuesUpdate(primary, snap);
   _smgmtLanesUpdate(primary, snap);
   _smgmtRpTimelineFetch(primary, _smgmtRepo());
+}
+
+/** Derive done/retrying/running/queued counts from a live snapshot. */
+function _smgmtGaugeCounts(live) {
+  const issues = (live && live.issues) || [];
+  const total = live && live.total_count != null ? Number(live.total_count) : issues.length;
+  const done = Number(live && live.done_count || 0);
+  const retrying = issues.filter(function(i) {
+    return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+  }).length;
+  const running = issues.filter(function(i) {
+    return i.status !== 'done' && _smgmtRailFixRound(i) == null
+      && (i.agent === 'coder' || i.agent === 'tester');
+  }).length;
+  const queued = Math.max(0, total - done - retrying - running);
+  return { done: done, retrying: retrying, running: running, queued: queued, total: total };
+}
+
+/** Build the gauge HTML (bar + legend + summary + stat row) from a live snapshot. */
+function _smgmtGaugeHtml(live) {
+  const c = _smgmtGaugeCounts(live);
+  const t = c.total || 1; // avoid /0
+  const pct = function(n) { return (n / t * 100).toFixed(2) + '%'; };
+
+  // Gauge bar segments — running segment only rendered when running > 0
+  const runningStyle = c.running > 0
+    ? `style="width:${pct(c.running)}"` : 'style="width:0"';
+  const bar = `<div class="rp-gauge" id="smgmt-rp-gauge">`
+    + `<div class="rp-gauge-seg rp-gauge-seg--done" id="smgmt-rp-seg-done" style="width:${pct(c.done)}"></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--retrying" id="smgmt-rp-seg-retrying" style="width:${pct(c.retrying)}"></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--running" id="smgmt-rp-seg-running" ${runningStyle}></div>`
+    + `<div class="rp-gauge-seg rp-gauge-seg--queued" id="smgmt-rp-seg-queued" style="width:${pct(c.queued)}"></div>`
+    + `</div>`;
+
+  // Legend: N done / N retrying / N running / N queued
+  const sep = '<span class="rp-gauge-legend-sep"> / </span>';
+  const legend = `<div class="rp-gauge-legend" id="smgmt-rp-gauge-legend">`
+    + `<span class="rp-gauge-legend-done" id="smgmt-rp-leg-done">${c.done} done</span>${sep}`
+    + `<span class="rp-gauge-legend-retrying" id="smgmt-rp-leg-retrying">${c.retrying} retrying</span>${sep}`
+    + `<span class="rp-gauge-legend-running" id="smgmt-rp-leg-running">${c.running} running</span>${sep}`
+    + `<span class="rp-gauge-legend-queued" id="smgmt-rp-leg-queued">${c.queued} queued</span>`
+    + `</div>`;
+
+  // Summary: X of Y done
+  const summary = `<div class="rp-gauge-summary" id="smgmt-rp-gauge-summary">${c.done} of ${c.total} done</div>`;
+
+  // Stat row: agents · mode  ·  retrying info  ·  coder Xm / tester Xm
+  const issues = (live && live.issues) || [];
+  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
+  const mode = live && live.pipeline_mode ? 'parallel' : 'serial';
+  const agentStr = `${activeCount} agent${activeCount !== 1 ? 's' : ''} · ${mode}`;
+
+  let retryingStr = '';
+  if (c.retrying > 0) {
+    const retryIss = issues.find(function(i) {
+      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+    });
+    const retryLabel = retryIss
+      ? `#${retryIss.number} with failure context`
+      : `${c.retrying} retrying`;
+    retryingStr = `<span class="rp-stat-sep"> · </span><span class="rp-stat-amber">${escHtml(retryLabel)}</span>`;
+  }
+
+  let timeStr = '';
+  if (live && live.agent_time_split) {
+    const cSec = Number(live.agent_time_split.coder || 0);
+    const tSec = Number(live.agent_time_split.tester || 0);
+    if (cSec + tSec > 0) {
+      timeStr = `<span class="rp-stat-sep"> · </span>`
+        + `coder ${escHtml(_smgmtFmtSplit(cSec))} / tester ${escHtml(_smgmtFmtSplit(tSec))}`;
+    }
+  }
+
+  const statRow = `<div class="rp-stat-row" id="smgmt-rp-stat-row">`
+    + `<span>${escHtml(agentStr)}</span>${retryingStr}${timeStr}`
+    + `</div>`;
+
+  return `<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">${bar}${legend}${summary}${statRow}</div>`;
 }
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
@@ -13307,6 +13492,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
   const watchdog = isLinger
     ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
     : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog · heartbeat ${hb}s ago</span>`;
+  const gaugeHtml = isLinger ? '' : _smgmtGaugeHtml(live || {});
   return `<div class="run-head-card" id="smgmt-run-head-card" data-label="${safeLabel}">
     <div class="run-head-top">
       <div class="run-head-left">
@@ -13315,6 +13501,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       </div>
       ${cancelBtn}
     </div>
+    ${gaugeHtml}
     <div class="run-head-sub">
       <span class="run-head-meta" id="smgmt-run-head-meta">${escHtml(metaParts.join(' · '))}</span>
       ${watchdog}
@@ -13333,6 +13520,57 @@ function _smgmtRunHeadPatch(label, live) {
   if (estRem) metaParts.push(estRem);
   if (metaEl) metaEl.textContent = metaParts.join(' · ');
   if (wdEl) wdEl.textContent = `watchdog · heartbeat ${_smgmtLiveHeartbeatSec()}s ago`;
+
+  // Patch gauge elements (issue #1107)
+  const c = _smgmtGaugeCounts(live);
+  const t = c.total || 1;
+  const pct = function(n) { return (n / t * 100).toFixed(2) + '%'; };
+  const segDone    = document.getElementById('smgmt-rp-seg-done');
+  const segRetry   = document.getElementById('smgmt-rp-seg-retrying');
+  const segRunning = document.getElementById('smgmt-rp-seg-running');
+  const segQueued  = document.getElementById('smgmt-rp-seg-queued');
+  if (segDone)    segDone.style.width    = pct(c.done);
+  if (segRetry)   segRetry.style.width   = pct(c.retrying);
+  if (segRunning) segRunning.style.width = c.running > 0 ? pct(c.running) : '0';
+  if (segQueued)  segQueued.style.width  = pct(c.queued);
+
+  const legDone    = document.getElementById('smgmt-rp-leg-done');
+  const legRetry   = document.getElementById('smgmt-rp-leg-retrying');
+  const legRunning = document.getElementById('smgmt-rp-leg-running');
+  const legQueued  = document.getElementById('smgmt-rp-leg-queued');
+  if (legDone)    legDone.textContent    = c.done + ' done';
+  if (legRetry)   legRetry.textContent   = c.retrying + ' retrying';
+  if (legRunning) legRunning.textContent = c.running + ' running';
+  if (legQueued)  legQueued.textContent  = c.queued + ' queued';
+
+  const summaryEl = document.getElementById('smgmt-rp-gauge-summary');
+  if (summaryEl) summaryEl.textContent = c.done + ' of ' + c.total + ' done';
+
+  // Patch stat row
+  const issues = (live && live.issues) || [];
+  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
+  const mode = live.pipeline_mode ? 'parallel' : 'serial';
+  const agentStr = activeCount + ' agent' + (activeCount !== 1 ? 's' : '') + ' · ' + mode;
+  let retryingStr = '';
+  if (c.retrying > 0) {
+    const retryIss = issues.find(function(i) {
+      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+    });
+    const retryLabel = retryIss
+      ? '#' + retryIss.number + ' with failure context'
+      : c.retrying + ' retrying';
+    retryingStr = ' · ' + retryLabel;
+  }
+  let timeStr = '';
+  if (live.agent_time_split) {
+    const cSec = Number(live.agent_time_split.coder || 0);
+    const tSec = Number(live.agent_time_split.tester || 0);
+    if (cSec + tSec > 0) {
+      timeStr = ' · coder ' + _smgmtFmtSplit(cSec) + ' / tester ' + _smgmtFmtSplit(tSec);
+    }
+  }
+  const statRowEl = document.getElementById('smgmt-rp-stat-row');
+  if (statRowEl) statRowEl.textContent = agentStr + retryingStr + timeStr;
 }
 
 function _smgmtRunHeadUpdate(label, live, isLinger) {
@@ -14258,6 +14496,11 @@ let _smgmtInspectorLabel = '';     // sprint label the inspector is bound to
 let _smgmtInspectorTab = null;     // active log-tab key: 'orchestrator' | issue number
 let _smgmtInspectorPollId = null;  // streaming poll handle for the active log tab
 
+// ── All Issues panel state (issue #1106) ──────────────────────────────────────
+let _smgmtOrchExpanded = false;    // true when orchestrator panel is in "show more" mode
+let _smgmtAiLabel = '';            // sprint label bound to the All Issues panel
+let _smgmtAiExpandedNums = new Set(); // issue numbers whose inline log is currently open
+
 /** The agent colour-token key for an issue (lg-* contract); 'orchestrator' for
  *  the spine tab. Maps the active agent role onto the known agent keys. */
 function _smgmtInspectorAgentKey(iss) {
@@ -14510,6 +14753,285 @@ function _smgmtInspectorClose() {
   if (panel) { panel.hidden = true; panel.innerHTML = ''; }
 }
 
+// ── Orchestrator log panel (issue #1106) ──────────────────────────────────────
+// A collapsible panel placed directly below the header stat row. Shows the
+// sprint dispatch log with a live indicator dot. Defaults to ~3 lines; "Show
+// more" expands to ~15 scrollable lines; "Show less" collapses back.
+
+/** Fetch dispatch-log tail and render into the orchestrator panel body. */
+function _smgmtOrchFetchLines(label, tailLines) {
+  const bodyEl = document.getElementById('smgmt-orch-body');
+  if (!bodyEl) return;
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+  const lbl = label || _smgmtAiLabel;
+  if (!repo || !lbl) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
+  fetch('/api/sprints/' + encodeURIComponent(lbl) + '/dispatch-log'
+      + '?project=' + encodeURIComponent(repo) + '&tail_lines=' + tailLines)
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      const el = document.getElementById('smgmt-orch-body');
+      if (!el) return;
+      const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+      if (tail.trim()) {
+        const lines = tail.split('\n').filter(function(l) { return l; }).slice(-tailLines);
+        el.innerHTML = lines.map(function(line) {
+          return '<div class="log-line">' + colorizeLogLine(line, repo) + '</div>';
+        }).join('');
+      } else {
+        el.innerHTML = '<span class="log-empty">No log output yet.</span>';
+      }
+    }).catch(function() {});
+}
+
+/** Toggle the orchestrator panel between ~3 lines (collapsed) and ~15 lines (expanded). */
+function _smgmtOrchToggleMore(label) {
+  _smgmtOrchExpanded = !_smgmtOrchExpanded;
+  const btn = document.querySelector('.orch-more-btn');
+  if (btn) btn.textContent = _smgmtOrchExpanded ? 'Show less' : 'Show more';
+  const tailLines = _smgmtOrchExpanded ? 15 : 3;
+  _smgmtOrchFetchLines(label || _smgmtAiLabel, tailLines);
+}
+
+/** Render or refresh the orchestrator panel. Called on every live tick. */
+function _smgmtOrchPanelUpdate(label, live) {
+  const el = document.getElementById('smgmt-orch-panel');
+  if (!el) return;
+  if (label) _smgmtAiLabel = label;
+  const isActive = !!(live && live.run_state !== 'finished' && live.run_state !== 'cancelled');
+  const dotClass = 'orch-live-dot' + (isActive ? ' orch-live-dot--active' : '');
+  const safeLabel = escHtml(label || '');
+  const btnText = _smgmtOrchExpanded ? 'Show less' : 'Show more';
+  // Preserve body el between ticks — only rebuild header if not yet rendered.
+  if (!el.querySelector('.orch-panel-header')) {
+    el.innerHTML = '<div class="orch-panel-header">'
+      + '<span class="' + dotClass + '" aria-hidden="true"></span>'
+      + '<span class="orch-panel-title">Orchestrator</span>'
+      + '<button type="button" class="orch-more-btn" aria-label="Toggle orchestrator log"'
+      + ' onclick="_smgmtOrchToggleMore(\'' + safeLabel + '\')">' + btnText + '</button>'
+      + '</div>'
+      + '<div class="orch-panel-body" id="smgmt-orch-body">'
+      + '<span class="log-empty">Loading…</span>'
+      + '</div>';
+    const tailLines = _smgmtOrchExpanded ? 15 : 3;
+    _smgmtOrchFetchLines(label, tailLines);
+  } else {
+    // Patch the live dot state without full re-render (avoids log flicker on tick).
+    const dotEl = el.querySelector('.orch-live-dot');
+    if (dotEl) dotEl.className = dotClass;
+    const tailLines = _smgmtOrchExpanded ? 15 : 3;
+    _smgmtOrchFetchLines(label, tailLines);
+  }
+}
+
+// ── All Issues panel (issue #1106) ────────────────────────────────────────────
+// A single panel that shows every sprint issue grouped by dispatch level. Locked
+// levels (queued with a higher level number) display a lock icon and a caption.
+// Each row has a status icon, issue number, title, and a right-aligned meta
+// cluster (size, FIX badge, agent+model, state/time). Clicking a non-locked
+// non-queued row expands an inline log tail; the actively-running row is
+// auto-expanded on each render. No CLAUDE tag appears anywhere in this panel.
+
+/** HTML for a single issue row in the All Issues panel. */
+function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
+  const state = _smgmtRailNodeState(iss);
+  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isRunning = state === 'coder-active' || state === 'tester-active';
+  const fr = _smgmtRailFixRound(iss);
+  const isRetrying = !!fr;
+  const isQueued = state === 'queued' && !isDone;
+  const num = iss.number;
+  const isExpanded = _smgmtAiExpandedNums.has(num);
+
+  // Status icon: green check=done, blue spinner=running, amber dot=retrying, grey circle=queued
+  let iconHtml;
+  if (isDone) {
+    iconHtml = '<span class="ai-row-icon ai-row-icon--done" aria-hidden="true">&#10003;</span>';
+  } else if (isRunning) {
+    iconHtml = '<span class="ai-row-icon ai-row-icon--running" aria-hidden="true">'
+      + '<span class="smgmt-active-spinner"></span></span>';
+  } else if (isRetrying) {
+    iconHtml = '<span class="ai-row-icon ai-row-icon--retrying" aria-hidden="true">&#9679;</span>';
+  } else {
+    iconHtml = '<span class="ai-row-icon ai-row-icon--queued" aria-hidden="true">&#9675;</span>';
+  }
+
+  // Meta cluster
+  const sizePill = iss.size
+    ? '<span class="ai-row-size" title="≈' + (iss.minutes || _sizeMinutes(iss.size)) + ' min">'
+      + escHtml(iss.size) + '</span>' : '';
+
+  const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
+  const fixBadge = fr ? '<span class="ai-row-fix">FIX ' + fr + '/' + maxRounds + '</span>' : '';
+
+  let agentBadge = '';
+  if (isRunning) {
+    if (state === 'coder-active') {
+      const cm = _shortModelName(iss.coder_model);
+      agentBadge = '<span class="ai-row-agent">CODER' + (cm ? ' ' + escHtml(cm) : '') + '</span>';
+    } else {
+      agentBadge = '<span class="ai-row-agent">TESTER</span>';
+    }
+  }
+
+  let stateStr;
+  if (isDone) {
+    const elapsed = _fmtTicketElapsed(iss.elapsed_secs);
+    stateStr = elapsed ? 'done ' + elapsed : 'done';
+  } else if (isRunning) {
+    stateStr = 'running';
+  } else if (isRetrying) {
+    stateStr = 'retrying';
+  } else {
+    stateStr = 'queued';
+  }
+
+  const metaHtml = '<div class="ai-row-meta">'
+    + sizePill + fixBadge + agentBadge
+    + '<span class="ai-row-state">' + escHtml(stateStr) + '</span>'
+    + '</div>';
+
+  let rowClass = 'ai-row';
+  if (isLevelLocked) rowClass += ' ai-row--locked';
+  if (isExpanded) rowClass += ' ai-row--expanded';
+
+  const safeLabel = escHtml(label || '');
+  const logAreaId = 'ai-row-log-' + num;
+
+  return '<div class="' + escHtml(rowClass) + '" data-issue="' + num + '" data-state="' + escHtml(state) + '">'
+    + '<button type="button" class="ai-row-body"'
+    + ' onclick="_smgmtAiRowToggle(' + num + ', \'' + safeLabel + '\')"'
+    + ' aria-expanded="' + (isExpanded ? 'true' : 'false') + '"'
+    + (isLevelLocked ? ' aria-disabled="true"' : '')
+    + ' title="' + escHtml(iss.title || '') + '">'
+    + iconHtml
+    + '<span class="ai-row-num">#' + escHtml(String(num)) + '</span>'
+    + '<span class="ai-row-title">' + escHtml(iss.title || '') + '</span>'
+    + metaHtml
+    + '</button>'
+    + '<div class="ai-row-log" id="' + logAreaId + '"' + (isExpanded ? '' : ' hidden') + '></div>'
+    + '</div>';
+}
+
+/** Full HTML for the All Issues panel body: level headings + issue rows.
+ *  Auto-expands the actively-running issue (AC10) before rendering rows. */
+function _smgmtAllIssuesHtml(label, live) {
+  const levels = _smgmtRailLevels(live);
+  if (!levels.length) return '<span class="log-empty">No issues.</span>';
+  // Auto-expand the actively-running issue so it opens by default (AC10).
+  (live && live.issues || []).forEach(function(i) {
+    const st = _smgmtRailNodeState(i);
+    if (st === 'coder-active' || st === 'tester-active') _smgmtAiExpandedNums.add(i.number);
+  });
+  return levels.map(function(L) {
+    const isLocked = L.state === 'queued' && L.level > 1;
+    const lockIcon = isLocked ? '<i class="ti ti-lock" aria-hidden="true"></i>' : '';
+    const lockNote = isLocked ? ' — locked until Level ' + (L.level - 1) + ' finishes' : '';
+    const levelMeta = '<span class="ai-level-meta">'
+      + lockIcon + 'Level ' + L.level + escHtml(lockNote) + '</span>';
+    const rowsHtml = L.issues.map(function(iss) {
+      return _smgmtAiRowHtml(iss, live, isLocked, label);
+    }).join('');
+    return '<div class="ai-level' + (isLocked ? ' ai-level--locked' : '') + '" data-level="' + L.level + '">'
+      + '<div class="ai-level-header">' + levelMeta + '</div>'
+      + '<div class="ai-level-rows">' + rowsHtml + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+/** Toggle the inline log for issue row `num`. Locked/queued rows show "no output yet";
+ *  active/done rows fetch a short log tail (~5 lines) and a "Full log →" link. */
+function _smgmtAiRowToggle(num, label) {
+  const logEl = document.getElementById('ai-row-log-' + num);
+  if (!logEl) return;
+  const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
+  const state = row ? row.dataset.state : '';
+  const isLocked = row && row.classList.contains('ai-row--locked');
+  const isQueued = state === 'queued';
+  const wasHidden = logEl.hidden;
+  logEl.hidden = !wasHidden;
+  if (row) {
+    row.classList.toggle('ai-row--expanded', !logEl.hidden);
+    const btn = row.querySelector('.ai-row-body');
+    if (btn) btn.setAttribute('aria-expanded', logEl.hidden ? 'false' : 'true');
+  }
+  if (!logEl.hidden) {
+    _smgmtAiExpandedNums.add(num);
+    if (isLocked || isQueued) {
+      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
+    } else {
+      logEl.innerHTML = '<span class="log-empty">Loading…</span>';
+      _smgmtAiFetchLog(num, label);
+    }
+  } else {
+    _smgmtAiExpandedNums.delete(num);
+  }
+}
+
+/** Fetch a short log tail (~5 lines) for an issue row and render it with a "Full log →" link. */
+function _smgmtAiFetchLog(num, label) {
+  const bodyEl = document.getElementById('ai-row-log-' + num);
+  if (!bodyEl || bodyEl.hidden) return;
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+  const lbl = label || _smgmtAiLabel;
+  if (!repo || !lbl) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
+  const logsUrl = '/project/' + encodeURIComponent(_slug) + '/logs?sprint=' + encodeURIComponent(lbl);
+  const fullLogLink = '<a class="ai-full-log-link" href="' + escHtml(logsUrl) + '">Full log →</a>';
+  fetch('/logs/tail?sprint=' + encodeURIComponent(lbl)
+      + '&issue=' + encodeURIComponent(num)
+      + '&project=' + encodeURIComponent(repo) + '&tail_lines=5')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      const el = document.getElementById('ai-row-log-' + num);
+      if (!el || el.hidden) return;
+      const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+      if (tail.trim()) {
+        const lines = tail.split('\n').filter(function(l) { return l; }).slice(-5);
+        el.innerHTML = lines.map(function(line) {
+          return '<div class="log-line">' + colorizeLogLine(line, repo) + '</div>';
+        }).join('') + fullLogLink;
+      } else {
+        el.innerHTML = '<span class="log-empty">no output yet</span>' + fullLogLink;
+      }
+    }).catch(function() {});
+}
+
+/** Render or patch the All Issues panel from a live snapshot. Auto-expands the
+ *  actively-running issue and refreshes logs for already-open rows. */
+function _smgmtAllIssuesUpdate(label, live) {
+  const el = document.getElementById('smgmt-all-issues');
+  if (!el) return;
+  if (label) _smgmtAiLabel = label;
+  const issues = (live && live.issues) || [];
+  if (!issues.length) { el.innerHTML = ''; return; }
+
+  // Auto-expand the actively-running issue (no click required, AC10).
+  const activeIss = issues.find(function(i) {
+    const st = _smgmtRailNodeState(i);
+    return st === 'coder-active' || st === 'tester-active';
+  });
+  if (activeIss) _smgmtAiExpandedNums.add(activeIss.number);
+
+  el.innerHTML = '<div class="ai-panel-title-row">'
+    + '<span class="ai-panel-title">All issues</span>'
+    + '</div>'
+    + _smgmtAllIssuesHtml(label, live);
+
+  // Populate expanded rows with log content after the HTML is in the DOM.
+  _smgmtAiExpandedNums.forEach(function(num) {
+    const logEl = document.getElementById('ai-row-log-' + num);
+    if (!logEl || logEl.hidden) return;
+    const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
+    const state = row ? row.dataset.state : '';
+    const isLocked = row && row.classList.contains('ai-row--locked');
+    const isQueued = state === 'queued';
+    if (isLocked || isQueued) {
+      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
+    } else {
+      _smgmtAiFetchLog(num, label);
+    }
+  });
+}
+
 // ── Running metrics strip (issue #803) ───────────────────────────────────────
 // Five metric cards rendered above the level-rail from the /live snapshot.
 // Every card is sourced from snapshot data; agent_runs-only cards (Fix rounds,
@@ -14527,21 +15049,12 @@ function _smgmtFmtUsd(usd) {
   return '$' + n.toFixed(n > 0 && n < 1 ? 4 : 2);
 }
 
-/** Build the metric-strip markup from a /live snapshot. Returns the five cards
- *  (Done x/y, Active agents, Fix rounds, Tokens ≈ $, Agent time split), with the
- *  agent_runs- and price-map-gated cards omitted when their source is absent. */
+/** Build the metric-strip markup from a /live snapshot. Returns cards for
+ *  Active agents, Fix rounds, Tokens ≈ $, and Agent time split (the Done
+ *  card was removed in issue #1107 — it is now the gauge in the header). */
 function _smgmtMetricsHtml(live) {
   if (!live) return '';
   const cards = [];
-
-  const done = Number(live.done_count || 0);
-  const total = Number(live.total_count || 0);
-  const failed = Number(live.failed_count || 0);
-  const skipped = Number(live.skipped_count || 0);
-  cards.push('<div class="metric metric-done"><div class="metric-label">Done</div>'
-    + '<div class="metric-value">' + done
-    + '<span class="metric-unit">/ ' + total + '</span></div>'
-    + '<div class="metric-sub">' + failed + ' failed · ' + skipped + ' skipped</div></div>');
 
   const active = ((live.active_agents) || []).length;
   const mode = live.pipeline_mode ? 'pipeline mode' : 'serial mode';

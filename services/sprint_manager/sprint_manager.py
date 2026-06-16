@@ -8872,9 +8872,18 @@ def run_sprint(
     # ── Dispatch mode resolution (issue #737) ────────────────────────────────
     # Pipeline mode runs one coder + one tester worker concurrently per level.
     # Precedence: kill-switch env > per-sprint setting > per-project (cfg) > serial.
+    _project_pipeline = cfg.pipeline_mode if cfg is not None else False
+    if not _project_pipeline:
+        try:
+            import settings_repo as _settings_repo  # noqa: PLC0415
+            _stored = _settings_repo.get_setting("app_config", project=eff_repo)
+            if isinstance(_stored, dict) and _stored.get("pipeline_mode"):
+                _project_pipeline = True
+        except Exception:
+            pass
     _pipeline_on = _pipeline_mode_enabled(
         sprint_setting=pipeline_mode,
-        project_setting=(cfg.pipeline_mode if cfg is not None else None),
+        project_setting=_project_pipeline,
         env=os.environ,
     )
     # Dry-run never spawns workers — fall back to the serial no-op path.

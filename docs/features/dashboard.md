@@ -107,13 +107,33 @@ other sprint blocks via drag-and-drop.
 
 ### Running pane
 
-Shows the live rail and metrics strip for the currently running sprint.
+Shows live progress for the currently running sprint. The pane is built from
+three stacked pieces: a header **progress gauge**, an **Orchestrator log panel**,
+and an **All Issues panel** (the older level-rail and node inspector were
+removed).
 
-The Running metrics strip shows per-issue status. The sprint-level **"Fix rounds
-X/2" tile has been removed** (it summed per-issue fix-round counts and was
-meaningless as a sprint total). Fix-round badges appear on each rail node
-instead. The strip shows **"Retrying: N tickets"** only while one or more tickets
-are currently in a fix round.
+The **progress gauge** sits in the pane header — a four-segment horizontal bar
+(done · retrying · running · queued) with a matching legend, an "X of Y done"
+summary, and a stat row (active agents · serial/parallel mode, the retrying
+ticket, and the coder/tester time split). It replaces the former "Done X/Y"
+metric card, which has been removed from the metrics strip.
+
+The **Orchestrator panel** is a collapsible dispatch-log view with a live
+indicator dot. It defaults to ~3 lines and expands to ~15 scrollable lines via
+"Show more".
+
+The **All Issues panel** lists every sprint issue grouped by dispatch level.
+Locked levels (queued behind a higher level) show a lock icon and caption. Each
+row has a status icon, issue number, title, and a right-aligned meta cluster
+(size, FIX badge, agent + model, state/time). Clicking a non-locked, non-queued
+row expands an inline log tail with a "Full log →" link; the actively-running
+row auto-expands.
+
+The Running metrics strip shows the remaining per-issue status cards. The
+sprint-level **"Fix rounds X/2" tile has been removed** (it summed per-issue
+fix-round counts and was meaningless as a sprint total); fix-round badges appear
+on each issue row instead. The strip shows **"Retrying: N tickets"** only while
+one or more tickets are currently in a fix round.
 
 ### History pane
 

@@ -1,0 +1,102 @@
+/* Commander design system tokens — canonical source of truth.
+ * Light (default) and dark overrides. Reference these via var(--token) in
+ * all component CSS — never hardcode hex or spacing values. */
+
+:root {
+  /* ── Surface ── */
+  --bg:            #f9fafb;
+  --surface:       #ffffff;
+  --surface-2:     #f3f4f6;
+  --surface-hover: #f5f6f8;
+  --border:        #e5e7eb;
+
+  /* ── Text ── */
+  --text:          #111827;
+  --text-muted:    #6b7280;
+  --text-sub:      #9ca3af;
+
+  /* ── Accent ── */
+  --blue:          #2563eb;
+  --blue-bg:       #dbeafe;
+
+  /* ── Status ── */
+  --green:         #16a34a;
+  --green-bg:      #dcfce7;
+  --amber:         #d97706;
+  --amber-bg:      #fef3c7;
+  --red:           #dc2626;
+  --red-bg:        #fee2e2;
+  --purple:        #7c3aed;
+  --purple-bg:     #ede9fe;
+
+  /* ── Extended palette ── */
+  --indigo:        #6d28d9;
+  --indigo-bg:     #ede9fe;
+  --steel:         #4f7ab8;
+  --steel-bg:      #e0eaf8;
+  --yellow:        #a16207;
+  --yellow-bg:     #fefce8;
+  --teal:          #0f766e;
+  --teal-bg:       #ccfbf1;
+  --pink:          #be185d;
+  --pink-bg:       #fce7f3;
+
+  /* ── Semantic color aliases ── */
+  --color-success:    #dcfce7;
+  --color-success-fg: #16a34a;
+  --color-error:      #fee2e2;
+  --color-error-fg:   #dc2626;
+  --color-info:       #dbeafe;
+  --color-info-fg:    #2563eb;
+  --color-warning:    #fef3c7;
+  --color-warning-fg: #d97706;
+
+  /* ── Typography ── */
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* ── Misc ── */
+  --text-on-primary: #fff;
+}
+
+[data-theme="dark"] {
+  --bg:            #0d0d0d;
+  --surface:       #161616;
+  --surface-2:     #1e1e1e;
+  --surface-hover: #222222;
+  --border:        #2a2a2a;
+  --text:          #e5e7eb;
+  --text-muted:    #9ca3af;
+  --text-sub:      #6b7280;
+
+  --blue:          #60a5fa;
+  --blue-bg:       rgba(96, 165, 250, .13);
+
+  --green:         #22c55e;
+  --green-bg:      rgba(34, 197, 94, .13);
+  --amber:         #eab308;
+  --amber-bg:      rgba(234, 179, 8, .13);
+  --red:           #f87171;
+  --red-bg:        rgba(239, 68, 68, .13);
+  --purple:        #a78bfa;
+  --purple-bg:     rgba(167, 139, 250, .13);
+
+  --indigo:        #a78bfa;
+  --indigo-bg:     rgba(167, 139, 250, .13);
+  --steel:         #7aa3d4;
+  --steel-bg:      rgba(122, 163, 212, .13);
+  --yellow:        #facc15;
+  --yellow-bg:     rgba(250, 204, 21, .13);
+  --teal:          #2dd4bf;
+  --teal-bg:       rgba(45, 212, 191, .15);
+  --pink:          #f472b6;
+  --pink-bg:       rgba(244, 114, 182, .15);
+
+  --color-success:    rgba(34, 197, 94, .15);
+  --color-success-fg: #22c55e;
+  --color-error:      rgba(239, 68, 68, .15);
+  --color-error-fg:   #f87171;
+  --color-info:       rgba(96, 165, 250, .15);
+  --color-info-fg:    #60a5fa;
+  --color-warning:    rgba(234, 179, 8, .15);
+  --color-warning-fg: #eab308;
+}

@@ -33,11 +33,9 @@ def test_extract_system_misc_routes__router_exists(client):
 def test_extract_system_misc_routes__routes_in_system_misc(client):
     # AC: All seven routes live in routers/system_misc.py and nowhere else in server.py
     dashboard_root = Path(__file__).resolve().parent.parent / "apps" / "dashboard"
-    server_file = dashboard_root / "server.py"
     system_misc_file = dashboard_root / "routers" / "system_misc.py"
 
     # Read both files
-    server_content = server_file.read_text()
     system_misc_content = system_misc_file.read_text()
 
     # Routes that should be in system_misc (not server)
@@ -92,15 +90,12 @@ def test_extract_system_misc_routes__no_new_routes(client):
     # AC: No new routes are added to server.py during this change
     # This is implicitly tested by verifying moved routes aren't duplicated
     dashboard_root = Path(__file__).resolve().parent.parent / "apps" / "dashboard"
-    server_file = dashboard_root / "server.py"
     system_misc_file = dashboard_root / "routers" / "system_misc.py"
 
-    server_content = server_file.read_text()
     system_misc_content = system_misc_file.read_text()
 
     # Count route decorators
     import re
-    server_routes = len(re.findall(r'@app\.(get|post|put|delete)\(', server_content))
     system_misc_routes = len(re.findall(r'@router\.(get|post|put|delete)\(', system_misc_content))
 
     # Verify that system_misc has the expected routes (at least 7)

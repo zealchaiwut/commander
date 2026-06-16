@@ -6227,6 +6227,11 @@
     .bc-action-btn--skip { color: var(--text-muted); }
     .bc-action-btn--skip:hover { color: var(--red); background: var(--surface-2); }
 
+    @media (max-width:600px) {
+      .bc-card-head { flex-direction: column; align-items: flex-start; }
+      .bc-card-actions { flex-wrap: wrap; flex-shrink: unset; }
+    }
+
     /* Failed card expanded area */
     .bc-fail-detail {
       margin-top: 8px; width: 100%;

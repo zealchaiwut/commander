@@ -241,7 +241,6 @@ class TestEmptyState:
         assert m, "_rmRender must exist"
         fn = m.group(0)
         # Look for the empty state block — should have title + subtitle or descriptive text
-        empty_block = re.search(r"rm-empty[^;]+;", fn, re.DOTALL)
         # At minimum, the message must go beyond a single word phrase
         has_descriptive = re.search(
             r"(milestone|roadmap|started|plan|journey|create|add)",

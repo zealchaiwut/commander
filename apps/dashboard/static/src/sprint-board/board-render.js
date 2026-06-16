@@ -33,7 +33,19 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   }
 
   if (!silent) {
-    listEl.innerHTML = '<div class="loading-msg">Loading sprints…</div>';
+    listEl.innerHTML = `<div class="smgmt-skeleton" aria-busy="true" aria-label="Loading sprints">
+      <div class="smgmt-skeleton-card">
+        <div class="smgmt-skeleton-header"></div>
+        <div class="smgmt-skeleton-row"></div>
+        <div class="smgmt-skeleton-row smgmt-skeleton-row--short"></div>
+        <div class="smgmt-skeleton-row"></div>
+      </div>
+      <div class="smgmt-skeleton-card">
+        <div class="smgmt-skeleton-header"></div>
+        <div class="smgmt-skeleton-row"></div>
+        <div class="smgmt-skeleton-row smgmt-skeleton-row--short"></div>
+      </div>
+    </div>`;
     // Reset finish-card cache on a full (non-silent) load so stale cross-sprint cards don't linger
     for (const k of Object.keys(_smgmtFinishCards)) delete _smgmtFinishCards[k];
   }
@@ -342,7 +354,9 @@ export function _smgmtRender(data) {
   }
 
   listEl.innerHTML =
-    cards || '<div class="loading-msg">No sprints found.</div>';
+    cards ||
+    '<div class="smgmt-empty-state"><i class="ti ti-inbox" aria-hidden="true"></i>' +
+    '<p>No sprints yet — create one with <strong>+ New Sprint</strong>.</p></div>';
 
   // Populate capacity gauges (reads localStorage + estimate cache)
   _smgmtInitCapacityGauges(orderedLabels);
@@ -1359,7 +1373,7 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
       );
       return (
         sepHtml +
-        `<div class="smgmt-ticket" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
+        `<div class="smgmt-ticket smgmt-ticket-enter" data-issue="${t.number}" data-labels="${runTicketLabels}" draggable="false"${runSizeAttr}>
       ${indicator}
       <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank"
          rel="noopener">#${t.number}</a>
@@ -1764,10 +1778,13 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
   const sk = escHtml(label);
 
+  const _ariaLabel = escHtml(`#${ticket.number} ${ticket.title} — ${statusLabel}${sk ? ` — ${sk}` : ""}`);
   return `
-    <div class="smgmt-ticket${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
-         tabindex="-1"
+    <div class="smgmt-ticket smgmt-ticket-enter${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+         tabindex="0"
          draggable="true"
+         role="row"
+         aria-label="${_ariaLabel}"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
@@ -1777,6 +1794,7 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
          ondragleave="_smgmtTicketReorderDragLeave(event)"
          ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
          onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_smgmtRowClick(event,${ticket.number},'${sk}');}"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb"
              ${isSelected ? "checked" : ""}

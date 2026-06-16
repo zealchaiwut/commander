@@ -2771,7 +2771,49 @@
          drag initiate. The #num link/title remain clickable. */
       -webkit-user-select: none; user-select: none;
     }
-    .smgmt-ticket:hover { background: var(--surface-hover); }
+    .smgmt-ticket:hover { background: var(--surface-hover); box-shadow: 0 1px 4px rgba(0,0,0,0.10); position: relative; z-index: 1; cursor: pointer; }
+    .smgmt-ticket:focus-visible {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 0 5px var(--blue-bg);
+    }
+    /* AC3: enter/update animation for new/refreshed ticket rows */
+    @keyframes smgmt-ticket-enter {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .smgmt-ticket-enter { animation: smgmt-ticket-enter 0.18s ease-out both; }
+    /* AC4/AC5: loading skeleton + empty state */
+    @keyframes smgmt-skeleton-shimmer {
+      from { background-position: -200px 0; }
+      to   { background-position: calc(200px + 100%) 0; }
+    }
+    .smgmt-skeleton { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+    .smgmt-skeleton-card {
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .smgmt-skeleton-header, .smgmt-skeleton-row {
+      border-radius: 4px; height: 12px;
+      background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+      background-size: 200px 100%;
+      animation: smgmt-skeleton-shimmer 1.4s ease-in-out infinite;
+    }
+    .smgmt-skeleton-header { height: 16px; width: 40%; }
+    .smgmt-skeleton-row--short { width: 60%; }
+    .smgmt-empty-state {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      padding: 32px 16px; color: var(--text-muted); text-align: center;
+    }
+    .smgmt-empty-state .ti { font-size: 32px; color: var(--text-sub); }
+    .smgmt-empty-state p { font-size: 14px; margin: 0; line-height: 1.5; }
+    /* suppress animations under prefers-reduced-motion */
+    @media (prefers-reduced-motion: reduce) {
+      .smgmt-ticket-enter { animation: none; }
+      .smgmt-skeleton-header, .smgmt-skeleton-row { animation: none; }
+    }
     .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
     .smgmt-ticket[draggable="true"]:active { cursor: grabbing; }
     .smgmt-ticket[draggable="false"] { cursor: default; }

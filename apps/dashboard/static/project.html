@@ -6059,6 +6059,10 @@
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
     }
     .bc-pg-entry--success .bc-pg-entry-badge { color: var(--green); }
+    @media (max-width: 560px) {
+      .bc-pg-entry { flex-wrap: wrap; }
+      .bc-pg-entry-badge { flex: 1 1 auto; }
+    }
 
     /* Ticket card */
     .bc-card {

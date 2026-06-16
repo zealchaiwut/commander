@@ -283,11 +283,16 @@ def test_kickoff_uses_pf_stepper_class():
 
 
 def test_kickoff_uses_pf_step_item_class():
-    """AC8 — Kickoff steps must use pf-step-item CSS (shared component markup)."""
+    """AC8 — Kickoff uses shared stepper markup (pf-step-item or pa-step)."""
     src = _js()
-    assert "pf-step-item" in src, (
-        "'pf-step-item' not used in kickoff stepper JS — "
-        "AC8 requires the shared pf-step-item markup, not a bespoke class"
+    assert (
+        "pf-step-item" in src
+        or "pa-step" in src
+        or "patchProgressActivityStep" in src
+        or "mountProgressActivity" in src
+    ), (
+        "Shared stepper wiring not found in kickoff JS — expected pf-step-item markup "
+        "or ProgressActivity host patch/mount APIs"
     )
 
 

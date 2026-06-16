@@ -13,6 +13,11 @@
    _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
    _pfFlags:writable, _pfSelectedIds:writable, _pfUseClineFollowups:writable */
 
+import {
+  mountProgressActivity,
+  patchProgressActivityStep,
+} from "../progress-host.js";
+
 // ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
 
 /** Step definitions matching the pre-flight panel check groups. */
@@ -174,7 +179,7 @@ export function _pfReset() {
   _pfModels = null;
   _pfSelectedIds = new Set();
   _pfUseClineFollowups = false;
-  _pfStepperInit();
+  _pfShowLoadingActivity('Loading pre-flight checks…');
 }
 
 export function _pfClose() {
@@ -195,6 +200,7 @@ export function _pfClose() {
 
 export async function _pfFetch() {
   _pfState = 'loading';
+  _pfShowLoadingActivity('Loading pre-flight checks…');
   const label = _pfCurrentLabel;
   const repo  = _pfCurrentRepo;
   try {
@@ -262,6 +268,7 @@ export function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
+  _pfStepperInit();
   // Note: _pfUpdateConfirmBtn() is called at the end of _pfStepperAnimate (issue #933)
   // so the Run button is only enabled after stepper resolves all steps.
   document.getElementById('pf-cancel-btn').focus();
@@ -645,20 +652,41 @@ export async function _pfConfirm() {
 
 // ── Pre-flight stepper functions (shared ProgressActivity — stepper mode, issue #933) ─
 
+function _paStepState(state) {
+  return state === 'fail' ? 'failed' : state;
+}
+
+function _pfShowLoadingActivity(currentLabel) {
+  const stepsEl = document.getElementById('pf-stepper-steps');
+  if (!stepsEl) return;
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'indeterminate',
+    current: currentLabel || 'Loading…',
+  }, {
+    id: 'pf-pa',
+    hideLog: true,
+  });
+}
+
 /** Initialise all steps to `pending` state. Called from _pfReset(). */
 export function _pfStepperInit() {
   _pfStepFails = 0;
   const stepsEl = document.getElementById('pf-stepper-steps');
   if (!stepsEl) return;
-  stepsEl.innerHTML = PF_STEPS.map(s =>
-    `<div class="pf-step-item pf-step-item--pending" id="pf-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="pf-step-note-${s.key}"></span>
-      </div>
-    </div>`
-  ).join('');
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'stepper',
+    steps: PF_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      state: 'pending',
+      note: '',
+    })),
+  }, {
+    id: 'pf-pa',
+    hideLog: true,
+  });
   const summaryEl = document.getElementById('pf-stepper-summary');
   if (summaryEl) {
     summaryEl.textContent = '';
@@ -668,11 +696,10 @@ export function _pfStepperInit() {
 
 /** Transition a single step to a new state with an optional note. */
 export function _pfStepState(key, state, note) {
-  const item = document.getElementById(`pf-step-${key}`);
-  if (!item) return;
-  item.className = `pf-step-item pf-step-item--${state}`;
-  const noteEl = document.getElementById(`pf-step-note-${key}`);
-  if (noteEl) noteEl.textContent = note || '';
+  patchProgressActivityStep('pf-stepper-steps', key, _paStepState(state), note || '', {
+    id: 'pf-pa',
+    hideLog: true,
+  });
 }
 
 /**
@@ -832,26 +859,29 @@ let _ksRepo  = null;
 function _ksInit() {
   const stepsEl = document.getElementById('smgmt-kickoff-steps');
   if (!stepsEl) return;
-  stepsEl.innerHTML = KS_STEPS.map(s =>
-    `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
-      </div>
-    </div>`
-  ).join('');
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'stepper',
+    steps: KS_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      state: 'pending',
+      note: '',
+    })),
+  }, {
+    id: 'ks-pa',
+    hideLog: true,
+  });
   const errEl = document.getElementById('smgmt-kickoff-error');
   if (errEl) errEl.hidden = true;
 }
 
 /** Transition a kickoff step to a new state with an optional note. */
 function _ksSetStep(key, state, note) {
-  const item = document.getElementById(`ks-step-${key}`);
-  if (!item) return;
-  item.className = `pf-step-item pf-step-item--${state}`;
-  const noteEl = document.getElementById(`ks-step-note-${key}`);
-  if (noteEl) noteEl.textContent = note || '';
+  patchProgressActivityStep('smgmt-kickoff-steps', key, _paStepState(state), note || '', {
+    id: 'ks-pa',
+    hideLog: true,
+  });
 }
 
 /** Show the kickoff stepper in the Running subview. */

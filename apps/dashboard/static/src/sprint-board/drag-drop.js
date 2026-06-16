@@ -55,8 +55,9 @@ export function _smgmtUpdateSelectionUI() {
   const bar = document.getElementById('proj-selection-bar');
   const listEl = document.getElementById('smgmt-sprint-list');
   const onSprintTab = typeof _activeTab === 'undefined' || _activeTab === 'sprint-mgmt';
+  const onBoard = typeof _smgmtSubView === 'undefined' || _smgmtSubView === 'board';
 
-  if (count > 0 && bar && onSprintTab) {
+  if (count > 0 && bar && onSprintTab && onBoard) {
     bar.classList.add('show');
     bar.classList.remove('hidden');
     if (listEl) listEl.classList.add('has-selection');

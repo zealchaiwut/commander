@@ -493,6 +493,7 @@
     const subTabsRow = document.querySelector(".sub-tabs-row");
     if (subTabsRow)
       subTabsRow.classList.toggle("hidden", onGlobalSettings);
+    const _topLevelTabs = ["sprint-mgmt", "tickets", "manage", "planning", "settings"];
     ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings"].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
       if (!btn)
@@ -500,6 +501,14 @@
       const isActive = !onGlobalSettings && t === tab;
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-selected", String(isActive));
+    });
+    _topLevelTabs.forEach((t) => {
+      const suffix = t === "manage" ? "manage-trigger" : t === "planning" ? "planning-trigger" : t;
+      const btn = document.getElementById("stab-" + suffix);
+      if (!btn)
+        return;
+      const isTopActive = !onGlobalSettings && (t === tab || btn.classList.contains("active"));
+      btn.tabIndex = isTopActive ? 0 : -1;
     });
     closeAllStabDropdowns();
     ["analytics", "more", "planning", "manage"].forEach((groupName) => {
@@ -5363,7 +5372,7 @@ ${data.errors.join("\n")}`);
                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();smgmtToggleCollapse('${escHtml(label)}');}">
             <i class="ti ti-chevron-down"></i></button>
           <i class="ti ti-layout-kanban" style="font-size:14px;color:var(--green)"></i>
-          <span class="smgmt-sprint-name" style="font-size:15px;font-weight:700;">${escHtml(sprintLabelDisplay(label))}</span>
+          <span class="smgmt-sprint-name">${escHtml(sprintLabelDisplay(label))}</span>
           <span class="smgmt-running-badge" id="smgmt-running-badge-${escHtml(label)}">
             <span class="smgmt-running-badge-dot"></span>${totalCount > 0 ? `${completeCount}/${totalCount}` : "\u2014"}
           </span>
@@ -5554,6 +5563,8 @@ ${data.errors.join("\n")}`);
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();_smgmtReEstimate(${ticket.number},this);}">Re-estimate</button>` : "";
     const riskFlagIconsHtml = _smgmtRiskFlagIconsHtml(ticket.number);
     const schedDepHtml = _smgmtSchedDepHtml(ticket);
+    const _planningAgent = ticket.status === "in-progress" ? "coder" : ticket.status === "sit" ? "tester" : null;
+    const planningAgentHtml = _planningAgent ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(_planningAgent)}">${escHtml(_planningAgent.toUpperCase())}</span>` : "";
     const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const sk = escHtml(label);
     return `
@@ -5583,6 +5594,7 @@ ${data.errors.join("\n")}`);
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
       ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
       ${_smgmtTicketEstHtml(ticket)}
+      ${planningAgentHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
       <button class="btn-view-log" tabindex="0" title="View issue log"
               onclick="event.stopPropagation();openLvIssueLog(${ticket.number},'${sk}',_smgmtRepo()||'')">
@@ -5631,7 +5643,7 @@ ${data.errors.join("\n")}`);
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
     if (sorted.length === 0) {
       const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:14px 18px;text-align:center;">${msg}</div>`;
+      ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:var(--space-3) var(--space-4);text-align:center;">${msg}</div>`;
     } else {
       ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
     }

@@ -277,7 +277,10 @@ async def delete_empty_sprints(body: SprintDeleteBody):
             if label_num >= min_active_sprint:
                 raise HTTPException(
                     422,
-                    detail=f"Cannot delete {label}: sprint number {label_num} is not below the lowest active sprint ({min_active_sprint})",
+                    detail=(
+                        f"Cannot delete {label}: sprint number {label_num} is not below "
+                        f"the lowest active sprint ({min_active_sprint})"
+                    ),
                 )
 
     deleted = []
@@ -315,7 +318,7 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
     except subprocess.CalledProcessError as e:
         raise _server()._gh_error(e)
 
-    sprint_re_any   = re.compile(r"^sprint-(\d+)(?:\.\d+)?$")
+    sprint_re_any = re.compile(r"^sprint-(\d+)(?:\.\d+)?$")
     sprint_re_plain = re.compile(r"^sprint-(\d+)$")
 
     # Collect base sprint numbers that have ≥ 1 open ticket (plain or dotted sub-labels)
@@ -328,8 +331,8 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
 
     # Iterate plain sprint-N labels in ascending order; collect consecutive leading empties
     plain_labels = sorted(
-        [l for l in all_sprint_labels if sprint_re_plain.match(l)],
-        key=lambda l: int(sprint_re_plain.match(l).group(1)),  # type: ignore[union-attr]
+        [lbl for lbl in all_sprint_labels if sprint_re_plain.match(lbl)],
+        key=lambda lbl: int(sprint_re_plain.match(lbl).group(1)),  # type: ignore[union-attr]
     )
 
     leading_empty: list[str] = []
@@ -408,5 +411,9 @@ def delete_sprint(sprint_label: str, project: str):
     for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
         github_client.invalidate(_ck)
 
-    result: dict = {"deleted_label": sprint_label, "unlabelled_count": unlabelled_count, **({"errors": errors} if errors else {})}
+    result: dict = {
+        "deleted_label": sprint_label,
+        "unlabelled_count": unlabelled_count,
+        **({"errors": errors} if errors else {}),
+    }
     return result

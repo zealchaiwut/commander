@@ -375,7 +375,7 @@ def test_run_state_stopped_when_print_fails(client_ctx):
 
 
 def test_run_state_idle_when_no_launchd_label(client_ctx):
-    """AC7: a script-only env has no probe → idle (unknown), no subprocess."""
+    """AC7: a script-only env with no port has no probe → idle (unknown)."""
     client, srv, settings_repo = client_ctx
     _save_deploy_config(srv, settings_repo, {
         "uat": {"host": "local", "working_dir": "/srv/x", "branch": "develop",
@@ -383,10 +383,49 @@ def test_run_state_idle_when_no_launchd_label(client_ctx):
     })
     run_mock = MagicMock()
     with patch.object(srv.subprocess, "run", run_mock):
-        resp = client.get("/api/projects/commander/environments/uat/run-state")
+        with patch.object(da, "restart_port", return_value=None):
+            resp = client.get("/api/projects/commander/environments/uat/run-state")
     assert resp.status_code == 200, resp.text
     assert resp.json()["state"] == "idle"
     run_mock.assert_not_called()
+
+
+def test_run_state_running_when_port_listening(client_ctx):
+    """Script-managed env: probe configured port when no launchd_label."""
+    client, srv, settings_repo = client_ctx
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": "/srv/x",
+            "branch": "develop",
+            "port": 8001,
+            "stop_script": "/srv/stop.sh",
+            "start_script": "/srv/start.sh",
+        },
+    })
+    with patch.object(da, "probe_port_listening", return_value=True):
+        resp = client.get("/api/projects/commander/environments/uat/run-state")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "running"
+    assert resp.json().get("probe") == "port"
+
+
+def test_run_state_stopped_when_port_not_listening(client_ctx):
+    client, srv, settings_repo = client_ctx
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": "/srv/x",
+            "branch": "develop",
+            "port": 8001,
+            "stop_script": "/srv/stop.sh",
+            "start_script": "/srv/start.sh",
+        },
+    })
+    with patch.object(da, "probe_port_listening", return_value=False):
+        resp = client.get("/api/projects/commander/environments/uat/run-state")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "stopped"
 
 
 # ── no regression on Deploy / Restart (AC2/AC11) ──────────────────────────────

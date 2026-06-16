@@ -104,7 +104,7 @@ export async function smgmtBulkCompleteSprint(label) {
       );
     }
     actionRows.push(
-      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close selected tickets (UAT + summary included)</div>`,
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (UAT + summary included)</div>`,
       `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? 's' : ''} completed</div>`,
     );
     actionsEl.innerHTML = actionRows.join('');
@@ -150,18 +150,15 @@ export async function _bcConfirm() {
   const repoName = parts.slice(1).join('/');
   const label = _bcLabel;
   const mergeSteps = _bcPreview.merge_steps || [];
-
-  const checkboxes = Array.from(document.querySelectorAll('#bc-ticket-list input[type=checkbox]'));
-  const selectedNums = checkboxes.filter(c => c.checked).map(c => parseInt(c.dataset.issue, 10));
+  const allTickets = _bcPreview.all_tickets || [];
 
   const confirmBtn = document.getElementById('bc-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Completing…'; }
 
   _bcClose();
 
-  const settleLabel = 'Close tickets and mark sprints completed';
   const refreshLabel = 'Refreshing board…';
-  const totalSteps = mergeSteps.length + 2;
+  const totalSteps = mergeSteps.length + allTickets.length + 2;
   let doneSteps = 0;
 
   _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}…`, {
@@ -181,7 +178,23 @@ export async function _bcConfirm() {
       _smgmtBoardLog(`✓ ${stepLabel}`, 'ok');
     }
 
-    _smgmtBoardLog(settleLabel, 'step');
+    for (const t of allTickets) {
+      const closeLabel = `Closing #${t.number} — ${t.title || ''}`.trim();
+      _smgmtBoardLog(closeLabel, 'step');
+      const closeRes = await fetch(
+        `/api/issues/${t.number}/close?repo=${encodeURIComponent(repo)}`,
+        { method: 'POST' },
+      );
+      if (!closeRes.ok) {
+        const err = await closeRes.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed to close #${t.number}`);
+      }
+      doneSteps += 1;
+      _smgmtBoardProgress(doneSteps, totalSteps);
+      _smgmtBoardLog(`✓ Closed #${t.number}`, 'ok');
+    }
+
+    _smgmtBoardLog('Marking sprints completed…', 'step');
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
       {
@@ -189,7 +202,7 @@ export async function _bcConfirm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           confirmed: true,
-          selected_ticket_numbers: selectedNums,
+          skip_issue_close: true,
         }),
       },
     );
@@ -200,7 +213,7 @@ export async function _bcConfirm() {
     const data = await res.json();
     doneSteps += 1;
     _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog(`✓ ${settleLabel}`, 'ok');
+    _smgmtBoardLog('✓ Sprints marked completed', 'ok');
 
     _smgmtBoardLog(refreshLabel, 'step');
     await loadSprintMgmt();
@@ -208,11 +221,12 @@ export async function _bcConfirm() {
     _smgmtBoardProgress(doneSteps, totalSteps);
     _smgmtBoardLog('✓ Bulk complete finished', 'ok');
 
+    const closedCount = allTickets.length;
     if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`Bulk complete finished with errors — ${data.closed} closed.`);
+      _smgmtShowToast(`Bulk complete finished with errors — ${closedCount} closed.`);
     } else {
       _smgmtShowToast(
-        `${sprintLabelDisplay(label)} bulk completed — ${data.closed} closed, ${data.completed} marked completed.`,
+        `${sprintLabelDisplay(label)} bulk completed — ${closedCount} closed, ${data.completed} marked completed.`,
       );
     }
   } catch (e) {

@@ -1513,6 +1513,8 @@
       border-top: 1px solid var(--border);
       font-size: 13px;
       transition: background .12s;
+      flex-wrap: nowrap;
+      min-width: 0;
     }
     .ticket-status-pill {
       font-size: 10px; font-weight: 600;
@@ -1523,7 +1525,7 @@
     .ticket-status-pill.in-progress { background: var(--green-bg);  color: var(--green); }
     .ticket-status-pill.blocked  { background: var(--red-bg);    color: var(--red); }
     .ticket-status-pill.backlog  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
-    .ticket-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ticket-title { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ticket-num   { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
     .empty-msg { color: var(--text-muted); font-size: 13px; padding: 12px 0; font-style: italic; }
     .ticket-close-btn {
@@ -1545,10 +1547,15 @@
     .ticket-est-size-pill.sz-M  { background: var(--blue-bg);  color: var(--blue); }
     .ticket-est-size-pill.sz-L  { background: var(--amber-bg); color: var(--amber); }
     .ticket-est-size-pill.sz-XL { background: var(--red-bg);   color: var(--red); }
-    /* ── GitHub label chips (issue #1059) ── */
+    /* ── GitHub label chips (issue #1059) — inline on the same row as title ── */
+    .tkt-labels-inline {
+      display: inline-flex; align-items: center; gap: 4px;
+      flex: 0 1 auto; min-width: 0; max-width: 36%;
+      overflow: hidden;
+    }
     .tkt-labels-row {
-      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-      width: 100%; padding-bottom: 4px;
+      display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+      min-width: 0; overflow: hidden;
     }
     .tkt-gh-label {
       display: inline-flex; align-items: center;
@@ -1581,11 +1588,14 @@
       flex-shrink: 0; font-size: 10px; color: var(--text-muted);
       font-style: italic; white-space: nowrap;
     }
-    /* ── Dependency chips (issue #432) ── */
-    .ticket-row { flex-wrap: wrap; }
+    /* ── Dependency chips (issue #432) — inline when present ── */
+    .dep-chips-inline {
+      display: inline-flex; align-items: center; gap: 4px;
+      flex: 0 0 auto; flex-shrink: 0;
+    }
     .dep-chips-row {
-      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-      width: 100%; padding-bottom: 4px;
+      display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+      flex: 0 0 auto;
     }
     .dep-chip-sep { width: 8px; }
     .dep-chip-label {
@@ -3392,19 +3402,24 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (inside sticky chrome, below tab nav) ── */
+    /* ── Project-level selection bar (sticky at top of sprint board pane) ── */
     .proj-selection-bar {
       display: none;
       align-items: center;
       gap: 12px;
-      padding: 10px 28px;
+      padding: 10px 16px;
+      margin: 0 0 10px;
       background: var(--blue-bg);
-      border-bottom: 1px solid var(--blue);
+      border: 1px solid var(--blue);
+      border-radius: 8px;
       font-size: 13px;
       color: var(--blue);
       white-space: nowrap;
       flex-wrap: wrap;
       box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      position: sticky;
+      top: 6px;
+      z-index: 20;
     }
     .proj-selection-bar.show { display: flex; }
     .proj-selection-bar-hint { color: var(--text-muted); }
@@ -8762,29 +8777,6 @@
       </div>
     </header>
 
-    <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-      <i class="ti ti-checkbox"></i>
-      <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-      <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
-      <div class="smgmt-sel-bar-actions">
-        <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                onclick="_smgmtDeleteSelected()">
-          <i class="ti ti-trash"></i> Delete
-        </button>
-        <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                onclick="_smgmtReEstimateSelected()">
-          <i class="ti ti-sparkles"></i> Reestimate
-        </button>
-        <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-          <i class="ti ti-x"></i> Deselect all
-        </button>
-        <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                onclick="_smgmtMoveToModalOpen()">
-          <i class="ti ti-send"></i> Move to Sprint
-        </button>
-      </div>
-    </div>
-
     </div><!-- /proj-sticky-chrome -->
 
     <!-- Tab content -->
@@ -8862,6 +8854,29 @@
 
         <!-- Sprint list -->
         <div class="smgmt-content">
+
+          <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+            <i class="ti ti-checkbox"></i>
+            <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+            <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
+            <div class="smgmt-sel-bar-actions">
+              <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
+                      onclick="_smgmtDeleteSelected()">
+                <i class="ti ti-trash"></i> Delete
+              </button>
+              <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                      onclick="_smgmtReEstimateSelected()">
+                <i class="ti ti-sparkles"></i> Reestimate
+              </button>
+              <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+                <i class="ti ti-x"></i> Deselect all
+              </button>
+              <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                      onclick="_smgmtMoveToModalOpen()">
+                <i class="ti ti-send"></i> Move to Sprint
+              </button>
+            </div>
+          </div>
 
           <!-- Focus Guide (issue #1044) — synthesized from board state by _smgmtFocusGuideHtml -->
           <div class="smgmt-focus-guide" id="smgmt-focus-guide" aria-live="polite"></div>
@@ -10980,7 +10995,7 @@ function _depChipsHtml(deps, ticketNums) {
       html += `<button class="dep-chip dep-chip--blocked-by${missing}" onclick="tdpOpen(${n})">#${n}</button>`;
     }
   }
-  return `<div class="dep-chips-row">${html}</div>`;
+  return `<span class="dep-chips-row dep-chips-inline">${html}</span>`;
 }
 
 // ── Ticket detail panel (issue #432) ─────────────────────────────────────────
@@ -11346,7 +11361,7 @@ function _tktGhLabelChipsHtml(labels) {
   if (!labels || !labels.length) return '';
   const chips = labels.filter(l => !_TKT_LABEL_SKIP.test(l));
   if (!chips.length) return '';
-  return `<div class="tkt-labels-row">${chips.map(l => `<span class="tkt-gh-label">${escHtml(l)}</span>`).join('')}</div>`;
+  return `<span class="tkt-labels-row tkt-labels-inline">${chips.map(l => `<span class="tkt-gh-label">${escHtml(l)}</span>`).join('')}</span>`;
 }
 
 // ── Tickets filter (issue #1061) ─────────────────────────────────────────────
@@ -12092,6 +12107,7 @@ function _smgmtShowSubView(view) {
     const live = lbl ? _smgmtLingerLive(lbl) : null;
     _smgmtRunningViewUpdate(lbl || null, live);
   }
+  if (typeof _smgmtUpdateSelectionUI === 'function') _smgmtUpdateSelectionUI();
 }
 
 // Sync the sub-nav live-state indicators (issue #798): a pulsing dot on the
@@ -28324,7 +28340,9 @@ function _deployCardHtml(c, i) {
     // service state so the user knows what they're acting on before clicking.
     + '    <span class="runstate-pill runstate-pill--idle" id="deploy-card-runstate-' + i + '"'
     + '          role="status" aria-live="polite" title="Run state">idle</span>'
-    + '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+    + (c.host === 'render'
+        ? '    <span class="status-pill status-pill--idle" id="deploy-card-status-' + i + '">idle</span>'
+        : '')
     + '  </div>'
     +      _deployReadinessAlertHtml(c)
     + '  <div class="deploy-card__meta">'

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Any, Optional
 
@@ -467,6 +468,23 @@ def interpret_run_state(returncode: int) -> str:
     (running/loaded) and non-zero once it has been booted out (stopped).
     """
     return "running" if returncode == 0 else "stopped"
+
+
+def probe_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.25) -> bool:
+    """True when *host*:*port* accepts a TCP connection (script-managed envs)."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def interpret_script_run_state(entry: dict) -> str:
+    """Run state for script-managed envs via configured bind port (issue #771)."""
+    port = restart_port(entry)
+    if port is None:
+        return "idle"
+    return "running" if probe_port_listening(port) else "stopped"
 
 
 def build_kickstart_command(label: str, uid: Optional[int] = None) -> list[str]:

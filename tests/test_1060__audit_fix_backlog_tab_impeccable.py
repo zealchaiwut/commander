@@ -338,16 +338,13 @@ class TestColumnAlignment:
             "AC4: Status chips must not grow; .ticket-status-pill must not have flex: 1"
         )
 
-    def test_ticket_row_has_flex_wrap(self, html):
-        """AC4 — .ticket-row must use flex-wrap: wrap so label rows wrap consistently."""
-        # A .ticket-row rule block must contain flex-wrap: wrap (may have other decls)
-        wrap_rule = re.search(
-            r"\.ticket-row\s*\{[^}]*flex-wrap\s*:\s*wrap",
-            html,
-            re.DOTALL,
-        )
-        assert wrap_rule, (
-            "AC4: .ticket-row must have flex-wrap: wrap for label sub-rows"
+    def test_ticket_row_has_single_line_layout(self, html):
+        """Issues rows keep title + labels on one line (flex-wrap: nowrap)."""
+        row_rule = re.search(r"\.ticket-row\s*\{([^}]+)\}", html, re.DOTALL)
+        assert row_rule, "AC4: .ticket-row must be defined"
+        decls = row_rule.group(1)
+        assert "flex-wrap: nowrap" in decls or "flex-wrap:nowrap" in decls.replace(" ", ""), (
+            "AC4: .ticket-row must use flex-wrap: nowrap for a single-line layout"
         )
 
 

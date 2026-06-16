@@ -2443,7 +2443,7 @@ Replace the existing draft (${data.existing_label})?`
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
       }
       actionRows.push(
-        '<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>'
+        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} sprint ticket${allTickets.length !== 1 ? "s" : ""}</div>`
       );
       actionsEl.innerHTML = actionRows.join("");
       document.getElementById("fs-loading").classList.add("hidden");
@@ -2464,12 +2464,10 @@ Replace the existing draft (${data.existing_label})?`
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
-    const checkboxes = Array.from(
-      document.querySelectorAll("#fs-ticket-list input[type=checkbox]")
-    );
-    const selectedTickets = checkboxes.filter((c) => c.checked).map((c) => ({
-      number: parseInt(c.dataset.issue, 10),
-      title: c.dataset.title || `#${c.dataset.issue}`
+    const allTickets = _fsPreview.all_tickets || [];
+    const selectedTickets = allTickets.map((t) => ({
+      number: t.number,
+      title: t.title || `#${t.number}`
     }));
     const selectedNums = selectedTickets.map((t) => t.number);
     const confirmBtn = document.getElementById("fs-confirm-btn");
@@ -2629,7 +2627,7 @@ Replace the existing draft (${data.existing_label})?`
         );
       }
       actionRows.push(
-        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close selected tickets (UAT + summary included)</div>`,
+        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} ticket${allTickets.length !== 1 ? "s" : ""} (UAT + summary included)</div>`,
         `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? "s" : ""} completed</div>`
       );
       actionsEl.innerHTML = actionRows.join("");
@@ -2674,17 +2672,15 @@ Replace the existing draft (${data.existing_label})?`
     const repoName = parts.slice(1).join("/");
     const label = _bcLabel;
     const mergeSteps = _bcPreview.merge_steps || [];
-    const checkboxes = Array.from(document.querySelectorAll("#bc-ticket-list input[type=checkbox]"));
-    const selectedNums = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
+    const allTickets = _bcPreview.all_tickets || [];
     const confirmBtn = document.getElementById("bc-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Completing\u2026";
     }
     _bcClose();
-    const settleLabel = "Close tickets and mark sprints completed";
     const refreshLabel = "Refreshing board\u2026";
-    const totalSteps = mergeSteps.length + 2;
+    const totalSteps = mergeSteps.length + allTickets.length + 2;
     let doneSteps = 0;
     _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
@@ -2701,7 +2697,22 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtBoardProgress(doneSteps, totalSteps);
         _smgmtBoardLog(`\u2713 ${stepLabel}`, "ok");
       }
-      _smgmtBoardLog(settleLabel, "step");
+      for (const t of allTickets) {
+        const closeLabel = `Closing #${t.number} \u2014 ${t.title || ""}`.trim();
+        _smgmtBoardLog(closeLabel, "step");
+        const closeRes = await fetch(
+          `/api/issues/${t.number}/close?repo=${encodeURIComponent(repo)}`,
+          { method: "POST" }
+        );
+        if (!closeRes.ok) {
+          const err = await closeRes.json().catch(() => ({}));
+          throw new Error(err.detail || `Failed to close #${t.number}`);
+        }
+        doneSteps += 1;
+        _smgmtBoardProgress(doneSteps, totalSteps);
+        _smgmtBoardLog(`\u2713 Closed #${t.number}`, "ok");
+      }
+      _smgmtBoardLog("Marking sprints completed\u2026", "step");
       const res = await fetch(
         `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
         {
@@ -2709,7 +2720,7 @@ Replace the existing draft (${data.existing_label})?`
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             confirmed: true,
-            selected_ticket_numbers: selectedNums
+            skip_issue_close: true
           })
         }
       );
@@ -2720,17 +2731,18 @@ Replace the existing draft (${data.existing_label})?`
       const data = await res.json();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog(`\u2713 ${settleLabel}`, "ok");
+      _smgmtBoardLog("\u2713 Sprints marked completed", "ok");
       _smgmtBoardLog(refreshLabel, "step");
       await loadSprintMgmt();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
       _smgmtBoardLog("\u2713 Bulk complete finished", "ok");
+      const closedCount = allTickets.length;
       if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`Bulk complete finished with errors \u2014 ${data.closed} closed.`);
+        _smgmtShowToast(`Bulk complete finished with errors \u2014 ${closedCount} closed.`);
       } else {
         _smgmtShowToast(
-          `${sprintLabelDisplay(label)} bulk completed \u2014 ${data.closed} closed, ${data.completed} marked completed.`
+          `${sprintLabelDisplay(label)} bulk completed \u2014 ${closedCount} closed, ${data.completed} marked completed.`
         );
       }
     } catch (e) {
@@ -3668,7 +3680,8 @@ Replace the existing draft (${data.existing_label})?`
     const bar = document.getElementById("proj-selection-bar");
     const listEl = document.getElementById("smgmt-sprint-list");
     const onSprintTab = typeof _activeTab === "undefined" || _activeTab === "sprint-mgmt";
-    if (count > 0 && bar && onSprintTab) {
+    const onBoard = typeof _smgmtSubView === "undefined" || _smgmtSubView === "board";
+    if (count > 0 && bar && onSprintTab && onBoard) {
       bar.classList.add("show");
       bar.classList.remove("hidden");
       if (listEl)

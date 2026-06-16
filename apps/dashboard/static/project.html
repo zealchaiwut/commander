@@ -3627,6 +3627,44 @@
       margin-top: 12px;
     }
     .modal-error.hidden { display: none; }
+    .modal-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    @keyframes _modalIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+    @keyframes _backdropIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes _drawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    .modal:not(.hidden) { animation: _modalIn 0.15s ease forwards; }
+    .modal-backdrop:not(.hidden) { animation: _backdropIn 0.15s ease forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .modal:not(.hidden), .modal-backdrop:not(.hidden) { animation: none; }
+    }
+    .insp-drawer {
+      position: fixed; top: 0; right: 0; bottom: 0;
+      width: min(480px, calc(100vw - 48px));
+      background: var(--surface); border-left: 1px solid var(--border);
+      z-index: 101; display: flex; flex-direction: column; overflow: hidden;
+    }
+    .insp-drawer.hidden { display: none; }
+    .insp-drawer:not(.hidden) { animation: _drawerIn 0.18s ease forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .insp-drawer:not(.hidden) { animation: none; }
+    }
+    .insp-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .insp-title { font-size: 13px; font-weight: 700; color: var(--text-muted); }
+    .insp-body { flex: 1; overflow-y: auto; }
+    .bc-main-modal {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      z-index: 101; display: flex; flex-direction: column; overflow: hidden;
+    }
+    .bc-main-modal.hidden { display: none; }
+    .bc-main-modal:not(.hidden) { animation: _modalIn 0.15s ease forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .bc-main-modal:not(.hidden) { animation: none; }
+    }
+    .bc-main-body { flex: 1; overflow-y: auto; }
 
     /* ── New Sprint modal ── */
     .ns-modal { width: min(480px, calc(100vw - 32px)); }
@@ -8885,15 +8923,18 @@
         </div>
       </div>
 
-      <!-- Bulk Create tab -->
-      <div class="tab-pane" id="pane-bulk-create" role="tabpanel" aria-labelledby="stab-bulk-create">
+      <!-- Tab pane shell kept for tabs.js / _bcInitTab compatibility -->
+      <div class="tab-pane" id="pane-bulk-create" role="tabpanel" aria-labelledby="stab-bulk-create"></div>
 
-        <!-- Back to board (bulk-create is opened via the + Create menu, not a nav tab) -->
-        <button type="button" class="bc-back-btn" onclick="switchTab('sprint-mgmt')"
-                style="display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--text-sub);font-size:13px;cursor:pointer;padding:4px 0;margin-bottom:8px;">
-          <i class="ti ti-arrow-left"></i> Back to board
-        </button>
-
+      <!-- Bulk Create modal (issue #1078) -->
+      <div class="modal-backdrop hidden" id="bc-main-backdrop" onclick="closeBulkCreate()"></div>
+      <div class="bc-main-modal hidden" id="bc-main-modal"
+           role="dialog" aria-modal="true" aria-labelledby="bc-main-title">
+        <div class="modal-header">
+          <span class="modal-title" id="bc-main-title">Bulk Create</span>
+          <button class="modal-close" id="bc-main-close-btn" onclick="closeBulkCreate()" aria-label="Close">&times;</button>
+        </div>
+        <div class="bc-main-body">
         <!-- Step 1: Input -->
         <div id="bc-step1">
           <div class="bc-settings-bar">
@@ -9208,7 +9249,8 @@
           </div>
         </div>
 
-      </div><!-- /pane-bulk-create -->
+        </div><!-- /bc-main-body -->
+      </div><!-- /bc-main-modal -->
 
       <!-- Timeline tab (issue #431) -->
       <div class="tab-pane" id="pane-timeline" role="tabpanel" aria-labelledby="stab-timeline">
@@ -11459,7 +11501,17 @@ function _ticketsShowError(msg) {
 
 // ── Header button handlers ─────────────────────────────────────────────────
 function openBulkCreate() {
-  switchTab('bulk-create');
+  _bcInitTab();
+  _lpRenderBc();
+  document.getElementById('bc-main-backdrop').classList.remove('hidden');
+  document.getElementById('bc-main-modal').classList.remove('hidden');
+  _setBodyInert(['bc-main-backdrop', 'bc-main-modal']);
+}
+
+function closeBulkCreate() {
+  document.getElementById('bc-main-backdrop').classList.add('hidden');
+  document.getElementById('bc-main-modal').classList.add('hidden');
+  _clearBodyInert();
 }
 
 function openNewTicket() {
@@ -14805,21 +14857,27 @@ function _smgmtInspectorFeed(ticket, label) {
       + `<span class="smgmt-active-spinner"></span> ${escHtml(workingAgent.toUpperCase())} working</span>`
     : '';
 
-  panel.innerHTML =
-    `<div class="inspector-head">`
-    + `<span class="inspector-num">#${escHtml(String(_smgmtInspectorNum != null ? _smgmtInspectorNum : ''))}</span>`
-    + `<span class="inspector-title">${escHtml(t.title || '')}</span>`
-    + workingChip + size + est + links
-    + `</div>`
-    + `<div class="inspector-body">`
-    + _smgmtInspectorAttemptsHtml(t)
-    + `<div>`
-    + `<div class="inspector-section-label">Logs</div>`
-    + `<div class="log-tabs" role="tablist">${_smgmtInspectorTabsHtml(t, live)}</div>`
-    + `<div class="log-body" id="smgmt-inspector-log"><span class="log-empty">Loading…</span></div>`
-    + `</div>`
-    + `</div>`;
-  panel.hidden = false;
+  const inspBody = panel.querySelector('.insp-body');
+  if (inspBody) {
+    inspBody.innerHTML =
+      `<div class="inspector-head">`
+      + `<span class="inspector-num">#${escHtml(String(_smgmtInspectorNum != null ? _smgmtInspectorNum : ''))}</span>`
+      + `<span class="inspector-title">${escHtml(t.title || '')}</span>`
+      + workingChip + size + est + links
+      + `</div>`
+      + `<div class="inspector-body">`
+      + _smgmtInspectorAttemptsHtml(t)
+      + `<div>`
+      + `<div class="inspector-section-label">Logs</div>`
+      + `<div class="log-tabs" role="tablist">${_smgmtInspectorTabsHtml(t, live)}</div>`
+      + `<div class="log-body" id="smgmt-inspector-log"><span class="log-empty">Loading…</span></div>`
+      + `</div>`
+      + `</div>`;
+  }
+  const inspBackdrop = document.getElementById('insp-backdrop');
+  if (inspBackdrop) inspBackdrop.classList.remove('hidden');
+  panel.classList.remove('hidden');
+  _setBodyInert(['insp-backdrop', 'smgmt-inspector']);
 
   _smgmtInspectorStreamRestart();
 }
@@ -14904,7 +14962,14 @@ function _smgmtInspectorClose() {
   if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
   _smgmtInspectorNum = null;
   const panel = document.getElementById('smgmt-inspector');
-  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+  if (panel) {
+    panel.classList.add('hidden');
+    const inspBody = panel.querySelector('.insp-body');
+    if (inspBody) inspBody.innerHTML = '';
+  }
+  const inspBackdrop = document.getElementById('insp-backdrop');
+  if (inspBackdrop) inspBackdrop.classList.add('hidden');
+  _clearBodyInert();
 }
 
 // ── Orchestrator log panel (issue #1106) ──────────────────────────────────────
@@ -18987,10 +19052,16 @@ function _setupModals() {
         createLabelModalCancel();
       } else if (!document.getElementById('ns-modal').classList.contains('hidden')) {
         _nsClose();
+      } else if (!document.getElementById('rr-modal').classList.contains('hidden')) {
+        _rrClose();
       } else if (!document.getElementById('nt-modal').classList.contains('hidden')) {
         _ntClose();
       } else if (!document.getElementById('apm-modal').classList.contains('hidden')) {
         closeAddProjectModal();
+      } else if (!document.getElementById('bc-main-modal').classList.contains('hidden')) {
+        closeBulkCreate();
+      } else if (document.getElementById('smgmt-inspector') && !document.getElementById('smgmt-inspector').classList.contains('hidden')) {
+        _smgmtInspectorClose();
       } else if (_smgmtSelectedIssues.size > 0) {
         // Clear multi-select when Escape pressed and no modal is open
         _smgmtCloseMoveToMenu();
@@ -20345,8 +20416,8 @@ function _bcRecoverFromStaleJob() {
   _bcJobState = null;
   _bcUpdateBadge();
 
-  const pane = document.getElementById('pane-bulk-create');
-  const onBulkTab = pane && !pane.classList.contains('hidden');
+  const bcModal = document.getElementById('bc-main-modal');
+  const onBulkTab = bcModal && !bcModal.classList.contains('hidden');
   if (onBulkTab) {
     _bcShowStep(1);
     // _bcInitTab may have early-returned into Step 2 before this fired, so make
@@ -24524,7 +24595,7 @@ document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
     const ntModal   = document.getElementById('nt-modal');
     const ntBody    = document.getElementById('nt-body');
-    const bcPane    = document.getElementById('pane-bulk-create');
+    const bcModal   = document.getElementById('bc-main-modal');
     const bcTextarea = document.getElementById('bc-textarea');
     if (ntModal && !ntModal.classList.contains('hidden') &&
         document.activeElement === ntBody) {
@@ -24532,7 +24603,7 @@ document.addEventListener('keydown', function(e) {
       ntAcTplOpen();
       return;
     }
-    if (bcPane && bcPane.classList.contains('active') &&
+    if (bcModal && !bcModal.classList.contains('hidden') &&
         document.activeElement === bcTextarea) {
       e.preventDefault();
       bcAcTplOpen();
@@ -24827,8 +24898,19 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
+<!-- ── Ticket Inspector drawer (issue #1078) ── -->
+<div class="modal-backdrop hidden" id="insp-backdrop" onclick="_smgmtInspectorClose()"></div>
+<div class="insp-drawer hidden" id="smgmt-inspector"
+     role="dialog" aria-modal="true" aria-labelledby="insp-title">
+  <div class="insp-header">
+    <span class="insp-title" id="insp-title">Ticket Inspector</span>
+    <button class="modal-close" id="insp-close-btn" onclick="_smgmtInspectorClose()" aria-label="Close">&times;</button>
+  </div>
+  <div class="insp-body"></div>
+</div>
+
 <!-- ── Re-run Sprint modal (issue #512) ── -->
-<div class="modal-backdrop hidden" id="rr-backdrop"></div>
+<div class="modal-backdrop hidden" id="rr-backdrop" onclick="_rrClose()"></div>
 <div class="modal hidden" id="rr-modal"
      role="dialog" aria-modal="true" aria-labelledby="rr-modal-title">
   <div class="modal-header">
@@ -24855,7 +24937,7 @@ document.addEventListener('keydown', function(e) {
 </div>
 
 <!-- ── New Sprint modal ── -->
-<div class="modal-backdrop hidden" id="ns-backdrop"></div>
+<div class="modal-backdrop hidden" id="ns-backdrop" onclick="_nsClose()"></div>
 <div class="modal ns-modal hidden" id="ns-modal"
      role="dialog" aria-modal="true" aria-labelledby="ns-modal-title">
   <div class="modal-header">
@@ -29127,7 +29209,7 @@ function sugAccept(sid) {
             if (typeof _bcShowStep !== 'undefined') _bcShowStep(2);
             if (typeof _bcConnectSSE !== 'undefined') _bcConnectSSE(_bcJobId);
           }
-          switchTab('bulk-create');
+          openBulkCreate();
         });
     })
     .catch(function(err) {

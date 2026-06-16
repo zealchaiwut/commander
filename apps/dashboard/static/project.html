@@ -4403,6 +4403,10 @@
     .smgmt-op-head { display: flex; align-items: center; gap: 12px; }
     .smgmt-op-progress-wrap { display: flex; align-items: center; gap: 10px; }
     .smgmt-op-progress-wrap[hidden] { display: none !important; }
+    .smgmt-op-pa-host { display: block; }
+    .smgmt-op-pa-host[hidden] { display: none !important; }
+    .smgmt-op-pa-host .pa-root { margin-top: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+    .smgmt-op-pa-host .pa-log-stream { max-height: 120px; }
     .smgmt-op-progress-bar {
       flex: 1; height: 6px; background: var(--surface-2);
       border-radius: 999px; overflow: hidden;
@@ -8547,6 +8551,7 @@
                       onclick="_smgmtBulkReEstBackground()" title="Background — keep running" hidden>×</button>
             </div>
             <div class="smgmt-op-current" id="smgmt-op-current" hidden></div>
+            <div id="smgmt-op-pa-host" class="smgmt-op-pa-host" hidden></div>
             <div class="smgmt-op-progress-wrap" id="smgmt-op-progress-wrap" hidden>
               <div class="smgmt-op-progress-bar"><div class="smgmt-op-progress-fill" id="smgmt-op-progress-fill"></div></div>
               <span class="smgmt-op-progress-pct" id="smgmt-op-progress-pct">0%</span>
@@ -16226,10 +16231,22 @@ function _smgmtBulkReEstPatchRow(issueNum, data) {
 function _smgmtBulkReEstShowDone(doneCount) {
   const doneEl = document.getElementById('smgmt-op-done');
   const msgEl  = document.getElementById('smgmt-move-overlay-msg');
+  const errorEl = document.getElementById('smgmt-op-error');
   if (msgEl)  msgEl.textContent = 'Done';
+  if (errorEl) errorEl.hidden = true;
   if (doneEl) {
     doneEl.textContent = `${doneCount} reestimated`;
     doneEl.hidden = false;
+  }
+  if (typeof patchProgressActivity === 'function') {
+    patchProgressActivity('smgmt-op-pa-host', {
+      status: 'done',
+      mode: 'bar',
+      result: `${doneCount} reestimated`,
+    }, {
+      id: (typeof BOARD_OVERLAY_PA_ID === 'string' ? BOARD_OVERLAY_PA_ID : 'board-overlay-pa'),
+      hideLog: true,
+    });
   }
   // Replace spinner with close affordance
   const spinnerEl = document.getElementById('smgmt-move-spinner');
@@ -16244,16 +16261,33 @@ function _smgmtBulkReEstShowDone(doneCount) {
 
 function _smgmtBulkReEstShowError(failed, doneCount) {
   const errorEl = document.getElementById('smgmt-op-error');
+  const doneEl = document.getElementById('smgmt-op-done');
   const msgEl   = document.getElementById('smgmt-move-overlay-msg');
   if (msgEl) msgEl.textContent = `Done — ${failed.length} failed`;
+  if (doneEl) doneEl.hidden = true;
+  if (typeof patchProgressActivity === 'function') {
+    patchProgressActivity('smgmt-op-pa-host', {
+      status: 'error',
+      mode: 'bar',
+      error: `${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed (${doneCount} succeeded)`,
+    }, {
+      id: (typeof BOARD_OVERLAY_PA_ID === 'string' ? BOARD_OVERLAY_PA_ID : 'board-overlay-pa'),
+      retryFn: '_smgmtBulkReEstRetry',
+      hideLog: true,
+    });
+  }
   if (errorEl) {
-    errorEl.hidden = false;
-    errorEl.innerHTML = `<span>${failed.length} ticket${failed.length !== 1 ? 's' : ''} failed</span>
-      <button class="smgmt-op-retry-btn" onclick="_smgmtBulkReEstRetry()">Retry failed</button>
-      <button class="smgmt-op-close-btn" style="margin-left:auto" onclick="_smgmtBulkReEstClose()">Close</button>`;
+    errorEl.hidden = true;
+    errorEl.innerHTML = '';
   }
   const spinnerEl = document.getElementById('smgmt-move-spinner');
   if (spinnerEl) spinnerEl.style.display = 'none';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'smgmt-op-close-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = _smgmtBulkReEstClose;
+  const head = document.querySelector('.smgmt-op-head');
+  if (head) head.appendChild(closeBtn);
 }
 
 function _smgmtBulkReEstRetry() {

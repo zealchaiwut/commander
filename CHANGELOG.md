@@ -1,5 +1,18 @@
 # Changelog
 
+## Sprint 81
+
+Dashboard UI/UX polish sweep: a shared design-token stylesheet (`apps/dashboard/static/css/tokens.css`) now drives a token-based dark theme across the Deploy, Settings, and Advisor tabs, the Sprint board, and project.html modals/drawers, capped by a cross-page token-consistency and mobile-responsive pass.
+
+- [#1057](https://github.com/zealchaiwut/commander/issues/1057) Polish Sprint board: hover/focus, live-update transitions, skeleton, empty state — 2026-06-16
+- [#1072](https://github.com/zealchaiwut/commander/issues/1072) Redesign Deploy tab with token-based dark UI — 2026-06-16
+- [#1074](https://github.com/zealchaiwut/commander/issues/1074) Polish Deploy tab UI: states, transitions, accessibility — 2026-06-16
+- [#1075](https://github.com/zealchaiwut/commander/issues/1075) Redesign Settings and Advisor tabs in project.html — 2026-06-16
+- [#1076](https://github.com/zealchaiwut/commander/issues/1076) Audit and fix Settings/Advisor tab UI anti-patterns — 2026-06-16
+- [#1077](https://github.com/zealchaiwut/commander/issues/1077) Polish Settings and Advisor tabs UI/UX — 2026-06-16
+- [#1078](https://github.com/zealchaiwut/commander/issues/1078) Redesign and polish modals/drawers in project.html — 2026-06-16
+- [#1079](https://github.com/zealchaiwut/commander/issues/1079) Cross-page token consistency and mobile responsive sweep — 2026-06-16
+
 ## Sprint 79
 
 Running-pane redesign: the level-rail and node inspector were replaced by a collapsible Orchestrator log panel and a single All Issues panel grouped by dispatch level, and a four-segment progress gauge (done · retrying · running · queued) was added to the pane header.

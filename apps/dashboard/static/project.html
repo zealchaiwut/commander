@@ -1492,6 +1492,7 @@
       padding: 12px 0;
       border-top: 1px solid var(--border);
       font-size: 13px;
+      transition: background .12s;
     }
     .ticket-status-pill {
       font-size: 10px; font-weight: 600;
@@ -1581,6 +1582,44 @@
     .dep-chip--blocks    { background: var(--red-bg); color: var(--red); }
     .dep-chip--blocked-by { background: var(--purple-bg); color: var(--purple); }
     .dep-chip--missing   { opacity: .55; cursor: default; text-decoration: line-through; }
+    /* ── Ticket row hover + focus + keyboard (issue #1061) ── */
+    .ticket-row:hover { background: var(--surface-hover); }
+    .ticket-row:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
+    .ticket-row a:focus-visible,
+    .ticket-row button:focus-visible,
+    .ticket-row input[type=checkbox]:focus-visible {
+      outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px;
+    }
+    /* ── Ticket group sections (filter targets, issue #1061) ── */
+    .tkt-group-section { transition: opacity .2s; }
+    /* ── Ticket filter chips (issue #1061) ── */
+    .tkt-filter-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .tkt-filter-chip {
+      padding: 3px 10px; font-size: 11px; font-weight: 600; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .tkt-filter-chip:hover { background: var(--surface-hover); color: var(--text); }
+    .tkt-filter-chip.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
+    .tkt-filter-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+    /* ── Ticket loading spinner (issue #1061) ── */
+    .tkt-loading {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 56px 24px; gap: 12px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .tkt-loading-spinner {
+      width: 24px; height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: tkt-spin .7s linear infinite;
+    }
+    @keyframes tkt-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .ticket-row, .tkt-group-section, .tkt-filter-chip, .tkt-loading-spinner { transition: none; animation: none; }
+    }
     /* ── Ticket detail panel (issue #432) ── */
     .tdp {
       display: none; position: fixed;
@@ -10795,7 +10834,7 @@ async function loadTickets() {
   }
 
   _ticketsRepo = repo;
-  container.innerHTML = '<div class="loading-msg">Loading tickets…</div>';
+  container.innerHTML = '<div class="tkt-loading"><div class="tkt-loading-spinner" aria-hidden="true"></div>Loading tickets…</div>';
 
   try {
     const resp = await fetch('/api/project-details?repo=' + encodeURIComponent(repo));
@@ -10845,13 +10884,16 @@ function renderTickets(data, repo) {
         const chipsHtml = _depChipsHtml(deps, ticketNums);
         const labelChipsHtml = _tktGhLabelChipsHtml(t.labels || []);
         return `
-        <div class="ticket-row" id="ticket-row-${t.number}">
-          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}" onchange="_onTicketCheckbox(this)">
+        <div class="ticket-row" id="ticket-row-${t.number}" tabindex="0"
+             aria-label="Issue #${t.number}: ${escHtml(t.title)}, status ${escHtml(_tktStatusLabel(t.status))}">
+          <input type="checkbox" class="ticket-checkbox" data-num="${t.number}" data-title="${escHtml(t.title)}"
+                 aria-label="Select ticket #${t.number}" onchange="_onTicketCheckbox(this)">
           <span class="ticket-status-pill ${escHtml(t.status)}">${escHtml(_tktStatusLabel(t.status))}</span>
           <a class="ticket-title" href="${escHtml(t.url)}" target="_blank" rel="noopener" title="${escHtml(t.title)}">${escHtml(t.title)}</a>
           <span class="ticket-num">#${t.number}</span>
           <span class="ticket-est-wrap" id="ticket-est-${t.number}"></span>
-          <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
+          <button class="ticket-close-btn" data-num="${t.number}" data-title="${escHtml(t.title)}"
+                  aria-label="Close ticket #${t.number}: ${escHtml(t.title)}" onclick="openCloseTicketModal(this)">Close</button>
           ${labelChipsHtml}
           ${chipsHtml}
         </div>`;
@@ -10861,14 +10903,22 @@ function renderTickets(data, repo) {
         ? `<button type="button" class="ticket-grp-uat-close-btn" onclick="openBulkCloseUatModal()"
                   title="Bulk close UAT tickets left open after sprint sign-off">Close all UAT</button>`
         : '';
-      return `<div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span>${uatBtn}</div>${rows}`;
+      return `<div class="tkt-group-section" data-group="${escHtml(g.label)}"><div class="ticket-group-hdr" id="ticket-grp-hdr-${gid}">${escHtml(g.label)} · ${g.items.length}<span class="ticket-group-rollup" id="ticket-grp-rollup-${gid}"></span>${uatBtn}</div>${rows}</div>`;
     }).join('');
   }
+
+  const filterChipsHtml = groups.length > 1
+    ? `<div class="tkt-filter-chips" role="group" aria-label="Filter by status">
+        <button class="tkt-filter-chip active" data-filter="all" onclick="tktSetFilter(this)">All</button>
+        ${groups.map(g => `<button class="tkt-filter-chip" data-filter="${escHtml(g.label)}" onclick="tktSetFilter(this)">${escHtml(g.label)}</button>`).join('')}
+      </div>`
+    : '';
 
   container.innerHTML = `
     <div class="tickets-toolbar">
       <div class="tickets-toolbar-left">
         <span style="font-size:13px;font-weight:600;color:var(--text-muted)">${tickets.length} open ticket${tickets.length !== 1 ? 's' : ''}</span>
+        ${filterChipsHtml}
       </div>
       <div class="tickets-toolbar-right">
         <button class="btn-create-label" onclick="openCreateLabelModal()">
@@ -10957,6 +11007,18 @@ function _tktGhLabelChipsHtml(labels) {
   const chips = labels.filter(l => !_TKT_LABEL_SKIP.test(l));
   if (!chips.length) return '';
   return `<div class="tkt-labels-row">${chips.map(l => `<span class="tkt-gh-label">${escHtml(l)}</span>`).join('')}</div>`;
+}
+
+// ── Tickets filter (issue #1061) ─────────────────────────────────────────────
+function tktSetFilter(chipEl) {
+  const filter = chipEl.dataset.filter;
+  document.querySelectorAll('#tickets-content .tkt-filter-chip').forEach(c =>
+    c.classList.toggle('active', c === chipEl)
+  );
+  document.querySelectorAll('#tickets-content .tkt-group-section').forEach(g => {
+    const show = filter === 'all' || g.dataset.group === filter;
+    g.style.display = show ? '' : 'none';
+  });
 }
 
 // ── Close Ticket flow ─────────────────────────────────────────────────────────

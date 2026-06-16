@@ -223,28 +223,6 @@ _STARTED_AT: str = datetime.now(timezone.utc).isoformat()
 _BUILD_TIMESTAMP: str = _STARTED_AT
 
 
-# ── Build hash (cache-busting) ─────────────────────────────────────────────────
-
-def _compute_build_hash() -> str:
-    """Compute an 8-char MD5 hash over all JS and CSS files in STATIC_DIR.
-
-    The hash changes whenever any local static asset changes, which lets
-    browsers cache assets indefinitely while always loading fresh code after
-    a deploy/restart.
-    """
-    h = hashlib.md5()
-    for ext in ("*.js", "*.css"):
-        for f in sorted(STATIC_DIR.glob(ext)):
-            try:
-                h.update(f.read_bytes())
-            except OSError:
-                pass
-    return h.hexdigest()[:8]
-
-
-_BUILD_HASH: str = _compute_build_hash()
-_APP_VERSION: str = "1.0"
-
 # ── Per-env last-deploy timestamps (persisted across requests, reset on restart) ─
 _DEPLOY_TIMES_FILE = Path(__file__).parent / "runtime" / "deploy-times.json"
 
@@ -269,37 +247,6 @@ _deploy_times: dict = _load_deploy_times()
 # Populated once at startup by _check_gh_auth(); served via /api/gh-auth-status.
 _GH_AUTH_STATUS: dict = {"ok": True, "message": ""}
 
-
-def _inject_version_into_html(html: str) -> str:
-    """Inject ?v=<hash> query string on local /static/*.js and /static/*.css URLs."""
-    # Replace src="/static/foo.js" → src="/static/foo.js?v=<hash>"
-    # Replace href="/static/foo.css" → href="/static/foo.css?v=<hash>"
-    # Skip URLs that already have a query string.
-    pattern = r'((?:src|href)="(/static/[^"?]+\.(?:js|css))")'
-    replacement = rf'\g<2>?v={_BUILD_HASH}'
-
-    def _replacer(m: re.Match) -> str:
-        attr_name = m.group(1).split("=")[0]  # src or href
-        url = m.group(2)
-        return f'{attr_name}="{url}?v={_BUILD_HASH}"'
-
-    return re.sub(pattern, _replacer, html)
-
-
-_HTML_NO_CACHE_HEADERS = {
-    "Cache-Control": "no-cache, must-revalidate",
-    "Pragma": "no-cache",
-}
-
-
-def _serve_html(path: Path) -> HTMLResponse:
-    """Read an HTML file, inject cache-busting version stamps, and serve with no-cache headers."""
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError:
-        raise HTTPException(status_code=404, detail="Not found")
-    content = _inject_version_into_html(content)
-    return HTMLResponse(content=content, headers=_HTML_NO_CACHE_HEADERS)
 
 
 async def _cache_refresh_loop():
@@ -957,6 +904,7 @@ from routers import (  # noqa: E402
     log_search_router,
     logs_router,
     milestones_router,
+    pages_router,
     roadmap_router,
     runs_router,
     settings_router,
@@ -973,6 +921,7 @@ from routers import (  # noqa: E402
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
 
+app.include_router(pages_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
 app.include_router(suggestions_router)
@@ -1201,81 +1150,8 @@ def _compute_health_status(
 
 # ── agent endpoints ───────────────────────────────────────────────────────────
 
-@app.get("/")
-async def root(request: Request):
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/", method="GET")
-    return _serve_html(STATIC_DIR / "home.html")
-
-
-@app.get("/brief")
-async def brief_redirect():
-    """Legacy /brief bookmarks → daily brief home at /."""
-    return RedirectResponse(url="/", status_code=301)
-
-
-@app.get("/home")
-async def home_redirect():
-    return RedirectResponse(url="/", status_code=301)
-
-
-@app.get("/overview")
-async def overview_redirect():
-    return RedirectResponse(url="/", status_code=301)
-
-
+# GET /, /brief, /home, /overview, /projects/*, /project/* moved to routers/pages.py (issue #1248)
 # /diagnostics moved to routers/system.py (issue #794)
-
-
-# ── /projects/ redirect — 301 to current /project/ UI ─────────────────────────
-# Old /projects/<slug>/<tab> bookmarks are redirected to /project/<slug>/<tab>.
-# Paths that cannot be cleanly mapped (no slug/tab) go to the dashboard home.
-
-@app.get("/projects/{path:path}")
-async def projects_redirect(path: str):
-    """Redirect /projects/<slug>/<tab> → /project/<slug>/<tab> (301).
-
-    Any path that does not contain a recognisable slug/tab segment is redirected
-    to the dashboard home ('/') instead of serving the legacy UI.
-    """
-    # Strip leading/trailing slashes and split into parts
-    parts = [p for p in path.strip("/").split("/") if p]
-    if len(parts) >= 2:
-        slug, tab = parts[0], parts[1]
-        return RedirectResponse(url=f"/project/{slug}/{tab}", status_code=301)
-    elif len(parts) == 1:
-        slug = parts[0]
-        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=301)
-    else:
-        # No recognisable slug — send to dashboard home
-        return RedirectResponse(url="/", status_code=301)
-
-
-# ── Slug-based project routes (/project/<slug>/...) ───────────────────────────
-
-_VALID_PROJECT_TABS = {"sprint-mgmt", "tickets", "logs", "sprint-history", "status", "metrics", "notes", "settings", "global-settings", "roadmap"}
-
-
-@app.get("/project/{slug}")
-async def project_slug_no_tab(slug: str):
-    """Redirect bare /project/<slug> to /project/<slug>/sprint-mgmt."""
-    return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
-
-
-@app.get("/project/{slug}/analytics")
-async def project_slug_analytics(slug: str):
-    """Retired standalone analytics page — analytics is now an in-chrome tab
-    (with the project nav). Redirect old links to the in-chrome Analytics tab."""
-    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
-
-
-@app.get("/project/{slug}/{tab}")
-async def project_slug_tab(slug: str, tab: str):
-    """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""
-    if tab not in _VALID_PROJECT_TABS:
-        return RedirectResponse(url=f"/project/{slug}/sprint-mgmt", status_code=302)
-    return _serve_html(STATIC_DIR / "project.html")
-
-
 # /api/health, /api/environment moved to routers/system.py (issue #1247)
 # /api/version, /api/gh-auth-status moved to routers/system.py (issue #794)
 # /api/agent-event, /api/token-usage, /api/events/test, /events moved to routers/logs.py

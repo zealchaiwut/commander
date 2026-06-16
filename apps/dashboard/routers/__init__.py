@@ -6,6 +6,7 @@ This package is the strangler-fig landing zone. New endpoints belong in
 forbidden and is rejected by the COMMANDER_GATE_MONOLITH gate.
 """
 from .activity import router as activity_router
+from .pages import router as pages_router
 from .advisor import router as advisor_router
 from .analytics import router as analytics_router
 from .logs import router as logs_router
@@ -30,6 +31,7 @@ from .timeline import router as timeline_router
 
 __all__ = [
     "activity_router",
+    "pages_router",
     "advisor_router",
     "analytics_router",
     "logs_router",

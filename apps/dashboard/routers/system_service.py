@@ -58,8 +58,8 @@ def get_gh_auth_status() -> JSONResponse:
 
 def get_diagnostics_page():
     """Serve the system diagnostics page (issue #230)."""
-    srv = _server()
-    return srv._serve_html(srv.STATIC_DIR / "diagnostics.html")
+    from routers.pages import _serve_html, _STATIC_DIR  # noqa: PLC0415
+    return _serve_html(_STATIC_DIR / "diagnostics.html")
 
 
 # ── Issue #1247: health, environment, repo/config, github/labels ──────────────

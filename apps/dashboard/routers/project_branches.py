@@ -4,6 +4,7 @@ Handles stale-branch listing and single-branch deletion for a given
 owner/repo pair. Previously lived as @app.get / @app.delete decorators
 directly on the FastAPI app in server.py (issue #634).
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,9 @@ router = APIRouter(
     tags=["project_branches"],
 )
 
-_PROTECTED_BRANCHES: frozenset[str] = frozenset({"develop", "master", "main", "attachments"})
+_PROTECTED_BRANCHES: frozenset[str] = frozenset(
+    {"develop", "master", "main", "attachments"}
+)
 _STALE_BRANCH_RE = re.compile(r"^(feat|feature|sprint)/")
 
 
@@ -32,13 +35,29 @@ def get_stale_branches(owner: str, repo: str):
     merged_heads: set[str] = set()
     try:
         result = subprocess.run(
-            ["gh", "pr", "list", "--repo", full_repo, "--state", "merged",
-             "--limit", "200", "--json", "headRefName"],
-            capture_output=True, text=True, check=False,
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                full_repo,
+                "--state",
+                "merged",
+                "--limit",
+                "200",
+                "--json",
+                "headRefName",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         for pr in json.loads(result.stdout or "[]"):
             head = pr.get("headRefName", "")
-            if _STALE_BRANCH_RE.match(head) and head not in _PROTECTED_BRANCHES:
+            if (
+                _STALE_BRANCH_RE.match(head)
+                and head not in _PROTECTED_BRANCHES
+            ):
                 merged_heads.add(head)
     except Exception:
         pass
@@ -49,13 +68,25 @@ def get_stale_branches(owner: str, repo: str):
     existing: set[str] = set()
     try:
         result = subprocess.run(
-            ["gh", "api", f"repos/{full_repo}/branches", "--paginate",
-             "--jq", ".[].name"],
-            capture_output=True, text=True, check=False,
+            [
+                "gh",
+                "api",
+                f"repos/{full_repo}/branches",
+                "--paginate",
+                "--jq",
+                ".[].name",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         for name in result.stdout.splitlines():
             name = name.strip()
-            if name and _STALE_BRANCH_RE.match(name) and name not in _PROTECTED_BRANCHES:
+            if (
+                name
+                and _STALE_BRANCH_RE.match(name)
+                and name not in _PROTECTED_BRANCHES
+            ):
                 existing.add(name)
     except Exception:
         pass
@@ -70,20 +101,32 @@ def delete_project_branch(owner: str, repo: str, branch: str):
     branches not matching the allowed patterns.
     """
     if branch in _PROTECTED_BRANCHES:
-        raise HTTPException(status_code=400,
-                            detail=f"Cannot delete protected branch: {branch!r}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete protected branch: {branch!r}",
+        )
     if not _STALE_BRANCH_RE.match(branch):
         raise HTTPException(
             status_code=400,
-            detail=f"Only feat/*, feature/*, or sprint/* branches may be deleted. Got: {branch!r}",
+            detail=(
+                "Only feat/*, feature/*, or sprint/* branches"
+                f" may be deleted. Got: {branch!r}"
+            ),
         )
 
     full_repo = f"{owner}/{repo}"
     try:
         result = subprocess.run(
-            ["gh", "api", "--method", "DELETE",
-             f"repos/{full_repo}/git/refs/heads/{branch}"],
-            capture_output=True, text=True, check=False,
+            [
+                "gh",
+                "api",
+                "--method",
+                "DELETE",
+                f"repos/{full_repo}/git/refs/heads/{branch}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode != 0:
             raise HTTPException(

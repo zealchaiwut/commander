@@ -175,12 +175,26 @@ class TestAC4RouteCountUnchanged:
     BASELINE = 243
 
     def test_route_count_equals_baseline(self, test_client):
+        # test_client fixture has already imported server under patch;
+        # just use the app that was loaded by the fixture
         import server as srv
+
+        # Verify it's the same app that test_client was created from
+        # Count routes directly on the imported app
         routes = [r for r in srv.app.routes if hasattr(r, "path")]
-        assert len(routes) == self.BASELINE, (
-            f"Expected {self.BASELINE} routes (pre-#1248 baseline), got {len(routes)}. "
-            "Moving routes must not change the total registered count."
-        )
+
+        # If we somehow got a different count, log the imports for debugging
+        if len(routes) != self.BASELINE:
+            # This would indicate the server module wasn't fully initialized
+            # Try a fresh count by checking server app directly
+            all_routes = list(srv.app.routes)
+            assert False, (
+                f"Expected {self.BASELINE} routes (pre-#1248 baseline), got {len(routes)}. "
+                f"Total routes in app: {len(all_routes)}. "
+                "Moving routes must not change the total registered count."
+            )
+
+        assert len(routes) == self.BASELINE
 
 
 # ── AC5: py_compile exits 0 ───────────────────────────────────────────────────

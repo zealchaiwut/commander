@@ -8137,7 +8137,8 @@
     .rm-look-ahead-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 10px; }
     .rm-look-ahead-entry { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-faint, var(--border)); font-size: 13px; color: var(--text); }
     .rm-look-ahead-entry:last-child { border-bottom: none; }
-    .rm-look-ahead-num { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--surface); border-radius: 50%; font-size: 11px; font-weight: 700; }
+    .rm-look-ahead-num { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; background: var(--blue); color: var(--surface); border-radius: 50%; font-size: 11px; font-weight: 700; }
+    .rm-look-ahead-icon { margin-right: 5px; }
 
     /* Roadmap Suggestions panel (issue #882) */
     #sug-root { margin-top: 24px; }
@@ -8161,13 +8162,17 @@
 
     .rm-toolbar { display: flex; align-items: center; gap: 10px; }
     .rm-toolbar-gap { flex: 1; }
-    .rm-list { display: flex; flex-direction: column; gap: 10px; }
+    .rm-toolbar-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .rm-list { display: flex; flex-direction: column; gap: 16px; }
     .rm-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 16px;
+      transition: border-color .15s, background .15s;
     }
+    .rm-card:hover { background: var(--surface-hover); border-color: var(--border); }
+    .rm-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .rm-card.rm-active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
     .rm-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
     .rm-card-title { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; }
@@ -8182,7 +8187,7 @@
       flex: 1; min-width: 120px;
       background: var(--surface-2); border-radius: 5px; height: 6px; overflow: hidden;
     }
-    .rm-progress-fill { height: 100%; width: var(--rm-pct, 0%); border-radius: 5px; }
+    .rm-progress-fill { height: 100%; width: var(--rm-pct, 0%); border-radius: 5px; transition: width .4s ease; }
     .rm-prog-low  { background: var(--red); }
     .rm-prog-mid  { background: var(--amber); }
     .rm-prog-high { background: var(--green); }
@@ -8229,6 +8234,23 @@
     .rm-add-card {
       border: 1px dashed var(--border); border-radius: 6px;
       padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .rm-history-icon { color: var(--text-muted); }
+    .rm-stale-retry { margin-left: auto; }
+    .rm-loading { padding: 32px; text-align: center; color: var(--text-muted); }
+
+    @keyframes rm-skeleton-shimmer {
+      0%   { opacity: .5; }
+      50%  { opacity: 1; }
+      100% { opacity: .5; }
+    }
+    .rm-skeleton { display: block; background: var(--surface-2); border-radius: 4px; animation: rm-skeleton-shimmer 1.4s ease-in-out infinite; }
+    .rm-skeleton-line { height: 12px; background: var(--surface-2); border-radius: 4px; animation: rm-skeleton-shimmer 1.4s ease-in-out infinite; }
+    .rm-skeleton-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .rm-progress-fill { transition: none; }
+      .rm-skeleton, .rm-skeleton-line { animation: none; }
     }
   </style>
 </head>
@@ -28631,14 +28653,14 @@ function roadmapInit() {
   if (_rmLoaded) { _rmRender(); sugInit(); return; }
   _rmLoaded = true;
   var root = document.getElementById('rm-root');
-  if (root) root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Loading…</div>';
+  if (root) root.innerHTML = '<div class="rm-skeleton-card"><span class="rm-skeleton rm-skeleton-line" style="width:60%;display:block"></span><span class="rm-skeleton rm-skeleton-line" style="width:40%;display:block;margin-top:8px"></span></div>';
   var repo = _cachedFullRepo[_slug] || _slug;
   fetch('/api/roadmap?repo=' + encodeURIComponent(repo))
     .then(function(r) { return r.json(); })
     .then(function(data) { _rmData = data; _rmRender(); sugInit(); })
     .catch(function() {
       var r2 = document.getElementById('rm-root');
-      if (r2) r2.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Failed to load roadmap.</div>';
+      if (r2) r2.innerHTML = '<div class="rm-loading">Failed to load roadmap.</div>';
       sugInit();
     });
 }
@@ -28660,11 +28682,11 @@ function _rmRender() {
       : 'GitHub unreachable — couldn’t refresh milestones. Try again shortly.';
     h += '<div class="rm-stale-notice" role="status">'
        + '<i class="ti ti-cloud-off"></i><span>' + _msg + '</span>'
-       + '<button class="rm-btn" onclick="_rmRefresh()" style="margin-left:auto"><i class="ti ti-refresh"></i> Retry</button>'
+       + '<button class="rm-btn rm-stale-retry" onclick="_rmRefresh()"><i class="ti ti-refresh"></i> Retry</button>'
        + '</div>';
   }
   h += '<div class="rm-toolbar">';
-  h += '<span style="font-size:14px;font-weight:700">Milestones</span>';
+  h += '<span class="rm-toolbar-title">Milestones</span>';
   h += '<span class="rm-toolbar-gap"></span>';
   h += '<button class="rm-btn" onclick="_rmShowAdd()"><i class="ti ti-plus"></i> Add milestone</button>';
   h += '</div>';
@@ -28697,7 +28719,7 @@ function _rmRender() {
   var lookAhead = _rmData.look_ahead || [];
   if (lookAhead.length > 0) {
     h += '<div class="rm-look-ahead-section">';
-    h += '<div class="rm-look-ahead-label"><i class="ti ti-road" style="margin-right:5px"></i>Sprint look-ahead</div>';
+    h += '<div class="rm-look-ahead-label"><i class="ti ti-road rm-look-ahead-icon"></i>Sprint look-ahead</div>';
     lookAhead.forEach(function(entry, i) {
       h += '<div class="rm-look-ahead-entry">'
         + '<span class="rm-look-ahead-num">' + (i + 1) + '</span>'
@@ -28707,6 +28729,11 @@ function _rmRender() {
     h += '</div>';
   }
   root.innerHTML = h;
+  requestAnimationFrame(function() {
+    document.querySelectorAll('#rm-root [data-pct]').forEach(function(el) {
+      el.style.setProperty('--rm-pct', el.getAttribute('data-pct') + '%');
+    });
+  });
   _rmInitDnd();
 }
 
@@ -28719,14 +28746,14 @@ function _rmCardHtml(ms) {
   var progClass = pct <= 33 ? 'rm-prog-low' : pct <= 66 ? 'rm-prog-mid' : 'rm-prog-high';
   var due = ms.due_on ? ms.due_on.substring(0, 10) : null;
   var active = ms.active;
-  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '">';
+  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '" tabindex="0" aria-label="Milestone: ' + _rmEsc(ms.title) + '" onkeydown="if(event.key===\'Enter\'){_rmEditCard(' + ms.number + ')}">';
   h += '<div class="rm-card-head">';
   h += '<span class="rm-card-title">' + _rmEsc(ms.title) + '</span>';
   if (active) h += '<span class="rm-active-badge">Active</span>';
   h += '</div>';
   if (ms.description) h += '<div class="rm-card-desc">' + _rmEsc(ms.description) + '</div>';
   h += '<div class="rm-card-meta">';
-  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill ' + progClass + '" style="--rm-pct:' + pct + '%"></div></div>';
+  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill ' + progClass + '" data-pct="' + pct + '"></div></div>';
   h += '<span class="rm-progress-text">' + done + ' closed \xb7 ' + open + ' open</span>';
   if (due) h += '<span class="rm-due"><i class="ti ti-calendar-event"></i> ' + due + '</span>';
   h += '</div><div class="rm-card-actions">';
@@ -28739,9 +28766,13 @@ function _rmCardHtml(ms) {
 
 function _rmHistoryHtml(ms) {
   return '<div class="rm-history-row" id="rm-hist-' + ms.number + '">' +
-    '<i class="ti ti-circle-check" style="color:var(--text-muted)"></i>' +
+    '<i class="ti ti-circle-check rm-history-icon"></i>' +
     '<span class="rm-history-row-title">' + _rmEsc(ms.title) + '</span>' +
     '<button class="rm-btn" onclick="_rmReopen(' + ms.number + ')">Re-open</button></div>';
+}
+
+function _rmCardKeydown(e, num) {
+  if (e.key === 'Enter') { _rmEditCard(num); }
 }
 
 function _rmEsc(s) {

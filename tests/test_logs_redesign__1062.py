@@ -6,7 +6,7 @@ import httpx
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.
 # Default kept only as a last-resort fallback if BASE_URL not exported.
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
+BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "8000")
 if not BASE_URL.startswith("http"):
     raise RuntimeError(
         "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."

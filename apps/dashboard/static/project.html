@@ -2013,6 +2013,15 @@
     @media (max-width: 600px) {
       .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
+      .hist-card-head {
+        display: flex; flex-direction: column; gap: 8px; overflow-x: hidden;
+      }
+      .hist-card-head-left, .hist-card-head-right {
+        flex-basis: 100%; width: 100%;
+      }
+      .hist-card-head-right {
+        justify-content: flex-start; margin-left: 0; grid-column: unset; grid-row: unset;
+      }
     }
 
     /* Post-sprint reconciliation checklist (issue #856) */

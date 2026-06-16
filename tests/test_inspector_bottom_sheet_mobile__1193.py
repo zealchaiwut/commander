@@ -4,10 +4,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
-PROJECT_HTML = (REPO_ROOT / "apps" / "dashboard" / "static" / "project.html").read_text(encoding="utf-8")
-
 import pytest
+
+REPO_ROOT = Path(__file__).parent.parent
+PROJECT_HTML = (
+    REPO_ROOT / "apps" / "dashboard" / "static" / "project.html"
+).read_text(encoding="utf-8")
 
 
 # ── AC1 & AC2: bottom-sheet layout at ≤375px and ≤640px ──────────────────────

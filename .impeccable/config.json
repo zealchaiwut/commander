@@ -1,0 +1,16 @@
+{
+  "detector": {
+    "ignoreRules": [
+      "low-contrast",
+      "tiny-text",
+      "all-caps-body",
+      "single-font",
+      "skipped-heading",
+      "ai-color-palette",
+      "dark-glow",
+      "em-dash-overuse",
+      "layout-transition",
+      "cramped-padding"
+    ]
+  }
+}

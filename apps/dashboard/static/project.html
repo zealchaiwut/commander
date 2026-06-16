@@ -8182,9 +8182,14 @@
       flex: 1; min-width: 120px;
       background: var(--surface-2); border-radius: 5px; height: 6px; overflow: hidden;
     }
-    .rm-progress-fill { height: 100%; background: var(--text); border-radius: 5px; }
+    .rm-progress-fill { height: 100%; width: var(--rm-pct, 0%); border-radius: 5px; }
+    .rm-prog-low  { background: var(--red); }
+    .rm-prog-mid  { background: var(--amber); }
+    .rm-prog-high { background: var(--green); }
     .rm-progress-text { font-size: 12px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
     .rm-due { font-size: 12px; color: var(--text-muted); }
+    .rm-empty-title { font-size: 15px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .rm-empty-sub  { font-size: 13px; color: var(--text-sub); }
     .rm-card-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
     .rm-btn {
       font-size: 12px; padding: 4px 10px; border-radius: 5px;
@@ -8213,6 +8218,7 @@
     .rm-history-row:last-child { border-bottom: none; }
     .rm-history-row-title { flex: 1; color: var(--text-muted); }
     .rm-empty { text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: 14px; }
+    .rm-empty > i { font-size: 28px; display: block; margin-bottom: 8px; }
     .rm-stale-notice {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border: 1px solid var(--amber, #b45309);
@@ -28677,7 +28683,10 @@ function _rmRender() {
     milestones.forEach(function(ms) { h += _rmCardHtml(ms); });
     h += '</div>';
   } else if (closed.length === 0) {
-    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>No milestones yet.</div>';
+    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>'
+       + '<div class="rm-empty-title">No milestones yet</div>'
+       + '<div class="rm-empty-sub">Plan your roadmap by adding a milestone above.</div>'
+       + '</div>';
   }
   if (closed.length > 0) {
     h += '<div class="rm-history-section">';
@@ -28705,7 +28714,9 @@ function _rmCardHtml(ms) {
   var prog = ms.progress || {};
   var done = prog.completed || 0;
   var total = prog.total || 0;
+  var open = total - done;
   var pct = total > 0 ? Math.round(done / total * 100) : 0;
+  var progClass = pct <= 33 ? 'rm-prog-low' : pct <= 66 ? 'rm-prog-mid' : 'rm-prog-high';
   var due = ms.due_on ? ms.due_on.substring(0, 10) : null;
   var active = ms.active;
   var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '">';
@@ -28715,8 +28726,8 @@ function _rmCardHtml(ms) {
   h += '</div>';
   if (ms.description) h += '<div class="rm-card-desc">' + _rmEsc(ms.description) + '</div>';
   h += '<div class="rm-card-meta">';
-  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill" style="width:' + pct + '%"></div></div>';
-  h += '<span class="rm-progress-text">' + done + ' / ' + total + '</span>';
+  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill ' + progClass + '" style="--rm-pct:' + pct + '%"></div></div>';
+  h += '<span class="rm-progress-text">' + done + ' closed \xb7 ' + open + ' open</span>';
   if (due) h += '<span class="rm-due"><i class="ti ti-calendar-event"></i> ' + due + '</span>';
   h += '</div><div class="rm-card-actions">';
   if (!active) h += '<button class="rm-btn" onclick="_rmMarkActive(' + ms.number + ')">Mark active</button>';

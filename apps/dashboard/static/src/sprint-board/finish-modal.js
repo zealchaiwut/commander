@@ -24,7 +24,6 @@ export function _fsOpen() {
 
 export function _fsClose() {
   document.getElementById("fs-backdrop").classList.add("hidden");
-  document.getElementById("fs-modal").classList.remove("hidden");
   document.getElementById("fs-modal").classList.add("hidden");
   _clearBodyInert();
   // Close the EventSource so we don't leak connections, but keep _fsActiveJob

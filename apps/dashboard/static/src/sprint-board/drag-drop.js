@@ -880,11 +880,14 @@ export function _smgmtBoardLock(message, opts) {
 
 export function _smgmtBoardProgress(done, total) {
   if (_smgmtBoardOverlayHasProgress) {
+    const d = Number(done || 0);
+    const t = Number(total || 0);
     patchProgressActivity('smgmt-op-pa-host', {
-      done: Number(done || 0),
-      total: Number(total || 0),
+      done: d,
+      total: t,
       mode: 'bar',
       status: 'running',
+      current: t > 0 ? `${d} of ${t}` : '',
     }, { id: BOARD_OVERLAY_PA_ID });
     return;
   }

@@ -16255,9 +16255,21 @@ function _smgmtBulkReEstimate(issueNums) {
   _smgmtBulkReEstRun(issueNums);
 }
 
+function _smgmtBulkReEstResetOverlayChrome() {
+  const spinnerEl = document.getElementById('smgmt-move-spinner');
+  if (spinnerEl) spinnerEl.style.display = '';
+  document.querySelectorAll('.smgmt-op-close-btn').forEach((b) => b.remove());
+  const doneEl = document.getElementById('smgmt-op-done');
+  const errorEl = document.getElementById('smgmt-op-error');
+  if (doneEl) { doneEl.hidden = true; doneEl.textContent = ''; }
+  if (errorEl) { errorEl.hidden = true; errorEl.innerHTML = ''; }
+}
+
 async function _smgmtBulkReEstRun(issueNums) {
   const total = issueNums.length;
   _bulkReEst = { running: true, done: 0, total, failed: [], finished: false };
+
+  _smgmtBulkReEstResetOverlayChrome();
 
   // Open shared progress component in bar mode
   _smgmtBoardLock(`0 of ${total}`, { progress: true, total, clearLog: true });
@@ -16426,20 +16438,12 @@ function _smgmtBulkReEstReopen() {
 
 function _smgmtBulkReEstClose() {
   _bulkReEst = { running: false, done: 0, total: 0, failed: [], finished: false };
-  // Restore spinner visibility
-  const spinnerEl = document.getElementById('smgmt-move-spinner');
-  if (spinnerEl) spinnerEl.style.display = '';
+  _smgmtBulkReEstResetOverlayChrome();
   // Hide extra elements
   const bgBtn     = document.getElementById('smgmt-op-bg-btn');
   const currentEl = document.getElementById('smgmt-op-current');
-  const doneEl    = document.getElementById('smgmt-op-done');
-  const errorEl   = document.getElementById('smgmt-op-error');
   if (bgBtn)     bgBtn.hidden    = true;
   if (currentEl) currentEl.hidden = true;
-  if (doneEl)    doneEl.hidden   = true;
-  if (errorEl)   errorEl.hidden  = true;
-  // Remove any dynamically added close buttons
-  document.querySelectorAll('.smgmt-op-close-btn').forEach(b => b.remove());
   _smgmtBoardUnlock();
 }
 
@@ -20794,7 +20798,7 @@ function _bcRenderPostingProgress(tickets, postingTicketIndices) {
     });
 
   if (typeof mountProgressActivity === 'function') {
-    mountProgressActivity(pgWrap, {
+    const payload = {
       status: resolved === total && total > 0 ? 'done' : 'running',
       mode: 'bar',
       done: resolved,
@@ -20802,9 +20806,15 @@ function _bcRenderPostingProgress(tickets, postingTicketIndices) {
       current,
       result: resolved === total && total > 0 ? `Posted ${resolved} of ${total}` : '',
       log_tail: logTail,
-    }, {
-      id: 'bc-posting-pa',
-    });
+    };
+    const existing = typeof getProgressActivityPayload === 'function'
+      ? getProgressActivityPayload('bc-posting-progress')
+      : null;
+    if (existing && typeof patchProgressActivity === 'function') {
+      patchProgressActivity('bc-posting-progress', payload, { id: 'bc-posting-pa' });
+    } else {
+      mountProgressActivity(pgWrap, payload, { id: 'bc-posting-pa' });
+    }
   }
 
   // Show component, hide ticket list and parallel banner

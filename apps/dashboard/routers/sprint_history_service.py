@@ -488,19 +488,45 @@ def _record_from_history(rec: dict) -> dict:
 
 
 def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
-    """Build the response row from a `sprints` lifecycle row + DB/disk enrichment."""
+    """Build the response row from a `sprints` lifecycle row + DB/disk enrichment.
+
+    Uses a lazy-ingest pattern (issue #1160): when run_ingested_at is NULL and
+    a disk artifact exists, ingest it into the DB first so all subsequent reads
+    are served from SQLite only — no dual render-time read path.
+    """
     label = row.get("label")
+    if not row.get("run_ingested_at"):
+        state = _read_state_file(sprints_dirs, label)
+        if state is not None:
+            try:
+                summary_path = _find_summary_path(sprints_dirs, label)
+                _db().ingest_sprint_run_artifact(
+                    label, state,
+                    project=row.get("project") or "",
+                    summary_path=summary_path,
+                )
+                refreshed = _db().get_sprint(label)
+                if refreshed:
+                    row = refreshed
+            except Exception:
+                pass
+    from . import sprint_artifact_service  # noqa: PLC0415
     if row.get("run_ingested_at"):
-        from . import sprint_artifact_service  # noqa: PLC0415
         enrich = sprint_artifact_service.enrichment_from_db_row(row)
     else:
-        enrich = _enrich_from_state(label, sprints_dirs)
+        enrich = sprint_artifact_service.enrichment_from_db_row({})
+    # Plan files are not run artifacts and are never ingested — read them at
+    # render time to supply bulk_complete lifecycle signals (plan_status,
+    # plan-derived end_reason) that have no DB column.
+    plan = _read_plan_file(sprints_dirs, label) or {}
+    if not enrich.get("plan_status"):
+        enrich["plan_status"] = plan.get("state") or plan.get("status")
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
     from . import sprint_state  # noqa: PLC0415
     lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
-    end_reason = row.get("end_reason") or enrich.get("end_reason")
+    end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
     issues = enrich["issues"]
     lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]

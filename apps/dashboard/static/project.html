@@ -2175,6 +2175,16 @@
     .iss-chip.notrun  { color: var(--amber); background: transparent; border: 1px solid var(--amber-bg); }
     .iss-time { margin-left: auto; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
 
+    /* Sprint History gantt horizontal-scroll container (issue #1197) */
+    .hist-gantt { overflow-x: auto; }
+
+    /* Mobile: stack issue-list title above time metadata (issue #1197) */
+    @media (max-width: 600px) {
+      .iss-row    { flex-wrap: wrap; }
+      .iss-title  { flex: 1 1 100%; }
+      .iss-time   { flex: 0 0 100%; margin-left: 0; margin-top: 4px; }
+    }
+
     /* Lock note on terminal sprints */
     .lock-note {
       display: flex; align-items: center; gap: 7px;

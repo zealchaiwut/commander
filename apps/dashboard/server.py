@@ -8294,7 +8294,12 @@ def _outcome_from_ingested_row(
         sprint_status = "completed"
 
     done_count = sum(1 for i in result_issues if i["outcome"] == "done")
-    failed_count = sum(1 for i in result_issues if i["outcome"] == "failed")
+    # Prefer materialized summary_failure_count when present (AC4 — stable read
+    # without re-derivation from issues_json); fall back to counting result_issues.
+    _mat_failure = row.get("summary_failure_count")
+    failed_count = _mat_failure if _mat_failure is not None else sum(
+        1 for i in result_issues if i["outcome"] == "failed"
+    )
     skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
 
     surl = enrich.get("summary_issue_url")

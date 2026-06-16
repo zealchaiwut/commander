@@ -751,6 +751,9 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("post_sprint_json", "TEXT"),
     ("estimate_accuracy", "REAL"),
     ("run_ingested_at", "TEXT"),
+    ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -798,6 +801,9 @@ def ingest_sprint_run_artifact(
                 fields["post_sprint_json"],
                 fields["estimate_accuracy"],
                 ingested_at,
+                fields["summary_settled_done"],
+                fields["summary_uat_count"],
+                fields["summary_failure_count"],
             ]
             project_sql = ""
             if (project or "").strip():
@@ -815,7 +821,10 @@ def ingest_sprint_run_artifact(
                     pr_number = ?,
                     post_sprint_json = ?,
                     estimate_accuracy = ?,
-                    run_ingested_at = ?{project_sql}
+                    run_ingested_at = ?,
+                    summary_settled_done = ?,
+                    summary_uat_count = ?,
+                    summary_failure_count = ?{project_sql}
                 WHERE label = ?
                 """,
                 tuple(updates) + (label,),
@@ -826,8 +835,10 @@ def ingest_sprint_run_artifact(
                 INSERT INTO sprints (label, project, state, created_at, run_ingested_at,
                                      issues_json, tokens, wall_clock_secs,
                                      reconciliation_json, summary_issue_url, summary_path,
-                                     pr_number, post_sprint_json, estimate_accuracy)
-                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     pr_number, post_sprint_json, estimate_accuracy,
+                                     summary_settled_done, summary_uat_count,
+                                     summary_failure_count)
+                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     label,
@@ -843,6 +854,9 @@ def ingest_sprint_run_artifact(
                     fields["pr_number"],
                     fields["post_sprint_json"],
                     fields["estimate_accuracy"],
+                    fields["summary_settled_done"],
+                    fields["summary_uat_count"],
+                    fields["summary_failure_count"],
                 ),
             )
         conn.commit()

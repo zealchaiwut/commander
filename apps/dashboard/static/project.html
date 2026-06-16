@@ -6781,6 +6781,7 @@
     }
     .logs-chip:hover { background: var(--surface-2); color: var(--text); }
     .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .logs-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     /* Errors-only overlay pill reads in red when active (distinct from the blue
        source filters); deck filter=errors lands here. */
     .logs-chip--errors.active { background: var(--red-bg); border-color: var(--red); color: var(--red); }
@@ -6809,6 +6810,7 @@
     .logs-view-btn:last-child { border-right: none; }
     .logs-view-btn:hover { background: var(--surface-2); color: var(--text); }
     .logs-view-btn.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+    .logs-view-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; z-index: 1; position: relative; }
     .lsr-label { font-size: 11px; color: var(--text-sub); font-weight: 500; }
     .lsr-input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); width: 100%; }
     .lsr-input:focus { outline: none; border-color: var(--blue); }
@@ -6821,6 +6823,16 @@
     .lsr-truncation { padding: 8px 12px; font-size: 11px; color: var(--text-sub); background: var(--surface-2); text-align: center; }
     .logs-body { flex: 1; overflow-y: auto; min-height: 0; }
     .logs-empty { padding: 40px 20px; text-align: center; color: var(--text-sub); font-size: 13px; }
+    /* Loading skeleton for activity list */
+    .logs-skeleton { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .logs-skeleton-row {
+      height: 36px; border-radius: 6px;
+      background: var(--surface-2); opacity: .7;
+      animation: logs-shimmer 1.4s ease-in-out infinite;
+    }
+    .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
+    .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
+    @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
     /* Logs › Issues view */
     .logs-issue-group { border-bottom: 1px solid var(--border); }
     .logs-issue-group-label {
@@ -6841,6 +6853,7 @@
     }
     .logs-issue-row:first-of-type { border-top: none; }
     .logs-issue-row:hover { background: var(--surface-hover); }
+    .logs-issue-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
     .logs-issue-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
     .logs-issue-title {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -6921,6 +6934,7 @@
       padding: 10px 16px; cursor: pointer; user-select: none;
     }
     .evl-bundle-header:hover { background: var(--surface-hover); }
+    .evl-bundle-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
     .evl-bundle-row.evl-single .evl-bundle-header { cursor: default; }
     .evl-bundle-row.evl-single .evl-bundle-header:hover { background: transparent; }
     .evl-headline { font-size: 13px; font-weight: 500; color: var(--text); flex-shrink: 0; }
@@ -7149,6 +7163,19 @@
     }
     .evl-sprint-cleanup:hover { border-color: var(--purple); background: var(--purple-bg); }
     .evl-sprint-cleanup:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* List filter fade transition */
+    .evl-list { transition: opacity .15s ease; }
+    .evl-list.logs-filtering { opacity: .5; }
+    .evl-bundle-row { transition: opacity .12s ease; }
+
+    /* Suppress all Logs tab motion when user prefers reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .logs-chip, .logs-view-btn, .logs-issue-row, .logs-run-header,
+      .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
+      .evl-chevron, .logs-run-chevron, .logs-live-dot,
+      .logs-skeleton-row { transition: none !important; animation: none !important; }
+    }
 
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
@@ -8680,18 +8707,18 @@
                 <span class="logs-chip-label">Sprint</span>
                 <div id="logs-chips-sprint" style="display:contents"></div>
               </div>
-              <div class="logs-chip-group">
+              <div class="logs-chip-group" role="group" aria-label="Filter by role">
                 <span class="logs-chip-label">Role</span>
-                <button class="logs-chip" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
-                <button class="logs-chip" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
-                <button class="logs-chip" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="coder" onclick="logsToggleChip(this)">coder</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="tester" onclick="logsToggleChip(this)">tester</button>
+                <button class="logs-chip" aria-pressed="false" data-group="agent_role" data-value="ba" onclick="logsToggleChip(this)">ba</button>
               </div>
-              <div class="logs-chip-group">
+              <div class="logs-chip-group" role="group" aria-label="Filter by level">
                 <span class="logs-chip-label">Level</span>
-                <button class="logs-chip" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
-                <button class="logs-chip" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
-                <button class="logs-chip" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
-                <button class="logs-chip" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="dispatch" onclick="logsToggleChip(this)">dispatch</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="success" onclick="logsToggleChip(this)">success</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="warn" onclick="logsToggleChip(this)">warn</button>
+                <button class="logs-chip" aria-pressed="false" data-group="event_level" data-value="fail" onclick="logsToggleChip(this)">fail</button>
               </div>
               <button class="logs-chip logs-tags-see-more-btn hidden" id="logs-tags-see-more" onclick="_logsTagsToggle()">See more</button>
             </div>
@@ -8719,12 +8746,12 @@
                   <i class="ti ti-search"></i> Search
                 </button>
               </div>
-              <div id="logs-evl-source-group" class="logs-chip-group" style="margin-left:8px">
-                <button class="logs-chip active" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
-                <button class="logs-chip" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
-                <button class="logs-chip" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
-                <button class="logs-chip" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
-                <button class="logs-chip logs-chip--errors" id="evl-filter-errors" onclick="evlToggleErrorsOnly()" title="Show only failures/errors">Errors</button>
+              <div id="logs-evl-source-group" class="logs-chip-group" role="group" aria-label="Filter by source" style="margin-left:8px">
+                <button class="logs-chip active" aria-pressed="true" id="evl-filter-all" onclick="evlSetFilter('all')">All</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-agent" onclick="evlSetFilter('agent')">Agent &amp; Sprint</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-dashboard" onclick="evlSetFilter('dashboard')">Dashboard</button>
+                <button class="logs-chip" aria-pressed="false" id="evl-filter-github" onclick="evlSetFilter('github')">GitHub</button>
+                <button class="logs-chip logs-chip--errors" aria-pressed="false" id="evl-filter-errors" onclick="evlToggleErrorsOnly()" title="Show only failures/errors">Errors</button>
               </div>
               <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()" style="margin-left:4px">
                 <i class="ti ti-refresh"></i>
@@ -8747,7 +8774,12 @@
             <div id="logs-activity">
               <div id="evl-stale-banner" class="hidden"></div>
               <div class="evl-list" id="evl-list">
-                <div class="logs-empty" id="evl-empty">Loading activity…</div>
+                <div class="logs-skeleton" id="evl-skeleton">
+                  <div class="logs-skeleton-row"></div>
+                  <div class="logs-skeleton-row"></div>
+                  <div class="logs-skeleton-row"></div>
+                </div>
+                <div class="logs-empty hidden" id="evl-empty">No events</div>
               </div>
             </div>
             <!-- Search panel (issue #785) -->
@@ -22497,6 +22529,7 @@ function _logsPopulateSprintChips() {
     } else {
       const btn = document.createElement('button');
       btn.className = 'logs-chip';
+      btn.setAttribute('aria-pressed', 'false');
       btn.dataset.group = 'sprint_label';
       btn.dataset.value = label;
       btn.dataset.tagRecency = recency;
@@ -22554,6 +22587,7 @@ function logsToggleChip(btn) {
   const set = _logsState.chips[group];
   if (set.has(value)) { set.delete(value); btn.classList.remove('active'); }
   else { set.add(value); btn.classList.add('active'); }
+  btn.setAttribute('aria-pressed', btn.classList.contains('active') ? 'true' : 'false');
   logsRenderTimeline();
   if (_logsState.viewMode === 'raw') logsLoadRawView();
 }
@@ -23312,26 +23346,61 @@ function evlRender() {
   const listEl = document.getElementById('evl-list');
   if (!listEl) return;
 
+  // Hide skeleton once we have data (loaded or empty)
+  const skEl = document.getElementById('evl-skeleton');
+  const emEl = document.getElementById('evl-empty');
+
   if (!_evlState.events) {
-    listEl.innerHTML = '<div class="logs-empty">Loading activity…</div>';
+    if (skEl) skEl.classList.remove('hidden');
+    if (emEl) emEl.classList.add('hidden');
     return;
   }
 
-  listEl.innerHTML = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  if (skEl) skEl.classList.add('hidden');
+
+  const rendered = evlRenderTimeline(_evlState.events, _evlState.sourceFilter);
+  // evlRenderTimeline returns empty-state HTML when empty; inject after skeleton/empty els
+  const staticEls = listEl.querySelectorAll('#evl-skeleton, #evl-empty');
+  // Remove any previous dynamic content
+  [...listEl.children].forEach(function(c) {
+    if (c.id !== 'evl-skeleton' && c.id !== 'evl-empty') c.remove();
+  });
+
+  if (!rendered || rendered.includes('logs-empty')) {
+    // Show the dedicated empty element
+    if (emEl) { emEl.textContent = 'No events'; emEl.classList.remove('hidden'); }
+  } else {
+    if (emEl) emEl.classList.add('hidden');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = rendered;
+    while (tmp.firstChild) listEl.appendChild(tmp.firstChild);
+  }
+
   const _errBtn = document.getElementById('evl-filter-errors');
-  if (_errBtn) _errBtn.classList.toggle('active', _evlState.errorsOnly);
+  if (_errBtn) {
+    _errBtn.classList.toggle('active', _evlState.errorsOnly);
+    _errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
+  }
   _evlUpdateBanner();
 }
 
 // Errors-only overlay toggle (also seeded by the deck `filter=errors` deep link).
 function evlToggleErrorsOnly() {
   _evlState.errorsOnly = !_evlState.errorsOnly;
+  var errBtn = document.getElementById('evl-filter-errors');
+  if (errBtn) errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
   evlRender();
 }
 
 async function evlFetch() {
   if (!_projectData || _evlState.loading) return;
   _evlState.loading = true;
+
+  // Show skeleton while loading
+  const skEl = document.getElementById('evl-skeleton');
+  const emEl = document.getElementById('evl-empty');
+  if (skEl) skEl.classList.remove('hidden');
+  if (emEl) emEl.classList.add('hidden');
 
   const slug = (_projectData.repo || '').split('/').pop();
   try {
@@ -23374,7 +23443,10 @@ function evlSetFilter(filter) {
   _evlState.sourceFilter = filter;
   ['all', 'agent', 'dashboard', 'github'].forEach(function(f) {
     var el = document.getElementById('evl-filter-' + f);
-    if (el) el.classList.toggle('active', f === filter);
+    if (el) {
+      el.classList.toggle('active', f === filter);
+      el.setAttribute('aria-pressed', f === filter ? 'true' : 'false');
+    }
   });
   evlRender();
 }
@@ -23724,11 +23796,11 @@ function _evlDurationPill(ev) {
 }
 
 function evlRenderTimeline(events, filter) {
-  if (!events || events.length === 0) return '<div class="logs-empty">No events found.</div>';
+  if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
 
   var visible = events.filter(function(e) { return _evlMatchesFilter(e, filter); });
 
-  if (visible.length === 0) return '<div class="logs-empty">No events for this filter.</div>';
+  if (visible.length === 0) return '<div class="logs-empty">No events</div>';
 
   // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
   var sprintFeatMap = {};
@@ -23800,7 +23872,7 @@ function evlRenderTimeline(events, filter) {
     }
   }
 
-  return html || '<div class="logs-empty">No events for this filter.</div>';
+  return html || '<div class="logs-empty">No events</div>';
 }
 
 // ── Branch cleanup helpers (issue #634) ──────────────────────────────────────

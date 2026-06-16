@@ -6901,6 +6901,10 @@
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
     }
+    @media (max-width: 600px) {
+      .logs-run-id { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .logs-ticket-fail { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-wrap: nowrap; }
+    }
     /* ── Events Activity Log (issue #633) ── */
     .evl-bundle-row { border-bottom: 1px solid var(--border); }
     .evl-bundle-header {

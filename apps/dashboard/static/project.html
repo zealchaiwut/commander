@@ -1136,18 +1136,17 @@
 
     /* ── Deploy tab (issue #726, redesigned #1072) ── */
     .deploy-grid {
-      display: flex; flex-direction: column; gap: 0;
-      max-width: 900px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+      display: flex; flex-direction: column; gap: 8px;
+      max-width: 900px;
     }
-    .deploy-tab-intro { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 20px; max-width: 720px; }
+    .deploy-tab-intro { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0 0 24px; max-width: 720px; }
     .deploy-card {
-      background: var(--surface); border-bottom: 1px solid var(--border);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
       display: flex; flex-direction: column;
     }
-    .deploy-card:last-child { border-bottom: none; }
     /* Primary env row: name | runstate | port | host badge | actions */
     .deploy-card__row {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       padding: 12px 16px; transition: background .15s;
     }
     .deploy-card__row:hover { background: var(--surface-hover); }
@@ -1160,13 +1159,13 @@
     .deploy-card__project { font-size: 12px; color: var(--text-muted); font-weight: 500; }
     .deploy-card__badge {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-      padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
     }
     .deploy-card__badge--local  { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
     .deploy-card__badge--render { background: var(--purple-bg); color: var(--purple); border-color: transparent; }
     .deploy-card__alert {
-      display: flex; gap: 10px; align-items: flex-start;
-      padding: 10px 12px; border-radius: 6px;
+      display: flex; gap: 8px; align-items: flex-start;
+      padding: 12px 16px; border-radius: 6px;
       background: var(--amber-bg); border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
       color: var(--text); font-size: 12.5px; line-height: 1.45;
       margin: 0 16px 8px;
@@ -1174,17 +1173,17 @@
     .deploy-card__alert .ti { color: var(--amber); font-size: 16px; flex-shrink: 0; margin-top: 1px; }
     .deploy-card__alert ul { margin: 4px 0 0; padding-left: 18px; }
     .deploy-card__alert li { margin: 2px 0; }
-    .deploy-card__meta { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; padding: 0 16px 12px; }
+    .deploy-card__meta { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; padding: 0 16px 12px; }
     .deploy-card__meta-row { display: flex; gap: 8px; align-items: baseline; }
     .deploy-card__meta-label { color: var(--text-muted); min-width: 92px; flex-shrink: 0; }
     .deploy-card__meta-val { color: var(--text); word-break: break-word; }
     .deploy-card__meta-val.is-mono { font-family: var(--mono); font-size: 12px; }
-    .deploy-card__commit-msg { color: var(--text-muted); font-size: 11.5px; margin-left: 6px; }
+    .deploy-card__commit-msg { color: var(--text-muted); font-size: 11.5px; margin-left: 8px; }
     /* Editable run folder + port rows (issue #769) */
     .deploy-field-val { flex: 1; min-width: 0; }
     .deploy-field-edit {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 24px; height: 24px; flex-shrink: 0; padding: 0;
+      width: 44px; height: 44px; flex-shrink: 0; padding: 0;
       border: 1px solid transparent; border-radius: 6px;
       background: transparent; color: var(--text-sub); cursor: pointer;
       transition: background .15s, color .15s, border-color .15s;
@@ -1194,7 +1193,7 @@
     .deploy-card__meta-row.is-editing { align-items: flex-start; }
     .deploy-field-edit-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0; }
     .deploy-field-input {
-      flex: 1; min-width: 140px; min-height: 32px; padding: 6px 10px;
+      flex: 1; min-width: 140px; min-height: 32px; padding: 8px 12px;
       font-family: var(--mono); font-size: 12px; color: var(--text);
       background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
     }
@@ -1203,11 +1202,11 @@
     .deploy-field-error { flex-basis: 100%; color: var(--red); font-size: 12px; }
     .status-pill {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-      padding: 2px 10px; border-radius: 999px;
-      background: var(--surface-2); color: var(--text-sub); margin-left: auto;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-muted); margin-left: auto;
       transition: background .2s, color .2s;
     }
-    .status-pill--queued   { background: var(--surface-2); color: var(--text-sub); }
+    .status-pill--queued   { background: var(--surface-2); color: var(--text-muted); }
     .status-pill--building { background: var(--amber-bg); color: var(--amber); }
     .status-pill--live     { background: var(--green-bg); color: var(--green); }
     .status-pill--idle     { background: var(--green-bg); color: var(--green); }
@@ -1215,9 +1214,9 @@
     /* ── Run-state pill (issue #771) ── running / stopped / idle ── */
     .runstate-pill {
       font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-      padding: 2px 10px; border-radius: 999px;
-      background: var(--surface-2); color: var(--text-sub);
-      display: inline-flex; align-items: center; gap: 6px;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface-2); color: var(--text-muted);
+      display: inline-flex; align-items: center; gap: 4px;
       transition: background .2s, color .2s;
     }
     .runstate-pill::before {
@@ -1226,11 +1225,11 @@
     }
     .runstate-pill--running { background: var(--green-bg); color: var(--green); }
     .runstate-pill--stopped { background: var(--red-bg); color: var(--red); }
-    .runstate-pill--idle    { background: var(--surface-2); color: var(--text-sub); }
+    .runstate-pill--idle    { background: var(--surface-2); color: var(--text-muted); }
     .deploy-card__actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
     .deploy-btn {
-      display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
-      padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px;
+      display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+      padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px;
       background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600;
       cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s;
     }
@@ -1247,16 +1246,16 @@
       font-size: 12px; color: var(--text-sub); cursor: help;
     }
     .deploy-card__confirm {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
-      padding: 10px 12px; font-size: 13px; color: var(--text);
+      padding: 12px 16px; font-size: 13px; color: var(--text);
     }
     .deploy-card__confirm-msg { flex: 1; min-width: 160px; }
     .deploy-card__log {
       font-family: var(--mono); font-size: 12px; line-height: 1.5;
       background: var(--surface-2); color: var(--text-sub);
       border: 1px solid var(--border); border-radius: 8px;
-      padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+      padding: 12px; white-space: pre-wrap; word-break: break-word;
       max-height: 220px; overflow: auto; margin: 0;
     }
     .deploy-card__log.is-error { color: var(--red); }
@@ -1271,7 +1270,7 @@
     }
     .deploy-log--collapsed .deploy-log__head { border-bottom: none; }
     .deploy-log__status {
-      display: inline-flex; align-items: center; gap: 6px;
+      display: inline-flex; align-items: center; gap: 8px;
       font-size: 11px; font-weight: 600; letter-spacing: .02em;
       padding: 2px 8px; border-radius: 999px;
       background: var(--surface); color: var(--text-muted);
@@ -1281,7 +1280,7 @@
     .deploy-log__status--failure { background: var(--red-bg); color: var(--red); }
     .deploy-log__toggle {
       margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
-      width: 24px; height: 24px; padding: 0; border-radius: 6px;
+      width: 44px; height: 44px; padding: 0; border-radius: 6px;
       border: 1px solid transparent; background: transparent;
       color: var(--text-muted); cursor: pointer;
     }
@@ -1289,7 +1288,7 @@
     .deploy-log__toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .deploy-log__body {
       font-family: var(--mono); font-size: 12px; line-height: 1.5;
-      color: var(--text-sub); padding: 10px 12px; margin: 0;
+      color: var(--text-sub); padding: 12px; margin: 0;
       max-height: 220px; overflow: auto;
       white-space: pre-wrap; word-break: break-word;
     }
@@ -1298,8 +1297,8 @@
     .deploy-log__line--error { color: var(--red); font-weight: 600; }
     /* Scroll-to-bottom affordance (AC4 issue #1074) */
     .deploy-log__scroll-btn {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      padding: 4px 10px; margin: 4px 12px 8px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 4px 12px; margin: 4px 12px 8px; border-radius: 6px;
       background: var(--surface); border: 1px solid var(--border);
       color: var(--text-muted); font-size: 11.5px; cursor: pointer;
       font-family: inherit; width: fit-content;
@@ -1308,8 +1307,8 @@
     .deploy-log__scroll-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     /* Loading spinner for deploy data fetch (AC5 issue #1074) */
     .deploy-loading {
-      display: flex; align-items: center; gap: 10px;
-      padding: 20px 16px; color: var(--text-muted); font-size: 13px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 24px 16px; color: var(--text-muted); font-size: 13px;
     }
     .deploy-loading__spinner {
       width: 18px; height: 18px; border-radius: 50%;

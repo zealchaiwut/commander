@@ -67,6 +67,20 @@ function _fsPreviewSlot() {
   return document.getElementById("fs-content");
 }
 
+function _fsRenderPreviewLoading(current) {
+  const loading = document.getElementById("fs-loading");
+  if (!loading) return;
+  loading.innerHTML = renderProgressActivity({
+    status: "running",
+    mode: "indeterminate",
+    current: current || "Loading preview…",
+  }, {
+    id: "fs-preview-pa",
+    hideLog: true,
+  });
+  loading.classList.remove("hidden");
+}
+
 /** Switch modal body to ProgressActivity bar mode and set footer buttons. */
 function _fsEnterProgressView(snap) {
   document.getElementById("fs-loading").classList.add("hidden");
@@ -250,7 +264,7 @@ export async function smgmtFinishSprint(label) {
 
   document.getElementById("fs-modal-title").textContent =
     `Merge ${sprintLabelDisplay(label)}?`;
-  document.getElementById("fs-loading").classList.remove("hidden");
+  _fsRenderPreviewLoading("Loading preview…");
   document.getElementById("fs-content").classList.add("hidden");
   document.getElementById("fs-error").classList.add("hidden");
   document.getElementById("fs-error").textContent = "";

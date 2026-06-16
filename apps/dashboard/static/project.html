@@ -8164,6 +8164,18 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 16px;
+      transition: box-shadow .15s, border-color .15s, background .15s;
+      cursor: default;
+    }
+    .rm-card:hover {
+      background: var(--surface-hover);
+      border-color: var(--text-sub);
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .rm-card:focus { outline: none; }
+    .rm-card:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
     }
     .rm-card.rm-active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
     .rm-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -8179,7 +8191,10 @@
       flex: 1; min-width: 120px;
       background: var(--surface-2); border-radius: 5px; height: 6px; overflow: hidden;
     }
-    .rm-progress-fill { height: 100%; background: var(--text); border-radius: 5px; }
+    .rm-progress-fill { height: 100%; background: var(--text); border-radius: 5px; transition: width .6s ease; }
+    @media (prefers-reduced-motion: reduce) {
+      .rm-progress-fill { transition: none; }
+    }
     .rm-progress-text { font-size: 12px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap; }
     .rm-due { font-size: 12px; color: var(--text-muted); }
     .rm-card-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
@@ -8209,7 +8224,31 @@
     }
     .rm-history-row:last-child { border-bottom: none; }
     .rm-history-row-title { flex: 1; color: var(--text-muted); }
-    .rm-empty { text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: 14px; }
+    .rm-empty { display: flex; flex-direction: column; align-items: center; padding: 48px 24px; gap: 12px; }
+    .rm-empty-icon { font-size: 32px; color: var(--text-sub); opacity: .6; }
+    .rm-empty-title { font-size: 15px; font-weight: 600; color: var(--text-sub); margin: 0; }
+    .rm-empty-sub { font-size: 13px; color: var(--text-muted); margin: 0; line-height: 1.55; max-width: 280px; text-align: center; }
+    /* Skeleton loading state */
+    .rm-skeleton-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .rm-skeleton-pulse {
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--surface-2) 0%, var(--border) 50%, var(--surface-2) 100%);
+      background-size: 200% 100%;
+      animation: rmSkeletonPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes rmSkeletonPulse {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .rm-skeleton-pulse { animation: none; background: var(--surface-2); }
+    }
+    .rm-skeleton-title { height: 16px; width: 60%; }
+    .rm-skeleton-body { height: 12px; width: 85%; }
+    .rm-skeleton-progress { height: 6px; width: 100%; }
     .rm-stale-notice {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; border: 1px solid var(--amber);
@@ -28688,7 +28727,10 @@ function roadmapInit() {
   if (_rmLoaded) { _rmRender(); sugInit(); return; }
   _rmLoaded = true;
   var root = document.getElementById('rm-root');
-  if (root) root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted)">Loading…</div>';
+  if (root) root.innerHTML = '<div class="rm-list">'
+    + '<div class="rm-skeleton-card"><div class="rm-skeleton-pulse rm-skeleton-title"></div><div class="rm-skeleton-pulse rm-skeleton-body"></div><div class="rm-skeleton-pulse rm-skeleton-progress"></div></div>'
+    + '<div class="rm-skeleton-card"><div class="rm-skeleton-pulse rm-skeleton-title" style="width:45%"></div><div class="rm-skeleton-pulse rm-skeleton-progress"></div></div>'
+    + '</div>';
   var repo = _cachedFullRepo[_slug] || _slug;
   fetch('/api/roadmap?repo=' + encodeURIComponent(repo))
     .then(function(r) { return r.json(); })
@@ -28740,7 +28782,11 @@ function _rmRender() {
     milestones.forEach(function(ms) { h += _rmCardHtml(ms); });
     h += '</div>';
   } else if (closed.length === 0) {
-    h += '<div class="rm-empty"><i class="ti ti-map-off"></i>No milestones yet.</div>';
+    h += '<div class="rm-empty">'
+      + '<i class="ti ti-map-2 rm-empty-icon"></i>'
+      + '<p class="rm-empty-title">No milestones yet</p>'
+      + '<p class="rm-empty-sub">Create your first milestone to start tracking progress toward your goals.</p>'
+      + '</div>';
   }
   if (closed.length > 0) {
     h += '<div class="rm-history-section">';
@@ -28761,6 +28807,7 @@ function _rmRender() {
     h += '</div>';
   }
   root.innerHTML = h;
+  _rmAnimateProgress();
   _rmInitDnd();
 }
 
@@ -28771,14 +28818,17 @@ function _rmCardHtml(ms) {
   var pct = total > 0 ? Math.round(done / total * 100) : 0;
   var due = ms.due_on ? ms.due_on.substring(0, 10) : null;
   var active = ms.active;
-  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '">';
+  var ariaLabel = 'Milestone: ' + _rmEsc(ms.title) + (active ? ', active' : '') + ', ' + done + ' of ' + total + ' tickets done';
+  var h = '<div class="rm-card' + (active ? ' rm-active' : '') + '" draggable="true" id="rm-card-' + ms.number + '" data-ms="' + ms.number + '"'
+    + ' tabindex="0" role="article" aria-label="' + ariaLabel + '"'
+    + ' onkeydown="_rmCardKeydown(event,' + ms.number + ')">';
   h += '<div class="rm-card-head">';
   h += '<span class="rm-card-title">' + _rmEsc(ms.title) + '</span>';
   if (active) h += '<span class="rm-active-badge">Active</span>';
   h += '</div>';
   if (ms.description) h += '<div class="rm-card-desc">' + _rmEsc(ms.description) + '</div>';
   h += '<div class="rm-card-meta">';
-  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill" style="width:' + pct + '%"></div></div>';
+  h += '<div class="rm-progress-wrap"><div class="rm-progress-fill" data-pct="' + pct + '" style="width:0%"></div></div>';
   h += '<span class="rm-progress-text">' + done + ' / ' + total + '</span>';
   if (due) h += '<span class="rm-due"><i class="ti ti-calendar-event"></i> ' + due + '</span>';
   h += '</div><div class="rm-card-actions">';
@@ -28913,6 +28963,25 @@ function _rmPersistOrder() {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({order: order})
   }).catch(function() {});
+}
+
+function _rmAnimateProgress() {
+  var fills = document.querySelectorAll('.rm-progress-fill[data-pct]');
+  fills.forEach(function(el) {
+    var pct = el.getAttribute('data-pct') + '%';
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        el.style.width = pct;
+      });
+    });
+  });
+}
+
+function _rmCardKeydown(e, num) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    _rmEditCard(num);
+  }
 }
 
 // ── Advisor tab (issue #881) ──────────────────────────────────────────────────

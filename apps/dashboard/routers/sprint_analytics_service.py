@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -642,7 +642,9 @@ def _refresh_calibration_cache(project_root: Path, configured_minutes: dict[str,
     archive_dir = sprints_dir / "archive"
     if archive_dir.is_dir():
         for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
-            if _calibration_absorb_state_file(cache, state_file, sprints_dir, estimates_dir, configured_minutes, processed):
+            if _calibration_absorb_state_file(
+                cache, state_file, sprints_dir, estimates_dir, configured_minutes, processed
+            ):
                 changed = True
     for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
         if _calibration_absorb_state_file(cache, state_file, sprints_dir, estimates_dir, configured_minutes, processed):

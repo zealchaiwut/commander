@@ -11,7 +11,7 @@ AC7: All existing preflight endpoint URLs, HTTP methods, request/response shapes
 import py_compile
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -125,7 +125,6 @@ def test_ac4_no_circular_import():
     """AC4: sprint_preflight.py does not import server at module scope (would cause circular import)."""
     source = SPRINT_PREFLIGHT_PATH.read_text(encoding="utf-8")
     # Module-level (non-indented) import of server is forbidden
-    import re
     # Lines like "import server" or "from server import ..." at top level
     for line in source.splitlines():
         stripped = line.lstrip()

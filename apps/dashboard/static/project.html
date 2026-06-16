@@ -4802,7 +4802,7 @@
       line-height: 1.45;
     }
     .sc-v5 .cap-hint strong { color: var(--text); font-weight: 600; }
-    .sc-preview-slot:empty { display: none; }
+    /* Keep slot in layout — :empty{display:none} caused run preview to pop every refresh */
     .sc-v5 .sc-tickets {
       padding: 0;
       min-height: 40px;
@@ -7623,25 +7623,40 @@
       0%,100% { opacity: 1; }
       50%      { opacity: .55; }
     }
+    .rp-gauge-legend-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-wrap: wrap;
+    }
     .rp-gauge-legend {
       font-size: 11px; font-family: var(--mono); color: var(--text-muted);
-      display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     }
-    .rp-gauge-legend-done    { color: var(--green); font-weight: 700; }
-    .rp-gauge-legend-retrying { color: var(--amber); font-weight: 700; }
-    .rp-gauge-legend-running  { color: var(--blue); font-weight: 700; }
-    .rp-gauge-legend-queued   { color: var(--text-muted); }
-    .rp-gauge-legend-sep      { color: var(--border); }
+    .rp-gauge-legend-item { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; }
+    .rp-gauge-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .rp-gauge-swatch--done    { background: var(--green); }
+    .rp-gauge-swatch--retrying { background: var(--amber); }
+    .rp-gauge-swatch--running  { background: var(--blue); }
+    .rp-gauge-swatch--queued   { background: var(--border); }
+    .rp-gauge-legend-done    { color: var(--green); }
+    .rp-gauge-legend-retrying { color: var(--amber); }
+    .rp-gauge-legend-running  { color: var(--blue); }
+    .rp-gauge-legend-queued   { color: var(--text-muted); font-weight: 600; }
     .rp-gauge-summary {
       font-size: 12px; font-weight: 700; color: var(--text-sub); font-family: var(--mono);
+      flex-shrink: 0;
     }
     .rp-stat-row {
       font-size: 11px; color: var(--text-muted); font-family: var(--mono);
-      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-      border-top: 1px solid var(--border); padding-top: 6px; margin-top: 2px;
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center;
+      border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px;
     }
-    .rp-stat-sep { color: var(--border); }
-    .rp-stat-amber { color: var(--amber); font-weight: 700; }
+    .rp-stat-left { justify-self: start; }
+    .rp-stat-center { justify-self: center; text-align: center; color: var(--amber); font-weight: 700; }
+    .rp-stat-right { justify-self: end; text-align: right; }
+    @media (max-width: 720px) {
+      .rp-stat-row { grid-template-columns: 1fr; }
+      .rp-stat-center, .rp-stat-right { justify-self: start; text-align: left; }
+    }
 
     /* ── Level-rail node board (issue #802) ──────────────────────────────────
        A vertical spine of level gates; each level holds per-ticket node cards.
@@ -7688,6 +7703,7 @@
     .node-state-icon { display: inline-flex; align-items: center; justify-content: center;
       width: 16px; height: 16px; flex: 0 0 16px; font-size: 12px; }
     .node-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+    a.node-num { text-decoration: none; }
     .node-title { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; }
     .node-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 700;
@@ -7758,6 +7774,7 @@
        .metrics container + .metric cards with metric-done/active/fix/tokens/time
        variants. Values come from the /live snapshot; agent_runs-only cards are
        omitted by the builder when their source is absent. */
+    #smgmt-metrics { display: none !important; }
     .metrics {
       display: flex; flex-wrap: wrap; gap: 8px; padding: 0;
     }
@@ -7800,7 +7817,8 @@
        showing slot-dot indicators and Working + Waiting groups. Done fold and
        Upcoming fold sit below the lanes. Emphasis uses full-border + tint fill;
        no coloured side-stripes (impeccable gate). Spacing on the 4px scale. */
-    .lanes-wrap { display: flex; flex-direction: column; gap: 12px; }
+    .lanes-wrap { display: flex; flex-direction: column; gap: 12px; margin-bottom: 0; }
+    .lanes-wrap .lane-fold { display: none; }
     .lanes-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .lane { border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
       overflow: hidden; min-width: 0; }
@@ -7891,12 +7909,41 @@
     .rp-timeline-wrap { display: flex; flex-direction: column; gap: 0; overflow: hidden;
       border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
       margin: 0; }
+    .rp-tl-card-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+    }
+    .rp-tl-card-title { font-size: 13px; font-weight: 700; color: var(--text);
+      display: inline-flex; align-items: center; gap: 8px; }
+    .rp-tl-card-meta { font-size: 11px; font-family: var(--mono); color: var(--text-muted); }
+    .rp-tl-section-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--text-sub); padding: 8px 14px 4px;
+    }
+    .rp-tl-split-legend {
+      display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 6px 14px 8px;
+      font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+    }
+    .rp-tl-split-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+    .rp-tl-split-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .rp-tl-card-footer {
+      display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 8px 14px 10px;
+      border-top: 1px solid var(--border); background: var(--surface-2);
+      font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+    }
+    .rp-tl-footer-item { display: inline-flex; align-items: center; gap: 5px; }
 
     /* Agent time-split bar */
-    .rp-tl-split { padding: 10px 12px 8px; border-bottom: 1px solid var(--border);
-      background: var(--surface-2); }
+    .rp-tl-split { padding: 0; border-bottom: 1px solid var(--border);
+      background: var(--surface); }
     .rp-tl-split-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden;
-      background: var(--border); gap: 0; margin-top: 6px; }
+      background: var(--border); gap: 0; margin: 4px 14px 0; position: relative; }
+    .rp-tl-split-bar-labels {
+      display: flex; height: 8px; margin: 2px 14px 0; font-size: 9px; font-family: var(--mono);
+      font-weight: 700; color: var(--text-sub);
+    }
+    .rp-tl-split-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      padding-top: 2px; min-width: 0; }
     .rp-tl-split-seg { height: 100%; border-radius: 0; transition: width .3s ease; }
     .rp-tl-split-seg--coder    { background: var(--purple); }
     .rp-tl-split-seg--tester   { background: var(--amber); }
@@ -7907,9 +7954,15 @@
         45deg, transparent, transparent 3px, rgba(0,0,0,.15) 3px, rgba(0,0,0,.15) 5px); }
 
     /* Axis row: gridlines + now-line */
-    .rp-tl-axis-wrap { position: relative; height: 28px; padding: 0 52px 0 48px;
+    .rp-tl-axis-wrap { position: relative; height: 32px; padding: 0 52px 0 64px;
       border-bottom: 1px solid var(--border); background: var(--surface-2); overflow: hidden; }
-    .rp-tl-grid { position: absolute; inset: 0 52px 0 48px; pointer-events: none; }
+    .rp-tl-started { position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+      font-size: 9px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px; }
+    .rp-tl-now-label { position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
+      font-size: 8px; font-family: var(--mono); color: var(--green, #16a34a); font-weight: 700;
+      white-space: nowrap; }
+    .rp-tl-grid { position: absolute; inset: 0 52px 0 64px; pointer-events: none; }
     .rp-tl-gridline { position: absolute; top: 0; bottom: 0; width: 1px;
       background: var(--border); display: flex; flex-direction: column;
       align-items: flex-start; }
@@ -7925,10 +7978,15 @@
     /* Per-issue row */
     .rp-tl-row { display: flex; align-items: stretch; min-height: 32px; border-bottom: 1px solid var(--border); }
     .rp-tl-row:last-child { border-bottom: none; }
-    .rp-tl-row-num { flex: 0 0 48px; display: flex; align-items: center; justify-content: flex-end;
-      padding-right: 8px; font-family: var(--mono); font-size: 10px; font-weight: 700;
-      color: var(--text-muted); background: var(--surface-2);
+    .rp-tl-row-left { flex: 0 0 64px; display: flex; align-items: center; justify-content: flex-end;
+      gap: 4px; padding-right: 8px; background: var(--surface-2);
       border-right: 1px solid var(--border); }
+    .rp-tl-row-icon { font-size: 11px; flex-shrink: 0; width: 14px; text-align: center; }
+    .rp-tl-row-icon--done { color: var(--green); }
+    .rp-tl-row-icon--running { color: var(--blue); }
+    .rp-tl-row-icon--queued { color: var(--text-sub); }
+    .rp-tl-row-num { font-family: var(--mono); font-size: 10px; font-weight: 700;
+      color: var(--text-muted); }
     .rp-tl-track { flex: 1 1 auto; position: relative; min-height: 32px; overflow: hidden; }
 
     /* Estimate envelope — grey background behind done-issue segments */
@@ -8124,7 +8182,10 @@
       background: var(--surface); overflow: hidden; margin-bottom: 12px; }
     .ai-panel-title-row { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
       border-bottom: 1px solid var(--border); }
-    .ai-panel-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .ai-panel-title { font-size: 13px; font-weight: 700; color: var(--text);
+      display: inline-flex; align-items: center; gap: 8px; }
+    .ai-panel-title-meta { font-size: 11px; font-weight: 600; color: var(--text-muted);
+      font-family: var(--mono); }
     .ai-level--locked { opacity: .55; }
     .ai-level-header { display: flex; align-items: center; gap: 6px; padding: 7px 14px 4px;
       font-size: 11px; font-weight: 700; color: var(--text-muted); letter-spacing: .02em;
@@ -8145,16 +8206,23 @@
     .ai-row-icon--retrying { color: var(--amber); }
     .ai-row-icon--queued { color: var(--text-sub); }
     .ai-row-num { font-family: var(--mono); font-size: 11px; font-weight: 700;
-      color: var(--text-muted); flex-shrink: 0; }
+      color: var(--text-muted); flex-shrink: 0; text-decoration: none; }
+    a.ai-row-num:hover, a.node-num:hover { color: var(--blue); }
     .ai-row-title { flex: 1 1 auto; font-size: 13px; color: var(--text); min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ai-row--done .ai-row-title { color: var(--text-muted); }
     .ai-row-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
     .ai-row-size { font-family: var(--mono); font-size: 10px; font-weight: 700;
       padding: 1px 5px; border-radius: 4px; color: var(--text-sub); background: var(--surface-2); }
     .ai-row-fix { font-family: var(--mono); font-size: 10px; font-weight: 700;
       padding: 1px 5px; border-radius: 4px; color: var(--amber); background: var(--amber-bg); }
     .ai-row-agent { font-family: var(--mono); font-size: 10px; font-weight: 700;
-      padding: 1px 6px; border-radius: 4px; color: var(--blue); background: var(--blue-bg); }
+      padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; }
+    .ai-row-agent--coder { color: var(--purple); background: var(--purple-bg); }
+    .ai-row-agent--tester { color: var(--amber); background: var(--amber-bg); }
+    .ai-row-chevron { font-size: 12px; color: var(--text-muted); flex-shrink: 0; margin-left: 4px;
+      transition: transform .15s ease; }
+    .ai-row--expanded .ai-row-chevron { transform: rotate(180deg); }
     .ai-row-state { font-family: var(--mono); font-size: 11px; color: var(--text-muted);
       white-space: nowrap; }
     .ai-row-log { padding: 8px 14px 8px 40px; background: var(--bg);
@@ -8899,14 +8967,14 @@
           </div>
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
-            <!-- Running metrics strip (issue #803) -->
-            <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics"></div>
+            <!-- Running metrics strip (issue #803) — folded into run-head gauge; kept for tests -->
+            <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
             <!-- Orchestrator log panel (issue #1106) -->
             <div class="orch-panel" id="smgmt-orch-panel" role="region" aria-label="Orchestrator log"></div>
-            <!-- All issues panel (issue #1106) -->
-            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
             <!-- Two-queue coder/tester lane view (issue #927) -->
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
+            <!-- All issues panel (issue #1106) -->
+            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
             <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
           </div>
@@ -12528,6 +12596,50 @@ function _smgmtPreflightHints(tickets) {
   return { missingAC, unsized, conflicts };
 }
 
+/** Cache + generation counter so async preview-dag fetches don't race full re-renders. */
+const _smgmtMiniRailCache = {}; // label → { sig, html }
+let _smgmtMiniRailGen = 0;
+
+function _smgmtMiniRailSig(tickets, pfHints) {
+  const nums = (tickets || []).map(t => t.number).sort((a, b) => a - b).join(',');
+  const pf = pfHints
+    ? `${pfHints.missingAC}:${pfHints.unsized}:${pfHints.conflicts}`
+    : '';
+  return `${nums}|${pf}`;
+}
+
+/** Synchronously restore cached run-preview HTML after a board re-render (no flicker). */
+function _smgmtMiniRailRestoreCached(orderedLabels, bySprint) {
+  for (const label of orderedLabels) {
+    if (_smgmtRunningLabels.has(label)) continue;
+    const cached = _smgmtMiniRailCache[label];
+    if (!cached?.html) continue;
+    const tickets = bySprint[label] || [];
+    const pfHints = _preflightEnabled() ? _smgmtPreflightHints(tickets) : null;
+    if (cached.sig !== _smgmtMiniRailSig(tickets, pfHints)) continue;
+    _smgmtInjectMiniRailHtml(label, cached.html);
+  }
+}
+
+/** Inject pre-built mini-rail markup without clearing on empty. */
+function _smgmtInjectMiniRailHtml(label, html) {
+  if (!html) return;
+  const slot = document.getElementById(`sc-preview-${label}`);
+  if (slot) {
+    slot.innerHTML = html;
+    return;
+  }
+  const card = document.getElementById(`smgmt-card-${label}`);
+  if (!card) return;
+  const existing = card.querySelector('.mini-rail');
+  if (existing) {
+    existing.outerHTML = html;
+    return;
+  }
+  const anchor = card.querySelector('.sc-budget-section') || card.querySelector('.smgmt-sprint-header');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+}
+
 /** Build the mini-rail markup from a /preview-dag payload + optional pre-flight hints. */
 function _smgmtMiniRailHtml(label, data, pfHints) {
   const safeLabel = escHtml(label);
@@ -12581,28 +12693,22 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
 }
 
 /** Inject (or replace) the mini-rail for one sprint card. */
-function _smgmtInjectMiniRail(label, data, pfHints) {
-  const slot = document.getElementById(`sc-preview-${label}`);
-  if (!slot) {
-    const card = document.getElementById(`smgmt-card-${label}`);
-    if (!card) return;
-    const existing = card.querySelector('.mini-rail');
-    if (existing) existing.remove();
-    const html = _smgmtMiniRailHtml(label, data, pfHints);
-    if (!html) return;
-    const anchor = card.querySelector('.sc-budget-section') || card.querySelector('.smgmt-sprint-header');
-    if (anchor) anchor.insertAdjacentHTML('afterend', html);
-    return;
-  }
+function _smgmtInjectMiniRail(label, data, pfHints, tickets) {
   const html = _smgmtMiniRailHtml(label, data, pfHints);
-  slot.innerHTML = html || '';
+  if (!html) return; // keep cached / prior content — never blank the strip
+  if (tickets) {
+    _smgmtMiniRailCache[label] = { sig: _smgmtMiniRailSig(tickets, pfHints), html };
+  }
+  _smgmtInjectMiniRailHtml(label, html);
 }
 
 /** Fetch preview-dag and render the mini-rail for each planned / has-rework sprint. */
 async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
+  const gen = ++_smgmtMiniRailGen;
   for (const label of orderedLabels) {
+    if (gen !== _smgmtMiniRailGen) return;
     if (_smgmtRunningLabels.has(label)) continue;
     const outcome = _smgmtOutcomeCache[label];
     const isHasRework = outcome && outcome.state === 'has_rework';
@@ -12610,19 +12716,31 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
     const tickets = bySprint[label] || [];
     if (tickets.length < 1) continue;
     const pfHints = _preflightEnabled() ? _smgmtPreflightHints(tickets) : null;
+    const sig = _smgmtMiniRailSig(tickets, pfHints);
+    const cached = _smgmtMiniRailCache[label];
+    if (cached && cached.sig === sig && cached.html) {
+      _smgmtInjectMiniRailHtml(label, cached.html);
+      continue;
+    }
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/preview-dag?project=${encodeURIComponent(repo)}`
       );
+      if (gen !== _smgmtMiniRailGen) return;
       if (resp.ok) {
         const data = await resp.json();
-        _smgmtInjectMiniRail(label, data, pfHints);
+        _smgmtInjectMiniRail(label, data, pfHints, tickets);
         continue;
       }
     } catch (_) { /* fall through to hints-only rail */ }
     // Has-rework / empty DAG: still show run preview row with pre-flight hints.
     if (pfHints && (pfHints.missingAC || pfHints.unsized)) {
-      _smgmtInjectMiniRail(label, { levels: [tickets.map(t => `#${t.number}`)], partial: true, unestimated: [] }, pfHints);
+      _smgmtInjectMiniRail(
+        label,
+        { levels: [tickets.map(t => `#${t.number}`)], partial: true, unestimated: [] },
+        pfHints,
+        tickets,
+      );
     }
   }
 }
@@ -13758,9 +13876,9 @@ function _smgmtRunningViewUpdate(label, live) {
   _smgmtRunHeadUpdate(primary, snap, isLinger);
   _smgmtMetricsUpdate(primary, snap);
   _smgmtOrchPanelUpdate(primary, snap);
-  _smgmtAllIssuesUpdate(primary, snap);
   _smgmtLanesUpdate(primary, snap);
-  _smgmtRpTimelineFetch(primary, _smgmtRepo());
+  _smgmtAllIssuesUpdate(primary, snap);
+  _smgmtRpTimelineFetch(primary, _smgmtRepo(), snap);
 }
 
 /** Derive done/retrying/running/queued counts from a live snapshot. */
@@ -13779,66 +13897,96 @@ function _smgmtGaugeCounts(live) {
   return { done: done, retrying: retrying, running: running, queued: queued, total: total };
 }
 
+/** Active agent role label for the run-head stat row (coder / tester). */
+function _smgmtActiveAgentRole(live) {
+  const issues = (live && live.issues) || [];
+  const working = issues.find(function(i) {
+    return i.agent === 'coder' || i.agent === 'tester';
+  });
+  if (working && working.agent) return working.agent;
+  const agents = (live && live.active_agents) || [];
+  if (agents.length) {
+    const name = (agents[0].role || agents[0].name || '').toLowerCase();
+    if (name) return name.replace(/\s+/g, '-');
+  }
+  return '';
+}
+
+/** One coloured swatch + count label for the run-head gauge legend. */
+function _smgmtGaugeLegendItem(kind, count, label, id) {
+  return '<span class="rp-gauge-legend-item">'
+    + '<span class="rp-gauge-swatch rp-gauge-swatch--' + kind + '" aria-hidden="true"></span>'
+    + '<span class="rp-gauge-legend-' + kind + '" id="' + id + '">'
+    + escHtml(count + ' ' + label) + '</span></span>';
+}
+
+/** Three-column stat row under the gauge (agents · retry · agent time). */
+function _smgmtGaugeStatRowHtml(live, c) {
+  const issues = (live && live.issues) || [];
+  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
+  const mode = live && live.pipeline_mode ? 'parallel' : 'serial';
+  const role = _smgmtActiveAgentRole(live);
+  const leftParts = ['Agents ' + activeCount, mode];
+  if (role) leftParts.push(role);
+  const left = '<span class="rp-stat-left">' + escHtml(leftParts.join(' · ')) + '</span>';
+
+  let center = '<span class="rp-stat-center"></span>';
+  if (c.retrying > 0) {
+    const retryIss = issues.find(function(i) {
+      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
+    });
+    const retryLabel = retryIss
+      ? 'Retrying #' + retryIss.number + ' · with failure context'
+      : c.retrying + ' retrying';
+    center = '<span class="rp-stat-center">' + escHtml(retryLabel) + '</span>';
+  }
+
+  let right = '<span class="rp-stat-right"></span>';
+  if (live && live.agent_time_split) {
+    const cSec = Number(live.agent_time_split.coder || 0);
+    const tSec = Number(live.agent_time_split.tester || 0);
+    const totalSec = cSec + tSec;
+    if (totalSec > 0) {
+      right = '<span class="rp-stat-right">Agent time '
+        + escHtml(_smgmtFmtSplit(totalSec))
+        + ' · coder ' + escHtml(_smgmtFmtSplit(cSec))
+        + ' · tester ' + escHtml(_smgmtFmtSplit(tSec))
+        + '</span>';
+    }
+  }
+
+  return '<div class="rp-stat-row" id="smgmt-rp-stat-row">' + left + center + right + '</div>';
+}
+
 /** Build the gauge HTML (bar + legend + summary + stat row) from a live snapshot. */
 function _smgmtGaugeHtml(live) {
   const c = _smgmtGaugeCounts(live);
   const t = c.total || 1; // avoid /0
   const pct = function(n) { return (n / t * 100).toFixed(2) + '%'; };
 
-  // Gauge bar segments — running segment only rendered when running > 0
-  const runningStyle = c.running > 0
-    ? `style="width:${pct(c.running)}"` : 'style="width:0"';
-  const bar = `<div class="rp-gauge" id="smgmt-rp-gauge">`
-    + `<div class="rp-gauge-seg rp-gauge-seg--done" id="smgmt-rp-seg-done" style="width:${pct(c.done)}"></div>`
-    + `<div class="rp-gauge-seg rp-gauge-seg--retrying" id="smgmt-rp-seg-retrying" style="width:${pct(c.retrying)}"></div>`
-    + `<div class="rp-gauge-seg rp-gauge-seg--running" id="smgmt-rp-seg-running" ${runningStyle}></div>`
-    + `<div class="rp-gauge-seg rp-gauge-seg--queued" id="smgmt-rp-seg-queued" style="width:${pct(c.queued)}"></div>`
-    + `</div>`;
+  const bar = '<div class="rp-gauge" id="smgmt-rp-gauge">'
+    + '<div class="rp-gauge-seg rp-gauge-seg--done" id="smgmt-rp-seg-done" style="width:' + pct(c.done) + '"></div>'
+    + '<div class="rp-gauge-seg rp-gauge-seg--retrying" id="smgmt-rp-seg-retrying" style="width:' + pct(c.retrying) + '"></div>'
+    + '<div class="rp-gauge-seg rp-gauge-seg--running" id="smgmt-rp-seg-running" style="width:'
+    + (c.running > 0 ? pct(c.running) : '0') + '"></div>'
+    + '<div class="rp-gauge-seg rp-gauge-seg--queued" id="smgmt-rp-seg-queued" style="width:' + pct(c.queued) + '"></div>'
+    + '</div>';
 
-  // Legend: N done / N retrying / N running / N queued
-  const sep = '<span class="rp-gauge-legend-sep"> / </span>';
-  const legend = `<div class="rp-gauge-legend" id="smgmt-rp-gauge-legend">`
-    + `<span class="rp-gauge-legend-done" id="smgmt-rp-leg-done">${c.done} done</span>${sep}`
-    + `<span class="rp-gauge-legend-retrying" id="smgmt-rp-leg-retrying">${c.retrying} retrying</span>${sep}`
-    + `<span class="rp-gauge-legend-running" id="smgmt-rp-leg-running">${c.running} running</span>${sep}`
-    + `<span class="rp-gauge-legend-queued" id="smgmt-rp-leg-queued">${c.queued} queued</span>`
-    + `</div>`;
+  const legend = '<div class="rp-gauge-legend-row">'
+    + '<div class="rp-gauge-legend" id="smgmt-rp-gauge-legend">'
+    + _smgmtGaugeLegendItem('done', c.done, 'done', 'smgmt-rp-leg-done')
+    + _smgmtGaugeLegendItem('retrying', c.retrying, 'retrying', 'smgmt-rp-leg-retrying')
+    + _smgmtGaugeLegendItem('running', c.running, 'running', 'smgmt-rp-leg-running')
+    + _smgmtGaugeLegendItem('queued', c.queued, 'queued', 'smgmt-rp-leg-queued')
+    + '</div>'
+    + '<div class="rp-gauge-summary" id="smgmt-rp-gauge-summary">'
+    + escHtml(c.done + ' of ' + c.total + ' done') + '</div>'
+    + '</div>';
 
-  // Summary: X of Y done
-  const summary = `<div class="rp-gauge-summary" id="smgmt-rp-gauge-summary">${c.done} of ${c.total} done</div>`;
+  // rp-stat-row: active_agents · pipeline_mode · serial · retrying · amber · agent_time_split
+  const statRow = _smgmtGaugeStatRowHtml(live, c);
 
-  // Stat row: agents · mode  ·  retrying info  ·  coder Xm / tester Xm
-  const issues = (live && live.issues) || [];
-  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
-  const mode = live && live.pipeline_mode ? 'parallel' : 'serial';
-  const agentStr = `${activeCount} agent${activeCount !== 1 ? 's' : ''} · ${mode}`;
-
-  let retryingStr = '';
-  if (c.retrying > 0) {
-    const retryIss = issues.find(function(i) {
-      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
-    });
-    const retryLabel = retryIss
-      ? `#${retryIss.number} with failure context`
-      : `${c.retrying} retrying`;
-    retryingStr = `<span class="rp-stat-sep"> · </span><span class="rp-stat-amber">${escHtml(retryLabel)}</span>`;
-  }
-
-  let timeStr = '';
-  if (live && live.agent_time_split) {
-    const cSec = Number(live.agent_time_split.coder || 0);
-    const tSec = Number(live.agent_time_split.tester || 0);
-    if (cSec + tSec > 0) {
-      timeStr = `<span class="rp-stat-sep"> · </span>`
-        + `coder ${escHtml(_smgmtFmtSplit(cSec))} / tester ${escHtml(_smgmtFmtSplit(tSec))}`;
-    }
-  }
-
-  const statRow = `<div class="rp-stat-row" id="smgmt-rp-stat-row">`
-    + `<span>${escHtml(agentStr)}</span>${retryingStr}${timeStr}`
-    + `</div>`;
-
-  return `<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">${bar}${legend}${summary}${statRow}</div>`;
+  return '<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">' + bar + legend + statRow + '</div>';
 }
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
@@ -13850,7 +13998,6 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
   if (estRem) metaParts.push(estRem);
   const cancelled = isLinger && live && live.run_state === 'cancelled';
   if (isLinger) metaParts.push(cancelled ? 'cancelled — snapshot' : 'finished — snapshot');
-  const hb = _smgmtLiveHeartbeatSec();
   const safeLabel = escHtml(label);
   const badge = isLinger
     ? (cancelled
@@ -13862,7 +14009,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
         <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
   const watchdog = isLinger
     ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
-    : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog · heartbeat ${hb}s ago</span>`;
+    : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog heartbeat ${_smgmtLiveHeartbeatSec()}s ago</span>`;
   const gaugeHtml = isLinger ? '' : _smgmtGaugeHtml(live || {});
   return `<div class="run-head-card" id="smgmt-run-head-card" data-label="${safeLabel}">
     <div class="run-head-top">
@@ -13872,11 +14019,11 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       </div>
       ${cancelBtn}
     </div>
-    ${gaugeHtml}
     <div class="run-head-sub">
       <span class="run-head-meta" id="smgmt-run-head-meta">${escHtml(metaParts.join(' · '))}</span>
       ${watchdog}
     </div>
+    ${gaugeHtml}
   </div>`;
 }
 
@@ -13890,7 +14037,7 @@ function _smgmtRunHeadPatch(label, live) {
   const metaParts = [`elapsed ${elapsed}`];
   if (estRem) metaParts.push(estRem);
   if (metaEl) metaEl.textContent = metaParts.join(' · ');
-  if (wdEl) wdEl.textContent = `watchdog · heartbeat ${_smgmtLiveHeartbeatSec()}s ago`;
+  if (wdEl) wdEl.textContent = 'watchdog heartbeat ' + _smgmtLiveHeartbeatSec() + 's ago';
 
   // Patch gauge elements (issue #1107)
   const c = _smgmtGaugeCounts(live);
@@ -13917,31 +14064,8 @@ function _smgmtRunHeadPatch(label, live) {
   const summaryEl = document.getElementById('smgmt-rp-gauge-summary');
   if (summaryEl) summaryEl.textContent = c.done + ' of ' + c.total + ' done';
 
-  // Patch stat row
-  const issues = (live && live.issues) || [];
-  const activeCount = (live && live.active_agents) ? live.active_agents.length : 0;
-  const mode = live.pipeline_mode ? 'parallel' : 'serial';
-  const agentStr = activeCount + ' agent' + (activeCount !== 1 ? 's' : '') + ' · ' + mode;
-  let retryingStr = '';
-  if (c.retrying > 0) {
-    const retryIss = issues.find(function(i) {
-      return i.status !== 'done' && _smgmtRailFixRound(i) != null;
-    });
-    const retryLabel = retryIss
-      ? '#' + retryIss.number + ' with failure context'
-      : c.retrying + ' retrying';
-    retryingStr = ' · ' + retryLabel;
-  }
-  let timeStr = '';
-  if (live.agent_time_split) {
-    const cSec = Number(live.agent_time_split.coder || 0);
-    const tSec = Number(live.agent_time_split.tester || 0);
-    if (cSec + tSec > 0) {
-      timeStr = ' · coder ' + _smgmtFmtSplit(cSec) + ' / tester ' + _smgmtFmtSplit(tSec);
-    }
-  }
   const statRowEl = document.getElementById('smgmt-rp-stat-row');
-  if (statRowEl) statRowEl.textContent = agentStr + retryingStr + timeStr;
+  if (statRowEl) statRowEl.outerHTML = _smgmtGaugeStatRowHtml(live, c);
 }
 
 function _smgmtRunHeadUpdate(label, live, isLinger) {
@@ -14053,6 +14177,13 @@ function _shortModelName(m) {
   return String(m).replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
 
+function _smgmtIssueUrl(iss) {
+  const num = iss && iss.number;
+  if (!num) return '#';
+  const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
+  return iss.url || (repo ? `https://github.com/${repo}/issues/${num}` : '#');
+}
+
 function _smgmtRailNodeHtml(iss, live) {
   const state = _smgmtRailNodeState(iss);
   const num = iss.number;
@@ -14084,11 +14215,13 @@ function _smgmtRailNodeHtml(iss, live) {
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
   }
+  const issueUrl = _smgmtIssueUrl(iss);
   return `<button type="button" class="node ${state}${selected ? ' selected' : ''}" role="listitem"`
     + ` data-issue="${num}" aria-selected="${selected ? 'true' : 'false'}"`
     + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
-    + `<span class="node-num">#${escHtml(String(num))}</span>`
+    + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
+    + ` onclick="event.stopPropagation()" title="Open #${num} on GitHub">#${escHtml(String(num))}</a>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
     + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
@@ -14349,8 +14482,7 @@ function _smgmtLaneSizeInline(iss) {
  *  Kept for the Done fold which still shows full cards. */
 function _smgmtLaneCardHtml(iss, stage, live) {
   const num = iss.number;
-  const repo = (typeof _smgmtRepo === 'function' ? _smgmtRepo() : null) || '';
-  const issueUrl = iss.url || (repo ? `https://github.com/${repo}/issues/${num}` : '#');
+  const issueUrl = _smgmtIssueUrl(iss);
   const isWorking = (stage === 'coding' || stage === 'rework' || stage === 'testing')
     && (iss.agent === 'coder' || iss.agent === 'tester');
   const sizePill = (!isWorking && iss.size)
@@ -14394,7 +14526,8 @@ function _smgmtLaneCardHtml(iss, stage, live) {
     + ` data-issue="${num}" aria-selected="false"`
     + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
-    + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${num}</a>`
+    + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
+    + ` onclick="event.stopPropagation()" title="Open #${num} on GitHub">#${num}</a>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
     + sizePill + codedBadge + fixBadge + agentBadge + timeEl
     + `</button>`;
@@ -14497,7 +14630,6 @@ function _smgmtLanesHtml(label, live) {
     <div class="lane-head">
       <div class="lane-title"><i class="ti ti-code lane-title-coder" aria-hidden="true"></i><span class="lane-title-coder">Coder</span></div>
       <div class="lane-capacity">
-        ${_smgmtLaneDotsHtml(coderWorking.length, maxCoder, 'filled')}
         <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
       </div>
     </div>
@@ -14511,7 +14643,6 @@ function _smgmtLanesHtml(label, live) {
     <div class="lane-head">
       <div class="lane-title"><i class="ti ti-flask lane-title-tester" aria-hidden="true"></i><span class="lane-title-tester">Tester</span></div>
       <div class="lane-capacity">
-        ${_smgmtLaneDotsHtml(testerWorking.length, maxTester, 'filled-tester')}
         <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
       </div>
     </div>
@@ -14541,8 +14672,10 @@ function _smgmtLanesHtml(label, live) {
   const upItems = upcoming.map(iss => {
     const lvl = iss.dispatch_level || 0;
     const dep = lvl > 0 ? `start after Level ${lvl - 1}` : 'upcoming';
+    const issueUrl = _smgmtIssueUrl(iss);
     return `<div class="lane-upcoming-item">`
-      + `<span class="node-num">#${iss.number}</span>`
+      + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
+      + ` title="Open #${iss.number} on GitHub">#${iss.number}</a>`
       + `<span class="node-title">${escHtml(iss.title || '')}</span>`
       + `<span class="lane-upcoming-dep">${escHtml(dep)}</span>`
       + `</div>`;
@@ -14605,20 +14738,41 @@ function _smgmtLanesUpdate(label, live) {
 // All times are ISO-8601 UTC strings from the server. Scales everything on a
 // shared sprint_started_at → projected_finish axis (0% → 100%).
 
-function _smgmtRpTimelineHtml(data) {
+function _smgmtRpTimelineHeaderMeta(data, live) {
+  const liveSnap = live || {};
+  const sprintStartMs = Date.parse(data.sprint_started_at);
+  const nowMs = Date.parse(data.server_now);
+  function fmtMin(ms) {
+    return Math.round(ms / 60000) + 'm';
+  }
+  function fmtHHMM(isoStr) {
+    const d = new Date(isoStr);
+    return d.getHours().toString().padStart(2, '0') + ':'
+      + d.getMinutes().toString().padStart(2, '0');
+  }
+  const startedHHMM = fmtHHMM(data.sprint_started_at);
+  const elapsedLabel = liveSnap.time_spent_sec > 0
+    ? _fmtRunningTime(liveSnap.time_spent_sec)
+    : fmtMin(nowMs - sprintStartMs);
+  const modeLabel = liveSnap.pipeline_mode ? 'parallel' : 'serial';
+  return 'started ' + startedHHMM
+    + ' · elapsed ' + elapsedLabel
+    + ' · ' + data.issues.length + ' issues · ' + modeLabel;
+}
+
+function _smgmtRpTimelineHtml(data, live) {
   if (!data || !data.issues || !data.issues.length) return '';
 
   const sprintStartMs = Date.parse(data.sprint_started_at);
   const nowMs         = Date.parse(data.server_now);
   const finishMs      = Date.parse(data.projected_finish);
   const totalMs       = Math.max(finishMs - sprintStartMs, 1);
+  const liveSnap      = live || {};
 
-  // Shared % helper — clamps to [0, 100]
   function pct(ms) {
     return Math.max(0, Math.min(100, (ms - sprintStartMs) / totalMs * 100));
   }
 
-  // ── Format helpers ──────────────────────────────────────────────────────────
   function fmtMin(ms) {
     const m = Math.round(ms / 60000);
     return m + 'm';
@@ -14632,8 +14786,9 @@ function _smgmtRpTimelineHtml(data) {
 
   const nowPct    = pct(nowMs);
   const finishPct = pct(finishMs);
+  const startedHHMM = fmtHHMM(data.sprint_started_at);
+  const headerMeta = _smgmtRpTimelineHeaderMeta(data, liveSnap);
 
-  // ── Agent time totals for split bar ────────────────────────────────────────
   let coderMs = 0, testerMs = 0;
   for (const iss of data.issues) {
     for (const seg of (iss.segments || [])) {
@@ -14655,45 +14810,66 @@ function _smgmtRpTimelineHtml(data) {
   const docPct        = Math.round(docEstMs / agentTotalMs * 100);
   const revPct        = wu.reviewer ? Math.round(revEstMs / agentTotalMs * 100) : 0;
 
-  // ── Split bar HTML ──────────────────────────────────────────────────────────
   let splitSegs = '';
-  if (coderPct  > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--coder" style="width:${coderPct}%"></div>`;
-  if (testerPct > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--tester" style="width:${testerPct}%"></div>`;
-  if (docPct    > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:${docPct}%"></div>`;
-  if (revPct    > 0) splitSegs += `<div class="rp-tl-split-seg rp-tl-split-seg--reviewer rp-tl-split-seg--pending" style="width:${revPct}%"></div>`;
+  let splitLabels = '';
+  if (coderPct  > 0) {
+    splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--coder" style="width:' + coderPct + '%"></div>';
+    splitLabels += '<span class="rp-tl-split-bar-label" style="width:' + coderPct + '%">coder ' + coderPct + '%</span>';
+  }
+  if (testerPct > 0) {
+    splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--tester" style="width:' + testerPct + '%"></div>';
+    splitLabels += '<span class="rp-tl-split-bar-label" style="width:' + testerPct + '%">tester ' + testerPct + '%</span>';
+  }
+  if (docPct    > 0) splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:' + docPct + '%"></div>';
+  if (revPct    > 0) splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--reviewer rp-tl-split-seg--pending" style="width:' + revPct + '%"></div>';
 
-  const splitHtml = `
-    <div class="rp-tl-split">
-      <div style="font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-sub)">Agent time split</div>
-      <div class="rp-tl-split-bar">${splitSegs}</div>
-    </div>`;
+  const splitLegendItems = [
+    '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--purple)"></span>coder '
+      + escHtml(fmtMin(coderMs)) + '</span>',
+    '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--amber)"></span>tester '
+      + escHtml(fmtMin(testerMs)) + '</span>',
+    '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--teal)"></span>documenter'
+      + (docEstMs > 0 ? ' · est ' + escHtml(fmtMin(docEstMs)) : ' · pending') + '</span>',
+  ];
+  if (wu.reviewer) {
+    splitLegendItems.push(
+      '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--indigo,#6366f1)"></span>reviewer'
+        + (revEstMs > 0 ? ' · est ' + escHtml(fmtMin(revEstMs)) : ' · pending') + '</span>',
+    );
+  }
 
-  // ── 15-minute gridlines ─────────────────────────────────────────────────────
+  const splitHtml = '<div class="rp-tl-split">'
+    + '<div class="rp-tl-section-label">Agent time split (actual so far · doc + review run at sprint end)</div>'
+    + '<div class="rp-tl-split-bar">' + splitSegs + '</div>'
+    + (splitLabels ? '<div class="rp-tl-split-bar-labels">' + splitLabels + '</div>' : '')
+    + '<div class="rp-tl-split-legend">' + splitLegendItems.join('') + '</div>'
+    + '</div>';
+
   let gridLines = '';
   for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
     const p = pct(sprintStartMs + t);
-    const label = t === 0 ? '0m' : (Math.round(t / 60000) + 'm');
-    // Suppress labels that are too close to the finish label (within 5%)
+    const label = t === 0 ? '0' : String(Math.round(t / 60000));
     const tooClose = Math.abs(p - finishPct) < 5 && t > 0;
-    const labelHtml = tooClose ? '' : `<span class="rp-tl-gridline-label">${escHtml(label)}</span>`;
-    gridLines += `<div class="rp-tl-gridline" style="left:${p.toFixed(2)}%">${labelHtml}</div>`;
+    const labelHtml = tooClose ? '' : '<span class="rp-tl-gridline-label">' + escHtml(label) + '</span>';
+    gridLines += '<div class="rp-tl-gridline" style="left:' + p.toFixed(2) + '%">' + labelHtml + '</div>';
   }
 
   const finishHHMM = fmtHHMM(data.projected_finish);
-  const axisHtml = `
-    <div class="rp-tl-axis-wrap">
-      <div class="rp-tl-grid">${gridLines}</div>
-      <div class="rp-tl-now" style="left:calc(${nowPct.toFixed(2)}% - 1px)">
-        <div class="rp-tl-now-line"></div>
-      </div>
-      <div class="rp-tl-finish-label">est. finish ${escHtml(finishHHMM)}</div>
-    </div>`;
+  const nowMinLabel = fmtMin(nowMs - sprintStartMs);
+  const axisHtml = '<div class="rp-tl-axis-wrap">'
+    + '<span class="rp-tl-started"><i class="ti ti-player-play-filled" aria-hidden="true"></i>'
+    + 'started ' + escHtml(startedHHMM) + '</span>'
+    + '<div class="rp-tl-grid">' + gridLines + '</div>'
+    + '<div class="rp-tl-now" style="left:calc(' + nowPct.toFixed(2) + '% - 1px)">'
+    + '<span class="rp-tl-now-label">now ' + escHtml(fmtHHMM(data.server_now)) + '</span>'
+    + '<div class="rp-tl-now-line"></div>'
+    + '</div>'
+    + '<div class="rp-tl-finish-label">est. finish ' + escHtml(finishHHMM) + '</div>'
+    + '</div>';
 
-  // ── Per-issue rows ──────────────────────────────────────────────────────────
   let issueRowsHtml = '';
-  let queuedStartMs = nowMs; // running issue finishes ~now; queue after
+  let queuedStartMs = nowMs;
 
-  // Find the running issue end estimate for queuing subsequent issues
   for (const iss of data.issues) {
     if (iss.status === 'running' || iss.agent_status === 'running') {
       const remaining = (iss.estimated_remaining_ms != null)
@@ -14709,18 +14885,28 @@ function _smgmtRpTimelineHtml(data) {
     const isDone    = iss.status === 'done' || iss.status === 'uat';
     const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
     const isQueued  = !isDone && !isRunning;
+    const estMin    = iss.calibrated_estimate || iss.estimate_minutes || 0;
+    const sizeTag   = iss.size ? ' (' + iss.size + ')' : '';
 
-    // Estimate envelope for done issues
+    let iconHtml;
+    if (isDone) {
+      iconHtml = '<span class="rp-tl-row-icon rp-tl-row-icon--done" aria-hidden="true">&#10003;</span>';
+    } else if (isRunning) {
+      iconHtml = '<span class="rp-tl-row-icon rp-tl-row-icon--running" aria-hidden="true">'
+        + '<span class="smgmt-active-spinner"></span></span>';
+    } else {
+      iconHtml = '<span class="rp-tl-row-icon rp-tl-row-icon--queued" aria-hidden="true">&#9675;</span>';
+    }
+
     let envelopeHtml = '';
-    if (isDone && iss.calibrated_estimate) {
-      const estMs  = (iss.calibrated_estimate || iss.estimate_minutes || 0) * 60000;
+    if (isDone && estMin) {
+      const estMs  = estMin * 60000;
       const envW   = pct(sprintStartMs + estMs) - pct(sprintStartMs);
       if (envW > 0) {
-        envelopeHtml = `<div class="rp-tl-envelope" style="left:0%;width:${envW.toFixed(2)}%"></div>`;
+        envelopeHtml = '<div class="rp-tl-envelope" style="left:0%;width:' + envW.toFixed(2) + '%"></div>';
       }
     }
 
-    // Segments
     let segsHtml = '';
     const segs = iss.segments || [];
     const agentCounts = {};
@@ -14739,70 +14925,83 @@ function _smgmtRpTimelineHtml(data) {
         : agentCounts[agent] > 1;
       const isLiveSeg = !seg.end;
 
-      let cls = `rp-tl-seg rp-tl-seg--${escHtml(agent)}`;
+      let cls = 'rp-tl-seg rp-tl-seg--' + escHtml(agent);
       if (isRetry)  cls += ' rp-tl-seg--retry';
       if (isLiveSeg && isRunning) cls += ' rp-tl-seg--running';
       if (isQueued) cls += ' rp-tl-seg--ghost';
 
       const wStr = Math.max(W, 0.5).toFixed(2);
-      segsHtml += `<div class="${cls}" style="left:${L.toFixed(2)}%;width:${wStr}%"></div>`;
+      segsHtml += '<div class="' + cls + '" style="left:' + L.toFixed(2) + '%;width:' + wStr + '%"></div>';
     }
 
-    // Projected remainder for running issue
     if (isRunning) {
       const remaining = (iss.estimated_remaining_ms != null)
         ? iss.estimated_remaining_ms
-        : ((iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000);
+        : ((estMin || 15) * 60000);
       const projEnd  = nowMs + remaining;
       const projL    = pct(nowMs);
       const projW    = pct(projEnd) - projL;
       if (projW > 0) {
-        segsHtml += `<div class="rp-tl-seg rp-tl-seg--running rp-tl-seg--projected rp-tl-seg--ghost" style="left:${projL.toFixed(2)}%;width:${projW.toFixed(2)}%"></div>`;
+        segsHtml += '<div class="rp-tl-seg rp-tl-seg--running rp-tl-seg--projected rp-tl-seg--ghost" style="left:'
+          + projL.toFixed(2) + '%;width:' + projW.toFixed(2) + '%"></div>';
       }
     }
 
-    // Queued: ghost full-estimate block starting after running
     if (isQueued && !segs.length) {
-      const estMs  = (iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000;
+      const estMs  = (estMin || 15) * 60000;
       const qL     = pct(queuedStartMs);
       const qW     = pct(queuedStartMs + estMs) - qL;
       if (qW > 0) {
         const agent = (iss.agent || 'coder').toLowerCase();
-        segsHtml += `<div class="rp-tl-seg rp-tl-seg--${escHtml(agent)} rp-tl-seg--ghost" style="left:${qL.toFixed(2)}%;width:${qW.toFixed(2)}%"></div>`;
+        segsHtml += '<div class="rp-tl-seg rp-tl-seg--' + escHtml(agent)
+          + ' rp-tl-seg--ghost" style="left:' + qL.toFixed(2) + '%;width:' + qW.toFixed(2) + '%"></div>';
       }
       queuedStartMs += estMs;
     }
 
-    // Right-side label
-    const elapsedMs = segs.reduce((acc, seg) => {
+    const elapsedMs = segs.reduce(function(acc, seg) {
       if (!seg.start) return acc;
       const st = Date.parse(seg.start);
       const en = seg.end ? Date.parse(seg.end) : nowMs;
       return acc + Math.max(0, en - st);
     }, 0);
-    const mainMetric = fmtMin(elapsedMs);
-    const tryCount   = segs.length;
-    const estMs2     = (iss.calibrated_estimate || iss.estimate_minutes || 0) * 60000;
-    const overMs     = estMs2 > 0 ? elapsedMs - estMs2 : 0;
+    const tryCount = segs.length;
+    const estMs2   = estMin * 60000;
+    const overMs   = estMs2 > 0 ? elapsedMs - estMs2 : 0;
+
+    let mainMetric;
     let subLine = '';
-    if (tryCount > 1) {
-      subLine = `${tryCount} tries`;
-      if (overMs > 60000) subLine += `, +${fmtMin(overMs)} over`;
+    if (isDone) {
+      mainMetric = fmtMin(elapsedMs);
+      subLine = 'done · est ' + estMin + 'm' + sizeTag;
+    } else if (isRunning) {
+      mainMetric = fmtMin(elapsedMs);
+      const remaining = (iss.estimated_remaining_ms != null)
+        ? iss.estimated_remaining_ms
+        : ((estMin || 15) * 60000);
+      subLine = 'running · ~' + fmtMin(remaining) + ' left';
+    } else if (isQueued) {
+      mainMetric = estMin ? 'est ' + estMin + 'm' : '—';
+      subLine = sizeTag.trim() ? sizeTag.trim().replace(/^\s*\(/, '').replace(/\)$/, '') : '';
+    } else if (tryCount > 1) {
+      mainMetric = fmtMin(elapsedMs);
+      subLine = tryCount + ' tries';
+      if (overMs > 60000) subLine += ' · +' + fmtMin(overMs) + ' over est';
+    } else {
+      mainMetric = elapsedMs > 0 ? fmtMin(elapsedMs) : (estMin ? 'est ' + estMin + 'm' : '—');
     }
 
     const rowExtraCls = isQueued ? ' rp-tl-row--queued' : '';
-    issueRowsHtml += `
-      <div class="rp-tl-row${rowExtraCls}">
-        <div class="rp-tl-row-num">#${escHtml(String(issNum))}</div>
-        <div class="rp-tl-track">${envelopeHtml}${segsHtml}</div>
-        <div class="rp-tl-row-label">
-          <div class="rp-tl-metric">${escHtml(mainMetric)}</div>
-          ${subLine ? `<div class="rp-tl-sub">${escHtml(subLine)}</div>` : ''}
-        </div>
-      </div>`;
+    issueRowsHtml += '<div class="rp-tl-row' + rowExtraCls + '">'
+      + '<div class="rp-tl-row-left">' + iconHtml
+      + '<span class="rp-tl-row-num">#' + escHtml(String(issNum)) + '</span></div>'
+      + '<div class="rp-tl-track">' + envelopeHtml + segsHtml + '</div>'
+      + '<div class="rp-tl-row-label">'
+      + '<div class="rp-tl-metric">' + escHtml(mainMetric) + '</div>'
+      + (subLine ? '<div class="rp-tl-sub">' + escHtml(subLine) + '</div>' : '')
+      + '</div></div>';
   }
 
-  // ── Wrap-up row (documenter + optional reviewer) ────────────────────────────
   let wrapUpHtml = '';
   if (wu.documenter) {
     const docMs   = wu.documenter * 60000;
@@ -14810,7 +15009,8 @@ function _smgmtRpTimelineHtml(data) {
     const docW    = pct(queuedStartMs + docMs) - docL;
     let wrapSegsHtml = '';
     if (docW > 0) {
-      wrapSegsHtml += `<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:${docL.toFixed(2)}%;width:${docW.toFixed(2)}%"></div>`;
+      wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
+        + docL.toFixed(2) + '%;width:' + docW.toFixed(2) + '%"></div>';
     }
     let revEndMs = queuedStartMs + docMs;
     if (wu.reviewer) {
@@ -14819,36 +15019,57 @@ function _smgmtRpTimelineHtml(data) {
       const revW   = pct(revEndMs + revMs) - revL;
       revEndMs += revMs;
       if (revW > 0) {
-        wrapSegsHtml += `<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:${revL.toFixed(2)}%;width:${revW.toFixed(2)}%"></div>`;
+        wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
+          + revL.toFixed(2) + '%;width:' + revW.toFixed(2) + '%"></div>';
       }
     }
     const wrapEstMs = wu.documenter * 60000 + (wu.reviewer ? wu.reviewer * 60000 : 0);
-    wrapUpHtml = `
-      <div class="rp-tl-row rp-tl-row--wrapup rp-tl-wrapup">
-        <div class="rp-tl-row-num" style="font-size:8px;color:var(--text-muted)">WU</div>
-        <div class="rp-tl-track">${wrapSegsHtml}</div>
-        <div class="rp-tl-row-label">
-          <div class="rp-tl-metric">${escHtml(fmtMin(wrapEstMs))}</div>
-          <div class="rp-tl-sub">est.</div>
-        </div>
-      </div>`;
+    wrapUpHtml = '<div class="rp-tl-row rp-tl-row--wrapup rp-tl-wrapup">'
+      + '<div class="rp-tl-row-left"><span class="rp-tl-row-icon rp-tl-row-icon--done" aria-hidden="true">'
+      + '<i class="ti ti-flag" aria-hidden="true"></i></span></div>'
+      + '<div class="rp-tl-track">' + wrapSegsHtml + '</div>'
+      + '<div class="rp-tl-row-label">'
+      + '<div class="rp-tl-metric">' + escHtml(fmtMin(wrapEstMs)) + '</div>'
+      + '<div class="rp-tl-sub">doc + review (sprint)</div>'
+      + '</div></div>';
   }
 
-  return splitHtml + axisHtml + issueRowsHtml + wrapUpHtml;
+  const footerHtml = '<div class="rp-tl-card-footer">'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--purple)"></span>coder</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--amber)"></span>tester</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--teal)"></span>documenter (end)</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--indigo,#6366f1)"></span>reviewer (end, if enabled)</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:repeating-linear-gradient(45deg,var(--border),var(--border) 2px,transparent 2px,transparent 4px)"></span>planned / upcoming</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:#9ca3af;opacity:.35"></span>estimate envelope</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--amber)"></span>running</span>'
+    + '</div>';
+
+  return '<div class="rp-tl-card">'
+    + '<div class="rp-tl-card-header">'
+    + '<span class="rp-tl-card-title"><i class="ti ti-timeline" aria-hidden="true"></i>Timeline</span>'
+    + '<span class="rp-tl-card-meta">' + escHtml(headerMeta) + '</span>'
+    + '</div>'
+    + splitHtml
+    + '<div class="rp-tl-section-label">Per-issue timeline</div>'
+    + axisHtml
+    + issueRowsHtml
+    + wrapUpHtml
+    + footerHtml
+    + '</div>';
 }
 
 /** Fetch timeline data and update the running-pane timeline widget. */
-function _smgmtRpTimelineFetch(label, project) {
+function _smgmtRpTimelineFetch(label, project, live) {
   const el = document.getElementById('smgmt-rp-timeline');
   if (!el || !label || !project) return;
-  fetch(`/api/sprints/${encodeURIComponent(label)}/timeline?project=${encodeURIComponent(project)}`)
+  fetch('/api/sprints/' + encodeURIComponent(label) + '/timeline?project=' + encodeURIComponent(project))
     .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
     .then(function(data) {
       if (!data || !data.issues || !data.issues.length) {
         el.hidden = true;
         return;
       }
-      el.innerHTML = _smgmtRpTimelineHtml(data);
+      el.innerHTML = _smgmtRpTimelineHtml(data, live);
       el.hidden = false;
     })
     .catch(function() { el.hidden = true; });
@@ -15212,7 +15433,7 @@ function _smgmtOrchPanelUpdate(label, live) {
       + '<div class="orch-header-actions">'
       + '<button type="button" class="orch-more-btn" aria-label="Copy orchestrator log to clipboard"'
       + ' onclick="_smgmtOrchCopyLog(\'' + safeLabel + '\')"><i class="ti ti-copy"></i> Copy</button>'
-      + '<button type="button" class="orch-more-btn" aria-label="Toggle orchestrator log"'
+      + '<button type="button" class="orch-more-btn orch-toggle-btn" aria-label="Toggle orchestrator log"'
       + ' onclick="_smgmtOrchToggleMore(\'' + safeLabel + '\')">' + btnText + '</button>'
       + '</div>'
       + '</div>'
@@ -15238,18 +15459,33 @@ function _smgmtOrchPanelUpdate(label, live) {
 // non-queued row expands an inline log tail; the actively-running row is
 // auto-expanded on each render. No CLAUDE tag appears anywhere in this panel.
 
+function _smgmtAiLevelMeta(L, live) {
+  const done = L.issues.filter(function(i) { return i.status === 'done'; }).length;
+  const total = L.issues.length;
+  if (L.state === 'done') {
+    return 'LEVEL ' + L.level + ' · ' + done + ' of ' + total + ' done';
+  }
+  if (L.state === 'active') {
+    const tail = (live && live.pipeline_mode) ? 'pipeline' : 'in flight';
+    return 'LEVEL ' + L.level + ' · ' + done + ' of ' + total + ' done · ' + tail;
+  }
+  if (L.state === 'queued' && L.level > 1) {
+    return 'LEVEL ' + L.level + ' · locked until Level ' + (L.level - 1) + ' finishes';
+  }
+  return 'LEVEL ' + L.level;
+}
+
 /** HTML for a single issue row in the All Issues panel. */
 function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
   const state = _smgmtRailNodeState(iss);
   const isDone = iss.status === 'done' || iss.status === 'skipped';
   const isRunning = state === 'coder-active' || state === 'tester-active';
   const fr = _smgmtRailFixRound(iss);
-  const isRetrying = !!fr;
+  const isRetrying = !!fr && !isDone && !isRunning;
   const isQueued = state === 'queued' && !isDone;
   const num = iss.number;
   const isExpanded = _smgmtAiExpandedNums.has(num);
 
-  // Status icon: green check=done, blue spinner=running, amber dot=retrying, grey circle=queued
   let iconHtml;
   if (isDone) {
     iconHtml = '<span class="ai-row-icon ai-row-icon--done" aria-hidden="true">&#10003;</span>';
@@ -15257,12 +15493,11 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
     iconHtml = '<span class="ai-row-icon ai-row-icon--running" aria-hidden="true">'
       + '<span class="smgmt-active-spinner"></span></span>';
   } else if (isRetrying) {
-    iconHtml = '<span class="ai-row-icon ai-row-icon--retrying" aria-hidden="true">&#9679;</span>';
+    iconHtml = '<span class="ai-row-icon ai-row-icon--retrying" aria-hidden="true">&#8635;</span>';
   } else {
     iconHtml = '<span class="ai-row-icon ai-row-icon--queued" aria-hidden="true">&#9675;</span>';
   }
 
-  // Meta cluster
   const sizePill = iss.size
     ? '<span class="ai-row-size" title="≈' + (iss.minutes || _sizeMinutes(iss.size)) + ' min">'
       + escHtml(iss.size) + '</span>' : '';
@@ -15274,16 +15509,17 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
   if (isRunning) {
     if (state === 'coder-active') {
       const cm = _shortModelName(iss.coder_model);
-      agentBadge = '<span class="ai-row-agent">CODER' + (cm ? ' ' + escHtml(cm) : '') + '</span>';
+      agentBadge = '<span class="ai-row-agent ai-row-agent--coder">CODER'
+        + (cm ? ' ' + escHtml(cm) : '') + '</span>';
     } else {
-      agentBadge = '<span class="ai-row-agent">TESTER</span>';
+      agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';
     }
   }
 
   let stateStr;
   if (isDone) {
     const elapsed = _fmtTicketElapsed(iss.elapsed_secs);
-    stateStr = elapsed ? 'done ' + elapsed : 'done';
+    stateStr = elapsed ? 'done · ' + elapsed : 'done';
   } else if (isRunning) {
     stateStr = 'running';
   } else if (isRetrying) {
@@ -15295,14 +15531,17 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
   const metaHtml = '<div class="ai-row-meta">'
     + sizePill + fixBadge + agentBadge
     + '<span class="ai-row-state">' + escHtml(stateStr) + '</span>'
+    + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>'
     + '</div>';
 
   let rowClass = 'ai-row';
+  if (isDone) rowClass += ' ai-row--done';
   if (isLevelLocked) rowClass += ' ai-row--locked';
   if (isExpanded) rowClass += ' ai-row--expanded';
 
   const safeLabel = escHtml(label || '');
   const logAreaId = 'ai-row-log-' + num;
+  const issueUrl = _smgmtIssueUrl(iss);
 
   return '<div class="' + escHtml(rowClass) + '" data-issue="' + num + '" data-state="' + escHtml(state) + '">'
     + '<button type="button" class="ai-row-body"'
@@ -15311,7 +15550,9 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
     + (isLevelLocked ? ' aria-disabled="true"' : '')
     + ' title="' + escHtml(iss.title || '') + '">'
     + iconHtml
-    + '<span class="ai-row-num">#' + escHtml(String(num)) + '</span>'
+    + '<a class="ai-row-num" href="' + escHtml(issueUrl) + '" target="_blank" rel="noopener"'
+    + ' onclick="event.stopPropagation()" title="Open #' + escHtml(String(num)) + ' on GitHub">'
+    + '#' + escHtml(String(num)) + '</a>'
     + '<span class="ai-row-title">' + escHtml(iss.title || '') + '</span>'
     + metaHtml
     + '</button>'
@@ -15320,7 +15561,8 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
 }
 
 /** Full HTML for the All Issues panel body: level headings + issue rows.
- *  Auto-expands the actively-running issue (AC10) before rendering rows. */
+ *  Auto-expands the actively-running issue (AC10) before rendering rows.
+ *  Locked levels show: locked until Level N finishes. */
 function _smgmtAllIssuesHtml(label, live) {
   const levels = _smgmtRailLevels(live);
   if (!levels.length) return '<span class="log-empty">No issues.</span>';
@@ -15331,10 +15573,8 @@ function _smgmtAllIssuesHtml(label, live) {
   });
   return levels.map(function(L) {
     const isLocked = L.state === 'queued' && L.level > 1;
-    const lockIcon = isLocked ? '<i class="ti ti-lock" aria-hidden="true"></i>' : '';
-    const lockNote = isLocked ? ' — locked until Level ' + (L.level - 1) + ' finishes' : '';
-    const levelMeta = '<span class="ai-level-meta">'
-      + lockIcon + 'Level ' + L.level + escHtml(lockNote) + '</span>';
+    // locked until Level N finishes
+    const levelMeta = '<span class="ai-level-meta">' + escHtml(_smgmtAiLevelMeta(L, live)) + '</span>';
     const rowsHtml = L.issues.map(function(iss) {
       return _smgmtAiRowHtml(iss, live, isLocked, label);
     }).join('');
@@ -15418,8 +15658,16 @@ function _smgmtAllIssuesUpdate(label, live) {
   });
   if (activeIss) _smgmtAiExpandedNums.add(activeIss.number);
 
+  const levels = _smgmtRailLevels(live);
+  const totalIssues = issues.length;
+  const levelCount = levels.length;
+
   el.innerHTML = '<div class="ai-panel-title-row">'
-    + '<span class="ai-panel-title">All issues</span>'
+    + '<span class="ai-panel-title"><i class="ti ti-list-details" aria-hidden="true"></i>'
+    + 'All issues</span>'
+    + '<span class="ai-panel-title-meta">'
+    + escHtml(totalIssues + ' total · ' + levelCount + (levelCount === 1 ? ' level' : ' levels'))
+    + '</span>'
     + '</div>'
     + _smgmtAllIssuesHtml(label, live);
 
@@ -21845,7 +22093,18 @@ function _gssRender(data) {
         <i class="ti ti-robot" style="color:var(--text-muted)"></i>
         <div><div class="gss-card-title">Agent Models</div><div class="gss-card-sub">Model assigned to each agent role</div></div>
       </div>
-      <div class="gss-card-body">${modelRows}</div>
+      <div class="gss-card-body">${modelRows}
+        <div class="gss-row">
+          <div class="gss-label">Coder dispatch<span class="hint">CLI used for overnight sprint coders</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="coder_backend">
+              <option value="claude-code"${(data.coder_backend || 'claude-code') === 'claude-code' ? ' selected' : ''}>Claude Code (default)</option>
+              <option value="cline"${data.coder_backend === 'cline' ? ' selected' : ''}>Cline</option>
+            </select>
+          </div>
+        </div>
+        <div class="gss-risk-note">Writes <code>agent_config.coder.backend</code> in each project&apos;s <code>sprint.yaml</code>. Cline requires <code>agent_config.cline.model</code> and <code>cline auth</code> in the coder worktree.</div>
+      </div>
     </div>
 
     <div class="gss-card">

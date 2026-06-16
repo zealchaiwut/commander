@@ -273,6 +273,32 @@ def apply_fetch(
         _update_projects_json(projects_file, project_updates)
 
 
+def _set_sprint_yaml_coder_backend(sprint_yaml_path: Path, backend: str) -> None:
+    """Set agent_config.coder.backend in sprint.yaml (cline | claude-code)."""
+    if backend not in ("cline", "claude-code"):
+        return
+    data: dict = {}
+    if sprint_yaml_path.exists() and _YAML_AVAILABLE:
+        try:
+            data = _yaml.safe_load(sprint_yaml_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            data = {}
+
+    agent_config: dict = data.get(SPRINT_YAML_AGENT_CONFIG_KEY) or {}
+    coder: dict = agent_config.get("coder") or {}
+    if not isinstance(coder, dict):
+        coder = {}
+    coder["backend"] = backend
+    agent_config["coder"] = coder
+    data[SPRINT_YAML_AGENT_CONFIG_KEY] = agent_config
+
+    if _YAML_AVAILABLE:
+        sprint_yaml_path.write_text(
+            _yaml.dump(data, default_flow_style=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+
 def _update_sprint_yaml_agent_config(sprint_yaml_path: Path, new_cfg: dict[str, Any]) -> None:
     """Update (or create) the agent_config section in sprint.yaml."""
     data: dict = {}

@@ -488,6 +488,8 @@ class SprintConfig:
     coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
     # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
     coder_backend:     str  = "claude-code"
+    # Cline-specific model id (agent_config.cline.model) — separate namespace from coder_model
+    cline_model:       Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
 
@@ -684,6 +686,13 @@ def load_config(path: Path) -> "SprintConfig":
         if _ucf is not None:
             use_cline_followups = bool(_ucf)
 
+    # ── agent_config.cline.model — Cline CLI model id (not Claude Code names) ─
+    cline_model: Optional[str] = None
+    if isinstance(agent_cfg, dict):
+        _cline_sub = agent_cfg.get("cline") or {}
+        if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
+            cline_model = str(_cline_sub["model"])
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -711,6 +720,7 @@ def load_config(path: Path) -> "SprintConfig":
         tester_by_risk              = tester_by_risk,
         coder_by_size               = coder_by_size,
         coder_backend               = coder_backend,
+        cline_model                 = cline_model,
         use_cline_followups         = use_cline_followups,
     )
 
@@ -4484,6 +4494,17 @@ def _resolve_coder_model(
     return flat_default, "unestimated:default"
 
 
+def _resolve_cline_model(cfg: Optional["SprintConfig"], coder_model: str) -> tuple[str, str]:
+    """Return (model, routing_reason) for a Cline headless dispatch.
+
+    Cline uses its own model namespace (e.g. Bedrock ARNs). agent_config.cline.model
+    takes precedence; falling back to coder_model is a misconfiguration risk.
+    """
+    if cfg is not None and cfg.cline_model:
+        return cfg.cline_model, "cline:configured"
+    return coder_model, "cline:fallback-coder_model"
+
+
 # ── Pre-dispatch doctor (issue #789) ─────────────────────────────────────────
 
 def _doctor_probe_auth(backend: str = "claude-code") -> Optional[str]:
@@ -5067,19 +5088,33 @@ def _dispatch_coder(
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
     coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
-    sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
+    if coder_backend == "cline":
+        dispatch_model, dispatch_routing_reason = _resolve_cline_model(cfg, coder_model)
+    else:
+        dispatch_model, dispatch_routing_reason = coder_model, coder_routing_reason
+    sys.stdout.write(str(
+        f"  [size-routing] issue #{issue_num}: model={dispatch_model}, reason={dispatch_routing_reason}, backend={coder_backend}"
+    ) + "\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
     sub_env = os.environ.copy()
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
-    sub_env["CLAUDE_MODEL"] = coder_model  # hook records model_name on token_usage rows
+    sub_env["CLAUDE_MODEL"] = dispatch_model  # hook records model_name on token_usage rows
 
     if coder_backend == "cline":
         # Cline headless backend (issue #917).
         # -y skips tool-approval prompts (analogous to --dangerously-skip-permissions).
         # Cline has no --append-system-prompt; prepend persona to the prompt string instead.
         # Metered API path: keep ANTHROPIC_API_KEY so Cline can authenticate.
+        if dispatch_routing_reason == "cline:fallback-coder_model":
+            structured_log.warn(
+                "cline_model_missing",
+                "[coder] agent_config.cline.model not set — using coder_model for Cline -m "
+                "(Claude Code model ids often 404 in Cline; set agent_config.cline.model)",
+                issue_num=issue_num,
+                coder_model=coder_model,
+            )
         if not (cwd_path / ".clinerules").exists():
             structured_log.warn(
                 "clinerules_missing",
@@ -5089,13 +5124,13 @@ def _dispatch_coder(
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
         full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
-        cmd = ["cline", "-y", "-m", coder_model, full_prompt]
+        cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
         # Claude Code (existing default behavior, byte-for-byte unchanged).
         cmd = [
             "claude",
-            "--model", coder_model,
+            "--model", dispatch_model,
             "--dangerously-skip-permissions",
         ]
         coder_persona = _load_agent_persona("coder", cwd_path)
@@ -5136,7 +5171,7 @@ def _dispatch_coder(
         structured_log.info(
             "dispatch_start", f"coder dispatch #{issue_num} (attempt {attempt + 1})",
             issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
-            attempt=attempt + 1, model=coder_model, cmd=cmd[:4],
+            attempt=attempt + 1, model=dispatch_model, cmd=cmd[:4],
         )
         try:
             with log_path.open(open_mode) as log_f:

@@ -7557,6 +7557,11 @@
     .metric.amber .metric-label,
     .metric.amber .metric-value { color: var(--amber); }
     @media (max-width: 560px) { .metric { flex-basis: calc(50% - 8px); } }
+    @media (max-width: 640px) {
+      .metrics { gap: 6px; }
+      .metric { flex: 1 1 auto; min-width: 120px; }
+      .metric-label { font-size: 9px; }
+    }
 
     /* ── Two-queue coder/tester lane view (issue #927) ───────────────────────
        Two side-by-side lanes (Coder / Tester). Each lane has a capacity header

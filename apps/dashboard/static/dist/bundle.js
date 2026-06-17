@@ -990,6 +990,7 @@ Replace the existing draft (${data.existing_label})?`
   var _histLedgerData = [];
   globalThis._histLedgerData = _histLedgerData;
   var _histExpanded = /* @__PURE__ */ new Set();
+  var _histGroupCollapsed = /* @__PURE__ */ new Set();
   var _histDidAutoExpand = false;
   var _histFoldSize = 10;
   var _histFoldExpanded = /* @__PURE__ */ new Set();
@@ -1702,6 +1703,23 @@ Replace the existing draft (${data.existing_label})?`
     const stats = _histRunStats[s.label];
     return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
   }
+  function _histCardShowsDoneSummary(s) {
+    if (_histSprintFailed(s))
+      return false;
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (state === "needs_rework" || state === "partial_finished") {
+      const issues = Array.isArray(s.issues) ? s.issues : [];
+      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
+      if (unfinished.length)
+        return false;
+    }
+    return state === "ready_to_merge" || state === "completed" || state === "partial_finished" || state === "running";
+  }
+  function _histCardOutcomeHtml(s) {
+    if (!_histCardShowsDoneSummary(s))
+      return "";
+    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+  }
   function _histChildMetricsHtml(s) {
     const stats = _histRunStats[s.label];
     const metricsOpen = _histMetricsExpanded.has(s.label);
@@ -1733,15 +1751,18 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(base).replace("Sprint ", "");
     return `\u2190 from ${display}`;
   }
-  function _histParentRowHtml(s, bulkBtn) {
+  function _histParentRowHtml(s, bulkBtn, groupExpanded) {
     const display = sprintLabelDisplay(s.label);
     const lbl = escHtml(s.label || "");
-    return `<div class="hist-parent-row" data-label="${lbl}">
-    <i class="ti ti-chevron-down hist-chev" aria-hidden="true"></i>
+    const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
+    return `<div class="hist-parent-row" data-label="${lbl}" role="button" tabindex="0"
+    onclick="_histToggleGroup('${lbl}')"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
+    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
     <span class="hist-parent-name">${escHtml(display)}</span>
     ${_histStateChip(s.lifecycle_state, s)}
     ${_histHeadStatsHtml(s)}
-    <span class="hist-parent-actions">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
+    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
   </div>`;
   }
   function _histChildCardHtml(s) {
@@ -2006,9 +2027,12 @@ Replace the existing draft (${data.existing_label})?`
     const deleteBtn = _histDeleteBtnHtml(s);
     const secondaryLinks = _histSecondaryLinksHtml(s);
     const headRight = secondaryLinks || deleteBtn || bulkBtn || recoveryBtn ? `<span class="hist-card-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>` : "";
+    if (expanded && !(s.label in _histRunStats))
+      _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
+      ${_histCardOutcomeHtml(s)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ""}
     </div>` : "";
@@ -2032,6 +2056,16 @@ Replace the existing draft (${data.existing_label})?`
     } else {
       _histExpanded.add(label);
       _histLoadRunStats(label);
+    }
+    _histRenderLedger(_histLedgerData);
+  }
+  function _histToggleGroup(baseLabel) {
+    if (!baseLabel)
+      return;
+    if (_histGroupCollapsed.has(baseLabel)) {
+      _histGroupCollapsed.delete(baseLabel);
+    } else {
+      _histGroupCollapsed.add(baseLabel);
     }
     _histRenderLedger(_histLedgerData);
   }
@@ -2117,9 +2151,12 @@ Replace the existing draft (${data.existing_label})?`
     const bulkBtn = _histBulkCompleteBtnHtml(group);
     const children = group.children || [];
     if (children.length) {
-      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn) : "";
+      const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
+      const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
+      const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
+      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded) : "";
       const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-      return `<div class="hist-sprint-group">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
+      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
     if (group.baseSprint) {
       return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
@@ -6984,6 +7021,7 @@ ${data.errors.join("\n")}`);
   globalThis._histScanStale = _histScanStale;
   globalThis._histCleanupStale = _histCleanupStale;
   globalThis._histToggleCard = _histToggleCard;
+  globalThis._histToggleGroup = _histToggleGroup;
   globalThis._histToggleFold = _histToggleFold;
   globalThis._histFocusLabel = _histFocusLabel;
   globalThis._histStateChip = _histStateChip;

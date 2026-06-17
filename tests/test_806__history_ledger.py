@@ -112,6 +112,7 @@ def test_ac1_card_has_expandable_issue_list():
         "_histIssueListHtml" in card
         or "_histIssueRowHtml" in card
         or "_histDoneIssuesHtml" in child
+        or "_histCardOutcomeHtml" in card
     ), "cards must render ticket rows via an issue-list builder"
     list_fn = _fn_body("_histIssueListHtml")
     assert "iss-list" in list_fn, "the issue-list builder emits the .iss-list container"

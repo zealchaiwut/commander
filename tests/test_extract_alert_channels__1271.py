@@ -42,11 +42,11 @@ def test_extract_alert_channels__symbols_importable():
         from services.sprint_manager.alerts import (
             HangDetector,
             dispatch_alerts,
-            _alert_dashboard_banner,
-            _alert_email,
-            _alert_discord,
-            _alert_ntfy,
-            _alert_file,
+            _alert_dashboard_banner,  # noqa: F401
+            _alert_email,  # noqa: F401
+            _alert_discord,  # noqa: F401
+            _alert_ntfy,  # noqa: F401
+            _alert_file,  # noqa: F401
             AlertMode,
         )
         # If we got here, all imports succeeded

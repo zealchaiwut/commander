@@ -12385,6 +12385,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+  // Feature flags (sign-off, advisor, plan-next) — hide disabled surfaces before first paint.
+  if (typeof loadCommanderFeatures === 'function') {
+    await loadCommanderFeatures();
+  }
   // Stash deck deep-link intent; switchTab/logsInit consume it once on this load.
   _deepLinkView = view;
   _deepLinkFilter = filter;
@@ -23084,6 +23088,12 @@ function _gssModelOpts(current) {
   ).join('');
 }
 
+function _gssFeatureDisableOpts(key, data) {
+  const disabled = data[key] !== false;
+  return `<option value="true"${disabled ? ' selected' : ''}>Disabled</option>` +
+    `<option value="false"${!disabled ? ' selected' : ''}>Enabled</option>`;
+}
+
 function _gssRender(data) {
   _gssData = data;
 
@@ -23178,6 +23188,47 @@ function _gssRender(data) {
           <div class="gss-control">
             <select class="gss-select gss-inp" data-gss-key="log_level">
               ${['DEBUG','INFO','WARNING','ERROR'].map(l => `<option${(data.log_level||'INFO')===l?' selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-toggle-left" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Feature flags</div><div class="gss-card-sub">Optional product surfaces — takes effect after save (no server restart). Env vars in <code>.env</code> override these when set.</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Sprint sign-off<span class="hint">Approve before Run on planned sprints</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_signoff" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_signoff', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Daily advisor<span class="hint">Roadmap suggestions agent</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_advisor" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_advisor', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Plan next sprint<span class="hint">Milestone-based sprint planner</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_planning" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_planning', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Require sprint goal<span class="hint">Goal field must be filled before Run</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_goal_required" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_goal_required', data)}
             </select>
           </div>
         </div>
@@ -23576,6 +23627,10 @@ async function _gssSave() {
   inputs.forEach(el => {
     const key = el.dataset.gssKey;
     const raw = el.value;
+    if (el.dataset.gssBool === '1') {
+      payload[key] = raw === 'true';
+      return;
+    }
     if (el.type === 'number') {
       const n = parseInt(raw, 10);
       if (!isNaN(n)) payload[key] = n;
@@ -23603,6 +23658,9 @@ async function _gssSave() {
     });
     localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
     _gssData = updated;
+    if (typeof loadCommanderFeatures === 'function') {
+      await loadCommanderFeatures();
+    }
     if (feedback) {
       feedback.textContent = 'Saved';
       feedback.className = 'gss-feedback visible';

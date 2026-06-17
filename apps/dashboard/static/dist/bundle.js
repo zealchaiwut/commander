@@ -803,6 +803,60 @@
     switchTab(effTab, false);
   });
 
+  // apps/dashboard/static/src/shell/features.js
+  var _features = null;
+  function commanderFeatures() {
+    return _features || {};
+  }
+  function signoffEnabled() {
+    return commanderFeatures().signoff === true;
+  }
+  function advisorEnabled() {
+    return commanderFeatures().advisor === true;
+  }
+  function planningEnabled() {
+    return commanderFeatures().planning === true;
+  }
+  async function loadCommanderFeatures() {
+    try {
+      const res = await fetch("/api/environment", { cache: "no-store" });
+      if (!res.ok)
+        throw new Error(String(res.status));
+      const data = await res.json();
+      _features = data.features || {};
+    } catch {
+      _features = { signoff: false, advisor: false, planning: false };
+    }
+    const root2 = typeof window !== "undefined" ? window : globalThis;
+    root2._commanderFeatures = _features;
+    applyFeatureFlags();
+    return _features;
+  }
+  function _hide(el) {
+    if (!el)
+      return;
+    el.classList.add("hidden");
+    el.setAttribute("aria-hidden", "true");
+  }
+  function applyFeatureFlags() {
+    if (!advisorEnabled()) {
+      _hide(document.getElementById("stab-advisor"));
+      _hide(document.getElementById("pane-advisor"));
+    }
+    if (!planningEnabled()) {
+      _hide(document.getElementById("smgmt-plan-next-btn"));
+      _hide(document.getElementById("hnav-milestone"));
+    }
+    if (!signoffEnabled()) {
+      _hide(document.getElementById("snav-signoff"));
+    }
+    if (!advisorEnabled() && !planningEnabled()) {
+      const group = document.getElementById("stab-group-planning");
+      if (group)
+        group.style.display = "none";
+    }
+  }
+
   // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
@@ -868,6 +922,10 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
   async function smgmtPlanNextSprint() {
+    if (globalThis._commanderFeatures && globalThis._commanderFeatures.planning !== true) {
+      _smgmtShowToast("Plan next sprint is disabled.");
+      return;
+    }
     const repo = _smgmtRepo();
     if (!repo) {
       _smgmtShowToast("No project selected.");
@@ -888,6 +946,8 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
   async function _smgmtLoadPendingSignoff() {
+    if (globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true)
+      return;
     const repo = _smgmtRepo();
     if (!repo)
       return;
@@ -5137,6 +5197,9 @@ ${data.errors.join("\n")}`);
   // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   function _smgmtSignoffState(label) {
+    if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
+      return null;
+    }
     return (_smgmtData && _smgmtData.sprint_signoff || {})[label] || null;
   }
   function _smgmtSignoffBadgeHtml(label) {
@@ -5149,6 +5212,12 @@ ${data.errors.join("\n")}`);
       return "";
     const e = escHtml(label);
     return `<button class="smgmt-approve-btn" type="button" onclick="smgmtApproveSprint('${e}')"><i class="ti ti-check"></i> Approve</button><button class="smgmt-reject-btn" type="button" onclick="smgmtRejectSprint('${e}')"><i class="ti ti-x"></i> Reject</button>`;
+  }
+  function _smgmtGoalRequired() {
+    const f = typeof globalThis !== "undefined" && globalThis._commanderFeatures;
+    if (!f)
+      return false;
+    return f.goal_required === true;
   }
   async function loadSprintMgmt2(silent, optimisticRunningLabel) {
     const listEl = document.getElementById("smgmt-sprint-list");
@@ -5891,13 +5960,12 @@ ${data.errors.join("\n")}`);
           continue;
         const data = await resp.json();
         const goal = (data.goal || "").trim();
-        if (!goal)
-          continue;
         if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-          goalEl.value = goal;
+          if (goal)
+            goalEl.value = goal;
           const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-          smgmtDraftGoalInput(goalEl, runBtnId, label);
-        } else {
+          _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
+        } else if (goal) {
           goalEl.textContent = goal;
           goalEl.title = goal;
           goalEl.style.display = "";
@@ -6609,7 +6677,7 @@ ${data.errors.join("\n")}`);
         return `Ready to run.${held} Waiting on ${blocker} to finish.`;
       }
       if (!planState || planState === "draft" || planState === "planning") {
-        return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : "Set a sprint goal to enable the run.";
+        return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : _smgmtGoalRequired() ? "Set a sprint goal to enable the run." : "Ready to run.";
       }
       return held ? `Ready to run.${held}` : "Ready to run.";
     }
@@ -7186,9 +7254,22 @@ ${data.errors.join("\n")}`);
     const signoffPending = _smgmtSignoffState(label) === "pending";
     const signoffBadge = _smgmtSignoffBadgeHtml(label);
     const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
-    const runDisabled = signoffPending ? "disabled" : "disabled";
-    const runTitle = signoffPending ? 'title="Approve the sprint plan before running"' : 'title="Enter a sprint goal to enable Run"';
-    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span>` + signoffBadge + `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button>` + signoffActions + `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" ${runDisabled} ${runTitle} onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
+    const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
+    const goalRequired = _smgmtGoalRequired();
+    let runDisabled = "";
+    let runTitle = "";
+    if (signoffPending) {
+      runDisabled = "disabled";
+      runTitle = 'title="Approve the sprint plan before running"';
+    } else if (!canRun) {
+      runDisabled = "disabled";
+      runTitle = 'title="No dispatchable tickets \u2014 add tickets from the backlog"';
+    } else if (goalRequired) {
+      runDisabled = "disabled";
+      runTitle = 'title="Enter a sprint goal to enable Run"';
+    }
+    const goalPlaceholder = goalRequired ? "Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" : "Optional sprint goal \u2014 e.g. 'Milestone burndown + activity cleanup'";
+    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span>` + signoffBadge + `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button>` + signoffActions + `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" ${runDisabled} ${runTitle} onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="${escHtml(goalPlaceholder)}" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
   }
   function smgmtPlanningRowMenu(event, issueNum, label) {
     event.stopPropagation();
@@ -7264,17 +7345,28 @@ ${data.errors.join("\n")}`);
     }
   }
   var _smgmtGoalSaveTimers = {};
-  function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
+  function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
     const btn = document.getElementById(runBtnId);
-    if (btn) {
-      const hasGoal = inputEl.value.trim().length > 0;
-      btn.disabled = !hasGoal;
-      if (hasGoal) {
-        btn.removeAttribute("title");
-      } else {
-        btn.title = "Enter a sprint goal to enable Run";
-      }
+    if (!btn)
+      return;
+    if (_smgmtSignoffState(sprintLabel) === "pending") {
+      btn.disabled = true;
+      btn.title = "Approve the sprint plan before running";
+      return;
     }
+    if (!_smgmtGoalRequired()) {
+      const tickets = _smgmtBySprint && _smgmtBySprint[sprintLabel] || [];
+      const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
+      btn.disabled = !canRun;
+      btn.title = canRun ? "" : "No dispatchable tickets \u2014 add tickets from the backlog";
+      return;
+    }
+    const hasGoal = inputEl && inputEl.value.trim().length > 0;
+    btn.disabled = !hasGoal;
+    btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
+  }
+  function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
+    _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
     if (!sprintLabel)
       return;
     const repo = _smgmtRepo();
@@ -7504,8 +7596,10 @@ ${data.errors.join("\n")}`);
   root.switchTab = switchTab;
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
+  root.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+  globalThis.loadCommanderFeatures = loadCommanderFeatures;
 })();
 //# sourceMappingURL=bundle.js.map

@@ -31,6 +31,7 @@ import {
   BOARD_OVERLAY_PA_ID,
 } from "./progress-host.js";
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
+import { loadCommanderFeatures } from './shell/features.js';
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -57,6 +58,8 @@ injectProgressActivityCss();
 root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
+root.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+globalThis.loadCommanderFeatures = loadCommanderFeatures;

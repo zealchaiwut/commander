@@ -24,6 +24,10 @@ let _smgmtResolvedAncestors = new Set();
 
 /** Sign-off gate state for a sprint label (issue #862): 'pending' | 'approved' | null. */
 function _smgmtSignoffState(label) {
+  if (typeof globalThis !== 'undefined' && globalThis._commanderFeatures
+      && globalThis._commanderFeatures.signoff !== true) {
+    return null;
+  }
   return ((_smgmtData && _smgmtData.sprint_signoff) || {})[label] || null;
 }
 
@@ -43,6 +47,13 @@ function _smgmtSignoffActionsHtml(label) {
     ` onclick="smgmtRejectSprint('${e}')">` +
     `<i class="ti ti-x"></i> Reject</button>`
   );
+}
+
+/** When false (default), sprint goal is optional and does not gate Run Sprint. */
+function _smgmtGoalRequired() {
+  const f = typeof globalThis !== "undefined" && globalThis._commanderFeatures;
+  if (!f) return false;
+  return f.goal_required === true;
 }
 
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
@@ -935,12 +946,11 @@ export async function _smgmtLoadGoals(orderedLabels) {
       if (!resp.ok) continue;
       const data = await resp.json();
       const goal = (data.goal || "").trim();
-      if (!goal) continue;
       if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-        goalEl.value = goal;
+        if (goal) goalEl.value = goal;
         const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-        smgmtDraftGoalInput(goalEl, runBtnId, label);
-      } else {
+        _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
+      } else if (goal) {
         goalEl.textContent = goal;
         goalEl.title = goal;
         goalEl.style.display = "";
@@ -1894,7 +1904,9 @@ export function _smgmtCardStatusSentence(label, opts) {
     if (!planState || planState === "draft" || planState === "planning") {
       return tickets.length === 0
         ? "No tickets yet — drag some from the backlog."
-        : "Set a sprint goal to enable the run.";
+        : _smgmtGoalRequired()
+          ? "Set a sprint goal to enable the run."
+          : "Ready to run.";
     }
     return held ? `Ready to run.${held}` : "Ready to run.";
   }
@@ -2674,10 +2686,23 @@ export function _smgmtDraftCardHtml(label, tickets) {
   const signoffPending = _smgmtSignoffState(label) === "pending";
   const signoffBadge = _smgmtSignoffBadgeHtml(label);
   const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
-  const runDisabled = signoffPending ? "disabled" : "disabled";
-  const runTitle = signoffPending
-    ? 'title="Approve the sprint plan before running"'
-    : 'title="Enter a sprint goal to enable Run"';
+  const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
+  const goalRequired = _smgmtGoalRequired();
+  let runDisabled = "";
+  let runTitle = "";
+  if (signoffPending) {
+    runDisabled = "disabled";
+    runTitle = 'title="Approve the sprint plan before running"';
+  } else if (!canRun) {
+    runDisabled = "disabled";
+    runTitle = 'title="No dispatchable tickets — add tickets from the backlog"';
+  } else if (goalRequired) {
+    runDisabled = "disabled";
+    runTitle = 'title="Enter a sprint goal to enable Run"';
+  }
+  const goalPlaceholder = goalRequired
+    ? "Set a sprint goal to run — e.g. 'Milestone burndown + activity cleanup'"
+    : "Optional sprint goal — e.g. 'Milestone burndown + activity cleanup'";
 
   return (
     `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}">` +
@@ -2701,7 +2726,7 @@ export function _smgmtDraftCardHtml(label, tickets) {
     `<div class="smgmt-goal-slot smgmt-goal-slot--dashed">` +
     `<i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i>` +
     `<input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text"` +
-    ` placeholder="Set a sprint goal to run — e.g. 'Milestone burndown + activity cleanup'"` +
+    ` placeholder="${escHtml(goalPlaceholder)}"` +
     ` oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')">` +
     `</div>` +
     budgetBar +
@@ -2812,17 +2837,28 @@ export function smgmtAddToDraft(issueNum, draftLabel) {
  */
 const _smgmtGoalSaveTimers = {};
 
-export function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
+function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
   const btn = document.getElementById(runBtnId);
-  if (btn) {
-    const hasGoal = inputEl.value.trim().length > 0;
-    btn.disabled = !hasGoal;
-    if (hasGoal) {
-      btn.removeAttribute("title");
-    } else {
-      btn.title = "Enter a sprint goal to enable Run";
-    }
+  if (!btn) return;
+  if (_smgmtSignoffState(sprintLabel) === "pending") {
+    btn.disabled = true;
+    btn.title = "Approve the sprint plan before running";
+    return;
   }
+  if (!_smgmtGoalRequired()) {
+    const tickets = (_smgmtBySprint && _smgmtBySprint[sprintLabel]) || [];
+    const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
+    btn.disabled = !canRun;
+    btn.title = canRun ? "" : "No dispatchable tickets — add tickets from the backlog";
+    return;
+  }
+  const hasGoal = inputEl && inputEl.value.trim().length > 0;
+  btn.disabled = !hasGoal;
+  btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
+}
+
+export function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
+  _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
   if (!sprintLabel) return;
   const repo = _smgmtRepo();
   if (!repo) return;

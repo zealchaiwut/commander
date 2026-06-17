@@ -65,6 +65,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # are available when db.py executes its module-level startup checks.
 load_dotenv(Path(__file__).parent / ".env")
 
+import config
 import db
 import github_client
 import sprint_state
@@ -1341,8 +1342,11 @@ async def health_check(request: Request):
 
 @app.get("/api/environment")
 def get_environment():
-    """Return the current runtime environment (prd or uat)."""
-    return {"environment": ENVIRONMENT}
+    """Return the current runtime environment (prd or uat) and feature flags."""
+    return {
+        "environment": ENVIRONMENT,
+        "features": config.commander_features(),
+    }
 
 
 # /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
@@ -4869,6 +4873,8 @@ def _plan_json_set_state(
 
 def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str]:
     """Return 'pending', 'approved', or None for a sprint's sign-off gate."""
+    if config.sprint_signoff_disabled():
+        return None
     plan = _read_plan_json(project_root, sprint_label)
     if not plan:
         return None
@@ -4922,6 +4928,8 @@ def _assert_sprint_signed_off(project_root: Path, sprint_label: str) -> None:
     Called from the run path so a pending sprint cannot be dispatched — the
     same gate that mutes the Run Sprint button on the board.
     """
+    if config.sprint_signoff_disabled():
+        return
     if _sprint_signoff_state(project_root, sprint_label) == "pending":
         raise HTTPException(
             409,

@@ -164,8 +164,9 @@ PY
 }
 
 # _get_env_val FILE KEY — print the current effective value of KEY in FILE.
-# Strips leading # so commented-out entries are also found.
-# Prints nothing (empty) if KEY is absent or the file does not exist.
+# Only uncommented lines are returned as the effective value; commented lines
+# (even with real values) are skipped so they never suppress a setup prompt.
+# Prints nothing (empty) if KEY is absent, commented-out, or file does not exist.
 _get_env_val() {
     SM_KEY="$2" python3 - "$1" <<'PY'
 import os, sys
@@ -176,7 +177,9 @@ try:
 except FileNotFoundError:
     sys.exit(0)
 for ln in lines:
-    stripped = ln.lstrip("#").lstrip()
+    stripped = ln.lstrip()
+    if stripped.startswith("#"):
+        continue  # commented lines never count as the effective value
     if stripped.startswith(key + "="):
         print(stripped[len(key) + 1:], end="")
         sys.exit(0)

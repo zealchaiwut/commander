@@ -240,7 +240,8 @@ class TestClearErrorWhenEstimationCannotRun:
         Issue #374: estimation now happens in bulk_post_selected (not _bulk_flusher).
         The flusher only holds tickets at draft_ready; this test exercises post-selected.
         """
-        from server import bulk_post_selected, _bulk_jobs, _bulk_job_queues, BulkPostSelectedBody, BulkPostSelectedItem
+        from routers.bulk_tickets import bulk_post_selected, BulkPostSelectedBody, BulkPostSelectedItem
+        from server import _bulk_jobs, _bulk_job_queues
 
         job_id = "test-331-no-repo"
         ticket = {

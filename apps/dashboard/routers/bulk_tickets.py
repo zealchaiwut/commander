@@ -222,7 +222,7 @@ class SizeRemedyImagesBody(BaseModel):
 
 @router.post("/api/tickets/draft")
 async def create_ticket_draft(
-    description: str = Form(...),
+    description: str = Form(default=""),
     project: str = Form(default=""),
     sprint_label: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
@@ -320,7 +320,7 @@ async def create_ticket_draft(
 async def create_ticket_from_draft(
     background_tasks: BackgroundTasks,
     draft_id: str = Form(default=""),
-    title: str = Form(...),
+    title: str = Form(default=""),
     body: str = Form(default=""),
     project: str = Form(default=""),
     sprint_label: str = Form(default=""),

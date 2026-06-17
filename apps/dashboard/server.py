@@ -11191,6 +11191,13 @@ def sprint_branch_merge(owner: str, repo_name: str, body: SprintBranchMergeBody)
     )
     if not ok:
         raise HTTPException(400, detail=detail)
+    # PR may have been the sprint's outstanding loose end — refresh reconciliation.
+    m = re.match(r"^sprint/sprint-(\d+(?:\.\d+)*)$", body.head or "")
+    if m:
+        from routers import sprint_reconcile_service  # noqa: PLC0415
+        sprint_reconcile_service.refresh_post_sprint_reconciliation(
+            f"sprint-{m.group(1)}", repo,
+        )
     return {"ok": True, "detail": detail}
 
 

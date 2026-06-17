@@ -5,7 +5,6 @@ AC2: No bare mixed and/or remain without parentheses.
 AC3: Logical result is identical for all combinations of has_agent_action, status.
 AC4: Existing tests pass without modification.
 """
-import re
 from pathlib import Path
 
 import pytest
@@ -40,7 +39,7 @@ def test_condition_has_explicit_parentheses():
     # The condition line should have parentheses around the or clause
     # or around the and clause, but not bare mixed and/or
     lines = fn_src.split('\n')
-    if_lines = [l for l in lines if 'if ' in l and 'status' in l and 'has_agent_action' in l]
+    if_lines = [ln for ln in lines if 'if ' in ln and 'status' in ln and 'has_agent_action' in ln]
 
     assert if_lines, "Could not find condition line"
 
@@ -85,14 +84,6 @@ def test_no_bare_mixed_and_or():
 
             if and_pos > 0 and or_pos > and_pos:
                 # There's both 'and' and 'or' in order
-                # Check if they're properly parenthesized
-                before_and = condition[:and_pos]
-                between = condition[and_pos:or_pos]
-                after_or = condition[or_pos:]
-
-                # Count unmatched parens before the and
-                open_before = before_and.count('(') - before_and.count(')')
-
                 # The and/or should be inside a parenthetical group
                 # or at least one side should be parenthesized
                 assert '(' in condition and ')' in condition, (

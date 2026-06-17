@@ -1703,6 +1703,23 @@ Replace the existing draft (${data.existing_label})?`
     const stats = _histRunStats[s.label];
     return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
   }
+  function _histCardShowsDoneSummary(s) {
+    if (_histSprintFailed(s))
+      return false;
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (state === "needs_rework" || state === "partial_finished") {
+      const issues = Array.isArray(s.issues) ? s.issues : [];
+      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
+      if (unfinished.length)
+        return false;
+    }
+    return state === "ready_to_merge" || state === "completed" || state === "partial_finished" || state === "running";
+  }
+  function _histCardOutcomeHtml(s) {
+    if (!_histCardShowsDoneSummary(s))
+      return "";
+    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+  }
   function _histChildMetricsHtml(s) {
     const stats = _histRunStats[s.label];
     const metricsOpen = _histMetricsExpanded.has(s.label);
@@ -2009,9 +2026,12 @@ Replace the existing draft (${data.existing_label})?`
     const deleteBtn = _histDeleteBtnHtml(s);
     const secondaryLinks = _histSecondaryLinksHtml(s);
     const headRight = secondaryLinks || deleteBtn || bulkBtn || recoveryBtn ? `<span class="hist-card-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>` : "";
+    if (expanded && !(s.label in _histRunStats))
+      _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
+      ${_histCardOutcomeHtml(s)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ""}
     </div>` : "";

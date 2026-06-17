@@ -498,10 +498,26 @@ def test_ac12_secondary_class_visually_different_from_recovery():
 def test_ac13_hist_card_html_uses_helper_functions():
     """_histCardHtml must delegate to new helper functions for all variants."""
     card_body = _fn_body("_histCardHtml")
-    required_helpers = ["_histLooseEndBandHtml", "_histWhatListHtml", "_histDetailsHtml"]
+    required_helpers = [
+        "_histLooseEndBandHtml",
+        "_histWhatListHtml",
+        "_histCardOutcomeHtml",
+        "_histDetailsHtml",
+    ]
     for helper in required_helpers:
         assert helper in card_body, \
             f"_histCardHtml must call {helper} to ensure consistent layout across variants"
+
+
+def test_standalone_ready_card_shows_done_issues_and_agent_bar():
+    """Ready-to-merge standalone sprints show ticket rows + agent bar like child cards."""
+    card_body = _fn_body("_histCardHtml")
+    assert "_histCardOutcomeHtml" in card_body
+    outcome = _fn_body("_histCardOutcomeHtml")
+    assert "_histChildMetricsHtml" in outcome
+    assert "_histDoneIssuesHtml" in outcome
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "ready_to_merge" in shows
 
 
 def test_ac13_hist_loose_end_band_css_exists():

@@ -5,12 +5,21 @@ All read functions accept an optional repo_name to support multi-repo setups.
 Results cached for CACHE_TTL seconds.
 """
 import json
+import logging
 import os
 import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
+
+_logger = logging.getLogger(__name__)
+_GH_DEBUG = os.environ.get("COMMANDER_GH_API_DEBUG", "").strip() == "1"
+# gh subcommands that route through GraphQL (shared 5000/hr budget).
+_GH_GRAPHQL_SUBCMDS = frozenset({
+    ("issue", "list"), ("issue", "view"), ("issue", "create"),
+    ("label", "list"), ("pr", "list"), ("pr", "view"),
+})
 
 from config import TEST_GITHUB_REPO
 
@@ -185,12 +194,40 @@ def invalidate(prefix: str = ""):
         del _cache[k]
 
 
+def _gh_transport_label(gh_args: tuple[str, ...]) -> str:
+    """Classify a gh invocation for COMMANDER_GH_API_DEBUG logging."""
+    if not gh_args:
+        return "other"
+    if gh_args[0] == "api":
+        return "rest"
+    if len(gh_args) >= 2 and (gh_args[0], gh_args[1]) in _GH_GRAPHQL_SUBCMDS:
+        return "graphql"
+    if gh_args[0] in {"issue", "label", "pr"}:
+        return "graphql"
+    return "other"
+
+
+def _log_gh_call(gh_args: tuple[str, ...]) -> None:
+    if not _GH_DEBUG:
+        return
+    preview = " ".join(str(a) for a in gh_args[:4])
+    if len(gh_args) > 4:
+        preview += " …"
+    _logger.info(
+        "gh_call transport=%s cmd=%s",
+        _gh_transport_label(gh_args),
+        preview,
+    )
+
+
 def _json(*args) -> object:
+    _log_gh_call(args)
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 
 
 def _run(*args) -> str:
+    _log_gh_call(args)
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return r.stdout.strip()
 

@@ -86,13 +86,15 @@ def assert_run_mutable(add: Iterable[str], remove: Iterable[str]) -> None:
 
 
 def _fetch_labels(issue: int, repo: str) -> frozenset[str]:
+    # REST (gh api) — `gh issue view` uses GraphQL and burns the 5000/hr budget
+    # during sprint label transitions (issue #755 follow-up).
     result = subprocess.run(
-        ["gh", "issue", "view", str(issue), "--repo", repo, "--json", "labels"],
+        ["gh", "api", f"repos/{repo}/issues/{issue}"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
         raise TransitionError(
-            f"gh issue view #{issue} failed: {result.stderr.strip()}"
+            f"gh api repos/{repo}/issues/{issue} failed: {result.stderr.strip()}"
         )
     try:
         data = json.loads(result.stdout)

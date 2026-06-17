@@ -2087,21 +2087,25 @@ def _sweep_stale_status(
     ticket) and one ``SIT`` (the tester's active ticket) at a time. In pipeline
     mode both run concurrently, so a crash between the remove-label and add-label
     calls, or an interrupted prior run, can leave a ghost label on a ticket no
-    longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
+    longer being worked (issue #738 AC5). One REST ``gh api`` issue query finds them; we
     clear all except ``active_issue``. Best-effort and bounded (no per-ticket
     fetches).
     """
     r = _r(repo_name)
     try:
         out = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", status_label, "--label", sprint_label,
-             "--state", "open", "--json", "number", "--limit", "100"],
+            [
+                "gh", "api", f"repos/{r}/issues",
+                "-f", "state=open",
+                "-f", f"labels={status_label},{sprint_label}",
+                "-f", "per_page=100",
+                "--jq", ".[].number",
+            ],
             capture_output=True, text=True, timeout=15,
         )
         if out.returncode != 0:
             return
-        nums = [i["number"] for i in json.loads(out.stdout or "[]")]
+        nums = [int(n) for n in (out.stdout or "").split() if n.strip().isdigit()]
     except Exception:
         return
     cleared: list[int] = []
@@ -6913,7 +6917,7 @@ git diff {base_sha}..{head_sha} --stat
 Run:
 
 ```
-gh issue view {summary_issue_num} --json body
+gh api repos/{repo_name}/issues/{summary_issue_num} --jq .body
 ```
 
 Parse the sprint summary body to extract the list of merged ticket numbers \
@@ -6921,7 +6925,7 @@ Parse the sprint summary body to extract the list of merged ticket numbers \
 For each merged ticket N, run:
 
 ```
-gh issue view N --json number,title,body,labels
+gh api repos/{repo_name}/issues/N
 ```
 
 Skip any ticket that:
@@ -7173,7 +7177,7 @@ git diff {base_sha}..{head_sha}
 
 For each ticket in the sprint, read:
 ```
-gh issue view <N> --json number,title,body,labels
+gh api repos/{repo_name}/issues/<N>
 ```
 
 Only document tickets that are in a merged/done state.
@@ -7276,6 +7280,7 @@ def _dispatch_documenter(
             head_sha          = head_sha,
             sprint_filter_url = sprint_filter_url,
             summary_issue_num = summary_issue_num or 0,
+            repo_name         = eff_repo or "",
         )
     except KeyError as e:
         structured_log.error("documenter_template_error", f"[documenter] prompt template has unknown placeholder {e}", placeholder=str(e))
@@ -7653,7 +7658,7 @@ You are a Business Analyst. Issue #{issue_num} in repository {repo} was created 
 automated code reviewer as a follow-up ticket. Its body may be minimal or unstructured.
 
 Your task:
-1. Read the issue with: gh issue view {issue_num} --repo {repo} --json title,body
+1. Read the issue with: gh api repos/{repo}/issues/{issue_num}
 2. Rewrite the body to the standard Commander format with ALL of these sections:
    ## What & Why
    ## Acceptance Criteria

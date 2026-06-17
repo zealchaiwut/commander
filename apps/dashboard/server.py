@@ -679,8 +679,10 @@ def _check_gh_auth() -> None:
         return
 
     try:
+        # --active: ignore stale secondary accounts in the keyring (only check
+        # the credential gh will actually use, including GH_TOKEN).
         result = subprocess.run(
-            ["gh", "auth", "status"],
+            ["gh", "auth", "status", "--active"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -1063,7 +1065,7 @@ _HEALTH_CACHE_TTL = 10.0  # seconds
 def _health_collect_gh_auth_scopes() -> dict | None:
     try:
         result = subprocess.run(
-            ["gh", "auth", "status"],
+            ["gh", "auth", "status", "--active"],
             capture_output=True, text=True, timeout=5,
         )
         output = result.stdout + result.stderr

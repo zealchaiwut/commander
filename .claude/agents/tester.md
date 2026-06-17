@@ -269,8 +269,8 @@ mode (`verify issue <N>`), the main agent runs this directly — after Step 0.
 ### Step 1 — Fetch the ticket
 
 ```bash
-gh issue view <N> --repo $(cd "$MAIN_REPO/dashboard" && python3 -c "import github_client; print(github_client.repo())") \
-  --json number,title,body,labels
+REPO=$(cd "$MAIN_REPO/dashboard" && python3 -c "import github_client; print(github_client.repo())")
+gh api "repos/${REPO}/issues/<N>"
 ```
 
 Parse the body to extract:

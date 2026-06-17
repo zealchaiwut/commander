@@ -13208,15 +13208,6 @@ async def bulk_get_job(job_id: str):
     """Return the current state of a bulk job."""
     job = _get_bulk_job(job_id)
     if not job:
-        # Try to load from disk
-        try:
-            path = _bulk_jobs_dir() / f"{job_id}.json"
-            if path.exists():
-                job = json.loads(path.read_text())
-                _bulk_jobs[job_id] = job
-        except Exception:
-            pass
-    if not job:
         raise HTTPException(404, detail="Job not found")
     # Strip internal fields from response
     tickets = [
@@ -13237,17 +13228,6 @@ async def bulk_get_job(job_id: str):
 async def bulk_job_stream(job_id: str, request: Request):
     """SSE stream of state-change events for a bulk job."""
     job = _get_bulk_job(job_id)
-    if not job:
-        # Rehydrate from disk if the job was persisted but evicted from memory
-        # (e.g. server restart). Mirrors bulk_get_job so a reconnecting client
-        # doesn't get a fatal 404 for a job that still exists on disk.
-        try:
-            path = _bulk_jobs_dir() / f"{job_id}.json"
-            if path.exists():
-                job = json.loads(path.read_text())
-                _bulk_jobs[job_id] = job
-        except Exception:
-            pass
     if not job:
         raise HTTPException(404, detail="Job not found")
 

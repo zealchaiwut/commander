@@ -306,10 +306,10 @@ restore_db() {
     local target="$DASHBOARD_DIR/commander.db"
     echo "[restore] Restoring DB from $source via backup.py …"
     if [ "${SETUP_MACHINE_DRY_RUN:-}" = "1" ]; then
-        echo "DRY-RUN: (cd $REPO_ROOT && $PYTHON -m services.sprint_manager.backup restore-db --from $source --target $target)"
+        echo "DRY-RUN: (cd $REPO_ROOT && $PYTHON -m services.sprint_manager.backup restore-db --from $source --target $target --force)"
     else
         ( cd "$REPO_ROOT" && "$PYTHON" -m services.sprint_manager.backup \
-            restore-db --from "$source" --target "$target" )
+            restore-db --from "$source" --target "$target" --force )
     fi
 }
 

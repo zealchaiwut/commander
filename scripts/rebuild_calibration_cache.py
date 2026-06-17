@@ -20,7 +20,7 @@ _DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
 _ROUTERS_ROOT = _DASHBOARD_ROOT / "routers"
 _SERVICES_ROOT = _REPO_ROOT / "services" / "sprint_manager"
 
-for _p in (str(_DASHBOARD_ROOT), str(_ROUTERS_ROOT), str(_SERVICES_ROOT)):
+for _p in (str(_REPO_ROOT), str(_DASHBOARD_ROOT), str(_ROUTERS_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

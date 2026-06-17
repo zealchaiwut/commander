@@ -29,7 +29,7 @@ Use `gh` and `git` CLI to fetch everything else you need.
 2. Run `git diff <BASE_REF>..<HEAD_REF> --stat` — see file-level scope of changes
 3. Run `git diff <BASE_REF>..<HEAD_REF>` — full unified diff
 4. Run `gh issue list --repo $REPO --label $SPRINT_LABEL --state all --json number,title,body,labels` — get every ticket in this sprint with its spec
-5. Run `gh issue view $SPRINT_SUMMARY_ISSUE --repo $REPO` — read the sprint summary, note which tickets were merged vs failed
+5. Run `gh api repos/$REPO/issues/$SPRINT_SUMMARY_ISSUE` — read the sprint summary, note which tickets were merged vs failed
 
 Skip tickets that did not merge (failed / needs-rework). You only review what actually shipped.
 

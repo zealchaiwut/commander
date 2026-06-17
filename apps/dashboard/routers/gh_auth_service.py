@@ -9,10 +9,13 @@ import select
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 _DEVICE_CODE_RE = re.compile(r"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b")
 _DEVICE_URL_RE = re.compile(r"(https://github\.com/login/device\S*)")
+
+_DASHBOARD_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 _GH_LOGIN_CMD = [
     "gh",
@@ -289,5 +292,52 @@ def refresh_server_gh_auth() -> None:
         import server as srv
 
         srv._check_gh_auth()
+        if srv._GH_AUTH_STATUS.get("ok"):
+            persist_gh_token_to_env()
     except Exception:
         pass
+
+
+def _write_env_token(env_file: Path, token: str) -> bool:
+    """Set or replace GH_TOKEN in the dashboard .env (idempotent)."""
+    try:
+        lines: list[str] = []
+        if env_file.is_file():
+            lines = env_file.read_text(encoding="utf-8").splitlines()
+        out: list[str] = []
+        replaced = False
+        for line in lines:
+            if line.startswith("GH_TOKEN="):
+                if not replaced:
+                    out.append(f"GH_TOKEN={token}")
+                    replaced = True
+                continue
+            out.append(line)
+        if not replaced:
+            if out and out[-1].strip():
+                out.append("")
+            out.append(f"GH_TOKEN={token}")
+        env_file.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+        os.environ["GH_TOKEN"] = token
+        return True
+    except OSError:
+        return False
+
+
+def persist_gh_token_to_env() -> bool:
+    """Persist ``gh auth token`` into apps/dashboard/.env for headless restarts."""
+    try:
+        proc = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.returncode != 0:
+            return False
+        token = proc.stdout.strip()
+        if not token:
+            return False
+        return _write_env_token(_DASHBOARD_ENV, token)
+    except (OSError, subprocess.TimeoutExpired):
+        return False

@@ -26,7 +26,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import tempfile
 import uuid
 from datetime import datetime, timezone

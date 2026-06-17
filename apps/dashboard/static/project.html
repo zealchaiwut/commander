@@ -14735,7 +14735,7 @@ function _smgmtMergeTimelineIssues(timelineIssues, live) {
  *  tester node in the same level both glow at once (pipeline mode). */
 function _smgmtRailNodeState(iss) {
   if (!iss) return 'queued';
-  if (iss.status === 'done') return 'done';
+  if (iss.status === 'done' || iss.status === 'skipped' || iss.status === 'uat') return 'done';
   if (iss.agent === 'coder')  return 'coder-active';
   if (iss.agent === 'tester') return 'tester-active';
   return 'queued';
@@ -15353,6 +15353,30 @@ function _smgmtLanesUpdate(label, live) {
 
 const _SMGMT_RP_CODER_FRAC = 0.6;
 
+function _smgmtRpParseIsoMs(iso) {
+  if (!iso) return null;
+  let s = String(iso).trim();
+  if (!s) return null;
+  if (s.indexOf('T') === -1 && s.indexOf(' ') > 0) s = s.replace(' ', 'T');
+  if (!/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
+  const n = Date.parse(s);
+  return isNaN(n) ? null : n;
+}
+
+function _smgmtRpMaxSegEndMs(issues, nowMs) {
+  let maxEnd = 0;
+  for (const iss of issues) {
+    for (const seg of (iss.segments || [])) {
+      const st = _smgmtRpParseIsoMs(seg.start);
+      let en = seg.end ? _smgmtRpParseIsoMs(seg.end) : null;
+      if (!en && st && seg.duration) en = st + seg.duration * 1000;
+      if (!en && st && !seg.end) en = nowMs;
+      if (en) maxEnd = Math.max(maxEnd, en);
+    }
+  }
+  return maxEnd;
+}
+
 function _smgmtRpIssueDone(iss) {
   return iss.status === 'done' || iss.status === 'uat';
 }
@@ -15380,11 +15404,12 @@ function _smgmtRpBuildIssueSchedule(issues, nowMs, parallel, estFn, remFn) {
   function maxSegEndMs(iss) {
     let maxEnd = null;
     for (const seg of (iss.segments || [])) {
-      let en = seg.end ? Date.parse(seg.end) : null;
+      let en = seg.end ? _smgmtRpParseIsoMs(seg.end) : null;
       if (!en && seg.start && seg.duration) {
-        en = Date.parse(seg.start) + seg.duration * 1000;
+        const st = _smgmtRpParseIsoMs(seg.start);
+        if (st) en = st + seg.duration * 1000;
       }
-      if (en && !isNaN(en)) {
+      if (en) {
         maxEnd = maxEnd == null ? en : Math.max(maxEnd, en);
       }
     }
@@ -15620,7 +15645,7 @@ function _smgmtRpTimelineHtml(data, live) {
     data.issues, nowMs, liveSnap, issueEstMin,
     function(iss, estMs) { return issueRemMs(iss, estMs); },
   );
-  const workEndMs = schedule.workEndMs;
+  let workEndMs = Math.max(schedule.workEndMs, _smgmtRpMaxSegEndMs(data.issues, nowMs));
   const queuedSlots = schedule.queuedSlots;
 
   const elapsedMs = liveSnap.time_spent_sec > 0
@@ -15829,7 +15854,7 @@ function _smgmtRpTimelineHtml(data, live) {
       const isLiveSeg = !seg.end && isRunning;
 
       let cls = 'rp-tl-seg rp-tl-seg--' + escHtml(agent);
-      if (isRetry)  cls += ' rp-tl-seg--retry';
+      if (isRetry && isLiveSeg) cls += ' rp-tl-seg--retry';
       if (isLiveSeg) cls += ' rp-tl-seg--running';
 
       const wStr = Math.max(W, 2);
@@ -16383,10 +16408,14 @@ function _smgmtAiLevelMeta(L, live) {
   return 'LEVEL ' + L.level;
 }
 
+function _smgmtIssueDone(iss) {
+  return iss.status === 'done' || iss.status === 'skipped' || iss.status === 'uat';
+}
+
 /** HTML for a single issue row in the All Issues panel. */
 function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
   const state = _smgmtRailNodeState(iss);
-  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isDone = _smgmtIssueDone(iss);
   const isRunning = state === 'coder-active' || state === 'tester-active';
   const fr = _smgmtRailFixRound(iss);
   const isRetrying = !!fr && !isDone && !isRunning;
@@ -16512,8 +16541,14 @@ function _smgmtAiRowToggle(num, label) {
   }
   if (!logEl.hidden) {
     _smgmtAiExpandedNums.add(num);
+    const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+    const lbl = label || _smgmtAiLabel;
+    const logsUrl = (repo && lbl) ? _logsIssueLogUrl(num, lbl) : '';
+    const fullLogLink = logsUrl
+      ? '<a class="ai-full-log-link" href="' + escHtml(logsUrl) + '">Full log →</a>'
+      : '';
     if (isLocked || isQueued) {
-      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
+      logEl.innerHTML = '<span class="log-empty">no output yet</span>' + fullLogLink;
     } else {
       const cached = _smgmtAiLogCache[num];
       if (cached && cached.html) {
@@ -16584,7 +16619,7 @@ function _smgmtAiSig(live) {
 
 function _smgmtAiRowStateStr(iss, live) {
   const state = _smgmtRailNodeState(iss);
-  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isDone = _smgmtIssueDone(iss);
   const isRunning = state === 'coder-active' || state === 'tester-active';
   const fr = _smgmtRailFixRound(iss);
   const isRetrying = !!fr && !isDone && !isRunning;
@@ -16600,7 +16635,7 @@ function _smgmtAiRowStateStr(iss, live) {
 function _smgmtAiPatchRowIcon(iconEl, iss) {
   if (!iconEl) return;
   const state = _smgmtRailNodeState(iss);
-  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isDone = _smgmtIssueDone(iss);
   const isRunning = state === 'coder-active' || state === 'tester-active';
   const fr = _smgmtRailFixRound(iss);
   const isRetrying = !!fr && !isDone && !isRunning;
@@ -16651,7 +16686,7 @@ function _smgmtAiPatchRow(iss, live, isLevelLocked) {
   const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
   if (!row) return;
   const state = _smgmtRailNodeState(iss);
-  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isDone = _smgmtIssueDone(iss);
   const isExpanded = _smgmtAiExpandedNums.has(num);
   const fr = _smgmtRailFixRound(iss);
   const isRetrying = !!fr && !isDone && state !== 'coder-active' && state !== 'tester-active';
@@ -16682,15 +16717,24 @@ function _smgmtAiRestoreCachedLogs() {
 }
 
 function _smgmtAiRefreshExpandedLogs(label, live) {
+  const issues = (live && live.issues) || [];
   _smgmtAiExpandedNums.forEach(function(num) {
     const logEl = document.getElementById('ai-row-log-' + num);
     if (!logEl || logEl.hidden) return;
     const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
     const state = row ? row.dataset.state : '';
     const isLocked = row && row.classList.contains('ai-row--locked');
-    const isQueued = state === 'queued';
+    const liveIss = issues.find(function(i) { return i.number === num; });
+    const isDone = liveIss ? _smgmtIssueDone(liveIss) : state === 'done';
+    const isQueued = state === 'queued' && !isDone;
     if (isLocked || isQueued) {
-      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
+      const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
+      const lbl = label || _smgmtAiLabel;
+      const logsUrl = (repo && lbl) ? _logsIssueLogUrl(num, lbl) : '';
+      const fullLogLink = logsUrl
+        ? '<a class="ai-full-log-link" href="' + escHtml(logsUrl) + '">Full log →</a>'
+        : '';
+      logEl.innerHTML = '<span class="log-empty">no output yet</span>' + fullLogLink;
       return;
     }
     _smgmtAiFetchLog(num, label, { keepContent: true });

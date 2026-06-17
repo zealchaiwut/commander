@@ -565,12 +565,34 @@ function _histAutoExpandRecent(groups) {
   }
 }
 
-// The gantt: one row per reached ticket (unreached tickets simply have no row —
-// AC5). Coder segments are purple, tester amber; fix-round segments are hatched
-// (AC3). A red ✕ crash marker is painted at the crash ticket's end offset, but
-// only for a sprint that actually failed (AC4).
+/** Merge run-stats ticket rows with every issue listed on the history record. */
+function _histMergeGanttTickets(s, stats) {
+  const byNum = new Map();
+  (Array.isArray(stats && stats.tickets) ? stats.tickets : []).forEach((t) => {
+    byNum.set(String(t.ticket), t);
+  });
+  (Array.isArray(s.issues) ? s.issues : []).forEach((i) => {
+    const id = i.ticket_id;
+    if (id == null) return;
+    const key = String(id);
+    if (!byNum.has(key)) {
+      byNum.set(key, { ticket: id, start: 0, end: 0, segments: [] });
+    }
+  });
+  return Array.from(byNum.values()).sort((a, b) => {
+    const sa = a.start ?? 0;
+    const sb = b.start ?? 0;
+    if (sa !== sb) return sa - sb;
+    return Number(a.ticket) - Number(b.ticket);
+  });
+}
+
+// The gantt: one row per sprint issue (union of history issues + agent_runs).
+// Coder segments are purple, tester amber — fix rounds use the same solid colors.
+// A red ✕ crash marker is painted at the crash ticket's end offset, but only
+// for a sprint that actually failed (AC4).
 function _histGanttHtml(s, stats) {
-  const tickets = Array.isArray(stats.tickets) ? stats.tickets : [];
+  const tickets = _histMergeGanttTickets(s, stats);
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
   const sprintFailed = _histSprintFailed(s);
@@ -580,7 +602,7 @@ function _histGanttHtml(s, stats) {
       const left  = (seg.start / scale) * 100;
       const width = (seg.duration / scale) * 100;
       const agentCls = seg.agent === 'tester' ? 'g-tester' : 'g-coder';
-      const cls = 'g-seg ' + agentCls + (seg.fix_round ? ' g-fix' : '');
+      const cls = 'g-seg ' + agentCls;
       const title = `${seg.agent}${seg.fix_round ? ' (fix round)' : ''} · ${_histFmtSecs(seg.duration)}`;
       return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
     }).join('');
@@ -1001,7 +1023,7 @@ function _histMetricsChipsHtml(s, stats) {
 }
 
 function _histTimelineRowsHtml(s, stats) {
-  const tickets = Array.isArray(stats && stats.tickets) ? stats.tickets : [];
+  const tickets = _histMergeGanttTickets(s, stats);
   if (!tickets.length) return "";
   const scale = Math.max(1, stats.wall_seconds || 0);
   const rows = tickets.map((t) => {
@@ -1014,7 +1036,7 @@ function _histTimelineRowsHtml(s, stats) {
         const left = (seg.start / scale) * 100;
         const width = Math.max(0.5, (seg.duration / scale) * 100);
         const agentCls = seg.agent === "tester" ? "hist-tl-tester" : "hist-tl-coder";
-        const cls = "hist-tl-seg " + agentCls + (seg.fix_round ? " hist-tl-fix" : "");
+        const cls = "hist-tl-seg " + agentCls;
         const title = `${seg.agent}${seg.fix_round ? " (fix round)" : ""} · ${_histFmtSecs(seg.duration)}`;
         return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
       })

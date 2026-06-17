@@ -234,6 +234,7 @@ def _build_segments(runs: list[dict], now: datetime) -> list[dict]:
             "start": str(started),
             "end": str(finished) if finished else None,
             "duration": dur,
+            "attempt_kind": run.get("attempt_kind") or "initial",
         })
 
     # Sort by start time (chronological)

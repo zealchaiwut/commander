@@ -137,7 +137,7 @@ def test_ac2_complete_card_has_no_rerun_in_header():
         # If ready_to_merge appears, it should be in a DIFFERENT if-branch (after the rerun block)
         # or the rerun block should be inside a guard that excludes ready_to_merge
         assert ready_idx > rerun_idx or "completed" not in body[max(0, rerun_idx - 50):rerun_idx], \
-            "ready_to_merge must not trigger the Re-run button (it has its own Merge action)"
+            "ready_to_merge must not trigger the Re-run button (it has its own Complete action)"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

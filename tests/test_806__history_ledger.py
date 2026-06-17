@@ -364,6 +364,9 @@ def test_bulk_complete_modal_mounts():
     assert 'id="bc-confirm-btn"' in PROJECT_HTML
     modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
     assert "bulk-complete-preview" in modal_js or "smgmtBulkCompleteSprint" in modal_js
+    # Re-fetch merge chain after each merge (parent→develop only known post child merge).
+    assert "_bcRemainingMergeSteps" in modal_js
+    assert "while (mergeSteps.length > 0)" in modal_js
 
 
 def test_locked_collapsed_cards_hide_header_details():

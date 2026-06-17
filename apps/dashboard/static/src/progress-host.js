@@ -31,10 +31,35 @@ function _storePayload(paId, payload) {
   return snap;
 }
 
+function _logStreamId(paId) {
+  return `pa-log-stream-${paId}`;
+}
+
+function _captureLogScroll(paId) {
+  if (typeof document === "undefined") return null;
+  const el = document.getElementById(_logStreamId(paId));
+  if (!el) return null;
+  return {
+    top: el.scrollTop,
+    atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 8,
+  };
+}
+
+function _restoreLogScroll(paId, state) {
+  if (!state || typeof document === "undefined") return;
+  const el = document.getElementById(_logStreamId(paId));
+  if (!el) return;
+  if (state.atBottom) el.scrollTop = el.scrollHeight;
+  else el.scrollTop = state.top;
+}
+
 function _renderIntoHost(hostEl, payload, opts) {
   if (!hostEl) return;
   const renderOpts = opts || {};
+  const paId = _resolvePaId(hostEl, renderOpts.id);
+  const scrollState = _captureLogScroll(paId);
   hostEl.innerHTML = renderProgressActivity(payload, renderOpts);
+  _restoreLogScroll(paId, scrollState);
 }
 
 export function mountProgressActivity(host, payload, opts) {

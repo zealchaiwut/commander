@@ -7009,48 +7009,55 @@ def _parse_log_lines_for_live(lines: list[str], limit: int = 50) -> list[dict]:
     Classifies each line into one of: dispatch, success, warn, fail, event.
     Returns the last `limit` entries (oldest-first).
     """
+    from services.logging import ORCHESTRATOR_LOG_TS_RE
+
     entries: list[dict] = []
     for raw in lines:
         stripped = raw.strip()
         if not stripped:
             continue
 
-        # Determine line type by content heuristics
+        ts_match = ORCHESTRATOR_LOG_TS_RE.match(stripped)
+        if ts_match:
+            timestamp = ts_match.group(1)
+            message = ts_match.group(2)
+        else:
+            timestamp = "—"
+            message = stripped
+
+        # Determine line type by content heuristics (message body only)
         if (
-            stripped.startswith("→")
-            or stripped.startswith("---")
-            or "start_feature.py" in stripped
-            or "Dispatching" in stripped
+            message.startswith("→")
+            or message.startswith("---")
+            or "start_feature.py" in message
+            or "Dispatching" in message
         ):
             line_type = "dispatch"
         elif (
-            stripped.startswith("✓")
-            or "promoted" in stripped.lower()
-            or "merged" in stripped.lower()
-            or "completed" in stripped.lower()
-            or "done" in stripped.lower()
+            message.startswith("✓")
+            or "promoted" in message.lower()
+            or "merged" in message.lower()
+            or "completed" in message.lower()
+            or "done" in message.lower()
         ):
             line_type = "success"
         elif (
-            "warning" in stripped.lower()
-            or stripped.lower().startswith("warn")
-            or "[retry]" in stripped.lower()
+            "warning" in message.lower()
+            or message.lower().startswith("warn")
+            or "[retry]" in message.lower()
         ):
             line_type = "warn"
         elif (
-            "error" in stripped.lower()
-            or "fail" in stripped.lower()
-            or "skipped" in stripped.lower()
-            or stripped.lower().startswith("err")
+            "error" in message.lower()
+            or "fail" in message.lower()
+            or "skipped" in message.lower()
+            or message.lower().startswith("err")
         ):
             line_type = "fail"
         else:
             line_type = "event"
 
-        # Use the current UTC time formatted as HH:MM:SS — we don't have per-line
-        # timestamps in the log, so we label with a placeholder "—"; callers may
-        # pre-process the raw lines before calling this function.
-        entries.append({"timestamp": "—", "type": line_type, "message": stripped})
+        entries.append({"timestamp": timestamp, "type": line_type, "message": message})
 
     return entries[-limit:]
 

@@ -17,7 +17,7 @@ from . import timeline_service  # noqa: E402
 
 router = APIRouter(tags=["sprints"])
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+[a-z]?$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 
 
 @router.get("/api/sprints/{sprint_label}/timeline")

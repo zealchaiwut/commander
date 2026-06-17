@@ -329,13 +329,14 @@ def get_timeline(sprint_label: str, project: str) -> dict:
 
         issue_list.append(entry)
 
-    # Wrap-up estimate (sprint level)
-    doc_min = float(settings.get("estimation_m_minutes", 15) or 15)
-    rev_min = float(settings.get("estimation_m_minutes", 15) or 15)
+    # Wrap-up estimate (sprint level) — ~4 min doc + ~3 min review per issue
+    n_issues = len(issue_list)
+    doc_min = 4.0 * n_issues
+    rev_min = 3.0 * n_issues if reviewer_enabled else 0.0
     wrap_up: dict = {"documenter": doc_min}
     if reviewer_enabled:
         wrap_up["reviewer"] = rev_min
-    wrap_up["total"] = doc_min + (rev_min if reviewer_enabled else 0.0)
+    wrap_up["total"] = doc_min + rev_min
 
     # Projected finish
     remaining_running = running_remaining_min or 0.0

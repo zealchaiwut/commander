@@ -30,6 +30,7 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 PROJECT_HTML = (DASHBOARD_DIR / "static" / "project.html").read_text(encoding="utf-8")
+HISTORY_JS = (DASHBOARD_DIR / "static/src/sprint-board/history.js").read_text(encoding="utf-8")
 
 
 # ──────────────────────────── helpers ────────────────────────────────────────
@@ -149,7 +150,7 @@ def test_ac2_verbs_only_on_completed_or_failed():
 
 def test_ac2_verbs_wired_to_existing_handlers():
     verbs = _fn_body("_histVerbsHtml")
-    assert "_histRerunSprint" in verbs, "History Re-run creates and dispatches immediately"
+    assert "_histRerunSprint" in verbs, "History Re-run opens the shared re-run modal"
     assert "smgmtFinishSprint" in verbs, "Finish reuses the existing finish handler"
     assert "smgmtDeleteSprint" in verbs, "Delete reuses the existing delete handler"
 
@@ -169,7 +170,7 @@ def test_ac2_locked_states_get_no_verbs():
 def test_ac3_rerun_gated_on_needs_rework():
     verbs = _fn_body("_histVerbsHtml")
     assert "needs_rework" in verbs, "Re-run is gated on the needs_rework state"
-    assert "_histRerunSprint" in verbs, "Re-run creates and dispatches a child"
+    assert "_histRerunSprint" in verbs, "Re-run opens the shared modal then pre-run kickoff"
 
 
 def test_ac3_resume_verb_retired():
@@ -307,9 +308,12 @@ def test_failed_block_renders_on_failed_sprint():
     assert "failure_reason" in fail or "failed_tickets" in fail
     card = _fn_body("_histCardHtml")
     assert "_histHeadActionsHtml" in card, "PR/summary/logs actions render on the card head"
-    assert "_histRerunSprint" in PROJECT_HTML
-    rerun = _fn_body("_histRerunSprint")
-    assert "auto_run" in rerun and "true" in rerun
+    assert "_histRerunSprint" in HISTORY_JS
+    rerun = _fn_body("_histRerunSprint", HISTORY_JS)
+    assert "smgmtRerunSprint" in rerun, (
+        "History Re-run must open the shared re-run modal (ticket pick + pre-run), "
+        "not POST auto_run directly"
+    )
 
 
 def test_post_sprint_block_renders_documenter_and_reviewer():

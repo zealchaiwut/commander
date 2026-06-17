@@ -2038,6 +2038,11 @@
     .hist-head-btn.link-sum { color: var(--blue); border-color: var(--blue-bg); }
     .hist-head-btn.link-sum:hover { background: var(--blue-bg); }
     .hist-head-btn--rerun  { color: var(--amber); border-color: var(--amber-bg); }
+    .hist-head-btn--rerun-primary {
+      background: var(--amber); color: #fff; border-color: var(--amber); font-weight: 600;
+    }
+    .hist-head-btn--rerun-primary:hover { background: color-mix(in srgb, var(--amber) 88%, #000); }
+    .hist-head-btn--rerun-primary:disabled { opacity: .55; cursor: not-allowed; }
     .hist-head-btn--rerun:hover  { background: var(--amber-bg); }
     .hist-head-btn--finish { color: var(--blue); border-color: var(--blue-bg); }
     .hist-head-btn--finish:hover { background: var(--blue-bg); }
@@ -2169,62 +2174,83 @@
 
     /* Loose-end amber band: exactly ONE per card (AC4) */
     .hist-loose-end-band {
-      display: flex; align-items: center; gap: 8px;
-      margin: 0 0 0; padding: 8px 14px;
-      background: var(--amber-bg); color: var(--amber);
-      font-size: 12px; font-weight: 600; border-radius: 0;
-      border-top: 1px solid color-mix(in srgb, var(--amber) 20%, transparent);
-      border-bottom: 1px solid color-mix(in srgb, var(--amber) 20%, transparent);
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin: 0; padding: 8px 12px;
+      background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+      color: var(--text);
+      font-size: 11.5px; font-weight: 500; border-radius: 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--amber) 25%, var(--border));
     }
-    .hist-loose-end-band i { font-size: 13px; flex: none; }
+    .hist-loose-end-band i { font-size: 13px; flex: none; color: var(--amber); }
     .hist-band-msg { flex: 1; min-width: 0; }
     .hist-band-cta {
       flex: none; font-size: 11px; font-weight: 600;
-      padding: 2px 9px; border-radius: 4px; cursor: pointer;
-      background: transparent; border: 1px solid var(--amber);
+      padding: 4px 10px; border-radius: 6px; cursor: pointer;
+      background: transparent; border: 1px solid color-mix(in srgb, var(--amber) 50%, var(--border));
       color: var(--amber); transition: background .12s;
     }
+    .hist-band-cta--clear {
+      background: var(--amber); color: #fff; border-color: var(--amber);
+    }
+    .hist-band-cta--clear:hover { background: color-mix(in srgb, var(--amber) 88%, #000); }
     .hist-band-cta:hover { background: color-mix(in srgb, var(--amber) 15%, transparent); }
 
     /* What-list: "Why it failed" / "Unfinished N of M" (AC5/AC6) */
-    .hist-what-list { padding: 4px 12px 6px; }
+    .hist-what-list { padding: 8px 12px 10px; }
     .hist-what-head {
-      display: flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 700; color: var(--text-muted);
-      text-transform: uppercase; letter-spacing: .04em;
-      margin-bottom: 5px; padding-top: 4px;
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .06em;
+      margin-bottom: 6px; padding-top: 2px;
     }
-    .hist-what-head i { font-size: 12px; }
+    .hist-what-head--failed { color: var(--text-sub); }
     /* Why-it-failed list items */
     .wl-item {
-      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-      padding: 4px 0; font-size: 11.5px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 0; font-size: 11.5px;
       border-top: 1px solid var(--border);
     }
     .wl-item:first-of-type { border-top: none; }
-    .wl-id { font-weight: 700; color: var(--text); min-width: 40px; flex: none; }
-    .wl-reason { flex: 1; min-width: 0; color: var(--text-muted); }
-    .wl-ts { font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums; flex: none; }
-    .wl-log { font-size: 10.5px; color: var(--blue); text-decoration: none; flex: none; }
+    .wl-icon {
+      width: 16px; height: 16px; border-radius: 50%; flex: none;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 9px;
+    }
+    .wl-icon.fail { background: var(--red); color: #fff; }
+    .wl-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+    .wl-id { font-weight: 700; color: var(--text); flex: none; }
+    .wl-title { color: var(--text); }
+    .wl-reason-accent { color: var(--red); font-size: 11px; }
+    .wl-time { font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums; flex: none; }
+    .wl-log { font-size: 10.5px; color: var(--blue); text-decoration: none; flex: none; font-weight: 500; }
     .wl-log:hover { text-decoration: underline; }
 
-    /* Compact meta chip in card header (date · ticket count) */
+    /* Compact header stats (progress · duration · loose ends) */
+    .hist-head-stats {
+      display: inline-flex; align-items: center; gap: 0; flex-wrap: wrap;
+      font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums;
+    }
+    .hist-head-stat + .hist-head-stat::before {
+      content: '·'; margin: 0 5px; color: var(--text-muted);
+    }
+
+    /* Compact meta chip in card header (legacy) */
     .hist-meta {
       font-size: 10.5px; color: var(--text-sub); font-variant-numeric: tabular-nums;
     }
     .hist-meta::before { content: '·'; margin-right: 5px; color: var(--text-sub); }
 
-    /* Details sub-block (collapsed by default — AC8) */
+    /* Metrics block — collapsed by default at card bottom */
     .hist-details { border-top: 1px solid var(--border); }
     .hist-details-head {
-      display: flex; align-items: center; gap: 5px;
-      padding: 7px 12px; cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 12px; cursor: pointer;
       font-size: 11.5px; color: var(--text-sub); user-select: none;
       transition: background .12s;
     }
     .hist-details-head:hover { background: var(--surface-hover); color: var(--text-muted); }
-    .hist-details-head .hist-chev { font-size: 12px; }
-    .hist-details-body { padding: 0 0 4px; }
+    .hist-details-icon { font-size: 13px; color: var(--text-muted); }
+    .hist-details-label { flex: 1; min-width: 0; }
+    .hist-details-chev { margin-left: auto; font-size: 12px; }
+    .hist-details-body { padding: 4px 12px 10px; }
 
     /* Compact all-clear / loose-ends chip in the card head */
     .recon-chip {
@@ -3027,7 +3053,7 @@
     }
     .slp-ancestor-row:hover { border-color: var(--text-sub); }
     .slp-ancestor-header {
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 8px;
       padding: 10px 14px; min-height: 44px;
     }
     .slp-ancestor-name {
@@ -3036,7 +3062,31 @@
     .slp-carry-summary {
       font-size: 12px; color: var(--text-sub); font-family: var(--mono);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1; min-width: 0;
     }
+    .slp-status-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+    .slp-status-icon--merged { color: var(--green); }
+    .slp-status-icon--needs_merge { color: var(--amber); }
+    .slp-status-icon--failed { color: var(--red); }
+    .slp-status-icon--unknown { color: var(--text-muted); }
+    .slp-status-pill {
+      font-size: 10px; font-weight: 700; font-family: var(--mono);
+      text-transform: uppercase; letter-spacing: .06em;
+      padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+      border: 1px solid transparent;
+    }
+    .slp-ancestor-duration {
+      font-size: 12px; color: var(--text-muted); font-family: var(--mono);
+      flex-shrink: 0; margin-left: auto;
+    }
+    .slp-ancestor-menu {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); padding: 4px; line-height: 1; flex-shrink: 0;
+    }
+    .slp-ancestor-menu:hover { color: var(--text); }
     /* Merge-state mark: three distinct states */
     .slp-merge-mark {
       display: inline-flex; align-items: center; gap: 5px;
@@ -3754,29 +3804,72 @@
       margin-bottom: 16px;
     }
     .smgmt-focus-guide-title {
-      font-size: 11px; font-weight: 700; letter-spacing: .06em;
-      text-transform: uppercase; color: var(--text-sub);
-      margin-bottom: 8px;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
+      margin-bottom: 10px;
     }
     .smgmt-focus-step {
-      display: flex; align-items: center; gap: var(--space-2);
-      font-size: 13px; padding: var(--space-1) 0;
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; padding: 5px 0;
+      line-height: 1.4;
+    }
+    .smgmt-focus-step--resolved {
+      opacity: .55;
+    }
+    .smgmt-focus-step--resolved .smgmt-focus-text {
+      text-decoration: line-through;
+      color: var(--text-muted);
     }
     .smgmt-focus-num {
-      width: 18px; height: 18px; border-radius: 50%;
+      width: 20px; height: 20px; border-radius: 50%;
       background: var(--text); color: var(--surface);
-      font-size: 10px; font-weight: 700;
+      font-size: 11px; font-weight: 700;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0; font-family: var(--mono);
+      margin-top: 1px;
     }
-    .smgmt-focus-num--med  { background: var(--amber); }
-    .smgmt-focus-num--low  { background: var(--surface-2); color: var(--text-muted); }
+    .smgmt-focus-num--high { background: var(--text); }
+    .smgmt-focus-num--med  { background: var(--amber); color: #fff; }
+    .smgmt-focus-num--low  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+    .smgmt-focus-check {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--surface-2); color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 12px;
+    }
     .smgmt-section-label {
-      font-size: var(--font-size-sm); font-weight: 700; letter-spacing: .06em;
-      text-transform: uppercase; color: var(--text-sub);
-      margin: var(--space-5) 0 var(--space-2); display: flex; align-items: center; gap: var(--space-1);
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
+      margin: 20px 0 8px; display: flex; align-items: center; gap: 6px;
     }
-    .smgmt-planning-section { }
+    .smgmt-section-label:first-of-type { margin-top: 0; }
+    .smgmt-section-upnext { color: var(--green); }
+    .smgmt-section-planning { color: var(--blue); }
+    .smgmt-board-section { margin-bottom: 4px; }
+    .smgmt-board-section--upnext {
+      border: 1px solid var(--green);
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: 0 0 0 2px var(--green-bg);
+      padding: 0;
+      overflow: hidden;
+    }
+    .smgmt-board-section--upnext .smgmt-sprint-unit { margin: 0; }
+    .smgmt-board-section--upnext .sc-v5 {
+      border: none; border-radius: 0; box-shadow: none;
+    }
+    .smgmt-board-section--planning {
+      border: 1px solid var(--blue);
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+      padding: 0;
+      overflow: hidden;
+    }
+    .smgmt-board-section--planning .smgmt-draft-card {
+      border: none; box-shadow: none; margin-bottom: 0;
+    }
+    .smgmt-board-section--lineage .slp-ancestor-row:last-child { margin-bottom: 0; }
     /* Draft sprint card */
     .smgmt-draft-card {
       background: var(--surface);
@@ -3787,6 +3880,11 @@
     .smgmt-draft-card .smgmt-card-head {
       display: flex; align-items: center; gap: var(--space-2);
       padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .smgmt-draft-meta {
+      font-size: 12px; color: var(--text-sub); font-family: var(--mono);
+      flex-shrink: 0;
     }
     .smgmt-draft-badge {
       font-family: var(--mono); font-size: 10px; font-weight: 700;
@@ -3798,6 +3896,21 @@
     .smgmt-card-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
     /* Goal slot */
     .smgmt-goal-slot { padding: 12px 16px 0; }
+    .smgmt-goal-slot--dashed {
+      display: flex; align-items: center; gap: 10px;
+      margin: 12px 16px 0;
+      padding: 10px 12px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+    .smgmt-goal-flag { color: var(--text-muted); font-size: 15px; flex-shrink: 0; }
+    .smgmt-goal-slot--dashed .smgmt-goal-input {
+      border: none; background: transparent; padding: 0;
+    }
+    .smgmt-goal-slot--dashed .smgmt-goal-input:focus {
+      border: none; background: transparent;
+    }
     .smgmt-goal-input {
       width: 100%; padding: 8px 11px; border: 1px solid var(--border);
       border-radius: 7px; background: var(--surface-2); color: var(--text);
@@ -3805,18 +3918,26 @@
     }
     .smgmt-goal-input:focus { outline: none; border-color: var(--blue); background: var(--surface); }
     /* Budget bar */
-    .smgmt-budget-bar { padding: 10px 16px 0; }
+    .smgmt-budget-bar { padding: 12px 16px 0; }
     .smgmt-budget-bar-top {
-      display: flex; justify-content: space-between;
-      font-size: 11px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 4px;
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 12px; margin-bottom: 6px;
     }
-    .smgmt-budget-label { font-weight: 700; }
+    .smgmt-budget-label { font-weight: 600; color: var(--text); }
+    .smgmt-budget-used { font-family: var(--mono); color: var(--text-sub); font-size: 11px; }
+    .smgmt-budget-sub {
+      font-size: 11px; color: var(--green); font-family: var(--mono);
+      margin-top: 5px; margin-bottom: 2px;
+    }
+    .smgmt-budget-sub--warn { color: var(--amber); }
+    .smgmt-budget-sub--over { color: var(--amber); font-weight: 700; }
     .smgmt-budget-headroom { color: var(--text-sub); }
     .smgmt-budget-headroom--over { color: var(--amber); font-weight: 700; }
     .smgmt-budget-track {
-      height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+      height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
     }
-    .smgmt-budget-fill { height: 100%; background: var(--blue); border-radius: 999px; }
+    .smgmt-budget-fill { height: 100%; background: var(--green); border-radius: 999px; }
+    .smgmt-budget-fill--warn { background: var(--amber); }
     .smgmt-budget-fill--over { background: var(--amber); }
     /* Planning ticket rows (no drag) */
     .smgmt-plan-tickets { padding: 8px 0; }
@@ -3825,7 +3946,13 @@
     .smgmt-plan-empty { padding: 14px 18px; color: var(--text-sub); font-size: 13px; }
     .smgmt-plan-row-menu .smgmt-ctx-item--remove { color: var(--red); }
     /* + Add ticket affordance */
-    .smgmt-add-ticket-row { padding: 8px 16px 12px; }
+    .smgmt-add-ticket-row {
+      padding: 8px 16px 14px;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .smgmt-add-ticket-hint {
+      font-size: 12px; color: var(--text-muted);
+    }
     .smgmt-add-ticket-btn {
       font-size: 13px; color: var(--blue); background: none; border: none;
       cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
@@ -3907,8 +4034,22 @@
       align-items: center;
       gap: 8px;
       padding: 12px 16px;
-      border-top: 1px solid var(--border);
+      border-top: none;
     }
+    .bl-filter-est {
+      margin-left: auto;
+      font: inherit; font-size: 12px; line-height: 1.5;
+      padding: 4px 12px; min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .bl-filter-est:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
+    .bl-filter-est.hidden { display: none; }
+    .bl-header-row.bl-header-row--mock-hidden { display: none; }
     .bl-filter-label {
       font-size: 11px; font-weight: 600; color: var(--text-sub);
       margin-right: 4px;
@@ -3941,7 +4082,6 @@
       background: var(--surface);
       color: var(--text);
       cursor: pointer;
-      margin-left: auto;
     }
     .bl-ms-filter:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
     .bl-grid {
@@ -4338,9 +4478,6 @@
     .ac-tpl-opt-desc { font-size: 11px; color: var(--text-muted); }
     .ac-tpl-opt.is-default .ac-tpl-opt-name::after { content: ' ✓'; color: var(--blue); }
     .ac-tpl-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
-    .bc-ac-tpl-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 28px 4px; }
-    .bc-ac-global-wrap { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-    .bc-ac-global-label { font-size: 12px; color: var(--text-muted); }
     .nt-spinner {
       display: inline-block; width: 12px; height: 12px;
       border: 2px solid currentColor; border-top-color: transparent;
@@ -4773,6 +4910,24 @@
       color: var(--text-muted);
       white-space: nowrap;
       flex-shrink: 0;
+    }
+    .sc-v5.sc-v5--next {
+      border: none;
+      box-shadow: none;
+    }
+    .sc-status-line {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 13px; color: var(--text-sub);
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      line-height: 1.45;
+    }
+    .sc-status-line--next {
+      background: var(--surface-2);
+      margin: 0;
+    }
+    .sc-status-icon {
+      color: var(--text-muted); font-size: 14px; flex-shrink: 0; margin-top: 2px;
     }
     .sc-v5 .sc-budget-section {
       padding: 12px 18px 10px;
@@ -8030,7 +8185,7 @@
 
     /* Ghost: queued or projected remainder — faint + hatched */
     .rp-tl-seg--ghost {
-      opacity: 0.25;
+      opacity: 0.42;
       background-image: repeating-linear-gradient(
         45deg, transparent, transparent 4px, rgba(0,0,0,.40) 4px, rgba(0,0,0,.40) 7px);
     }
@@ -8040,7 +8195,7 @@
     .rp-tl-row--wrapup { margin-top: 12px; border-top: 1px dashed var(--border) !important; }
 
     /* Right-side label */
-    .rp-tl-row-label { flex: 0 0 52px; display: flex; flex-direction: column;
+    .rp-tl-row-label { flex: 0 0 76px; display: flex; flex-direction: column;
       align-items: flex-start; justify-content: center; padding: 0 6px 0 4px;
       border-left: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
     .rp-tl-metric { font-family: var(--mono); font-size: 10px; font-weight: 700;
@@ -8896,8 +9051,8 @@
                Drag-and-drop removed from board (issue #1044). -->
           <div class="panel bl-panel smgmt-backlog-pane is-expanded" id="smgmt-backlog-pane"
                role="region" aria-label="Backlog">
-            <span class="bl-eyebrow">Backlog</span>
-            <div class="bl-header-row" id="smgmt-backlog-header-row"
+            <span class="bl-eyebrow" id="bl-eyebrow">Backlog · source for planning</span>
+            <div class="bl-header-row bl-header-row--mock-hidden" id="smgmt-backlog-header-row"
                  onclick="_smgmtBacklogToggle()"
                  role="button" tabindex="0"
                  aria-expanded="true"
@@ -8924,6 +9079,13 @@
                         onclick="_blToggleFilter('size','XL',this)">XL</button>
                 <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
                         onclick="_blToggleFilter('unestimated','1',this)">unestimated</button>
+                <button type="button" class="bl-filter-est smgmt-bulk-est-btn hidden"
+                        id="smgmt-backlog-bulk-est-btn"
+                        onclick="_smgmtBulkEstimate('__backlog__', this)"
+                        title="Estimate all unsized backlog tickets">
+                  <i class="ti ti-wand"></i> Estimate unsized
+                </button>
+                <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
                 <select class="bl-ms-filter" id="bl-ms-filter" aria-label="Filter by milestone"
                         onchange="_blSetMilestoneFilter(this.value)">
                   <option value="">All milestones</option>
@@ -8982,6 +9144,8 @@
           </div>
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
+            <!-- Running-pane Gantt timeline (issue #1147) — below run-head gauge -->
+            <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
             <!-- Running metrics strip (issue #803) — folded into run-head gauge; kept for tests -->
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
             <!-- Orchestrator log panel (issue #1106) -->
@@ -8990,8 +9154,6 @@
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
             <!-- All issues panel (issue #1106) -->
             <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
-            <!-- Running-pane Gantt timeline (issue #1147) -->
-            <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
           </div>
           <!-- Node inspector panel (issue #1193) — bottom sheet on mobile ≤640px,
                inline below the run-shell on desktop. Toggled by _smgmtInspectorFeed. -->
@@ -9217,43 +9379,6 @@
 
           <div id="bc-limit-banner" class="bc-limit-banner hidden" role="alert" aria-live="polite"></div>
 
-          <div class="bc-ac-tpl-toolbar">
-            <div class="ac-tpl-wrap" id="bc-ac-tpl-wrap">
-              <button type="button" class="ac-tpl-btn" id="bc-ac-tpl-btn"
-                      aria-haspopup="true" aria-expanded="false"
-                      aria-label="Insert AC template into prompts (Ctrl+Shift+A)"
-                      title="Insert AC template (Ctrl/Cmd+Shift+A)"
-                      onclick="bcAcTplOpen()">
-                <i class="ti ti-template"></i> Insert AC Template
-              </button>
-              <div class="ac-tpl-menu hidden" id="bc-ac-tpl-menu" role="menu" aria-label="AC template options">
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
-                        onclick="bcAcTplSelect('gwt')" tabindex="-1">
-                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Given / When / Then</span>
-                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
-                  </span>
-                </button>
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
-                        onclick="bcAcTplSelect('checklist')" tabindex="-1">
-                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Checklist</span>
-                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
-                  </span>
-                </button>
-              </div>
-            </div>
-            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-uat-tpl-btn"
-                    aria-label="Insert UAT Steps template into prompts"
-                    title="Insert UAT Steps template"
-                    onclick="bcUatTplInsert()">
-              <i class="ti ti-checklist"></i> Insert UAT Template
-            </button>
-            <span class="bc-ac-global-label">Appends scaffold to each ticket prompt</span>
-          </div>
-
           <!-- Prompt Tips (issue #572) -->
           <button type="button" class="bc-tips-toggle"
                   id="bc-tips-toggle"
@@ -9385,41 +9510,6 @@
             </label>
             <button type="button" class="bc-bulk-btn" onclick="bcDeselectAll()">Deselect all</button>
             <button type="button" class="bc-bulk-btn bc-select-failed-btn hidden" id="bc-select-failed-btn" onclick="bcSelectFailed()">Select failed</button>
-            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-            <div class="ac-tpl-wrap" id="bc-bulk-ac-tpl-wrap">
-              <button type="button" class="ac-tpl-btn" id="bc-bulk-ac-tpl-btn"
-                      aria-haspopup="true" aria-expanded="false"
-                      aria-label="Apply AC template to all draft tickets"
-                      title="Apply AC template to all draft tickets"
-                      onclick="bcBulkAcTplOpen()">
-                <i class="ti ti-template"></i> Apply AC to all drafts
-              </button>
-              <div class="ac-tpl-menu hidden" id="bc-bulk-ac-tpl-menu" role="menu" aria-label="AC template options">
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
-                        onclick="bcBulkAcTplSelect('gwt')" tabindex="-1">
-                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Given / When / Then</span>
-                    <span class="ac-tpl-opt-desc">BDD-style acceptance criteria</span>
-                  </span>
-                </button>
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
-                        onclick="bcBulkAcTplSelect('checklist')" tabindex="-1">
-                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Checklist</span>
-                    <span class="ac-tpl-opt-desc">Markdown checkbox criteria</span>
-                  </span>
-                </button>
-              </div>
-            </div>
-            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-bulk-uat-tpl-btn"
-                    aria-label="Apply UAT Steps template to all draft tickets"
-                    title="Apply UAT Steps template to all draft tickets"
-                    onclick="bcBulkUatTplInsert()">
-              <i class="ti ti-checklist"></i> Apply UAT to all drafts
-            </button>
-            </div>
           </div>
 
           <div class="bc-ticket-list" id="bc-ticket-list"></div>
@@ -10063,6 +10153,14 @@
                 <div class="ps-row-label">Sprint budget<span class="ps-hint">capacity bar target</span></div>
                 <div class="ps-row-control">
                   <input class="ps-inp ps-num" id="ps-sprint-budget" type="number" min="1" max="10000"> <span class="ps-unit">min</span>
+                </div>
+              </div>
+              <div class="ps-row">
+                <div class="ps-row-label">Concurrent coder + tester<span class="ps-hint">pipeline mode — off by default (serial dispatch)</span></div>
+                <div class="ps-row-control">
+                  <button class="ps-toggle" id="ps-pipeline-mode-toggle" role="switch" aria-checked="false"
+                          onclick="projSettingsTogglePipelineMode()"
+                          title="When on, one coder and one tester run in parallel per dispatch level"></button>
                 </div>
               </div>
               <div class="ps-row">
@@ -14752,7 +14850,7 @@ function _smgmtLanesUpdate(label, live) {
 // ── Running-pane Gantt timeline (issue #1147) ─────────────────────────────────
 // Pure HTML renderer — data is the JSON from GET /api/sprints/{label}/timeline.
 // All times are ISO-8601 UTC strings from the server. Scales everything on a
-// shared sprint_started_at → projected_finish axis (0% → 100%).
+// shared plan axis: sprint start → projected finish, clamped to visible plan horizon.
 
 function _smgmtRpTimelineHeaderMeta(data, live) {
   const liveSnap = live || {};
@@ -14779,30 +14877,92 @@ function _smgmtRpTimelineHeaderMeta(data, live) {
 function _smgmtRpTimelineHtml(data, live) {
   if (!data || !data.issues || !data.issues.length) return '';
 
-  const sprintStartMs = Date.parse(data.sprint_started_at);
-  const nowMs         = Date.parse(data.server_now);
-  const finishMs      = Date.parse(data.projected_finish);
-  const totalMs       = Math.max(finishMs - sprintStartMs, 1);
-  const liveSnap      = live || {};
+  const CODER_FRAC = 0.6;
+  const DOC_PER_ISSUE = 4;
+  const REV_PER_ISSUE = 3;
+  const liveSnap = live || {};
+  const nowMs = Date.parse(data.server_now);
 
-  function pct(ms) {
-    return Math.max(0, Math.min(100, (ms - sprintStartMs) / totalMs * 100));
+  function issueEstMin(iss) {
+    return iss.calibrated_estimate || iss.estimate_minutes || 15;
+  }
+
+  function resolveWrapUp() {
+    const n = data.issues.length;
+    const raw = data.wrap_up_estimate || {};
+    const documenter = raw.documenter > 0 ? raw.documenter : DOC_PER_ISSUE * n;
+    const reviewer = raw.reviewer ? (raw.reviewer > 0 ? raw.reviewer : REV_PER_ISSUE * n) : 0;
+    return { documenter: documenter, reviewer: reviewer };
   }
 
   function fmtMin(ms) {
-    const m = Math.round(ms / 60000);
-    return m + 'm';
+    return Math.round(ms / 60000) + 'm';
   }
   function fmtHHMM(isoStr) {
     const d = new Date(isoStr);
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return h + ':' + m;
+    return d.getHours().toString().padStart(2, '0') + ':'
+      + d.getMinutes().toString().padStart(2, '0');
   }
 
-  const nowPct    = pct(nowMs);
-  const finishPct = pct(finishMs);
-  const startedHHMM = fmtHHMM(data.sprint_started_at);
+  function ghostSplitHtml(startMs, estMs, pctFn) {
+    const coderMs = estMs * CODER_FRAC;
+    const cL = pctFn(startMs);
+    const cW = Math.max(pctFn(startMs + coderMs) - cL, 1.5);
+    const tL = pctFn(startMs + coderMs);
+    const tW = Math.max(pctFn(startMs + estMs) - tL, 1.5);
+    return '<div class="rp-tl-seg rp-tl-seg--coder rp-tl-seg--ghost" style="left:'
+      + cL.toFixed(2) + '%;width:' + cW.toFixed(2) + '%"></div>'
+      + '<div class="rp-tl-seg rp-tl-seg--tester rp-tl-seg--ghost" style="left:'
+      + tL.toFixed(2) + '%;width:' + tW.toFixed(2) + '%"></div>';
+  }
+
+  const wu = resolveWrapUp();
+  const wrapUpMs = (wu.documenter + (wu.reviewer || 0)) * 60000;
+
+  const elapsedMs = liveSnap.time_spent_sec > 0
+    ? liveSnap.time_spent_sec * 1000
+    : (function() {
+        const ss = Date.parse(data.sprint_started_at);
+        return (ss && !isNaN(ss)) ? Math.max(0, nowMs - ss) : 60000;
+      })();
+
+  let axisStartMs = Date.parse(data.sprint_started_at);
+  if (!axisStartMs || isNaN(axisStartMs)) axisStartMs = nowMs - elapsedMs;
+  if (elapsedMs > 0 && nowMs - axisStartMs > elapsedMs + 5 * 60000) {
+    axisStartMs = nowMs - elapsedMs;
+  }
+
+  let planEndMs = nowMs;
+  for (const iss of data.issues) {
+    const estMs = issueEstMin(iss) * 60000;
+    const isDone = iss.status === 'done' || iss.status === 'uat';
+    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
+    if (isRunning) {
+      const rem = (iss.estimated_remaining_ms != null)
+        ? iss.estimated_remaining_ms
+        : estMs;
+      planEndMs += rem;
+    } else if (!isDone) {
+      planEndMs += estMs;
+    }
+  }
+  planEndMs += wrapUpMs;
+
+  const finishMsParsed = Date.parse(data.projected_finish);
+  const axisEndMs = Math.max(
+    (!isNaN(finishMsParsed) ? finishMsParsed : 0),
+    planEndMs,
+    nowMs + 60000,
+  );
+  const totalMs = Math.max(axisEndMs - axisStartMs, 15 * 60000);
+
+  function pct(ms) {
+    return Math.max(0, Math.min(100, (ms - axisStartMs) / totalMs * 100));
+  }
+
+  const nowPct = pct(nowMs);
+  const finishPct = pct(axisEndMs);
+  const startedHHMM = data.sprint_started_at ? fmtHHMM(data.sprint_started_at) : fmtHHMM(data.server_now);
   const headerMeta = _smgmtRpTimelineHeaderMeta(data, liveSnap);
 
   let coderMs = 0, testerMs = 0;
@@ -14817,9 +14977,8 @@ function _smgmtRpTimelineHtml(data, live) {
       if (a === 'tester') testerMs += dur;
     }
   }
-  const wu = data.wrap_up_estimate || {};
-  const docEstMs      = (wu.documenter || 0) * 60000;
-  const revEstMs      = (wu.reviewer   || 0) * 60000;
+  const docEstMs = wu.documenter * 60000;
+  const revEstMs = wu.reviewer * 60000;
   const agentTotalMs  = coderMs + testerMs + docEstMs + revEstMs || 1;
   const coderPct      = Math.round(coderMs  / agentTotalMs * 100);
   const testerPct     = Math.round(testerMs / agentTotalMs * 100);
@@ -14836,21 +14995,28 @@ function _smgmtRpTimelineHtml(data, live) {
     splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--tester" style="width:' + testerPct + '%"></div>';
     splitLabels += '<span class="rp-tl-split-bar-label" style="width:' + testerPct + '%">tester ' + testerPct + '%</span>';
   }
-  if (docPct    > 0) splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:' + docPct + '%"></div>';
-  if (revPct    > 0) splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--reviewer rp-tl-split-seg--pending" style="width:' + revPct + '%"></div>';
+  if (docPct > 0) {
+    splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:' + docPct + '%"></div>';
+  }
+  if (revPct > 0) {
+    splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--reviewer rp-tl-split-seg--pending" style="width:' + revPct + '%"></div>';
+  }
+  if (!splitSegs) {
+    splitSegs = '<div class="rp-tl-split-seg rp-tl-split-seg--pending" style="width:100%;opacity:.2"></div>';
+  }
 
   const splitLegendItems = [
     '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--purple)"></span>coder '
-      + escHtml(fmtMin(coderMs)) + '</span>',
+      + escHtml(coderMs > 0 ? fmtMin(coderMs) : 'pending') + '</span>',
     '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--amber)"></span>tester '
-      + escHtml(fmtMin(testerMs)) + '</span>',
+      + escHtml(testerMs > 0 ? fmtMin(testerMs) : 'pending') + '</span>',
     '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--teal)"></span>documenter'
-      + (docEstMs > 0 ? ' · est ' + escHtml(fmtMin(docEstMs)) : ' · pending') + '</span>',
+      + ' · est ' + escHtml(fmtMin(docEstMs)) + '</span>',
   ];
   if (wu.reviewer) {
     splitLegendItems.push(
       '<span class="rp-tl-split-legend-item"><span class="rp-tl-split-swatch" style="background:var(--indigo,#6366f1)"></span>reviewer'
-        + (revEstMs > 0 ? ' · est ' + escHtml(fmtMin(revEstMs)) : ' · pending') + '</span>',
+        + ' · est ' + escHtml(fmtMin(revEstMs)) + '</span>',
     );
   }
 
@@ -14863,15 +15029,14 @@ function _smgmtRpTimelineHtml(data, live) {
 
   let gridLines = '';
   for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
-    const p = pct(sprintStartMs + t);
+    const p = pct(axisStartMs + t);
     const label = t === 0 ? '0' : String(Math.round(t / 60000));
     const tooClose = Math.abs(p - finishPct) < 5 && t > 0;
     const labelHtml = tooClose ? '' : '<span class="rp-tl-gridline-label">' + escHtml(label) + '</span>';
     gridLines += '<div class="rp-tl-gridline" style="left:' + p.toFixed(2) + '%">' + labelHtml + '</div>';
   }
 
-  const finishHHMM = fmtHHMM(data.projected_finish);
-  const nowMinLabel = fmtMin(nowMs - sprintStartMs);
+  const finishHHMM = fmtHHMM(new Date(axisEndMs).toISOString());
   const axisHtml = '<div class="rp-tl-axis-wrap">'
     + '<span class="rp-tl-started"><i class="ti ti-player-play-filled" aria-hidden="true"></i>'
     + 'started ' + escHtml(startedHHMM) + '</span>'
@@ -14888,9 +15053,10 @@ function _smgmtRpTimelineHtml(data, live) {
 
   for (const iss of data.issues) {
     if (iss.status === 'running' || iss.agent_status === 'running') {
+      const estMs = issueEstMin(iss) * 60000;
       const remaining = (iss.estimated_remaining_ms != null)
         ? iss.estimated_remaining_ms
-        : ((iss.calibrated_estimate || iss.estimate_minutes || 15) * 60000);
+        : estMs;
       queuedStartMs = nowMs + remaining;
       break;
     }
@@ -14901,8 +15067,9 @@ function _smgmtRpTimelineHtml(data, live) {
     const isDone    = iss.status === 'done' || iss.status === 'uat';
     const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
     const isQueued  = !isDone && !isRunning;
-    const estMin    = iss.calibrated_estimate || iss.estimate_minutes || 0;
-    const sizeTag   = iss.size ? ' (' + iss.size + ')' : '';
+    const estMin = issueEstMin(iss);
+    const estMs = estMin * 60000;
+    const sizeTag = iss.size || '';
 
     let iconHtml;
     if (isDone) {
@@ -14916,11 +15083,23 @@ function _smgmtRpTimelineHtml(data, live) {
 
     let envelopeHtml = '';
     if (isDone && estMin) {
-      const estMs  = estMin * 60000;
-      const envW   = pct(sprintStartMs + estMs) - pct(sprintStartMs);
+      const envW = pct(axisStartMs + estMs) - pct(axisStartMs);
       if (envW > 0) {
         envelopeHtml = '<div class="rp-tl-envelope" style="left:0%;width:' + envW.toFixed(2) + '%"></div>';
       }
+    } else if (isQueued) {
+      const envL = pct(queuedStartMs);
+      const envW = Math.max(pct(queuedStartMs + estMs) - envL, 1.5);
+      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
+        + '%;width:' + envW.toFixed(2) + '%"></div>';
+    } else if (isRunning) {
+      const rem = (iss.estimated_remaining_ms != null)
+        ? iss.estimated_remaining_ms
+        : estMs;
+      const envL = pct(nowMs);
+      const envW = Math.max(pct(nowMs + rem) - envL, 1.5);
+      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
+        + '%;width:' + envW.toFixed(2) + '%"></div>';
     }
 
     let segsHtml = '';
@@ -14944,34 +15123,22 @@ function _smgmtRpTimelineHtml(data, live) {
       let cls = 'rp-tl-seg rp-tl-seg--' + escHtml(agent);
       if (isRetry)  cls += ' rp-tl-seg--retry';
       if (isLiveSeg && isRunning) cls += ' rp-tl-seg--running';
-      if (isQueued) cls += ' rp-tl-seg--ghost';
 
       const wStr = Math.max(W, 0.5).toFixed(2);
       segsHtml += '<div class="' + cls + '" style="left:' + L.toFixed(2) + '%;width:' + wStr + '%"></div>';
     }
 
     if (isRunning) {
-      const remaining = (iss.estimated_remaining_ms != null)
+      const rem = (iss.estimated_remaining_ms != null)
         ? iss.estimated_remaining_ms
-        : ((estMin || 15) * 60000);
-      const projEnd  = nowMs + remaining;
-      const projL    = pct(nowMs);
-      const projW    = pct(projEnd) - projL;
-      if (projW > 0) {
-        segsHtml += '<div class="rp-tl-seg rp-tl-seg--running rp-tl-seg--projected rp-tl-seg--ghost" style="left:'
-          + projL.toFixed(2) + '%;width:' + projW.toFixed(2) + '%"></div>';
+        : estMs;
+      if (rem > 0) {
+        segsHtml += ghostSplitHtml(nowMs, rem, pct);
       }
     }
 
-    if (isQueued && !segs.length) {
-      const estMs  = (estMin || 15) * 60000;
-      const qL     = pct(queuedStartMs);
-      const qW     = pct(queuedStartMs + estMs) - qL;
-      if (qW > 0) {
-        const agent = (iss.agent || 'coder').toLowerCase();
-        segsHtml += '<div class="rp-tl-seg rp-tl-seg--' + escHtml(agent)
-          + ' rp-tl-seg--ghost" style="left:' + qL.toFixed(2) + '%;width:' + qW.toFixed(2) + '%"></div>';
-      }
+    if (isQueued) {
+      segsHtml += ghostSplitHtml(queuedStartMs, estMs, pct);
       queuedStartMs += estMs;
     }
 
@@ -14982,23 +15149,23 @@ function _smgmtRpTimelineHtml(data, live) {
       return acc + Math.max(0, en - st);
     }, 0);
     const tryCount = segs.length;
-    const estMs2   = estMin * 60000;
+    const estMs2 = estMs;
     const overMs   = estMs2 > 0 ? elapsedMs - estMs2 : 0;
 
     let mainMetric;
     let subLine = '';
     if (isDone) {
       mainMetric = fmtMin(elapsedMs);
-      subLine = 'done · est ' + estMin + 'm' + sizeTag;
+      subLine = 'done · est ' + estMin + 'm' + (sizeTag ? ' (' + sizeTag + ')' : '');
     } else if (isRunning) {
       mainMetric = fmtMin(elapsedMs);
-      const remaining = (iss.estimated_remaining_ms != null)
+      const rem = (iss.estimated_remaining_ms != null)
         ? iss.estimated_remaining_ms
-        : ((estMin || 15) * 60000);
-      subLine = 'running · ~' + fmtMin(remaining) + ' left';
+        : estMs;
+      subLine = 'running · ~' + fmtMin(rem) + ' left';
     } else if (isQueued) {
-      mainMetric = estMin ? 'est ' + estMin + 'm' : '—';
-      subLine = sizeTag.trim() ? sizeTag.trim().replace(/^\s*\(/, '').replace(/\)$/, '') : '';
+      mainMetric = 'est ' + estMin + 'm';
+      subLine = (sizeTag ? sizeTag + ' · ' : '') + 'queued';
     } else if (tryCount > 1) {
       mainMetric = fmtMin(elapsedMs);
       subLine = tryCount + ' tries';
@@ -15022,7 +15189,7 @@ function _smgmtRpTimelineHtml(data, live) {
   if (wu.documenter) {
     const docMs   = wu.documenter * 60000;
     const docL    = pct(queuedStartMs);
-    const docW    = pct(queuedStartMs + docMs) - docL;
+    const docW = Math.max(pct(queuedStartMs + docMs) - docL, 1.5);
     let wrapSegsHtml = '';
     if (docW > 0) {
       wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
@@ -15032,14 +15199,14 @@ function _smgmtRpTimelineHtml(data, live) {
     if (wu.reviewer) {
       const revMs  = wu.reviewer * 60000;
       const revL   = pct(revEndMs);
-      const revW   = pct(revEndMs + revMs) - revL;
+      const revW = Math.max(pct(revEndMs + revMs) - revL, 1.5);
       revEndMs += revMs;
       if (revW > 0) {
         wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
           + revL.toFixed(2) + '%;width:' + revW.toFixed(2) + '%"></div>';
       }
     }
-    const wrapEstMs = wu.documenter * 60000 + (wu.reviewer ? wu.reviewer * 60000 : 0);
+    const wrapEstMs = wrapUpMs;
     wrapUpHtml = '<div class="rp-tl-row rp-tl-row--wrapup rp-tl-wrapup">'
       + '<div class="rp-tl-row-left"><span class="rp-tl-row-icon rp-tl-row-icon--done" aria-hidden="true">'
       + '<i class="ti ti-flag" aria-hidden="true"></i></span></div>'
@@ -15109,6 +15276,8 @@ let _smgmtOrchExpanded = false;    // true when orchestrator panel is in "show m
 let _smgmtOrchLastTail = '';       // plain-text dispatch log tail (for clipboard copy)
 let _smgmtAiLabel = '';            // sprint label bound to the All Issues panel
 let _smgmtAiExpandedNums = new Set(); // issue numbers whose inline log is currently open
+const _smgmtAiLogCache = {};       // num → { html, tail } — avoids log flicker on live poll
+const _smgmtAiFetchGen = {};       // num → fetch generation (drop stale responses)
 
 /** The agent colour-token key for an issue (lg-* contract); 'orchestrator' for
  *  the spine tab. Maps the active agent role onto the known agent keys. */
@@ -15244,7 +15413,7 @@ function _smgmtInspectorFeed(ticket, label) {
   const repo = _smgmtRepo();
   const issueUrl = (repo && t.number)
     ? `https://github.com/${escHtml(repo)}/issues/${t.number}` : '';
-  const logsUrl = `/project/${encodeURIComponent(_slug)}/logs?sprint=${encodeURIComponent(label || '')}`;
+  const logsUrl = _logsIssueLogUrl(t.number, label || '');
   const links = `<div class="inspector-links">`
     + (issueUrl ? `<a class="inspector-link" href="${issueUrl}" target="_blank" rel="noopener">Issue</a>` : '')
     + `<a class="inspector-link" href="${escHtml(logsUrl)}">Full log</a></div>`;
@@ -15622,8 +15791,13 @@ function _smgmtAiRowToggle(num, label) {
     if (isLocked || isQueued) {
       logEl.innerHTML = '<span class="log-empty">no output yet</span>';
     } else {
-      logEl.innerHTML = '<span class="log-empty">Loading…</span>';
-      _smgmtAiFetchLog(num, label);
+      const cached = _smgmtAiLogCache[num];
+      if (cached && cached.html) {
+        logEl.innerHTML = cached.html;
+        _smgmtAiFetchLog(num, label, { keepContent: true });
+      } else {
+        _smgmtAiFetchLog(num, label);
+      }
     }
   } else {
     _smgmtAiExpandedNums.delete(num);
@@ -15631,31 +15805,200 @@ function _smgmtAiRowToggle(num, label) {
 }
 
 /** Fetch a short log tail (~5 lines) for an issue row and render it with a "Full log →" link. */
-function _smgmtAiFetchLog(num, label) {
+function _smgmtAiFetchLog(num, label, opts) {
+  opts = opts || {};
   const bodyEl = document.getElementById('ai-row-log-' + num);
   if (!bodyEl || bodyEl.hidden) return;
   const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
   const lbl = label || _smgmtAiLabel;
-  if (!repo || !lbl) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
-  const logsUrl = '/project/' + encodeURIComponent(_slug) + '/logs?sprint=' + encodeURIComponent(lbl);
+  if (!repo || !lbl) {
+    if (!opts.keepContent) {
+      bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>';
+    }
+    return;
+  }
+  const logsUrl = _logsIssueLogUrl(num, lbl);
   const fullLogLink = '<a class="ai-full-log-link" href="' + escHtml(logsUrl) + '">Full log →</a>';
+  if (!opts.keepContent && !_smgmtAiLogCache[num]) {
+    bodyEl.innerHTML = '<span class="log-empty">Loading…</span>';
+  }
+  const gen = (_smgmtAiFetchGen[num] = (_smgmtAiFetchGen[num] || 0) + 1);
   fetch('/logs/tail?sprint=' + encodeURIComponent(lbl)
       + '&issue=' + encodeURIComponent(num)
       + '&project=' + encodeURIComponent(repo) + '&tail_lines=5')
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(data) {
+      if (_smgmtAiFetchGen[num] !== gen) return;
       const el = document.getElementById('ai-row-log-' + num);
       if (!el || el.hidden) return;
       const tail = (data && typeof data.tail === 'string') ? data.tail : '';
+      let html;
       if (tail.trim()) {
         const lines = tail.split('\n').filter(function(l) { return l; }).slice(-5);
-        el.innerHTML = lines.map(function(line) {
+        html = lines.map(function(line) {
           return '<div class="log-line">' + colorizeLogLine(line, repo) + '</div>';
         }).join('') + fullLogLink;
+      } else if (_smgmtAiLogCache[num] && _smgmtAiLogCache[num].html) {
+        return; // keep showing last good tail while agent is still starting
       } else {
-        el.innerHTML = '<span class="log-empty">no output yet</span>' + fullLogLink;
+        html = '<span class="log-empty">no output yet</span>' + fullLogLink;
       }
+      const cached = _smgmtAiLogCache[num];
+      if (cached && cached.tail === tail && cached.html === html) return;
+      _smgmtAiLogCache[num] = { html: html, tail: tail };
+      el.innerHTML = html;
     }).catch(function() {});
+}
+
+/** Structural signature for the All Issues panel — level set + issue numbers. */
+function _smgmtAiSig(live) {
+  const levels = _smgmtRailLevels(live);
+  return levels.map(function(L) {
+    return L.level + ':' + L.issues.map(function(i) { return i.number; }).join(',');
+  }).join('|');
+}
+
+function _smgmtAiRowStateStr(iss, live) {
+  const state = _smgmtRailNodeState(iss);
+  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isRunning = state === 'coder-active' || state === 'tester-active';
+  const fr = _smgmtRailFixRound(iss);
+  const isRetrying = !!fr && !isDone && !isRunning;
+  if (isDone) {
+    const elapsed = _fmtTicketElapsed(iss.elapsed_secs);
+    return elapsed ? 'done · ' + elapsed : 'done';
+  }
+  if (isRunning) return 'running';
+  if (isRetrying) return 'retrying';
+  return 'queued';
+}
+
+function _smgmtAiPatchRowIcon(iconEl, iss) {
+  if (!iconEl) return;
+  const state = _smgmtRailNodeState(iss);
+  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isRunning = state === 'coder-active' || state === 'tester-active';
+  const fr = _smgmtRailFixRound(iss);
+  const isRetrying = !!fr && !isDone && !isRunning;
+  iconEl.className = 'ai-row-icon';
+  if (isDone) {
+    iconEl.className += ' ai-row-icon--done';
+    iconEl.innerHTML = '&#10003;';
+  } else if (isRunning) {
+    iconEl.className += ' ai-row-icon--running';
+    iconEl.innerHTML = '<span class="smgmt-active-spinner"></span>';
+  } else if (isRetrying) {
+    iconEl.className += ' ai-row-icon--retrying';
+    iconEl.innerHTML = '&#8635;';
+  } else {
+    iconEl.className += ' ai-row-icon--queued';
+    iconEl.innerHTML = '&#9675;';
+  }
+}
+
+function _smgmtAiPatchRowMeta(metaEl, iss, live) {
+  if (!metaEl) return;
+  const state = _smgmtRailNodeState(iss);
+  const isRunning = state === 'coder-active' || state === 'tester-active';
+  const fr = _smgmtRailFixRound(iss);
+  const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
+  const sizePill = iss.size
+    ? '<span class="ai-row-size" title="≈' + (iss.minutes || _sizeMinutes(iss.size)) + ' min">'
+      + escHtml(iss.size) + '</span>' : '';
+  const fixBadge = fr ? '<span class="ai-row-fix">FIX ' + fr + '/' + maxRounds + '</span>' : '';
+  let agentBadge = '';
+  if (isRunning) {
+    if (state === 'coder-active') {
+      const cm = _shortModelName(iss.coder_model);
+      agentBadge = '<span class="ai-row-agent ai-row-agent--coder">CODER'
+        + (cm ? ' ' + escHtml(cm) : '') + '</span>';
+    } else {
+      agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';
+    }
+  }
+  metaEl.innerHTML = sizePill + fixBadge + agentBadge
+    + '<span class="ai-row-state">' + escHtml(_smgmtAiRowStateStr(iss, live)) + '</span>'
+    + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>';
+}
+
+/** In-place patch of row state/meta — never touches .ai-row-log (no flicker). */
+function _smgmtAiPatchRow(iss, live, isLevelLocked) {
+  const num = iss.number;
+  const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
+  if (!row) return;
+  const state = _smgmtRailNodeState(iss);
+  const isDone = iss.status === 'done' || iss.status === 'skipped';
+  const isExpanded = _smgmtAiExpandedNums.has(num);
+  row.dataset.state = state;
+  row.classList.toggle('ai-row--done', isDone);
+  row.classList.toggle('ai-row--locked', !!isLevelLocked);
+  row.classList.toggle('ai-row--expanded', isExpanded);
+  _smgmtAiPatchRowIcon(row.querySelector('.ai-row-icon'), iss);
+  _smgmtAiPatchRowMeta(row.querySelector('.ai-row-meta'), iss, live);
+  const titleEl = row.querySelector('.ai-row-title');
+  if (titleEl && iss.title) titleEl.textContent = iss.title;
+  const logEl = document.getElementById('ai-row-log-' + num);
+  if (logEl) logEl.hidden = !isExpanded;
+  const btn = row.querySelector('.ai-row-body');
+  if (btn) btn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+}
+
+function _smgmtAiRestoreCachedLogs() {
+  _smgmtAiExpandedNums.forEach(function(num) {
+    const logEl = document.getElementById('ai-row-log-' + num);
+    const cached = _smgmtAiLogCache[num];
+    if (logEl && !logEl.hidden && cached && cached.html) {
+      logEl.innerHTML = cached.html;
+    }
+  });
+}
+
+function _smgmtAiRefreshExpandedLogs(label, live) {
+  _smgmtAiExpandedNums.forEach(function(num) {
+    const logEl = document.getElementById('ai-row-log-' + num);
+    if (!logEl || logEl.hidden) return;
+    const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
+    const state = row ? row.dataset.state : '';
+    const isLocked = row && row.classList.contains('ai-row--locked');
+    const isQueued = state === 'queued';
+    if (isLocked || isQueued) {
+      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
+      return;
+    }
+    _smgmtAiFetchLog(num, label, { keepContent: true });
+  });
+}
+
+/** Patch level headers + issue rows without rebuilding log panels. */
+function _smgmtAllIssuesPatch(label, live) {
+  const el = document.getElementById('smgmt-all-issues');
+  if (!el) return;
+  const issues = (live && live.issues) || [];
+  const activeIss = issues.find(function(i) {
+    const st = _smgmtRailNodeState(i);
+    return st === 'coder-active' || st === 'tester-active';
+  });
+  if (activeIss) _smgmtAiExpandedNums.add(activeIss.number);
+
+  const levels = _smgmtRailLevels(live);
+  const metaEl = el.querySelector('.ai-panel-title-meta');
+  if (metaEl) {
+    metaEl.textContent = issues.length + ' total · ' + levels.length
+      + (levels.length === 1 ? ' level' : ' levels');
+  }
+  levels.forEach(function(L) {
+    const isLocked = L.state === 'queued' && L.level > 1;
+    const levelEl = el.querySelector('.ai-level[data-level="' + L.level + '"]');
+    if (levelEl) {
+      levelEl.classList.toggle('ai-level--locked', isLocked);
+      const levelMeta = levelEl.querySelector('.ai-level-meta');
+      if (levelMeta) levelMeta.textContent = _smgmtAiLevelMeta(L, live);
+    }
+    L.issues.forEach(function(iss) {
+      _smgmtAiPatchRow(iss, live, isLocked);
+    });
+  });
+  _smgmtAiRefreshExpandedLogs(label, live);
 }
 
 /** Render or patch the All Issues panel from a live snapshot. Auto-expands the
@@ -15665,15 +16008,21 @@ function _smgmtAllIssuesUpdate(label, live) {
   if (!el) return;
   if (label) _smgmtAiLabel = label;
   const issues = (live && live.issues) || [];
-  if (!issues.length) { el.innerHTML = ''; return; }
+  if (!issues.length) { el.innerHTML = ''; el.dataset.aiSig = ''; return; }
 
-  // Auto-expand the actively-running issue (no click required, AC10).
   const activeIss = issues.find(function(i) {
     const st = _smgmtRailNodeState(i);
     return st === 'coder-active' || st === 'tester-active';
   });
   if (activeIss) _smgmtAiExpandedNums.add(activeIss.number);
 
+  const sig = _smgmtAiSig(live);
+  if (el.dataset.aiSig === sig && el.querySelector('.ai-level')) {
+    _smgmtAllIssuesPatch(label, live);
+    return;
+  }
+
+  el.dataset.aiSig = sig;
   const levels = _smgmtRailLevels(live);
   const totalIssues = issues.length;
   const levelCount = levels.length;
@@ -15687,20 +16036,8 @@ function _smgmtAllIssuesUpdate(label, live) {
     + '</div>'
     + _smgmtAllIssuesHtml(label, live);
 
-  // Populate expanded rows with log content after the HTML is in the DOM.
-  _smgmtAiExpandedNums.forEach(function(num) {
-    const logEl = document.getElementById('ai-row-log-' + num);
-    if (!logEl || logEl.hidden) return;
-    const row = document.querySelector('.ai-row[data-issue="' + num + '"]');
-    const state = row ? row.dataset.state : '';
-    const isLocked = row && row.classList.contains('ai-row--locked');
-    const isQueued = state === 'queued';
-    if (isLocked || isQueued) {
-      logEl.innerHTML = '<span class="log-empty">no output yet</span>';
-    } else {
-      _smgmtAiFetchLog(num, label);
-    }
-  });
+  _smgmtAiRestoreCachedLogs();
+  _smgmtAiRefreshExpandedLogs(label, live);
 }
 
 // ── Running metrics strip (issue #803) ───────────────────────────────────────
@@ -21376,35 +21713,6 @@ function _bcRenderCard(t) {
           <div class="bc-draft-card-actions">
             <button class="bc-btn-regenerate" id="bc-btn-regen-${t.index}"
                     onclick="bcRegenerateDraft(${t.index})">Regenerate draft</button>
-            <div class="ac-tpl-wrap" id="bc-card-ac-wrap-${t.index}" style="position:relative">
-              <button type="button" class="ac-tpl-btn" id="bc-card-ac-btn-${t.index}"
-                      aria-haspopup="true" aria-expanded="false"
-                      aria-label="Insert AC template into this ticket"
-                      onclick="bcCardAcTplOpen(${t.index})">
-                <i class="ti ti-template"></i> AC template
-              </button>
-              <div class="ac-tpl-menu hidden" id="bc-card-ac-menu-${t.index}" role="menu">
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="gwt"
-                        onclick="bcCardAcTplSelect(${t.index},'gwt')" tabindex="-1">
-                  <i class="ti ti-list-details ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Given / When / Then</span>
-                  </span>
-                </button>
-                <button type="button" class="ac-tpl-opt" role="menuitem" data-tpl="checklist"
-                        onclick="bcCardAcTplSelect(${t.index},'checklist')" tabindex="-1">
-                  <i class="ti ti-checkbox ac-tpl-opt-icon"></i>
-                  <span class="ac-tpl-opt-label">
-                    <span class="ac-tpl-opt-name">Checklist</span>
-                  </span>
-                </button>
-              </div>
-            </div>
-            <button type="button" class="ac-tpl-btn uat-tpl-btn" id="bc-card-uat-btn-${t.index}"
-                    aria-label="Insert UAT Steps template into this ticket"
-                    onclick="bcCardUatTplInsert(${t.index})">
-              <i class="ti ti-checklist"></i> UAT template
-            </button>
             <button class="bc-btn-remove-row" onclick="bcRemoveRow(${t.index})" title="Remove this draft">Remove</button>
           </div>
         </div>
@@ -22999,6 +23307,7 @@ const _logsState = {
     source: 'all',
     severity: 'all',
     rawLevel: '',
+    issue: '',
   },
   expanded: new Set(),
   events: {},
@@ -23015,6 +23324,40 @@ const _logsState = {
 let _logsLoaded = false;
 let _logsSearchTimer = null;
 
+/** Build a Logs-tab URL filtered to one sprint issue (raw per-issue log view). */
+function _logsIssueLogUrl(issueNum, sprintLabel) {
+  const params = new URLSearchParams();
+  if (sprintLabel) params.set('sprint', sprintLabel);
+  if (issueNum != null && issueNum !== '') params.set('issue', String(issueNum));
+  params.set('view', 'raw');
+  const qs = params.toString();
+  return '/project/' + encodeURIComponent(_slug) + '/logs' + (qs ? '?' + qs : '');
+}
+
+/** Apply ?sprint= & ?issue= & ?view= from the URL into logs filters (one-shot). */
+function _logsApplyQueryParams() {
+  const q = new URLSearchParams(window.location.search);
+  const sprint = q.get('sprint') || '';
+  const issue = q.get('issue') || '';
+  const view = (q.get('view') || '').toLowerCase();
+  if (!sprint && !issue) return false;
+
+  if (sprint) {
+    _logsState.filter.sprint = sprint;
+    const sel = document.getElementById('logs-filter-sprint');
+    if (sel) sel.value = sprint;
+  }
+  if (issue) {
+    _logsState.filter.issue = String(issue);
+    _logsState.search = String(issue);
+    const searchEl = document.getElementById('logs-search');
+    if (searchEl) searchEl.value = '#' + issue;
+  }
+  if (issue || view === 'raw') logsSetView('raw');
+  else _logsApplyFilters();
+  return true;
+}
+
 function logsInit() {
   const searchEl = document.getElementById('logs-search');
   if (searchEl && !_logsLoaded) searchEl.value = '';
@@ -23026,6 +23369,8 @@ function logsInit() {
     logsSyncGitHub();
     evlFetch();
   }
+
+  _logsApplyQueryParams();
 
   if (!_logsState.pollTimer) {
     _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
@@ -23070,6 +23415,14 @@ async function logsFetchRuns() {
 
     _logsState.runs = newRuns;
     _logsPopulateSprintDropdown();
+
+    if (_logsState.filter.sprint) {
+      const sprintSel = document.getElementById('logs-filter-sprint');
+      if (sprintSel) sprintSel.value = _logsState.filter.sprint;
+    }
+    if (_logsState.filter.issue && _logsState.viewMode === 'raw') {
+      logsLoadRawView();
+    }
 
     if (!_logsLoaded || existingIds.size === 0) {
       logsRenderTimeline();
@@ -23167,8 +23520,12 @@ function _logsPopulateRawLevelDropdown() {
 function logsOnSearch(value) {
   clearTimeout(_logsSearchTimer);
   _logsSearchTimer = setTimeout(() => {
-    _logsState.search = value.trim().toLowerCase();
+    const trimmed = value.trim();
+    const issueMatch = trimmed.match(/^#?(\d+)$/);
+    _logsState.filter.issue = issueMatch ? issueMatch[1] : '';
+    _logsState.search = trimmed.toLowerCase();
     _logsApplyFilters();
+    if (_logsState.filter.issue && _logsState.viewMode === 'raw') logsLoadRawView();
   }, 280);
 }
 
@@ -23657,6 +24014,7 @@ async function logsLoadRawView() {
   const streamEl = document.getElementById('logs-raw-stream');
   if (!streamEl) return;
   let sprintLabel = _logsState.filter.sprint || null;
+  const issueNum = _logsState.filter.issue || null;
   let project = _projectData?.repo;
   if (!sprintLabel && _logsState.runs.length > 0) {
     sprintLabel = _logsState.runs[0].sprint_label;
@@ -23665,19 +24023,28 @@ async function logsLoadRawView() {
     const run = _logsState.runs.find(r => r.sprint_label === sprintLabel);
     if (run) project = run.project;
   }
+  if (!project && typeof _smgmtRepo === 'function') project = _smgmtRepo();
   if (!sprintLabel) {
     streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint to view raw output…</div>';
     _logsState.rawLines = null;
     return;
   }
-  streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Loading…</div>';
+  const loadingMsg = issueNum
+    ? `Loading issue #${escHtml(issueNum)} log…`
+    : 'Loading…';
+  streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">' + loadingMsg + '</div>';
   try {
-    const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=2000`;
+    const url = issueNum
+      ? `/api/sprints/${encodeURIComponent(sprintLabel)}/issue/${encodeURIComponent(issueNum)}/log?project=${encodeURIComponent(project)}&tail_lines=2000`
+      : `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=2000`;
     const resp = await fetch(url);
     if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
     const data = await resp.json();
     if (!data.found || !data.tail) {
-      streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log file found for this sprint.</div>';
+      const emptyMsg = issueNum
+        ? `No log file found for issue #${escHtml(issueNum)}.`
+        : 'No log file found for this sprint.';
+      streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">' + emptyMsg + '</div>';
       _logsState.rawLines = null;
       return;
     }
@@ -23688,9 +24055,10 @@ async function logsLoadRawView() {
 
 function _logsRawLineMatches(line) {
   const f = _logsState.filter;
-  const q = _logsState.search;
   const s = String(line || '');
   if (f.rawLevel && _logsClassifyLine(s) !== f.rawLevel) return false;
+  if (f.issue) return true;
+  const q = _logsState.search;
   if (q && !s.toLowerCase().includes(q)) return false;
   return true;
 }
@@ -25191,36 +25559,6 @@ function _ntBodyTab(tab) {
   }
 }
 
-function bcUatTplInsert() { _uatInsert('bc-textarea', 'bc-uat-tpl-btn'); }
-
-function bcBulkUatTplInsert() {
-  if (!_bcJobState) return;
-  const tickets = (_bcJobState.tickets || []).filter(
-    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
-  );
-  if (tickets.length === 0) return;
-  const anyHasBlock = tickets.some(t => {
-    const el = document.getElementById(`bc-draft-body-${t.index}`);
-    return el && _uatHasBlock(el.value);
-  });
-  if (anyHasBlock) {
-    if (!confirm(`One or more drafts already contain a UAT Test Steps block. Apply UAT template to all ${tickets.length} drafts anyway?`)) return;
-  }
-  tickets.forEach(t => {
-    const el = document.getElementById(`bc-draft-body-${t.index}`);
-    if (el) _acInsertAtCursor(el, _UAT_TEMPLATE);
-  });
-  const btn = document.getElementById('bc-bulk-uat-tpl-btn');
-  if (btn) {
-    btn.innerHTML = `<i class="ti ti-checklist"></i> UAT applied <span style="font-size:10px;opacity:.6">(all)</span>`;
-    btn.classList.add('has-default');
-  }
-}
-
-function bcCardUatTplInsert(index) {
-  _uatInsert(`bc-draft-body-${index}`, `bc-card-uat-btn-${index}`);
-}
-
 const _acTplTemplates = {
   gwt:
 `## Acceptance Criteria
@@ -25330,79 +25668,15 @@ function ntAcTplSelect(tplKey) {
   _acApplyTemplate(tplKey, 'nt-body', 'nt-ac-tpl-btn');
 }
 
-// BC step 1 (prompt textarea)
-function bcAcTplOpen() {
-  _acSyncMenuChecks('bc-ac-tpl-menu', _acSessionDefault);
-  _acOpenMenu('bc-ac-tpl-menu', 'bc-ac-tpl-btn');
-}
-function bcAcTplSelect(tplKey) {
-  _acApplyTemplate(tplKey, 'bc-textarea', 'bc-ac-tpl-btn');
-}
-
-// BC step 2 — apply to ALL draft bodies
-function bcBulkAcTplOpen() {
-  _acSyncMenuChecks('bc-bulk-ac-tpl-menu', _acSessionDefault);
-  _acOpenMenu('bc-bulk-ac-tpl-menu', 'bc-bulk-ac-tpl-btn');
-}
-function bcBulkAcTplSelect(tplKey) {
-  _acCloseAllMenus();
-  if (!_bcJobState) return;
-  const tickets = (_bcJobState.tickets || []).filter(
-    t => t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
-  );
-  if (tickets.length === 0) return;
-  const anyHasBlock = tickets.some(t => {
-    const el = document.getElementById(`bc-draft-body-${t.index}`);
-    return el && _acHasAcBlock(el.value);
-  });
-  if (anyHasBlock) {
-    if (!confirm(`One or more drafts already contain an Acceptance Criteria block. Apply ${_acTplLabels[tplKey]} template to all ${tickets.length} drafts anyway?`)) return;
-  }
-  tickets.forEach(t => {
-    const el = document.getElementById(`bc-draft-body-${t.index}`);
-    if (el) _acInsertAtCursor(el, _acTplTemplates[tplKey]);
-  });
-  _acSessionDefault = tplKey;
-  _acUpdateBtnLabel('bc-bulk-ac-tpl-btn', tplKey);
-}
-
-// BC step 2 — per-ticket
-function bcCardAcTplOpen(index) {
-  _acSyncMenuChecks(`bc-card-ac-menu-${index}`, _acSessionDefault);
-  _acOpenMenu(`bc-card-ac-menu-${index}`, `bc-card-ac-btn-${index}`);
-}
-function bcCardAcTplSelect(index, tplKey) {
-  _acApplyTemplate(tplKey, `bc-draft-body-${index}`, `bc-card-ac-btn-${index}`);
-}
-
-// Keyboard shortcut: Ctrl/Cmd+Shift+A opens picker from body editors
+// Keyboard shortcut: Ctrl/Cmd+Shift+A opens AC picker in new-ticket modal
 document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
     const ntModal   = document.getElementById('nt-modal');
     const ntBody    = document.getElementById('nt-body');
-    const bcPane    = document.getElementById('pane-bulk-create');
-    const bcTextarea = document.getElementById('bc-textarea');
     if (ntModal && !ntModal.classList.contains('hidden') &&
         document.activeElement === ntBody) {
       e.preventDefault();
       ntAcTplOpen();
-      return;
-    }
-    if (bcPane && bcPane.classList.contains('active') &&
-        document.activeElement === bcTextarea) {
-      e.preventDefault();
-      bcAcTplOpen();
-      return;
-    }
-    // Per-ticket body in BC step 2
-    const active = document.activeElement;
-    if (active && active.id && active.id.startsWith('bc-draft-body-')) {
-      const idx = parseInt(active.id.replace('bc-draft-body-', ''), 10);
-      if (!isNaN(idx)) {
-        e.preventDefault();
-        bcCardAcTplOpen(idx);
-        return;
-      }
     }
   }
 });
@@ -27281,6 +27555,7 @@ function _notesHideConflict() {
 
 let _psLoaded = false;
 let _psTracked = true;
+let _psPipelineMode = false;
 
 // Colour name → CSS value for swatch preview
 const _PS_COLOR_MAP = {
@@ -27568,6 +27843,10 @@ async function projSettingsLoad() {
     const toggle = document.getElementById('ps-tracked-toggle');
     if (toggle) toggle.setAttribute('aria-checked', String(_psTracked));
 
+    _psPipelineMode = !!data.pipeline_mode;
+    const pipelineToggle = document.getElementById('ps-pipeline-mode-toggle');
+    if (pipelineToggle) pipelineToggle.setAttribute('aria-checked', String(_psPipelineMode));
+
     // Overrides fields
     _psSetNum('ps-sprint-budget', data.sprint_budget_minutes);
     _psSetVal('ps-default-branch', data.default_branch || '');
@@ -27675,6 +27954,7 @@ async function projSettingsSave() {
     icon: _psSelectedIcon,
     color: _psSelectedColor,
     tracked: _psTracked,
+    pipeline_mode: _psPipelineMode,
     sprint_budget_minutes: _psGetNum('ps-sprint-budget'),
     default_branch: _psGetVal('ps-default-branch'),
     default_branch_uat: _psGetVal('ps-default-branch-uat'),
@@ -27741,6 +28021,12 @@ function projSettingsToggleTracked() {
   _psTracked = !_psTracked;
   const toggle = document.getElementById('ps-tracked-toggle');
   if (toggle) toggle.setAttribute('aria-checked', String(_psTracked));
+}
+
+function projSettingsTogglePipelineMode() {
+  _psPipelineMode = !_psPipelineMode;
+  const toggle = document.getElementById('ps-pipeline-mode-toggle');
+  if (toggle) toggle.setAttribute('aria-checked', String(_psPipelineMode));
 }
 
 function projSettingsGoGlobal() {

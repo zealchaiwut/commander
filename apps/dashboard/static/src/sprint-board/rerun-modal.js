@@ -181,6 +181,9 @@ export async function _rrConfirm() {
       _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
     }
     await loadSprintMgmt(true);
+    if (typeof globalThis._histLoadLedger === 'function') {
+      await globalThis._histLoadLedger(repo);
+    }
     _rrShowCreateProgress(2, 3, 'Queueing sprint run…', 'running', '');
     const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';
     if (data.errors && data.errors.length > 0) {

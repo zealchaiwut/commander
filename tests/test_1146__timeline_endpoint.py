@@ -644,3 +644,16 @@ def test_reviewer_enabled_field_in_settings_schema():
     meta = KNOWN_FIELDS["reviewer_enabled"]
     assert meta["secret"] is False
     assert meta["default"] is False
+
+
+# ── dotted sub-sprint labels (rerun children) ─────────────────────────────────
+
+def test_timeline_router_accepts_dotted_sprint_label():
+    """GET /timeline must accept rerun sub-labels like sprint-83.1 (not 400)."""
+    from apps.dashboard.routers.timeline import _SPRINT_LABEL_RE
+
+    assert _SPRINT_LABEL_RE.match("sprint-83")
+    assert _SPRINT_LABEL_RE.match("sprint-83.1")
+    assert _SPRINT_LABEL_RE.match("sprint-15.10")
+    assert not _SPRINT_LABEL_RE.match("sprint-83.1.1")
+    assert not _SPRINT_LABEL_RE.match("sprint-abc")

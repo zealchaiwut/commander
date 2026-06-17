@@ -21,13 +21,14 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import secrets
 import subprocess
 import sys
 import threading
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 _LEVEL_ORDER = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
 _REQUIRED_KEYS = (
@@ -432,3 +433,93 @@ def _build_commander_logger() -> logging.Logger:
 
 
 commander_logger: logging.Logger = _build_commander_logger()
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator stdout timestamps (sprint_manager dispatch log)
+# ---------------------------------------------------------------------------
+
+ORCHESTRATOR_LOG_TS_RE = re.compile(
+    r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?)\]\s*(.*)$",
+    re.DOTALL,
+)
+
+
+def _orchestrator_line_ts() -> str:
+    """Local wall-clock time for orchestrator log line prefixes."""
+    return datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+class TimestampLineWriter:
+    """Prefix each written line with ``[YYYY-MM-DD HH:MM]``."""
+
+    def __init__(self, fh: TextIO) -> None:
+        self._fh = fh
+        self._buf = ""
+
+    def write(self, data: str) -> int:
+        if not data:
+            return 0
+        self._buf += data
+        written = 0
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            written += self._emit_line(line)
+        return written or len(data)
+
+    def _emit_line(self, line: str) -> int:
+        line = line.rstrip("\r")
+        if line:
+            payload = f"[{_orchestrator_line_ts()}] {line}\n"
+        else:
+            payload = "\n"
+        self._fh.write(payload)
+        return len(payload)
+
+    def flush(self) -> None:
+        if self._buf:
+            self._emit_line(self._buf.rstrip("\r"))
+            self._buf = ""
+        self._fh.flush()
+
+    def fileno(self) -> int:
+        return self._fh.fileno()
+
+
+class _TimestampingTextIO:
+    """Drop-in ``sys.stdout`` wrapper that stamps each complete line."""
+
+    _orchestrator_ts_wrapped = True
+
+    def __init__(self, underlying: TextIO) -> None:
+        self._underlying = underlying
+        self._writer = TimestampLineWriter(underlying)
+
+    def write(self, data: str) -> int:
+        return self._writer.write(data)
+
+    def flush(self) -> None:
+        self._writer.flush()
+
+    def fileno(self) -> int:
+        return self._underlying.fileno()
+
+    def isatty(self) -> bool:
+        return self._underlying.isatty()
+
+    @property
+    def encoding(self) -> str:
+        return self._underlying.encoding
+
+    def writable(self) -> bool:
+        return True
+
+
+def install_orchestrator_stdout_timestamps() -> None:
+    """Wrap ``sys.stdout`` so every orchestrator line gets a wall-clock prefix."""
+    if os.environ.get("COMMANDER_ORCH_LOG_NO_TS") == "1":
+        return
+    out = sys.stdout
+    if getattr(out, "_orchestrator_ts_wrapped", False):
+        return
+    sys.stdout = _TimestampingTextIO(out)  # type: ignore[assignment]

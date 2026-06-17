@@ -56,7 +56,7 @@ except ImportError:
     _psutil = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -65,6 +65,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 # are available when db.py executes its module-level startup checks.
 load_dotenv(Path(__file__).parent / ".env")
 
+import config
 import db
 import github_client
 import sprint_state
@@ -1341,8 +1342,11 @@ async def health_check(request: Request):
 
 @app.get("/api/environment")
 def get_environment():
-    """Return the current runtime environment (prd or uat)."""
-    return {"environment": ENVIRONMENT}
+    """Return the current runtime environment (prd or uat) and feature flags."""
+    return {
+        "environment": ENVIRONMENT,
+        "features": config.commander_features(),
+    }
 
 
 # /api/version and /api/gh-auth-status moved to routers/system.py (issue #794)
@@ -4869,6 +4873,8 @@ def _plan_json_set_state(
 
 def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str]:
     """Return 'pending', 'approved', or None for a sprint's sign-off gate."""
+    if config.sprint_signoff_disabled():
+        return None
     plan = _read_plan_json(project_root, sprint_label)
     if not plan:
         return None
@@ -4922,6 +4928,8 @@ def _assert_sprint_signed_off(project_root: Path, sprint_label: str) -> None:
     Called from the run path so a pending sprint cannot be dispatched — the
     same gate that mutes the Run Sprint button on the board.
     """
+    if config.sprint_signoff_disabled():
+        return
     if _sprint_signoff_state(project_root, sprint_label) == "pending":
         raise HTTPException(
             409,
@@ -5975,33 +5983,62 @@ async def preflight_fix(sprint_label: str, project: str):
 
         filled = estimated = skipped = 0
         errors: list[str] = []
+        log_queue: asyncio.Queue = asyncio.Queue()
         yield _sse("log", f"Fixing {total} pre-flight ticket(s)…")
 
-        for idx, item in enumerate(work, start=1):
+        async def _fix_item(item: dict, idx: int) -> dict:
+            """Fix one ticket; push progress lines to log_queue."""
             num = item["num"]
+            out = {"filled": 0, "estimated": 0, "skipped": 0, "errors": []}
             if item["needs_ac"]:
-                yield _sse("log", f"Generating acceptance criteria for #{num} ({idx}/{total})…")
+                await log_queue.put(f"Generating acceptance criteria for #{num} ({idx}/{total})…")
                 try:
                     status, err = await asyncio.to_thread(_fill_ac.fill_issue, num, repo, False)
                     if status == "filled":
-                        filled += 1
+                        out["filled"] = 1
                     elif status == "skipped":
-                        skipped += 1
+                        out["skipped"] = 1
                     else:
-                        errors.append(f"#{num} AC: {err or 'failed'}")
+                        out["errors"].append(f"#{num} AC: {err or 'failed'}")
                 except Exception as e:  # noqa: BLE001
-                    errors.append(f"#{num} AC: {e}")
+                    out["errors"].append(f"#{num} AC: {e}")
 
             if item["needs_size"]:
-                yield _sse("log", f"Estimating #{num} ({idx}/{total})…")
+                await log_queue.put(f"Estimating #{num} ({idx}/{total})…")
                 try:
                     ok = await asyncio.to_thread(_preflight_estimate_one, num, repo)
                     if ok:
-                        estimated += 1
+                        out["estimated"] = 1
                     else:
-                        errors.append(f"#{num} estimate: failed")
+                        out["errors"].append(f"#{num} estimate: failed")
                 except Exception as e:  # noqa: BLE001
-                    errors.append(f"#{num} estimate: {e}")
+                    out["errors"].append(f"#{num} estimate: {e}")
+            return out
+
+        async def _run_workers() -> None:
+            sem = asyncio.Semaphore(2)
+            results: list[dict] = []
+
+            async def _one(idx: int, item: dict) -> None:
+                async with sem:
+                    results.append(await _fix_item(item, idx))
+
+            await asyncio.gather(*[_one(i, w) for i, w in enumerate(work, start=1)])
+            nonlocal filled, estimated, skipped, errors
+            for r in results:
+                filled += r["filled"]
+                estimated += r["estimated"]
+                skipped += r["skipped"]
+                errors.extend(r["errors"])
+            await log_queue.put(None)
+
+        worker_task = asyncio.create_task(_run_workers())
+        while True:
+            msg = await log_queue.get()
+            if msg is None:
+                break
+            yield _sse("log", msg)
+        await worker_task
 
         github_client.invalidate("open_issues_body:")
         github_client.invalidate("open_issues:")
@@ -8414,18 +8451,175 @@ def _derive_outcome_lifecycle(
     return parent_state
 
 
+def _outcome_kind_from_state_issue(iss: dict) -> str:
+    """Map a sprint-state issue row to done | failed | uat | skipped."""
+    agent = (iss.get("agent_status") or "").lower()
+    status = (iss.get("status") or "").lower()
+    st = (iss.get("state") or "").lower()
+    if iss.get("failure_reason") or agent == "failed" or status in ("failed", "skipped"):
+        return "failed"
+    if status == "uat":
+        return "uat"
+    if st == "merged" or agent in ("completed", "done") or status in ("done", "shipped", "merged"):
+        return "done"
+    return "skipped"
+
+
+def _outcome_kind_from_board_issue(iss: dict) -> str:
+    """Map a live GitHub issue to done | failed | uat | skipped."""
+    label_names = {lbl.get("name") for lbl in iss.get("labels", []) if isinstance(lbl, dict)}
+    if "UAT-approved" in label_names or iss.get("state") == "closed":
+        return "done"
+    if "needs-rework" in label_names or "need-rework" in label_names or "blocked" in label_names:
+        return "failed"
+    col = github_client.classify_issue(iss)
+    if col == "uat":
+        return "uat"
+    if col == "done":
+        return "done"
+    if col in ("sit", "in-progress"):
+        return "skipped"
+    return "skipped"
+
+
+def _merge_preview_issue(
+    bucket: dict[int, dict],
+    num: int,
+    *,
+    title: str = "",
+    outcome: str | None = None,
+    elapsed_secs: int | None = None,
+) -> None:
+    _OUTCOME_RANK = {"failed": 4, "done": 3, "uat": 2, "skipped": 1}
+    row = bucket.setdefault(
+        int(num),
+        {"number": int(num), "title": title or f"#{num}", "outcome": "skipped"},
+    )
+    if title:
+        row["title"] = title
+    if outcome:
+        cur = row.get("outcome") or "skipped"
+        if _OUTCOME_RANK.get(outcome, 0) >= _OUTCOME_RANK.get(cur, 0):
+            row["outcome"] = outcome
+    if elapsed_secs is not None:
+        prev = int(row.get("elapsed_secs") or 0)
+        row["elapsed_secs"] = max(prev, int(elapsed_secs))
+
+
+def _build_outcome_preview(project: str, sprint_label: str, project_root: Path) -> dict | None:
+    """Best-effort outcome for lineage ancestor rows (state file + agent_runs + live GitHub)."""
+    from routers import sprint_artifact_service as sas  # noqa: PLC0415
+    from live_metrics import _fetch_sprint_agent_run_rows  # noqa: PLC0415
+
+    commander = _commander_dir(project_root)
+    sprints_dir = commander / "sprints"
+    issues_map: dict[int, dict] = {}
+    wall_clock = 0
+
+    state_path = sas.resolve_state_path(sprints_dir, sprint_label)
+    if state_path and state_path.is_file():
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            wc = state_data.get("wall_clock_secs")
+            if isinstance(wc, (int, float)):
+                wall_clock = max(wall_clock, int(wc))
+            for iss in state_data.get("issues") or []:
+                num = iss.get("number") or iss.get("ticket_id")
+                if num is None:
+                    continue
+                kind = _outcome_kind_from_state_issue(iss)
+                _merge_preview_issue(
+                    issues_map,
+                    int(num),
+                    title=iss.get("title", ""),
+                    outcome=kind,
+                    elapsed_secs=iss.get("time_spent"),
+                )
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            pass
+
+    for row in _fetch_sprint_agent_run_rows(sprint_label):
+        num = row.get("issue_number")
+        if num is None:
+            continue
+        dur = row.get("duration_seconds")
+        elapsed = int(dur) if dur else None
+        if elapsed:
+            wall_clock = max(wall_clock, elapsed)
+        prev = issues_map.get(int(num), {})
+        combined = (int(prev.get("elapsed_secs") or 0) + int(elapsed)) if elapsed else int(prev.get("elapsed_secs") or 0)
+        _merge_preview_issue(
+            issues_map,
+            int(num),
+            title=prev.get("title", ""),
+            outcome=prev.get("outcome"),
+            elapsed_secs=combined or None,
+        )
+
+    try:
+        for iss in _get_sprint_issues(project, sprint_label):
+            num = iss.get("number")
+            if num is None:
+                continue
+            kind = _outcome_kind_from_board_issue(iss)
+            prev = issues_map.get(int(num), {})
+            _merge_preview_issue(
+                issues_map,
+                int(num),
+                title=iss.get("title", ""),
+                outcome=kind if kind != "skipped" or not prev.get("outcome") else prev.get("outcome"),
+                elapsed_secs=prev.get("elapsed_secs"),
+            )
+    except Exception:
+        pass
+
+    if not issues_map and wall_clock <= 0:
+        return None
+
+    result_issues = sorted(issues_map.values(), key=lambda i: i.get("number") or 0)
+    done_count = sum(1 for i in result_issues if i.get("outcome") == "done")
+    failed_count = sum(1 for i in result_issues if i.get("outcome") == "failed")
+    uat_count = sum(1 for i in result_issues if i.get("outcome") == "uat")
+    skipped_count = sum(
+        1 for i in result_issues
+        if i.get("outcome") not in ("done", "failed", "uat")
+    )
+
+    return {
+        "sprint_label": sprint_label,
+        "partial": True,
+        "state": "partial",
+        "lifecycle": "unknown",
+        "sprint_status": None,
+        "counts": {
+            "done": done_count,
+            "failed": failed_count,
+            "skipped": skipped_count,
+            "uat": uat_count,
+        },
+        "wall_clock_secs": wall_clock,
+        "ended_at": None,
+        "issues": result_issues,
+        "log_line_count": 0,
+    }
+
+
 @app.get("/api/sprints/{sprint_label}/outcome")
-def get_sprint_outcome(sprint_label: str, project: str):
+def get_sprint_outcome(sprint_label: str, project: str, preview: bool = Query(False)):
     """Return frozen outcome data for a completed or stopped sprint.
 
     Reads sprint-N-state.json plus the latest sprint-run-<label>-*.log to produce:
       - state: "running" | "completed" | "has_rework" | "cancelled"
       - sprint_status: "completed" | "stopped" | None (still running or not found)
-      - counts: { done, failed, skipped }
+      - counts: { done, failed, skipped, uat }
       - wall_clock_secs: total duration
       - ended_at: ISO 8601 timestamp of sprint end (from last issue status_changed_at)
       - issues: list of { number, title, outcome, elapsed_secs } for each issue
       - log_line_count: number of lines in the archived run log
+
+    When ``preview=1``, returns a best-effort snapshot from state files, agent_runs,
+    and live GitHub issues (``partial: true``) for lineage ancestor rows — without
+    relaxing the ingested-only contract for normal board reads (issue #1161).
     """
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
@@ -8437,12 +8631,18 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if _is_sprint_running(project_root, sprint_label):
         return {"sprint_label": sprint_label, "state": "running", "lifecycle": "running"}
 
+    if _sprint_has_own_run_outcome(project_root, sprint_label):
+        ingested = db.get_sprint(sprint_label)
+        if ingested and ingested.get("run_ingested_at"):
+            return _outcome_from_ingested_row(ingested, sprint_label, project)
+
+    if preview:
+        partial = _build_outcome_preview(project, sprint_label, project_root)
+        if partial:
+            return partial
+
     if not _sprint_has_own_run_outcome(project_root, sprint_label):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
-
-    ingested = db.get_sprint(sprint_label)
-    if ingested and ingested.get("run_ingested_at"):
-        return _outcome_from_ingested_row(ingested, sprint_label, project)
 
     raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
 

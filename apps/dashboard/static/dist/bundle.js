@@ -803,6 +803,60 @@
     switchTab(effTab, false);
   });
 
+  // apps/dashboard/static/src/shell/features.js
+  var _features = null;
+  function commanderFeatures() {
+    return _features || {};
+  }
+  function signoffEnabled() {
+    return commanderFeatures().signoff === true;
+  }
+  function advisorEnabled() {
+    return commanderFeatures().advisor === true;
+  }
+  function planningEnabled() {
+    return commanderFeatures().planning === true;
+  }
+  async function loadCommanderFeatures() {
+    try {
+      const res = await fetch("/api/environment", { cache: "no-store" });
+      if (!res.ok)
+        throw new Error(String(res.status));
+      const data = await res.json();
+      _features = data.features || {};
+    } catch {
+      _features = { signoff: false, advisor: false, planning: false };
+    }
+    const root2 = typeof window !== "undefined" ? window : globalThis;
+    root2._commanderFeatures = _features;
+    applyFeatureFlags();
+    return _features;
+  }
+  function _hide(el) {
+    if (!el)
+      return;
+    el.classList.add("hidden");
+    el.setAttribute("aria-hidden", "true");
+  }
+  function applyFeatureFlags() {
+    if (!advisorEnabled()) {
+      _hide(document.getElementById("stab-advisor"));
+      _hide(document.getElementById("pane-advisor"));
+    }
+    if (!planningEnabled()) {
+      _hide(document.getElementById("smgmt-plan-next-btn"));
+      _hide(document.getElementById("hnav-milestone"));
+    }
+    if (!signoffEnabled()) {
+      _hide(document.getElementById("snav-signoff"));
+    }
+    if (!advisorEnabled() && !planningEnabled()) {
+      const group = document.getElementById("stab-group-planning");
+      if (group)
+        group.style.display = "none";
+    }
+  }
+
   // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
@@ -868,6 +922,10 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
   async function smgmtPlanNextSprint() {
+    if (globalThis._commanderFeatures && globalThis._commanderFeatures.planning !== true) {
+      _smgmtShowToast("Plan next sprint is disabled.");
+      return;
+    }
     const repo = _smgmtRepo();
     if (!repo) {
       _smgmtShowToast("No project selected.");
@@ -888,6 +946,8 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
   async function _smgmtLoadPendingSignoff() {
+    if (globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true)
+      return;
     const repo = _smgmtRepo();
     if (!repo)
       return;
@@ -3306,6 +3366,7 @@ Replace the existing draft (${data.existing_label})?`
     { key: "conflicts", label: "Conflict analysis", autoFixable: false }
   ];
   var _pfStepFails = 0;
+  var _pfAutofixPending = false;
   var _pfModels = null;
   function _pfModelShort(m) {
     const s = String(m || "");
@@ -3365,6 +3426,52 @@ Replace the existing draft (${data.existing_label})?`
       _smgmtShowToast(`Cancel failed: ${e.message}`);
     }
   }
+  async function smgmtApproveSprint(label) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    if (!confirm(`Approve ${sprintLabelDisplay(label)}? This signs off the sprint and enables Run Sprint.`))
+      return;
+    try {
+      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _smgmtShowToast(`Approve failed: ${err.detail || res.status}`);
+        return;
+      }
+      _smgmtShowToast(`${sprintLabelDisplay(label)} approved \u2014 ready to run`);
+      loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast(`Approve failed: ${e.message}`);
+    }
+  }
+  async function smgmtRejectSprint(label) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    if (!confirm(`Reject ${sprintLabelDisplay(label)}? The sprint is dissolved and all its tickets return to the backlog.`))
+      return;
+    try {
+      const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        _smgmtShowToast(`Reject failed: ${err.detail || res.status}`);
+        return;
+      }
+      _smgmtShowToast(`${sprintLabelDisplay(label)} rejected \u2014 tickets returned to backlog`);
+      loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast(`Reject failed: ${e.message}`);
+    }
+  }
   function _pfOpen(label) {
     const repo = _smgmtRepo();
     if (!repo)
@@ -3408,6 +3515,7 @@ Replace the existing draft (${data.existing_label})?`
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
     _pfStepFails = 0;
+    _pfAutofixPending = false;
   }
   async function _pfFetch() {
     _pfState = "loading";
@@ -3529,6 +3637,29 @@ Replace the existing draft (${data.existing_label})?`
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join("")}</div>
   </div>`;
+  }
+  function _pfPatchWarnings() {
+    const content = document.getElementById("pf-content");
+    if (!content)
+      return;
+    const html = _pfBuildWarningsHtml();
+    content.querySelector(".pf-warnings-section")?.remove();
+    if (!html)
+      return;
+    const anchor = content.querySelector(".pf-cline-section") || content.querySelector(".pf-models-section");
+    if (anchor)
+      anchor.insertAdjacentHTML("afterend", html);
+  }
+  function _pfShrinkWarnings(fix, missingAc, unestimated) {
+    if (!_pfWarnings || fix.errors && fix.errors.length)
+      return;
+    if (fix.filled > 0 && _pfWarnings.missing_ac?.length) {
+      _pfWarnings.missing_ac = _pfWarnings.missing_ac.slice(fix.filled);
+    }
+    if (fix.estimated > 0 && _pfWarnings.unestimated?.length) {
+      _pfWarnings.unestimated = _pfWarnings.unestimated.slice(fix.estimated);
+    }
+    _pfPatchWarnings();
   }
   function _pfBuildCycleHtml() {
     if (!_pfCycle || !_pfCycle.length)
@@ -3886,7 +4017,7 @@ Replace the existing draft (${data.existing_label})?`
       hideLog: true
     });
   }
-  async function _pfRunAutoFix(label, repo) {
+  async function _pfRunAutoFix(label, repo, onLog) {
     const resp = await fetch(
       `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
       { method: "POST" }
@@ -3907,7 +4038,17 @@ Replace the existing draft (${data.existing_label})?`
         const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
         if (!m)
           continue;
-        if (m[1] === "done") {
+        if (m[1] === "log") {
+          try {
+            const d = JSON.parse(m[2]);
+            const msg = typeof d === "string" ? d : d.message || String(d);
+            if (onLog)
+              onLog(msg);
+          } catch (_) {
+            if (onLog)
+              onLog(m[2]);
+          }
+        } else if (m[1] === "done") {
           try {
             const d = JSON.parse(m[2]);
             filled = d.filled || 0;
@@ -3921,43 +4062,56 @@ Replace the existing draft (${data.existing_label})?`
     return { filled, estimated, errors };
   }
   async function _pfStepperAnimate(data) {
-    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
-    _pfStepState("ac", "checking", "");
-    _pfStepState("estimates", "checking", "");
-    await delay(350);
     const missingAc = data.warnings && data.warnings.missing_ac || [];
     const unestimated = data.warnings && data.warnings.unestimated || [];
     const hasAcIssues = missingAc.length > 0;
     const hasEstIssues = unestimated.length > 0;
+    const _routeAutofixLog = (msg) => {
+      const s = String(msg || "");
+      if (/acceptance criteria/i.test(s)) {
+        _pfStepState("ac", "checking", s);
+      } else if (/Estimating/i.test(s)) {
+        _pfStepState("estimates", "checking", s);
+      } else if (/Fixing \d+ pre-flight/i.test(s)) {
+        if (hasAcIssues)
+          _pfStepState("ac", "checking", s);
+        if (hasEstIssues)
+          _pfStepState("estimates", "checking", s);
+      }
+    };
+    const _finishAutofix = (fix) => {
+      const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "";
+      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "";
+      _pfStepState("ac", fix.filled > 0 ? "fixed" : "pass", acNote);
+      _pfStepState("estimates", fix.estimated > 0 ? "fixed" : "pass", estNote);
+      _pfShrinkWarnings(fix, missingAc, unestimated);
+      _pfAutofixPending = false;
+      _pfStepperSummary();
+    };
     if ((hasAcIssues || hasEstIssues) && label && repo) {
-      try {
-        const fix = await _pfRunAutoFix(label, repo);
-        const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "";
-        const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "";
-        _pfStepState("ac", fix.filled > 0 ? "fixed" : "pass", acNote);
-        _pfStepState("estimates", fix.estimated > 0 ? "fixed" : "pass", estNote);
-      } catch (_) {
+      _pfAutofixPending = true;
+      _pfStepState("ac", "checking", hasAcIssues ? `Fixing ${missingAc.length} ticket(s)\u2026` : "");
+      _pfStepState("estimates", "checking", hasEstIssues ? `Estimating ${unestimated.length} ticket(s)\u2026` : "");
+      _pfRunAutoFix(label, repo, _routeAutofixLog).then(_finishAutofix).catch(() => {
         _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "");
         _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "");
-      }
+        _pfAutofixPending = false;
+        _pfStepperSummary();
+      });
     } else {
       _pfStepState("ac", "pass", "");
       _pfStepState("estimates", "pass", "");
     }
-    await delay(300);
     _pfStepState("cycle", "checking", "");
-    await delay(350);
     if (data.cycle && data.cycle.length) {
       _pfStepState("cycle", "fail", `Cycle: ${data.cycle.join(" \u2192 ")}`);
       _pfStepFails++;
     } else {
       _pfStepState("cycle", "pass", "");
     }
-    await delay(300);
     _pfStepState("missizing", "checking", "");
-    await delay(350);
     const pendingFlags = (data.mis_sizing_flags && data.mis_sizing_flags.flags || []).filter((f) => f.status === "pending");
     if (pendingFlags.length > 0) {
       _pfStepState("missizing", "fail", `${pendingFlags.length} flag(s) require review`);
@@ -3965,9 +4119,7 @@ Replace the existing draft (${data.existing_label})?`
     } else {
       _pfStepState("missizing", "pass", "");
     }
-    await delay(300);
     _pfStepState("conflicts", "checking", "");
-    await delay(350);
     const selectedTickets = _pfGetSelectedTickets();
     const conflicts = _pfComputeConflicts(selectedTickets);
     if (conflicts.length > 0) {
@@ -3986,6 +4138,9 @@ Replace the existing draft (${data.existing_label})?`
     if (_pfStepFails > 0) {
       summaryEl.textContent = `${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} \u2014 cannot run`;
       summaryEl.className = "pf-stepper-summary pf-stepper-summary--blocking";
+    } else if (_pfAutofixPending) {
+      summaryEl.textContent = "Ready to run \u2014 preparing tickets in background";
+      summaryEl.className = "pf-stepper-summary pf-stepper-summary--clear";
     } else {
       summaryEl.textContent = "All checks passed \u2014 ready to run";
       summaryEl.className = "pf-stepper-summary pf-stepper-summary--clear";
@@ -4222,21 +4377,19 @@ Replace the existing draft (${data.existing_label})?`
     const onSprintTab = typeof _activeTab === "undefined" || _activeTab === "sprint-mgmt";
     const onBoard = typeof _smgmtSubView === "undefined" || _smgmtSubView === "board";
     if (count > 0 && bar && onSprintTab && onBoard) {
-      bar.classList.add("show");
       bar.classList.remove("hidden");
       if (listEl)
         listEl.classList.add("has-selection");
       const countEl = document.getElementById("smgmt-sel-count");
       if (countEl)
         countEl.textContent = count === 1 ? "1 issue selected" : `${count} issues selected`;
-      const deleteBtn = document.getElementById("smgmt-sel-delete-btn");
-      if (deleteBtn) {
-        const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
-        deleteBtn.classList.toggle("show", showDelete);
+      const closeBtn = document.getElementById("smgmt-sel-close-btn");
+      if (closeBtn) {
+        const label = count === 1 ? "Close ticket" : `Close ${count} tickets`;
+        closeBtn.innerHTML = `<i class="ti ti-circle-x"></i> ${label}`;
       }
     } else {
       if (bar) {
-        bar.classList.remove("show");
         bar.classList.add("hidden");
       }
       if (listEl)
@@ -5043,6 +5196,29 @@ ${data.errors.join("\n")}`);
 
   // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
+  function _smgmtSignoffState(label) {
+    if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
+      return null;
+    }
+    return (_smgmtData && _smgmtData.sprint_signoff || {})[label] || null;
+  }
+  function _smgmtSignoffBadgeHtml(label) {
+    if (_smgmtSignoffState(label) !== "pending")
+      return "";
+    return '<span class="sc-signoff-badge">Pending sign-off</span>';
+  }
+  function _smgmtSignoffActionsHtml(label) {
+    if (_smgmtSignoffState(label) !== "pending")
+      return "";
+    const e = escHtml(label);
+    return `<button class="smgmt-approve-btn" type="button" onclick="smgmtApproveSprint('${e}')"><i class="ti ti-check"></i> Approve</button><button class="smgmt-reject-btn" type="button" onclick="smgmtRejectSprint('${e}')"><i class="ti ti-x"></i> Reject</button>`;
+  }
+  function _smgmtGoalRequired() {
+    const f = typeof globalThis !== "undefined" && globalThis._commanderFeatures;
+    if (!f)
+      return false;
+    return f.goal_required === true;
+  }
   async function loadSprintMgmt2(silent, optimisticRunningLabel) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
@@ -5294,8 +5470,8 @@ ${data.errors.join("\n")}`);
           if (latest && latest !== label)
             childLabel = latest;
         }
-        const outcome2 = _smgmtOutcomeCache[label] || null;
-        return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, outcome2, childLabel) + `</div>`;
+        const cachedOutcome = _smgmtOutcomeCache[label];
+        return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, cachedOutcome, childLabel) + `</div>`;
       }
       if (_usesDraftCard(label)) {
         return `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtDraftCardHtml(label, tickets) + `</div>`;
@@ -5567,26 +5743,70 @@ ${data.errors.join("\n")}`);
     }
     await Promise.all(
       toFetch.map(async (label) => {
+        const isAncestor = _smgmtResolvedAncestors.has(label);
+        const previewQs = isAncestor ? "&preview=1" : "";
         try {
           const resp = await fetch(
-            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}`
+            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}${previewQs}`
           );
           if (resp.ok) {
             const outcome = await resp.json();
             _smgmtOutcomeCache[label] = outcome;
-            if (_smgmtResolvedAncestors.has(label)) {
+            if (isAncestor) {
               _smgmtUpdateAncestorRow(label, outcome);
             } else {
               _smgmtInjectOutcomeBand(label, outcome);
             }
-          } else {
-            _smgmtOutcomeCache[label] = null;
+            return;
+          }
+          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
+          _smgmtOutcomeCache[label] = fallback;
+          if (isAncestor && fallback) {
+            _smgmtUpdateAncestorRow(label, fallback);
+          } else if (isAncestor) {
+            _smgmtUpdateAncestorRow(label, null);
           }
         } catch (_) {
-          _smgmtOutcomeCache[label] = null;
+          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
+          _smgmtOutcomeCache[label] = fallback;
+          if (isAncestor) {
+            _smgmtUpdateAncestorRow(label, fallback || null);
+          }
         }
       })
     );
+  }
+  function _smgmtOutcomeFromBoard(label, tickets) {
+    if (!tickets || tickets.length === 0)
+      return null;
+    const issues = tickets.map((t) => {
+      const labelNames = (t.labels || []).map((l) => l.name);
+      let outcome = "skipped";
+      if (labelNames.includes("UAT-approved") || t.status === "done")
+        outcome = "done";
+      else if (labelNames.includes("needs-rework") || labelNames.includes("need-rework"))
+        outcome = "failed";
+      else if (t.status === "uat")
+        outcome = "uat";
+      else if (t.status === "sit" || t.status === "in-progress")
+        outcome = "skipped";
+      return { number: t.number, title: t.title || "", outcome };
+    });
+    const counts = { done: 0, failed: 0, skipped: 0, uat: 0 };
+    for (const iss of issues) {
+      const k = iss.outcome === "uat" ? "uat" : iss.outcome;
+      if (counts[k] !== void 0)
+        counts[k] += 1;
+    }
+    return {
+      sprint_label: label,
+      partial: true,
+      state: "partial",
+      lifecycle: "unknown",
+      counts,
+      wall_clock_secs: 0,
+      issues
+    };
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
@@ -5740,7 +5960,12 @@ ${data.errors.join("\n")}`);
           continue;
         const data = await resp.json();
         const goal = (data.goal || "").trim();
-        if (goal) {
+        if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+          if (goal)
+            goalEl.value = goal;
+          const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
+          _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
+        } else if (goal) {
           goalEl.textContent = goal;
           goalEl.title = goal;
           goalEl.style.display = "";
@@ -5996,6 +6221,8 @@ ${data.errors.join("\n")}`);
                   <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
     } else if (isHasRework || isPostRun) {
       actionBtn = rerunBtn;
+    } else if (_smgmtSignoffState(label) === "pending") {
+      actionBtn = _smgmtSignoffActionsHtml(label);
     } else if (_smgmtAnySprintRunning) {
       actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
                   title="Another sprint is running"
@@ -6072,7 +6299,8 @@ ${data.errors.join("\n")}`);
     const logHtml = "";
     const cancelBannerHtml = "";
     const plannedBadge = !finished && !isPostRun && !outcomeBadgeHtml && !isRunningView ? '<span class="sc-draft-badge">DRAFT</span>' : "";
-    const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
+    const signoffBadge = _smgmtSignoffBadgeHtml(label);
+    const blockedHint = _smgmtSignoffState(label) === "pending" ? '<span class="sc-blocked-hint smgmt-blocked-hint--signoff">Approve the plan to run</span>' : _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
     const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
     const runningComplete = live ? (live.done_count || 0) + (live.failed_count || 0) + (live.skipped_count || 0) : 0;
@@ -6103,6 +6331,7 @@ ${data.errors.join("\n")}`);
           ${runningBadgeHtml}
           ${showRunningChrome ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
           ${plannedBadge}
+          ${signoffBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
           <span class="sc-meta smgmt-sprint-count" id="smgmt-col-rollup-${escHtml(label)}">${_smgmtRollupText(rollupItems)}</span>
@@ -6448,7 +6677,7 @@ ${data.errors.join("\n")}`);
         return `Ready to run.${held} Waiting on ${blocker} to finish.`;
       }
       if (!planState || planState === "draft" || planState === "planning") {
-        return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : "Set a sprint goal to enable the run.";
+        return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : _smgmtGoalRequired() ? "Set a sprint goal to enable the run." : "Ready to run.";
       }
       return held ? `Ready to run.${held}` : "Ready to run.";
     }
@@ -6674,12 +6903,31 @@ ${data.errors.join("\n")}`);
       return "merged";
     return "needs_merge";
   }
+  function _smgmtAncestorStatsLine(outcome) {
+    if (!outcome)
+      return "";
+    const c = outcome.counts || {};
+    const parts = [];
+    if (c.done)
+      parts.push(`${c.done} done`);
+    if (c.failed)
+      parts.push(`${c.failed} failed`);
+    if (c.uat)
+      parts.push(`${c.uat} awaiting UAT`);
+    if (c.skipped)
+      parts.push(`${c.skipped} incomplete`);
+    if (outcome.wall_clock_secs) {
+      parts.push(`${_fmtRunningTime(outcome.wall_clock_secs)} elapsed`);
+    }
+    return parts.join(" \xB7 ");
+  }
   function _smgmtAncestorCarrySummary(outcome, childLabel, mergeState) {
     if (!outcome)
       return "";
     const counts = outcome.counts || {};
     const done = counts.done || 0;
     const carried = (counts.failed || 0) + (counts.skipped || 0);
+    const uat = counts.uat || 0;
     const childDisplay = childLabel ? sprintLabelDisplay(childLabel).replace("Sprint ", "") : "";
     if (mergeState === "failed") {
       if (carried > 0 && childDisplay) {
@@ -6691,6 +6939,8 @@ ${data.errors.join("\n")}`);
     }
     if (mergeState === "needs_merge") {
       let summary2 = `${done} passed`;
+      if (uat > 0)
+        summary2 += ` \xB7 ${uat} awaiting UAT`;
       if (carried > 0 && childDisplay)
         summary2 += ` \xB7 ${carried} reworked \u2192 ${childDisplay}`;
       else if (carried > 0)
@@ -6698,6 +6948,8 @@ ${data.errors.join("\n")}`);
       return `${summary2} \xB7 not merged yet`;
     }
     let summary = `${done} merged`;
+    if (uat > 0)
+      summary += ` \xB7 ${uat} awaiting UAT`;
     if (carried > 0 && childDisplay)
       summary += ` \xB7 ${carried} reworked \u2192 ${childDisplay}`;
     else if (carried > 0)
@@ -6713,29 +6965,55 @@ ${data.errors.join("\n")}`);
     const childDisplay = childLabel ? sprintLabelDisplay(childLabel).replace("Sprint ", "") : "";
     return issues.map((iss) => {
       const o = iss.outcome || "skipped";
-      const isMerged = o === "done";
       const issueUrl = repo ? `https://github.com/${repo}/issues/${iss.number}` : "#";
-      if (isMerged) {
+      const elapsed = iss.elapsed_secs != null && iss.elapsed_secs > 0 ? `<span class="slp-ticket-elapsed">${escHtml(_fmtRunningTime(iss.elapsed_secs))}</span>` : "";
+      if (o === "done") {
         return `<div class="slp-ancestor-ticket-row">
-          <span class="slp-ticket-merged" title="Merged"><i class="ti ti-circle-check"></i></span>
+          <span class="slp-ticket-merged" title="Done"><i class="ti ti-circle-check"></i></span>
           <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
              onclick="event.stopPropagation()">#${iss.number}</a>
           <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
-          <span class="slp-fate-merged">merged</span>
+          <span class="slp-fate-merged">done</span>${elapsed}
         </div>`;
-      } else {
+      }
+      if (o === "uat") {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-uat" title="Awaiting UAT sign-off"><i class="ti ti-hourglass"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-uat">awaiting UAT</span>${elapsed}
+        </div>`;
+      }
+      if (o === "failed") {
+        return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-failed" title="Failed / rework"><i class="ti ti-circle-x"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-failed">failed</span>${elapsed}
+        </div>`;
+      }
+      if (childDisplay) {
         return `<div class="slp-ancestor-ticket-row">
           <span class="slp-ticket-carried" title="Carried to ${escHtml(childDisplay)}"><i class="ti ti-arrow-right"></i></span>
           <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
              onclick="event.stopPropagation()">#${iss.number}</a>
           <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
-          <span class="slp-fate-carried">carried \u2192 ${escHtml(childDisplay)}</span>
+          <span class="slp-fate-carried">carried \u2192 ${escHtml(childDisplay)}</span>${elapsed}
         </div>`;
       }
+      return `<div class="slp-ancestor-ticket-row">
+          <span class="slp-ticket-incomplete" title="Incomplete"><i class="ti ti-dots"></i></span>
+          <a class="smgmt-ticket-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()">#${iss.number}</a>
+          <span class="smgmt-ticket-title slp-ticket-title" title="${escHtml(iss.title)}">${escHtml(iss.title)}</span>
+          <span class="slp-fate-incomplete">incomplete</span>${elapsed}
+        </div>`;
     }).join("");
   }
   function _smgmtAncestorRowHtml(label, outcome, childLabel) {
-    const mergeState = _smgmtAncestorMergeState(label, outcome);
+    const mergeState = _smgmtAncestorMergeState(label, outcome || null);
     const safeLabel = escHtml(label);
     const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
     let statusIcon, statusText, statusCls;
@@ -6756,9 +7034,19 @@ ${data.errors.join("\n")}`);
       statusText = "Pending";
       statusCls = "slp-pending";
     }
-    const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto, mergeState);
-    const durationHtml = outcome && outcome.wall_clock_secs != null ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>` : "";
-    const ticketsHtml = outcome ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">Loading outcome data\u2026</div>';
+    const carrySummary = _smgmtAncestorCarrySummary(outcome || null, rerunInto, mergeState);
+    const durationHtml = outcome && outcome.wall_clock_secs != null && outcome.wall_clock_secs > 0 ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>` : "";
+    let ticketsHtml;
+    if (outcome === void 0) {
+      ticketsHtml = '<div class="slp-no-tickets">Loading outcome data\u2026</div>';
+    } else if (!outcome) {
+      ticketsHtml = '<div class="slp-no-tickets">No run data for this sprint \u2014 tickets may have moved to a child sprint.</div>';
+    } else {
+      const statsLine = _smgmtAncestorStatsLine(outcome);
+      const statsHtml = statsLine ? `<div class="slp-ancestor-stats">${escHtml(statsLine)}</div>` : "";
+      const listHtml = (outcome.issues || []).length > 0 ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">No per-ticket records found.</div>';
+      ticketsHtml = statsHtml + listHtml;
+    }
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const actionsHtml = mergeState === "needs_merge" ? `<div class="slp-ancestor-actions">
@@ -6778,11 +7066,11 @@ ${data.errors.join("\n")}`);
               onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
         <i class="ti ti-chevron-right"></i>
       </button>
-      <span class="slp-status-icon slp-status-icon--${escHtml(mergeState)}" title="${escHtml(statusText)}">
+      <span class="slp-merge-mark ${statusCls}">
         <i class="ti ${statusIcon}"></i>
+        <span class="slp-mark-text">${escHtml(statusText)}</span>
       </span>
       <span class="slp-ancestor-name">${escHtml(sprintLabelDisplay(label))}</span>
-      <span class="slp-status-pill ${statusCls}">${escHtml(statusText)}</span>
       ${carrySummary ? `<span class="slp-carry-summary">${escHtml(carrySummary)}</span>` : ""}
       ${durationHtml}
       <button class="slp-ancestor-menu" type="button"
@@ -6963,7 +7251,151 @@ ${data.errors.join("\n")}`);
     }).join("");
     const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
     const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span><span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
+    const signoffPending = _smgmtSignoffState(label) === "pending";
+    const signoffBadge = _smgmtSignoffBadgeHtml(label);
+    const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
+    const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
+    const goalRequired = _smgmtGoalRequired();
+    let runDisabled = "";
+    let runTitle = "";
+    if (signoffPending) {
+      runDisabled = "disabled";
+      runTitle = 'title="Approve the sprint plan before running"';
+    } else if (!canRun) {
+      runDisabled = "disabled";
+      runTitle = 'title="No dispatchable tickets \u2014 add tickets from the backlog"';
+    } else if (goalRequired) {
+      runDisabled = "disabled";
+      runTitle = 'title="Enter a sprint goal to enable Run"';
+    }
+    const goalPlaceholder = goalRequired ? "Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" : "Optional sprint goal \u2014 e.g. 'Milestone burndown + activity cleanup'";
+    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span>` + signoffBadge + `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button>` + signoffActions + `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" ${runDisabled} ${runTitle} onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="${escHtml(goalPlaceholder)}" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
+  }
+  function smgmtPlanningRowMenu(event, issueNum, label) {
+    event.stopPropagation();
+    const existing = document.getElementById("smgmt-plan-row-menu");
+    if (existing)
+      existing.remove();
+    const menu = document.createElement("div");
+    menu.id = "smgmt-plan-row-menu";
+    menu.className = "smgmt-ctx-menu smgmt-plan-ctx-menu";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = [
+      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${issueNum},'${escHtml(label)}',false);document.getElementById('smgmt-plan-row-menu')?.remove()"><i class="ti ti-arrows-move"></i> Move</button>`,
+      `<button class="smgmt-ctx-item smgmt-ctx-item--remove" role="menuitem" onclick="event.stopPropagation();smgmtPlanningRemove(${issueNum},'${escHtml(label)}')"><i class="ti ti-x"></i> Remove</button>`,
+      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();smgmtPlanningReorder(${issueNum},'${escHtml(label)}')"><i class="ti ti-arrows-up-down"></i> Reorder</button>`
+    ].join("");
+    document.body.appendChild(menu);
+    const rect = event.currentTarget.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.top = rect.bottom + 4 + "px";
+    menu.style.left = rect.left + "px";
+    menu.style.zIndex = "9999";
+    const close = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("click", close);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", close), 0);
+  }
+  function smgmtPlanningRemove(issueNum, label) {
+    const menu = document.getElementById("smgmt-plan-row-menu");
+    if (menu)
+      menu.remove();
+    if (typeof _smgmtRowMenuOpen === "function") {
+      const fakeEvt = { currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body, stopPropagation() {
+      } };
+      _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
+    }
+  }
+  function smgmtPlanningReorder(issueNum, label) {
+    const menu = document.getElementById("smgmt-plan-row-menu");
+    if (menu)
+      menu.remove();
+    const ticketEl = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (!ticketEl)
+      return;
+    const container = ticketEl.closest(".smgmt-plan-tickets");
+    if (!container)
+      return;
+    const rows = [...container.querySelectorAll(".smgmt-plan-ticket")];
+    const idx = rows.indexOf(ticketEl);
+    if (idx < 0)
+      return;
+    const choice = window.confirm(
+      `Move #${issueNum} \u2014 OK = move up one row, Cancel = move down one row`
+    );
+    const target = choice ? rows[idx - 1] : rows[idx + 2];
+    if (target)
+      container.insertBefore(ticketEl, choice ? target : target);
+  }
+  function smgmtAddToDraft(issueNum, draftLabel) {
+    if (!draftLabel)
+      return;
+    const fakeEvt = {
+      currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body,
+      stopPropagation() {
+      },
+      preventDefault() {
+      }
+    };
+    if (typeof _smgmtRowMenuOpen === "function") {
+      _smgmtRowMenuOpen(fakeEvt, issueNum, null, false);
+    }
+  }
+  var _smgmtGoalSaveTimers = {};
+  function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
+    const btn = document.getElementById(runBtnId);
+    if (!btn)
+      return;
+    if (_smgmtSignoffState(sprintLabel) === "pending") {
+      btn.disabled = true;
+      btn.title = "Approve the sprint plan before running";
+      return;
+    }
+    if (!_smgmtGoalRequired()) {
+      const tickets = _smgmtBySprint && _smgmtBySprint[sprintLabel] || [];
+      const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
+      btn.disabled = !canRun;
+      btn.title = canRun ? "" : "No dispatchable tickets \u2014 add tickets from the backlog";
+      return;
+    }
+    const hasGoal = inputEl && inputEl.value.trim().length > 0;
+    btn.disabled = !hasGoal;
+    btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
+  }
+  function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
+    _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
+    if (!sprintLabel)
+      return;
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    clearTimeout(_smgmtGoalSaveTimers[sprintLabel]);
+    _smgmtGoalSaveTimers[sprintLabel] = setTimeout(async () => {
+      try {
+        await fetch("/api/sprints/goal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project: repo,
+            sprint_label: sprintLabel,
+            goal: inputEl.value.trim()
+          })
+        });
+      } catch (_) {
+      }
+    }, 400);
+  }
+  function smgmtOpenTicketPicker(label) {
+    if (typeof _smgmtPlanNextBtn === "function") {
+      _smgmtPlanNextBtn(label);
+    } else {
+      const backlogEl = document.getElementById("smgmt-backlog-pane");
+      if (backlogEl)
+        backlogEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
   function _smgmtUpdateAncestorRow(label, outcome) {
     const card = document.getElementById(`smgmt-card-${label}`);
@@ -7014,6 +7446,8 @@ ${data.errors.join("\n")}`);
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
   globalThis.smgmtRunSprint = smgmtRunSprint2;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;
+  globalThis.smgmtApproveSprint = smgmtApproveSprint;
+  globalThis.smgmtRejectSprint = smgmtRejectSprint;
   globalThis._pfOpen = _pfOpen;
   globalThis._pfReset = _pfReset;
   globalThis._pfClose = _pfClose;
@@ -7116,6 +7550,12 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
   globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
   globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
+  globalThis.smgmtDraftGoalInput = smgmtDraftGoalInput;
+  globalThis.smgmtPlanningRowMenu = smgmtPlanningRowMenu;
+  globalThis.smgmtPlanningRemove = smgmtPlanningRemove;
+  globalThis.smgmtPlanningReorder = smgmtPlanningReorder;
+  globalThis.smgmtOpenTicketPicker = smgmtOpenTicketPicker;
+  globalThis.smgmtAddToDraft = smgmtAddToDraft;
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
@@ -7156,8 +7596,10 @@ ${data.errors.join("\n")}`);
   root.switchTab = switchTab;
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
+  root.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+  globalThis.loadCommanderFeatures = loadCommanderFeatures;
 })();
 //# sourceMappingURL=bundle.js.map

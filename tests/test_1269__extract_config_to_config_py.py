@@ -11,7 +11,6 @@ AC6: python sprint_manager.py --help exits 0 and output unchanged
 from __future__ import annotations
 
 import ast
-import inspect
 import subprocess
 import sys
 from pathlib import Path

@@ -18,20 +18,22 @@ except ImportError:  # pragma: no cover
 # ── path constants (mirrors sprint_manager.py path setup) ───────────────────
 # This file lives at services/sprint_manager/config.py
 # Repo root is three levels up: config.py → sprint_manager/ → services/ → root
-_REPO_ROOT     = Path(__file__).parent.parent.parent
+_REPO_ROOT = Path(__file__).parent.parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
-_SCRIPTS_DIR   = _REPO_ROOT / "scripts"
+_SCRIPTS_DIR = _REPO_ROOT / "scripts"
 
-_WORKTESTER_ROOT  = Path(os.environ.get("WORKTESTER_ROOT",
-                          Path.home() / "dev" / "commander" / "tester"))
+_WORKTESTER_ROOT = Path(os.environ.get(
+    "WORKTESTER_ROOT",
+    Path.home() / "dev" / "commander" / "tester",
+))
 _DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
-_SPRINTS_DIR       = _DASHBOARD_DIR / "sprints"
-_ALERTS_DIR        = _DASHBOARD_DIR / "alerts"
+_SPRINTS_DIR = _DASHBOARD_DIR / "sprints"
+_ALERTS_DIR = _DASHBOARD_DIR / "alerts"
 
 _DEFAULT_CODER_BY_SIZE: dict = {
-    "S":  "claude-haiku-4-5",
-    "M":  "claude-sonnet-4-6",
-    "L":  "claude-sonnet-4-6",
+    "S": "claude-haiku-4-5",
+    "M": "claude-sonnet-4-6",
+    "L": "claude-sonnet-4-6",
     "XL": "claude-sonnet-4-6",
 }
 
@@ -46,51 +48,51 @@ class SprintConfig:
     present the class is populated with the same env-var + hardcoded defaults
     that existed before this ticket, so backward compatibility is preserved.
     """
-    repo_name:             Optional[str]  = None
-    worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
-    worktree_tester:       Path           = field(default_factory=lambda: _WORKTESTER_ROOT)
+    repo_name: Optional[str] = None
+    worktree_coder: Path = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
+    worktree_tester: Path = field(default_factory=lambda: _WORKTESTER_ROOT)
     # Dedicated clone for non-coding sprint agents (documenter, reviewer) so they
     # never check out feature branches in the coder/tester worktrees (which are
     # mid-sprint) or — worse — the serving uat clone. Optional; falls back to the
     # tester/coder worktree when unset.
-    worktree_agents:       Optional[Path] = None
-    tester_app_subdir:     str            = "apps/dashboard"
-    scripts_dir:           Path           = field(default_factory=lambda: _SCRIPTS_DIR)
-    logs_dir:              Path           = field(default_factory=lambda: _DASHBOARD_DIR / "logs")
-    sprints_dir:           Path           = field(default_factory=lambda: _SPRINTS_DIR)
-    alerts_dir:            Path           = field(default_factory=lambda: _ALERTS_DIR)
-    api_url:               str            = field(default_factory=lambda: _DASHBOARD_API_URL)
-    coder_prompt_template:  Optional[str] = None
+    worktree_agents: Optional[Path] = None
+    tester_app_subdir: str = "apps/dashboard"
+    scripts_dir: Path = field(default_factory=lambda: _SCRIPTS_DIR)
+    logs_dir: Path = field(default_factory=lambda: _DASHBOARD_DIR / "logs")
+    sprints_dir: Path = field(default_factory=lambda: _SPRINTS_DIR)
+    alerts_dir: Path = field(default_factory=lambda: _ALERTS_DIR)
+    api_url: str = field(default_factory=lambda: _DASHBOARD_API_URL)
+    coder_prompt_template: Optional[str] = None
     tester_prompt_template: Optional[str] = None
     # Port detection (issue #62)
-    app_default_port:      Optional[int]  = None
-    app_port_strategy:     str            = "prefer_default"
+    app_default_port: Optional[int] = None
+    app_port_strategy: str = "prefer_default"
     # Documentor (issue #103)
-    documentor_enabled:    bool           = False
+    documentor_enabled: bool = False
     # Concurrent pipeline mode (issue #737) — per-project opt-in, default serial
-    pipeline_mode:         bool           = False
+    pipeline_mode: bool = False
     # Reviewer (issue #159)
     reviewer_prompt_template: Optional[str] = None
     # Documenter (issue #165)
     documenter_prompt_template: Optional[str] = None
     # Agent models (issue #700) — defaults match current hardcoded values
-    coder_model:       str = "claude-sonnet-4-6"
-    tester_model:      str = "claude-sonnet-4-6"
-    reviewer_model:    str = "claude-haiku-4-5"
-    estimator_model:   str = "claude-sonnet-4-6"
-    documentor_model:  str = "claude-sonnet-4-6"
+    coder_model: str = "claude-sonnet-4-6"
+    tester_model: str = "claude-sonnet-4-6"
+    reviewer_model: str = "claude-haiku-4-5"
+    estimator_model: str = "claude-sonnet-4-6"
+    documentor_model: str = "claude-sonnet-4-6"
     # Risk-tier model routing for tester (issue #790)
-    tester_by_risk:    dict = field(default_factory=lambda: {
-        "LOW":    "claude-haiku-4-5",
+    tester_by_risk: dict = field(default_factory=lambda: {
+        "LOW": "claude-haiku-4-5",
         "MEDIUM": "claude-haiku-4-5",
-        "HIGH":   "claude-sonnet-4-6",
+        "HIGH": "claude-sonnet-4-6",
     })
     # Size-tier model routing for coder (issue #789)
-    coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
+    coder_by_size: dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
     # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
-    coder_backend:     str  = "claude-code"
+    coder_backend: str = "claude-code"
     # Cline-specific model id (agent_config.cline.model) — separate namespace from coder_model
-    cline_model:       Optional[str] = None
+    cline_model: Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
 
@@ -142,7 +144,7 @@ def load_config(path: Path) -> "SprintConfig":
         missing.append("repo_name")
 
     wt = data.get("worktrees") or {}
-    coder_raw  = (wt.get("coder") or "").strip()
+    coder_raw = (wt.get("coder") or "").strip()
     tester_raw = (wt.get("tester") or "").strip()
     if not coder_raw:
         missing.append("worktrees.coder")
@@ -155,7 +157,7 @@ def load_config(path: Path) -> "SprintConfig":
             + ", ".join(missing)
         )
 
-    worktree_coder  = _resolve_path(coder_raw, base_dir)
+    worktree_coder = _resolve_path(coder_raw, base_dir)
     worktree_tester = _resolve_path(tester_raw, base_dir)
     # Optional dedicated agents clone (documenter/reviewer). Falls back to None
     # (→ tester/coder worktree) when not configured.
@@ -178,14 +180,14 @@ def load_config(path: Path) -> "SprintConfig":
     scripts_raw = (paths.get("scripts_dir") or "").strip()
     scripts_dir = _resolve_path(scripts_raw, base_dir) if scripts_raw else _SCRIPTS_DIR
 
-    logs_raw  = (paths.get("logs_dir") or "").strip()
-    logs_dir  = _resolve_path(logs_raw, base_dir) if logs_raw else base_dir / "logs"
+    logs_raw = (paths.get("logs_dir") or "").strip()
+    logs_dir = _resolve_path(logs_raw, base_dir) if logs_raw else base_dir / "logs"
 
-    sprints_raw  = (paths.get("sprints_dir") or "").strip()
-    sprints_dir  = _resolve_path(sprints_raw, base_dir) if sprints_raw else base_dir / "sprints"
+    sprints_raw = (paths.get("sprints_dir") or "").strip()
+    sprints_dir = _resolve_path(sprints_raw, base_dir) if sprints_raw else base_dir / "sprints"
 
-    alerts_raw  = (paths.get("alerts_dir") or "").strip()
-    alerts_dir  = _resolve_path(alerts_raw, base_dir) if alerts_raw else base_dir / "alerts"
+    alerts_raw = (paths.get("alerts_dir") or "").strip()
+    alerts_dir = _resolve_path(alerts_raw, base_dir) if alerts_raw else base_dir / "alerts"
 
     # ── dashboard section ─────────────────────────────────────────────────────
     dashboard = data.get("dashboard") or {}
@@ -194,12 +196,12 @@ def load_config(path: Path) -> "SprintConfig":
     # project-root yaml can't tell PRD (8000) from UAT (8001), so when the running
     # clone's own .env declares the URL it wins. Falls back to yaml, then hardcoded.
     _env_api_url = os.environ.get("DASHBOARD_API_URL")
-    api_url   = (_env_api_url or dashboard.get("api_url") or _DASHBOARD_API_URL).strip()
+    api_url = (_env_api_url or dashboard.get("api_url") or _DASHBOARD_API_URL).strip()
 
     # ── agents section ────────────────────────────────────────────────────────
     agents = data.get("agents") or {}
-    coder_prompt   = agents.get("coder_prompt_template") or None
-    tester_prompt  = agents.get("tester_prompt_template") or None
+    coder_prompt = agents.get("coder_prompt_template") or None
+    tester_prompt = agents.get("tester_prompt_template") or None
 
     # ── app section (issue #62: per-project port detection) ───────────────────
     app_section = data.get("app") or {}
@@ -234,7 +236,9 @@ def load_config(path: Path) -> "SprintConfig":
 
     # ── agent_config section (issue #700) ────────────────────────────────────
     agent_cfg = data.get("agent_config") or {}
-    _default_model: Optional[str] = (agent_cfg.get("default_model") or None) if isinstance(agent_cfg, dict) else None
+    _default_model: Optional[str] = (
+        (agent_cfg.get("default_model") or None) if isinstance(agent_cfg, dict) else None
+    )
 
     def _resolve_model(key: str, hardcoded: str) -> str:
         """Return per-agent override → default_model → hardcoded, in that order."""
@@ -244,17 +248,17 @@ def load_config(path: Path) -> "SprintConfig":
             return _default_model
         return hardcoded
 
-    coder_model      = _resolve_model("coder_model",      "claude-sonnet-4-6")
-    tester_model     = _resolve_model("tester_model",     "claude-sonnet-4-6")
-    reviewer_model   = _resolve_model("reviewer_model",   "claude-haiku-4-5")
-    estimator_model  = _resolve_model("estimator_model",  "claude-sonnet-4-6")
+    coder_model = _resolve_model("coder_model", "claude-sonnet-4-6")
+    tester_model = _resolve_model("tester_model", "claude-sonnet-4-6")
+    reviewer_model = _resolve_model("reviewer_model", "claude-haiku-4-5")
+    estimator_model = _resolve_model("estimator_model", "claude-sonnet-4-6")
     documentor_model = _resolve_model("documentor_model", "claude-sonnet-4-6")
 
     # ── agent_config.tester.by_risk (issue #790) ─────────────────────────────
     _default_by_risk = {
-        "LOW":    "claude-haiku-4-5",
+        "LOW": "claude-haiku-4-5",
         "MEDIUM": "claude-haiku-4-5",
-        "HIGH":   "claude-sonnet-4-6",
+        "HIGH": "claude-sonnet-4-6",
     }
     tester_by_risk: dict = _default_by_risk.copy()
     if isinstance(agent_cfg, dict):
@@ -295,34 +299,34 @@ def load_config(path: Path) -> "SprintConfig":
             cline_model = str(_cline_sub["model"])
 
     return SprintConfig(
-        repo_name             = repo_name,
-        worktree_coder        = worktree_coder,
-        worktree_tester       = worktree_tester,
-        worktree_agents       = worktree_agents,
-        tester_app_subdir     = tester_app_subdir,
-        scripts_dir           = scripts_dir,
-        logs_dir              = logs_dir,
-        sprints_dir           = sprints_dir,
-        alerts_dir            = alerts_dir,
-        api_url               = api_url,
-        coder_prompt_template = coder_prompt,
-        tester_prompt_template= tester_prompt,
-        app_default_port         = app_default_port,
-        app_port_strategy        = app_port_strategy,
-        documentor_enabled          = documentor_enabled,
-        pipeline_mode               = pipeline_mode,
-        reviewer_prompt_template    = reviewer_prompt,
-        documenter_prompt_template  = documenter_prompt,
-        coder_model                 = coder_model,
-        tester_model                = tester_model,
-        reviewer_model              = reviewer_model,
-        estimator_model             = estimator_model,
-        documentor_model            = documentor_model,
-        tester_by_risk              = tester_by_risk,
-        coder_by_size               = coder_by_size,
-        coder_backend               = coder_backend,
-        cline_model                 = cline_model,
-        use_cline_followups         = use_cline_followups,
+        repo_name=repo_name,
+        worktree_coder=worktree_coder,
+        worktree_tester=worktree_tester,
+        worktree_agents=worktree_agents,
+        tester_app_subdir=tester_app_subdir,
+        scripts_dir=scripts_dir,
+        logs_dir=logs_dir,
+        sprints_dir=sprints_dir,
+        alerts_dir=alerts_dir,
+        api_url=api_url,
+        coder_prompt_template=coder_prompt,
+        tester_prompt_template=tester_prompt,
+        app_default_port=app_default_port,
+        app_port_strategy=app_port_strategy,
+        documentor_enabled=documentor_enabled,
+        pipeline_mode=pipeline_mode,
+        reviewer_prompt_template=reviewer_prompt,
+        documenter_prompt_template=documenter_prompt,
+        coder_model=coder_model,
+        tester_model=tester_model,
+        reviewer_model=reviewer_model,
+        estimator_model=estimator_model,
+        documentor_model=documentor_model,
+        tester_by_risk=tester_by_risk,
+        coder_by_size=coder_by_size,
+        coder_backend=coder_backend,
+        cline_model=cline_model,
+        use_cline_followups=use_cline_followups,
     )
 
 
@@ -349,14 +353,14 @@ def _default_config() -> "SprintConfig":
     """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
     _dev = Path.home() / "dev" / "commander"
     return SprintConfig(
-        repo_name          = None,  # will use github_client.repo()
-        worktree_coder     = _dev / "coder",
-        worktree_tester    = _WORKTESTER_ROOT,
-        tester_app_subdir  = "apps/dashboard",
-        scripts_dir        = _SCRIPTS_DIR,
-        logs_dir           = _DASHBOARD_DIR / "logs",
-        sprints_dir        = _SPRINTS_DIR,
-        alerts_dir         = _ALERTS_DIR,
-        api_url            = _DASHBOARD_API_URL,
-        documentor_enabled = False,
+        repo_name=None,  # will use github_client.repo()
+        worktree_coder=_dev / "coder",
+        worktree_tester=_WORKTESTER_ROOT,
+        tester_app_subdir="apps/dashboard",
+        scripts_dir=_SCRIPTS_DIR,
+        logs_dir=_DASHBOARD_DIR / "logs",
+        sprints_dir=_SPRINTS_DIR,
+        alerts_dir=_ALERTS_DIR,
+        api_url=_DASHBOARD_API_URL,
+        documentor_enabled=False,
     )

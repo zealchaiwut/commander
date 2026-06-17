@@ -189,10 +189,37 @@ def test_ac4_loose_end_band_returns_early_after_first_match():
     # Must have at least one early return so only ONE band is emitted
     # (not two appended band strings)
     assert "return" in body, "_histLooseEndBandHtml must return after first match"
+    assert "sprint_pr" in body, "sprint PR unmerged must be a loose-end priority"
     # The function must not concatenate two separate band HTML strings
     band_count = body.count("hist-loose-end-band")
-    assert band_count <= 2, \
-        f"Should define the band class at most twice (one per branch), got {band_count}"
+    assert band_count <= 3, \
+        f"Should define the band class at most three times (sprint PR, stale labels, branches), got {band_count}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Child sprint mock — legend, parent row, nested child card, agent-time bar
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_child_sprint_legend_renders_above_ledger():
+    """Agent colour legend must render above the sprint list."""
+    render_body = _fn_body("_histRenderLedger")
+    assert "_histLegendHtml" in render_body, "_histRenderLedger must inject the agent legend"
+
+
+def test_child_sprint_card_helpers_exist():
+    """Nested child sprint layout helpers must exist."""
+    assert _fn_exists("_histChildCardHtml"), "_histChildCardHtml must exist"
+    assert _fn_exists("_histParentRowHtml"), "_histParentRowHtml must exist"
+    assert _fn_exists("_histAgentTimeBarHtml") or "hist-agent-bar" in _fn_body("_histChildMetricsHtml"), \
+        "collapsed agent-time bar must be implemented"
+
+
+def test_child_group_uses_parent_row_and_child_wrap():
+    """Groups with children must nest under a parent row + L-connector wrap."""
+    body = _fn_body("_histGroupHtml")
+    assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
+    assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
+    assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
 
 
 def test_ac4_loose_end_band_css_uses_amber():

@@ -1490,9 +1490,287 @@ Replace the existing draft (${data.existing_label})?`
     ${items}
   </div>`;
   }
+  function _histLegendHtml() {
+    return `<div class="hist-legend-top" aria-label="Agent colours">
+    <span class="hist-legend-label">Agents</span>
+    <span class="hist-legend-item"><span class="hist-swatch hist-swatch--coder"></span> coder</span>
+    <span class="hist-legend-item"><span class="hist-swatch hist-swatch--tester"></span> tester</span>
+    <span class="hist-legend-item"><span class="hist-swatch hist-swatch--documenter"></span> documenter</span>
+    <span class="hist-legend-item"><span class="hist-swatch hist-swatch--reviewer"></span> reviewer</span>
+    <span class="hist-legend-item"><span class="hist-swatch hist-swatch--fix"></span> fix round</span>
+  </div>`;
+  }
+  function _histFixRoundSeconds(stats) {
+    if (!stats)
+      return 0;
+    if (stats.fix_round_seconds != null)
+      return Math.max(0, Number(stats.fix_round_seconds) || 0);
+    let total = 0;
+    for (const t of stats.tickets || []) {
+      for (const seg of t.segments || []) {
+        if (seg.fix_round)
+          total += seg.duration || 0;
+      }
+    }
+    return total;
+  }
+  function _histAgentSeconds(stats) {
+    const raw = stats && stats.agent_seconds || {};
+    return {
+      coder: raw.coder || 0,
+      tester: raw.tester || 0,
+      documenter: raw.documenter || 0,
+      reviewer: raw.reviewer || 0
+    };
+  }
+  function _histAgentBarSegments(stats) {
+    if (!stats || !stats.has_runs)
+      return [];
+    const fixSecs = _histFixRoundSeconds(stats);
+    const a = _histAgentSeconds(stats);
+    const coderNet = Math.max(0, a.coder - fixSecs);
+    const parts = [
+      { key: "coder", seconds: coderNet, cls: "hist-bar-coder" },
+      { key: "fix", seconds: fixSecs, cls: "hist-bar-fix" },
+      { key: "tester", seconds: a.tester, cls: "hist-bar-tester" },
+      { key: "documenter", seconds: a.documenter, cls: "hist-bar-documenter" },
+      { key: "reviewer", seconds: a.reviewer, cls: "hist-bar-reviewer" }
+    ].filter((p) => p.seconds > 0);
+    const total = parts.reduce((n, p) => n + p.seconds, 0) || 1;
+    return parts.map((p) => ({
+      ...p,
+      pct: Math.max(0.5, p.seconds / total * 100),
+      label: _histFmtSecs(p.seconds)
+    }));
+  }
+  function _histMetricsElapsedLabel(s, stats) {
+    const hasRuns = !!(stats && stats.has_runs);
+    const secs = hasRuns && stats.agent_total_seconds != null ? stats.agent_total_seconds : s.duration;
+    if (secs == null)
+      return "";
+    return `${escHtml(_histFmtSecs(secs))} <small>elapsed</small>`;
+  }
+  function _histAgentTimeBarHtml(stats) {
+    const segs = _histAgentBarSegments(stats);
+    if (!segs.length) {
+      return `<div class="hist-agent-bar hist-agent-bar--empty" aria-hidden="true"></div>`;
+    }
+    const inner = segs.map((seg) => {
+      const showLabel = seg.key !== "fix" && seg.pct >= 8;
+      return `<span class="hist-agent-bar-seg ${seg.cls}" style="width:${seg.pct}%" title="${escHtml(seg.label)}">${showLabel ? escHtml(seg.label) : ""}</span>`;
+    }).join("");
+    return `<div class="hist-agent-bar">${inner}</div>`;
+  }
+  function _histAgentBreakdownHtml(stats) {
+    if (!stats || !stats.has_runs)
+      return "";
+    const fixSecs = _histFixRoundSeconds(stats);
+    const a = _histAgentSeconds(stats);
+    const coderNet = Math.max(0, a.coder - fixSecs);
+    const rows = [
+      { cls: "hist-swatch--coder", label: "coder", secs: coderNet },
+      { cls: "hist-swatch--fix", label: "fix round", secs: fixSecs },
+      { cls: "hist-swatch--tester", label: "tester", secs: a.tester },
+      { cls: "hist-swatch--documenter", label: "documenter", secs: a.documenter },
+      { cls: "hist-swatch--reviewer", label: "reviewer", secs: a.reviewer }
+    ].filter((r) => r.secs > 0);
+    if (!rows.length)
+      return "";
+    return `<div class="hist-agent-breakdown">${rows.map(
+      (r) => `<span class="hist-agent-at"><span class="hist-swatch ${r.cls}"></span>${escHtml(r.label)} <b>${escHtml(_histFmtSecs(r.secs))}</b></span>`
+    ).join("")}</div>`;
+  }
+  function _histMetricsChipsHtml(s, stats) {
+    const hasRuns = !!(stats && stats.has_runs);
+    const wall = hasRuns && stats.wall_seconds != null ? stats.wall_seconds : s.duration;
+    const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
+    const chips = [];
+    if (wall != null)
+      chips.push(`<span class="hist-metric-chip">wall ${_histFmtSecs(wall)}</span>`);
+    if (hasRuns) {
+      chips.push(
+        `<span class="hist-metric-chip">agent time ${_histFmtSecs(stats.agent_total_seconds)}</span>`
+      );
+    }
+    if (tokens != null) {
+      chips.push(`<span class="hist-metric-chip">tokens ${_histFmtTokens(tokens)}</span>`);
+    }
+    if (hasRuns && stats.fix_round_count > 0) {
+      const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
+      chips.push(
+        `<span class="hist-metric-chip hist-metric-chip--warn">${stats.fix_round_count} fix round` + (refs ? ` (${escHtml(refs)})` : "") + `</span>`
+      );
+    }
+    if (hasRuns && stats.slowest_ticket) {
+      chips.push(
+        `<span class="hist-metric-chip">slowest #${stats.slowest_ticket.ticket} \xB7 ${_histFmtSecs(stats.slowest_ticket.seconds)}</span>`
+      );
+    }
+    if (hasRuns && stats.parallel_saved_seconds != null) {
+      chips.push(
+        `<span class="hist-metric-chip">parallel saved ~${_histFmtSecs(stats.parallel_saved_seconds)}</span>`
+      );
+    }
+    return chips.length ? `<div class="hist-metric-chips">${chips.join("")}</div>` : "";
+  }
+  function _histTimelineRowsHtml(s, stats) {
+    const tickets = Array.isArray(stats && stats.tickets) ? stats.tickets : [];
+    if (!tickets.length)
+      return "";
+    const scale = Math.max(1, stats.wall_seconds || 0);
+    const rows = tickets.map((t) => {
+      const dur = Math.max(0, (t.end || 0) - (t.start || 0));
+      const fixN = (t.segments || []).filter((seg) => seg.fix_round).length;
+      let durLabel = _histFmtSecs(dur || t.segments?.reduce((n, seg) => n + (seg.duration || 0), 0));
+      if (fixN)
+        durLabel += " \xB7 fix";
+      const segs = (t.segments || []).map((seg) => {
+        const left = seg.start / scale * 100;
+        const width = Math.max(0.5, seg.duration / scale * 100);
+        const agentCls = seg.agent === "tester" ? "hist-tl-tester" : "hist-tl-coder";
+        const cls = "hist-tl-seg " + agentCls + (seg.fix_round ? " hist-tl-fix" : "");
+        const title = `${seg.agent}${seg.fix_round ? " (fix round)" : ""} \xB7 ${_histFmtSecs(seg.duration)}`;
+        return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
+      }).join("");
+      return `<div class="hist-tl-row">
+      <span class="hist-tl-num">#${escHtml(String(t.ticket))}</span>
+      <div class="hist-tl-track">${segs}</div>
+      <span class="hist-tl-dur">${escHtml(durLabel)}</span>
+    </div>`;
+    }).join("");
+    return `<div class="hist-tl-section"><div class="hist-sec-label">Timeline</div>${rows}</div>`;
+  }
+  function _histFixCountForIssue(issueNum, stats) {
+    if (!stats || !stats.tickets)
+      return 0;
+    const hit = stats.tickets.find((t) => String(t.ticket) === String(issueNum));
+    if (!hit)
+      return 0;
+    return (hit.segments || []).filter((seg) => seg.fix_round).length;
+  }
+  function _histDoneIssueRowHtml(iss, s, stats) {
+    const num = iss.ticket_id;
+    const id = num != null ? "#" + num : "#?";
+    const titleText = _histIssueTitle(iss, s);
+    const repo = _histRepo(s);
+    const clickable = num != null && repo ? ` role="link" tabindex="0" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
+    const merged = (iss.state || "").toLowerCase() === "merged";
+    const icon = merged ? '<span class="hist-irow-check"><i class="ti ti-check"></i></span>' : _histIssueIcon(iss);
+    let dur = _histFmtSecs(iss.time_spent);
+    const fixN = _histFixCountForIssue(num, stats);
+    if (fixN)
+      dur += ` \xB7 ${fixN} fix`;
+    return `<div class="hist-irow${clickable ? " hist-irow-link" : ""}"${clickable}>
+    ${icon}
+    <span class="hist-irow-num">${escHtml(String(id))}</span>
+    <span class="hist-irow-title">${escHtml(titleText)}</span>
+    <span class="hist-irow-dur">${escHtml(dur)}</span>
+  </div>`;
+  }
+  function _histDoneIssuesHtml(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (!issues.length)
+      return "";
+    const stats = _histRunStats[s.label];
+    return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
+  }
+  function _histChildMetricsHtml(s) {
+    const stats = _histRunStats[s.label];
+    const metricsOpen = _histMetricsExpanded.has(s.label);
+    const lbl = escHtml(s.label || "");
+    const chev = metricsOpen ? "ti-chevron-down" : "ti-chevron-right";
+    const barHtml = stats && stats.has_runs ? _histAgentTimeBarHtml(stats) : "";
+    const elapsed = _histMetricsElapsedLabel(s, stats);
+    const body = metricsOpen ? `<div class="hist-metrics-body">
+        ${_histAgentBreakdownHtml(stats)}
+        ${_histMetricsChipsHtml(s, stats)}
+        ${_histTimelineRowsHtml(s, stats)}
+        ${_histPostSprintHtml(s)}
+        ${_histReconcileHtml(s)}
+      </div>` : "";
+    return `<div class="hist-metrics-v2${metricsOpen ? " open" : ""}">
+    <div class="hist-metrics-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
+      <i class="ti ${chev} hist-chev"></i>
+      <span class="hist-metrics-label">Agent time</span>
+      ${barHtml}
+      <span class="hist-metrics-elapsed">${elapsed}</span>
+    </div>
+    ${body}
+  </div>`;
+  }
+  function _histParentFromLabel(label) {
+    const { base, sub } = _histLabelParts(label);
+    if (!sub)
+      return "";
+    const display = sprintLabelDisplay(base).replace("Sprint ", "");
+    return `\u2190 from ${display}`;
+  }
+  function _histParentRowHtml(s, bulkBtn) {
+    const display = sprintLabelDisplay(s.label);
+    const lbl = escHtml(s.label || "");
+    return `<div class="hist-parent-row" data-label="${lbl}">
+    <i class="ti ti-chevron-down hist-chev" aria-hidden="true"></i>
+    <span class="hist-parent-name">${escHtml(display)}</span>
+    ${_histStateChip(s.lifecycle_state, s)}
+    ${_histHeadStatsHtml(s)}
+    <span class="hist-parent-actions">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
+  </div>`;
+  }
+  function _histChildCardHtml(s) {
+    const expanded = _histExpanded.has(s.label);
+    const lbl = escHtml(s.label || "");
+    const state = (s.lifecycle_state || "").toLowerCase();
+    const displayState = state === "needs_rework" && s.end_reason && (String(s.end_reason).toLowerCase() === "natural" || String(s.end_reason).toLowerCase() === "merge_sprint") && !_histSprintFailed(s) ? "ready_to_merge" : state;
+    const cls = ["hist-child-card"];
+    if (displayState === "ready_to_merge" || displayState === "completed")
+      cls.push("ready");
+    if (expanded)
+      cls.push("expanded");
+    const display = sprintLabelDisplay(s.label);
+    const fromLine = _histParentFromLabel(s.label);
+    const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
+    const recoveryBtn = _histRecoveryBtnHtml(s);
+    const deleteBtn = _histDeleteBtnHtml(s);
+    const secondaryLinks = _histSecondaryLinksHtml(s);
+    const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}</span>`;
+    if (expanded && !(s.label in _histRunStats))
+      _histLoadRunStats(s.label);
+    const body = expanded ? `<div class="hist-child-body">
+        ${_histLooseEndBandHtml(s)}
+        ${_histChildMetricsHtml(s)}
+        ${_histDoneIssuesHtml(s)}
+      </div>` : "";
+    return `<div class="${cls.join(" ")}" data-label="${lbl}">
+    <div class="hist-child-head" onclick="_histToggleCard('${lbl}')">
+      <div class="hist-child-head-left">
+        <i class="ti ${chev} hist-chev"></i>
+        <span class="hist-child-title">${escHtml(display)}` + (fromLine ? ` <span class="hist-child-from">${escHtml(fromLine)}</span>` : "") + `</span>
+        ${_histStateChip(s.lifecycle_state, s)}
+        ${_histHeadStatsHtml(s)}
+      </div>
+      ${headRight}
+    </div>
+    ${body}
+  </div>`;
+  }
   function _histLooseEndBandHtml(s) {
     const r = s.reconciliation;
     if (r && Array.isArray(r.checks)) {
+      const prCheck = r.checks.find((c) => !c.ok && c.name === "sprint_pr");
+      if (prCheck) {
+        const looseN = r.checks.filter((c) => !c.ok).length || 1;
+        const prNum = s.pr_number;
+        const prUrl = _histPrUrl(s);
+        const prRef = prNum ? `#${prNum}` : "PR";
+        const msg = `${looseN} loose end \u2014 Sprint PR ${prRef} is not yet merged`;
+        const cta = prUrl ? `<a class="hist-band-cta" href="${escHtml(prUrl)}" target="_blank" rel="noopener"
+            onclick="event.stopPropagation()">Merge PR</a>` : "";
+        return `<div class="hist-loose-end-band">
+        <i class="ti ti-alert-triangle"></i>
+        <span class="hist-band-msg">${escHtml(msg)}</span>
+        ${cta}
+      </div>`;
+      }
       const staleCheck = r.checks.find((c) => !c.ok && c.name === "stale_labels");
       if (staleCheck) {
         const offenders = Array.isArray(staleCheck.tickets) ? staleCheck.tickets : [];
@@ -1630,9 +1908,9 @@ Replace the existing draft (${data.existing_label})?`
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
     if (state === "ready_to_merge") {
-      return `<button type="button" class="hist-head-btn hist-head-btn--finish"
+      return `<button type="button" class="hist-head-btn hist-head-btn--merge"
       onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
-      <i class="ti ti-flag-check"></i> Merge</button>`;
+      <i class="ti ti-git-merge"></i> Merge</button>`;
     }
     return "";
   }
@@ -1808,14 +2086,16 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _histGroupHtml(group) {
     const bulkBtn = _histBulkCompleteBtnHtml(group);
-    const head = group.baseSprint ? _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn }) : "";
-    const childHtml = (group.children || []).map(_histCardHtml).join("");
-    if (!childHtml)
-      return head;
-    if (!head) {
-      return `<div class="hist-sprint-group"><div class="hist-group-children">${childHtml}</div></div>`;
+    const children = group.children || [];
+    if (children.length) {
+      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn) : "";
+      const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
+      return `<div class="hist-sprint-group">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
-    return `<div class="hist-sprint-group">${head}<div class="hist-group-children">${childHtml}</div></div>`;
+    if (group.baseSprint) {
+      return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
+    }
+    return "";
   }
   function _histTicketsDone(s) {
     const issues = Array.isArray(s.issues) ? s.issues : [];
@@ -2016,7 +2296,7 @@ Replace the existing draft (${data.existing_label})?`
     const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
     const recentHtml = recent.map(_histGroupHtml).join("");
     const foldsHtml = folds.map(_histFoldHtml).join("");
-    el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
+    el.innerHTML = _histLegendHtml() + _histToolbarHtml() + recentHtml + foldsHtml;
   }
   function _histRerunSprint(label) {
     if (typeof globalThis.smgmtRerunSprint === "function") {

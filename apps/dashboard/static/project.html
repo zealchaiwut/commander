@@ -1972,8 +1972,179 @@
     }
     .hist-card.child { margin-left: 0; padding-left: 2px; }
     /* Re-run sub-sprints (.1, .2, …) nest under their base sprint row. */
-    .hist-sprint-group { display: flex; flex-direction: column; gap: 8px; }
-    .hist-group-children {
+    .hist-sprint-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    /* Agent legend — shared across all history sprint rows */
+    .hist-legend-top {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      padding: 8px 14px; margin-bottom: 12px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .hist-legend-label {
+      font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-sub); font-size: 10px;
+    }
+    .hist-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .hist-swatch {
+      width: 11px; height: 11px; border-radius: 3px; flex: none; display: inline-block;
+    }
+    .hist-swatch--coder      { background: var(--purple); }
+    .hist-swatch--tester     { background: var(--amber); }
+    .hist-swatch--documenter { background: var(--blue); }
+    .hist-swatch--reviewer   { background: var(--green); }
+    .hist-swatch--fix {
+      background-color: var(--purple);
+      background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.55) 0 2px, transparent 2px 4px);
+    }
+    /* Parent sprint — collapsed one-line row */
+    .hist-parent-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
+      background: var(--surface);
+    }
+    .hist-parent-name { font-weight: 700; font-size: 14px; color: var(--text); }
+    .hist-parent-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+    /* Child sprint — nested with L-connector */
+    .hist-child-wrap { position: relative; margin-left: 32px; margin-top: 4px; }
+    .hist-child-wrap::before {
+      content: ''; position: absolute; left: -20px; top: -10px;
+      width: 15px; height: 36px;
+      border-left: 2px solid var(--border); border-bottom: 2px solid var(--border);
+      border-bottom-left-radius: 10px;
+    }
+    .hist-child-card {
+      border: 1px solid var(--border); border-radius: 11px;
+      background: var(--surface); overflow: hidden;
+    }
+    .hist-child-card.ready {
+      border-color: var(--green);
+      box-shadow: 0 0 0 2px var(--green-bg);
+    }
+    .hist-child-head {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+    }
+    .hist-child-head:hover { background: var(--surface-hover); }
+    .hist-child-head-left {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1;
+    }
+    .hist-child-head-right {
+      margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .hist-child-title { font-weight: 700; font-size: 15px; color: var(--text); }
+    .hist-child-from {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 11px; font-weight: 400; color: var(--text-sub);
+    }
+    .hist-child-body { display: flex; flex-direction: column; }
+    .hist-head-btn--merge {
+      color: var(--green); border-color: var(--green); font-weight: 600;
+    }
+    .hist-head-btn--merge:hover { background: var(--green); color: #fff; }
+    /* Collapsed agent-time bar + expandable metrics (child sprint mock) */
+    .hist-metrics-v2 { border-bottom: 1px solid var(--border); }
+    .hist-metrics-head {
+      display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+      cursor: pointer; user-select: none;
+    }
+    .hist-metrics-head:hover { background: var(--surface-hover); }
+    .hist-metrics-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+      color: var(--text-sub); flex: none;
+    }
+    .hist-agent-bar {
+      flex: 1; min-width: 0; height: 16px; border-radius: 5px; overflow: hidden;
+      display: flex; font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 9px; font-weight: 700; color: #fff;
+    }
+    .hist-metrics-v2.open .hist-agent-bar { display: none; }
+    .hist-agent-bar--empty { background: var(--surface-2); min-height: 16px; }
+    .hist-agent-bar-seg {
+      display: flex; align-items: center; justify-content: center;
+      white-space: nowrap; overflow: hidden; min-width: 0;
+      text-shadow: 0 1px 1px rgba(0,0,0,.25);
+    }
+    .hist-bar-coder      { background: var(--purple); }
+    .hist-bar-tester     { background: var(--amber); }
+    .hist-bar-documenter { background: var(--blue); }
+    .hist-bar-reviewer   { background: var(--green); }
+    .hist-bar-fix {
+      background-color: var(--purple);
+      background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.55) 0 2px, transparent 2px 4px);
+    }
+    .hist-metrics-elapsed {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 13px; font-weight: 700; color: var(--text); flex: none; margin-left: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .hist-metrics-elapsed small { color: var(--text-sub); font-weight: 400; }
+    .hist-metrics-v2.open .hist-metrics-elapsed { margin-left: auto; }
+    .hist-metrics-body { display: none; padding: 0 16px 16px; }
+    .hist-metrics-v2.open .hist-metrics-body { display: block; }
+    .hist-agent-breakdown {
+      display: flex; flex-wrap: wrap; gap: 16px; margin: 6px 0 14px;
+    }
+    .hist-agent-at {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 12px; color: var(--text);
+    }
+    .hist-agent-at b { font-weight: 700; }
+    .hist-metric-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+    .hist-metric-chip {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 11px; color: var(--text-muted);
+      background: var(--surface-2); padding: 4px 9px; border-radius: 6px;
+    }
+    .hist-metric-chip--warn { background: var(--amber-bg); color: var(--amber); }
+    .hist-sec-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+      color: var(--text-sub); margin: 0 0 8px;
+    }
+    .hist-tl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .hist-tl-num {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 11px; color: var(--text-sub); width: 46px; flex: none;
+    }
+    .hist-tl-track {
+      flex: 1; position: relative; height: 13px;
+      background: var(--surface-2); border-radius: 4px; overflow: hidden;
+    }
+    .hist-tl-seg { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; min-width: 2px; }
+    .hist-tl-coder  { background: var(--purple); }
+    .hist-tl-tester { background: var(--amber); }
+    .hist-tl-fix {
+      background: var(--purple); opacity: .85;
+      background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.5) 0 2px, transparent 2px 4px);
+    }
+    .hist-tl-dur {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 10px; color: var(--text-sub); width: 88px; text-align: right; flex: none;
+    }
+    .hist-issue-rows { display: flex; flex-direction: column; }
+    .hist-irow {
+      display: flex; align-items: center; gap: 11px; padding: 9px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .hist-irow-link { cursor: pointer; }
+    .hist-irow-link:hover { background: var(--surface-hover); }
+    .hist-irow-check {
+      width: 18px; height: 18px; border-radius: 50%; flex: none;
+      background: var(--green-bg); color: var(--green);
+      display: flex; align-items: center; justify-content: center; font-size: 11px;
+    }
+    .hist-irow-num {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 12px; color: var(--text-sub); width: 46px; flex: none;
+    }
+    .hist-irow-title {
+      flex: 1; font-size: 13px; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .hist-metrics-body .hist-post-sprint { margin-top: 14px; border: 1px solid var(--border); border-radius: 8px; }
+    .hist-metrics-body .recon { margin-top: 12px; }
       display: flex; flex-direction: column; gap: 6px;
       margin: 2px 0 0 10px; padding: 6px 0 2px 12px;
       border-left: 1px solid var(--border);

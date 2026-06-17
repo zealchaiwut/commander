@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 @contextmanager
 def _stack(patches):
-    [p.start() for p in patches]
+    started = [p.start() for p in patches]
     try:
         yield
     finally:

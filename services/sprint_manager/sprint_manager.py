@@ -18,13 +18,14 @@ Usage:
     python3 ~/commander/services/sprint_manager/sprint_manager.py <label> [options]
 
 Examples:
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --skip-gates
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --gate-pytest=false
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --resume
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --retry-failed
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --dry-run
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --skip-gates
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --gate-pytest=false
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py \
+        sprint-5 --alert-mode dashboard-banner,file
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --resume
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --retry-failed
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --dry-run
 
 Run from the git root of the repository.
 """
@@ -74,7 +75,17 @@ from services.sprint_manager.config import (  # noqa: E402
     load_config,
     discover_config,
     _default_config,
-    _resolve_path,
+)
+
+from services.sprint_manager.paths import (  # noqa: E402
+    _pid_file_path,
+    _plan_json_path,
+    _state_path,
+    _summary_path,
+    _sprint_number,
+    _is_child_sprint_label,
+    _sprint_branch_for_label,
+    _base_sprint_branch,
 )
 
 # issue #738: cross-thread serialization for concurrent pipeline mode — one
@@ -244,8 +255,12 @@ def _resolve_uat_env_for_tester(
     if port == "8000":
         return None, f"Refusing port 8000 (PRD) in {uat_env_path}"
 
-    commander_ok = uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
-    env_ok = environment in ("uat", "") or (commander_ok and environment in ("uat", "prd", ""))
+    commander_ok = (
+        uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
+    )
+    env_ok = environment in ("uat", "") or (
+        commander_ok and environment in ("uat", "prd", "")
+    )
     if not env_ok:
         return None, (
             f"{uat_env_path} has ENVIRONMENT={environment!r}; expected uat "
@@ -275,7 +290,8 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
+# issue #710: live-browser UAT
+from services.sprint_manager import agent_browser_runner  # noqa: E402
 from services.sprint_manager.state import (  # noqa: E402
     IssueState,
     SprintState,
@@ -284,7 +300,10 @@ from services.sprint_manager.state import (  # noqa: E402
 )
 
 try:
-    from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
+    # issue #860
+    from services.sprint_manager.brief_generator import (
+        write_sprint_brief as _write_sprint_brief,
+    )
     _BRIEF_GENERATOR_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _write_sprint_brief = None  # type: ignore[assignment]
@@ -451,16 +470,6 @@ def _emit_ticket_failed(
 
 # ── per-project PID lock ──────────────────────────────────────────────────────
 
-def _pid_file_path(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
-    """Return the per-(project, sprint_label) PID file path."""
-    if cfg is not None:
-        sprints_dir = cfg.sprints_dir
-    else:
-        sprints_dir = REPO_ROOT / ".commander" / "sprints"
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    return sprints_dir / f"{sprint_label}-pid"
-
-
 def _acquire_pid_lock(sprint_label: str, project: str,
                       cfg: Optional["SprintConfig"] = None) -> Path:
     """Write a PID file scoped to (project, sprint_label).
@@ -523,12 +532,6 @@ def _release_pid_lock(pid_path: Path) -> None:
 
 
 # ── Plan.json state helpers (issue #507) ─────────────────────────────────────
-
-def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
-    """Return path to {label}-plan.json in the sprints directory."""
-    sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
-    return sprints_dir / f"{label}-plan.json"
-
 
 def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
     """True when ``label`` is a versioned re-run sub-sprint (plan.json has parent)."""
@@ -890,34 +893,6 @@ def _to_bangkok(utc_str: str) -> str:
         return _bangkok_now()
 
 
-def _sprint_number(label: str) -> Optional[int]:
-    m = re.search(r"(\d+)", label)
-    return int(m.group(1)) if m else None
-
-
-def _label_base(label: str) -> str:
-    """Base sprint label: sprint-68.6 → sprint-68 (lineage display only)."""
-    m = re.match(r"^(sprint-\d+)", label)
-    return m.group(1) if m else label
-
-
-def _is_child_sprint_label(label: str) -> bool:
-    return bool(re.match(r"^sprint-\d+\.\d+", label))
-
-
-def _sprint_branch_for_label(label: str) -> str:
-    return f"sprint/{label}"
-
-
-def _base_sprint_branch(label: str) -> str:
-    """Base sprint branch for lineage (sprint/sprint-68 for any 68.x label).
-
-    Used when creating child branches off the base and when promoting the chain
-    at Merge Sprint — not as the per-ticket merge target during a child run.
-    """
-    return _sprint_branch_for_label(_label_base(label))
-
-
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
 
@@ -929,28 +904,6 @@ def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
     retry_after = int(m.group(1)) if m else None
     return True, retry_after
-
-
-def _state_path(
-    sprint_number: Optional[int],
-    sprint_label: str,
-    cfg: Optional["SprintConfig"] = None,
-) -> Path:
-    """Per-label state file: ``sprint-68.6-state.json`` (lifecycle P3)."""
-    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    return sprints_dir / f"{sprint_label}-state.json"
-
-
-def _summary_path(
-    sprint_number: Optional[int],
-    sprint_label: str,
-    cfg: Optional["SprintConfig"] = None,
-) -> Path:
-    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    day = datetime.now().strftime("%Y-%m-%d")
-    return sprints_dir / f"{sprint_label}-summary-{day}.md"
 
 
 # ── PID file management (AC-2) ───────────────────────────────────────────────

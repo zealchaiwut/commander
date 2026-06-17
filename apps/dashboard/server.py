@@ -9317,8 +9317,6 @@ from calibration_cache_service import (  # noqa: E402
     _refresh_calibration_cache,
 )
 
-_CALIBRATION_SIZES = _CALIBRATION_SIZES  # re-export for any local references
-
 
 def _iter_calibration_state_files(
     sprints_dir: Path,

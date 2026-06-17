@@ -357,6 +357,34 @@ planner and visual drag-and-drop interface for choosing which backlog issues to
 include before running sprint_manager. Open it at `http://localhost:8000`, pick
 issues, and use "Start sprint" to launch the manager directly from the UI.
 
+### Analytics — estimate calibration
+
+The **Analytics** page (`/project/{slug}/analytics`) has a **Calibration**
+sub-tab that compares each ticket's estimated size against how long it actually
+took, so you can see whether the estimator is sizing tickets well over time.
+
+Calibration resolves each completed ticket's size through a three-tier fallback
+— canonical estimate JSON → sprint-state estimate → `size-*` GitHub label — so a
+ticket estimated only at creation still shows up in the history. The cache
+auto-refreshes whenever a sprint finishes.
+
+If the Calibration tab shows a **"Calibration cache empty or stale"** banner
+(cache empty but sprint-state files exist on disk, e.g. after upgrading from an
+older Commander version), click **Rebuild** to rescan every `sprint-*-state.json`
+file — live and archived — and repopulate the full history. The same rebuild is
+available headless:
+
+```bash
+# CLI
+python3 scripts/rebuild_calibration_cache.py --project <slug>
+
+# or HTTP
+curl -X POST 'http://localhost:8000/api/maintenance/calibration/rebuild?project=<slug>'
+```
+
+See [features/estimation-lifecycle.md](features/estimation-lifecycle.md) for the
+full estimate write path and calibration contract.
+
 ---
 
 ## 6. Best practices

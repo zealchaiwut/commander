@@ -87,7 +87,7 @@ Every view above, with the endpoints it calls. Paths use `:var` for path params.
 | View | API calls |
 |------|-----------|
 | `metrics` › `metrics` | `GET /api/metrics/sprints`, `GET /api/projects/:slug/analytics/metrics` |
-| `metrics` › `calibration` | `GET /api/calibration`, `GET /api/projects/:slug/analytics/calibration` |
+| `metrics` › `calibration` | `GET /api/calibration`, `GET /api/projects/:slug/analytics/calibration`, `POST /api/maintenance/calibration/rebuild` (stale-cache Rebuild link) |
 | `metrics` › `status` | `GET /api/sprint-status`, `POST /api/sprint-status` |
 | `metrics` › `trends` | `GET /api/sprints/:label/estimate-vs-actual`, `GET /api/sprints/:label/outcome`, `GET /api/estimates/batch` |
 

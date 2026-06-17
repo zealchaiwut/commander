@@ -1936,9 +1936,10 @@ Replace the existing draft (${data.existing_label})?`
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
     if (state === "ready_to_merge") {
-      return `<button type="button" class="hist-head-btn hist-head-btn--merge"
-      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
-      <i class="ti ti-git-merge"></i> Merge</button>`;
+      return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')"
+      title="Complete sprint \u2014 merge to develop">
+      <i class="ti ti-circle-check"></i> Complete</button>`;
     }
     return "";
   }

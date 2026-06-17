@@ -316,7 +316,7 @@ function _histVerbsHtml(s) {
                <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   } else if (state === 'completed' || state === 'ready_to_merge') {
     html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
-               <i class="ti ti-flag-check"></i> Merge</button>`;
+               <i class="ti ti-circle-check"></i> Complete</button>`;
     html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
                <i class="ti ti-trash"></i> Delete</button>`;
   }
@@ -423,9 +423,9 @@ function _histHeadActionsHtml(s) {
         onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
         <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
     } else if (state === 'completed' || state === 'ready_to_merge') {
-      html += `<button type="button" class="hist-head-btn hist-head-btn--finish"
+      html += `<button type="button" class="hist-head-btn hist-head-btn--bulk"
         onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
-        <i class="ti ti-flag-check"></i> Finish sprint</button>`;
+        <i class="ti ti-circle-check"></i> Complete</button>`;
       html += `<button type="button" class="hist-head-btn hist-head-btn--delete"
         onclick="event.stopPropagation();smgmtDeleteSprint('${lbl}')">
         <i class="ti ti-trash"></i> Delete</button>`;
@@ -1303,7 +1303,7 @@ export function _histToggleMetrics(label) {
   _histRenderLedger(_histLedgerData);
 }
 
-// Recovery CTA: one per card — failed → amber Re-run, ready_to_merge → Merge,
+// Recovery CTA: one per card — failed → amber Re-run, ready_to_merge → Complete,
 // complete/partial → none (partial uses bulk-complete at group level — AC2).
 function _histRecoveryBtnHtml(s) {
   if (_histIsLocked(s.lifecycle_state)) return '';
@@ -1320,9 +1320,10 @@ function _histRecoveryBtnHtml(s) {
       <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   }
   if (state === 'ready_to_merge') {
-    return `<button type="button" class="hist-head-btn hist-head-btn--merge"
-      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
-      <i class="ti ti-git-merge"></i> Merge</button>`;
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+      onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')"
+      title="Complete sprint — merge to develop">
+      <i class="ti ti-circle-check"></i> Complete</button>`;
   }
   return '';
 }

@@ -6,8 +6,10 @@ against GitHub, updates drift in the DB, and broadcasts deltas to the UI.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Callable, Awaitable
 
@@ -186,16 +188,175 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
     return updated
 
 
+def _stored_reconciliation(row: dict, state: dict | None) -> dict:
+    recon = (state or {}).get("reconciliation") or {}
+    raw = row.get("reconciliation_json")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                recon = parsed
+        except (TypeError, ValueError):
+            pass
+    return recon if isinstance(recon, dict) else {}
+
+
+def _reconciliation_needs_refresh(recon: dict) -> bool:
+    """True when persisted post-sprint checks may be stale (e.g. PR merged since finish)."""
+    if not recon:
+        return False
+    checks = recon.get("checks") or []
+    return any(c.get("name") == "sprint_pr" and not c.get("ok") for c in checks)
+
+
+def _ticket_numbers_for_reconciliation(row: dict, state: dict | None) -> list[int]:
+    nums: list[int] = []
+    seen: set[int] = set()
+    for source in (
+        (state or {}).get("issues") or [],
+        json.loads(row.get("issues_json") or "[]") if row.get("issues_json") else [],
+    ):
+        for iss in source:
+            n = iss.get("number", iss.get("ticket_id", iss.get("issue_number")))
+            if n is None:
+                continue
+            try:
+                num = int(n)
+            except (TypeError, ValueError):
+                continue
+            if num not in seen:
+                seen.add(num)
+                nums.append(num)
+    return nums
+
+
+def _pr_url_for_reconciliation(repo: str, state: dict | None, row: dict, recon: dict) -> str | None:
+    state = state or {}
+    pr_url = state.get("sprint_pr_url") or state.get("pr_url")
+    if pr_url:
+        return str(pr_url)
+    pr_number = row.get("pr_number")
+    if pr_number is None:
+        for chk in recon.get("checks") or []:
+            if chk.get("name") == "sprint_pr" and chk.get("pr_number") is not None:
+                pr_number = chk.get("pr_number")
+                break
+    if pr_number is None:
+        pr_number = state.get("pr_number")
+    if pr_number is not None and repo:
+        return f"https://github.com/{repo}/pull/{int(pr_number)}"
+    return None
+
+
+def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
+    """Re-run GitHub post-sprint reconciliation when loose ends may have cleared."""
+    row = _db().get_sprint(label)
+    if not row:
+        return False
+    if project and row.get("project") and row.get("project") != project:
+        return False
+    state = row.get("state") or ""
+    if state == "running" or state in ("draft", "planned", "planning"):
+        return False
+
+    try:
+        import server as srv  # noqa: PLC0415
+        from . import sprint_artifact_service  # noqa: PLC0415
+        from services.sprint_manager.reconciliation import (  # noqa: PLC0415
+            gather_inputs_via_gh,
+            run_reconciliation,
+        )
+    except Exception:
+        return False
+
+    repo = project or row.get("project") or ""
+    if not repo:
+        return False
+
+    try:
+        project_root = srv._project_root_path(repo)
+        sprints_dir = project_root / ".commander" / "sprints"
+        state_path = sprint_artifact_service.resolve_state_path(sprints_dir, label)
+        state_data = sprint_artifact_service.load_state_file(sprints_dir, label) or {}
+    except Exception:
+        state_data = {}
+        state_path = None
+
+    recon = _stored_reconciliation(row, state_data)
+    if not _reconciliation_needs_refresh(recon):
+        return False
+
+    pr_url = _pr_url_for_reconciliation(repo, state_data, row, recon)
+    ticket_numbers = _ticket_numbers_for_reconciliation(row, state_data)
+    try:
+        rec_inputs = gather_inputs_via_gh(label, repo, pr_url, ticket_numbers)
+        result = run_reconciliation(
+            sprint_label=label,
+            project=repo,
+            state_path=state_path,
+            summary_issues=rec_inputs["summary_issues"],
+            pr_info=rec_inputs["pr_info"],
+            tickets=rec_inputs["tickets"],
+            emit_event=None,
+        )
+    except Exception as exc:
+        _log.warning("post-sprint reconciliation refresh failed for %s: %s", label, exc)
+        return False
+
+    prior_fp = recon.get("fingerprint")
+    if prior_fp and prior_fp == result.get("fingerprint"):
+        return False
+
+    if state_path is not None:
+        try:
+            merged = dict(state_data)
+            merged["reconciliation"] = result
+            state_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    try:
+        _db().update_sprint_reconciliation(label, result)
+    except Exception:
+        pass
+    return True
+
+
+def refresh_post_sprint_reconciliations(project: str, limit: int = 40) -> list[str]:
+    """Refresh stale post-sprint reconciliation blocks for terminal sprints."""
+    updated: list[str] = []
+    rows = _db().list_sprints_lifecycle()
+    checked = 0
+    for row in rows:
+        if checked >= limit:
+            break
+        label = row.get("label") or ""
+        if not label:
+            continue
+        if project and row.get("project") != project:
+            continue
+        state = row.get("state") or ""
+        if state == "running" or state in ("draft", "planned", "planning"):
+            continue
+        checked += 1
+        if refresh_post_sprint_reconciliation(label, project):
+            updated.append(label)
+    return updated
+
+
 async def reconcile_project_background(
     project: str,
     broadcast: Callable[[dict], Awaitable[None]] | None = None,
 ) -> None:
-    """Background task: reconcile then notify connected clients."""
+    """Background task: reconcile lifecycle + post-sprint loose ends, then notify."""
+    lifecycle_updated: list[str] = []
+    reconciliation_updated: list[str] = []
     try:
-        updated = reconcile_project(project)
+        lifecycle_updated = reconcile_project(project)
+        reconciliation_updated = refresh_post_sprint_reconciliations(project)
     except Exception as exc:
         _log.warning("sprint reconcile failed for %s: %s", project, exc)
         return
+    updated = sorted(set(lifecycle_updated) | set(reconciliation_updated))
     if not updated or broadcast is None:
         return
     try:

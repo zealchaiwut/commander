@@ -4810,6 +4810,24 @@ def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
     return result
 
 
+def _sprint_rerun_into_from_labels(labels: list[str]) -> dict[str, str]:
+    """Infer parent → latest child from dotted labels (e.g. sprint-85 → sprint-85.1)."""
+    _sub_re = re.compile(r"^sprint-(\d+)\.(\d+)$")
+    by_base: dict[str, list[tuple[int, str]]] = {}
+    for lbl in labels:
+        m = _sub_re.match(lbl)
+        if not m:
+            continue
+        base = f"sprint-{m.group(1)}"
+        sub = int(m.group(2))
+        by_base.setdefault(base, []).append((sub, lbl))
+    result: dict[str, str] = {}
+    for base, subs in by_base.items():
+        subs.sort(key=lambda x: x[0])
+        result[base] = subs[-1][1]
+    return result
+
+
 def _write_plan_json(project_root: Path, sprint_label: str, data: dict) -> None:
     """Write plan.json atomically."""
     path = _sprint_plan_path(project_root, sprint_label)
@@ -5507,6 +5525,8 @@ def get_sprint_management_issues(repo: str):
     placeholder_sprint = _max_num + 1
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
+    for parent, child in _sprint_rerun_into_from_labels(renderable_sprint_labels).items():
+        sprint_rerun_into[parent] = child
 
     # Sign-off gate state per renderable label (issue #862) — drives the
     # PENDING SIGN-OFF badge and the muted Run Sprint button on the board.

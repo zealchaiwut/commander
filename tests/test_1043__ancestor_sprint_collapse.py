@@ -520,10 +520,31 @@ def test_ac8_render_passes_child_label_to_ancestor_html():
         "rerunInto" in render_body
         or "_rerunInto" in render_body
         or "sprint_rerun_into" in render_body
+        or "_smgmtChildSprintLabel" in render_body
     )
     assert has_child_passed, (
         "_smgmtRender must pass the child sprint label (from sprint_rerun_into) "
         "to _smgmtAncestorRowHtml so carry links reference the correct sprint"
+    )
+
+
+def test_parent_collapses_when_child_exists_regardless_of_tickets():
+    """Parent sprint must move to Lineage whenever a child sub-sprint is in order."""
+    assert _fn_exists("_smgmtShouldCollapseParent"), (
+        "_smgmtShouldCollapseParent must exist to gate parent collapse"
+    )
+    body = _fn_body("_smgmtShouldCollapseParent")
+    assert "ticket" not in body.lower() and "settled" not in body.lower(), (
+        "Parent collapse must not depend on ticket count — any child sub-sprint "
+        "hides the parent from Draft / Ready to merge sections"
+    )
+    assert _fn_exists("_smgmtSprintBaseLabel"), (
+        "_smgmtSprintBaseLabel must exist to infer parent/child from dotted labels "
+        "when plan.json parent is missing"
+    )
+    render_body = _fn_body("_smgmtRender")
+    assert "_smgmtShouldCollapseParent" in render_body, (
+        "_smgmtRender must call _smgmtShouldCollapseParent before showing sprint cards"
     )
 
 

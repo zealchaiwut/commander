@@ -3027,7 +3027,7 @@
       padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
       border: 1px solid transparent;
     }
-    .smgmt-state-badge.state-finished { background: var(--amber-bg);  color: var(--amber);    border-color: var(--amber);  }
+    .smgmt-state-badge.state-finished { background: var(--green-bg);  color: var(--green);    border-color: var(--green);  }
     .smgmt-state-badge.state-partial  { background: var(--yellow-bg);  color: var(--yellow);    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);  }
     .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
@@ -3843,10 +3843,14 @@
       margin: 20px 0 8px; display: flex; align-items: center; gap: 6px;
     }
     .smgmt-section-label:first-of-type { margin-top: 0; }
+    .smgmt-section-merge { color: var(--green); }
+    .smgmt-section-rework { color: var(--amber); }
+    .smgmt-section-running { color: var(--text-sub); }
+    .smgmt-section-draft { color: var(--blue); }
     .smgmt-section-upnext { color: var(--green); }
     .smgmt-section-planning { color: var(--blue); }
     .smgmt-board-section { margin-bottom: 4px; }
-    .smgmt-board-section--upnext {
+    .smgmt-board-section--merge {
       border: 1px solid var(--green);
       border-radius: 11px;
       background: var(--surface);
@@ -3854,10 +3858,32 @@
       padding: 0;
       overflow: hidden;
     }
-    .smgmt-board-section--upnext .smgmt-sprint-unit { margin: 0; }
-    .smgmt-board-section--upnext .sc-v5 {
+    .smgmt-board-section--merge .smgmt-sprint-unit { margin: 0; }
+    .smgmt-board-section--merge .sc-v5 {
       border: none; border-radius: 0; box-shadow: none;
     }
+    .smgmt-board-section--rework {
+      border: 1px solid var(--amber);
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: 0 0 0 2px var(--amber-bg);
+      padding: 0;
+      overflow: hidden;
+    }
+    .smgmt-board-section--rework .smgmt-sprint-unit { margin: 0; }
+    .smgmt-board-section--rework .sc-v5 {
+      border: none; border-radius: 0; box-shadow: none;
+    }
+    .smgmt-board-section--running {
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+      padding: 0;
+      overflow: hidden;
+    }
+    .smgmt-board-section--running .smgmt-sprint-unit { margin: 0; }
+    .smgmt-board-section--draft,
+    .smgmt-board-section--upnext,
     .smgmt-board-section--planning {
       border: 1px solid var(--blue);
       border-radius: 11px;
@@ -3866,6 +3892,13 @@
       padding: 0;
       overflow: hidden;
     }
+    .smgmt-board-section--draft .smgmt-sprint-unit,
+    .smgmt-board-section--upnext .smgmt-sprint-unit { margin: 0; }
+    .smgmt-board-section--draft .sc-v5,
+    .smgmt-board-section--upnext .sc-v5 {
+      border: none; border-radius: 0; box-shadow: none;
+    }
+    .smgmt-board-section--draft .smgmt-draft-card,
     .smgmt-board-section--planning .smgmt-draft-card {
       border: none; box-shadow: none; margin-bottom: 0;
     }
@@ -3891,6 +3924,7 @@
       padding: 2px 8px; border-radius: 999px; text-transform: uppercase;
       letter-spacing: .03em;
       background: var(--blue-bg); color: var(--blue);
+      border: 1px solid var(--blue);
     }
     .smgmt-sprint-name { font-weight: 700; font-size: 15px; }
     .smgmt-card-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
@@ -4859,7 +4893,8 @@
       color: var(--text-sub);
       font-weight: 400;
     }
-    .sc-planned-badge {
+    .sc-planned-badge,
+    .sc-draft-badge {
       font-family: var(--mono);
       font-size: 10px;
       font-weight: 700;

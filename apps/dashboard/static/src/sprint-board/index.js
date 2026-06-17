@@ -21,7 +21,7 @@ import {
 import {
   _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleFold, _histFocusLabel, _histStateChip,
-  _histRenderLedger, _histRerunSprint, _histToggleDetails,
+  _histRenderLedger, _histRerunSprint, _histToggleMetrics, _histClearStaleLabels,
 } from './history.js';
 
 import {
@@ -242,4 +242,5 @@ globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;
 globalThis._histRenderLedger = _histRenderLedger;
 globalThis._histRerunSprint = _histRerunSprint;
-globalThis._histToggleDetails = _histToggleDetails;
+globalThis._histToggleMetrics = _histToggleMetrics;
+globalThis._histClearStaleLabels = _histClearStaleLabels;

@@ -98,6 +98,19 @@ def test_ac1_timeline_container_in_run_shell():
     )
 
 
+def test_ac1_timeline_above_orchestrator_panel():
+    """Timeline sits below run-head and above orchestrator (visible without scrolling past issues)."""
+    shell_start = PROJECT_HTML.index('id="smgmt-run-shell"')
+    shell = PROJECT_HTML[shell_start:shell_start + 4000]
+    tl_pos = shell.find('id="smgmt-rp-timeline"')
+    orch_pos = shell.find('id="smgmt-orch-panel"')
+    head_pos = shell.find('id="smgmt-run-head"')
+    assert tl_pos != -1 and orch_pos != -1 and head_pos != -1
+    assert head_pos < tl_pos < orch_pos, (
+        "Timeline must render between run-head and orchestrator panel"
+    )
+
+
 def test_ac1_timeline_render_function_exists():
     """A JS function exists to render the running-pane Gantt timeline."""
     has_fn = (

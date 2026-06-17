@@ -172,3 +172,38 @@ def cleanup_stale_branches(body: CleanupStaleRequest):
 def get_run_stats(label: str, project: str | None = None):
     """Per-sprint agent_runs aggregation for the expanded History run-stats block."""
     return run_stats_service.sprint_run_stats(label, project=project)
+
+
+class ClearStaleLabelsBody(BaseModel):
+    project: str
+    tickets: list[dict] = []
+
+
+class ClearStaleLabelsResponse(BaseModel):
+    cleared: list[int] = []
+    errors: list[str] = []
+
+
+@router.post("/api/sprints/{label}/clear-stale-labels", response_model=ClearStaleLabelsResponse)
+def clear_stale_labels(label: str, body: ClearStaleLabelsBody):
+    """Remove stale sprint status labels flagged by post-sprint reconciliation."""
+    import github_client as gh  # noqa: PLC0415
+
+    cleared: list[int] = []
+    errors: list[str] = []
+    for ticket in body.tickets or []:
+        num = ticket.get("issue") or ticket.get("issue_num") or ticket.get("ticket_id")
+        labels = ticket.get("labels") or []
+        if num is None or not labels:
+            continue
+        try:
+            gh.update_labels(int(num), add=[], remove=list(labels), repo_name=body.project)
+            cleared.append(int(num))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"#{num}: {exc}")
+
+    if cleared:
+        gh.invalidate("open_issues_body:")
+        gh.invalidate("open_issues:")
+        gh.invalidate("issues:")
+    return ClearStaleLabelsResponse(cleared=cleared, errors=errors)

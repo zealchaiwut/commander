@@ -1018,6 +1018,67 @@ Replace the existing draft (${data.existing_label})?`
     }
     return '<span class="iss-icon idle"></span>';
   }
+  function _histProgressText(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (!issues.length)
+      return "";
+    const done = issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
+    return `${done}/${issues.length} done`;
+  }
+  function _histLooseEndCount(s) {
+    const r = s.reconciliation;
+    if (r && Array.isArray(r.checks) && !r.all_clear) {
+      const n = r.checks.filter((c) => !c.ok).length;
+      if (n)
+        return n;
+    }
+    const g = _histStaleBySprint[s.label];
+    if (g && g.count)
+      return g.count;
+    return 0;
+  }
+  function _histHeadStatsHtml(s) {
+    const parts = [];
+    const progress = _histProgressText(s);
+    if (progress)
+      parts.push(progress);
+    if (s.duration != null)
+      parts.push(_histFmtSecs(s.duration));
+    const looseN = _histLooseEndCount(s);
+    if (looseN)
+      parts.push(looseN + " loose end" + (looseN !== 1 ? "s" : ""));
+    if (!parts.length)
+      return "";
+    return '<span class="hist-head-stats">' + parts.map((p) => '<span class="hist-head-stat">' + escHtml(p) + "</span>").join("") + "</span>";
+  }
+  function _histIssueLogUrl(s, issueNum) {
+    const base = _histLogsUrl(s);
+    if (issueNum == null)
+      return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return base + sep + "issue=" + encodeURIComponent(String(issueNum)) + "&view=raw";
+  }
+  function _histFailedIssueMeta(ft, s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const hit = issues.find((i) => String(i.ticket_id) === String(ft.ticket_id));
+    return {
+      title: _histIssueTitle(hit || ft, s),
+      time: hit && hit.time_spent != null ? hit.time_spent : null
+    };
+  }
+  function _histFailReasonParts(ft, s) {
+    const meta = _histFailedIssueMeta(ft, s);
+    const reason = String(ft.failure_reason || "Agent failed");
+    let title = meta.title;
+    let accent = reason;
+    if (title && reason.toLowerCase().startsWith(title.toLowerCase())) {
+      accent = reason.slice(title.length).replace(/^[\s·—-]+/, "").trim();
+    } else if (!title) {
+      accent = reason;
+      title = "";
+    }
+    return { title, accent, time: meta.time };
+  }
   function _histIssueTitle(iss, s) {
     if (iss.title)
       return String(iss.title);
@@ -1130,18 +1191,18 @@ Replace the existing draft (${data.existing_label})?`
     const er = sprint && sprint.end_reason ? String(sprint.end_reason).toLowerCase() : "";
     const displayState = s === "needs_rework" && (er === "natural" || er === "merge_sprint") && sprint && !_histSprintFailed(sprint) ? "ready_to_merge" : s;
     const map = {
-      completed: ["completed", "Completed"],
-      ready_to_merge: ["completed", "Ready to merge"],
-      needs_rework: ["failed", "Failed"],
-      partial_finished: ["partial", "Partial"],
-      deleted: ["deleted", "Deleted"],
-      running: ["running", "Running"],
-      draft: ["planning", "Draft"],
-      planned: ["planning", "Planned"],
-      finished: ["finished", "Finished"],
-      failed: ["failed", "Failed"],
-      cancelled: ["failed", "Failed"],
-      planning: ["planning", "Draft"]
+      completed: ["completed", "COMPLETED"],
+      ready_to_merge: ["completed", "READY TO MERGE"],
+      needs_rework: ["failed", "FAILED"],
+      partial_finished: ["partial", "PARTIAL"],
+      deleted: ["deleted", "DELETED"],
+      running: ["running", "RUNNING"],
+      draft: ["planning", "DRAFT"],
+      planned: ["planning", "PLANNED"],
+      finished: ["finished", "FINISHED"],
+      failed: ["failed", "FAILED"],
+      cancelled: ["failed", "FAILED"],
+      planning: ["planning", "DRAFT"]
     };
     const pair = map[displayState] || ["unknown", displayState];
     const reason = sprint && sprint.end_reason && _histSprintFailed(sprint) ? `<span class="hist-state-reason" title="${escHtml(String(sprint.end_reason))}">${escHtml(String(sprint.end_reason))}</span>` : "";
@@ -1404,15 +1465,47 @@ Replace the existing draft (${data.existing_label})?`
     ${rows}
   </div>`;
   }
+  function _histReconcileHtml(s) {
+    const r = s.reconciliation;
+    if (!r || !Array.isArray(r.checks) || !r.checks.length)
+      return "";
+    const allClear = !!r.all_clear;
+    const items = r.checks.map((c) => {
+      const ok = !!c.ok;
+      const icon = ok ? "ti-circle-check" : "ti-alert-triangle";
+      const detail = c.detail || (ok ? "OK" : "unresolved");
+      return `<div class="recon-item ${ok ? "ok" : "fail"}">
+      <i class="ti ${icon}"></i>
+      <span><span class="recon-label">${escHtml(_histReconcileLabel(c.name))}:</span>
+        <span class="recon-detail">${escHtml(detail)}</span></span>
+    </div>`;
+    }).join("");
+    const failed = r.checks.filter((c) => !c.ok).length;
+    const summary = allClear ? "All clear \u2014 no loose ends" : failed + (failed === 1 ? " item unresolved" : " items unresolved");
+    return `<div class="recon">
+    <div class="recon-head ${allClear ? "clear" : "flagged"}">
+      <i class="ti ${allClear ? "ti-checks" : "ti-alert-triangle"}"></i>
+      Reconciliation <span class="recon-summary">\xB7 ${escHtml(summary)}</span>
+    </div>
+    ${items}
+  </div>`;
+  }
   function _histLooseEndBandHtml(s) {
     const r = s.reconciliation;
     if (r && Array.isArray(r.checks)) {
       const staleCheck = r.checks.find((c) => !c.ok && c.name === "stale_labels");
       if (staleCheck) {
-        const detail = staleCheck.detail || "Clear stale status labels";
+        const offenders = Array.isArray(staleCheck.tickets) ? staleCheck.tickets : [];
+        const looseN = r.checks.filter((c) => !c.ok).length || 1;
+        const offenderCount = offenders.length;
+        const labelParts = offenderCount ? offenders.map((o) => "#" + o.issue + " " + (o.labels || []).join(", ")).join(" \xB7 ") : staleCheck.detail || "Clear stale status labels";
+        const msg = offenderCount ? looseN + " loose end \u2014 " + offenderCount + " stale status labels to clear: " + labelParts : looseN + " loose end \u2014 " + labelParts;
+        const lbl = escHtml(s.label || "");
         return `<div class="hist-loose-end-band">
-        <i class="ti ti-tag"></i>
-        <span class="hist-band-msg">${escHtml(detail)}</span>
+        <i class="ti ti-alert-triangle"></i>
+        <span class="hist-band-msg">${escHtml(msg)}</span>
+        <button type="button" class="hist-band-cta hist-band-cta--clear"
+          onclick="event.stopPropagation();_histClearStaleLabels('${lbl}')">Clear labels</button>
       </div>`;
       }
     }
@@ -1439,22 +1532,27 @@ Replace the existing draft (${data.existing_label})?`
       const sprintReason = s.failure_reason || s.end_reason;
       if (!failed.length && !sprintReason)
         return "";
+      const n = failed.length || 1;
       const items = failed.map((ft) => {
         const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
-        const reason = ft.failure_reason || "Agent failed";
-        const ts = ft.failed_at || ft.timestamp || "";
-        const tsHtml = ts ? `<span class="wl-ts">${escHtml(String(ts).slice(0, 16).replace("T", " "))}</span>` : "";
-        const logHref = escHtml(_histLogsUrl(s));
+        const parts = _histFailReasonParts(ft, s);
+        const titleHtml = parts.title ? `<span class="wl-title">${escHtml(parts.title)}</span>` : "";
+        const accentHtml = parts.accent ? `<span class="wl-reason-accent">${escHtml(parts.accent)}</span>` : "";
+        const timeHtml = parts.time != null ? `<span class="wl-time">${escHtml(_histFmtSecs(parts.time))}</span>` : "";
+        const logHref = escHtml(_histIssueLogUrl(s, ft.ticket_id));
         return `<div class="wl-item">
-        <span class="wl-id">${escHtml(String(id))}</span>
-        <span class="wl-reason">${escHtml(String(reason))}</span>
-        ${tsHtml}
-        <a class="wl-log" href="${logHref}" onclick="event.stopPropagation()" title="View logs">log</a>
+        <span class="wl-icon fail"><i class="ti ti-x"></i></span>
+        <span class="wl-main">
+          <span class="wl-id">${escHtml(String(id))}</span>
+          ${titleHtml}${accentHtml}
+        </span>
+        ${timeHtml}
+        <a class="wl-log" href="${logHref}" onclick="event.stopPropagation()" title="View issue log">Log \u2192</a>
       </div>`;
       }).join("");
-      const summary = !failed.length && sprintReason ? `<div class="wl-item"><span class="wl-reason">${escHtml(String(sprintReason))}</span></div>` : "";
+      const summary = !failed.length && sprintReason ? `<div class="wl-item"><span class="wl-reason-accent">${escHtml(String(sprintReason))}</span></div>` : "";
       return `<div class="hist-what-list">
-      <div class="hist-what-head"><i class="ti ti-x"></i> Why it failed</div>
+      <div class="hist-what-head hist-what-head--failed">Why it failed \xB7 ${n} issue${n !== 1 ? "s" : ""} crashed</div>
       ${items}${summary}
     </div>`;
     }
@@ -1488,23 +1586,34 @@ Replace the existing draft (${data.existing_label})?`
     }).join("");
     return `<div class="hist-recon-passed">${items}</div>`;
   }
-  var _histDetailsExpanded = /* @__PURE__ */ new Set();
-  globalThis._histDetailsExpanded = _histDetailsExpanded;
+  var _histMetricsExpanded = /* @__PURE__ */ new Set();
   function _histDetailsHtml(s) {
-    const detExpanded = _histDetailsExpanded.has(s.label);
+    const expanded = _histMetricsExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
-    const chev = detExpanded ? "ti-chevron-down" : "ti-chevron-right";
-    const body = detExpanded ? `<div class="hist-details-body">
+    const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
+    const body = expanded ? `<div class="hist-details-body">
       ${_histStatsHtml(s)}
       ${_histPostSprintHtml(s)}
+      ${_histReconcileHtml(s)}
       ${_histReconPassedHtml(s)}
     </div>` : "";
-    return `<div class="hist-details${detExpanded ? " expanded" : ""}">
-    <div class="hist-details-head" onclick="event.stopPropagation();_histToggleDetails('${lbl}')">
-      <i class="ti ${chev} hist-chev"></i> Details
+    return `<div class="hist-details${expanded ? " expanded" : ""}">
+    <div class="hist-details-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
+      <i class="ti ti-chart-bar hist-details-icon" aria-hidden="true"></i>
+      <span class="hist-details-label">Metrics, timeline &amp; reconciliation</span>
+      <i class="ti ${chev} hist-chev hist-details-chev" aria-hidden="true"></i>
     </div>
     ${body}
   </div>`;
+  }
+  function _histToggleMetrics(label) {
+    if (_histMetricsExpanded.has(label)) {
+      _histMetricsExpanded.delete(label);
+    } else {
+      _histMetricsExpanded.add(label);
+      _histLoadRunStats(label);
+    }
+    _histRenderLedger(_histLedgerData);
   }
   function _histRecoveryBtnHtml(s) {
     if (_histIsLocked(s.lifecycle_state))
@@ -1516,7 +1625,7 @@ Replace the existing draft (${data.existing_label})?`
       const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
       const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
-      return `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
+      return `<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
@@ -1584,18 +1693,12 @@ Replace the existing draft (${data.existing_label})?`
     const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(s.label) : s.label || "";
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const lbl = escHtml(s.label || "");
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const endDate = s.ended_at ? String(s.ended_at).slice(0, 10) : s.started_at ? String(s.started_at).slice(0, 10) : "";
-    const metaParts = [];
-    if (endDate)
-      metaParts.push(endDate);
-    metaParts.push(issues.length + " ticket" + (issues.length !== 1 ? "s" : ""));
-    const metaHtml = `<span class="hist-meta">${escHtml(metaParts.join(" \xB7 "))}</span>`;
+    const headStatsHtml = _histHeadStatsHtml(s);
     const recoveryBtn = _histRecoveryBtnHtml(s);
     const bulkBtn = opts.bulkCompleteBtn || "";
     const deleteBtn = _histDeleteBtnHtml(s);
     const secondaryLinks = _histSecondaryLinksHtml(s);
-    const headRight = secondaryLinks || deleteBtn || bulkBtn || recoveryBtn ? `<span class="hist-card-head-right">${secondaryLinks}${deleteBtn}${bulkBtn}${recoveryBtn}</span>` : "";
+    const headRight = secondaryLinks || deleteBtn || bulkBtn || recoveryBtn ? `<span class="hist-card-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>` : "";
     const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
@@ -1609,7 +1712,7 @@ Replace the existing draft (${data.existing_label})?`
         ${child ? '<span class="hist-child-arrow">\u21B3</span>' : ""}
         <span class="hist-card-title">${escHtml(display)}</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${metaHtml}
+        ${headStatsHtml}
       </div>
       ${headRight}
     </div>
@@ -1621,15 +1724,6 @@ Replace the existing draft (${data.existing_label})?`
       _histExpanded.delete(label);
     } else {
       _histExpanded.add(label);
-      _histLoadRunStats(label);
-    }
-    _histRenderLedger(_histLedgerData);
-  }
-  function _histToggleDetails(label) {
-    if (_histDetailsExpanded.has(label)) {
-      _histDetailsExpanded.delete(label);
-    } else {
-      _histDetailsExpanded.add(label);
       _histLoadRunStats(label);
     }
     _histRenderLedger(_histLedgerData);
@@ -1829,6 +1923,29 @@ Replace the existing draft (${data.existing_label})?`
       }
     }
   }
+  async function _histClearStaleLabels(label) {
+    const repo = _cachedFullRepo[_slug];
+    if (!repo)
+      return;
+    const s = (_histLedgerData || []).find((x) => x.label === label);
+    if (!s || !s.reconciliation)
+      return;
+    const staleCheck = (s.reconciliation.checks || []).find((c) => !c.ok && c.name === "stale_labels");
+    if (!staleCheck)
+      return;
+    const tickets = Array.isArray(staleCheck.tickets) ? staleCheck.tickets : [];
+    try {
+      const resp = await fetch("/api/sprints/" + encodeURIComponent(label) + "/clear-stale-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: repo, tickets })
+      });
+      if (resp.ok) {
+        await _histLoadLedger2();
+      }
+    } catch (_) {
+    }
+  }
   async function _histCleanupStale(label) {
     const repo = _cachedFullRepo[_slug];
     const g = _histStaleBySprint[label];
@@ -1901,31 +2018,9 @@ Replace the existing draft (${data.existing_label})?`
     const foldsHtml = folds.map(_histFoldHtml).join("");
     el.innerHTML = _histToolbarHtml() + recentHtml + foldsHtml;
   }
-  async function _histRerunSprint(label) {
-    const repo = (typeof _smgmtRepo === "function" ? _smgmtRepo() : null) || _cachedFullRepo && _cachedFullRepo[_slug] || "";
-    if (!repo)
-      return;
-    const enc = encodeURIComponent(label);
-    try {
-      const prev = await fetch(`/api/sprints/${enc}/rerun-preview?project=${encodeURIComponent(repo)}`);
-      if (!prev.ok) {
-        console.error("_histRerunSprint preview failed", await prev.text());
-        return;
-      }
-      const data = await prev.json();
-      const ticketNumbers = (data.tickets || []).map((t) => t.number);
-      const res = await fetch(`/api/sprints/${enc}/rerun?project=${encodeURIComponent(repo)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: true })
-      });
-      if (!res.ok) {
-        console.error("_histRerunSprint failed", await res.text());
-        return;
-      }
-      await _histLoadLedger2(repo);
-    } catch (e) {
-      console.error("_histRerunSprint error", e);
+  function _histRerunSprint(label) {
+    if (typeof globalThis.smgmtRerunSprint === "function") {
+      return globalThis.smgmtRerunSprint(label);
     }
   }
   async function _histLoadLedger2(repo) {
@@ -2131,6 +2226,9 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
       }
       await loadSprintMgmt(true);
+      if (typeof globalThis._histLoadLedger === "function") {
+        await globalThis._histLoadLedger(repo);
+      }
       _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
       if (data.errors && data.errors.length > 0) {
@@ -4726,18 +4824,35 @@ ${data.errors.join("\n")}`);
       (l) => !_smgmtResolvedAncestors.has(l) && l !== planningLabel
     );
     const sectionLabel = (text, cls) => `<div class="smgmt-section-label ${cls}">${text}</div>`;
+    const lineageRangeLabel = (labels) => {
+      if (!labels.length)
+        return "Lineage";
+      const first = sprintLabelDisplay(labels[0]).replace("Sprint ", "");
+      const last = sprintLabelDisplay(labels[labels.length - 1]).replace("Sprint ", "");
+      return first === last ? `Lineage ${first}` : `Lineage ${first} \u2192 ${last}`;
+    };
     let cards = "";
     if (lineageLabels.length > 0) {
-      cards += sectionLabel("Lineage", "smgmt-section-lineage");
+      cards += sectionLabel(lineageRangeLabel(lineageLabels), "smgmt-section-lineage");
+      cards += `<div class="smgmt-board-section smgmt-board-section--lineage">`;
       cards += lineageLabels.map(_buildCard).join("");
+      cards += `</div>`;
     }
     if (upNextLabels.length > 0) {
-      cards += sectionLabel("Up next", "smgmt-section-upnext");
+      const upLabel = upNextLabels.length === 1 ? "Up next \u2014 queued to run 1" : `Up next \u2014 queued to run ${upNextLabels.length}`;
+      cards += sectionLabel(upLabel, "smgmt-section-upnext");
+      cards += `<div class="smgmt-board-section smgmt-board-section--upnext">`;
       cards += upNextLabels.map(_buildCard).join("");
+      cards += `</div>`;
     }
     if (planningLabel) {
-      cards += sectionLabel("Planning", "smgmt-section-planning smgmt-planning-section");
+      cards += sectionLabel(
+        "Planning \u2014 building this next 1",
+        "smgmt-section-planning smgmt-planning-section"
+      );
+      cards += `<div class="smgmt-board-section smgmt-board-section--planning">`;
       cards += _buildCard(planningLabel);
+      cards += `</div>`;
     }
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
     _smgmtInitCapacityGauges(orderedLabels);
@@ -5414,8 +5529,9 @@ ${data.errors.join("\n")}`);
     const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
+    const nextClass = isNext && !isRunning ? " sc-v5--next" : "";
     return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card sc-v5${nextClass}${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
          ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
          ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
@@ -5463,9 +5579,13 @@ ${data.errors.join("\n")}`);
         isAwaitingMerge,
         planState,
         outcome,
-        tickets
+        tickets,
+        parent
       });
-      return _ss ? `<div class="sc-status-line">${escHtml(_ss)}</div>` : "";
+      if (!_ss)
+        return "";
+      const cls = isNext && !isRunning ? " sc-status-line--next" : "";
+      return `<div class="sc-status-line${cls}"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
     }()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -5745,7 +5865,8 @@ ${data.errors.join("\n")}`);
       isAwaitingMerge,
       planState,
       outcome,
-      tickets
+      tickets,
+      parent
     } = opts;
     if (isRunning)
       return "";
@@ -5765,11 +5886,14 @@ ${data.errors.join("\n")}`);
       return "All tickets passed. Ready to merge.";
     }
     if (isNext) {
+      const n = tickets.length;
+      const parentShort = parent ? sprintLabelDisplay(parent).replace("Sprint ", "") : "";
+      const held = n > 0 && parentShort ? ` Holds the ${n} ticket${n !== 1 ? "s" : ""} carried from ${parentShort}.` : n > 0 ? ` Holds ${n} ticket${n !== 1 ? "s" : ""}.` : "";
       if (_smgmtAnySprintRunning) {
-        const blocker = typeof _smgmtRunningBlockerShort === "function" ? _smgmtRunningBlockerShort() : "";
-        return `Ready to run. Waiting on ${blocker}.`;
+        const blocker = typeof _smgmtRunningBlockerShort === "function" ? _smgmtRunningBlockerShort() : "another sprint";
+        return `Ready to run.${held} Waiting on ${blocker} to finish.`;
       }
-      return "Ready to run.";
+      return held ? `Ready to run.${held}` : "Ready to run.";
     }
     if (_smgmtAnySprintRunning) {
       return "Blocked: another sprint is running.";
@@ -5915,6 +6039,11 @@ ${data.errors.join("\n")}`);
       const total = _blBacklogAll.length, shown = filtered.length;
       countEl.textContent = total > 0 ? `${shown === total ? total : `${shown} of ${total}`} ticket${total !== 1 ? "s" : ""}` : "0 tickets";
     }
+    const eyebrowEl = document.getElementById("bl-eyebrow");
+    if (eyebrowEl) {
+      const n = _blBacklogAll.length;
+      eyebrowEl.textContent = n > 0 ? `Backlog ${n} \xB7 source for planning` : "Backlog \xB7 source for planning";
+    }
     const backlogBulkBtn = document.getElementById("smgmt-backlog-bulk-est-btn");
     if (backlogBulkBtn) {
       const hasUnsized = _blBacklogAll.some((t) => !_smgmtTicketHasEstimate(t));
@@ -5991,13 +6120,29 @@ ${data.errors.join("\n")}`);
       return "merged";
     return "needs_merge";
   }
-  function _smgmtAncestorCarrySummary(outcome, childLabel) {
+  function _smgmtAncestorCarrySummary(outcome, childLabel, mergeState) {
     if (!outcome)
       return "";
     const counts = outcome.counts || {};
     const done = counts.done || 0;
     const carried = (counts.failed || 0) + (counts.skipped || 0);
     const childDisplay = childLabel ? sprintLabelDisplay(childLabel).replace("Sprint ", "") : "";
+    if (mergeState === "failed") {
+      if (carried > 0 && childDisplay) {
+        return `${done} merged \xB7 ${carried} carried \u2192 ${childDisplay}`;
+      }
+      if (carried > 0)
+        return `${done} merged \xB7 ${carried} carried`;
+      return `${done} merged`;
+    }
+    if (mergeState === "needs_merge") {
+      let summary2 = `${done} passed`;
+      if (carried > 0 && childDisplay)
+        summary2 += ` \xB7 ${carried} reworked \u2192 ${childDisplay}`;
+      else if (carried > 0)
+        summary2 += ` \xB7 ${carried} reworked`;
+      return `${summary2} \xB7 not merged yet`;
+    }
     let summary = `${done} merged`;
     if (carried > 0 && childDisplay)
       summary += ` \xB7 ${carried} reworked \u2192 ${childDisplay}`;
@@ -6039,25 +6184,26 @@ ${data.errors.join("\n")}`);
     const mergeState = _smgmtAncestorMergeState(label, outcome);
     const safeLabel = escHtml(label);
     const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
-    let markIcon, markText, markCls;
+    let statusIcon, statusText, statusCls;
     if (mergeState === "merged") {
-      markIcon = "ti-git-merge";
-      markText = "Merged";
-      markCls = "slp-merged";
+      statusIcon = "ti-circle-check";
+      statusText = "Merged";
+      statusCls = "slp-merged";
     } else if (mergeState === "needs_merge") {
-      markIcon = "ti-git-pull-request";
-      markText = "Needs merge";
-      markCls = "slp-needs-merge";
+      statusIcon = "ti-alert-triangle";
+      statusText = "Needs merge";
+      statusCls = "slp-needs-merge";
     } else if (mergeState === "failed") {
-      markIcon = "ti-circle-x";
-      markText = "Failed";
-      markCls = "slp-failed";
+      statusIcon = "ti-circle-x";
+      statusText = "Failed";
+      statusCls = "slp-failed";
     } else {
-      markIcon = "ti-clock";
-      markText = "Pending";
-      markCls = "slp-pending";
+      statusIcon = "ti-clock";
+      statusText = "Pending";
+      statusCls = "slp-pending";
     }
-    const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto);
+    const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto, mergeState);
+    const durationHtml = outcome && outcome.wall_clock_secs != null ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>` : "";
     const ticketsHtml = outcome ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">Loading outcome data\u2026</div>';
     const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
@@ -6078,12 +6224,19 @@ ${data.errors.join("\n")}`);
               onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
         <i class="ti ti-chevron-right"></i>
       </button>
-      <span class="slp-merge-mark ${markCls}" title="${escHtml(markText)}">
-        <i class="ti ${markIcon}"></i>
-        <span class="slp-mark-text">${escHtml(markText)}</span>
+      <span class="slp-status-icon slp-status-icon--${escHtml(mergeState)}" title="${escHtml(statusText)}">
+        <i class="ti ${statusIcon}"></i>
       </span>
       <span class="slp-ancestor-name">${escHtml(sprintLabelDisplay(label))}</span>
+      <span class="slp-status-pill ${statusCls}">${escHtml(statusText)}</span>
       ${carrySummary ? `<span class="slp-carry-summary">${escHtml(carrySummary)}</span>` : ""}
+      ${durationHtml}
+      <button class="slp-ancestor-menu" type="button"
+              title="Sprint actions"
+              aria-label="Sprint actions"
+              onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
+        <i class="ti ti-menu-2"></i>
+      </button>
     </div>
     <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
       <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
@@ -6115,10 +6268,21 @@ ${data.errors.join("\n")}`);
     const planStates = data.sprint_plan_states || {};
     const rerunInto = data.sprint_rerun_into || {};
     const finishedSet = new Set(data.finished_sprints || []);
-    for (const label of orderedLabels || []) {
-      const display = sprintLabelDisplay(label).replace("Sprint ", "Sprint ");
-      if (_smgmtResolvedAncestors.has(label)) {
-        steps.push({ text: `${escHtml(display)} needs a merge decision.`, priority: "high" });
+    const lineageLabels = (orderedLabels || []).filter(
+      (l) => _smgmtResolvedAncestors.has(l)
+    );
+    for (const label of lineageLabels) {
+      const outcome = _smgmtOutcomeCache[label] || null;
+      const mergeState = _smgmtAncestorMergeState(label, outcome);
+      const display = sprintLabelDisplay(label);
+      if (mergeState === "needs_merge") {
+        const c = outcome && outcome.counts || {};
+        const done = c.done || 0;
+        const carried = (c.failed || 0) + (c.skipped || 0);
+        steps.push({
+          text: `${escHtml(display)} needs a merge decision \u2014 ${done} merged, ${carried} reworked`,
+          priority: "high"
+        });
       }
     }
     const draftLabel = (orderedLabels || []).find((l) => {
@@ -6140,53 +6304,112 @@ ${data.errors.join("\n")}`);
     });
     if (upNextCandidates.length > 0) {
       const nextDisplay = sprintLabelDisplay(upNextCandidates[0]);
-      steps.push({ text: `${escHtml(nextDisplay)} is queued and ready to run.`, priority: "med" });
+      const blocker = _smgmtAnySprintRunning && typeof _smgmtRunningBlockerShort === "function" ? _smgmtRunningBlockerShort() : "";
+      steps.push({
+        text: blocker ? `${escHtml(nextDisplay)} ready to run \u2014 blocked: ${escHtml(blocker)} running` : `${escHtml(nextDisplay)} ready to run`,
+        priority: "med"
+      });
     }
     if (draftLabel) {
       const draftDisplay = sprintLabelDisplay(draftLabel);
-      const tickets = (bySprint[draftLabel] || []).length;
+      const draftTickets = bySprint[draftLabel] || [];
+      let usedMin = 0;
+      for (const t of draftTickets) {
+        usedMin += _sizeMinutes(_smgmtTicketSize(t)) || 0;
+      }
+      const headroomH = Math.max(0, Math.round((180 - usedMin) / 60));
+      const goalNote = "needs a goal";
       steps.push({
-        text: `Finish planning ${escHtml(draftDisplay)} \u2014 ${tickets} ticket${tickets !== 1 ? "s" : ""} added.`,
+        text: `Finish planning ${escHtml(draftDisplay)} \u2014 ${goalNote} \xB7 ${headroomH}h headroom left`,
         priority: "low"
       });
     } else {
       steps.push({ text: "No draft sprint yet \u2014 create one to start planning.", priority: "low" });
     }
+    const resolved = [];
+    for (const label of lineageLabels) {
+      const outcome = _smgmtOutcomeCache[label] || null;
+      const mergeState = _smgmtAncestorMergeState(label, outcome);
+      if (mergeState !== "merged" && mergeState !== "failed")
+        continue;
+      const display = sprintLabelDisplay(label).replace("Sprint ", "");
+      const child = rerunInto[label];
+      const childShort = child ? sprintLabelDisplay(child).replace("Sprint ", "") : "";
+      let text = `${escHtml(display)} merged`;
+      if (mergeState === "failed" && childShort) {
+        const carried = (outcome && outcome.counts || {}).failed || 0;
+        text = `${escHtml(display)} merged \xB7 ${escHtml(childShort)} failed (${carried} carried into ${escHtml(childShort)})`;
+      }
+      resolved.push({ text: `${text} \u2014 resolved`, resolved: true });
+    }
     if (steps.length === 0) {
       steps.push({ text: "Board is up to date.", priority: "low" });
     }
-    const stepHtml = steps.map(
-      (s, i) => `<div class="smgmt-focus-step"><span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${i + 1}</span><span class="smgmt-focus-text">${s.text}</span></div>`
-    ).join("");
-    return `<div class="smgmt-focus-guide-title">Focus</div>` + stepHtml;
+    const allSteps = [
+      ...steps.map((s, i) => ({ ...s, num: i + 1 })),
+      ...resolved.map((s) => ({ ...s, num: null }))
+    ];
+    const stepHtml = allSteps.map((s) => {
+      if (s.resolved) {
+        return `<div class="smgmt-focus-step smgmt-focus-step--resolved"><span class="smgmt-focus-check" aria-hidden="true"><i class="ti ti-check"></i></span><span class="smgmt-focus-text">${s.text}</span></div>`;
+      }
+      return `<div class="smgmt-focus-step"><span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${s.num}</span><span class="smgmt-focus-text">${s.text}</span></div>`;
+    }).join("");
+    return `<div class="smgmt-focus-guide-title">What to do, in order</div>` + stepHtml;
   }
-  function _smgmtBudgetBarHtml(tickets) {
-    const sizePoints = { S: 1, M: 2, L: 3, XL: 5 };
-    let used = 0;
+  function _smgmtTicketsEstBreakdown(tickets) {
+    const sizeCounts = { S: 0, M: 0, L: 0, XL: 0 };
+    let totalMin = 0;
     for (const t of tickets || []) {
       const sz = _smgmtTicketSize(t);
-      used += sizePoints[sz] || 0;
+      if (sz && sizeCounts[sz] !== void 0)
+        sizeCounts[sz]++;
+      totalMin += _sizeMinutes(sz) || 0;
     }
-    const capacity = 10;
-    const pct = Math.min(100, Math.round(used / capacity * 100));
-    const remaining = Math.max(0, capacity - used);
-    const overBudget = used > capacity;
-    const fillClass = overBudget ? "smgmt-budget-fill smgmt-budget-fill--over" : "smgmt-budget-fill";
-    return `<div class="smgmt-budget-bar"><div class="smgmt-budget-bar-top"><span class="smgmt-budget-label">${used} / ${capacity} pts used</span><span class="smgmt-budget-headroom${overBudget ? " smgmt-budget-headroom--over" : ""}">` + (overBudget ? `${used - capacity} pts over` : `${remaining} pts remaining`) + `</span></div><div class="smgmt-budget-track"><div class="${fillClass}" style="width:${pct}%"></div></div></div>`;
+    return { totalMin, sizeCounts };
+  }
+  function _smgmtFmtBudgetHours(minutes) {
+    if (minutes >= 60) {
+      const h = minutes / 60;
+      return Number.isInteger(h) ? `${h}h` : `${Math.round(h * 10) / 10}h`;
+    }
+    return `${minutes}m`;
+  }
+  function _smgmtBudgetBarHtml(tickets, capHours = 3) {
+    const { totalMin, sizeCounts } = _smgmtTicketsEstBreakdown(tickets);
+    const capMin = capHours * 60;
+    const pct = capMin > 0 ? Math.min(100, Math.round(totalMin / capMin * 100)) : 0;
+    const headroomMin = capMin - totalMin;
+    const overBudget = totalMin > capMin;
+    const fillClass = overBudget ? "smgmt-budget-fill smgmt-budget-fill--over" : totalMin >= capMin * 0.85 ? "smgmt-budget-fill smgmt-budget-fill--warn" : "smgmt-budget-fill";
+    const breakdown = Object.entries(sizeCounts).filter(([, n]) => n > 0).map(([s, n]) => `${s}x${n}`).join(" \xB7 ");
+    let headroomText;
+    if (overBudget) {
+      headroomText = `${_smgmtFmtBudgetHours(totalMin - capMin)} over`;
+    } else if (headroomMin >= 60) {
+      const xlRoom = Math.floor(headroomMin / 60);
+      headroomText = `${_smgmtFmtBudgetHours(headroomMin)} headroom \xB7 room for ~${xlRoom} more XL`;
+    } else {
+      headroomText = `${headroomMin}m headroom`;
+    }
+    const subLine = breakdown ? `${breakdown} \u2014 ${headroomText}` : headroomText;
+    return `<div class="smgmt-budget-bar"><div class="smgmt-budget-bar-top"><span class="smgmt-budget-label">Sprint budget</span><span class="smgmt-budget-used">${_smgmtFmtBudgetHours(totalMin)} of ${capHours}h</span></div><div class="smgmt-budget-track"><div class="${fillClass}" style="width:${pct}%"></div></div><div class="smgmt-budget-sub${overBudget ? " smgmt-budget-sub--over" : headroomMin < 30 ? " smgmt-budget-sub--warn" : ""}">` + escHtml(subLine) + `</div></div>`;
   }
   function _smgmtDraftCardHtml(label, tickets) {
     const display = sprintLabelDisplay(label);
+    const shortNum = display.replace("Sprint ", "");
     const budgetBar = _smgmtBudgetBarHtml(tickets);
+    const { totalMin } = _smgmtTicketsEstBreakdown(tickets);
+    const estMeta = tickets.length > 0 ? `${tickets.length} ticket${tickets.length !== 1 ? "s" : ""} \xB7 ~${_smgmtFmtBudgetHours(totalMin)}` : "0 tickets";
     const ticketRowsHtml = (tickets || []).map((t) => {
       const sizeValue = _smgmtTicketSize(t) || "";
       const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
-      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
+      const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
+      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
     }).join("");
     const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
     const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">Draft</span><div class="smgmt-card-actions"><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot"><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal\u2026" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + // Budget bar
-    budgetBar + // Ticket rows
-    `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button></div></div>`;
+    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">Draft</span><span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
   }
   function _smgmtUpdateAncestorRow(label, outcome) {
     const card = document.getElementById(`smgmt-card-${label}`);
@@ -6354,7 +6577,8 @@ ${data.errors.join("\n")}`);
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
   globalThis._histRerunSprint = _histRerunSprint;
-  globalThis._histToggleDetails = _histToggleDetails;
+  globalThis._histToggleMetrics = _histToggleMetrics;
+  globalThis._histClearStaleLabels = _histClearStaleLabels;
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;

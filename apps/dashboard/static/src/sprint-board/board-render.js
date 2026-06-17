@@ -321,24 +321,44 @@ export function _smgmtRender(data) {
   const sectionLabel = (text, cls) =>
     `<div class="smgmt-section-label ${cls}">${text}</div>`;
 
+  const lineageRangeLabel = (labels) => {
+    if (!labels.length) return "Lineage";
+    const first = sprintLabelDisplay(labels[0]).replace("Sprint ", "");
+    const last = sprintLabelDisplay(labels[labels.length - 1]).replace("Sprint ", "");
+    return first === last ? `Lineage ${first}` : `Lineage ${first} → ${last}`;
+  };
+
   let cards = "";
 
   // Section: Lineage (collapsed ancestor sprints)
   if (lineageLabels.length > 0) {
-    cards += sectionLabel("Lineage", "smgmt-section-lineage");
+    cards += sectionLabel(lineageRangeLabel(lineageLabels), "smgmt-section-lineage");
+    cards += `<div class="smgmt-board-section smgmt-board-section--lineage">`;
     cards += lineageLabels.map(_buildCard).join("");
+    cards += `</div>`;
   }
 
   // Section: Up next (queued non-draft sprints)
   if (upNextLabels.length > 0) {
-    cards += sectionLabel("Up next", "smgmt-section-upnext");
+    const upLabel =
+      upNextLabels.length === 1
+        ? "Up next — queued to run 1"
+        : `Up next — queued to run ${upNextLabels.length}`;
+    cards += sectionLabel(upLabel, "smgmt-section-upnext");
+    cards += `<div class="smgmt-board-section smgmt-board-section--upnext">`;
     cards += upNextLabels.map(_buildCard).join("");
+    cards += `</div>`;
   }
 
   // Section: Planning (draft sprint)
   if (planningLabel) {
-    cards += sectionLabel("Planning", "smgmt-section-planning smgmt-planning-section");
+    cards += sectionLabel(
+      "Planning — building this next 1",
+      "smgmt-section-planning smgmt-planning-section",
+    );
+    cards += `<div class="smgmt-board-section smgmt-board-section--planning">`;
     cards += _buildCard(planningLabel);
+    cards += `</div>`;
   }
 
   listEl.innerHTML =
@@ -1221,8 +1241,9 @@ export function _smgmtCardHtml(
   const collapseLabel =
     (isCollapsed ? "Expand " : "Collapse ") +
     escHtml(sprintLabelDisplay(label));
+  const nextClass = isNext && !isRunning ? " sc-v5--next" : "";
   return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card sc-v5${nextClass}${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
          ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
          ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
@@ -1263,9 +1284,11 @@ export function _smgmtCardHtml(
       ${(function() {
         const _ss = _smgmtCardStatusSentence(label, {
           isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
-          isAwaitingMerge, planState, outcome, tickets,
+          isAwaitingMerge, planState, outcome, tickets, parent,
         });
-        return _ss ? `<div class="sc-status-line">${escHtml(_ss)}</div>` : "";
+        if (!_ss) return "";
+        const cls = isNext && !isRunning ? " sc-status-line--next" : "";
+        return `<div class="sc-status-line${cls}"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
       })()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -1629,7 +1652,7 @@ export function _smgmtTicketHasEstimate(t) {
 export function _smgmtCardStatusSentence(label, opts) {
   const {
     isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
-    isAwaitingMerge, planState, outcome, tickets,
+    isAwaitingMerge, planState, outcome, tickets, parent,
   } = opts;
   if (isRunning) return "";
   if (isLinger) return "Sprint finished — snapshot kept 1 hour.";
@@ -1647,12 +1670,22 @@ export function _smgmtCardStatusSentence(label, opts) {
     return "All tickets passed. Ready to merge.";
   }
   if (isNext) {
+    const n = tickets.length;
+    const parentShort = parent
+      ? sprintLabelDisplay(parent).replace("Sprint ", "")
+      : "";
+    const held =
+      n > 0 && parentShort
+        ? ` Holds the ${n} ticket${n !== 1 ? "s" : ""} carried from ${parentShort}.`
+        : n > 0
+          ? ` Holds ${n} ticket${n !== 1 ? "s" : ""}.`
+          : "";
     if (_smgmtAnySprintRunning) {
       const blocker = typeof _smgmtRunningBlockerShort === "function"
-        ? _smgmtRunningBlockerShort() : "";
-      return `Ready to run. Waiting on ${blocker}.`;
+        ? _smgmtRunningBlockerShort() : "another sprint";
+      return `Ready to run.${held} Waiting on ${blocker} to finish.`;
     }
-    return "Ready to run.";
+    return held ? `Ready to run.${held}` : "Ready to run.";
   }
   if (_smgmtAnySprintRunning) {
     return "Blocked: another sprint is running.";
@@ -1849,6 +1882,15 @@ export function _smgmtRenderBacklog(tickets) {
         : "0 tickets";
   }
 
+  const eyebrowEl = document.getElementById("bl-eyebrow");
+  if (eyebrowEl) {
+    const n = _blBacklogAll.length;
+    eyebrowEl.textContent =
+      n > 0
+        ? `Backlog ${n} · source for planning`
+        : "Backlog · source for planning";
+  }
+
   // Update bulk estimate button visibility (issue #598) — over full backlog
   const backlogBulkBtn = document.getElementById("smgmt-backlog-bulk-est-btn");
   if (backlogBulkBtn) {
@@ -1955,7 +1997,7 @@ export function _smgmtAncestorMergeState(label, outcome) {
 }
 
 /** Build carry-down summary: "3 merged · 1 reworked → 73.1". */
-export function _smgmtAncestorCarrySummary(outcome, childLabel) {
+export function _smgmtAncestorCarrySummary(outcome, childLabel, mergeState) {
   if (!outcome) return "";
   const counts = outcome.counts || {};
   const done = counts.done || 0;
@@ -1963,6 +2005,22 @@ export function _smgmtAncestorCarrySummary(outcome, childLabel) {
   const childDisplay = childLabel
     ? sprintLabelDisplay(childLabel).replace("Sprint ", "")
     : "";
+
+  if (mergeState === "failed") {
+    if (carried > 0 && childDisplay) {
+      return `${done} merged · ${carried} carried → ${childDisplay}`;
+    }
+    if (carried > 0) return `${done} merged · ${carried} carried`;
+    return `${done} merged`;
+  }
+
+  if (mergeState === "needs_merge") {
+    let summary = `${done} passed`;
+    if (carried > 0 && childDisplay) summary += ` · ${carried} reworked → ${childDisplay}`;
+    else if (carried > 0) summary += ` · ${carried} reworked`;
+    return `${summary} · not merged yet`;
+  }
+
   let summary = `${done} merged`;
   if (carried > 0 && childDisplay) summary += ` · ${carried} reworked → ${childDisplay}`;
   else if (carried > 0) summary += ` · ${carried} reworked`;
@@ -2013,26 +2071,30 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
   const safeLabel = escHtml(label);
   const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
 
-  let markIcon, markText, markCls;
+  let statusIcon, statusText, statusCls;
   if (mergeState === "merged") {
-    markIcon = "ti-git-merge";
-    markText = "Merged";
-    markCls = "slp-merged";
+    statusIcon = "ti-circle-check";
+    statusText = "Merged";
+    statusCls = "slp-merged";
   } else if (mergeState === "needs_merge") {
-    markIcon = "ti-git-pull-request";
-    markText = "Needs merge";
-    markCls = "slp-needs-merge";
+    statusIcon = "ti-alert-triangle";
+    statusText = "Needs merge";
+    statusCls = "slp-needs-merge";
   } else if (mergeState === "failed") {
-    markIcon = "ti-circle-x";
-    markText = "Failed";
-    markCls = "slp-failed";
+    statusIcon = "ti-circle-x";
+    statusText = "Failed";
+    statusCls = "slp-failed";
   } else {
-    markIcon = "ti-clock";
-    markText = "Pending";
-    markCls = "slp-pending";
+    statusIcon = "ti-clock";
+    statusText = "Pending";
+    statusCls = "slp-pending";
   }
 
-  const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto);
+  const carrySummary = _smgmtAncestorCarrySummary(outcome, rerunInto, mergeState);
+  const durationHtml =
+    outcome && outcome.wall_clock_secs != null
+      ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>`
+      : "";
   const ticketsHtml = outcome
     ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto)
     : '<div class="slp-no-tickets">Loading outcome data…</div>';
@@ -2062,12 +2124,19 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
               onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
         <i class="ti ti-chevron-right"></i>
       </button>
-      <span class="slp-merge-mark ${markCls}" title="${escHtml(markText)}">
-        <i class="ti ${markIcon}"></i>
-        <span class="slp-mark-text">${escHtml(markText)}</span>
+      <span class="slp-status-icon slp-status-icon--${escHtml(mergeState)}" title="${escHtml(statusText)}">
+        <i class="ti ${statusIcon}"></i>
       </span>
       <span class="slp-ancestor-name">${escHtml(sprintLabelDisplay(label))}</span>
+      <span class="slp-status-pill ${statusCls}">${escHtml(statusText)}</span>
       ${carrySummary ? `<span class="slp-carry-summary">${escHtml(carrySummary)}</span>` : ""}
+      ${durationHtml}
+      <button class="slp-ancestor-menu" type="button"
+              title="Sprint actions"
+              aria-label="Sprint actions"
+              onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
+        <i class="ti ti-menu-2"></i>
+      </button>
     </div>
     <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
       <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
@@ -2106,12 +2175,22 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
   const planStates = data.sprint_plan_states || {};
   const rerunInto  = data.sprint_rerun_into  || {};
   const finishedSet = new Set(data.finished_sprints || []);
+  const lineageLabels = (orderedLabels || []).filter((l) =>
+    _smgmtResolvedAncestors.has(l),
+  );
 
-  // Identify what the planner should focus on, in priority order
-  for (const label of (orderedLabels || [])) {
-    const display = sprintLabelDisplay(label).replace("Sprint ", "Sprint ");
-    if (_smgmtResolvedAncestors.has(label)) {
-      steps.push({ text: `${escHtml(display)} needs a merge decision.`, priority: "high" });
+  for (const label of lineageLabels) {
+    const outcome = _smgmtOutcomeCache[label] || null;
+    const mergeState = _smgmtAncestorMergeState(label, outcome);
+    const display = sprintLabelDisplay(label);
+    if (mergeState === "needs_merge") {
+      const c = (outcome && outcome.counts) || {};
+      const done = c.done || 0;
+      const carried = (c.failed || 0) + (c.skipped || 0);
+      steps.push({
+        text: `${escHtml(display)} needs a merge decision — ${done} merged, ${carried} reworked`,
+        priority: "high",
+      });
     }
   }
 
@@ -2131,38 +2210,107 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
 
   if (upNextCandidates.length > 0) {
     const nextDisplay = sprintLabelDisplay(upNextCandidates[0]);
-    steps.push({ text: `${escHtml(nextDisplay)} is queued and ready to run.`, priority: "med" });
+    const blocker =
+      _smgmtAnySprintRunning && typeof _smgmtRunningBlockerShort === "function"
+        ? _smgmtRunningBlockerShort()
+        : "";
+    steps.push({
+      text: blocker
+        ? `${escHtml(nextDisplay)} ready to run — blocked: ${escHtml(blocker)} running`
+        : `${escHtml(nextDisplay)} ready to run`,
+      priority: "med",
+    });
   }
 
   if (draftLabel) {
     const draftDisplay = sprintLabelDisplay(draftLabel);
-    const tickets = (bySprint[draftLabel] || []).length;
+    const draftTickets = bySprint[draftLabel] || [];
+    let usedMin = 0;
+    for (const t of draftTickets) {
+      usedMin += _sizeMinutes(_smgmtTicketSize(t)) || 0;
+    }
+    const headroomH = Math.max(0, Math.round((180 - usedMin) / 60));
+    const goalNote = "needs a goal";
     steps.push({
-      text: `Finish planning ${escHtml(draftDisplay)} — ${tickets} ticket${tickets !== 1 ? "s" : ""} added.`,
+      text: `Finish planning ${escHtml(draftDisplay)} — ${goalNote} · ${headroomH}h headroom left`,
       priority: "low",
     });
   } else {
     steps.push({ text: "No draft sprint yet — create one to start planning.", priority: "low" });
   }
 
+  const resolved = [];
+  for (const label of lineageLabels) {
+    const outcome = _smgmtOutcomeCache[label] || null;
+    const mergeState = _smgmtAncestorMergeState(label, outcome);
+    if (mergeState !== "merged" && mergeState !== "failed") continue;
+    const display = sprintLabelDisplay(label).replace("Sprint ", "");
+    const child = rerunInto[label];
+    const childShort = child
+      ? sprintLabelDisplay(child).replace("Sprint ", "")
+      : "";
+    let text = `${escHtml(display)} merged`;
+    if (mergeState === "failed" && childShort) {
+      const carried = ((outcome && outcome.counts) || {}).failed || 0;
+      text = `${escHtml(display)} merged · ${escHtml(childShort)} failed (${carried} carried into ${escHtml(childShort)})`;
+    }
+    resolved.push({ text: `${text} — resolved`, resolved: true });
+  }
+
   if (steps.length === 0) {
     steps.push({ text: "Board is up to date.", priority: "low" });
   }
 
-  const stepHtml = steps
-    .map(
-      (s, i) =>
+  const allSteps = [
+    ...steps.map((s, i) => ({ ...s, num: i + 1 })),
+    ...resolved.map((s) => ({ ...s, num: null })),
+  ];
+
+  const stepHtml = allSteps
+    .map((s) => {
+      if (s.resolved) {
+        return (
+          `<div class="smgmt-focus-step smgmt-focus-step--resolved">` +
+          `<span class="smgmt-focus-check" aria-hidden="true"><i class="ti ti-check"></i></span>` +
+          `<span class="smgmt-focus-text">${s.text}</span>` +
+          `</div>`
+        );
+      }
+      return (
         `<div class="smgmt-focus-step">` +
-        `<span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${i + 1}</span>` +
+        `<span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${s.num}</span>` +
         `<span class="smgmt-focus-text">${s.text}</span>` +
-        `</div>`,
-    )
+        `</div>`
+      );
+    })
     .join("");
 
   return (
-    `<div class="smgmt-focus-guide-title">Focus</div>` +
+    `<div class="smgmt-focus-guide-title">What to do, in order</div>` +
     stepHtml
   );
+}
+
+/**
+ * Sum estimate minutes and size breakdown for sprint budget display.
+ */
+function _smgmtTicketsEstBreakdown(tickets) {
+  const sizeCounts = { S: 0, M: 0, L: 0, XL: 0 };
+  let totalMin = 0;
+  for (const t of tickets || []) {
+    const sz = _smgmtTicketSize(t);
+    if (sz && sizeCounts[sz] !== undefined) sizeCounts[sz]++;
+    totalMin += _sizeMinutes(sz) || 0;
+  }
+  return { totalMin, sizeCounts };
+}
+
+function _smgmtFmtBudgetHours(minutes) {
+  if (minutes >= 60) {
+    const h = minutes / 60;
+    return Number.isInteger(h) ? `${h}h` : `${Math.round(h * 10) / 10}h`;
+  }
+  return `${minutes}m`;
 }
 
 /**
@@ -2170,30 +2318,47 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
  * tickets: array of ticket objects with size labels.
  * Returns an HTML string.
  */
-export function _smgmtBudgetBarHtml(tickets) {
-  const sizePoints = { S: 1, M: 2, L: 3, XL: 5 };
-  let used = 0;
-  for (const t of (tickets || [])) {
-    const sz = _smgmtTicketSize(t);
-    used += sizePoints[sz] || 0;
+export function _smgmtBudgetBarHtml(tickets, capHours = 3) {
+  const { totalMin, sizeCounts } = _smgmtTicketsEstBreakdown(tickets);
+  const capMin = capHours * 60;
+  const pct = capMin > 0 ? Math.min(100, Math.round((totalMin / capMin) * 100)) : 0;
+  const headroomMin = capMin - totalMin;
+  const overBudget = totalMin > capMin;
+  const fillClass = overBudget
+    ? "smgmt-budget-fill smgmt-budget-fill--over"
+    : totalMin >= capMin * 0.85
+      ? "smgmt-budget-fill smgmt-budget-fill--warn"
+      : "smgmt-budget-fill";
+
+  const breakdown = Object.entries(sizeCounts)
+    .filter(([, n]) => n > 0)
+    .map(([s, n]) => `${s}x${n}`)
+    .join(" · ");
+
+  let headroomText;
+  if (overBudget) {
+    headroomText = `${_smgmtFmtBudgetHours(totalMin - capMin)} over`;
+  } else if (headroomMin >= 60) {
+    const xlRoom = Math.floor(headroomMin / 60);
+    headroomText = `${_smgmtFmtBudgetHours(headroomMin)} headroom · room for ~${xlRoom} more XL`;
+  } else {
+    headroomText = `${headroomMin}m headroom`;
   }
-  const capacity = 10; // default sprint capacity in points
-  const pct = Math.min(100, Math.round((used / capacity) * 100));
-  const remaining = Math.max(0, capacity - used);
-  const overBudget = used > capacity;
-  const fillClass = overBudget ? "smgmt-budget-fill smgmt-budget-fill--over" : "smgmt-budget-fill";
+
+  const subLine = breakdown
+    ? `${breakdown} — ${headroomText}`
+    : headroomText;
 
   return (
     `<div class="smgmt-budget-bar">` +
     `<div class="smgmt-budget-bar-top">` +
-    `<span class="smgmt-budget-label">${used} / ${capacity} pts used</span>` +
-    `<span class="smgmt-budget-headroom${overBudget ? " smgmt-budget-headroom--over" : ""}">` +
-    (overBudget
-      ? `${used - capacity} pts over`
-      : `${remaining} pts remaining`) +
-    `</span>` +
+    `<span class="smgmt-budget-label">Sprint budget</span>` +
+    `<span class="smgmt-budget-used">${_smgmtFmtBudgetHours(totalMin)} of ${capHours}h</span>` +
     `</div>` +
     `<div class="smgmt-budget-track"><div class="${fillClass}" style="width:${pct}%"></div></div>` +
+    `<div class="smgmt-budget-sub${overBudget ? " smgmt-budget-sub--over" : headroomMin < 30 ? " smgmt-budget-sub--warn" : ""}">` +
+    escHtml(subLine) +
+    `</div>` +
     `</div>`
   );
 }
@@ -2205,12 +2370,19 @@ export function _smgmtBudgetBarHtml(tickets) {
  */
 export function _smgmtDraftCardHtml(label, tickets) {
   const display = sprintLabelDisplay(label);
+  const shortNum = display.replace("Sprint ", "");
   const budgetBar = _smgmtBudgetBarHtml(tickets);
+  const { totalMin } = _smgmtTicketsEstBreakdown(tickets);
+  const estMeta =
+    tickets.length > 0
+      ? `${tickets.length} ticket${tickets.length !== 1 ? "s" : ""} · ~${_smgmtFmtBudgetHours(totalMin)}`
+      : "0 tickets";
 
   const ticketRowsHtml = (tickets || [])
     .map((t) => {
       const sizeValue = _smgmtTicketSize(t) || "";
       const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
+      const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
       return (
         `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}"` +
         ` data-issue="${t.number}" data-sprint="${escHtml(label)}"` +
@@ -2220,6 +2392,7 @@ export function _smgmtDraftCardHtml(label, tickets) {
         ` rel="noopener" onclick="event.stopPropagation()">#${t.number}</a>` +
         `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` +
         sizePill +
+        estMins +
         `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0"` +
         ` title="Ticket actions" aria-haspopup="true"` +
         ` onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')">` +
@@ -2234,33 +2407,36 @@ export function _smgmtDraftCardHtml(label, tickets) {
 
   return (
     `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}">` +
-    // Header
     `<div class="smgmt-card-head">` +
+    `<button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0">` +
+    `<i class="ti ti-chevron-down"></i></button>` +
     `<span class="smgmt-sprint-name">${escHtml(display)}</span>` +
     `<span class="smgmt-draft-badge">Draft</span>` +
+    `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span>` +
     `<div class="smgmt-card-actions">` +
+    `<button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint"` +
+    ` onclick="smgmtDeleteSprint('${escHtml(label)}')">` +
+    `<i class="ti ti-trash"></i></button>` +
     `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled` +
     ` title="Enter a sprint goal to enable Run"` +
     ` onclick="smgmtRunSprint('${escHtml(label)}')">` +
     `<i class="ti ti-player-play"></i> Run Sprint</button>` +
     `</div>` +
     `</div>` +
-    // Goal slot
-    `<div class="smgmt-goal-slot">` +
+    `<div class="smgmt-goal-slot smgmt-goal-slot--dashed">` +
+    `<i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i>` +
     `<input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text"` +
-    ` placeholder="Set a sprint goal…"` +
+    ` placeholder="Set a sprint goal to run — e.g. 'Milestone burndown + activity cleanup'"` +
     ` oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')">` +
     `</div>` +
-    // Budget bar
     budgetBar +
-    // Ticket rows
     `<div class="smgmt-plan-tickets">` +
     (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet — add from Backlog below.</div>`) +
     `</div>` +
-    // + Add ticket affordance
     `<div class="smgmt-add-ticket-row">` +
     `<button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')">` +
     `<i class="ti ti-circle-plus"></i> Add ticket</button>` +
+    `<span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span>` +
     `</div>` +
     `</div>`
   );

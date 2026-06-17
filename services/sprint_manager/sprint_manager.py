@@ -267,6 +267,7 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
+from services.logging import install_orchestrator_stdout_timestamps  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
 
 try:
@@ -10137,6 +10138,7 @@ def main() -> None:
     )
 
     args = p.parse_args()
+    install_orchestrator_stdout_timestamps()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
     cfg: Optional[SprintConfig] = None

@@ -12,7 +12,7 @@ AC coverage:
           re-rendered by a separate reconciliation/sprint-failed block
   AC6  — partial "Unfinished N of M" list exists in _histWhatListHtml
   AC7  — complete/locked cards: _histLooseEndBandHtml returns '' and _histWhatListHtml returns ''
-  AC8  — Details block: _histDetailsHtml wraps stats + recon; collapsed by default via _histDetailsExpanded
+  AC8  — Metrics block: _histDetailsHtml wraps stats + recon; collapsed by default via _histMetricsExpanded
   AC9  — passed recon checks render as grey checkmarks inside Details, not as green boxes outside
   AC10 — _histStatsHtml is called ONLY inside _histDetailsHtml, not directly in _histCardHtml body
   AC11 — delete action is quiet icon: class ends in -icon or -quiet, no red color in CSS rule,
@@ -289,23 +289,23 @@ def test_ac7_what_list_returns_empty_for_locked():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# AC8 — Details block collapsed by default; contains metrics + split + gantt + recon
+# AC8 — Metrics block collapsed by default at card bottom
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_ac8_details_html_function_exists():
-    """_histDetailsHtml must exist as the collapsed Details block builder."""
+    """_histDetailsHtml must exist as the metrics/timeline block builder."""
     assert _fn_exists("_histDetailsHtml"), "_histDetailsHtml must exist"
 
 
-def test_ac8_details_expanded_tracking_set_exists():
-    """A _histDetailsExpanded Set must track which cards have Details open."""
-    assert "_histDetailsExpanded" in HISTORY_JS, \
-        "_histDetailsExpanded Set must exist to track Details expansion"
+def test_ac8_metrics_expanded_tracking_set_exists():
+    """A _histMetricsExpanded Set must track which cards have metrics open."""
+    assert "_histMetricsExpanded" in HISTORY_JS, \
+        "_histMetricsExpanded Set must exist to track metrics expansion"
 
 
-def test_ac8_details_toggle_function_exists():
-    """_histToggleDetails must exist to toggle the Details sub-section."""
-    assert _fn_exists("_histToggleDetails"), "_histToggleDetails must exist"
+def test_ac8_metrics_toggle_function_exists():
+    """_histToggleMetrics must exist to toggle the metrics sub-section."""
+    assert _fn_exists("_histToggleMetrics"), "_histToggleMetrics must exist"
 
 
 def test_ac8_details_html_contains_stats():
@@ -315,13 +315,20 @@ def test_ac8_details_html_contains_stats():
 
 
 def test_ac8_details_head_css_exists():
-    """CSS for .hist-details-head must exist (the clickable Details toggle row)."""
+    """CSS for .hist-details-head must exist (the clickable metrics toggle row)."""
     assert _css_exists(".hist-details-head"), "CSS rule .hist-details-head must exist"
 
 
 def test_ac8_details_body_css_exists():
-    """CSS for .hist-details-body must exist (the collapsible details content)."""
+    """CSS for .hist-details-body must exist (the collapsible metrics content)."""
     assert _css_exists(".hist-details-body"), "CSS rule .hist-details-body must exist"
+
+
+def test_ac8_details_metrics_label():
+    """Metrics toggle must use the mock label text."""
+    body = _fn_body("_histDetailsHtml")
+    assert "Metrics, timeline" in body, \
+        "_histDetailsHtml must label the section 'Metrics, timeline & reconciliation'"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -498,12 +505,12 @@ def test_ac14_what_list_and_issue_list_not_both_called():
 # Structural check — new functions are exported or globally accessible
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_hist_toggle_details_is_exported():
-    """_histToggleDetails must be exported or globally accessible for inline onclick."""
-    assert "export function _histToggleDetails" in HISTORY_JS \
-        or "globalThis._histToggleDetails" in HISTORY_JS \
-        or "_histToggleDetails" in HISTORY_JS, \
-        "_histToggleDetails must be exported for onclick handlers"
+def test_hist_metrics_toggle_is_exported():
+    """_histToggleMetrics must be exported or globally accessible for inline onclick."""
+    assert "export function _histToggleMetrics" in HISTORY_JS \
+        or "globalThis._histToggleMetrics" in HISTORY_JS \
+        or "_histToggleMetrics" in HISTORY_JS, \
+        "_histToggleMetrics must be exported for onclick handlers"
 
 
 def test_hist_loose_end_band_css_has_band_cta():

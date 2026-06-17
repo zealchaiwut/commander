@@ -23,6 +23,14 @@ import db as _db  # noqa: E402
 import projects as _projects_module  # noqa: E402
 import settings_repo as _settings_repo  # noqa: E402
 
+from calibration_cache_service import (  # noqa: E402
+    _calibration_empty_cache,
+    _save_calibration_cache,
+    _refresh_calibration_cache,
+    _CALIBRATION_SIZE_SETTING_KEYS,
+)
+from settings_schema import build_effective_response  # noqa: E402
+
 _PROJECTS_BASE = Path.home() / "dev"
 _SIZES = ("S", "M", "L", "XL")
 
@@ -303,4 +311,36 @@ def get_project_analytics_cost(slug: str):
         # Blended $/token rate so the capacity-bar forecast can derive a $ figure
         # (issue #801). None when no price map is configured.
         "usd_per_token": usd_per_token,
+    }
+
+
+@router.post("/api/maintenance/calibration/rebuild")
+def rebuild_calibration_cache(project: str):
+    """POST /api/maintenance/calibration/rebuild — full rescan of sprint state files.
+
+    Clears the existing calibration_cache.json and rescans all sprint-*-state.json
+    files under .commander/sprints/ and archive/ using the shared size resolver.
+    Returns a count summary. Idempotent: running twice on the same data yields the
+    same counts (issue #1332, referenced by #1334 banner AC5).
+    """
+    repo = _resolve_project_slug(project)
+    project_root = _project_root_path(repo)
+    commander = _commander_dir(project_root)
+
+    try:
+        stored = _settings_repo.get_setting("app_config", project=repo)
+    except Exception:
+        stored = {}
+    effective = build_effective_response(stored)
+    configured_minutes = {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+
+    # Clear stale cache before full rescan so no stale keys survive
+    _save_calibration_cache(commander, _calibration_empty_cache())
+    cache = _refresh_calibration_cache(project_root, configured_minutes)
+    processed_count = len(cache.get("processed") or [])
+    by_size_counts = {sz: cache["by_size"][sz]["count"] for sz in ("S", "M", "L", "XL")}
+    return {
+        "message": f"Calibration cache rebuilt: {processed_count} sample(s) processed",
+        "processed_count": processed_count,
+        "by_size_counts": by_size_counts,
     }

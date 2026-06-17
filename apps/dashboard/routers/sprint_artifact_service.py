@@ -261,6 +261,8 @@ def _compute_summary_counts(issues_raw: list[dict]) -> dict:
         agent = (iss.get("agent_status") or "").lower()
         fr = iss.get("failure_reason")
         has_agent_action = agent in ("completed", "done", "failed") or bool(fr)
+        # Unsettled if status is in not-settled columns (unconditional),
+        # or if status is empty and agent hasn't run yet.
         if status in _NOT_SETTLED_STATUSES or (not has_agent_action and status == ""):
             not_settled += 1
         if status == "uat":

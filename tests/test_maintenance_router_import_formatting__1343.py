@@ -147,8 +147,6 @@ def test_blank_line_before_grouped_include_block():
     assert include_router_idx is not None
 
     # There should be at least one blank line between them
-    # Check the line immediately after logs_service import
-    next_line_idx = logs_service_idx + 1
     blank_line_found = False
 
     for i in range(logs_service_idx + 1, include_router_idx):

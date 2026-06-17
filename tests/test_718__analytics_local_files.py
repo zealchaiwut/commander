@@ -536,3 +536,89 @@ def test_calibration_filtered_scan_includes_archive(tmp_path):
     data = _calibration(tmp_path, sprint="sprint-42").json()
     assert data["by_size"]["L"]["count"] == 1
     assert data["points"][0]["issue_number"] == 101
+
+
+# ---------------------------------------------------------------------------
+# AC (issue #1331) — size-resolution fallback hierarchy
+# ---------------------------------------------------------------------------
+
+def _write_state_with_estimates(
+    project_root: Path,
+    sprint_label: str,
+    issues: list[dict],
+    estimates: dict,
+    *,
+    start_timestamp: str = "2026-01-10T10:00:00Z",
+) -> None:
+    """Write a sprint state file that includes a top-level estimates dict."""
+    import re
+    m = re.search(r"(\d+)", sprint_label)
+    n = m.group(1) if m else sprint_label
+    sprints_dir = project_root / ".commander" / "sprints"
+    sprints_dir.mkdir(parents=True, exist_ok=True)
+    (sprints_dir / f"sprint-{n}-state.json").write_text(json.dumps({
+        "sprint_label": sprint_label,
+        "sprint_number": int(n),
+        "project": "owner/repo",
+        "start_timestamp": start_timestamp,
+        "wall_clock_secs": 86400.0,
+        "issues": issues,
+        "estimates": estimates,
+    }), encoding="utf-8")
+
+
+def test_calibration_size_from_github_label_only(tmp_path):
+    """Ticket with size-* label only (no JSON, no state.estimates) is counted."""
+    issue = _done_issue(201, coder_min=10, tester_min=5)
+    issue["labels"] = [{"name": "size-S"}]
+    _write_state(tmp_path, "sprint-1", [issue])
+    # no _write_estimate() — no JSON file
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["S"]["count"] == 1
+    assert len(data["points"]) == 1
+    assert data["points"][0]["issue_number"] == 201
+
+
+def test_calibration_size_from_state_estimates_only(tmp_path):
+    """Ticket with state.estimates entry only (no JSON, no label) is counted."""
+    issue = _done_issue(202, coder_min=20, tester_min=5)
+    _write_state_with_estimates(tmp_path, "sprint-1", [issue],
+                                estimates={"202": {"size": "M"}})
+    # no _write_estimate() — no JSON file, no label in issue
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["M"]["count"] == 1
+    assert len(data["points"]) == 1
+    assert data["points"][0]["issue_number"] == 202
+
+
+def test_calibration_json_at_canonical_path_counts(tmp_path):
+    """Ticket with JSON at canonical estimates_dir (the corrected write path) is counted."""
+    issue = _done_issue(203, coder_min=15, tester_min=5)
+    _write_state(tmp_path, "sprint-1", [issue])
+    _write_estimate(tmp_path, 203, "L")
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["L"]["count"] == 1
+
+
+def test_calibration_json_wins_over_label_and_state_estimates(tmp_path):
+    """JSON at canonical path takes precedence over size-* label and state.estimates."""
+    issue = _done_issue(204, coder_min=10, tester_min=5)
+    issue["labels"] = [{"name": "size-S"}]
+    _write_state_with_estimates(tmp_path, "sprint-1", [issue],
+                                estimates={"204": {"size": "S"}})
+    _write_estimate(tmp_path, 204, "XL")  # JSON says XL — must win
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["XL"]["count"] == 1
+    assert data["by_size"]["S"]["count"] == 0
+
+
+def test_calibration_state_estimates_wins_over_label(tmp_path):
+    """state.estimates wins over size-* label when no JSON."""
+    issue = _done_issue(205, coder_min=8, tester_min=2)
+    issue["labels"] = [{"name": "size-S"}]
+    _write_state_with_estimates(tmp_path, "sprint-1", [issue],
+                                estimates={"205": {"size": "M"}})
+    # no JSON — state.estimates should win over label
+    data = _calibration(tmp_path).json()
+    assert data["by_size"]["M"]["count"] == 1
+    assert data["by_size"]["S"]["count"] == 0

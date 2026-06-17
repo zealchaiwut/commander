@@ -9168,24 +9168,62 @@ def _calibration_add_sample(
         cache["points"].append(point)
 
 
+def _resolve_calibration_size(
+    issue_num: int | None,
+    estimates_dir: Path,
+    state_estimates: dict,
+    issue_labels: list[dict],
+) -> str | None:
+    """Resolve size for calibration with priority: JSON → state.estimates → size-* label.
+
+    No live GitHub call — all three sources are local.
+    """
+    # 1. Canonical estimate JSON file (written by estimate_issue.py to project root)
+    if issue_num is not None and estimates_dir.is_dir():
+        est_file = estimates_dir / f"issue-{issue_num}.json"
+        if est_file.is_file():
+            try:
+                sz = json.loads(est_file.read_text(encoding="utf-8")).get("size")
+                if sz in _CALIBRATION_SIZES:
+                    return sz
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    # 2. state.estimates[issue_num] from the sprint state file
+    if issue_num is not None:
+        entry = state_estimates.get(issue_num) or state_estimates.get(str(issue_num))
+        if isinstance(entry, dict):
+            sz = entry.get("size")
+            if sz in _CALIBRATION_SIZES:
+                return sz
+
+    # 3. size-* label stored in the issue dict (no live GitHub call)
+    for lbl in issue_labels:
+        name = lbl.get("name", "")
+        if name.startswith("size-"):
+            sz = name[5:].upper()
+            if sz in _CALIBRATION_SIZES:
+                return sz
+
+    return None
+
+
 def _calibration_issue_sample(
     issue: dict,
     estimates_dir: Path,
     configured_minutes: dict[str, int],
+    state_estimates: dict | None = None,
 ) -> tuple[str, float, dict] | None:
     """Return (size, actual_minutes, point_dict) for one completed ticket."""
     if issue.get("status") not in _CALIBRATION_DONE_STATUSES:
         return None
     issue_num = issue.get("number")
-    size = None
-    if issue_num is not None and estimates_dir.is_dir():
-        est_file = estimates_dir / f"issue-{issue_num}.json"
-        if est_file.is_file():
-            try:
-                est = json.loads(est_file.read_text(encoding="utf-8"))
-                size = est.get("size")
-            except (json.JSONDecodeError, OSError):
-                size = None
+    size = _resolve_calibration_size(
+        issue_num,
+        estimates_dir,
+        state_estimates or {},
+        issue.get("labels") or [],
+    )
     if size not in _CALIBRATION_SIZES:
         return None
 
@@ -9225,6 +9263,7 @@ def _calibration_absorb_state_file(
     except (json.JSONDecodeError, OSError):
         return False
 
+    state_estimates = state_data.get("estimates") or {}
     changed = False
     for issue in state_data.get("issues", []):
         issue_num = issue.get("number")
@@ -9233,7 +9272,8 @@ def _calibration_absorb_state_file(
         key = _calibration_state_key(state_file, sprints_dir, issue_num)
         if key in processed:
             continue
-        sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
+        sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes,
+                                           state_estimates=state_estimates)
         if sample is None:
             continue
         size, actual_minutes, point = sample
@@ -9349,8 +9389,10 @@ def _compute_calibration_from_files(
             if until_dt and start_dt > until_dt:
                 continue
 
+        state_estimates = state_data.get("estimates") or {}
         for issue in state_data.get("issues", []):
-            sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
+            sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes,
+                                               state_estimates=state_estimates)
             if sample is None:
                 continue
             size, actual_minutes, point = sample
@@ -11794,6 +11836,7 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
     stderr_bytes: bytes = b""
     returncode: int = -1
 
+    _canonical_commander = _commander_dir(_project_root_path(repo))
     try:
         cmd = [
             sys.executable,
@@ -11802,6 +11845,7 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
             "--repo", repo,
             "--save-comment",
             "--save-label",
+            "--commander-dir", str(_canonical_commander),
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -11937,6 +11981,7 @@ async def _run_bulk_estimator_for_ticket(
     stderr_bytes: bytes = b""
     returncode: int = -1
 
+    _canonical_commander = _commander_dir(_project_root_path(repo))
     try:
         async with semaphore:
             cmd = [
@@ -11946,6 +11991,7 @@ async def _run_bulk_estimator_for_ticket(
                 "--repo", repo,
                 "--save-comment",
                 "--save-label",
+                "--commander-dir", str(_canonical_commander),
             ]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

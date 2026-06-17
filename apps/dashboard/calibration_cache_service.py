@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 _CALIBRATION_SIZES = ("S", "M", "L", "XL")
-_CALIBRATION_CACHE_VERSION = 1
+_CALIBRATION_CACHE_VERSION = 2
 _CALIBRATION_DONE_STATUSES = frozenset({"done", "uat", "merged", "passed"})
 _CALIBRATION_SIZE_SETTING_KEYS = {
     "S": "estimation_s_minutes",

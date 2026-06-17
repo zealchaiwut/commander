@@ -10,12 +10,10 @@ AC coverage:
 from __future__ import annotations
 
 import ast
-import json
 import py_compile
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -238,7 +236,7 @@ class TestNoDirectBulkGetRoutesInServerPy:
             if '@app.get(' in line and '/api/tickets/bulk/' in line:
                 violations.append(f"Line {i}: {line.strip()}")
         assert not violations, (
-            f"server.py must not define GET routes for /api/tickets/bulk/*:\n"
+            "server.py must not define GET routes for /api/tickets/bulk/*:\n"
             + "\n".join(violations)
         )
 

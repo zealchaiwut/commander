@@ -190,6 +190,10 @@ Index: `(repo, state)`.
 `sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
 
+**Run-artifact columns (issue #1160).** `sprints` also carries the ingested run artifact, written by `ingest_sprint_run_artifact()` at end-of-run and on lazy ingest: `issues_json`, `tokens`, `wall_clock_secs`, `reconciliation_json`, `summary_issue_url`, `summary_path`, `pr_number`, `post_sprint_json`, `estimate_accuracy`, `run_ingested_at`. The Sprint History / summary read path reads these from SQLite only — no disk fallback (issue #1161); on a cache miss it triggers a lazy ingest and returns the ingested row rather than reading raw disk (issue #1160).
+
+**Denormalized summary counts (issues #1162, #1163).** `summary_settled_done`, `summary_uat_count`, `summary_failure_count` — all `INTEGER NOT NULL DEFAULT 0`. Materialized on run finish so the finish-card / history panes render counts without recomputation. The reconcile job repairs stale counts via `update_sprint_run_counts(label, issues_json, settled_done, uat_count, failure_count)`, which overwrites `issues_json` plus the three count columns in one write.
+
 **DB is the sole source of truth for lifecycle state (sprint 74.2).** plan.json / labels / PID files are no longer read as state.
 
 - **Read:** `sprint_state.current(label)` is the only sanctioned reader (issue #1091). It returns `canonical_lifecycle(db.get_sprint(label)["state"])` — zero disk reads, zero GitHub label lookups, zero fallback. Missing row → `"unknown"`. The History pane and `_derive_outcome_lifecycle` were migrated onto it (issues #1092, #1093); GET endpoints no longer mutate plan.json (issue #1096). See `docs/architecture/sprint-lifecycle.md`.

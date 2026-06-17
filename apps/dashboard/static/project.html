@@ -2180,6 +2180,19 @@
       flex: 1; font-size: 13px; font-weight: 500;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .hist-irow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .hist-irow-line { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .hist-irow-line .hist-irow-title { flex: 1; }
+    .hist-irow-dur {
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+      font-size: 10px; color: var(--text-sub); flex: none; text-align: right; white-space: nowrap;
+    }
+    .hist-irow-reason { font-size: 11px; color: var(--red); line-height: 1.35; padding-left: 57px; }
+    .hist-irow-log {
+      font-size: 11px; color: var(--text-sub); text-decoration: none; flex: none;
+      font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+    }
+    .hist-irow-log:hover { color: var(--blue); text-decoration: underline; }
     .hist-metrics-body .hist-post-sprint { margin-top: 14px; border: 1px solid var(--border); border-radius: 8px; }
     .hist-metrics-body .recon { margin-top: 12px; }
       display: flex; flex-direction: column; gap: 6px;

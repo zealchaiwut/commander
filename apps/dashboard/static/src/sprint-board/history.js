@@ -37,6 +37,13 @@ let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 let _histFoldSize = 10;
 const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
 
+// Stale-while-revalidate cache for the ledger feed (Tier 1/2 load perf).
+let _histLedgerCacheRepo = '';
+let _histLedgerCacheAt = 0;
+const _HIST_LEDGER_TTL_MS = 45000;
+let _histLedgerInflight = null;
+let _histRenderRaf = 0;
+
 // Stale-branch scan (issue #808): label -> { sprint, count, branches[],
 // merged[], unmerged[] }, populated by _histScanStale() and consumed by the
 // per-row amber chip. Scan/cleanup are repo actions, so a chip renders on a
@@ -675,10 +682,28 @@ async function _histLoadRunStats(label) {
     const resp = await fetch(url);
     if (!resp.ok) return;
     _histRunStats[label] = await resp.json();
-    _histRenderLedger(_histLedgerData);
+    _histScheduleLedgerRender();
   } catch (_) {
     /* transient — leave uncached so a later expand retries */
   }
+}
+
+function _histScheduleLedgerRender() {
+  if (_histRenderRaf) return;
+  _histRenderRaf = requestAnimationFrame(() => {
+    _histRenderRaf = 0;
+    _histRenderLedger(_histLedgerData);
+  });
+}
+
+function _histShowLedgerSkeleton() {
+  const el = document.getElementById('hist-ledger');
+  if (!el || (_histLedgerData && _histLedgerData.length)) return;
+  el.innerHTML = `<div class="hist-ledger-skeleton" aria-busy="true" aria-label="Loading sprint history">
+    <div class="hist-skeleton-card"></div>
+    <div class="hist-skeleton-card"></div>
+    <div class="hist-skeleton-card"></div>
+  </div>`;
 }
 
 // Post-sprint reconciliation (issue #856): the loose-ends checklist surfaced on
@@ -1849,31 +1874,88 @@ export function _histRerunSprint(label) {
   }
 }
 
-export async function _histLoadLedger(repo) {
+export function _histPrefetchLedger(repo) {
+  if (!repo) return;
+  const hasData = (_histLedgerData || []).length > 0;
+  const fresh = repo === _histLedgerCacheRepo
+    && (Date.now() - _histLedgerCacheAt) < _HIST_LEDGER_TTL_MS
+    && hasData;
+  if (fresh || _histLedgerInflight) return;
+  _histLoadLedger(repo, { background: true });
+}
+
+export async function _histLoadLedger(repo, opts) {
+  opts = opts || {};
   if (!repo) return;
   const el = document.getElementById('hist-ledger');
-  try {
-    // Read the fold size from project settings so re-opening / reloading the
-    // History tab re-partitions whenever `history_fold_size` changes (AC7).
-    try {
-      const sresp = await fetch(`/api/projects/${encodeURIComponent(_slug)}/settings`);
-      if (sresp.ok) {
-        const settings = await sresp.json();
-        const fs = parseInt(settings.history_fold_size, 10);
-        if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
-      }
-    } catch (_) { /* fall back to the default fold size */ }
-    const resp = await fetch('/api/sprints/history?limit=50&project=' + encodeURIComponent(repo || ''));
-    if (!resp.ok) return;
-    const data = await resp.json();
-    let sprints = data.sprints || [];
-    _histLedgerData = sprints;
-    globalThis._histLedgerData = sprints;
-    _histRenderLedger(sprints);
-    _smgmtUpdateSubnav();   // refresh the needs-action badge from fresh states
-  } catch (_) {
-    if (el) el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+  const force = opts.force === true;
+  const background = opts.background === true;
+  const hasCache = repo === _histLedgerCacheRepo && (_histLedgerData || []).length > 0;
+  const fresh = !force && hasCache
+    && (Date.now() - _histLedgerCacheAt) < _HIST_LEDGER_TTL_MS;
+
+  if (fresh) {
+    if (!background && el && !el.querySelector('.hist-card, .hist-sprint-group, .hist-fold')) {
+      _histRenderLedger(_histLedgerData);
+    }
+    return;
   }
+
+  if (_histLedgerInflight) {
+    await _histLedgerInflight;
+    if (!background && (_histLedgerData || []).length) {
+      _histRenderLedger(_histLedgerData);
+      _smgmtUpdateSubnav();
+    }
+    return;
+  }
+
+  if (!hasCache && !background) _histShowLedgerSkeleton();
+  else if (hasCache && !background) _histRenderLedger(_histLedgerData);
+
+  const loadPromise = (async () => {
+    try {
+      const settingsUrl = `/api/projects/${encodeURIComponent(_slug)}/settings`;
+      const historyUrl = '/api/sprints/history?limit=50&project=' + encodeURIComponent(repo || '');
+      const [sresp, resp] = await Promise.all([
+        fetch(settingsUrl).catch(() => null),
+        fetch(historyUrl),
+      ]);
+      if (sresp && sresp.ok) {
+        try {
+          const settings = await sresp.json();
+          const fs = parseInt(settings.history_fold_size, 10);
+          if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
+        } catch (_) { /* keep current fold size */ }
+      }
+      if (!resp.ok) {
+        if (!hasCache && el && !background) {
+          el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+        }
+        return;
+      }
+      const data = await resp.json();
+      const sprints = data.sprints || [];
+      _histLedgerData = sprints;
+      globalThis._histLedgerData = sprints;
+      _histLedgerCacheRepo = repo;
+      _histLedgerCacheAt = Date.now();
+      const histOpen = document.getElementById('smgmt-subview-history')?.classList.contains('show');
+      if (!background || histOpen) {
+        _histRenderLedger(sprints);
+        _smgmtUpdateSubnav();
+      }
+    } catch (_) {
+      if (!hasCache && el && !background) {
+        el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+      }
+    } finally {
+      if (_histLedgerInflight === loadPromise) _histLedgerInflight = null;
+    }
+  })();
+
+  _histLedgerInflight = loadPromise;
+  await loadPromise;
 }
 function _histNextChildLabel(parentLabel) {
   return _nextSprintSublabel(parentLabel);

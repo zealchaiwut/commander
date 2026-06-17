@@ -160,6 +160,7 @@ export async function _bcConfirm() {
   const repoName = parts.slice(1).join('/');
   const label = _bcLabel;
   const allTickets = _bcPreview.all_tickets || [];
+  let mergeSteps = _bcPreview.merge_steps || [];
   const settleSteps = 2; // mark sprints completed + refresh board
 
   const confirmBtn = document.getElementById('bc-confirm-btn');
@@ -169,7 +170,6 @@ export async function _bcConfirm() {
 
   const refreshLabel = 'Refreshing board…';
   let doneSteps = 0;
-  let mergeSteps = _bcPreview.merge_steps || [];
 
   const _bcRecalcTotal = (pendingMerges) =>
     doneSteps + pendingMerges.length + allTickets.length + settleSteps;

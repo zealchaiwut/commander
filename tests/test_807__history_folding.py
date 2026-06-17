@@ -39,6 +39,7 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 PROJECT_HTML = (DASHBOARD_DIR / "static" / "project.html").read_text(encoding="utf-8")
+HISTORY_JS = (DASHBOARD_DIR / "static/src/sprint-board/history.js").read_text(encoding="utf-8")
 
 
 # ──────────────────────────── helpers ────────────────────────────────────────
@@ -223,17 +224,19 @@ def test_ac6_fold_expanded_state_is_tracked_separately():
 # ═══════════════════ AC7 — re-partition on setting change ════════════════════
 
 def test_ac7_loader_reads_the_fold_size_setting():
-    load = _fn_body("_histLoadLedger")
+    load = _fn_body("_histLoadLedger", HISTORY_JS)
     assert "/api/projects/" in load and "settings" in load, \
         "the loader fetches project settings"
     assert "history_fold_size" in load, \
         "the loader reads history_fold_size from settings"
+    assert "Promise.all" in load, \
+        "settings and history fetches run in parallel"
 
 
 def test_ac7_fold_size_flows_into_the_partition():
     """The fetched fold size is what the renderer partitions by — so changing the
     setting and reloading re-partitions history."""
-    assert "_histFoldSize" in PROJECT_HTML, "a module-level fold size is held"
+    assert "_histFoldSize" in HISTORY_JS, "a module-level fold size is held"
     render = _fn_body("_histRenderLedger")
     assert "_histFoldSize" in render or "_histPartition" in render, \
         "the renderer partitions using the current fold size"
@@ -242,7 +245,7 @@ def test_ac7_fold_size_flows_into_the_partition():
 def test_ac7_fold_size_has_a_sane_default_in_js():
     """If settings are unavailable the JS still falls back to 10 (mirrors AC1)."""
     # The module-level initializer pins the default to 10.
-    m = re.search(r"_histFoldSize\s*=\s*(\d+)", PROJECT_HTML)
+    m = re.search(r"_histFoldSize\s*=\s*(\d+)", HISTORY_JS)
     assert m is not None, "history fold size has a JS default"
     assert m.group(1) == "10", "the JS default fold size is 10"
 

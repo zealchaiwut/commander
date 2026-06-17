@@ -10,11 +10,44 @@ a later wave.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
+from . import backlog_cleanup_service
 from . import tickets_service
 
 router = APIRouter(tags=["tickets"])
+
+
+class BacklogCleanupBody(BaseModel):
+    confirmed: bool = False
+    issue_numbers: list[int] = []
+
+
+@router.post("/api/projects/{owner}/{repo_name}/backlog/cleanup-preview")
+def backlog_cleanup_preview(owner: str, repo_name: str):
+    """Scan open backlog for test tickets and stale follow-ups to close."""
+    repo = f"{owner}/{repo_name}"
+    try:
+        return backlog_cleanup_service.scan_backlog(repo)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/projects/{owner}/{repo_name}/backlog/cleanup")
+def backlog_cleanup(owner: str, repo_name: str, body: BacklogCleanupBody):
+    """Close selected backlog cleanup candidates on GitHub."""
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Request must have confirmed=true")
+    repo = f"{owner}/{repo_name}"
+    numbers = body.issue_numbers or []
+    if not numbers:
+        preview = backlog_cleanup_service.scan_backlog(repo)
+        numbers = [c["number"] for c in preview.get("candidates") or []]
+    try:
+        return backlog_cleanup_service.apply_backlog_cleanup(repo, numbers)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/tickets/{issue_id}/approve")

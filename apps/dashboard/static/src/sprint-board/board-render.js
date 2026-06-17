@@ -163,25 +163,46 @@ function _smgmtChildrenForParent(parentLabel, parents, order) {
   return [...new Set([...fromMeta, ...fromLabel])];
 }
 
+export function _smgmtCompareSprintLabels(a, b) {
+  const ka = _smgmtSprintLabelSortKey(a);
+  const kb = _smgmtSprintLabelSortKey(b);
+  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+    const d = (ka[i] ?? -1) - (kb[i] ?? -1);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 /** Latest child sub-sprint for a parent label present in the current order. */
 export function _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order) {
   if (rerunInto && rerunInto[parentLabel]) return rerunInto[parentLabel];
   const children = _smgmtChildrenForParent(parentLabel, parents, order);
   if (!children.length) return null;
-  return [...children].sort((a, b) => {
-    const ka = _smgmtSprintLabelSortKey(a);
-    const kb = _smgmtSprintLabelSortKey(b);
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const d = (ka[i] ?? -1) - (kb[i] ?? -1);
-      if (d !== 0) return d;
-    }
-    return 0;
-  })[children.length - 1];
+  return [...children].sort(_smgmtCompareSprintLabels)[children.length - 1];
+}
+
+/** Newest label in a base sprint lineage (sprint-N and all sprint-N.M siblings). */
+export function _smgmtLatestLineageLabel(baseLabel, parents, rerunInto, order) {
+  const base = _smgmtSprintBaseLabel(baseLabel);
+  const members = (order || []).filter(
+    (l) => l === base || (_smgmtSprintBaseLabel(l) === base && _smgmtSprintSubIndex(l) > 0),
+  );
+  if (!members.length) return null;
+  return [...members].sort(_smgmtCompareSprintLabels)[members.length - 1];
 }
 
 /** Collapse parent into Lineage whenever a child sub-sprint exists in order. */
 export function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
   return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+}
+
+/** Lineage row: parent when a child exists, or superseded rerun siblings (85.1 when 85.2 exists). */
+export function _smgmtShouldCollapseToLineage(label, parents, rerunInto, order) {
+  if (_smgmtShouldCollapseParent(label, parents, rerunInto, order)) return true;
+  const base = _smgmtSprintBaseLabel(label);
+  const latest = _smgmtLatestLineageLabel(base, parents, rerunInto, order);
+  if (!latest || label === latest) return false;
+  return _smgmtCompareSprintLabels(label, latest) < 0;
 }
 
 export function _smgmtRender(data) {
@@ -236,10 +257,11 @@ export function _smgmtRender(data) {
 
   // When a child sub-sprint exists (e.g. 85.1), collapse the parent (85) into
   // the Lineage section — do not show it in Draft / Ready to merge (issue #512).
+  // Superseded siblings (85.1 when 85.2 is the latest) also belong in Lineage.
   _smgmtResolvedAncestors = new Set();
   const orderedLabels = orderedLabelsRaw.filter((label) => {
     if (
-      _smgmtShouldCollapseParent(label, _sprintParents, _rerunInto, orderedLabelsRaw)
+      _smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)
     ) {
       _smgmtResolvedAncestors.add(label);
       return true;
@@ -305,12 +327,21 @@ export function _smgmtRender(data) {
     const tickets = bySprint[label] || [];
 
     if (_smgmtResolvedAncestors.has(label)) {
-      const childLabel = _smgmtChildSprintLabel(
+      let childLabel = _smgmtChildSprintLabel(
         label,
         _sprintParents,
         _rerunInto,
         orderedLabelsRaw,
       );
+      if (!childLabel) {
+        const latest = _smgmtLatestLineageLabel(
+          _smgmtSprintBaseLabel(label),
+          _sprintParents,
+          _rerunInto,
+          orderedLabelsRaw,
+        );
+        if (latest && latest !== label) childLabel = latest;
+      }
       const outcome = _smgmtOutcomeCache[label] || null;
       return (
         `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +

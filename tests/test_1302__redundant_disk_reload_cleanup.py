@@ -15,8 +15,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 
@@ -121,7 +119,6 @@ class TestBulkGetJobNotFound:
         empty_dir = tmp_path / "bulk-jobs"
         empty_dir.mkdir(parents=True)
 
-        import httpx
         from fastapi.testclient import TestClient
 
         with patch("server._bulk_jobs_dir", return_value=empty_dir):
@@ -141,7 +138,6 @@ class TestBulkGetJobNotFound:
         empty_dir = tmp_path / "bulk-jobs"
         empty_dir.mkdir(parents=True)
 
-        import httpx
         from fastapi.testclient import TestClient
 
         with patch("server._bulk_jobs_dir", return_value=empty_dir):

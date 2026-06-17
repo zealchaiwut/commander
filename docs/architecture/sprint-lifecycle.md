@@ -7,8 +7,9 @@
 > sprint-68.x retrospective (issue #894 / sprint-68.6 ran three times on one
 > label and showed Completed, Cancelled, 0 tickets, and a 44-minute wall time
 > simultaneously across panes). This document is the contract for the fix
-> tickets; companion to [`boundaries.md`](./boundaries.md) and
-> [`frontend-map.md`](./frontend-map.md).
+> tickets; companion to [`boundaries.md`](./boundaries.md),
+> [`frontend-map.md`](./frontend-map.md), and the store-level contract in
+> [`1_state-and-source-of-truth.md`](./1_state-and-source-of-truth.md) §§ 1.5–1.7.
 
 ## Canonical Read Contract (issue #1091)
 

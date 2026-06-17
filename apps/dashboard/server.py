@@ -8210,25 +8210,9 @@ def _state_data_is_dry_run_only(state_data: dict) -> bool:
 
 
 def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
-    """True when outcome data for *this* label exists (not a sibling/base run)."""
-    plan = _read_plan_json(project_root, sprint_label)
-    if plan and plan.get("state") in ("planning", "draft", "planned"):
-        return False
-
+    """True when run artifacts for *this* label are ingested in the DB."""
     row = db.get_sprint(sprint_label)
-    if row and row.get("run_ingested_at"):
-        return True
-
-    from routers import sprint_artifact_service  # noqa: PLC0415
-    sprints_dir = _commander_dir(project_root) / "sprints"
-    resolved = sprint_artifact_service.resolve_state_path(sprints_dir, sprint_label)
-    if resolved is None:
-        return False
-    try:
-        state_data = json.loads(resolved.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return True
-    return not _state_data_is_dry_run_only(state_data)
+    return bool(row and row.get("run_ingested_at"))
 
 
 def _outcome_from_ingested_row(
@@ -8323,7 +8307,12 @@ def _outcome_from_ingested_row(
         sprint_status = "completed"
 
     done_count = sum(1 for i in result_issues if i["outcome"] == "done")
-    failed_count = sum(1 for i in result_issues if i["outcome"] == "failed")
+    # Prefer materialized summary_failure_count when present (AC4 — stable read
+    # without re-derivation from issues_json); fall back to counting result_issues.
+    _mat_failure = row.get("summary_failure_count")
+    failed_count = _mat_failure if _mat_failure is not None else sum(
+        1 for i in result_issues if i["outcome"] == "failed"
+    )
     skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
 
     surl = enrich.get("summary_issue_url")
@@ -8455,238 +8444,7 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if ingested and ingested.get("run_ingested_at"):
         return _outcome_from_ingested_row(ingested, sprint_label, project)
 
-    m = re.search(r"(\d+)", sprint_label)
-    n = m.group(1) if m else sprint_label
-
-    # Check sprint-N.json for a stopped status (may exist even without a state file)
-    json_path = _sprint_json_path(project_root, sprint_label)
-    sprint_json = _sprint_json_read(json_path)
-    is_cancelled: bool = sprint_json.get("status") in ("cancelled", "needs_rework")
-
-    state_path = commander / "sprints" / f"sprint-{n}-state.json"
-    from routers import sprint_artifact_service  # noqa: PLC0415
-    resolved = sprint_artifact_service.resolve_state_path(commander / "sprints", sprint_label)
-    if resolved is not None:
-        state_path = resolved
-    if not state_path.exists():
-        if is_cancelled:
-            return {"sprint_label": sprint_label, "state": "cancelled",
-                    "lifecycle": "needs_rework",
-                    "end_reason": sprint_json.get("end_reason")}
-        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
-
-    try:
-        state_data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        raise HTTPException(500, detail=f"Could not read state file: {e}")
-
-    if _state_data_is_dry_run_only(state_data):
-        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (dry-run only)")
-
-    plan = _read_plan_json(project_root, sprint_label)
-    plan_state = (plan.get("state") or "").lower() if plan else ""
-    if plan_state in ("draft", "planned", "planning"):
-        raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
-
-    # Lazy-ingest (lifecycle P3 drift fix): a finished run reached this disk
-    # fallback because its artifacts were never ingested (run_ingested_at is
-    # null — e.g. finished pre-P3 or the end-of-run ingest was missed). Persist
-    # the disk state now so the NEXT read takes the DB path above and disk/DB
-    # counts can no longer diverge (the "0 tickets in History" class, #894).
-    # Guard: only when a sprints row already exists (UPDATE path), so we never
-    # mint a bogus draft row for a finished sprint. Best-effort — an ingest
-    # hiccup must never break outcome serving.
-    if ingested and not ingested.get("run_ingested_at"):
-        try:
-            db.ingest_sprint_run_artifact(sprint_label, state_data, project=project)
-        except Exception:
-            pass
-
-    def _parse_iso(s: Optional[str]) -> Optional[float]:
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s.rstrip("Z"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except Exception:
-            return None
-
-    def _fmt_iso(ts: Optional[float]) -> Optional[str]:
-        if ts is None:
-            return None
-        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
-
-    # Derive sprint status from summary file (most authoritative)
-    sprint_status: Optional[str] = None
-    sprints_dir = commander / "sprints"
-    for sf in sorted(
-        list((commander / "sprints").glob(f"{sprint_label}-summary-*.md"))
-        + list((commander / "sprints").glob(f"sprint-{n}-summary-*.md")),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    ):
-        try:
-            meta = _parse_summary_file(sf)
-            raw = (meta.get("status") or "").lower()
-            if raw in ("complete", "completed"):
-                sprint_status = "completed"
-            elif raw in ("stopped", "failed", "cancelled"):
-                sprint_status = "stopped"
-                if raw == "cancelled":
-                    is_cancelled = True
-        except Exception:
-            pass
-        break
-
-    # Fallback: derive from issue statuses — if all are done/skipped and no failures, completed
-    issues_raw = state_data.get("issues", [])
-    if sprint_status is None and issues_raw:
-        has_pending = any(i.get("status") == "pending" for i in issues_raw)
-        has_failed = any(
-            i.get("agent_status") == "failed" or i.get("failure_reason")
-            for i in issues_raw
-        )
-        if not has_pending:
-            sprint_status = "stopped" if has_failed else "completed"
-
-    if sprint_status is None:
-        raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
-
-    # Derive 4-state outcome for pane coloring
-    if plan_state == "needs_rework":
-        pane_state = "has_rework"
-    elif is_cancelled:
-        pane_state = "cancelled"
-    elif _has_rework_tickets(sprint_label, project):
-        pane_state = "has_rework"
-    else:
-        pane_state = "completed"
-
-    # Build issue outcome list
-    result_issues = []
-    ended_ts: Optional[float] = None
-    for iss in issues_raw:
-        start_ts = _parse_iso(iss.get("coder_started_at"))
-        end_ts = (
-            _parse_iso(iss.get("tester_finished_at"))
-            or _parse_iso(iss.get("status_changed_at"))
-        )
-        elapsed_secs = None
-        if start_ts is not None and end_ts is not None:
-            elapsed_secs = max(0.0, end_ts - start_ts)
-
-        if end_ts and (ended_ts is None or end_ts > ended_ts):
-            ended_ts = end_ts
-
-        iss_status = iss.get("status", "pending")
-        iss_agent = iss.get("agent_status")
-        failure_reason = iss.get("failure_reason")
-
-        if iss_status == "done":
-            outcome = "done"
-        elif iss_agent == "failed" or failure_reason:
-            outcome = "failed"
-        elif iss_status == "skipped":
-            outcome = "skipped"
-        else:
-            outcome = "skipped"
-
-        result_issues.append({
-            "number":       iss.get("number"),
-            "title":        iss.get("title", ""),
-            "outcome":      outcome,
-            "elapsed_secs": round(elapsed_secs) if elapsed_secs is not None else None,
-            "failure_reason": failure_reason,
-        })
-
-    # Retroactive label override: if an issue is marked "failed" in state.json but
-    # currently carries a UAT label on GitHub (manually applied after the sprint ran),
-    # treat it as "done" so the card reflects the true current state.
-    failed_nums = [i["number"] for i in result_issues if i["outcome"] == "failed" and i["number"]]
-    if failed_nums:
-        try:
-            repo = github_client.get_repo_for_operation(project)
-            r = subprocess.run(
-                ["gh", "issue", "list", "--repo", repo,
-                 "--state", "all", "--label", "UAT",
-                 "--json", "number",
-                 "--limit", "200"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if r.returncode == 0:
-                uat_nums = {i["number"] for i in (json.loads(r.stdout) or [])}
-                for ri in result_issues:
-                    if ri["outcome"] == "failed" and ri["number"] in uat_nums:
-                        ri["outcome"] = "done"
-        except Exception:
-            pass
-
-    # Issues moved to a child re-run label are not parent failures anymore.
-    on_label_nums: set[int] | None = None
-    try:
-        on_label_nums = {iss["number"] for iss in _get_sprint_issues(project, sprint_label)}
-    except Exception:
-        pass
-    if on_label_nums is not None:
-        for ri in result_issues:
-            if ri["outcome"] == "failed" and ri["number"] not in on_label_nums:
-                ri["outcome"] = "rerun"
-
-    # Counts (rerun/moved tickets are not failures on this label)
-    done_count    = sum(1 for i in result_issues if i["outcome"] == "done")
-    failed_count  = sum(1 for i in result_issues if i["outcome"] == "failed")
-    skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
-
-    # Retroactive override may have cleared all failures — upgrade stopped → completed
-    if sprint_status == "stopped" and failed_count == 0:
-        sprint_status = "completed"
-
-    # Log line count from most recent run log
-    log_line_count = 0
-    log_dir = commander / "logs"
-    if log_dir.exists():
-        candidates = sorted(
-            log_dir.glob(f"sprint-run-{sprint_label}-*.log"),
-            key=lambda p: p.stat().st_mtime, reverse=True,
-        )
-        if candidates:
-            try:
-                log_line_count = len(candidates[0].read_text(encoding="utf-8", errors="replace").splitlines())
-            except OSError:
-                pass
-
-    # Sprint Summary issue (issue #613: finished outcome band links)
-    summary_issue_url: Optional[str] = state_data.get("summary_issue_url")
-    summary_issue_num: Optional[int] = None
-    if summary_issue_url:
-        m_sn = re.search(r"/issues/(\d+)", summary_issue_url)
-        if m_sn:
-            summary_issue_num = int(m_sn.group(1))
-
-    return {
-        "sprint_label":      sprint_label,
-        "state":             pane_state,
-        # Unified lifecycle (sprint-lifecycle.md): pane vocabulary mapped to
-        # the one enum shared with the History pane.
-        "lifecycle":         _derive_outcome_lifecycle(
-            sprint_label, project_root, project, plan_state, pane_state, failed_count,
-        ),
-        "end_reason":        (plan.get("end_reason") if plan else None) or sprint_json.get("end_reason"),
-        "sprint_status":     sprint_status,
-        "counts": {
-            "done":    done_count,
-            "failed":  failed_count,
-            "skipped": skipped_count,
-        },
-        "wall_clock_secs":   state_data.get("wall_clock_secs", 0.0),
-        "ended_at":          _fmt_iso(ended_ts),
-        "issues":            result_issues,
-        "log_line_count":    log_line_count,
-        "summary_issue_url": summary_issue_url,
-        "summary_issue_num": summary_issue_num,
-    }
+    raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
 
 
 # ── Estimate-vs-Actual report (issue #575) ───────────────────────────────────
@@ -9726,6 +9484,74 @@ async def generate_daily_report(request: Request):
     return {"ok": True, "path": report_path, "message": out_line}
 
 
+def _finish_card_from_ingested_row(
+    row: dict,
+    sprint_label: str,
+    sprint_number: Optional[int],
+    project: str,
+) -> dict:
+    """Build finish-card payload from DB-ingested run artifacts (lifecycle P3)."""
+    from routers import sprint_artifact_service  # noqa: PLC0415
+
+    enrich = sprint_artifact_service.enrichment_from_db_row(row)
+    stored_state = row.get("state") or ""
+    lifecycle = db.canonical_lifecycle(stored_state)
+    end_reason = row.get("end_reason")
+
+    try:
+        issues_raw = json.loads(row.get("issues_json") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        issues_raw = []
+
+    done_count = 0
+    failed_count = 0
+    skipped_count = 0
+    for iss in issues_raw:
+        agent = (iss.get("agent_status") or "").lower()
+        fr = iss.get("failure_reason")
+        st = (iss.get("state") or "").lower()
+        if st == "merged" or agent in ("completed", "done"):
+            done_count += 1
+        elif agent == "failed" or fr:
+            failed_count += 1
+        else:
+            skipped_count += 1
+
+    _mat_failure = row.get("summary_failure_count")
+    if _mat_failure is not None:
+        failed_count = _mat_failure
+
+    is_cancelled = lifecycle == "needs_rework" and (end_reason or "").startswith("stopped")
+    if is_cancelled:
+        card_state = "cancelled"
+        rework_count = 0
+    elif _has_rework_tickets(sprint_label, project):
+        card_state = "has_rework"
+        rework_count = _count_rework_tickets(sprint_label, project)
+    else:
+        card_state = "completed"
+        rework_count = 0
+
+    surl = enrich.get("summary_issue_url")
+    summary_issue_num = enrich.get("summary_issue_num")
+
+    return {
+        "sprint_label":      sprint_label,
+        "sprint_number":     sprint_number,
+        "state":             card_state,
+        "lifecycle":         lifecycle,
+        "end_reason":        end_reason,
+        "done_count":        done_count,
+        "failed_count":      failed_count,
+        "skipped_count":     skipped_count,
+        "rework_count":      rework_count,
+        "wall_clock_secs":   enrich.get("duration") or row.get("wall_clock_secs") or 0,
+        "ended_at":          None,
+        "summary_issue_url": surl,
+        "summary_issue_num": summary_issue_num,
+    }
+
+
 @app.get("/api/sprints/{sprint_label}/finish-card")
 def get_sprint_finish_card(sprint_label: str, project: str):
     """Return data for the floating finish-report card above a sprint pane.
@@ -9790,130 +9616,14 @@ def get_sprint_finish_card(sprint_label: str, project: str):
             "state":         "no_data",
         }
 
-    fc_json_path = _sprint_json_path(project_root, sprint_label)
-    fc_sprint_json = _sprint_json_read(fc_json_path)
-    fc_is_cancelled: bool = fc_sprint_json.get("status") in ("cancelled", "needs_rework")
-
-    state_path = commander / "sprints" / f"sprint-{fc_n}-state.json"
-    if not state_path.exists():
-        if fc_is_cancelled:
-            return {
-                "sprint_label":      sprint_label,
-                "sprint_number":     sprint_number,
-                "state":             "cancelled",
-                "done_count":        0,
-                "failed_count":      0,
-                "skipped_count":     0,
-                "rework_count":      0,
-                "wall_clock_secs":   0.0,
-                "ended_at":          None,
-                "summary_issue_url": None,
-                "summary_issue_num": None,
-            }
-        return {
-            "sprint_label":  sprint_label,
-            "sprint_number": sprint_number,
-            "state":         "no_data",
-        }
-
-    try:
-        fc_state_data = json.loads(state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        raise HTTPException(500, detail=str(e))
-
-    # Rec 2d — collapse the disk-vs-DB dual path: populate the DB row from disk on
-    # read so DB-backed readers (outcome, history) converge regardless of which
-    # endpoint the UI hits first. UPDATE-only (never mints a draft row);
-    # best-effort — an ingest hiccup must never break the finish card.
-    _fc_db_row = db.get_sprint(sprint_label)
-    if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
-        try:
-            db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)
-        except Exception:
-            pass
-
-    def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s.rstrip("Z"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except Exception:
-            return None
-
-    sprints_dir = commander / "sprints"
-    fc_sprint_status: Optional[str] = None
-    for sf in sorted(sprints_dir.glob(f"sprint-{fc_n}-summary-*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            meta = _parse_summary_file(sf)
-            raw = (meta.get("status") or "").lower()
-            if raw in ("complete", "completed"):
-                fc_sprint_status = "completed"
-            elif raw in ("stopped", "failed", "cancelled"):
-                fc_sprint_status = "stopped"
-                if raw == "cancelled":
-                    fc_is_cancelled = True
-        except Exception:
-            pass
-        break
-
-    fc_issues_raw = fc_state_data.get("issues", [])
-    if fc_sprint_status is None and fc_issues_raw:
-        has_pending = any(i.get("status") == "pending" for i in fc_issues_raw)
-        has_failed = any(i.get("agent_status") == "failed" or i.get("failure_reason") for i in fc_issues_raw)
-        if not has_pending:
-            fc_sprint_status = "stopped" if has_failed else "completed"
-
-    done_count    = sum(1 for i in fc_issues_raw if i.get("status") == "done")
-    failed_count  = sum(1 for i in fc_issues_raw if i.get("agent_status") == "failed" or i.get("failure_reason"))
-    skipped_count = sum(
-        1 for i in fc_issues_raw
-        if i.get("status") == "skipped" and not (i.get("agent_status") == "failed" or i.get("failure_reason"))
-    )
-
-    fc_ended_ts: Optional[float] = None
-    for iss in fc_issues_raw:
-        end_ts = _fc_parse_iso(iss.get("tester_finished_at")) or _fc_parse_iso(iss.get("status_changed_at"))
-        if end_ts and (fc_ended_ts is None or end_ts > fc_ended_ts):
-            fc_ended_ts = end_ts
-    ended_at = (
-        datetime.fromtimestamp(fc_ended_ts, tz=timezone.utc).strftime("%H:%M")
-        if fc_ended_ts else None
-    )
-
-    if fc_is_cancelled:
-        card_state = "cancelled"
-        rework_count = 0
-    elif _has_rework_tickets(sprint_label, project):
-        card_state = "has_rework"
-        rework_count = _count_rework_tickets(sprint_label, project)
-    else:
-        card_state = "completed"
-        rework_count = 0
-
-    summary_issue_url: Optional[str] = fc_state_data.get("summary_issue_url")
-    summary_issue_num: Optional[int] = None
-    if summary_issue_url:
-        m_num = re.search(r"/issues/(\d+)", summary_issue_url)
-        if m_num:
-            summary_issue_num = int(m_num.group(1))
+    ingested = db.get_sprint(sprint_label)
+    if ingested and ingested.get("run_ingested_at"):
+        return _finish_card_from_ingested_row(ingested, sprint_label, sprint_number, project)
 
     return {
-        "sprint_label":      sprint_label,
-        "sprint_number":     sprint_number,
-        "state":             card_state,
-        "lifecycle":         db.canonical_lifecycle(card_state),
-        "end_reason":        fc_sprint_json.get("end_reason"),
-        "done_count":        done_count,
-        "failed_count":      failed_count,
-        "skipped_count":     skipped_count,
-        "rework_count":      rework_count,
-        "wall_clock_secs":   fc_state_data.get("wall_clock_secs", 0.0),
-        "ended_at":          ended_at,
-        "summary_issue_url": summary_issue_url,
-        "summary_issue_num": summary_issue_num,
+        "sprint_label":  sprint_label,
+        "sprint_number": sprint_number,
+        "state":         "no_data",
     }
 
 

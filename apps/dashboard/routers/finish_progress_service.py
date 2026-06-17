@@ -60,6 +60,18 @@ def unsubscribe(key: str, q: asyncio.Queue) -> None:
         subs.remove(q)
 
 
+def _norm_error_str(err) -> str:
+    """Coerce merge/close errors to a string for logging and comparisons."""
+    if err is None:
+        return ""
+    if isinstance(err, str):
+        return err
+    if isinstance(err, (list, tuple)):
+        parts = [_norm_error_str(x) for x in err if x is not None]
+        return "; ".join(p for p in parts if p)
+    return str(err)
+
+
 async def _emit(key: str, snapshot: dict) -> None:
     """Persist snapshot and fan-out to all subscriber queues."""
     _FINISH_JOBS[key] = snapshot
@@ -133,9 +145,11 @@ async def run_finish_sprint(
         base_label = srv._sprint_label_base(label)
 
         try:
-            merge_errors: list[str] = await asyncio.to_thread(
+            merge_errors, _merge_pr_number = await asyncio.to_thread(
                 srv._merge_sprint_branches_for_label, repo, label
             )
+            if not isinstance(merge_errors, list):
+                merge_errors = []
             errors.extend(merge_errors)
             for err in merge_errors:
                 _log(f"Merge error: {err}")
@@ -237,7 +251,10 @@ async def run_finish_sprint(
 
         _log("Done.")
 
-        pr_failed = any("merge" in e.lower() or "PR" in e for e in errors)
+        pr_failed = any(
+            "merge" in _norm_error_str(e).lower() or "PR" in _norm_error_str(e)
+            for e in errors
+        )
         parts: list[str] = [f"{closed} issue{'s' if closed != 1 else ''} closed"]
         if not pr_failed:
             parts.append("sprint merged")

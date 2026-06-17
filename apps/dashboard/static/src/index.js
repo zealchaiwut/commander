@@ -18,6 +18,7 @@ import {
 import {
   renderProgressActivity,
   updateProgressActivityLog,
+  patchProgressActivityInPlace,
   paToggleLog,
   injectProgressActivityCss,
 } from "./progress-activity.js";
@@ -46,6 +47,7 @@ root.AGENT_NAMES = AGENT_NAMES;
 // ProgressActivity component (issue #928)
 root.renderProgressActivity = renderProgressActivity;
 root.updateProgressActivityLog = updateProgressActivityLog;
+root.patchProgressActivityInPlace = patchProgressActivityInPlace;
 root.paToggleLog = paToggleLog;
 root.mountProgressActivity = mountProgressActivity;
 root.patchProgressActivity = patchProgressActivity;

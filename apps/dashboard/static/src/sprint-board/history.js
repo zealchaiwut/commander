@@ -1076,21 +1076,32 @@ function _histDoneIssueRowHtml(iss, s, stats) {
   const id = num != null ? "#" + num : "#?";
   const titleText = _histIssueTitle(iss, s);
   const repo = _histRepo(s);
+  const chip = _histIssueChip(iss);
+  const crashed = chip.cls === "crashed";
   const clickable = num != null && repo
     ? ` role="link" tabindex="0" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"`
     : "";
-  const merged = (iss.state || "").toLowerCase() === "merged";
-  const icon = merged
-    ? '<span class="hist-irow-check"><i class="ti ti-check"></i></span>'
-    : _histIssueIcon(iss);
+  const icon = _histIssueIcon(iss);
   let dur = _histFmtSecs(iss.time_spent);
   const fixN = _histFixCountForIssue(num, stats);
   if (fixN) dur += ` · ${fixN} fix`;
-  return `<div class="hist-irow${clickable ? " hist-irow-link" : ""}"${clickable}>
+  const reason = crashed && iss.failure_reason
+    ? `<span class="hist-irow-reason">${escHtml(String(iss.failure_reason))}</span>`
+    : "";
+  const logHtml = crashed && num != null
+    ? `<a class="hist-irow-log" href="${escHtml(_histIssueLogUrl(s, num))}" onclick="event.stopPropagation()" title="View issue log">Log →</a>`
+    : "";
+  return `<div class="hist-irow${crashed ? " hist-irow--failed" : ""}${clickable ? " hist-irow-link" : ""}"${clickable}>
     ${icon}
-    <span class="hist-irow-num">${escHtml(String(id))}</span>
-    <span class="hist-irow-title">${escHtml(titleText)}</span>
+    <span class="hist-irow-main">
+      <span class="hist-irow-line">
+        <span class="hist-irow-num">${escHtml(String(id))}</span>
+        <span class="hist-irow-title">${escHtml(titleText)}</span>
+      </span>
+      ${reason}
+    </span>
     <span class="hist-irow-dur">${escHtml(dur)}</span>
+    ${logHtml}
   </div>`;
 }
 
@@ -1101,12 +1112,12 @@ function _histDoneIssuesHtml(s) {
   return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
 }
 
-/** Standalone cards: agent bar + done ticket rows when the what-list is empty. */
+/** Agent bar + ticket rows when the sprint has a per-issue run snapshot. */
 function _histCardShowsDoneSummary(s) {
-  if (_histSprintFailed(s)) return false;
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  if (_histSprintFailed(s)) return issues.length > 0;
   const state = (s.lifecycle_state || "").toLowerCase();
   if (state === "needs_rework" || state === "partial_finished") {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
     const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
     if (unfinished.length) return false;
   }
@@ -1294,12 +1305,18 @@ function _histWhatListHtml(s) {
   if (_histIsLocked(s.lifecycle_state)) return '';
   const state = (s.lifecycle_state || '').toLowerCase();
 
-  // Failed branch: each crashed issue listed ONCE with reason + log link (AC5)
+  // Failed branch: crash summary header; per-ticket detail lives in issue rows (AC5/AC14)
   if (_histSprintFailed(s)) {
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+    const issues = Array.isArray(s.issues) ? s.issues : [];
     const sprintReason = s.failure_reason || s.end_reason;
-    if (!failed.length && !sprintReason) return '';
+    if (!failed.length && !sprintReason) return "";
     const n = failed.length || 1;
+    if (issues.length) {
+      return `<div class="hist-what-list">
+        <div class="hist-what-head hist-what-head--failed">Why it failed · ${n} issue${n !== 1 ? "s" : ""} crashed</div>
+      </div>`;
+    }
     const items = failed.map(ft => {
       const id = ft.ticket_id != null ? ('#' + ft.ticket_id) : '#?';
       const parts = _histFailReasonParts(ft, s);

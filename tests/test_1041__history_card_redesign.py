@@ -256,6 +256,21 @@ def test_ac4_partial_pill_not_amber():
 # AC5 — Failed "Why it failed" list: no issue duplication
 # ═════════════════════════════════════════════════════════════════════════════
 
+def test_failed_sprint_with_issues_shows_done_summary():
+    """Failed sprints with issues must still render agent time + full ticket rows."""
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "_histSprintFailed" in shows, \
+        "_histCardShowsDoneSummary must branch on failed sprints with issues"
+    outcome = _fn_body("_histCardOutcomeHtml")
+    assert "_histDoneIssuesHtml" in outcome
+
+
+def test_ac5_failed_with_issues_uses_header_only_what_list():
+    """When issues exist, what-list must not duplicate failed_tickets rows (AC14)."""
+    body = _fn_body("_histWhatListHtml")
+    assert "issues.length" in body, \
+        "_histWhatListHtml must skip per-ticket wl-items when s.issues is populated"
+
 def test_ac5_what_list_for_failed_uses_failed_tickets():
     """_histWhatListHtml must use s.failed_tickets (not s.issues) for the failed branch."""
     assert _fn_exists("_histWhatListHtml"), "_histWhatListHtml must exist"

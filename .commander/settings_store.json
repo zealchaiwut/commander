@@ -1,0 +1,31 @@
+{
+  "project|zealchaiwut/commander|deploy_config": {
+    "uat": {
+      "host": "local",
+      "working_dir": "/srv/uat",
+      "branch": "develop",
+      "port": 3456
+    }
+  },
+  "global||app_config": {
+    "default_model": "global-model",
+    "estimation_default_points": 3,
+    "coder_model": "claude-opus-4-8",
+    "tester_model": "claude-haiku-4-5",
+    "sprint_duration_days": 14,
+    "default_branch": "develop",
+    "default_branch_uat": "feature/uat",
+    "default_branch_prd": "main",
+    "bulk_create_concurrency": 5,
+    "log_level": "DEBUG",
+    "estimation_s_minutes": 7,
+    "estimation_m_minutes": 120,
+    "estimation_buffer_pct": 20
+  },
+  "project|owner/override-proj|app_config": {
+    "default_model": "project-model"
+  },
+  "project|owner/test-proj|app_config": {
+    "estimation_default_points": 99
+  }
+}

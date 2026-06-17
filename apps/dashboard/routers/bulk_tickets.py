@@ -19,13 +19,13 @@ router = APIRouter(tags=["bulk_tickets"])
 
 
 def _server():
-    """Deferred import of the monolith — safe at request time, avoids circular import."""
+    """Deferred import of the monolith — avoids circular import."""
     import server  # noqa: PLC0415
     return server
 
 
 def _get_bulk_job(job_id: str) -> dict | None:
-    """Return job from memory, or lazy-load from disk (e.g. after server restart).
+    """Return job from memory, or lazy-load from disk after restart.
 
     If found on disk and not in memory, the job is restored to _bulk_jobs so
     subsequent calls hit memory. Returns None if not found anywhere.

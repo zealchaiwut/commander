@@ -8360,8 +8360,10 @@
     }
     .rp-tl-started {
       position: absolute; left: 10px; top: 8px; z-index: 3;
+      max-width: calc(var(--rp-tl-gutter-left) - 14px);
       font-size: 11px; font-family: var(--mono); color: var(--text-sub); white-space: nowrap;
       display: inline-flex; align-items: center; gap: 5px;
+      overflow: hidden; text-overflow: ellipsis;
     }
     .rp-tl-grid {
       position: absolute;
@@ -8419,8 +8421,8 @@
 
     /* Segment base — pill bars inside the lane */
     .rp-tl-seg {
-      position: absolute; top: 0; bottom: 0; border-radius: 10px;
-      min-width: 4px; pointer-events: none;
+      position: absolute; top: 0; bottom: 0; border-radius: 6px;
+      min-width: 6px; pointer-events: none;
     }
     .rp-tl-seg--coder    { background: var(--purple); }
     .rp-tl-seg--tester   { background: var(--amber); }
@@ -15148,7 +15150,18 @@ function _smgmtRpTimelineHtml(data, live) {
   const DOC_PER_ISSUE = 4;
   const REV_PER_ISSUE = 3;
   const liveSnap = live || {};
-  const nowMs = Date.parse(data.server_now);
+
+  function parseIsoMs(iso) {
+    if (!iso) return null;
+    let s = String(iso).trim();
+    if (!s) return null;
+    if (s.indexOf('T') === -1 && s.indexOf(' ') > 0) s = s.replace(' ', 'T');
+    if (!/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
+    const n = Date.parse(s);
+    return isNaN(n) ? null : n;
+  }
+
+  const nowMs = parseIsoMs(data.server_now) || Date.now();
 
   function issueEstMin(iss) {
     return iss.calibrated_estimate || iss.estimate_minutes || 15;
@@ -15171,12 +15184,48 @@ function _smgmtRpTimelineHtml(data, live) {
       + d.getMinutes().toString().padStart(2, '0');
   }
 
+  function issueRemMs(iss, estMs) {
+    if (iss.estimated_remaining_ms != null) {
+      return Math.max(0, iss.estimated_remaining_ms);
+    }
+    if (iss.estimated_remaining != null) {
+      return Math.max(0, iss.estimated_remaining * 60000);
+    }
+    return estMs;
+  }
+
+  function segElapsedMs(seg, nowMs) {
+    if (seg.duration != null && seg.duration > 0) {
+      return seg.duration * 1000;
+    }
+    const st = parseIsoMs(seg.start);
+    if (!st) return 0;
+    const en = seg.end ? parseIsoMs(seg.end) : nowMs;
+    return Math.max(0, (en || nowMs) - st);
+  }
+
+  function synthWallSegsHtml(startMs, elapsedMs, pctFn, opts) {
+    if (!elapsedMs || elapsedMs <= 0) return '';
+    const coderMs = elapsedMs * CODER_FRAC;
+    const cL = pctFn(startMs);
+    const cW = Math.max(pctFn(startMs + coderMs) - cL, 2);
+    const tL = pctFn(startMs + coderMs);
+    const tW = Math.max(pctFn(startMs + elapsedMs) - tL, 2);
+    const live = opts && opts.live;
+    let html = '<div class="rp-tl-seg rp-tl-seg--coder' + (live ? ' rp-tl-seg--running' : '')
+      + '" style="left:' + cL.toFixed(2) + '%;width:' + cW.toFixed(2) + '%"></div>';
+    html += '<div class="rp-tl-seg rp-tl-seg--tester' + (live ? ' rp-tl-seg--running' : '')
+      + '" style="left:' + tL.toFixed(2) + '%;width:' + tW.toFixed(2) + '%"></div>';
+    return html;
+  }
+
   function ghostSplitHtml(startMs, estMs, pctFn) {
+    if (!estMs || estMs <= 0) return '';
     const coderMs = estMs * CODER_FRAC;
     const cL = pctFn(startMs);
-    const cW = Math.max(pctFn(startMs + coderMs) - cL, 1.5);
+    const cW = Math.max(pctFn(startMs + coderMs) - cL, 2);
     const tL = pctFn(startMs + coderMs);
-    const tW = Math.max(pctFn(startMs + estMs) - tL, 1.5);
+    const tW = Math.max(pctFn(startMs + estMs) - tL, 2);
     return '<div class="rp-tl-seg rp-tl-seg--coder rp-tl-seg--ghost" style="left:'
       + cL.toFixed(2) + '%;width:' + cW.toFixed(2) + '%"></div>'
       + '<div class="rp-tl-seg rp-tl-seg--tester rp-tl-seg--ghost" style="left:'
@@ -15193,31 +15242,44 @@ function _smgmtRpTimelineHtml(data, live) {
         return (ss && !isNaN(ss)) ? Math.max(0, nowMs - ss) : 60000;
       })();
 
-  let axisStartMs = Date.parse(data.sprint_started_at);
-  if (!axisStartMs || isNaN(axisStartMs)) axisStartMs = nowMs - elapsedMs;
+  let axisStartMs = parseIsoMs(data.sprint_started_at);
+  if (!axisStartMs) axisStartMs = nowMs - elapsedMs;
   if (elapsedMs > 0 && nowMs - axisStartMs > elapsedMs + 5 * 60000) {
     axisStartMs = nowMs - elapsedMs;
   }
 
-  let planEndMs = nowMs;
+  let runningRemMs = 0;
+  for (const iss of data.issues) {
+    const isDone = iss.status === 'done' || iss.status === 'uat';
+    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
+    if (isRunning) {
+      runningRemMs = issueRemMs(iss, issueEstMin(iss) * 60000);
+      break;
+    }
+  }
+  let queueCursorMs = nowMs + runningRemMs;
+
+  let planEndMs = queueCursorMs;
   for (const iss of data.issues) {
     const estMs = issueEstMin(iss) * 60000;
     const isDone = iss.status === 'done' || iss.status === 'uat';
     const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
-    if (isRunning) {
-      const rem = (iss.estimated_remaining_ms != null)
-        ? iss.estimated_remaining_ms
-        : estMs;
-      planEndMs += rem;
-    } else if (!isDone) {
+    if (!isDone && !isRunning) {
       planEndMs += estMs;
     }
   }
   planEndMs += wrapUpMs;
 
-  const finishMsParsed = Date.parse(data.projected_finish);
+  for (const iss of data.issues) {
+    for (const seg of (iss.segments || [])) {
+      const st = parseIsoMs(seg.start);
+      if (st) axisStartMs = Math.min(axisStartMs, st);
+    }
+  }
+
+  const finishMsParsed = parseIsoMs(data.projected_finish);
   const axisEndMs = Math.max(
-    (!isNaN(finishMsParsed) ? finishMsParsed : 0),
+    finishMsParsed || 0,
     planEndMs,
     nowMs + 60000,
   );
@@ -15236,10 +15298,7 @@ function _smgmtRpTimelineHtml(data, live) {
   for (const iss of data.issues) {
     for (const seg of (iss.segments || [])) {
       const a = (seg.agent || '').toLowerCase();
-      const st = seg.start ? Date.parse(seg.start) : null;
-      const en = seg.end   ? Date.parse(seg.end)   : nowMs;
-      if (!st) continue;
-      const dur = Math.max(0, en - st);
+      const dur = segElapsedMs(seg, nowMs);
       if (a === 'coder')  coderMs  += dur;
       if (a === 'tester') testerMs += dur;
     }
@@ -15319,18 +15378,6 @@ function _smgmtRpTimelineHtml(data, live) {
     + '</div></div>';
 
   let issueRowsHtml = '';
-  let queuedStartMs = nowMs;
-
-  for (const iss of data.issues) {
-    if (iss.status === 'running' || iss.agent_status === 'running') {
-      const estMs = issueEstMin(iss) * 60000;
-      const remaining = (iss.estimated_remaining_ms != null)
-        ? iss.estimated_remaining_ms
-        : estMs;
-      queuedStartMs = nowMs + remaining;
-      break;
-    }
-  }
 
   for (const iss of data.issues) {
     const issNum    = iss.number || iss.issue_number || '?';
@@ -15340,6 +15387,8 @@ function _smgmtRpTimelineHtml(data, live) {
     const estMin = issueEstMin(iss);
     const estMs = estMin * 60000;
     const sizeTag = iss.size || '';
+    const remMs = issueRemMs(iss, estMs);
+    const segs = iss.segments || [];
 
     let iconHtml;
     if (isDone) {
@@ -15351,40 +15400,53 @@ function _smgmtRpTimelineHtml(data, live) {
       iconHtml = '<span class="rp-tl-row-icon rp-tl-row-icon--queued" aria-hidden="true">&#9675;</span>';
     }
 
+    const elapsedMs = segs.reduce(function(acc, seg) {
+      return acc + segElapsedMs(seg, nowMs);
+    }, 0);
+
+    let issueStartMs = segs.reduce(function(min, seg) {
+      const st = parseIsoMs(seg.start);
+      return st && (min == null || st < min) ? st : min;
+    }, null);
+    if (issueStartMs == null && isRunning && elapsedMs > 0) {
+      issueStartMs = nowMs - elapsedMs;
+    }
+
     let envelopeHtml = '';
     if (isDone && estMin) {
-      const firstStart = segs.reduce(function(min, seg) {
-        if (!seg.start) return min;
-        const st = Date.parse(seg.start);
-        return min == null || st < min ? st : min;
-      }, null);
-      const envL = pct(firstStart != null ? firstStart : axisStartMs);
-      const envW = Math.max(pct((firstStart != null ? firstStart : axisStartMs) + estMs) - envL, 2);
+      const envStart = issueStartMs != null ? issueStartMs : axisStartMs;
+      const envL = pct(envStart);
+      const envW = Math.max(pct(envStart + estMs) - envL, 2);
       envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
         + '%;width:' + envW.toFixed(2) + '%"></div>';
     } else if (isQueued) {
-      const envL = pct(queuedStartMs);
-      const envW = Math.max(pct(queuedStartMs + estMs) - envL, 1.5);
+      const slotMs = queueCursorMs;
+      const envL = pct(slotMs);
+      const envW = Math.max(pct(slotMs + estMs) - envL, 2);
       envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
         + '%;width:' + envW.toFixed(2) + '%"></div>';
     } else if (isRunning) {
-      const rem = (iss.estimated_remaining_ms != null)
-        ? iss.estimated_remaining_ms
-        : estMs;
-      const envL = pct(nowMs);
-      const envW = Math.max(pct(nowMs + rem) - envL, 1.5);
+      const envStart = issueStartMs != null ? issueStartMs : (nowMs - elapsedMs);
+      const envL = pct(envStart);
+      const envW = Math.max(pct(nowMs + remMs) - envL, 2);
       envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
         + '%;width:' + envW.toFixed(2) + '%"></div>';
     }
 
     let segsHtml = '';
-    const segs = iss.segments || [];
     const agentCounts = {};
     for (const seg of segs) {
-      const agent    = (seg.agent || 'coder').toLowerCase();
-      const segStart = seg.start ? Date.parse(seg.start) : null;
+      const agent = (seg.agent || 'coder').toLowerCase();
+      let segStart = parseIsoMs(seg.start);
       if (!segStart) continue;
-      const segEnd   = seg.end   ? Date.parse(seg.end)   : nowMs;
+      let segEnd = seg.end ? parseIsoMs(seg.end) : null;
+      if (!segEnd && seg.duration) {
+        segEnd = segStart + seg.duration * 1000;
+      } else if (!segEnd && isRunning) {
+        segEnd = nowMs;
+      }
+      if (!segEnd) continue;
+
       const L = pct(segStart);
       const W = pct(segEnd) - L;
       if (W <= 0 && !isRunning) continue;
@@ -15393,39 +15455,32 @@ function _smgmtRpTimelineHtml(data, live) {
       const isRetry = seg.attempt_kind && seg.attempt_kind !== 'initial'
         ? true
         : agentCounts[agent] > 1;
-      const isLiveSeg = !seg.end;
+      const isLiveSeg = !seg.end && isRunning;
 
       let cls = 'rp-tl-seg rp-tl-seg--' + escHtml(agent);
       if (isRetry)  cls += ' rp-tl-seg--retry';
-      if (isLiveSeg && isRunning) cls += ' rp-tl-seg--running';
+      if (isLiveSeg) cls += ' rp-tl-seg--running';
 
-      const wStr = Math.max(W, 0.5).toFixed(2);
+      const wStr = Math.max(W, 2).toFixed(2);
       segsHtml += '<div class="' + cls + '" style="left:' + L.toFixed(2) + '%;width:' + wStr + '%"></div>';
     }
 
-    if (isRunning) {
-      const rem = (iss.estimated_remaining_ms != null)
-        ? iss.estimated_remaining_ms
-        : estMs;
-      if (rem > 0) {
-        segsHtml += ghostSplitHtml(nowMs, rem, pct);
-      }
+    if (isRunning && !segsHtml && elapsedMs > 0) {
+      const wallStart = issueStartMs != null ? issueStartMs : (nowMs - elapsedMs);
+      segsHtml += synthWallSegsHtml(wallStart, elapsedMs, pct, { live: true });
+    }
+
+    if (isRunning && remMs > 0) {
+      segsHtml += ghostSplitHtml(nowMs, remMs, pct);
     }
 
     if (isQueued) {
-      segsHtml += ghostSplitHtml(queuedStartMs, estMs, pct);
-      queuedStartMs += estMs;
+      segsHtml += ghostSplitHtml(queueCursorMs, estMs, pct);
+      queueCursorMs += estMs;
     }
 
-    const elapsedMs = segs.reduce(function(acc, seg) {
-      if (!seg.start) return acc;
-      const st = Date.parse(seg.start);
-      const en = seg.end ? Date.parse(seg.end) : nowMs;
-      return acc + Math.max(0, en - st);
-    }, 0);
     const tryCount = segs.length;
-    const estMs2 = estMs;
-    const overMs   = estMs2 > 0 ? elapsedMs - estMs2 : 0;
+    const overMs = estMs > 0 ? elapsedMs - estMs : 0;
 
     let mainMetric;
     let subLine = '';
@@ -15434,10 +15489,7 @@ function _smgmtRpTimelineHtml(data, live) {
       subLine = 'done · est ' + estMin + 'm' + (sizeTag ? ' (' + sizeTag + ')' : '');
     } else if (isRunning) {
       mainMetric = fmtMin(elapsedMs);
-      const rem = (iss.estimated_remaining_ms != null)
-        ? iss.estimated_remaining_ms
-        : estMs;
-      subLine = 'running · ~' + fmtMin(rem) + ' left';
+      subLine = 'running · ~' + fmtMin(remMs) + ' left';
     } else if (isQueued) {
       mainMetric = 'est ' + estMin + 'm';
       subLine = (sizeTag ? sizeTag + ' · ' : '') + 'queued';
@@ -15463,18 +15515,18 @@ function _smgmtRpTimelineHtml(data, live) {
   let wrapUpHtml = '';
   if (wu.documenter) {
     const docMs   = wu.documenter * 60000;
-    const docL    = pct(queuedStartMs);
-    const docW = Math.max(pct(queuedStartMs + docMs) - docL, 1.5);
+    const docL    = pct(queueCursorMs);
+    const docW = Math.max(pct(queueCursorMs + docMs) - docL, 2);
     let wrapSegsHtml = '';
     if (docW > 0) {
       wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
         + docL.toFixed(2) + '%;width:' + docW.toFixed(2) + '%"></div>';
     }
-    let revEndMs = queuedStartMs + docMs;
+    let revEndMs = queueCursorMs + docMs;
     if (wu.reviewer) {
       const revMs  = wu.reviewer * 60000;
       const revL   = pct(revEndMs);
-      const revW = Math.max(pct(revEndMs + revMs) - revL, 1.5);
+      const revW = Math.max(pct(revEndMs + revMs) - revL, 2);
       revEndMs += revMs;
       if (revW > 0) {
         wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:'

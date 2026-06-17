@@ -6022,7 +6022,8 @@ def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
     """Estimate one issue and apply its size label. Returns True on success.
 
     Mirrors POST /api/issues/{id}/estimate but as a blocking helper for the
-    preflight-fix executor thread.
+    preflight-fix executor thread.  Also writes the canonical JSON file to
+    .commander/estimates/ so downstream calibration can read it (AC2, issue #1334).
     """
     issue_data = _ei_fetch_issue(issue_num, repo)
     estimate, _err = _ei_run_estimator(issue_num, issue_data)
@@ -6030,6 +6031,19 @@ def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
         return False
     _ei_apply_label(issue_num, repo, estimate["size"])
     _ei_apply_estimated_status(issue_num, repo)
+    # Write canonical JSON so calibration and rebuild can find it
+    project_root = _project_root_path(repo)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    estimates_dir.mkdir(parents=True, exist_ok=True)
+    estimate_path = estimates_dir / f"issue-{issue_num}.json"
+    try:
+        estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    if not estimate_path.exists():
+        logger.warning(
+            "[preflight] size label applied but canonical JSON missing for issue #%s", issue_num
+        )
     return True
 
 
@@ -9183,6 +9197,18 @@ def _compute_calibration_from_files(
     return {"by_size": by_size, "points": points}
 
 
+def _has_sprint_state_files(project_root: Path) -> bool:
+    """Return True if at least one sprint-*-state.json file exists (live or archived)."""
+    sprints_dir = project_root / ".commander" / "sprints"
+    if sprints_dir.is_dir():
+        if any(sprints_dir.glob("sprint-*-state.json")):
+            return True
+        archive_dir = sprints_dir / "archive"
+        if archive_dir.is_dir() and any(archive_dir.glob("sprint-*-state.json")):
+            return True
+    return False
+
+
 def _compute_calibration(
     repo: str,
     since: str | None = None,
@@ -9230,7 +9256,12 @@ def _compute_calibration(
         }
         for sz in _CALIBRATION_SIZES
     }
-    return {"by_size": by_size, "points": list(cache.get("points") or [])}
+    return {
+        "by_size": by_size,
+        "points": list(cache.get("points") or []),
+        "processed_count": len(cache.get("processed") or []),
+        "has_sprint_state_files": _has_sprint_state_files(project_root),
+    }
 
 
 @app.get("/api/projects/{slug}/analytics/calibration")
@@ -14064,7 +14095,9 @@ def rebuild_mis_sizing_history(project: str):
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
 
-    # Collect all completed tickets from sprint state files
+    # Collect all completed tickets from sprint state files.
+    # Use _resolve_calibration_size (Phase 1 shared resolver) so tickets whose
+    # only size signal is a size-* label are no longer silently skipped (AC1, #1334).
     raw_completed: list[dict] = []
     if sprints_dir.exists():
         for state_path in sorted(sprints_dir.glob("sprint-*-state.json")):
@@ -14074,27 +14107,17 @@ def rebuild_mis_sizing_history(project: str):
                 state_data = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
+            state_estimates = state_data.get("estimates") or {}
             for iss in state_data.get("issues", []):
                 if iss.get("status") not in ("done", "passed"):
                     continue
                 num = iss.get("number")
                 if num is None:
                     continue
-                # Only include tickets that have an estimate file
-                est_path = estimates_dir / f"issue-{num}.json"
-                if not est_path.exists():
-                    continue
-                try:
-                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
-                    estimated_size = est_data.get("size") or None
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if not estimated_size:
-                    continue
                 raw_completed.append({
                     "number": num,
                     "sprint": sprint_label_str,
-                    "estimated_size": estimated_size,
+                    "_state_estimates": state_estimates,
                     "coder_started_at": iss.get("coder_started_at"),
                     "tester_finished_at": iss.get("tester_finished_at"),
                     "status_changed_at": iss.get("status_changed_at"),
@@ -14123,11 +14146,19 @@ def rebuild_mis_sizing_history(project: str):
                         lbl["name"] for lbl in iss.get("labels", [])
                     ]
     except Exception:
-        pass  # Proceed without labels — events will be skipped
+        pass  # Proceed without labels — size-* label fallback still applies
 
-    # Attach labels to completed tickets
+    # Attach labels and resolve estimated_size via shared resolver (JSON → state → label)
     for rec in raw_completed:
-        rec["labels"] = labels_by_num.get(rec["number"], [])
+        labels_list = labels_by_num.get(rec["number"], [])
+        rec["labels"] = labels_list
+        label_dicts = [{"name": l} for l in labels_list]
+        rec["estimated_size"] = _resolve_calibration_size(
+            rec["number"],
+            estimates_dir,
+            rec.pop("_state_estimates", {}),
+            label_dicts,
+        )
 
     history = _mis_sizing.build_history_from_completed(raw_completed)
     _mis_sizing.save_history(commander, history)

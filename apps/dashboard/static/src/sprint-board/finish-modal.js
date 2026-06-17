@@ -14,7 +14,7 @@
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, loadSprintMgmt,
    _fsLabel:writable, _fsPreview:writable, _fsActiveJob:writable,
-   renderProgressActivity */
+   renderProgressActivity, patchProgressActivityInPlace */
 
 export function _fsOpen() {
   _setBodyInert(["fs-backdrop", "fs-modal"]);
@@ -24,7 +24,6 @@ export function _fsOpen() {
 
 export function _fsClose() {
   document.getElementById("fs-backdrop").classList.add("hidden");
-  document.getElementById("fs-modal").classList.remove("hidden");
   document.getElementById("fs-modal").classList.add("hidden");
   _clearBodyInert();
   // Close the EventSource so we don't leak connections, but keep _fsActiveJob
@@ -67,6 +66,20 @@ function _fsPreviewSlot() {
   return document.getElementById("fs-content");
 }
 
+function _fsRenderPreviewLoading(current) {
+  const loading = document.getElementById("fs-loading");
+  if (!loading) return;
+  loading.innerHTML = renderProgressActivity({
+    status: "running",
+    mode: "indeterminate",
+    current: current || "Loading preview…",
+  }, {
+    id: "fs-preview-pa",
+    hideLog: true,
+  });
+  loading.classList.remove("hidden");
+}
+
 /** Switch modal body to ProgressActivity bar mode and set footer buttons. */
 function _fsEnterProgressView(snap) {
   document.getElementById("fs-loading").classList.add("hidden");
@@ -96,18 +109,14 @@ function _fsUpdateProgress(snap) {
   const slot = _fsProgressSlot();
   if (!slot || slot.classList.contains("hidden")) return;
 
-  const logEl = document.getElementById("pa-log-stream-fs-pa");
-  const atBottom =
-    !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
-
-  slot.innerHTML = renderProgressActivity(snap, {
-    id: "fs-pa",
+  const patched = patchProgressActivityInPlace("fs-pa", snap, {
     retryFn: "_fsRetry",
   });
-
-  if (atBottom) {
-    const newLog = document.getElementById("pa-log-stream-fs-pa");
-    if (newLog) newLog.scrollTop = newLog.scrollHeight;
+  if (!patched) {
+    slot.innerHTML = renderProgressActivity(snap, {
+      id: "fs-pa",
+      retryFn: "_fsRetry",
+    });
   }
 }
 
@@ -250,7 +259,7 @@ export async function smgmtFinishSprint(label) {
 
   document.getElementById("fs-modal-title").textContent =
     `Merge ${sprintLabelDisplay(label)}?`;
-  document.getElementById("fs-loading").classList.remove("hidden");
+  _fsRenderPreviewLoading("Loading preview…");
   document.getElementById("fs-content").classList.add("hidden");
   document.getElementById("fs-error").classList.add("hidden");
   document.getElementById("fs-error").textContent = "";
@@ -324,7 +333,7 @@ export async function smgmtFinishSprint(label) {
         <a href="${escHtml(preview.sprint_pr.url)}" target="_blank" rel="noopener">#${preview.sprint_pr.number}</a></div>`);
     }
     actionRows.push(
-      '<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close sprint tickets (labels kept)</div>',
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} sprint ticket${allTickets.length !== 1 ? 's' : ''}</div>`,
     );
     actionsEl.innerHTML = actionRows.join("");
 
@@ -346,16 +355,13 @@ export async function _fsConfirm() {
   const owner = parts[0];
   const repoName = parts.slice(1).join("/");
 
-  // Collect selected tickets (number + title for progress labels — AC3).
-  const checkboxes = Array.from(
-    document.querySelectorAll("#fs-ticket-list input[type=checkbox]"),
-  );
-  const selectedTickets = checkboxes
-    .filter((c) => c.checked)
-    .map((c) => ({
-      number: parseInt(c.dataset.issue, 10),
-      title: c.dataset.title || `#${c.dataset.issue}`,
-    }));
+  // Always close every open ticket in the sprint preview (operator can uncheck
+  // for visibility, but confirm sends the full set).
+  const allTickets = _fsPreview.all_tickets || [];
+  const selectedTickets = allTickets.map((t) => ({
+    number: t.number,
+    title: t.title || `#${t.number}`,
+  }));
   const selectedNums = selectedTickets.map((t) => t.number);
 
   const confirmBtn = document.getElementById("fs-confirm-btn");

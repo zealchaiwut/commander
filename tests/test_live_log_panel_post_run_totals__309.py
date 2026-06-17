@@ -253,6 +253,14 @@ class TestAC3LogLineFormat:
             "FAIL AC-3: log entry message does not contain original line text"
         )
 
+    def test_parse_log_lines_extracts_bracketed_timestamp(self, client):
+        import server
+        result = server._parse_log_lines_for_live(
+            ["[2026-06-16 22:35] Dispatching coder for #99"]
+        )
+        assert result[0]["timestamp"] == "2026-06-16 22:35"
+        assert result[0]["message"] == "Dispatching coder for #99"
+
     def test_parse_log_lines_skips_blank_lines(self, client, tmp_path):
         import server
         result = server._parse_log_lines_for_live(["", "  ", "Real line"])

@@ -46,6 +46,7 @@ from deploy_config_schema import (  # noqa: E402
     merge_seed as _deploy_merge_seed,
     merge_for_put as _deploy_merge_for_put,
     build_deploy_config_response as _build_deploy_config_response,
+    enrich_local_working_dirs as _deploy_enrich_working_dirs,
 )
 from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
 from services.sprint_manager import deploy_validation as _deploy_validation  # noqa: E402
@@ -88,6 +89,7 @@ _AGENT_MODEL_KEYS = (
     "default_model", "coder_model", "tester_model",
     "estimator_model", "documentor_model",
 )
+_VALID_CODER_BACKENDS = frozenset({"cline", "claude-code"})
 
 _PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
@@ -184,15 +186,27 @@ def _validate_settings_body(body: dict) -> None:
                 f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}"
             ),
         )
+    if "coder_backend" in body and body["coder_backend"] not in _VALID_CODER_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid coder_backend {body['coder_backend']!r}; "
+                "must be 'claude-code' or 'cline'."
+            ),
+        )
 
 
 def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
-    """Write agent-model fields from a settings Save into each project's sprint.yaml."""
+    """Write agent-model and coder-backend fields from settings into sprint.yaml."""
     model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if not model_cfg:
+    coder_backend = body.get("coder_backend") if "coder_backend" in body else None
+    if not model_cfg and coder_backend is None:
         return []
     try:
-        from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+        from services.sprint_manager.settings_sync import (
+            _set_sprint_yaml_coder_backend,
+            _update_sprint_yaml_agent_config,
+        )
     except Exception:
         return []
     updated: list[str] = []
@@ -202,9 +216,13 @@ def _propagate_models_to_sprint_yaml(body: dict) -> list[str]:
             continue
         try:
             sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
-            if sy.exists():
+            if not sy.exists():
+                continue
+            if model_cfg:
                 _update_sprint_yaml_agent_config(sy, model_cfg)
-                updated.append(repo)
+            if coder_backend is not None:
+                _set_sprint_yaml_coder_backend(sy, str(coder_backend))
+            updated.append(repo)
         except Exception:
             continue
     return updated
@@ -275,12 +293,19 @@ def put_project_settings(slug: str, body: dict) -> dict:
     merged = {**current_project_override, **body}
     _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
-    if model_cfg:
+    coder_backend = body.get("coder_backend") if "coder_backend" in body else None
+    if model_cfg or coder_backend is not None:
         try:
-            from services.sprint_manager.settings_sync import _update_sprint_yaml_agent_config
+            from services.sprint_manager.settings_sync import (
+                _set_sprint_yaml_coder_backend,
+                _update_sprint_yaml_agent_config,
+            )
             sy = _commander_dir(_project_root_path(repo)) / "sprint.yaml"
             if sy.exists():
-                _update_sprint_yaml_agent_config(sy, model_cfg)
+                if model_cfg:
+                    _update_sprint_yaml_agent_config(sy, model_cfg)
+                if coder_backend is not None:
+                    _set_sprint_yaml_coder_backend(sy, str(coder_backend))
         except Exception:
             pass
     display_patch: dict = {}
@@ -360,14 +385,11 @@ def _derive_project_environments(repo: str) -> dict[str, str]:
 
 
 def _enrich_local_working_dirs(repo: str, resp: dict) -> None:
-    """Fill working_dir for local entries that lack one."""
+    """Fill working_dir for local entries (honours ``shared_working_dir`` seeds)."""
     envs = projects_module.get_project_environments(repo)
     if not envs:
         envs = _derive_project_environments(repo)
-    for env, entry in resp.items():
-        if entry.get("host") == "local" and not entry.get("working_dir"):
-            if env in envs:
-                entry["working_dir"] = envs[env]
+    _deploy_enrich_working_dirs(resp, envs)
 
 
 def _enrich_deploy_readiness(config: dict) -> None:

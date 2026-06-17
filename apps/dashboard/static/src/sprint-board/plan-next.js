@@ -57,6 +57,10 @@ async function _planNextRequest(repo, replace) {
 }
 
 export async function smgmtPlanNextSprint() {
+  if (globalThis._commanderFeatures && globalThis._commanderFeatures.planning !== true) {
+    _smgmtShowToast('Plan next sprint is disabled.');
+    return;
+  }
   const repo = _smgmtRepo();
   if (!repo) { _smgmtShowToast('No project selected.'); return; }
   const btn = document.getElementById('smgmt-plan-next-btn');
@@ -70,6 +74,7 @@ export async function smgmtPlanNextSprint() {
 
 /** Mark pending-sign-off sprint cards as visually distinct after a render (AC9). */
 export async function _smgmtLoadPendingSignoff() {
+  if (globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) return;
   const repo = _smgmtRepo();
   if (!repo) return;
   let labels = [];

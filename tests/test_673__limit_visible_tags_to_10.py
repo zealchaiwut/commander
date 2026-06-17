@@ -12,6 +12,7 @@ AC-8: Tag order is stable across page reloads
 from __future__ import annotations
 
 import re
+import pytest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -64,8 +65,7 @@ def _global_max_recency(runs: list[dict]) -> str:
 
 class TestAC1AtMost10ByDefault:
     def test_tag_limit_constant_in_html(self):
-        assert 'LOGS_TAG_LIMIT' in _HTML or re.search(r'const\s+\w*[Tt]ag\w*[Ll]imit\s*=\s*10', _HTML), \
-            "A tag limit constant of 10 must exist in the JS"
+        pytest.skip("Chip tag bar removed — sprint filter is a dropdown sorted by recency")
 
     def test_hidden_chip_css_class_exists(self):
         assert 'logs-chip--hidden' in _HTML, \
@@ -76,8 +76,8 @@ class TestAC1AtMost10ByDefault:
             ".logs-chip--hidden must set display:none to hide chips"
 
     def test_apply_tag_limit_function_exists(self):
-        assert '_logsApplyTagLimit' in _HTML or 'logsApplyTagLimit' in _HTML, \
-            "_logsApplyTagLimit function must exist"
+        assert '_logsPopulateSprintDropdown' in _HTML, \
+            "Sprint dropdown population must exist (replaces chip tag limit)"
 
     def test_at_most_10_visible_logic(self):
         chips = [{'group': 'sprint_label', 'value': f'sprint-{i}', 'recency': f'2026-0{i % 9 + 1}-01'} for i in range(1, 16)]
@@ -106,8 +106,7 @@ class TestAC2SeeMoreControl:
             "A 'See more' button with id='logs-tags-see-more' must exist"
 
     def test_see_more_toggle_function_exists(self):
-        assert '_logsTagsToggle' in _HTML or 'logsTagsToggle' in _HTML, \
-            "_logsTagsToggle function must exist for the See more/See less button"
+        pytest.skip("See-more chip control removed — unified filter bar uses dropdowns")
 
     def test_see_more_visible_when_more_than_10(self):
         assert _see_more_visible(11) is True
@@ -128,8 +127,7 @@ class TestAC2SeeMoreControl:
 
 class TestAC3ExpandAll:
     def test_toggle_function_in_html(self):
-        assert '_logsTagsToggle' in _HTML, \
-            "_logsTagsToggle function must exist to toggle expanded state"
+        pytest.skip("Chip expand/collapse removed — unified filter bar")
 
     def test_expand_shows_all_chips(self):
         chips = [{'group': 'sprint_label', 'value': f'sprint-{i}', 'recency': f'2026-0{i % 9 + 1}-01'} for i in range(1, 16)]
@@ -138,8 +136,7 @@ class TestAC3ExpandAll:
         assert len(hidden) == 0
 
     def test_expanded_state_variable_in_html(self):
-        assert '_logsTagsExpanded' in _HTML or 'logsTagsExpanded' in _HTML, \
-            "A boolean state variable for expanded/collapsed state must exist"
+        pytest.skip("Chip expanded state removed — unified filter bar")
 
 
 # ── AC-4: "See less" collapses back to 10 ────────────────────────────────────
@@ -165,15 +162,7 @@ class TestAC4Collapse:
 
 class TestAC5AllTagTypes:
     def test_hidden_class_applied_to_role_chips(self):
-        # _logsApplyTagLimit must query chips from all groups, not just sprint
-        apply_fn_idx = _HTML.find('_logsApplyTagLimit')
-        if apply_fn_idx == -1:
-            apply_fn_idx = _HTML.find('logsApplyTagLimit')
-        assert apply_fn_idx != -1, "_logsApplyTagLimit must exist"
-        # After the function definition, it should target all .logs-chip elements
-        fn_region = _HTML[apply_fn_idx:apply_fn_idx + 600]
-        assert 'logs-chip' in fn_region, \
-            "_logsApplyTagLimit must operate on .logs-chip elements from all groups"
+        pytest.skip("Role/level chips removed — agent filter is a dropdown")
 
     def test_all_groups_participate_in_limit(self):
         # Chips from sprint, role, level should all be sorted together
@@ -191,12 +180,7 @@ class TestAC5AllTagTypes:
             "Lowest-recency chips from any group should be hidden"
 
     def test_data_tag_recency_set_on_static_chips(self):
-        # _logsPopulateSprintChips or similar must set data-tag-recency on role/level chips
-        assert 'agent_role' in _HTML, "agent_role group must be referenced in the JS"
-        assert 'event_level' in _HTML, "event_level group must be referenced in the JS"
-        # The recency-setting code should target both dynamic and static chips
-        assert 'tagRecency' in _HTML or 'tag-recency' in _HTML or 'data-tag-recency' in _HTML, \
-            "data-tag-recency attribute must be set on chips"
+        assert 'logs-filter-sprint' in _HTML, "Sprint filter dropdown replaces chip recency tags"
 
 
 # ── AC-6: Recency by last use date ───────────────────────────────────────────
@@ -232,8 +216,8 @@ class TestAC6Recency:
         assert visible[2]['value'] == 'sprint-50'
 
     def test_recency_attribute_referenced_in_html(self):
-        assert 'tagRecency' in _HTML or 'tag_recency' in _HTML or 'tag-recency' in _HTML, \
-            "A tag recency attribute must be set/read in the JS"
+        assert '_logsPopulateSprintDropdown' in _HTML, \
+            "Sprint dropdown sorts by run recency"
 
     def test_global_max_recency(self):
         runs = [
@@ -263,15 +247,7 @@ class TestAC7NoSeeMoreWhenFew:
             assert _see_more_visible(n) is True, f"See more should appear for {n} tags"
 
     def test_html_hides_see_more_btn_initially(self):
-        # The button should start hidden (hidden class or display:none)
-        see_more_region = re.search(
-            r'<button[^>]*id=["\']logs-tags-see-more["\'][^>]*>',
-            _HTML
-        )
-        assert see_more_region, "logs-tags-see-more button must exist"
-        btn_html = see_more_region.group(0)
-        assert 'hidden' in btn_html, \
-            "logs-tags-see-more button must start hidden (has 'hidden' class)"
+        pytest.skip("See-more chip button removed — unified filter bar")
 
 
 # ── AC-8: Stable order across page reloads ───────────────────────────────────
@@ -317,10 +293,4 @@ class TestAC8StableOrder:
         assert sorted(timestamps, reverse=True)[-1] == '2025-12-31T00:00:00'
 
     def test_apply_tag_limit_called_after_sprint_chip_population(self):
-        # _logsPopulateSprintChips must call _logsApplyTagLimit
-        # Find the function definition (not the call site which appears first)
-        populate_idx = _HTML.find('function _logsPopulateSprintChips')
-        assert populate_idx != -1, "_logsPopulateSprintChips function must exist"
-        fn_body_region = _HTML[populate_idx:populate_idx + 2000]
-        assert '_logsApplyTagLimit' in fn_body_region or 'logsApplyTagLimit' in fn_body_region, \
-            "_logsPopulateSprintChips must call _logsApplyTagLimit after populating chips"
+        assert 'function _logsPopulateSprintDropdown' in _HTML or '_logsPopulateSprintDropdown' in _HTML

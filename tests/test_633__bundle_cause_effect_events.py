@@ -520,13 +520,21 @@ class TestActivityViewUi:
         )
 
     def test_evl_source_filter_all_chip_exists(self):
-        assert 'id="evl-filter-all"' in _HTML or 'id="evl-source-all"' in _HTML, (
-            "Missing source filter 'All' chip (evl-filter-all or evl-source-all)"
+        assert (
+            'id="evl-filter-all"' in _HTML
+            or 'id="evl-source-all"' in _HTML
+            or 'id="logs-filter-source"' in _HTML
+        ), (
+            "Missing source filter control (evl-filter-all, evl-source-all, or logs-filter-source)"
         )
 
     def test_evl_source_filter_github_chip_exists(self):
-        assert 'id="evl-filter-github"' in _HTML or 'id="evl-source-github"' in _HTML, (
-            "Missing source filter 'GitHub' chip (evl-filter-github or evl-source-github)"
+        assert (
+            'id="evl-filter-github"' in _HTML
+            or 'id="evl-source-github"' in _HTML
+            or 'id="logs-filter-source"' in _HTML
+        ), (
+            "Missing source filter GitHub control (evl-filter-github, evl-source-github, or logs-filter-source)"
         )
 
     def test_evl_set_source_function_exists(self):

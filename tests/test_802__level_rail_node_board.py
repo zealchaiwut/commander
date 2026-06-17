@@ -77,23 +77,35 @@ def _css_rule(selector: str) -> str:
 
 # ───────────────────────── AC1: rail renders from /live ──────────────────────
 
-def test_ac1_contract_classes_present_in_markup_or_render():
-    """The five design-contract DOM targets must exist as real class hooks."""
-    # The rail container is a static mount point in the Running sub-view.
-    assert 'class="rail"' in PROJECT_HTML or "class=\\\"rail\\\"" in PROJECT_HTML \
-        or '"rail"' in _fn_body("_smgmtRailRender")
-    body = _fn_body("_smgmtRailRender")
-    for token in ("level", "level-dot", "nodes", "node"):
-        assert token in body, f"render must emit the `{token}` contract token"
+def test_ac1_running_pane_renders_issues_grouped_by_level():
+    """Issues render grouped by dispatch level in the Running sub-view.
+
+    Note: the standalone level-rail was consolidated into the All Issues panel
+    (issue #1106 / #1233). The level-grouping contract survived the move — the
+    All Issues render still groups via `_smgmtRailLevels` and emits per-level
+    rows — so the contract is asserted against its current home.
+    """
+    body = _fn_body("_smgmtAllIssuesHtml")
+    assert "_smgmtRailLevels(" in body, "issues must be grouped into dispatch levels"
+    for token in ("ai-level", "ai-level-rows", "_smgmtAiRowHtml"):
+        assert token in body, f"panel render must emit the `{token}` contract token"
+    # Per-issue rows are built by the row helper and carry the row contract class.
+    assert "ai-row" in _fn_body("_smgmtAiRowHtml"), "issue rows must use the `ai-row` class"
 
 
-def test_ac1_rail_mount_point_lives_in_running_subview():
-    """The rail must mount inside the Running sub-view, not elsewhere."""
+def test_ac1_running_panels_mount_in_running_subview():
+    """The live panels mount inside the Running sub-view, not elsewhere.
+
+    The level-rail mount point was replaced by the orchestrator + all-issues
+    panels in the running-pane consolidation (issue #1106).
+    """
     start = PROJECT_HTML.index('id="smgmt-subview-running"')
     end = PROJECT_HTML.index("smgmt-subview-running -->", start)
     subview = PROJECT_HTML[start:end]
-    assert 'id="smgmt-rail"' in subview, "rail mount point must be in the Running sub-view"
-    assert "rail" in subview
+    assert 'id="smgmt-all-issues"' in subview, \
+        "all-issues panel must mount in the Running sub-view"
+    assert 'id="smgmt-orch-panel"' in subview, \
+        "orchestrator panel must mount in the Running sub-view"
 
 
 def test_ac1_groups_issues_by_dispatch_level():

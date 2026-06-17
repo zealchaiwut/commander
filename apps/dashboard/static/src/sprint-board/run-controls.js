@@ -13,6 +13,12 @@
    _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
    _pfFlags:writable, _pfSelectedIds:writable, _pfUseClineFollowups:writable */
 
+import {
+  mountProgressActivity,
+  patchProgressActivityStep,
+  unmountProgressActivity,
+} from "../progress-host.js";
+
 // ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
 
 /** Step definitions matching the pre-flight panel check groups. */
@@ -26,6 +32,9 @@ const PF_STEPS = [
 
 /** Count of steps currently in fail state (blocks Run Sprint). */
 let _pfStepFails = 0;
+
+/** True while preflight-fix SSE is still running (non-blocking for Run). */
+let _pfAutofixPending = false;
 
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -174,7 +183,7 @@ export function _pfReset() {
   _pfModels = null;
   _pfSelectedIds = new Set();
   _pfUseClineFollowups = false;
-  _pfStepperInit();
+  _pfShowLoadingActivity('Loading pre-flight checks…');
 }
 
 export function _pfClose() {
@@ -191,10 +200,12 @@ export function _pfClose() {
   _pfSelectedIds  = new Set();
   _pfUseClineFollowups = false;
   _pfStepFails    = 0;
+  _pfAutofixPending = false;
 }
 
 export async function _pfFetch() {
   _pfState = 'loading';
+  _pfShowLoadingActivity('Loading pre-flight checks…');
   const label = _pfCurrentLabel;
   const repo  = _pfCurrentRepo;
   try {
@@ -262,8 +273,8 @@ export function _pfShowSuccess() {
      </div>`;
   document.getElementById('pf-content').classList.remove('hidden');
   document.getElementById('pf-footer').classList.remove('hidden');
-  // Note: _pfUpdateConfirmBtn() is called at the end of _pfStepperAnimate (issue #933)
-  // so the Run button is only enabled after stepper resolves all steps.
+  _pfStepperInit();
+  // Run enables after blocking checks (cycle, mis-sizing); auto-fix runs in background.
   document.getElementById('pf-cancel-btn').focus();
   if (_pfDagData && (_pfDagData.edges || []).length > 0) {
     requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
@@ -313,6 +324,29 @@ export function _pfBuildWarningsHtml() {
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join('')}</div>
   </div>`;
+}
+
+/** Refresh warning chips after background preflight-fix completes. */
+function _pfPatchWarnings() {
+  const content = document.getElementById('pf-content');
+  if (!content) return;
+  const html = _pfBuildWarningsHtml();
+  content.querySelector('.pf-warnings-section')?.remove();
+  if (!html) return;
+  const anchor = content.querySelector('.pf-cline-section')
+    || content.querySelector('.pf-models-section');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+}
+
+function _pfShrinkWarnings(fix, missingAc, unestimated) {
+  if (!_pfWarnings || (fix.errors && fix.errors.length)) return;
+  if (fix.filled > 0 && _pfWarnings.missing_ac?.length) {
+    _pfWarnings.missing_ac = _pfWarnings.missing_ac.slice(fix.filled);
+  }
+  if (fix.estimated > 0 && _pfWarnings.unestimated?.length) {
+    _pfWarnings.unestimated = _pfWarnings.unestimated.slice(fix.estimated);
+  }
+  _pfPatchWarnings();
 }
 
 export function _pfBuildCycleHtml() {
@@ -616,6 +650,7 @@ export function _pfUpdateSections() {
 
 export function _pfShowError(msg) {
   document.getElementById('pf-loading').classList.add('hidden');
+  unmountProgressActivity('pf-stepper-steps');
   document.getElementById('pf-content').classList.add('hidden');
   document.getElementById('pf-error-msg').textContent = msg;
   document.getElementById('pf-error').classList.remove('hidden');
@@ -645,20 +680,41 @@ export async function _pfConfirm() {
 
 // ── Pre-flight stepper functions (shared ProgressActivity — stepper mode, issue #933) ─
 
+function _paStepState(state) {
+  return state === 'fail' ? 'failed' : state;
+}
+
+function _pfShowLoadingActivity(currentLabel) {
+  const stepsEl = document.getElementById('pf-stepper-steps');
+  if (!stepsEl) return;
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'indeterminate',
+    current: currentLabel || 'Loading…',
+  }, {
+    id: 'pf-pa',
+    hideLog: true,
+  });
+}
+
 /** Initialise all steps to `pending` state. Called from _pfReset(). */
 export function _pfStepperInit() {
   _pfStepFails = 0;
   const stepsEl = document.getElementById('pf-stepper-steps');
   if (!stepsEl) return;
-  stepsEl.innerHTML = PF_STEPS.map(s =>
-    `<div class="pf-step-item pf-step-item--pending" id="pf-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="pf-step-note-${s.key}"></span>
-      </div>
-    </div>`
-  ).join('');
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'stepper',
+    steps: PF_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      state: 'pending',
+      note: '',
+    })),
+  }, {
+    id: 'pf-pa',
+    hideLog: true,
+  });
   const summaryEl = document.getElementById('pf-stepper-summary');
   if (summaryEl) {
     summaryEl.textContent = '';
@@ -668,18 +724,17 @@ export function _pfStepperInit() {
 
 /** Transition a single step to a new state with an optional note. */
 export function _pfStepState(key, state, note) {
-  const item = document.getElementById(`pf-step-${key}`);
-  if (!item) return;
-  item.className = `pf-step-item pf-step-item--${state}`;
-  const noteEl = document.getElementById(`pf-step-note-${key}`);
-  if (noteEl) noteEl.textContent = note || '';
+  patchProgressActivityStep('pf-stepper-steps', key, _paStepState(state), note || '', {
+    id: 'pf-pa',
+    hideLog: true,
+  });
 }
 
 /**
  * Call the preflight-fix SSE endpoint and collect summary counts.
  * Auto-fixes missing AC and missing size estimates for the sprint.
  */
-async function _pfRunAutoFix(label, repo) {
+async function _pfRunAutoFix(label, repo, onLog) {
   const resp = await fetch(
     `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
     { method: 'POST' }
@@ -697,7 +752,15 @@ async function _pfRunAutoFix(label, repo) {
     for (const part of parts) {
       const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
       if (!m) continue;
-      if (m[1] === 'done') {
+      if (m[1] === 'log') {
+        try {
+          const d = JSON.parse(m[2]);
+          const msg = typeof d === 'string' ? d : (d.message || String(d));
+          if (onLog) onLog(msg);
+        } catch (_) {
+          if (onLog) onLog(m[2]);
+        }
+      } else if (m[1] === 'done') {
         try {
           const d = JSON.parse(m[2]);
           filled    = d.filled    || 0;
@@ -716,57 +779,68 @@ async function _pfRunAutoFix(label, repo) {
  * Called from _pfFetch() after a successful preflight response.
  */
 export async function _pfStepperAnimate(data) {
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
   const label = _pfCurrentLabel;
   const repo  = _pfCurrentRepo;
 
-  // ── Steps 1 & 2: Acceptance criteria + Estimate coverage (auto-fixable) ──
-  _pfStepState('ac',        'checking', '');
-  _pfStepState('estimates', 'checking', '');
-  await delay(350);
-
-  const missingAc  = (data.warnings && data.warnings.missing_ac    || []);
-  const unestimated = (data.warnings && data.warnings.unestimated  || []);
+  const missingAc   = (data.warnings && data.warnings.missing_ac   || []);
+  const unestimated = (data.warnings && data.warnings.unestimated || []);
   const hasAcIssues  = missingAc.length  > 0;
   const hasEstIssues = unestimated.length > 0;
 
-  if ((hasAcIssues || hasEstIssues) && label && repo) {
-    // Auto-fix: call preflight-fix endpoint for missing AC and estimates
-    try {
-      const fix = await _pfRunAutoFix(label, repo);
-      const acNote  = fix.filled    > 0 ? `${fix.filled} acceptance criteria generated`
-                    : hasAcIssues       ? `${missingAc.length} ticket(s) missing AC`
-                    : '';
-      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated`
-                    : hasEstIssues      ? `${unestimated.length} ticket(s) unestimated`
-                    : '';
-      _pfStepState('ac',        fix.filled    > 0 ? 'fixed' : 'pass', acNote);
-      _pfStepState('estimates', fix.estimated > 0 ? 'fixed' : 'pass', estNote);
-    } catch (_) {
-      // Fix call failed — show pass with warning note (non-blocking)
-      _pfStepState('ac',        'pass', hasAcIssues  ? `${missingAc.length} ticket(s) missing AC`     : '');
-      _pfStepState('estimates', 'pass', hasEstIssues ? `${unestimated.length} ticket(s) unestimated`   : '');
+  const _routeAutofixLog = (msg) => {
+    const s = String(msg || '');
+    if (/acceptance criteria/i.test(s)) {
+      _pfStepState('ac', 'checking', s);
+    } else if (/Estimating/i.test(s)) {
+      _pfStepState('estimates', 'checking', s);
+    } else if (/Fixing \d+ pre-flight/i.test(s)) {
+      if (hasAcIssues)  _pfStepState('ac', 'checking', s);
+      if (hasEstIssues) _pfStepState('estimates', 'checking', s);
     }
+  };
+
+  const _finishAutofix = (fix) => {
+    const acNote  = fix.filled    > 0 ? `${fix.filled} acceptance criteria generated`
+                  : hasAcIssues       ? `${missingAc.length} ticket(s) missing AC`
+                  : '';
+    const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated`
+                  : hasEstIssues      ? `${unestimated.length} ticket(s) unestimated`
+                  : '';
+    _pfStepState('ac',        fix.filled    > 0 ? 'fixed' : 'pass', acNote);
+    _pfStepState('estimates', fix.estimated > 0 ? 'fixed' : 'pass', estNote);
+    _pfShrinkWarnings(fix, missingAc, unestimated);
+    _pfAutofixPending = false;
+    _pfStepperSummary();
+  };
+
+  // ── Steps 1 & 2: auto-fix in background (warnings are non-blocking) ───────
+  if ((hasAcIssues || hasEstIssues) && label && repo) {
+    _pfAutofixPending = true;
+    _pfStepState('ac',        'checking', hasAcIssues  ? `Fixing ${missingAc.length} ticket(s)…` : '');
+    _pfStepState('estimates', 'checking', hasEstIssues ? `Estimating ${unestimated.length} ticket(s)…` : '');
+    _pfRunAutoFix(label, repo, _routeAutofixLog)
+      .then(_finishAutofix)
+      .catch(() => {
+        _pfStepState('ac',        'pass', hasAcIssues  ? `${missingAc.length} ticket(s) missing AC`   : '');
+        _pfStepState('estimates', 'pass', hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : '');
+        _pfAutofixPending = false;
+        _pfStepperSummary();
+      });
   } else {
     _pfStepState('ac',        'pass', '');
     _pfStepState('estimates', 'pass', '');
   }
-  await delay(300);
 
-  // ── Step 3: Dependency cycle (non-auto-fixable, blocking on cycle) ────────
+  // ── Steps 3–5: blocking / informational checks (no artificial delay) ─────
   _pfStepState('cycle', 'checking', '');
-  await delay(350);
   if (data.cycle && data.cycle.length) {
     _pfStepState('cycle', 'fail', `Cycle: ${data.cycle.join(' → ')}`);
     _pfStepFails++;
   } else {
     _pfStepState('cycle', 'pass', '');
   }
-  await delay(300);
 
-  // ── Step 4: Mis-sizing review (non-auto-fixable, blocking if pending flags) ─
   _pfStepState('missizing', 'checking', '');
-  await delay(350);
   const pendingFlags = (data.mis_sizing_flags && data.mis_sizing_flags.flags || [])
     .filter(f => f.status === 'pending');
   if (pendingFlags.length > 0) {
@@ -775,11 +849,8 @@ export async function _pfStepperAnimate(data) {
   } else {
     _pfStepState('missizing', 'pass', '');
   }
-  await delay(300);
 
-  // ── Step 5: Conflict analysis (informational, non-blocking) ───────────────
   _pfStepState('conflicts', 'checking', '');
-  await delay(350);
   const selectedTickets = _pfGetSelectedTickets();
   const conflicts = _pfComputeConflicts(selectedTickets);
   if (conflicts.length > 0) {
@@ -788,7 +859,6 @@ export async function _pfStepperAnimate(data) {
     _pfStepState('conflicts', 'pass', '');
   }
 
-  // ── Summary ───────────────────────────────────────────────────────────────
   _pfStepperSummary();
   _pfUpdateConfirmBtn();
 }
@@ -802,6 +872,9 @@ export function _pfStepperSummary() {
     summaryEl.textContent =
       `${_pfStepFails} blocking issue${_pfStepFails > 1 ? 's' : ''} — cannot run`;
     summaryEl.className = 'pf-stepper-summary pf-stepper-summary--blocking';
+  } else if (_pfAutofixPending) {
+    summaryEl.textContent = 'Ready to run — preparing tickets in background';
+    summaryEl.className = 'pf-stepper-summary pf-stepper-summary--clear';
   } else {
     summaryEl.textContent = 'All checks passed — ready to run';
     summaryEl.className = 'pf-stepper-summary pf-stepper-summary--clear';
@@ -832,26 +905,29 @@ let _ksRepo  = null;
 function _ksInit() {
   const stepsEl = document.getElementById('smgmt-kickoff-steps');
   if (!stepsEl) return;
-  stepsEl.innerHTML = KS_STEPS.map(s =>
-    `<div class="pf-step-item pf-step-item--pending" id="ks-step-${s.key}">
-      <span class="pf-step-icon" aria-hidden="true"></span>
-      <div class="pf-step-content">
-        <span class="pf-step-name">${escHtml(s.label)}</span>
-        <span class="pf-step-note" id="ks-step-note-${s.key}"></span>
-      </div>
-    </div>`
-  ).join('');
+  mountProgressActivity(stepsEl, {
+    status: 'running',
+    mode: 'stepper',
+    steps: KS_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      state: 'pending',
+      note: '',
+    })),
+  }, {
+    id: 'ks-pa',
+    hideLog: true,
+  });
   const errEl = document.getElementById('smgmt-kickoff-error');
   if (errEl) errEl.hidden = true;
 }
 
 /** Transition a kickoff step to a new state with an optional note. */
 function _ksSetStep(key, state, note) {
-  const item = document.getElementById(`ks-step-${key}`);
-  if (!item) return;
-  item.className = `pf-step-item pf-step-item--${state}`;
-  const noteEl = document.getElementById(`ks-step-note-${key}`);
-  if (noteEl) noteEl.textContent = note || '';
+  patchProgressActivityStep('smgmt-kickoff-steps', key, _paStepState(state), note || '', {
+    id: 'ks-pa',
+    hideLog: true,
+  });
 }
 
 /** Show the kickoff stepper in the Running subview. */

@@ -515,7 +515,8 @@ class TestAC7TesterHygiene:
         """_dispatch_tester must call _worktree_hygiene before spawning claude."""
         hygiene_calls = []
 
-        def fake_hygiene(worktree, ticket_id, merge_target, is_retry=False, repo_root=None):
+        def fake_hygiene(worktree, ticket_id, merge_target, is_retry=False, repo_root=None,
+                         recover_on_rebase_conflict=False):
             hygiene_calls.append({
                 "worktree": worktree,
                 "ticket_id": ticket_id,
@@ -567,7 +568,8 @@ class TestAC7TesterHygiene:
         """_dispatch_coder must call _worktree_hygiene before spawning claude."""
         hygiene_calls = []
 
-        def fake_hygiene(worktree, ticket_id, merge_target, is_retry=False, repo_root=None):
+        def fake_hygiene(worktree, ticket_id, merge_target, is_retry=False, repo_root=None,
+                         recover_on_rebase_conflict=False):
             hygiene_calls.append({
                 "worktree": worktree,
                 "ticket_id": ticket_id,

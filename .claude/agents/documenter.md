@@ -26,11 +26,11 @@ Run these commands to inspect the diff and summary:
 
     git diff <BASE_SHA>..<HEAD_SHA> --stat
     git diff <BASE_SHA>..<HEAD_SHA>
-    gh issue view <SUMMARY_ISSUE_NUM> --repo <REPO>
+    gh api repos/<REPO>/issues/<SUMMARY_ISSUE_NUM>
 
 From the sprint summary, extract the list of merged tickets. For each, read the ticket body:
 
-    gh issue view <num> --repo <REPO>
+    gh api repos/<REPO>/issues/<num>
 
 You need the intent (from the ticket) and the reality (from the diff) to write accurate docs.
 

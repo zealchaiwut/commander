@@ -59,11 +59,14 @@ During an active run (`COMMANDER_SPRINT_RUNNING=1`), only status labels may chan
 
 | When | What |
 |------|------|
-| After BA creates ticket | Per-issue estimator (Haiku) → `.commander/estimates/issue-<N>.json` |
+| After BA creates ticket | Per-issue estimator (Haiku) → `.commander/estimates/issue-<N>.json` (canonical path — every writer uses it) |
 | At sprint start | Sprint estimator scans backlog (Sonnet) |
 | Board preview | `GET /api/sprints/{label}/preview-dag` — dispatch levels, conflicts, capacity |
+| On sprint finish | Calibration cache auto-refreshes; rebuildable via `POST /api/maintenance/calibration/rebuild?project=<slug>` or `scripts/rebuild_calibration_cache.py` |
 
 Size scale: S=5min, M=15min, L=30min, XL=90min (full pipeline wall-clock). `sprint_budget_minutes` (default 180) drives the capacity bar.
+
+Calibration resolves each completed ticket's size with a three-tier fallback — canonical estimate JSON → sprint-state estimate → `size-*` label — so tickets estimated only at creation still appear in history. See [features/estimation-lifecycle.md](../features/estimation-lifecycle.md).
 
 ## 3.5 Sprint planning
 

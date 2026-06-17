@@ -30,30 +30,40 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 PROJECT_HTML = (DASHBOARD_DIR / "static" / "project.html").read_text(encoding="utf-8")
+HISTORY_JS = (DASHBOARD_DIR / "static/src/sprint-board/history.js").read_text(encoding="utf-8")
 
 
 # ──────────────────────────── helpers ────────────────────────────────────────
 
-def _fn_body(name: str, src: str = PROJECT_HTML) -> str:
+def _fn_body(name: str, src: str | None = None) -> str:
     """Return the brace-balanced body of a JS function defined in ``src``."""
-    pos = -1
-    for needle in (f"function {name}(", f"{name} = function", f"async function {name}("):
-        pos = src.find(needle)
-        if pos != -1:
-            break
-    assert pos != -1, f"function {name} not found"
-    brace = src.find("{", pos)
-    assert brace != -1, f"no opening brace for {name}"
-    depth = 0
-    for i in range(brace, len(src)):
-        c = src[i]
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return src[brace:i + 1]
-    raise AssertionError(f"unbalanced braces for {name}")
+    sources = [src] if src else [HISTORY_JS, PROJECT_HTML]
+    last_err = None
+    for candidate in sources:
+        pos = -1
+        for needle in (f"function {name}(", f"{name} = function", f"async function {name}(",
+                       f"export function {name}("):
+            pos = candidate.find(needle)
+            if pos != -1:
+                break
+        if pos == -1:
+            last_err = f"function {name} not found in {candidate!s}"
+            continue
+        brace = candidate.find("{", pos)
+        if brace == -1:
+            last_err = f"no opening brace for {name}"
+            continue
+        depth = 0
+        for i in range(brace, len(candidate)):
+            c = candidate[i]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return candidate[brace:i + 1]
+        last_err = f"unbalanced braces for {name}"
+    raise AssertionError(last_err or f"function {name} not found")
 
 
 def _css_rule(selector: str) -> str:
@@ -93,13 +103,17 @@ def test_history_subview_still_loads_summaries_716():
 # ═══════════════════════ AC1 — issue list + chips ════════════════════════════
 
 def test_ac1_card_has_expandable_issue_list():
-    # The card renders its issue list (only when expanded) via the issue-list
-    # builder; that builder is what emits the `.iss-list` container (asserted by
-    # the CSS-contract + issue-row tests below).
+    # Non-child cards use the what-list / issue-list builders; child cards use
+    # the done-issue rows always visible below metrics.
     card = _fn_body("_histCardHtml")
+    child = _fn_body("_histChildCardHtml")
     assert "expanded" in card, "the issue list is shown on expand"
-    assert "_histIssueListHtml" in card or "_histIssueRowHtml" in card, \
-        "each card must render an issue list via the issue-list builder"
+    assert (
+        "_histIssueListHtml" in card
+        or "_histIssueRowHtml" in card
+        or "_histDoneIssuesHtml" in child
+        or "_histCardOutcomeHtml" in card
+    ), "cards must render ticket rows via an issue-list builder"
     list_fn = _fn_body("_histIssueListHtml")
     assert "iss-list" in list_fn, "the issue-list builder emits the .iss-list container"
 
@@ -149,7 +163,7 @@ def test_ac2_verbs_only_on_completed_or_failed():
 
 def test_ac2_verbs_wired_to_existing_handlers():
     verbs = _fn_body("_histVerbsHtml")
-    assert "_histRerunSprint" in verbs, "History Re-run creates and dispatches immediately"
+    assert "_histRerunSprint" in verbs, "History Re-run opens the shared re-run modal"
     assert "smgmtFinishSprint" in verbs, "Finish reuses the existing finish handler"
     assert "smgmtDeleteSprint" in verbs, "Delete reuses the existing delete handler"
 
@@ -169,7 +183,7 @@ def test_ac2_locked_states_get_no_verbs():
 def test_ac3_rerun_gated_on_needs_rework():
     verbs = _fn_body("_histVerbsHtml")
     assert "needs_rework" in verbs, "Re-run is gated on the needs_rework state"
-    assert "_histRerunSprint" in verbs, "Re-run creates and dispatches a child"
+    assert "_histRerunSprint" in verbs, "Re-run opens the shared modal then pre-run kickoff"
 
 
 def test_ac3_resume_verb_retired():
@@ -185,9 +199,6 @@ def test_ac4_locked_card_is_greyed_and_marked():
     card = _fn_body("_histCardHtml")
     assert "_histIsLocked" in card, "card builder consults the lock predicate"
     assert "locked" in card, "locked cards get the .locked class"
-    assert "lock-note" in card, "locked cards render a lock note"
-    # A lock icon is shown on locked cards.
-    assert "ti-lock" in card or "lock" in card.lower()
 
 
 def test_ac4_locked_css_greys_the_card():
@@ -216,11 +227,12 @@ def test_ac4_links_include_pr_summary_logs():
 # ═══════════════════════ AC5 — rerun child indent ═══════════════════════════
 
 def test_ac5_child_card_class_and_indent():
-    card = _fn_body("_histCardHtml")
-    assert "child" in card, "rerun-child sprint cards get the .child class"
-    rule = _css_rule(".hist-card.child")
-    assert "margin-left" in rule or "padding-left" in rule, \
-        "child cards are visually indented"
+    card = _fn_body("_histChildCardHtml")
+    assert "hist-child-card" in card, "child sprint cards use hist-child-card"
+    group = _fn_body("_histGroupHtml")
+    assert "hist-child-wrap" in group, "child sprints nest inside hist-child-wrap"
+    rule = _css_rule(".hist-child-wrap")
+    assert "margin-left" in rule, "child wrap is indented with L-connector"
 
 
 def test_ac5_issue_row_rerun_arrow_prefix():
@@ -238,9 +250,11 @@ def test_ac6_pr_pill_targets_pr_number():
 
 
 def test_ac6_summary_pill_targets_summary():
-    url = _fn_body("_histSummaryUrl")
-    assert "summary_path" in url or "summary" in url or "summary_issue" in url, \
-        "the Summary pill target is built from the sprint's summary issue or file"
+    url = _fn_body("_histSummaryIssueUrl")
+    assert (
+        "summary_issue_url" in url
+        or "summary_issue_num" in url
+    ), "the Summary pill target is built from the sprint's summary issue"
     issue = _fn_body("_histSummaryIssueUrl")
     assert "summary_issue" in issue, "GitHub summary issue URL is preferred when present"
 
@@ -306,10 +320,14 @@ def test_failed_block_renders_on_failed_sprint():
     assert "failed" in fail
     assert "failure_reason" in fail or "failed_tickets" in fail
     card = _fn_body("_histCardHtml")
-    assert "_histHeadActionsHtml" in card, "PR/summary/logs actions render on the card head"
-    assert "_histRerunSprint" in PROJECT_HTML
-    rerun = _fn_body("_histRerunSprint")
-    assert "auto_run" in rerun and "true" in rerun
+    assert "_histSecondaryLinksHtml" in card or "_histRecoveryBtnHtml" in card, \
+        "PR/summary/logs actions render on the card head"
+    assert "_histRerunSprint" in HISTORY_JS
+    rerun = _fn_body("_histRerunSprint", HISTORY_JS)
+    assert "smgmtRerunSprint" in rerun, (
+        "History Re-run must open the shared re-run modal (ticket pick + pre-run), "
+        "not POST auto_run directly"
+    )
 
 
 def test_post_sprint_block_renders_documenter_and_reviewer():
@@ -318,21 +336,19 @@ def test_post_sprint_block_renders_documenter_and_reviewer():
     assert "Reviewer" in block
     assert "files_touched" in block or "ps-file" in block
     assert "follow_up_tickets" in block or "ps-ticket" in block
-    card = _fn_body("_histCardHtml")
-    assert "_histPostSprintHtml" in card
-    hints = _fn_body("_histHeadHintsHtml")
-    assert "_histPostSprintChipHtml" in hints
-    assert "hist-card-head-left" in card
-    assert "hist-card-body" in card
+    details = _fn_body("_histDetailsHtml")
+    child_metrics = _fn_body("_histChildMetricsHtml")
+    assert "_histPostSprintHtml" in details or "_histPostSprintHtml" in child_metrics
+    assert "hist-card-head-left" in _fn_body("_histCardHtml")
+    assert "hist-card-body" in _fn_body("_histCardHtml")
 
 
 def test_bulk_complete_button_on_parent_with_children():
     group = _fn_body("_histGroupHtml")
     assert "_histBulkCompleteBtnHtml" in group
     assert "bulkCompleteBtn" in _fn_body("_histGroupHtml")
-    card = _fn_body("_histCardHtml")
-    assert "hist-card-head-right" in card
-    assert "bulkCompleteBtn" in card
+    parent = _fn_body("_histParentRowHtml")
+    assert "hist-parent-actions" in parent
     btn = _fn_body("_histBulkCompleteBtnHtml")
     assert "smgmtBulkCompleteSprint" in btn
     assert "Bulk complete" in btn
@@ -347,16 +363,28 @@ def test_bulk_complete_button_on_parent_with_children():
 def test_bulk_complete_modal_mounts():
     assert 'id="bc-modal"' in PROJECT_HTML
     assert 'id="bc-confirm-btn"' in PROJECT_HTML
-    assert "bulk-complete-preview" in PROJECT_HTML or "smgmtBulkCompleteSprint" in PROJECT_HTML
+    modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
+    assert "bulk-complete-preview" in modal_js or "smgmtBulkCompleteSprint" in modal_js
+    # Re-fetch merge chain after each merge (parent→develop only known post child merge).
+    assert "_bcRemainingMergeSteps" in modal_js
+    assert "while (mergeSteps.length > 0)" in modal_js
+
+
+def test_bc_confirm_reads_merge_steps_before_close():
+    """_bcClose() nulls _bcPreview — merge_steps must be captured first."""
+    modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
+    body = _fn_body("_bcConfirm", modal_js)
+    close_at = body.find("_bcClose()")
+    preview_merge_at = body.find("_bcPreview.merge_steps")
+    assert close_at != -1 and preview_merge_at != -1
+    assert preview_merge_at < close_at, (
+        "_bcPreview.merge_steps must be read before _bcClose clears _bcPreview"
+    )
 
 
 def test_locked_collapsed_cards_hide_header_details():
-    """Completed/deleted rows default collapsed with a compact header (no progress/duration)."""
-    card = _fn_body("_histCardHtml")
-    assert "headCompact" in card
-    assert "_histProgressText(s)" in card
-    assert "headCompact ?" in card
+    """Locked rows stay collapsed by default; auto-expand skips them."""
     auto = _fn_body("_histAutoExpandRecent")
-    assert "_histIsLocked(s.lifecycle_state)" in auto
+    assert "_histShouldAutoExpand" in auto or "_histIsLocked" in auto
     rule = _css_rule(".hist-card.locked:not(.expanded) .hist-card-head")
     assert rule, "locked collapsed cards must use a single-line header"

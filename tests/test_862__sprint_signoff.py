@@ -46,7 +46,15 @@ def project(tmp_path, monkeypatch):
     """A temp project root wired into server._project_root_path."""
     root = tmp_path / "proj"
     (root / ".commander" / "sprints").mkdir(parents=True)
-    monkeypatch.setattr(server, "_project_root_path", lambda repo: root)
+
+    def _root(_repo):
+        return root
+
+    # test_862 imports server at collection time; client_ctx may reload server
+    # later — patch every loaded server module so signoff_service._server() agrees.
+    for mod in {server, sys.modules.get("server")}:
+        if mod is not None:
+            monkeypatch.setattr(mod, "_project_root_path", _root)
     return root
 
 

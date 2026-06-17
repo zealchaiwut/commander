@@ -48,12 +48,55 @@ def get_version() -> JSONResponse:
 
 
 def get_gh_auth_status() -> JSONResponse:
-    """Return the GitHub CLI auth preflight result from startup (issue #424)."""
+    """Return live GitHub CLI auth preflight (re-checked each request)."""
     srv = _server()
+    srv._check_gh_auth()
     return JSONResponse(
         content=srv._GH_AUTH_STATUS,
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
+
+
+def start_gh_auth_login() -> JSONResponse:
+    from routers import gh_auth_service as gas
+
+    return JSONResponse(content=gas.start_login())
+
+
+def get_gh_auth_login_status() -> JSONResponse:
+    from routers import gh_auth_service as gas
+
+    body = gas.get_login_status()
+    if body.get("done") and body.get("ok"):
+        gas.refresh_server_gh_auth()
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+def send_gh_auth_input(payload: dict) -> JSONResponse:
+    from routers import gh_auth_service as gas
+
+    text = payload.get("text", "\n")
+    if text is None:
+        text = "\n"
+    return JSONResponse(content=gas.send_input(str(text)))
+
+
+def cancel_gh_auth_login() -> JSONResponse:
+    from routers import gh_auth_service as gas
+
+    return JSONResponse(content=gas.cancel_login())
+
+
+def gh_auth_login_with_token(payload: dict) -> JSONResponse:
+    from routers import gh_auth_service as gas
+
+    body = gas.login_with_token(payload.get("token", ""))
+    if body.get("ok"):
+        gas.refresh_server_gh_auth()
+    return JSONResponse(content=body)
 
 
 def get_diagnostics_page():

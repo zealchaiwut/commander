@@ -58,7 +58,10 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "host": "local",
             "branch": "develop",
             "port": 8001,
-            # Scripts live in each clone's scripts/; working_dir is the uat clone root.
+            # UAT runs from the prd clone (develop + port 8001). The dedicated
+            # uat/ worktree is dirtied by sprint_manager; sharing prd/ keeps
+            # deploy/restart reliable. PRD stays master:8000 on the same folder.
+            "shared_working_dir": "prd",
             "start_script": "bash scripts/start_uat.sh",
             "stop_script": "bash scripts/stop_all.sh uat",
         },
@@ -84,11 +87,6 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "port": 8011,
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
-            "deploy_not_ready_message": (
-                "Deploy lifecycle is not ready in vector-search-demo yet — "
-                "ship scripts/deploy-start.sh and scripts/deploy-stop.sh "
-                "(plus Milvus start/stop) on this branch before using Deploy."
-            ),
         },
         "uat": {
             "host": "local",
@@ -96,11 +94,6 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "port": 8010,
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
-            "deploy_not_ready_message": (
-                "Deploy lifecycle is not ready in vector-search-demo yet — "
-                "scripts/deploy-start.sh and scripts/deploy-stop.sh are missing "
-                "on develop; add them in the vector-search-demo repo first."
-            ),
         },
     },
 }
@@ -169,6 +162,25 @@ def branch_default(env: str) -> Optional[str]:
 def port_default(env: str) -> Optional[int]:
     """Return the default bind port for *env* (``prd``→8000, ``uat``→8001)."""
     return _PORT_DEFAULTS.get(env)
+
+
+def enrich_local_working_dirs(resp: dict, env_paths: dict[str, str]) -> None:
+    """Fill ``working_dir`` for local entries that lack an explicit override.
+
+  ``shared_working_dir`` (e.g. commander uat → prd clone) lets two deploy
+  environments share one git checkout while using different branches/ports at
+  action time.
+    """
+    for env, entry in resp.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("host") != "local" or entry.get("working_dir"):
+            continue
+        shared = entry.get("shared_working_dir")
+        if shared and shared in env_paths:
+            entry["working_dir"] = env_paths[shared]
+        elif env in env_paths:
+            entry["working_dir"] = env_paths[env]
 
 
 def port_value(env: str, stored: Any) -> Optional[int]:

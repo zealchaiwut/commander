@@ -19,9 +19,9 @@ import {
   _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
 } from './scheduled-run.js';
 import {
-  _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
-  _histToggleCard, _histToggleFold, _histFocusLabel, _histStateChip,
-  _histRenderLedger, _histRerunSprint,
+  _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
+  _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
+  _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
 } from './history.js';
 
 import {
@@ -38,6 +38,7 @@ import {
 } from './bulk-complete-modal.js';
 import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
+  smgmtApproveSprint, smgmtRejectSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
   _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
@@ -64,16 +65,21 @@ import {
   _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
 } from './drag-drop.js';
 import {
-  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender, 
-  _smgmtLabelFilterRender, _smgmtLabelFilterApply, 
-  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts, 
-  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml, 
-  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard, 
+  loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender,
+  _smgmtLabelFilterRender, _smgmtLabelFilterApply,
+  _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts,
+  _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml,
+  _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard,
   _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
-  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml, 
+  _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml,
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
   _smgmtApplyRerunOptimistic,
+  // Ancestor row (issue #1043)
+  _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
+  _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
+  smgmtDraftGoalInput, smgmtPlanningRowMenu, smgmtPlanningRemove,
+  smgmtPlanningReorder, smgmtOpenTicketPicker, smgmtAddToDraft,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -106,6 +112,8 @@ globalThis._bcConfirm = _bcConfirm;
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
 globalThis.smgmtCancelSprint = smgmtCancelSprint;
+globalThis.smgmtApproveSprint = smgmtApproveSprint;
+globalThis.smgmtRejectSprint = smgmtRejectSprint;
 globalThis._pfOpen = _pfOpen;
 globalThis._pfReset = _pfReset;
 globalThis._pfClose = _pfClose;
@@ -211,6 +219,22 @@ globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
 globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
 
+// Ancestor sprint rows (issue #1043)
+globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
+globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
+globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;
+globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
+globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
+globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
+
+// Draft sprint card helpers (issue #1044)
+globalThis.smgmtDraftGoalInput = smgmtDraftGoalInput;
+globalThis.smgmtPlanningRowMenu = smgmtPlanningRowMenu;
+globalThis.smgmtPlanningRemove = smgmtPlanningRemove;
+globalThis.smgmtPlanningReorder = smgmtPlanningReorder;
+globalThis.smgmtOpenTicketPicker = smgmtOpenTicketPicker;
+globalThis.smgmtAddToDraft = smgmtAddToDraft;
+
 // Run-on-schedule toggle (issue #863)
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
 globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
@@ -223,11 +247,16 @@ globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
 // History ledger (issue #806 / #797 extraction)
 globalThis._histNeedsActionCount = _histNeedsActionCount;
 globalThis._histLoadLedger = _histLoadLedger;
+globalThis._histPrefetchLedger = _histPrefetchLedger;
 globalThis._histScanStale = _histScanStale;
 globalThis._histCleanupStale = _histCleanupStale;
 globalThis._histToggleCard = _histToggleCard;
+globalThis._histToggleGroup = _histToggleGroup;
 globalThis._histToggleFold = _histToggleFold;
 globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;
 globalThis._histRenderLedger = _histRenderLedger;
 globalThis._histRerunSprint = _histRerunSprint;
+globalThis._histToggleAgentTime = _histToggleAgentTime;
+globalThis._histToggleMetrics = _histToggleMetrics;
+globalThis._histClearStaleLabels = _histClearStaleLabels;

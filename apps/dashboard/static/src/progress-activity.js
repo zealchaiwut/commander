@@ -17,6 +17,7 @@
  * Exported:
  *   renderProgressActivity(payload, opts?)  → HTML string
  *   updateProgressActivityLog(rootId, logTail, colorize?)  → DOM patch (log only)
+ *   patchProgressActivityInPlace(rootId, payload, opts?) → DOM patch (bar + log)
  *   paToggleLog(rootId)  → toggle collapse state of mounted log stream
  *   PA_CSS  → string of component CSS (inject once via injectProgressActivityCss())
  *   injectProgressActivityCss()  → idempotent <style> injector
@@ -250,6 +251,43 @@ export function updateProgressActivityLog(rootId, logTail, colorize) {
 }
 
 /**
+ * Patch a mounted bar-mode ProgressActivity without replacing the whole tree.
+ * Returns false when a full renderProgressActivity() call is required.
+ */
+export function patchProgressActivityInPlace(rootId, payload, opts) {
+  if (typeof document === "undefined" || !rootId) return false;
+  const root = document.getElementById(rootId);
+  if (!root) return false;
+
+  const status = payload.status || "running";
+  if (status === "done" || status === "error") return false;
+
+  const mode = payload.mode || _detectMode(payload);
+  if (mode !== "bar") return false;
+
+  const fill = root.querySelector(".pa-bar-fill");
+  if (!fill) return false;
+
+  const done = Number(payload.done ?? 0);
+  const total = Number(payload.total ?? 0);
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  fill.style.transform = `scaleX(${pct / 100})`;
+
+  const cur = root.querySelector(".pa-current");
+  if (cur && payload.current != null) cur.textContent = String(payload.current);
+
+  const counts = root.querySelector(".pa-counts");
+  if (counts) {
+    counts.textContent = total > 0 ? `${done} of ${total}` : "";
+  }
+
+  if (Array.isArray(payload.log_tail)) {
+    updateProgressActivityLog(rootId, payload.log_tail, opts && opts.colorize);
+  }
+  return true;
+}
+
+/**
  * Toggle the collapsed state of the log stream.
  * Wired to onclick in the rendered log-header; also usable programmatically.
  *
@@ -283,7 +321,7 @@ export const PA_CSS = `
 /* ── Bar mode ── */
 .pa-bar-track {
   height: 4px;
-  background: rgba(22,163,74,.18);
+  background: var(--green-bg);
   border-radius: 2px;
   overflow: hidden;
   position: relative;
@@ -303,14 +341,14 @@ export const PA_CSS = `
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.55) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.1) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 .pa-bar-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 16px 0;
+  padding: 4px 16px 0;
   font-size: 12px;
   color: var(--text-muted);
   min-height: 22px;
@@ -343,7 +381,7 @@ export const PA_CSS = `
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 5px 0;
+  padding: 4px 0;
   min-height: 28px;
 }
 .pa-step-icon {
@@ -382,14 +420,14 @@ export const PA_CSS = `
 .pa-indeterminate {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 8px 16px;
 }
 .pa-spinner {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border: 2px solid rgba(22,163,74,.2);
+  border: 2px solid var(--green-bg);
   border-top-color: var(--green);
   border-radius: 50%;
   animation: pa-spin .8s linear infinite;
@@ -397,7 +435,7 @@ export const PA_CSS = `
 .pa-indet-shimmer {
   height: 4px;
   flex: 1;
-  background: rgba(22,163,74,.15);
+  background: var(--green-bg);
   border-radius: 2px;
   position: relative;
   overflow: hidden;
@@ -407,7 +445,7 @@ export const PA_CSS = `
   position: absolute;
   top: 0; left: -40%;
   width: 40%; height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(22,163,74,.45) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--green-bg) 50%, transparent 100%);
   animation: pa-shimmer 1.8s ease-in-out infinite;
 }
 
@@ -416,7 +454,7 @@ export const PA_CSS = `
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 16px;
 }
 .pa-done-icon {
   color: var(--green);
@@ -430,7 +468,7 @@ export const PA_CSS = `
 
 /* ── Error end state ── */
 .pa-error {
-  padding: 10px 16px;
+  padding: 8px 16px;
 }
 .pa-error-msg {
   font-size: 13px;
@@ -440,8 +478,8 @@ export const PA_CSS = `
 .pa-retry-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
+  gap: 4px;
+  padding: 4px 12px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
@@ -463,7 +501,7 @@ export const PA_CSS = `
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 16px;
+  padding: 8px 16px;
   font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
   font-size: 11px;
   color: var(--text-muted);
@@ -498,12 +536,12 @@ export const PA_CSS = `
   font-family: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
   font-size: 11px;
   line-height: 1.7;
-  padding: 0 16px 10px;
+  padding: 0 16px 8px;
 }
 .pa-log-stream.pa-log-collapsed { display: none; }
 .pa-log-line {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 .pa-log-time {
   color: var(--text-sub);

@@ -751,6 +751,9 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("post_sprint_json", "TEXT"),
     ("estimate_accuracy", "REAL"),
     ("run_ingested_at", "TEXT"),
+    ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -798,6 +801,9 @@ def ingest_sprint_run_artifact(
                 fields["post_sprint_json"],
                 fields["estimate_accuracy"],
                 ingested_at,
+                fields["summary_settled_done"],
+                fields["summary_uat_count"],
+                fields["summary_failure_count"],
             ]
             project_sql = ""
             if (project or "").strip():
@@ -815,7 +821,10 @@ def ingest_sprint_run_artifact(
                     pr_number = ?,
                     post_sprint_json = ?,
                     estimate_accuracy = ?,
-                    run_ingested_at = ?{project_sql}
+                    run_ingested_at = ?,
+                    summary_settled_done = ?,
+                    summary_uat_count = ?,
+                    summary_failure_count = ?{project_sql}
                 WHERE label = ?
                 """,
                 tuple(updates) + (label,),
@@ -826,8 +835,10 @@ def ingest_sprint_run_artifact(
                 INSERT INTO sprints (label, project, state, created_at, run_ingested_at,
                                      issues_json, tokens, wall_clock_secs,
                                      reconciliation_json, summary_issue_url, summary_path,
-                                     pr_number, post_sprint_json, estimate_accuracy)
-                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     pr_number, post_sprint_json, estimate_accuracy,
+                                     summary_settled_done, summary_uat_count,
+                                     summary_failure_count)
+                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     label,
@@ -843,10 +854,27 @@ def ingest_sprint_run_artifact(
                     fields["pr_number"],
                     fields["post_sprint_json"],
                     fields["estimate_accuracy"],
+                    fields["summary_settled_done"],
+                    fields["summary_uat_count"],
+                    fields["summary_failure_count"],
                 ),
             )
         conn.commit()
 
+
+
+
+def update_sprint_pr_number(label: str, pr_number: int | None) -> None:
+    """Persist the sprint merge PR number after Merge Sprint (History links)."""
+    if pr_number is None:
+        return
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "UPDATE sprints SET pr_number = ? WHERE label = ?",
+            (int(pr_number), label),
+        )
+        conn.commit()
 
 def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
     """Refresh the ingested reconciliation block after a background reconcile."""
@@ -855,6 +883,36 @@ def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
         conn.execute(
             "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
             (json.dumps(reconciliation), label),
+        )
+        conn.commit()
+
+
+def update_sprint_run_counts(
+    label: str,
+    issues_json: str,
+    summary_settled_done: int,
+    summary_uat_count: int,
+    summary_failure_count: int,
+) -> None:
+    """Overwrite issues_json and denormalized count columns (reconcile path)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            UPDATE sprints SET
+                issues_json = ?,
+                summary_settled_done = ?,
+                summary_uat_count = ?,
+                summary_failure_count = ?
+            WHERE label = ?
+            """,
+            (
+                issues_json,
+                int(summary_settled_done),
+                int(summary_uat_count),
+                int(summary_failure_count),
+                label,
+            ),
         )
         conn.commit()
 
@@ -1459,6 +1517,35 @@ def upsert_issues(repo: str, issues: list[dict]) -> int:
             )
         conn.commit()
     return len(issues)
+
+
+def mark_issues_closed(repo: str, numbers: list[int]) -> int:
+    """Flip mirrored issues to closed by number (issue-mirror reconcile).
+
+    Mirror reads reconstruct from the `raw` JSON (see _row_to_issue), so the
+    state column alone is not enough — the raw blob's `$.state` is patched too,
+    via json_set, preserving every other field (title, labels, body). Used by
+    the open-set reconcile to correct rows that the incremental poll missed
+    closing (an issue can fall off the recently-updated window before its close
+    is observed, leaving a permanently-stale `open` row that keeps a finished
+    sprint on the board). Returns the number of rows updated.
+    """
+    if not numbers:
+        return 0
+    updated = 0
+    with get_conn() as conn:
+        _create_issues_table(conn)
+        for number in numbers:
+            cur = conn.execute(
+                """UPDATE issues
+                       SET state = 'closed',
+                           raw   = json_set(raw, '$.state', 'closed')
+                   WHERE repo = ? AND issue_number = ? AND state = 'open'""",
+                (repo, int(number)),
+            )
+            updated += cur.rowcount
+        conn.commit()
+    return updated
 
 
 def _row_to_issue(row: sqlite3.Row) -> dict:

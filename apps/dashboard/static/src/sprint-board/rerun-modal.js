@@ -9,8 +9,40 @@
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
-   _smgmtApplyRerunOptimistic, smgmtRunSprint,
+   _smgmtApplyRerunOptimistic, smgmtRunSprint, renderProgressActivity,
    _rrLabel:writable, _rrVersionedLabel:writable */
+
+function _rrShowPreviewLoading(current) {
+  const loading = document.getElementById('rr-loading');
+  if (!loading) return;
+  loading.innerHTML = renderProgressActivity({
+    status: 'running',
+    mode: 'indeterminate',
+    current: current || 'Loading preview…',
+  }, {
+    id: 'rr-preview-pa',
+    hideLog: true,
+  });
+  loading.classList.remove('hidden');
+}
+
+function _rrShowCreateProgress(done, total, current, status, error) {
+  const loading = document.getElementById('rr-loading');
+  if (!loading) return;
+  loading.innerHTML = renderProgressActivity({
+    status: status || 'running',
+    mode: 'bar',
+    done: done || 0,
+    total: total || 3,
+    current: current || '',
+    error: error || '',
+    result: status === 'done' ? 'Sub-sprint created' : '',
+  }, {
+    id: 'rr-create-pa',
+    hideLog: true,
+  });
+  loading.classList.remove('hidden');
+}
 
 export function _rrOpen() {
   _setBodyInert(['rr-backdrop', 'rr-modal']);
@@ -64,7 +96,7 @@ export async function smgmtRerunSprint(label) {
   _rrVersionedLabel = null;
 
   document.getElementById('rr-modal-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-  document.getElementById('rr-loading').classList.remove('hidden');
+  _rrShowPreviewLoading('Loading preview…');
   document.getElementById('rr-content').classList.add('hidden');
   document.getElementById('rr-error').classList.add('hidden');
   document.getElementById('rr-error').textContent = '';
@@ -122,6 +154,8 @@ export async function _rrConfirm() {
 
   const confirmBtn = document.getElementById('rr-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Creating…'; }
+  _rrShowCreateProgress(0, 3, 'Creating sprint…', 'running', '');
+  document.getElementById('rr-content').classList.add('hidden');
 
   try {
     const res = await fetch(
@@ -142,11 +176,15 @@ export async function _rrConfirm() {
     }
     const data = await res.json();
     const subLabel = data.sub_label;
-    _rrClose();
+    _rrShowCreateProgress(1, 3, 'Applying local updates…', 'running', '');
     if (typeof _smgmtApplyRerunOptimistic === 'function') {
       _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
     }
     await loadSprintMgmt(true);
+    if (typeof globalThis._histLoadLedger === 'function') {
+      await globalThis._histLoadLedger(repo);
+    }
+    _rrShowCreateProgress(2, 3, 'Queueing sprint run…', 'running', '');
     const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';
     if (data.errors && data.errors.length > 0) {
       _smgmtShowToast(`${subDisplay} created with label errors — check GitHub.`);
@@ -154,12 +192,17 @@ export async function _rrConfirm() {
       _smgmtShowToast(`${subDisplay} ready — confirm run`);
     }
     if (subLabel && typeof smgmtRunSprint === 'function') {
+      _rrShowCreateProgress(3, 3, 'Done', 'done', '');
       smgmtRunSprint(subLabel);
     }
+    _rrClose();
   } catch (e) {
+    _rrShowCreateProgress(0, 3, '', 'error', e.message || 'Failed to create re-run sprint');
     const errEl = document.getElementById('rr-error');
     errEl.textContent = 'Failed to re-run sprint: ' + e.message;
     errEl.classList.remove('hidden');
+    document.getElementById('rr-loading').classList.add('hidden');
+    document.getElementById('rr-content').classList.remove('hidden');
     if (confirmBtn) {
       confirmBtn.disabled = false;
       confirmBtn.textContent = _rrVersionedLabel

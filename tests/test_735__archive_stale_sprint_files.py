@@ -327,10 +327,20 @@ def test_ui_has_cleanup_card_and_preview_and_confirm():
     html = (STATIC_DIR / "project.html").read_text()
     assert 'id="ps-sprint-cleanup-card"' in html, "cleanup card missing"
     assert 'id="ps-stale-scan-btn"' in html, "stale branch scan button missing from settings"
+    assert 'id="ps-stale-prune-btn"' in html, "prune merged branches button missing from settings"
+    assert 'id="ps-tests-preview-btn"' in html, "clean old test files button missing from settings"
     assert 'id="ps-cleanup-preview"' in html, "preview panel missing"
+    # Cleanup card is pinned first in project settings (before Estimation).
+    wrap_pos = html.find('class="proj-settings-wrap"')
+    cleanup_pos = html.find('id="ps-sprint-cleanup-card"')
+    est_pos = html.find("<!-- Estimation card -->")
+    assert wrap_pos != -1 and cleanup_pos != -1 and est_pos != -1
+    assert wrap_pos < cleanup_pos < est_pos, "cleanup card should be first in settings"
     # A preview (dry-run) trigger and a confirm trigger must both exist.
     assert "sprintCleanupPreview(" in html, "preview button handler missing"
     assert "sprintCleanupConfirm(" in html, "confirm button handler missing"
+    assert "testFilesCleanupPreview(" in html, "test file preview handler missing"
+    assert "psPruneMergedBranches(" in html, "branch prune handler missing"
 
 
 def test_ui_confirm_calls_cleanup_endpoint():

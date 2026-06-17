@@ -14,6 +14,7 @@ from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
 from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
+from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
 from .roadmap import router as roadmap_router
 from .runs import router as runs_router
@@ -26,6 +27,7 @@ from .settings import router as settings_router
 from .suggestions import router as suggestions_router
 from .system import router as system_router
 from .tickets import router as tickets_router
+from .timeline import router as timeline_router
 
 __all__ = [
     "activity_router",
@@ -37,6 +39,7 @@ __all__ = [
     "finish_progress_router",
     "home_milestone_router",
     "log_search_router",
+    "maintenance_router",
     "milestones_router",
     "roadmap_router",
     "runs_router",
@@ -49,4 +52,5 @@ __all__ = [
     "suggestions_router",
     "system_router",
     "tickets_router",
+    "timeline_router",
 ]

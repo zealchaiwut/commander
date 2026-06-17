@@ -16,8 +16,10 @@ bash ~/dev/commander/prd/scripts/setup_machine.sh
 ```
 
 `setup_machine.sh` is idempotent: it creates the venv and installs
-requirements, copies `.env` from `.env.example` (prompting for secret keys
-without echoing them), constructs the `~/dev/commander/{prd,uat}` layout, and
+requirements, copies `.env` from `.env.example` (prompting without echoing for
+every secret key — those ending in `_TOKEN`/`_KEY`/`_SECRET`/`_PASSWORD` — and
+re-prompting only for keys still unset on an existing `.env`), constructs the
+`~/dev/commander/{prd,uat}` layout, and
 finishes with a preflight **doctor** that prints a PASS/FAIL table for
 `gh auth`, the `claude` CLI, `tailscale`, the dashboard port, and `sqlite3`.
 The script exits nonzero if any doctor check fails. Pass `--restore-gist <id>`
@@ -89,7 +91,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Sprint Estimator** | Claude Code-driven effort estimation for all sprint tickets — runs automatically at sprint start | see below |
 | **Pipeline mode** | Opt-in two-stage dispatch (`pipeline_mode` setting, default off): the coder works the next ticket while the tester validates the previous one, roughly halving wall-clock per dispatch level. One coder + one tester run concurrently; a hard level barrier holds the next level until the current one fully merges; rejected tickets jump to the front of the coder queue (3-attempt cap → `needs-rework`). Label transitions and develop merges are serialized; the board shows dual active-agent cards with per-level progress | [docs/features/sprint-manager.md](docs/features/sprint-manager.md) |
 | **Sprint file archive** | Reversible cleanup of stale per-sprint runtime files (plan/placeholder/state) for finished sprints into `.commander/sprints/archive/`; status/estimate/summary files are never touched and nothing is deleted. CLI `scripts/clean_sprint_files.py` or `POST /api/maintenance/sprints/cleanup` (dry-run preview + confirm in the UI) | [SCHEMA.md](SCHEMA.md) |
-| **Sprint Workspace** | The Sprint tab is split into **Board / Running / History** sub-views (issue #798). **Board:** filtered multi-select backlog panel with a what-if delta preview, a capacity budget bar driven by `sprint_budget_minutes` (default 180), and an execution-preview mini-rail backed by `GET /api/sprints/{label}/preview-dag` (predicted dispatch levels, file conflicts, cycles, unestimated tickets). **Running:** a level-rail node board with a running-metrics strip (from the extended live snapshot) and a per-node inspector with per-issue log tabs (`GET /logs/tail`). **History:** a sprint ledger (`GET /api/sprints/history`) with run-stats blocks and gantt timelines (`GET /api/sprints/{label}/run-stats`), a post-sprint reconciliation checklist surfacing loose ends — missing summary issue, unmerged PR, stale status labels (issue #856) — configurable folding via `history_fold_size` (default 10), deleted-sprint persistence (`sprint_history` table), and stale-branch scan/cleanup (`GET /scan-stale-branches`, `POST /cleanup-stale-branches`). New Sprint creation runs as a verified, ordered sequence (label → ticket labels → plan file) with retry + rollback and loud in-dialog failure surfacing (issue #857). All local-only — zero GitHub API calls | [SCHEMA.md](SCHEMA.md) |
+| **Sprint Workspace** | The Sprint tab is split into **Board / Running / History** sub-views (issue #798). **Board:** filtered multi-select backlog panel with a what-if delta preview, a capacity budget bar driven by `sprint_budget_minutes` (default 180), and an execution-preview mini-rail backed by `GET /api/sprints/{label}/preview-dag` (predicted dispatch levels, file conflicts, cycles, unestimated tickets). **Running:** a level-rail node board with a running-metrics strip (from the extended live snapshot), a chip-only lane assignment map (Working/Waiting number chips per agent lane, issue #1108), and a per-issue Gantt timeline (`GET /api/sprints/{label}/timeline`, issues #1146/#1147) — colour-coded coder/tester segments on a shared time axis with a live "now" line, estimate envelopes, and a sprint wrap-up row — plus a per-node inspector with per-issue log tabs (`GET /logs/tail`). **History:** a sprint ledger (`GET /api/sprints/history`) with run-stats blocks and gantt timelines (`GET /api/sprints/{label}/run-stats`), a post-sprint reconciliation checklist surfacing loose ends — missing summary issue, unmerged PR, stale status labels (issue #856) — configurable folding via `history_fold_size` (default 10), deleted-sprint persistence (`sprint_history` table), and stale-branch scan/cleanup (`GET /scan-stale-branches`, `POST /cleanup-stale-branches`). New Sprint creation runs as a verified, ordered sequence (label → ticket labels → plan file) with retry + rollback and loud in-dialog failure surfacing (issue #857). All local-only — zero GitHub API calls | [SCHEMA.md](SCHEMA.md) |
 | **Settings** | Global and per-project key-value config store backed by Neon; REST API at `GET/PUT /api/settings` and `GET/PUT /api/projects/{slug}/settings` | [SCHEMA.md](SCHEMA.md) |
 | **Global Settings screen** | Gear icon in the dashboard header opens a settings panel for global config (model defaults, estimation params) | — |
 | **Project Settings tab** | "More" menu on project cards exposes a Settings tab for per-project overrides | — |
@@ -101,6 +103,7 @@ For a full walkthrough including multi-clone setup for Coder/Tester agents, see
 | **Neon DB** | Optional Postgres export target for sprint and project state with Alembic migrations; populated on demand via `scripts/export_to_neon.py` (not a live dependency) | [SCHEMA.md](SCHEMA.md) |
 | **Structured Logging** | JSON-lines log module (`services/logging.py`) writing to `.commander/logs/structured-YYYY-MM-DD.log`; respects `COMMANDER_LOG_LEVEL` | — |
 | **Analytics page** | Per-project analytics at `/project/{slug}/analytics` with Status, Trends, and Calibration sub-tabs; Metrics, Status, and Trends (tokens-per-sprint sourced from `agent_runs`) are wired to real local data rather than placeholders (issue #859); all metrics sourced from local sprint/estimate files (no Neon dependency) | [SCHEMA.md](SCHEMA.md) |
+| **Calibration cache** | Estimate-accuracy history resolved through a three-tier size fallback (canonical estimate JSON → sprint-state estimate → `size-*` label); auto-refreshes on sprint finish and rebuildable from full sprint history via `POST /api/maintenance/calibration/rebuild` or CLI `scripts/rebuild_calibration_cache.py` (issues #1331–#1334) | [docs/features/estimation-lifecycle.md](docs/features/estimation-lifecycle.md) |
 | **Live Browser UAT** | agent-browser drives browser UAT steps automatically instead of MANUAL; BA tags testable steps `[agent-test]` and step screenshots attach to the UAT test report | — |
 | **Impeccable design wiring** | BA and coder agents receive impeccable design contracts; visual targets tracked against an `impeccable detect` baseline | — |
 | **Activity log linking** | Activity-log agent rows render `<role> <action> #<issue>` with clickable GitHub issue links; label transitions and sprint lifecycle (started/finished/rerun) emit scoped activity events | — |
@@ -348,6 +351,16 @@ editing `static/src/`. `setup_machine.sh` runs `npm install && npm run build`
 automatically when npm is present (skip with `SETUP_MACHINE_SKIP_NPM=1`); its
 doctor reports npm as informational, never a hard fail. CI rebuilds the bundle
 and runs a design gate over `static/src/` on every push.
+
+### Design tokens
+
+Shared visual constants — colors, spacing, type scale, radii, shadows, and
+z-index — live in `apps/dashboard/static/css/tokens.css` (issue #1045) as the
+single source of truth, and the file is linked from every page. Values are
+sampled from the existing pages (no invented values), and each page's own
+`:root` overrides load after the token sheet, so linking it never restyles a
+page on its own. Prefer these tokens over hardcoded hex/px values when editing
+frontend markup or styles.
 
 ---
 

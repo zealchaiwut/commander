@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Any, Optional
 
@@ -77,6 +78,24 @@ def build_checkout_command(branch: str) -> list[str]:
 def build_pull_command(branch: str) -> list[str]:
     """Build the pull-only command. Fast-forward only; never merges or pushes."""
     return ["git", "pull", "--ff-only", "origin", branch]
+
+
+def build_fetch_command(branch: str) -> list[str]:
+    """Fetch the configured branch from origin (deploy pre-sync)."""
+    return ["git", "fetch", "origin", branch]
+
+
+def build_reset_hard_command(branch: str) -> list[str]:
+    """Hard-reset the working tree to ``origin/<branch>`` after fetch."""
+    return ["git", "reset", "--hard", f"origin/{branch}"]
+
+
+def build_stash_dirty_command() -> list[str]:
+    """Best-effort stash of local + untracked changes before deploy sync.
+
+    Exit code 1 when there is nothing to stash — callers should ignore that.
+    """
+    return ["git", "stash", "push", "-u", "-m", "commander-deploy-autostash"]
 
 
 def build_head_sha_command() -> list[str]:
@@ -451,6 +470,23 @@ def interpret_run_state(returncode: int) -> str:
     return "running" if returncode == 0 else "stopped"
 
 
+def probe_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.25) -> bool:
+    """True when *host*:*port* accepts a TCP connection (script-managed envs)."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def interpret_script_run_state(entry: dict) -> str:
+    """Run state for script-managed envs via configured bind port (issue #771)."""
+    port = restart_port(entry)
+    if port is None:
+        return "idle"
+    return "running" if probe_port_listening(port) else "stopped"
+
+
 def build_kickstart_command(label: str, uid: Optional[int] = None) -> list[str]:
     """Build ``launchctl kickstart -k gui/<uid>/<label>``.
 
@@ -480,6 +516,31 @@ def is_self_restart_dir(entry: dict, self_dir: Optional[str]) -> bool:
         return os.path.realpath(wd) == os.path.realpath(str(self_dir))
     except OSError:
         return False
+
+
+def is_self_restart_port(entry: dict, listen_port: Optional[int]) -> bool:
+    """True when *entry*'s configured port is the port this dashboard listens on.
+
+    Commander's uat env uses ``shared_working_dir`` (the prd clone) for git sync
+    while ``stop_all.sh uat`` kills the process on the uat port — so
+    ``is_self_restart_dir`` misses it when the dashboard runs from the uat
+    clone. Matching on port catches that case.
+    """
+    if listen_port is None:
+        return False
+    configured = restart_port(entry)
+    return configured is not None and configured == listen_port
+
+
+def is_script_self_restart(
+    entry: dict,
+    self_dir: Optional[str],
+    listen_port: Optional[int] = None,
+) -> bool:
+    """True when a script stop+start restart would kill the serving dashboard."""
+    return is_self_restart_dir(entry, self_dir) or is_self_restart_port(
+        entry, listen_port
+    )
 
 
 def build_detached_restart_command(

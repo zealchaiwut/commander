@@ -36,12 +36,16 @@ _FAKE_ISSUE = 999
 
 
 def _label_response(*names: str) -> MagicMock:
-    """Fake subprocess.run result for gh issue view --json labels."""
+    """Fake subprocess.run result for gh api repos/.../issues/N (REST)."""
     m = MagicMock()
     m.returncode = 0
     m.stdout = json.dumps({"labels": [{"name": n} for n in names]})
     m.stderr = ""
     return m
+
+
+def _is_issue_fetch(cmd: list) -> bool:
+    return "api" in cmd and any(isinstance(a, str) and "/issues/" in a for a in cmd)
 
 
 def _edit_ok() -> MagicMock:
@@ -151,9 +155,9 @@ class TestValidTransitions:
 
         def fake_run(cmd, **kwargs):
             calls_made.append(list(cmd))
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 # First call: current labels; after edit: labels match target
-                if len([c for c in calls_made if "view" in c]) == 1:
+                if len([c for c in calls_made if _is_issue_fetch(c)]) == 1:
                     return _label_response(*from_labels)
                 else:
                     return _label_response(*([target_lbl] if target_lbl else []))
@@ -224,7 +228,7 @@ class TestSingleEditCall:
 
         def fake_run(cmd, **kwargs):
             nonlocal call_idx
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 resp = view_responses[min(call_idx, len(view_responses) - 1)]
                 call_idx += 1
                 return resp
@@ -258,7 +262,7 @@ class TestDiffMath:
 
         def fake_run(cmd, **kwargs):
             nonlocal view_call_count
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 if view_call_count == 0:
                     view_call_count += 1
                     return _label_response(*current_labels)
@@ -330,7 +334,7 @@ class TestRetry:
 
         def fake_run(cmd, **kwargs):
             nonlocal view_idx, edit_idx
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 r = view_responses[view_idx]
                 view_idx += 1
                 return r
@@ -357,7 +361,7 @@ class TestRetry:
     def test_all_retries_exhausted_raises_transition_error(self):
         """All 4 attempts fail → TransitionError."""
         def fake_run(cmd, **kwargs):
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 return _label_response("in-progress")
             return _edit_fail("network down")
 
@@ -371,7 +375,7 @@ class TestRetry:
     def test_all_retries_exhausted_sleep_sequence(self):
         """Sleep is called with backoff (1, 3, 7) — 3 sleeps for 4 attempts."""
         def fake_run(cmd, **kwargs):
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 return _label_response("in-progress")
             return _edit_fail()
 
@@ -394,7 +398,7 @@ class TestRetry:
 
         def fake_run(cmd, **kwargs):
             calls.append(list(cmd))
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 return _label_response("in-progress")
             return _edit_ok()
 
@@ -406,14 +410,14 @@ class TestRetry:
 
         assert result is True
         # Exactly one view (pre-edit fetch) and one edit — no verify re-fetch.
-        assert len([c for c in calls if "view" in c]) == 1
+        assert len([c for c in calls if _is_issue_fetch(c)]) == 1
         assert len([c for c in calls if "edit" in c]) == 1
 
     def test_no_transition_error_after_successful_edit(self):
         """Issue #755: with the verify loop gone, a successful edit never raises
         TransitionError even if the on-GitHub state would not be re-confirmed."""
         def fake_run(cmd, **kwargs):
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 return _label_response("in-progress")
             return _edit_ok()
 
@@ -437,7 +441,7 @@ class TestLogging:
 
         def fake_run(cmd, **kwargs):
             nonlocal view_idx
-            if "view" in cmd:
+            if _is_issue_fetch(cmd):
                 r = view_responses[view_idx]
                 view_idx += 1
                 return r

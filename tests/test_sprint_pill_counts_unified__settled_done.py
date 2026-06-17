@@ -112,7 +112,8 @@ def test_outcome_ingested_unions_agent_runs():
     assert "sprint_history_service._issues_from_agent_runs(sprint_label)" in fn, \
         "outcome ingested path does not union agent_runs"
     # Additive only — must not rewrite a ticket already present.
-    assert "if not _eid or _eid in _seen:" in fn
+    assert "_extra.get(\"ticket_id\")" in fn
+    assert "if _eid in _seen:" in fn
 
 
 # ── Rec 2d: finish-card lazy-ingest (collapse dual path everywhere) ──────────

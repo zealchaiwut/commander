@@ -24,7 +24,7 @@ The prompt that invokes you will contain:
 
 For every issue in ISSUES_JSON, run:
 
-    gh issue view <number> --repo <REPO> --json number,title,body,labels
+    gh api repos/<REPO>/issues/<number>
 
 Skip any issue already labeled `done`, `UAT-approved`, `closed`, or `needs-rework` — these don't need estimates. Note skipped issues in your output JSON.
 
@@ -116,7 +116,7 @@ Print one final line to stdout, then exit. Do NOT prompt for input. Do NOT conti
 - **One JSON output file per sprint.** Overwrite if it exists.
 - **One comment per ticket.** If a ticket already has an `estimated` label, skip it (don't double-comment).
 - **Be conservative on estimates.** Round up. Anything you're unsure about → add a risk flag and add minutes.
-- **Don't estimate tickets you can't read.** If `gh issue view` fails for a ticket, record it in `skipped` with reason "failed to fetch".
+- **Don't estimate tickets you can't read.** If `gh api repos/<REPO>/issues/<N>` fails for a ticket, record it in `skipped` with reason "failed to fetch".
 - **Stay within the working clone.** Don't cd elsewhere or scan unrelated repos.
 - **No interactive prompts.** Run autonomously.
 

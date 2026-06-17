@@ -18,10 +18,21 @@ import {
 import {
   renderProgressActivity,
   updateProgressActivityLog,
+  patchProgressActivityInPlace,
   paToggleLog,
   injectProgressActivityCss,
 } from "./progress-activity.js";
+import {
+  mountProgressActivity,
+  patchProgressActivity,
+  patchProgressActivityStep,
+  unmountProgressActivity,
+  appendProgressActivityLog,
+  getProgressActivityPayload,
+  BOARD_OVERLAY_PA_ID,
+} from "./progress-host.js";
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
+import { loadCommanderFeatures } from './shell/features.js';
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -36,11 +47,21 @@ root.AGENT_NAMES = AGENT_NAMES;
 // ProgressActivity component (issue #928)
 root.renderProgressActivity = renderProgressActivity;
 root.updateProgressActivityLog = updateProgressActivityLog;
+root.patchProgressActivityInPlace = patchProgressActivityInPlace;
 root.paToggleLog = paToggleLog;
+root.mountProgressActivity = mountProgressActivity;
+root.patchProgressActivity = patchProgressActivity;
+root.patchProgressActivityStep = patchProgressActivityStep;
+root.unmountProgressActivity = unmountProgressActivity;
+root.appendProgressActivityLog = appendProgressActivityLog;
+root.getProgressActivityPayload = getProgressActivityPayload;
+root.BOARD_OVERLAY_PA_ID = BOARD_OVERLAY_PA_ID;
 injectProgressActivityCss();
 root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
+root.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+globalThis.loadCommanderFeatures = loadCommanderFeatures;

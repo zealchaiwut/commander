@@ -11,8 +11,18 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
-/* global _activeTab, _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtMoveToModalOpen, _smgmtOrderedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, _smgmtUpdateToolbarTop, loadSprintMgmt, sprintLabelDisplay,
+/* global _activeTab, _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtMoveToModalOpen, _smgmtOrderedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, _smgmtSubView, _smgmtUpdateToolbarTop, loadSprintMgmt, sprintLabelDisplay,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
+
+import {
+  BOARD_OVERLAY_PA_ID,
+  mountProgressActivity,
+  patchProgressActivity,
+  appendProgressActivityLog,
+  unmountProgressActivity,
+} from "../progress-host.js";
+
+let _smgmtBoardOverlayHasProgress = false;
 
 export function isDragBlocked(state) {
   // A drop is blocked while a move is already in flight (issue #276) — mirrors
@@ -45,26 +55,28 @@ export function _smgmtUpdateSelectionUI() {
   const bar = document.getElementById('proj-selection-bar');
   const listEl = document.getElementById('smgmt-sprint-list');
   const onSprintTab = typeof _activeTab === 'undefined' || _activeTab === 'sprint-mgmt';
+  const onBoard = typeof _smgmtSubView === 'undefined' || _smgmtSubView === 'board';
 
-  if (count > 0 && bar && onSprintTab) {
-    bar.classList.add('show');
+  if (count > 0 && bar && onSprintTab && onBoard) {
     bar.classList.remove('hidden');
     if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 issue selected' : `${count} issues selected`;
-    const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
-    if (deleteBtn) {
-      const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
-      deleteBtn.classList.toggle('show', showDelete);
+    const closeBtn = document.getElementById('smgmt-sel-close-btn');
+    if (closeBtn) {
+      const label = count === 1 ? 'Close ticket' : `Close ${count} tickets`;
+      closeBtn.innerHTML = `<i class="ti ti-circle-x"></i> ${label}`;
     }
   } else {
     if (bar) {
-      bar.classList.remove('show');
       bar.classList.add('hidden');
     }
     if (listEl) listEl.classList.remove('has-selection');
   }
-  if (typeof _smgmtUpdateToolbarTop === 'function') _smgmtUpdateToolbarTop();
+  if (typeof _smgmtUpdateToolbarTop === 'function') {
+    _smgmtUpdateToolbarTop();
+    requestAnimationFrame(_smgmtUpdateToolbarTop);
+  }
 }
 
 export function _smgmtPopulateSelectionDropdown() {
@@ -825,6 +837,7 @@ export function _smgmtBoardLock(message, opts) {
   _smgmtArStopTicker();
   const overlay = document.getElementById('smgmt-move-overlay');
   const msgEl   = document.getElementById('smgmt-move-overlay-msg');
+  const paHost  = document.getElementById('smgmt-op-pa-host');
   const progWrap = document.getElementById('smgmt-op-progress-wrap');
   const logEl = document.getElementById('smgmt-op-log');
   const text    = message || 'Moving…';
@@ -834,10 +847,28 @@ export function _smgmtBoardLock(message, opts) {
     overlay.classList.add('active');
   }
   const showProgress = !!(opts && opts.progress);
-  if (progWrap) progWrap.hidden = !showProgress;
+  _smgmtBoardOverlayHasProgress = showProgress;
+  if (progWrap) progWrap.hidden = true;
   if (logEl) {
-    logEl.hidden = !showProgress;
-    if (showProgress && opts.clearLog) logEl.innerHTML = '';
+    logEl.hidden = true;
+    if (opts && opts.clearLog) logEl.innerHTML = '';
+  }
+  if (paHost) {
+    paHost.hidden = !showProgress;
+    if (showProgress) {
+      mountProgressActivity(paHost, {
+        status: 'running',
+        mode: 'bar',
+        done: 0,
+        total: (opts && opts.total) != null ? opts.total : 1,
+        current: text,
+        log_tail: [],
+      }, {
+        id: BOARD_OVERLAY_PA_ID,
+      });
+    } else {
+      unmountProgressActivity(paHost);
+    }
   }
   if (showProgress && opts.total != null) {
     _smgmtBoardProgress(0, opts.total);
@@ -847,6 +878,18 @@ export function _smgmtBoardLock(message, opts) {
 }
 
 export function _smgmtBoardProgress(done, total) {
+  if (_smgmtBoardOverlayHasProgress) {
+    const d = Number(done || 0);
+    const t = Number(total || 0);
+    patchProgressActivity('smgmt-op-pa-host', {
+      done: d,
+      total: t,
+      mode: 'bar',
+      status: 'running',
+      current: t > 0 ? `${d} of ${t}` : '',
+    }, { id: BOARD_OVERLAY_PA_ID });
+    return;
+  }
   const fill = document.getElementById('smgmt-op-progress-fill');
   const pctEl = document.getElementById('smgmt-op-progress-pct');
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -855,6 +898,14 @@ export function _smgmtBoardProgress(done, total) {
 }
 
 export function _smgmtBoardLog(line, kind) {
+  if (_smgmtBoardOverlayHasProgress) {
+    const mappedType =
+      kind === 'ok' ? 'success' :
+      kind === 'err' ? 'fail' :
+      kind === 'step' ? 'dispatch' : 'dispatch';
+    appendProgressActivityLog('smgmt-op-pa-host', line, mappedType, { id: BOARD_OVERLAY_PA_ID });
+    return;
+  }
   const logEl = document.getElementById('smgmt-op-log');
   if (!logEl) return;
   const row = document.createElement('div');
@@ -866,8 +917,14 @@ export function _smgmtBoardLog(line, kind) {
 
 export function _smgmtBoardUnlock() {
   _smgmtMoveLock = false;
+  _smgmtBoardOverlayHasProgress = false;
   const overlay = document.getElementById('smgmt-move-overlay');
   if (overlay) overlay.classList.remove('active');
+  const paHost = document.getElementById('smgmt-op-pa-host');
+  if (paHost) {
+    unmountProgressActivity(paHost);
+    paHost.hidden = true;
+  }
   const progWrap = document.getElementById('smgmt-op-progress-wrap');
   const logEl = document.getElementById('smgmt-op-log');
   if (progWrap) progWrap.hidden = true;

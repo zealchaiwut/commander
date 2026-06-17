@@ -267,6 +267,7 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
+from services.logging import install_orchestrator_stdout_timestamps  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
 
 try:
@@ -339,6 +340,10 @@ DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
 # threading.Event for thread-safe signaling across worker threads.
 _sprint_user_cancelled: threading.Event = threading.Event()
 
+# Calibration cache: if incremental refresh completes within this budget it runs
+# inline (no perceived delay); otherwise dispatched as a background thread (issue #1333).
+_CALIBRATION_INLINE_THRESHOLD_S: float = 0.5
+
 
 def _emit_sprint_lifecycle_event(
     type: str,
@@ -363,6 +368,80 @@ def _emit_sprint_lifecycle_event(
         )
     except Exception:
         pass
+
+
+def _run_calibration_cache_refresh(
+    project_root: Path,
+    configured_minutes: dict,
+    project: str = "",
+) -> None:
+    """Refresh the calibration cache after a sprint finishes (issue #1333).
+
+    Runs _refresh_calibration_cache incrementally. If it completes within
+    _CALIBRATION_INLINE_THRESHOLD_S it runs inline; otherwise it continues in a
+    daemon background thread so the sprint-finish UX is not blocked.
+
+    Emits a calibration_cache_updated event when new samples are absorbed.
+    """
+    try:
+        from calibration_cache_service import _refresh_calibration_cache as _rcr  # noqa: PLC0415
+    except ImportError:
+        return
+
+    commander = project_root / ".commander"
+    cache_path = commander / "calibration_cache.json"
+    try:
+        prev_processed = len(
+            json.loads(cache_path.read_text(encoding="utf-8")).get("processed") or []
+        ) if cache_path.is_file() else 0
+    except Exception:
+        prev_processed = 0
+
+    result_holder: list = [None]
+
+    def _work() -> None:
+        try:
+            result_holder[0] = _rcr(project_root, configured_minutes)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_work, daemon=True, name="calibration-refresh")
+    t.start()
+    t.join(timeout=_CALIBRATION_INLINE_THRESHOLD_S)
+
+    if t.is_alive():
+        def _bg_log() -> None:
+            t.join()
+            cache = result_holder[0]
+            if cache is not None:
+                _emit_calibration_updated_event(cache, prev_processed, project)
+        threading.Thread(target=_bg_log, daemon=True, name="calibration-refresh-log").start()
+        return
+
+    cache = result_holder[0]
+    if cache is not None:
+        _emit_calibration_updated_event(cache, prev_processed, project)
+
+
+def _emit_calibration_updated_event(cache: dict, prev_processed: int, project: str) -> None:
+    """Emit calibration_cache_updated event when new samples were absorbed."""
+    processed_after = len(cache.get("processed") or [])
+    new_samples = processed_after - prev_processed
+    if new_samples <= 0:
+        return
+    by_size = cache.get("by_size") or {}
+    total_samples = sum(
+        int(by_size[sz]["count"] or 0)
+        for sz in ("S", "M", "L", "XL")
+        if sz in by_size
+    )
+    _emit_sprint_lifecycle_event(
+        type="calibration_cache_updated",
+        target="calibration_cache",
+        actor="sprint_manager:calibration",
+        detail={"new_samples": new_samples, "total_samples": total_samples},
+        project=project,
+    )
 
 
 def _failure_event_detail(
@@ -488,6 +567,8 @@ class SprintConfig:
     coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
     # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
     coder_backend:     str  = "claude-code"
+    # Cline-specific model id (agent_config.cline.model) — separate namespace from coder_model
+    cline_model:       Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
 
@@ -684,6 +765,13 @@ def load_config(path: Path) -> "SprintConfig":
         if _ucf is not None:
             use_cline_followups = bool(_ucf)
 
+    # ── agent_config.cline.model — Cline CLI model id (not Claude Code names) ─
+    cline_model: Optional[str] = None
+    if isinstance(agent_cfg, dict):
+        _cline_sub = agent_cfg.get("cline") or {}
+        if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
+            cline_model = str(_cline_sub["model"])
+
     return SprintConfig(
         repo_name             = repo_name,
         worktree_coder        = worktree_coder,
@@ -711,6 +799,7 @@ def load_config(path: Path) -> "SprintConfig":
         tester_by_risk              = tester_by_risk,
         coder_by_size               = coder_by_size,
         coder_backend               = coder_backend,
+        cline_model                 = cline_model,
         use_cline_followups         = use_cline_followups,
     )
 
@@ -2076,21 +2165,25 @@ def _sweep_stale_status(
     ticket) and one ``SIT`` (the tester's active ticket) at a time. In pipeline
     mode both run concurrently, so a crash between the remove-label and add-label
     calls, or an interrupted prior run, can leave a ghost label on a ticket no
-    longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
+    longer being worked (issue #738 AC5). One REST ``gh api`` issue query finds them; we
     clear all except ``active_issue``. Best-effort and bounded (no per-ticket
     fetches).
     """
     r = _r(repo_name)
     try:
         out = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", status_label, "--label", sprint_label,
-             "--state", "open", "--json", "number", "--limit", "100"],
+            [
+                "gh", "api", f"repos/{r}/issues",
+                "-f", "state=open",
+                "-f", f"labels={status_label},{sprint_label}",
+                "-f", "per_page=100",
+                "--jq", ".[].number",
+            ],
             capture_output=True, text=True, timeout=15,
         )
         if out.returncode != 0:
             return
-        nums = [i["number"] for i in json.loads(out.stdout or "[]")]
+        nums = [int(n) for n in (out.stdout or "").split() if n.strip().isdigit()]
     except Exception:
         return
     cleared: list[int] = []
@@ -2966,8 +3059,16 @@ def _gate_merge_preview(
 
     merge_ok = False
     combined = ""
+    stashed = False
 
     try:
+        # Step 0: stash any unstaged/untracked changes so the worktree is clean
+        # (a dirty worktree causes `git rebase` to abort with "unstaged changes")
+        stash_rc, stash_out, stash_err = _run_timed(
+            "git", "stash", "--include-untracked", cwd=worktester_root
+        )
+        stashed = "No local changes to save" not in stash_out and stash_rc == 0
+
         # Step 1: fetch
         _run("git", "fetch", "origin", cwd=worktester_root, check=False)
 
@@ -3053,6 +3154,9 @@ def _gate_merge_preview(
         _run("git", "checkout", target_branch, cwd=worktester_root, check=False)
         # Delete tmp branch if it exists
         _try("git", "branch", "-D", _MERGE_PREVIEW_TMP_BRANCH, cwd=worktester_root)
+        # Restore any stashed changes
+        if stashed:
+            _run("git", "stash", "pop", cwd=worktester_root, check=False)
 
     if not merge_ok:
         _revert_to_sit(issue_num, "merge-preview", combined, repo_name=repo_name)
@@ -4473,6 +4577,17 @@ def _resolve_coder_model(
     return flat_default, "unestimated:default"
 
 
+def _resolve_cline_model(cfg: Optional["SprintConfig"], coder_model: str) -> tuple[str, str]:
+    """Return (model, routing_reason) for a Cline headless dispatch.
+
+    Cline uses its own model namespace (e.g. Bedrock ARNs). agent_config.cline.model
+    takes precedence; falling back to coder_model is a misconfiguration risk.
+    """
+    if cfg is not None and cfg.cline_model:
+        return cfg.cline_model, "cline:configured"
+    return coder_model, "cline:fallback-coder_model"
+
+
 # ── Pre-dispatch doctor (issue #789) ─────────────────────────────────────────
 
 def _doctor_probe_auth(backend: str = "claude-code") -> Optional[str]:
@@ -4558,6 +4673,7 @@ def _worktree_hygiene(
     merge_target: str,
     is_retry: bool = False,
     repo_root: Optional[Path] = None,
+    recover_on_rebase_conflict: bool = False,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Pre-dispatch hygiene sequence for coder/tester worktrees (issue #788).
 
@@ -4572,6 +4688,15 @@ def _worktree_hygiene(
     Returns (worktree_sha, base_sha, error_category).
       error_category is None on success, 'merge' on rebase conflict,
       or 'divergent-branch' if a fresh-ticket finds a divergent feature branch.
+
+    recover_on_rebase_conflict: when True (coder path only), a 5b rebase
+    conflict is NOT fatal — instead of dead-ending the ticket as 'merge', the
+    stale feature branch is deleted and the worktree hard-reset to base so the
+    coder rebuilds the branch fresh against the current base (mirrors 5a). This
+    breaks the deadlock where a rerun-child sub-sprint forever skips a ticket
+    whose stale branch overlaps another ticket's already-merged files (#1073).
+    The tester path leaves this False — a tester must not delete the coder's
+    just-built branch.
     """
     effective_root = repo_root or REPO_ROOT
     sys.stdout.write(str(f"  [hygiene] Pre-dispatch hygiene for ticket #{ticket_id} in {worktree}") + "\n")
@@ -4665,6 +4790,54 @@ def _worktree_hygiene(
                 sys.stdout.write(str(f"  [hygiene] Rebase conflict for #{ticket_id}: {rebase_err}") + "\n")
                 sys.stdout.flush()
                 _try("git", "rebase", "--abort", cwd=worktree)
+
+                if recover_on_rebase_conflict and base_sha:
+                    # Self-heal (coder path): the stale feature branch can't be
+                    # rebased onto the current base (typically it overlaps files
+                    # already merged from another ticket). Rather than dead-end
+                    # the ticket, drop the local branch and reset to base so the
+                    # coder recreates it fresh — the conflicting tip stays
+                    # recoverable via reflog, and the failure sidecar carries the
+                    # prior-attempt context. (#1073 deadlock.)
+                    detail = (
+                        f"Rebase of {feature_branch} onto origin/{merge_target} "
+                        f"conflicted — deleting stale branch and resetting to base "
+                        f"so the coder rebuilds fresh"
+                    )
+                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+                    sys.stdout.flush()
+                    _try("git", "checkout", "--detach", cwd=worktree)
+                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
+                    reset_ok, _, reset_err = _try(
+                        "git", "reset", "--hard", f"origin/{merge_target}", cwd=worktree,
+                    )
+                    ok_sha, wt_sha2, _ = _try("git", "rev-parse", "HEAD", cwd=worktree)
+                    new_sha = wt_sha2.strip() if ok_sha and wt_sha2.strip() else None
+                    # Only report a clean recovery when the worktree is verifiably
+                    # ON base. If the reset failed or HEAD didn't land on base, the
+                    # worktree is in an unknown state — do NOT dispatch the coder
+                    # into it; fall through to the merge-failure path so the ticket
+                    # is skipped rather than corrupted (returning a stale SHA here
+                    # would silently run the coder against the wrong tree).
+                    if reset_ok and new_sha == base_sha:
+                        worktree_sha = new_sha
+                        try:
+                            structured_log.warn(
+                                "rebase_conflict_recovered",
+                                f"deleted conflicting {feature_branch} and reset to base "
+                                f"before fresh dispatch of #{ticket_id}",
+                                issue_num=int(ticket_id), branch=feature_branch,
+                                base_sha=base_sha,
+                            )
+                        except Exception:
+                            pass
+                        return worktree_sha, base_sha, None
+                    sys.stdout.write(str(
+                        f"  [hygiene] recovery reset failed for #{ticket_id} "
+                        f"(reset_ok={reset_ok}, head={new_sha}, base={base_sha[:8]}, "
+                        f"err={reset_err!r}) — failing as merge") + "\n")
+                    sys.stdout.flush()
+
                 detail = (
                     f"Rebase of {feature_branch} onto origin/{merge_target} "
                     f"failed with conflict"
@@ -4852,6 +5025,7 @@ def _dispatch_coder(
         ticket_id=issue_num,
         merge_target=sprint_branch,
         is_retry=_is_retry,
+        recover_on_rebase_conflict=True,
     )
     if sprint_label:
         _db_update_worktree_shas_sm(issue_num, sprint_label, "coder", _wt_sha, _base_sha)
@@ -4997,19 +5171,33 @@ def _dispatch_coder(
     _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
     coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
-    sys.stdout.write(str(f"  [size-routing] issue #{issue_num}: model={coder_model}, reason={coder_routing_reason}, backend={coder_backend}") + "\n")
+    if coder_backend == "cline":
+        dispatch_model, dispatch_routing_reason = _resolve_cline_model(cfg, coder_model)
+    else:
+        dispatch_model, dispatch_routing_reason = coder_model, coder_routing_reason
+    sys.stdout.write(str(
+        f"  [size-routing] issue #{issue_num}: model={dispatch_model}, reason={dispatch_routing_reason}, backend={coder_backend}"
+    ) + "\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
     sub_env = os.environ.copy()
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
-    sub_env["CLAUDE_MODEL"] = coder_model  # hook records model_name on token_usage rows
+    sub_env["CLAUDE_MODEL"] = dispatch_model  # hook records model_name on token_usage rows
 
     if coder_backend == "cline":
         # Cline headless backend (issue #917).
         # -y skips tool-approval prompts (analogous to --dangerously-skip-permissions).
         # Cline has no --append-system-prompt; prepend persona to the prompt string instead.
         # Metered API path: keep ANTHROPIC_API_KEY so Cline can authenticate.
+        if dispatch_routing_reason == "cline:fallback-coder_model":
+            structured_log.warn(
+                "cline_model_missing",
+                "[coder] agent_config.cline.model not set — using coder_model for Cline -m "
+                "(Claude Code model ids often 404 in Cline; set agent_config.cline.model)",
+                issue_num=issue_num,
+                coder_model=coder_model,
+            )
         if not (cwd_path / ".clinerules").exists():
             structured_log.warn(
                 "clinerules_missing",
@@ -5019,13 +5207,13 @@ def _dispatch_coder(
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
         full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
-        cmd = ["cline", "-y", "-m", coder_model, full_prompt]
+        cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
         # Claude Code (existing default behavior, byte-for-byte unchanged).
         cmd = [
             "claude",
-            "--model", coder_model,
+            "--model", dispatch_model,
             "--dangerously-skip-permissions",
         ]
         coder_persona = _load_agent_persona("coder", cwd_path)
@@ -5066,7 +5254,7 @@ def _dispatch_coder(
         structured_log.info(
             "dispatch_start", f"coder dispatch #{issue_num} (attempt {attempt + 1})",
             issue_num=issue_num, agent_role="coder", sprint_label=sprint_label,
-            attempt=attempt + 1, model=coder_model, cmd=cmd[:4],
+            attempt=attempt + 1, model=dispatch_model, cmd=cmd[:4],
         )
         try:
             with log_path.open(open_mode) as log_f:
@@ -6377,15 +6565,31 @@ def create_summary_github_issue(
         pass
     _ensure_github_labels(labels, repo_name=repo_name)
 
-    try:
-        issue_num, url = github_client.create_issue(
-            title=title, body=content, labels=labels, repo_name=repo_name
-        )
-        sys.stdout.write(str(f"  Summary GitHub issue created: {url}") + "\n")
-        return issue_num, url
-    except Exception as e:
-        structured_log.warn("summary_issue_create_failed", f"failed to create summary GitHub issue: {e}", exc=str(e))
-        return None, None
+    # Retry the create on transient gh failures — a single failed `gh` call here
+    # (e.g. a flaky `gh issue list`/`create`) is what dropped sprint 79's summary
+    # issue, leaving the sprint stuck on the board (no cross-machine finished
+    # signal). Best-effort still: give up to 3 attempts before returning None.
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            issue_num, url = github_client.create_issue(
+                title=title, body=content, labels=labels, repo_name=repo_name
+            )
+            sys.stdout.write(str(f"  Summary GitHub issue created: {url}") + "\n")
+            return issue_num, url
+        except Exception as e:
+            last_exc = e
+            if attempt < 2:
+                sys.stdout.write(str(
+                    f"  [summary] create attempt {attempt + 1} failed ({e}); retrying...") + "\n")
+                sys.stdout.flush()
+                time.sleep(2 * (attempt + 1))
+    structured_log.warn(
+        "summary_issue_create_failed",
+        f"failed to create summary GitHub issue after 3 attempts: {last_exc}",
+        exc=str(last_exc),
+    )
+    return None, None
 
 
 def _close_cancelled_sprint_summary(
@@ -6791,7 +6995,7 @@ git diff {base_sha}..{head_sha} --stat
 Run:
 
 ```
-gh issue view {summary_issue_num} --json body
+gh api repos/{repo_name}/issues/{summary_issue_num} --jq .body
 ```
 
 Parse the sprint summary body to extract the list of merged ticket numbers \
@@ -6799,7 +7003,7 @@ Parse the sprint summary body to extract the list of merged ticket numbers \
 For each merged ticket N, run:
 
 ```
-gh issue view N --json number,title,body,labels
+gh api repos/{repo_name}/issues/N
 ```
 
 Skip any ticket that:
@@ -7051,7 +7255,7 @@ git diff {base_sha}..{head_sha}
 
 For each ticket in the sprint, read:
 ```
-gh issue view <N> --json number,title,body,labels
+gh api repos/{repo_name}/issues/<N>
 ```
 
 Only document tickets that are in a merged/done state.
@@ -7154,6 +7358,7 @@ def _dispatch_documenter(
             head_sha          = head_sha,
             sprint_filter_url = sprint_filter_url,
             summary_issue_num = summary_issue_num or 0,
+            repo_name         = eff_repo or "",
         )
     except KeyError as e:
         structured_log.error("documenter_template_error", f"[documenter] prompt template has unknown placeholder {e}", placeholder=str(e))
@@ -7531,7 +7736,7 @@ You are a Business Analyst. Issue #{issue_num} in repository {repo} was created 
 automated code reviewer as a follow-up ticket. Its body may be minimal or unstructured.
 
 Your task:
-1. Read the issue with: gh issue view {issue_num} --repo {repo} --json title,body
+1. Read the issue with: gh api repos/{repo}/issues/{issue_num}
 2. Rewrite the body to the standard Commander format with ALL of these sections:
    ## What & Why
    ## Acceptance Criteria
@@ -7643,6 +7848,10 @@ def _dispatch_estimator_for_followup(
         "--save-comment",
         "--save-label",
     ]
+    # Write estimate JSON to the canonical project-root .commander/ location so
+    # calibration can always find it regardless of which clone runs the dashboard.
+    if cfg is not None and hasattr(cfg, "sprints_dir"):
+        cmd += ["--commander-dir", str(cfg.sprints_dir.parent)]
 
     sys.stdout.write(str(f"  [estimator] Estimating follow-up #{issue_num} ...") + "\n")
     sys.stdout.flush()
@@ -8872,9 +9081,18 @@ def run_sprint(
     # ── Dispatch mode resolution (issue #737) ────────────────────────────────
     # Pipeline mode runs one coder + one tester worker concurrently per level.
     # Precedence: kill-switch env > per-sprint setting > per-project (cfg) > serial.
+    _project_pipeline = cfg.pipeline_mode if cfg is not None else False
+    if not _project_pipeline:
+        try:
+            import settings_repo as _settings_repo  # noqa: PLC0415
+            _stored = _settings_repo.get_setting("app_config", project=eff_repo)
+            if isinstance(_stored, dict) and _stored.get("pipeline_mode"):
+                _project_pipeline = True
+        except Exception:
+            pass
     _pipeline_on = _pipeline_mode_enabled(
         sprint_setting=pipeline_mode,
-        project_setting=(cfg.pipeline_mode if cfg is not None else None),
+        project_setting=_project_pipeline,
         env=os.environ,
     )
     # Dry-run never spawns workers — fall back to the serial no-op path.
@@ -9804,6 +10022,15 @@ def run_sprint(
         action_id=_run_id,
     )
 
+    # Auto-refresh calibration cache with newly completed sprint data (issue #1333)
+    try:
+        from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: PLC0415
+        _cal_project_root = _eff_sprints_dir.parent.parent
+        _cal_minutes = dict(_SIZE_TO_MINUTES)
+        _run_calibration_cache_refresh(_cal_project_root, _cal_minutes, project=eff_repo or label)
+    except Exception:
+        pass
+
     # Run documentor once for all merged tickets, before reviewer (issue #697)
     _eff_documentor = cfg.documentor_enabled if cfg is not None else False
     if _eff_documentor and summary.merged:
@@ -10007,6 +10234,7 @@ def main() -> None:
     )
 
     args = p.parse_args()
+    install_orchestrator_stdout_timestamps()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
     cfg: Optional[SprintConfig] = None

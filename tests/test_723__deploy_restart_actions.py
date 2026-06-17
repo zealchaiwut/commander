@@ -174,6 +174,23 @@ def test_is_self_restart_dir_matches_own_clone(tmp_path):
     assert da.is_self_restart_dir({"working_dir": root}, None) is False
 
 
+def test_is_self_restart_port_matches_listen_port():
+    """shared_working_dir uat: working_dir is prd but port 8001 is this server."""
+    entry = {"port": 8001, "working_dir": "/srv/commander/prd"}
+    assert da.is_self_restart_port(entry, 8001) is True
+    assert da.is_self_restart_port(entry, 8000) is False
+    assert da.is_self_restart_port(entry, None) is False
+    assert da.is_self_restart_port({"working_dir": "/x"}, 8001) is False
+
+
+def test_is_script_self_restart_combines_dir_and_port(tmp_path):
+    root = str(tmp_path)
+    other = str(tmp_path / "prd")
+    assert da.is_script_self_restart({"working_dir": root, "port": 8001}, root, 8000) is True
+    assert da.is_script_self_restart({"working_dir": other, "port": 8001}, root, 8001) is True
+    assert da.is_script_self_restart({"working_dir": other, "port": 8001}, root, 8000) is False
+
+
 def test_detached_restart_command_sleeps_then_stop_then_start():
     """The detached helper runs sleep → stop → start so the response flushes and
     the helper survives `stop` killing the dashboard before `start` runs."""
@@ -278,7 +295,7 @@ def test_restart_route_registered(client_ctx):
 
 
 def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
-    """AC2/AC3/AC5: pull runs in working_dir; response has stdout + HEAD; restart fires."""
+    """AC2/AC3/AC5: sync runs in working_dir; response has stdout + HEAD; restart fires."""
     client, srv, settings_repo = client_ctx
     _save_deploy_config(srv, settings_repo, {
         "uat": {"host": "local", "working_dir": "/srv/commander-uat",
@@ -289,10 +306,14 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
 
     def fake_run(cmd, *a, **kw):
         calls.append((cmd, kw.get("cwd")))
+        if cmd[:2] == ["git", "stash"]:
+            return _completed(cmd, returncode=1)
         if cmd[:2] == ["git", "checkout"]:
             return _completed(cmd, stdout=f"Switched to branch 'develop'\n")
-        if cmd[:2] == ["git", "pull"]:
-            return _completed(cmd, stdout="Updating 111..222\nFast-forward\n")
+        if cmd[:2] == ["git", "fetch"]:
+            return _completed(cmd, stdout="From origin\n")
+        if cmd[:2] == ["git", "reset"]:
+            return _completed(cmd, stdout="HEAD is now at deadbeef\n")
         if cmd[:2] == ["git", "rev-parse"]:
             return _completed(cmd, stdout="deadbeefcafe\n")
         if cmd[0] == "launchctl":
@@ -304,20 +325,20 @@ def test_deploy_runs_pull_in_working_dir_and_returns_output(client_ctx):
 
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert "Fast-forward" in data["pull_output"]
+    assert "HEAD is now" in data["pull_output"]
     assert data["head"] == "deadbeefcafe"
 
     checkout_call = next(c for c in calls if c[0][:2] == ["git", "checkout"])
     assert checkout_call[1] == "/srv/commander-uat"
     assert checkout_call[0] == ["git", "checkout", "develop"]
-    # pull ran in working_dir, fast-forward only
-    pull_call = next(c for c in calls if c[0][:2] == ["git", "pull"])
-    assert pull_call[1] == "/srv/commander-uat"
-    assert "--ff-only" in pull_call[0]
-    # AC5: a restart (kickstart) fired after the pull
+    fetch_call = next(c for c in calls if c[0][:2] == ["git", "fetch"])
+    assert fetch_call[1] == "/srv/commander-uat"
+    reset_call = next(c for c in calls if c[0][:2] == ["git", "reset"])
+    assert reset_call[0] == ["git", "reset", "--hard", "origin/develop"]
+    # AC5: a restart (kickstart) fired after the sync
     assert any(c[0][0] == "launchctl" for c in calls)
     # AC2: never merged/pushed
-    assert not any("merge" in c[0] or "push" in c[0] for c in calls)
+    assert not any("merge" in c[0] or "push" in c[0] for c in calls if c[0][:2] != ["git", "stash"])
 
 
 def test_deploy_rejects_missing_working_dir_without_shelling_out(client_ctx):
@@ -363,12 +384,19 @@ def test_restart_uses_kickstart_when_label_present(client_ctx):
     assert not any("unload" in c or "bootout" in c for c in calls)
 
 
-def test_restart_falls_back_to_scripts_without_label(client_ctx):
+def test_restart_falls_back_to_scripts_without_label(client_ctx, monkeypatch):
     """AC8: with no launchd_label, run stop then start; no launchctl call."""
+    monkeypatch.setenv("PORT", "8000")
     client, srv, settings_repo = client_ctx
     _save_deploy_config(srv, settings_repo, {
-        "uat": {"host": "local", "working_dir": "/srv/x", "branch": "develop",
-                "stop_script": "/srv/stop.sh", "start_script": "/srv/start.sh"},
+        "uat": {
+            "host": "local",
+            "working_dir": "/srv/x",
+            "branch": "develop",
+            "port": 9001,
+            "stop_script": "/srv/stop.sh",
+            "start_script": "/srv/start.sh",
+        },
     })
 
     calls = []
@@ -392,12 +420,13 @@ def test_restart_falls_back_to_scripts_without_label(client_ctx):
     assert not any(c and c[0][0] == "launchctl" for c, _ in calls)
 
 
-def test_restart_scripts_use_working_dir_as_cwd(client_ctx, tmp_path):
+def test_restart_scripts_use_working_dir_as_cwd(client_ctx, tmp_path, monkeypatch):
     """Relative stop/start scripts run with cwd=working_dir when it exists.
 
     Uses a working_dir that is NOT the dashboard's own clone, so this exercises
     the synchronous (non-self) script path; a self-restart over scripts detaches
     instead (covered separately)."""
+    monkeypatch.setenv("PORT", "8000")
     client, srv, settings_repo = client_ctx
     wd = str(tmp_path)
     # Readiness checks the referenced .sh files exist under working_dir.
@@ -410,6 +439,7 @@ def test_restart_scripts_use_working_dir_as_cwd(client_ctx, tmp_path):
             "host": "local",
             "working_dir": wd,
             "branch": "develop",
+            "port": 9001,
             "stop_script": "bash scripts/stop_all.sh uat",
             "start_script": "bash scripts/start_uat.sh",
         },
@@ -453,6 +483,42 @@ def test_script_self_restart_detaches_not_synchronous(client_ctx):
 
     assert resp.status_code == 202, resp.text
     # Detached helper spawned in a new session; stop/start NOT run synchronously.
+    popen_mock.assert_called_once()
+    assert popen_mock.call_args.kwargs.get("start_new_session") is True
+    run_mock.assert_not_called()
+
+
+def test_script_self_restart_detaches_when_port_matches_shared_working_dir(
+    client_ctx, tmp_path, monkeypatch,
+):
+    """Commander uat: working_dir is the prd clone (shared_working_dir) but stop
+    targets port 8001 — detach when this dashboard listens on that port."""
+    client, srv, settings_repo = client_ctx
+    monkeypatch.setenv("PORT", "8001")
+    prd_dir = tmp_path / "prd"
+    prd_dir.mkdir()
+    scripts = prd_dir / "scripts"
+    scripts.mkdir()
+    (scripts / "stop_all.sh").write_text("#!/bin/sh\n")
+    (scripts / "start_uat.sh").write_text("#!/bin/sh\n")
+    _save_deploy_config(srv, settings_repo, {
+        "uat": {
+            "host": "local",
+            "working_dir": str(prd_dir),
+            "branch": "develop",
+            "port": 8001,
+            "stop_script": "bash scripts/stop_all.sh uat",
+            "start_script": "bash scripts/start_uat.sh",
+        },
+    })
+
+    run_mock = MagicMock()
+    popen_mock = MagicMock()
+    with patch.object(srv.subprocess, "run", run_mock):
+        with patch.object(srv.subprocess, "Popen", popen_mock):
+            resp = client.post("/api/projects/commander/environments/uat/restart")
+
+    assert resp.status_code == 202, resp.text
     popen_mock.assert_called_once()
     assert popen_mock.call_args.kwargs.get("start_new_session") is True
     run_mock.assert_not_called()

@@ -22,8 +22,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "setup_machine.sh"
 

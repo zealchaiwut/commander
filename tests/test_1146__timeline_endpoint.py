@@ -648,6 +648,36 @@ def test_reviewer_enabled_field_in_settings_schema():
 
 # ── dotted sub-sprint labels (rerun children) ─────────────────────────────────
 
+def test_issues_sorted_by_launch_dispatch_order(patch_timeline, monkeypatch):
+    """Timeline issue list follows sprint state dispatch order, not GitHub sort."""
+    issues = [
+        _make_issue(822, ["in-progress"]),
+        _make_issue(819, ["SIT"]),
+    ]
+    patch_timeline(issues=issues)
+    monkeypatch.setattr(
+        timeline_service,
+        "_get_launch_issue_order",
+        lambda label, project: [819, 822],
+    )
+    result = timeline_service.get_timeline("sprint-99", "owner/repo")
+    nums = [i["number"] for i in result["issues"]]
+    assert nums == [819, 822]
+
+
+def test_sort_issues_by_dispatch_order_unit():
+    """_sort_issues_by_dispatch_order reorders without dropping extras."""
+    issues = [
+        {"number": 822, "status": "queued"},
+        {"number": 819, "status": "running"},
+        {"number": 900, "status": "queued"},
+    ]
+    sorted_list = timeline_service._sort_issues_by_dispatch_order(
+        issues, [819, 822],
+    )
+    assert [i["number"] for i in sorted_list] == [819, 822, 900]
+
+
 def test_timeline_router_accepts_dotted_sprint_label():
     """GET /timeline must accept rerun sub-labels like sprint-83.1 (not 400)."""
     from apps.dashboard.routers.timeline import _SPRINT_LABEL_RE

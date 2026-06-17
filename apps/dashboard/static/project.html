@@ -8436,9 +8436,9 @@
         45deg, transparent, transparent 4px, rgba(0,0,0,.30) 4px, rgba(0,0,0,.30) 7px);
     }
 
-    /* Running/projected: blink animation */
-    .rp-tl-seg--running   { animation: rpTlBlink 1.4s ease-in-out infinite; }
-    .rp-tl-seg--projected { animation: rpTlBlink 1.4s ease-in-out infinite; }
+    /* Running segment: blink; projected remainder on issue rows only */
+    .rp-tl-seg--running   { animation: rpTlBlink 1.4s ease-in-out infinite; z-index: 2; }
+    .rp-tl-seg--projected { animation: rpTlBlink 1.4s ease-in-out infinite; z-index: 1; }
     @keyframes rpTlBlink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
     /* Ghost: queued or projected remainder — agent tint + hatched */
@@ -8615,7 +8615,8 @@
     .orch-live-dot--active { background: var(--green); animation: orchDotPulse 2s ease-in-out infinite; }
     @keyframes orchDotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
     .orch-panel-body { padding: 10px 14px; font-family: var(--mono); font-size: 11px;
-      line-height: 1.55; overflow-y: auto; max-height: 260px; background: var(--bg); }
+      line-height: 1.55; overflow-y: auto; max-height: 4.8em; background: var(--bg); }
+    .orch-panel-body.orch-panel-body--expanded { max-height: 320px; }
 
     .all-issues-panel { border: 1px solid var(--border); border-radius: 10px;
       background: var(--surface); overflow: hidden; margin-bottom: 12px; }
@@ -14500,6 +14501,40 @@ function _smgmtRailLevels(live) {
   });
 }
 
+/** Flat dispatch order shared by timeline rows and the All Issues panel. */
+function _smgmtFlatIssueOrder(live) {
+  const order = [];
+  _smgmtRailLevels(live).forEach(function(L) {
+    L.issues.forEach(function(iss) {
+      if (iss && iss.number != null) order.push(iss.number);
+    });
+  });
+  return order;
+}
+
+/** Reorder timeline API issues to match the /live snapshot (launch dispatch order). */
+function _smgmtMergeTimelineIssues(timelineIssues, live) {
+  if (!timelineIssues || !timelineIssues.length) return [];
+  const order = _smgmtFlatIssueOrder(live);
+  if (!order.length) return timelineIssues;
+  const byNum = {};
+  timelineIssues.forEach(function(ti) {
+    const n = ti.number || ti.issue_number;
+    if (n != null) byNum[n] = ti;
+  });
+  const merged = [];
+  order.forEach(function(num) {
+    if (byNum[num]) {
+      merged.push(byNum[num]);
+      delete byNum[num];
+    }
+  });
+  Object.keys(byNum).forEach(function(k) {
+    merged.push(byNum[k]);
+  });
+  return merged;
+}
+
 /** Map a single snapshot issue to its node state: the four literal contract
  *  tokens. Per-issue (never a level-wide single winner) so a coder node and a
  *  tester node in the same level both glow at once (pipeline mode). */
@@ -15121,6 +15156,63 @@ function _smgmtLanesUpdate(label, live) {
 // All times are ISO-8601 UTC strings from the server. Scales everything on a
 // shared plan axis: sprint start → projected finish, clamped to visible plan horizon.
 
+const _SMGMT_RP_CODER_FRAC = 0.6;
+
+function _smgmtRpIssueDone(iss) {
+  return iss.status === 'done' || iss.status === 'uat';
+}
+
+/** True only when an agent is actively working (not merely in-progress on GitHub). */
+function _smgmtRpIssueActivelyRunning(iss) {
+  if (_smgmtRpIssueDone(iss)) return false;
+  if (iss.agent_status === 'running') return true;
+  const segs = iss.segments || [];
+  return segs.some(function(seg) { return seg.start && !seg.end; });
+}
+
+function _smgmtRpIssueWaiting(iss) {
+  return !_smgmtRpIssueDone(iss) && !_smgmtRpIssueActivelyRunning(iss);
+}
+
+/** When all coder+tester work ends + per-issue queued slot starts (dispatch order). */
+function _smgmtRpBuildIssueSchedule(issues, nowMs, parallel, estFn, remFn) {
+  let cursorMs = nowMs;
+  const queuedSlots = {};
+  let runningRemMs = 0;
+  const queuedEstMs = [];
+
+  for (const iss of issues) {
+    const num = iss.number || iss.issue_number;
+    const estMs = estFn(iss) * 60000;
+    if (_smgmtRpIssueDone(iss)) continue;
+    if (_smgmtRpIssueActivelyRunning(iss)) {
+      const remMs = remFn(iss, estMs);
+      runningRemMs = Math.max(runningRemMs, remMs);
+      cursorMs = Math.max(cursorMs, nowMs + remMs);
+    } else {
+      queuedSlots[num] = { startMs: cursorMs, estMs: estMs };
+      queuedEstMs.push(estMs);
+      cursorMs += estMs;
+    }
+  }
+
+  let workEndMs = cursorMs;
+  if (parallel && queuedEstMs.length) {
+    const coderTotal = queuedEstMs.reduce(function(a, e) {
+      return a + e * _SMGMT_RP_CODER_FRAC;
+    }, 0);
+    const lastTester = queuedEstMs[queuedEstMs.length - 1] * (1 - _SMGMT_RP_CODER_FRAC);
+    workEndMs = nowMs + runningRemMs + coderTotal + lastTester;
+  }
+
+  return { workEndMs: workEndMs, queuedSlots: queuedSlots };
+}
+
+function _smgmtRpTimelineSchedule(issues, nowMs, liveSnap, estFn, remFn) {
+  const parallel = !!(liveSnap && liveSnap.pipeline_mode);
+  return _smgmtRpBuildIssueSchedule(issues, nowMs, parallel, estFn, remFn);
+}
+
 function _smgmtRpTimelineHeaderMeta(data, live) {
   const liveSnap = live || {};
   const sprintStartMs = Date.parse(data.sprint_started_at);
@@ -15146,10 +15238,30 @@ function _smgmtRpTimelineHeaderMeta(data, live) {
 function _smgmtRpTimelineHtml(data, live) {
   if (!data || !data.issues || !data.issues.length) return '';
 
+  const liveSnap = live || {};
+  data = Object.assign({}, data, {
+    issues: _smgmtMergeTimelineIssues(data.issues, liveSnap),
+  });
+  if (liveSnap.issues && liveSnap.issues.length) {
+    const liveByNum = {};
+    liveSnap.issues.forEach(function(li) {
+      if (li && li.number != null) liveByNum[li.number] = li;
+    });
+    data = Object.assign({}, data, {
+      issues: data.issues.map(function(ti) {
+        const n = ti.number || ti.issue_number;
+        const liveIss = liveByNum[n];
+        if (!liveIss) return ti;
+        return Object.assign({}, ti, {
+          agent_status: liveIss.agent_status != null ? liveIss.agent_status : ti.agent_status,
+        });
+      }),
+    });
+  }
+
   const CODER_FRAC = 0.6;
   const DOC_PER_ISSUE = 4;
   const REV_PER_ISSUE = 3;
-  const liveSnap = live || {};
 
   function parseIsoMs(iso) {
     if (!iso) return null;
@@ -15234,6 +15346,12 @@ function _smgmtRpTimelineHtml(data, live) {
 
   const wu = resolveWrapUp();
   const wrapUpMs = (wu.documenter + (wu.reviewer || 0)) * 60000;
+  const schedule = _smgmtRpTimelineSchedule(
+    data.issues, nowMs, liveSnap, issueEstMin,
+    function(iss, estMs) { return issueRemMs(iss, estMs); },
+  );
+  const workEndMs = schedule.workEndMs;
+  const queuedSlots = schedule.queuedSlots;
 
   const elapsedMs = liveSnap.time_spent_sec > 0
     ? liveSnap.time_spent_sec * 1000
@@ -15248,27 +15366,7 @@ function _smgmtRpTimelineHtml(data, live) {
     axisStartMs = nowMs - elapsedMs;
   }
 
-  let runningRemMs = 0;
-  for (const iss of data.issues) {
-    const isDone = iss.status === 'done' || iss.status === 'uat';
-    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
-    if (isRunning) {
-      runningRemMs = issueRemMs(iss, issueEstMin(iss) * 60000);
-      break;
-    }
-  }
-  let queueCursorMs = nowMs + runningRemMs;
-
-  let planEndMs = queueCursorMs;
-  for (const iss of data.issues) {
-    const estMs = issueEstMin(iss) * 60000;
-    const isDone = iss.status === 'done' || iss.status === 'uat';
-    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
-    if (!isDone && !isRunning) {
-      planEndMs += estMs;
-    }
-  }
-  planEndMs += wrapUpMs;
+  let planEndMs = workEndMs + wrapUpMs;
 
   for (const iss of data.issues) {
     for (const seg of (iss.segments || [])) {
@@ -15381,9 +15479,9 @@ function _smgmtRpTimelineHtml(data, live) {
 
   for (const iss of data.issues) {
     const issNum    = iss.number || iss.issue_number || '?';
-    const isDone    = iss.status === 'done' || iss.status === 'uat';
-    const isRunning = (iss.status === 'running' || iss.agent_status === 'running') && !isDone;
-    const isQueued  = !isDone && !isRunning;
+    const isDone    = _smgmtRpIssueDone(iss);
+    const isRunning = _smgmtRpIssueActivelyRunning(iss);
+    const isQueued  = _smgmtRpIssueWaiting(iss);
     const estMin = issueEstMin(iss);
     const estMs = estMin * 60000;
     const sizeTag = iss.size || '';
@@ -15420,7 +15518,8 @@ function _smgmtRpTimelineHtml(data, live) {
       envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
         + '%;width:' + envW.toFixed(2) + '%"></div>';
     } else if (isQueued) {
-      const slotMs = queueCursorMs;
+      const slot = queuedSlots[issNum] || queuedSlots[iss.number];
+      const slotMs = slot ? slot.startMs : workEndMs;
       const envL = pct(slotMs);
       const envW = Math.max(pct(slotMs + estMs) - envL, 2);
       envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
@@ -15475,8 +15574,9 @@ function _smgmtRpTimelineHtml(data, live) {
     }
 
     if (isQueued) {
-      segsHtml += ghostSplitHtml(queueCursorMs, estMs, pct);
-      queueCursorMs += estMs;
+      const slot = queuedSlots[issNum] || queuedSlots[iss.number];
+      const slotMs = slot ? slot.startMs : workEndMs;
+      segsHtml += ghostSplitHtml(slotMs, estMs, pct);
     }
 
     const tryCount = segs.length;
@@ -15515,21 +15615,22 @@ function _smgmtRpTimelineHtml(data, live) {
   let wrapUpHtml = '';
   if (wu.documenter) {
     const docMs   = wu.documenter * 60000;
-    const docL    = pct(queueCursorMs);
-    const docW = Math.max(pct(queueCursorMs + docMs) - docL, 2);
+    const wrapStartMs = workEndMs;
+    const docL    = pct(wrapStartMs);
+    const docW = Math.max(pct(wrapStartMs + docMs) - docL, 2);
     let wrapSegsHtml = '';
     if (docW > 0) {
-      wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
+      wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost" style="left:'
         + docL.toFixed(2) + '%;width:' + docW.toFixed(2) + '%"></div>';
     }
-    let revEndMs = queueCursorMs + docMs;
+    let revEndMs = wrapStartMs + docMs;
     if (wu.reviewer) {
       const revMs  = wu.reviewer * 60000;
       const revL   = pct(revEndMs);
       const revW = Math.max(pct(revEndMs + revMs) - revL, 2);
       revEndMs += revMs;
       if (revW > 0) {
-        wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost rp-tl-seg--projected" style="left:'
+        wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost" style="left:'
           + revL.toFixed(2) + '%;width:' + revW.toFixed(2) + '%"></div>';
       }
     }
@@ -15867,15 +15968,23 @@ function _smgmtInspectorClose() {
 // ── Orchestrator log panel (issue #1106) ──────────────────────────────────────
 // A collapsible panel placed directly below the header stat row. Shows the
 // sprint dispatch log with a live indicator dot. Defaults to ~3 lines; "Show
-// more" expands to ~15 scrollable lines; "Show less" collapses back.
+// more" loads the full sprint log (scrollable); "Show less" collapses back.
+
+const _SMGMT_ORCH_COLLAPSED_LINES = 3;
+const _SMGMT_ORCH_FULL_LINES = 2000; // API cap — entire sprint dispatch log
 
 /** Fetch dispatch-log tail and render into the orchestrator panel body. */
-function _smgmtOrchFetchLines(label, tailLines) {
+function _smgmtOrchFetchLines(label, tailLines, opts) {
+  opts = opts || {};
+  const displayAll = !!opts.displayAll;
   const bodyEl = document.getElementById('smgmt-orch-body');
   if (!bodyEl) return;
+  bodyEl.classList.toggle('orch-panel-body--expanded', displayAll);
   const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : '';
   const lbl = label || _smgmtAiLabel;
   if (!repo || !lbl) { bodyEl.innerHTML = '<span class="log-empty">No running sprint.</span>'; return; }
+  const prevScroll = bodyEl.scrollTop;
+  const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 12;
   fetch('/api/sprints/' + encodeURIComponent(lbl) + '/dispatch-log'
       + '?project=' + encodeURIComponent(repo) + '&tail_lines=' + tailLines)
     .then(function(r) { return r.ok ? r.json() : null; })
@@ -15885,23 +15994,30 @@ function _smgmtOrchFetchLines(label, tailLines) {
       const tail = (data && typeof data.tail === 'string') ? data.tail : '';
       _smgmtOrchLastTail = tail;
       if (tail.trim()) {
-        const lines = tail.split('\n').filter(function(l) { return l; }).slice(-tailLines);
+        let lines = tail.split('\n').filter(function(l) { return l; });
+        if (!displayAll) lines = lines.slice(-tailLines);
         el.innerHTML = lines.map(function(line) {
           return '<div class="log-line">' + colorizeLogLine(line, repo) + '</div>';
         }).join('');
+        if (displayAll) {
+          el.scrollTop = atBottom ? el.scrollHeight : prevScroll;
+        }
       } else {
         el.innerHTML = '<span class="log-empty">No log output yet.</span>';
       }
     }).catch(function() {});
 }
 
-/** Toggle the orchestrator panel between ~3 lines (collapsed) and ~15 lines (expanded). */
+/** Toggle the orchestrator panel between ~3 lines (collapsed) and full sprint log. */
 function _smgmtOrchToggleMore(label) {
   _smgmtOrchExpanded = !_smgmtOrchExpanded;
   const btn = document.querySelector('.orch-toggle-btn');
   if (btn) btn.textContent = _smgmtOrchExpanded ? 'Show less' : 'Show more';
-  const tailLines = _smgmtOrchExpanded ? 15 : 3;
-  _smgmtOrchFetchLines(label || _smgmtAiLabel, tailLines);
+  if (_smgmtOrchExpanded) {
+    _smgmtOrchFetchLines(label || _smgmtAiLabel, _SMGMT_ORCH_FULL_LINES, { displayAll: true });
+  } else {
+    _smgmtOrchFetchLines(label || _smgmtAiLabel, _SMGMT_ORCH_COLLAPSED_LINES);
+  }
 }
 
 /** Copy the full orchestrator dispatch log to the clipboard (fetches up to 2000 lines). */
@@ -15958,14 +16074,16 @@ function _smgmtOrchPanelUpdate(label, live) {
       + '<div class="orch-panel-body" id="smgmt-orch-body">'
       + '<span class="log-empty">Loading…</span>'
       + '</div>';
-    const tailLines = _smgmtOrchExpanded ? 15 : 3;
-    _smgmtOrchFetchLines(label, tailLines);
+    const tailLines = _smgmtOrchExpanded ? _SMGMT_ORCH_FULL_LINES : _SMGMT_ORCH_COLLAPSED_LINES;
+    const fetchOpts = _smgmtOrchExpanded ? { displayAll: true } : {};
+    _smgmtOrchFetchLines(label, tailLines, fetchOpts);
   } else {
     // Patch the live dot state without full re-render (avoids log flicker on tick).
     const dotEl = el.querySelector('.orch-live-dot');
     if (dotEl) dotEl.className = dotClass;
-    const tailLines = _smgmtOrchExpanded ? 15 : 3;
-    _smgmtOrchFetchLines(label, tailLines);
+    const tailLines = _smgmtOrchExpanded ? _SMGMT_ORCH_FULL_LINES : _SMGMT_ORCH_COLLAPSED_LINES;
+    const fetchOpts = _smgmtOrchExpanded ? { displayAll: true } : {};
+    _smgmtOrchFetchLines(label, tailLines, fetchOpts);
   }
 }
 

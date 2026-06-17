@@ -9,6 +9,7 @@ No render-time disk reads — all segment data comes from the agent_runs table.
 """
 from __future__ import annotations
 
+import json
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -112,6 +113,41 @@ def _primary_sprint_label(issue: dict) -> Optional[str]:
         if name.startswith("sprint-"):
             return name
     return None
+
+
+def _get_launch_issue_order(sprint_label: str, project: str) -> list[int]:
+    """Dispatch order from sprint state snapshot (same sequence as /live issues)."""
+    srv = _server()
+    try:
+        project_root = srv._project_root_path(project)
+        commander = srv._commander_dir(project_root)
+        state_path = commander / "sprints" / f"{sprint_label}-state.json"
+        if not state_path.exists():
+            return []
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+        order: list[int] = []
+        for iss in data.get("issues") or []:
+            num = iss.get("number")
+            if num is not None:
+                order.append(int(num))
+        return order
+    except Exception:
+        return []
+
+
+def _sort_issues_by_dispatch_order(issue_list: list[dict], order: list[int]) -> list[dict]:
+    """Reorder timeline issues to match the sprint launch snapshot."""
+    if not order:
+        return issue_list
+    rank = {num: idx for idx, num in enumerate(order)}
+
+    def _key(iss: dict) -> tuple[int, int]:
+        num = iss.get("number")
+        if num is None:
+            return (10**9, 0)
+        return (rank.get(int(num), 10**9), int(num))
+
+    return sorted(issue_list, key=_key)
 
 
 def _classify_status(issue: dict) -> str:
@@ -350,6 +386,9 @@ def get_timeline(sprint_label: str, project: str) -> dict:
     from datetime import timedelta
     projected_dt = now + timedelta(minutes=total_remaining_min)
     projected_finish = _iso_from_dt(projected_dt)
+
+    launch_order = _get_launch_issue_order(sprint_label, project)
+    issue_list = _sort_issues_by_dispatch_order(issue_list, launch_order)
 
     return {
         "sprint_started_at": sprint_started_at,

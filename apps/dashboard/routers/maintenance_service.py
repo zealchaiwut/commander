@@ -23,6 +23,7 @@ from services.sprint_manager.settings_schema import (  # noqa: E402
     APP_CONFIG_KEY,
     build_effective_response,
 )
+import calibration_cache_service as _ccs  # noqa: E402
 
 _SIZES = ("S", "M", "L", "XL")
 _PROJECTS_BASE = Path.home() / "dev"
@@ -77,26 +78,24 @@ def rebuild_calibration_cache(
 
     Returns {"total": N, "by_size": {"S": x, "M": y, "L": z, "XL": w}}.
     """
-    import server as _srv  # noqa: PLC0415 — late import avoids router/monolith cycle
-
     commander = project_root / ".commander"
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
 
     # Start completely fresh — no stale keys survive.
-    cache = _srv._calibration_empty_cache()
+    cache = _ccs._calibration_empty_cache()
     processed: set[str] = set()
 
     if sprints_dir.is_dir():
         archive_dir = sprints_dir / "archive"
         if archive_dir.is_dir():
             for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
-                _srv._calibration_absorb_state_file(
+                _ccs._calibration_absorb_state_file(
                     cache, state_file, sprints_dir, estimates_dir,
                     configured_minutes, processed,
                 )
         for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
-            _srv._calibration_absorb_state_file(
+            _ccs._calibration_absorb_state_file(
                 cache, state_file, sprints_dir, estimates_dir,
                 configured_minutes, processed,
             )
@@ -104,7 +103,7 @@ def rebuild_calibration_cache(
     cache["archive_bootstrap_done"] = True
 
     if not dry_run:
-        _srv._save_calibration_cache(commander, cache)
+        _ccs._save_calibration_cache(commander, cache)
 
     return _count_summary(cache)
 

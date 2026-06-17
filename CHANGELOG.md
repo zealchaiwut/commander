@@ -2,7 +2,7 @@
 
 ## Sprint 85
 
-Backend decomposition sprint (strangler-fig): the dashboard's monolithic `apps/dashboard/server.py` was slimmed by extracting route clusters into dedicated `apps/dashboard/routers/*.py` modules (system/health, page-serving, project branches, preflight & DAG, sprint live/log, sprint CRUD, sprint summary & home, system/misc, sprint finish preview/write, sprint run read/write, and bulk job reads), and `services/sprint_manager/sprint_manager.py` was split into focused submodules (`state.py` data classes, `config.py` config loading, `paths.py` path helpers, `alerts.py` alert channels). No behavior, endpoint, or schema changes — routes and logic were relocated, not modified.
+Backend decomposition sprint (strangler-fig): the dashboard's monolithic `apps/dashboard/server.py` was slimmed by extracting route clusters into dedicated `apps/dashboard/routers/*.py` modules (system/health, page-serving, project branches, preflight & DAG, sprint live/log, sprint CRUD, sprint summary & home, system/misc, sprint finish preview/write, sprint run read/write, and bulk job read + per-job action routes), leaving `server.py` as a thin app factory (under 400 lines, no route handlers). `services/sprint_manager/sprint_manager.py` was split into focused submodules (`state.py` data classes, `config.py` config loading, `paths.py` path helpers, `alerts.py` alert channels). No behavior, endpoint, or schema changes — routes and logic were relocated, not modified.
 
 - [#1247](https://github.com/zealchaiwut/commander/issues/1247) Extract system/health routes from server.py to routers/system.py — 2026-06-17
 - [#1248](https://github.com/zealchaiwut/commander/issues/1248) Extract page-serving handlers from server.py to routers/pages.py — 2026-06-17
@@ -17,6 +17,8 @@ Backend decomposition sprint (strangler-fig): the dashboard's monolithic `apps/d
 - [#1262](https://github.com/zealchaiwut/commander/issues/1262) Extract sprint run read/preview routes to dedicated router — 2026-06-17
 - [#1263](https://github.com/zealchaiwut/commander/issues/1263) Extract sprint run routes from server.py to service module — 2026-06-17
 - [#1264](https://github.com/zealchaiwut/commander/issues/1264) Extract bulk job read routes to routers/bulk_tickets.py — 2026-06-17
+- [#1266](https://github.com/zealchaiwut/commander/issues/1266) Extract bulk-ticket per-job action routes to routers/bulk_tickets.py — 2026-06-17
+- [#1267](https://github.com/zealchaiwut/commander/issues/1267) Slim server.py to thin app factory (under 400 lines, no route handlers) — 2026-06-17
 - [#1268](https://github.com/zealchaiwut/commander/issues/1268) Extract sprint_manager data classes to state.py — 2026-06-17
 - [#1269](https://github.com/zealchaiwut/commander/issues/1269) Extract sprint_manager config loading to config.py — 2026-06-17
 - [#1270](https://github.com/zealchaiwut/commander/issues/1270) Extract sprint_manager path helpers to paths.py — 2026-06-17

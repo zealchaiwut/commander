@@ -392,3 +392,93 @@ class TestCombinedFilters:
         assert data["by_size"]["M"]["count"] == 1
         assert len(data["points"]) == 1
         assert data["points"][0]["issue_number"] == 101
+
+
+# ---------------------------------------------------------------------------
+# AC (issue #1331) — size-resolution fallback hierarchy
+# ---------------------------------------------------------------------------
+
+def _state_with_estimates(
+    project_root: Path,
+    label: str,
+    tickets: list[dict],
+    estimates: dict,
+    start_timestamp: str = "2026-01-15T10:00:00Z",
+) -> None:
+    """Write a sprint state file that includes a top-level estimates dict."""
+    import re
+    n = re.search(r"(\d+)", label).group(1)
+    d = project_root / ".commander" / "sprints"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"sprint-{n}-state.json").write_text(json.dumps({
+        "sprint_label": label,
+        "sprint_number": int(n),
+        "project": "owner/myrepo",
+        "start_timestamp": start_timestamp,
+        "wall_clock_secs": 86400.0,
+        "issues": tickets,
+        "estimates": estimates,
+    }), encoding="utf-8")
+
+
+class TestSizeFallbacks:
+    """issue #1331 — size resolution: JSON → state.estimates → size-* label."""
+
+    def test_size_from_github_label_only(self, root):
+        """Ticket with size-* label only (no JSON, no state.estimates) is counted."""
+        ticket = _ticket(101, 900)
+        ticket["labels"] = [{"name": "size-M"}]
+        _state(root, "sprint-1", [ticket])
+        # no _est() — no estimate JSON
+        assert _call(root).json()["by_size"]["M"]["count"] == 1
+
+    def test_size_from_state_estimates_only(self, root):
+        """Ticket with state.estimates entry only (no JSON, no label) is counted."""
+        ticket = _ticket(101, 900)
+        _state_with_estimates(root, "sprint-1", [ticket], estimates={"101": {"size": "L"}})
+        # no _est() — no estimate JSON, no label
+        assert _call(root).json()["by_size"]["L"]["count"] == 1
+
+    def test_json_at_canonical_path_counts(self, root):
+        """Ticket with JSON at canonical estimates_dir (after path fix) is counted."""
+        ticket = _ticket(101, 900)
+        _state(root, "sprint-1", [ticket])
+        _est(root, 101, "XL")
+        assert _call(root).json()["by_size"]["XL"]["count"] == 1
+
+    def test_json_takes_precedence_over_label(self, root):
+        """JSON at canonical path wins over size-* label."""
+        ticket = _ticket(101, 900)
+        ticket["labels"] = [{"name": "size-S"}]
+        _state(root, "sprint-1", [ticket])
+        _est(root, 101, "M")  # JSON says M
+        data = _call(root).json()
+        assert data["by_size"]["M"]["count"] == 1
+        assert data["by_size"]["S"]["count"] == 0
+
+    def test_json_takes_precedence_over_state_estimates(self, root):
+        """JSON at canonical path wins over state.estimates size."""
+        ticket = _ticket(101, 900)
+        _state_with_estimates(root, "sprint-1", [ticket], estimates={"101": {"size": "S"}})
+        _est(root, 101, "M")  # JSON says M
+        data = _call(root).json()
+        assert data["by_size"]["M"]["count"] == 1
+        assert data["by_size"]["S"]["count"] == 0
+
+    def test_state_estimates_takes_precedence_over_label(self, root):
+        """state.estimates wins over size-* label when no JSON."""
+        ticket = _ticket(101, 900)
+        ticket["labels"] = [{"name": "size-S"}]
+        _state_with_estimates(root, "sprint-1", [ticket], estimates={"101": {"size": "L"}})
+        # no JSON — state.estimates should win over label
+        data = _call(root).json()
+        assert data["by_size"]["L"]["count"] == 1
+        assert data["by_size"]["S"]["count"] == 0
+
+    def test_no_size_source_excludes_ticket(self, root):
+        """Ticket with no JSON, no state.estimates, no label is excluded."""
+        ticket = _ticket(101, 900)
+        _state(root, "sprint-1", [ticket])
+        # no _est(), no label, no state.estimates
+        data = _call(root).json()
+        assert all(data["by_size"][sz]["count"] == 0 for sz in ("S", "M", "L", "XL"))

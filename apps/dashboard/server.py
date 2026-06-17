@@ -970,12 +970,12 @@ from routers import (  # noqa: E402
     suggestions_router,
     system_router,
     tickets_router,
-    timeline_router,
+    timeline_router, maintenance_router,
 )
 # broadcast and _subscribers are now owned by routers/logs_service.py; import
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
-
+app.include_router(maintenance_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
 app.include_router(suggestions_router)
@@ -6059,7 +6059,8 @@ def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
     """Estimate one issue and apply its size label. Returns True on success.
 
     Mirrors POST /api/issues/{id}/estimate but as a blocking helper for the
-    preflight-fix executor thread.
+    preflight-fix executor thread.  Also writes the canonical JSON file to
+    .commander/estimates/ so downstream calibration can read it (AC2, issue #1334).
     """
     issue_data = _ei_fetch_issue(issue_num, repo)
     estimate, _err = _ei_run_estimator(issue_num, issue_data)
@@ -6067,6 +6068,19 @@ def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
         return False
     _ei_apply_label(issue_num, repo, estimate["size"])
     _ei_apply_estimated_status(issue_num, repo)
+    # Write canonical JSON so calibration and rebuild can find it
+    project_root = _project_root_path(repo)
+    estimates_dir = _commander_dir(project_root) / "estimates"
+    estimates_dir.mkdir(parents=True, exist_ok=True)
+    estimate_path = estimates_dir / f"issue-{issue_num}.json"
+    try:
+        estimate_path.write_text(json.dumps(estimate, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    if not estimate_path.exists():
+        logger.warning(
+            "[preflight] size label applied but canonical JSON missing for issue #%s", issue_num
+        )
     return True
 
 
@@ -9276,217 +9290,30 @@ def get_project_analytics_metrics(slug: str, request: Request):
 
 
 # ── Calibration analytics endpoint (issue #649) ──────────────────────────────
+# Functions extracted to calibration_cache_service.py (issue #1333) so that
+# sprint_manager can call _refresh_calibration_cache without importing FastAPI.
 
-_CALIBRATION_SIZES = ("S", "M", "L", "XL")
-_CALIBRATION_SIZE_SETTING_KEYS = {
-    "S": "estimation_s_minutes",
-    "M": "estimation_m_minutes",
-    "L": "estimation_l_minutes",
-    "XL": "estimation_xl_minutes",
-}
-_CALIBRATION_CACHE_VERSION = 1
-_CALIBRATION_DONE_STATUSES = frozenset({"done", "uat", "merged", "passed"})
+from calibration_cache_service import (  # noqa: E402
+    _CALIBRATION_SIZES,
+    _CALIBRATION_CACHE_VERSION,
+    _CALIBRATION_DONE_STATUSES,
+    _CALIBRATION_SIZE_SETTING_KEYS,
+    _analytics_parse_ts as _analytics_parse_ts,
+    _analytics_elapsed_minutes as _analytics_elapsed_minutes,
+    _calibration_cache_path,
+    _calibration_empty_by_size,
+    _calibration_empty_cache,
+    _load_calibration_cache,
+    _save_calibration_cache,
+    _calibration_add_sample,
+    _resolve_calibration_size,
+    _calibration_issue_sample,
+    _calibration_state_key,
+    _calibration_absorb_state_file,
+    _refresh_calibration_cache,
+)
 
-
-def _calibration_cache_path(commander_dir: Path) -> Path:
-    return commander_dir / "calibration_cache.json"
-
-
-def _calibration_empty_by_size() -> dict[str, dict]:
-    return {
-        sz: {
-            "count": 0,
-            "min_minutes": None,
-            "avg_minutes": None,
-            "max_minutes": None,
-        }
-        for sz in _CALIBRATION_SIZES
-    }
-
-
-def _calibration_empty_cache() -> dict:
-    return {
-        "version": _CALIBRATION_CACHE_VERSION,
-        "archive_bootstrap_done": False,
-        "by_size": _calibration_empty_by_size(),
-        "processed": [],
-        "points": [],
-    }
-
-
-def _load_calibration_cache(commander_dir: Path) -> dict:
-    path = _calibration_cache_path(commander_dir)
-    if not path.is_file():
-        return _calibration_empty_cache()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return _calibration_empty_cache()
-    if data.get("version") != _CALIBRATION_CACHE_VERSION:
-        return _calibration_empty_cache()
-    by_size = data.get("by_size") or {}
-    for sz in _CALIBRATION_SIZES:
-        if sz not in by_size:
-            by_size[sz] = _calibration_empty_by_size()[sz]
-    data["by_size"] = by_size
-    if not isinstance(data.get("processed"), list):
-        data["processed"] = []
-    if not isinstance(data.get("points"), list):
-        data["points"] = []
-    return data
-
-
-def _save_calibration_cache(commander_dir: Path, cache: dict) -> None:
-    path = _calibration_cache_path(commander_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
-
-
-def _calibration_add_sample(
-    cache: dict,
-    size: str,
-    actual_minutes: float,
-    point: dict | None = None,
-) -> None:
-    """Incrementally update per-size count/min/avg/max (no full rescan)."""
-    bucket = cache["by_size"][size]
-    val = round(actual_minutes, 2)
-    count = int(bucket["count"] or 0)
-    if count == 0:
-        bucket["count"] = 1
-        bucket["min_minutes"] = val
-        bucket["avg_minutes"] = val
-        bucket["max_minutes"] = val
-    else:
-        old_avg = float(bucket["avg_minutes"])
-        new_count = count + 1
-        bucket["avg_minutes"] = round((old_avg * count + val) / new_count, 2)
-        bucket["count"] = new_count
-        bucket["min_minutes"] = round(min(float(bucket["min_minutes"]), val), 2)
-        bucket["max_minutes"] = round(max(float(bucket["max_minutes"]), val), 2)
-    if point is not None:
-        cache["points"].append(point)
-
-
-def _calibration_issue_sample(
-    issue: dict,
-    estimates_dir: Path,
-    configured_minutes: dict[str, int],
-) -> tuple[str, float, dict] | None:
-    """Return (size, actual_minutes, point_dict) for one completed ticket."""
-    if issue.get("status") not in _CALIBRATION_DONE_STATUSES:
-        return None
-    issue_num = issue.get("number")
-    size = None
-    if issue_num is not None and estimates_dir.is_dir():
-        est_file = estimates_dir / f"issue-{issue_num}.json"
-        if est_file.is_file():
-            try:
-                est = json.loads(est_file.read_text(encoding="utf-8"))
-                size = est.get("size")
-            except (json.JSONDecodeError, OSError):
-                size = None
-    if size not in _CALIBRATION_SIZES:
-        return None
-
-    coder_min = _analytics_elapsed_minutes(
-        issue.get("coder_started_at"), issue.get("coder_finished_at"))
-    tester_min = _analytics_elapsed_minutes(
-        issue.get("tester_started_at"), issue.get("tester_finished_at"))
-    if coder_min is None and tester_min is None:
-        return None
-
-    actual_minutes = (coder_min or 0.0) + (tester_min or 0.0)
-    point = {
-        "issue_number": issue_num,
-        "estimated_size": size,
-        "estimated_minutes": configured_minutes[size],
-        "actual_minutes": round(actual_minutes, 2),
-    }
-    return size, actual_minutes, point
-
-
-def _calibration_state_key(state_file: Path, sprints_dir: Path, issue_num: int) -> str:
-    rel = state_file.relative_to(sprints_dir)
-    return f"{rel.as_posix()}/{issue_num}"
-
-
-def _calibration_absorb_state_file(
-    cache: dict,
-    state_file: Path,
-    sprints_dir: Path,
-    estimates_dir: Path,
-    configured_minutes: dict[str, int],
-    processed: set[str],
-) -> bool:
-    """Merge new tickets from one state file into cache; return True if anything added."""
-    try:
-        state_data = json.loads(state_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-
-    changed = False
-    for issue in state_data.get("issues", []):
-        issue_num = issue.get("number")
-        if issue_num is None:
-            continue
-        key = _calibration_state_key(state_file, sprints_dir, issue_num)
-        if key in processed:
-            continue
-        sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
-        if sample is None:
-            continue
-        size, actual_minutes, point = sample
-        _calibration_add_sample(cache, size, actual_minutes, point)
-        cache["processed"].append(key)
-        processed.add(key)
-        changed = True
-    return changed
-
-
-def _refresh_calibration_cache(
-    project_root: Path,
-    configured_minutes: dict[str, int],
-) -> dict:
-    """Merge sprint state files into calibration_cache.json (durable local store).
-
-    Live ``sprint-*-state.json`` files and ``archive/`` copies are scanned every
-    refresh; the ``processed`` list prevents double-counting. Aggregates in
-    ``by_size`` persist even after state files are archived or deleted.
-    """
-    commander = _commander_dir(project_root)
-    sprints_dir = commander / "sprints"
-    estimates_dir = commander / "estimates"
-    cache = _load_calibration_cache(commander)
-    processed = set(cache.get("processed") or [])
-    changed = False
-
-    if not sprints_dir.is_dir():
-        return cache
-
-    archive_dir = sprints_dir / "archive"
-    if archive_dir.is_dir():
-        for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
-            if _calibration_absorb_state_file(
-                cache, state_file, sprints_dir, estimates_dir,
-                configured_minutes, processed,
-            ):
-                changed = True
-
-    for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
-        if _calibration_absorb_state_file(
-            cache, state_file, sprints_dir, estimates_dir,
-            configured_minutes, processed,
-        ):
-            changed = True
-
-    if not cache.get("archive_bootstrap_done"):
-        cache["archive_bootstrap_done"] = True
-        changed = True
-
-    if changed:
-        _save_calibration_cache(commander, cache)
-    return cache
+_CALIBRATION_SIZES = _CALIBRATION_SIZES  # re-export for any local references
 
 
 def _iter_calibration_state_files(
@@ -9549,8 +9376,10 @@ def _compute_calibration_from_files(
             if until_dt and start_dt > until_dt:
                 continue
 
+        state_estimates = state_data.get("estimates") or {}
         for issue in state_data.get("issues", []):
-            sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes)
+            sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes,
+                                               state_estimates=state_estimates)
             if sample is None:
                 continue
             size, actual_minutes, point = sample
@@ -9566,6 +9395,18 @@ def _compute_calibration_from_files(
             by_size[sz]["max_minutes"] = round(max(vals), 2)
 
     return {"by_size": by_size, "points": points}
+
+
+def _has_sprint_state_files(project_root: Path) -> bool:
+    """Return True if at least one sprint-*-state.json file exists (live or archived)."""
+    sprints_dir = project_root / ".commander" / "sprints"
+    if sprints_dir.is_dir():
+        if any(sprints_dir.glob("sprint-*-state.json")):
+            return True
+        archive_dir = sprints_dir / "archive"
+        if archive_dir.is_dir() and any(archive_dir.glob("sprint-*-state.json")):
+            return True
+    return False
 
 
 def _compute_calibration(
@@ -9615,7 +9456,12 @@ def _compute_calibration(
         }
         for sz in _CALIBRATION_SIZES
     }
-    return {"by_size": by_size, "points": list(cache.get("points") or [])}
+    return {
+        "by_size": by_size,
+        "points": list(cache.get("points") or []),
+        "processed_count": len(cache.get("processed") or []),
+        "has_sprint_state_files": _has_sprint_state_files(project_root),
+    }
 
 
 @app.get("/api/projects/{slug}/analytics/calibration")
@@ -11994,6 +11840,7 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
     stderr_bytes: bytes = b""
     returncode: int = -1
 
+    _canonical_commander = _commander_dir(_project_root_path(repo))
     try:
         cmd = [
             sys.executable,
@@ -12002,6 +11849,7 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
             "--repo", repo,
             "--save-comment",
             "--save-label",
+            "--commander-dir", str(_canonical_commander),
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -12137,6 +11985,7 @@ async def _run_bulk_estimator_for_ticket(
     stderr_bytes: bytes = b""
     returncode: int = -1
 
+    _canonical_commander = _commander_dir(_project_root_path(repo))
     try:
         async with semaphore:
             cmd = [
@@ -12146,6 +11995,7 @@ async def _run_bulk_estimator_for_ticket(
                 "--repo", repo,
                 "--save-comment",
                 "--save-label",
+                "--commander-dir", str(_canonical_commander),
             ]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -14425,7 +14275,9 @@ def rebuild_mis_sizing_history(project: str):
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
 
-    # Collect all completed tickets from sprint state files
+    # Collect all completed tickets from sprint state files.
+    # Use _resolve_calibration_size (Phase 1 shared resolver) so tickets whose
+    # only size signal is a size-* label are no longer silently skipped (AC1, #1334).
     raw_completed: list[dict] = []
     if sprints_dir.exists():
         for state_path in sorted(sprints_dir.glob("sprint-*-state.json")):
@@ -14435,27 +14287,17 @@ def rebuild_mis_sizing_history(project: str):
                 state_data = json.loads(state_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
+            state_estimates = state_data.get("estimates") or {}
             for iss in state_data.get("issues", []):
                 if iss.get("status") not in ("done", "passed"):
                     continue
                 num = iss.get("number")
                 if num is None:
                     continue
-                # Only include tickets that have an estimate file
-                est_path = estimates_dir / f"issue-{num}.json"
-                if not est_path.exists():
-                    continue
-                try:
-                    est_data = json.loads(est_path.read_text(encoding="utf-8"))
-                    estimated_size = est_data.get("size") or None
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if not estimated_size:
-                    continue
                 raw_completed.append({
                     "number": num,
                     "sprint": sprint_label_str,
-                    "estimated_size": estimated_size,
+                    "_state_estimates": state_estimates,
                     "coder_started_at": iss.get("coder_started_at"),
                     "tester_finished_at": iss.get("tester_finished_at"),
                     "status_changed_at": iss.get("status_changed_at"),
@@ -14484,11 +14326,19 @@ def rebuild_mis_sizing_history(project: str):
                         lbl["name"] for lbl in iss.get("labels", [])
                     ]
     except Exception:
-        pass  # Proceed without labels — events will be skipped
+        pass  # Proceed without labels — size-* label fallback still applies
 
-    # Attach labels to completed tickets
+    # Attach labels and resolve estimated_size via shared resolver (JSON → state → label)
     for rec in raw_completed:
-        rec["labels"] = labels_by_num.get(rec["number"], [])
+        labels_list = labels_by_num.get(rec["number"], [])
+        rec["labels"] = labels_list
+        label_dicts = [{"name": l} for l in labels_list]
+        rec["estimated_size"] = _resolve_calibration_size(
+            rec["number"],
+            estimates_dir,
+            rec.pop("_state_estimates", {}),
+            label_dicts,
+        )
 
     history = _mis_sizing.build_history_from_completed(raw_completed)
     _mis_sizing.save_history(commander, history)

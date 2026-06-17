@@ -340,6 +340,10 @@ DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
 # threading.Event for thread-safe signaling across worker threads.
 _sprint_user_cancelled: threading.Event = threading.Event()
 
+# Calibration cache: if incremental refresh completes within this budget it runs
+# inline (no perceived delay); otherwise dispatched as a background thread (issue #1333).
+_CALIBRATION_INLINE_THRESHOLD_S: float = 0.5
+
 
 def _emit_sprint_lifecycle_event(
     type: str,
@@ -364,6 +368,80 @@ def _emit_sprint_lifecycle_event(
         )
     except Exception:
         pass
+
+
+def _run_calibration_cache_refresh(
+    project_root: Path,
+    configured_minutes: dict,
+    project: str = "",
+) -> None:
+    """Refresh the calibration cache after a sprint finishes (issue #1333).
+
+    Runs _refresh_calibration_cache incrementally. If it completes within
+    _CALIBRATION_INLINE_THRESHOLD_S it runs inline; otherwise it continues in a
+    daemon background thread so the sprint-finish UX is not blocked.
+
+    Emits a calibration_cache_updated event when new samples are absorbed.
+    """
+    try:
+        from calibration_cache_service import _refresh_calibration_cache as _rcr  # noqa: PLC0415
+    except ImportError:
+        return
+
+    commander = project_root / ".commander"
+    cache_path = commander / "calibration_cache.json"
+    try:
+        prev_processed = len(
+            json.loads(cache_path.read_text(encoding="utf-8")).get("processed") or []
+        ) if cache_path.is_file() else 0
+    except Exception:
+        prev_processed = 0
+
+    result_holder: list = [None]
+
+    def _work() -> None:
+        try:
+            result_holder[0] = _rcr(project_root, configured_minutes)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_work, daemon=True, name="calibration-refresh")
+    t.start()
+    t.join(timeout=_CALIBRATION_INLINE_THRESHOLD_S)
+
+    if t.is_alive():
+        def _bg_log() -> None:
+            t.join()
+            cache = result_holder[0]
+            if cache is not None:
+                _emit_calibration_updated_event(cache, prev_processed, project)
+        threading.Thread(target=_bg_log, daemon=True, name="calibration-refresh-log").start()
+        return
+
+    cache = result_holder[0]
+    if cache is not None:
+        _emit_calibration_updated_event(cache, prev_processed, project)
+
+
+def _emit_calibration_updated_event(cache: dict, prev_processed: int, project: str) -> None:
+    """Emit calibration_cache_updated event when new samples were absorbed."""
+    processed_after = len(cache.get("processed") or [])
+    new_samples = processed_after - prev_processed
+    if new_samples <= 0:
+        return
+    by_size = cache.get("by_size") or {}
+    total_samples = sum(
+        int(by_size[sz]["count"] or 0)
+        for sz in ("S", "M", "L", "XL")
+        if sz in by_size
+    )
+    _emit_sprint_lifecycle_event(
+        type="calibration_cache_updated",
+        target="calibration_cache",
+        actor="sprint_manager:calibration",
+        detail={"new_samples": new_samples, "total_samples": total_samples},
+        project=project,
+    )
 
 
 def _failure_event_detail(
@@ -7770,6 +7848,10 @@ def _dispatch_estimator_for_followup(
         "--save-comment",
         "--save-label",
     ]
+    # Write estimate JSON to the canonical project-root .commander/ location so
+    # calibration can always find it regardless of which clone runs the dashboard.
+    if cfg is not None and hasattr(cfg, "sprints_dir"):
+        cmd += ["--commander-dir", str(cfg.sprints_dir.parent)]
 
     sys.stdout.write(str(f"  [estimator] Estimating follow-up #{issue_num} ...") + "\n")
     sys.stdout.flush()
@@ -9939,6 +10021,15 @@ def run_sprint(
         project=eff_repo or label,
         action_id=_run_id,
     )
+
+    # Auto-refresh calibration cache with newly completed sprint data (issue #1333)
+    try:
+        from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: PLC0415
+        _cal_project_root = _eff_sprints_dir.parent.parent
+        _cal_minutes = dict(_SIZE_TO_MINUTES)
+        _run_calibration_cache_refresh(_cal_project_root, _cal_minutes, project=eff_repo or label)
+    except Exception:
+        pass
 
     # Run documentor once for all merged tickets, before reviewer (issue #697)
     _eff_documentor = cfg.documentor_enabled if cfg is not None else False

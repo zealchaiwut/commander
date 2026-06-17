@@ -256,10 +256,13 @@ def _reconcile_counts(label: str, row: dict) -> bool:
                 by_id[tid] = ar
                 changed = True
 
-    if not changed:
-        return False
-
     merged = [by_id[k] for k in sorted(by_id)]
+
+    # Always recompute counts from merged list, even if issues_json didn't change,
+    # because the status field may have been updated by GitHub label changes between reconciles.
+    old_settled = int(row.get("summary_settled_done") or 0)
+    old_uat = int(row.get("summary_uat_count") or 0)
+    old_failure = int(row.get("summary_failure_count") or 0)
 
     # Recompute denormalized counts from the merged list
     settled_done = sum(
@@ -272,12 +275,24 @@ def _reconcile_counts(label: str, row: dict) -> bool:
         if (i.get("agent_status") or "").lower() == "failed"
         or bool(i.get("failure_reason"))
     )
-    # UAT count cannot be reliably derived from agent_runs alone — preserve stored.
-    stored_uat = int(row.get("summary_uat_count") or 0)
+    # AC1: Derive uat_count by counting issues with status='uat' (same as materialize path).
+    # The status field flows through from existing issues_json and reflects GitHub labels.
+    uat_count = sum(1 for i in merged if (i.get("status") or "").lower() == "uat")
+
+    # Check if any count changed (beyond issues_json state changes)
+    counts_changed = (
+        settled_done != old_settled or
+        uat_count != old_uat or
+        failure_count != old_failure
+    )
+    changed = changed or counts_changed
+
+    if not changed:
+        return False
 
     new_json = _json.dumps(merged)
     _db().update_sprint_run_counts(
-        label, new_json, settled_done, stored_uat, failure_count,
+        label, new_json, settled_done, uat_count, failure_count,
     )
     _db().update_sprint_reconciliation(label, {
         "source": "count-reconcile",

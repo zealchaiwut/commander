@@ -18,13 +18,14 @@ Usage:
     python3 ~/commander/services/sprint_manager/sprint_manager.py <label> [options]
 
 Examples:
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --skip-gates
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --gate-pytest=false
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --resume
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --retry-failed
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --dry-run
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --skip-gates
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --gate-pytest=false
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py \
+        sprint-5 --alert-mode dashboard-banner,file
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --resume
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --retry-failed
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --dry-run
 
 Run from the git root of the repository.
 """
@@ -74,7 +75,6 @@ from services.sprint_manager.config import (  # noqa: E402
     load_config,
     discover_config,
     _default_config,
-    _resolve_path,
 )
 
 from services.sprint_manager.paths import (  # noqa: E402
@@ -83,7 +83,6 @@ from services.sprint_manager.paths import (  # noqa: E402
     _state_path,
     _summary_path,
     _sprint_number,
-    _label_base,
     _is_child_sprint_label,
     _sprint_branch_for_label,
     _base_sprint_branch,
@@ -256,8 +255,12 @@ def _resolve_uat_env_for_tester(
     if port == "8000":
         return None, f"Refusing port 8000 (PRD) in {uat_env_path}"
 
-    commander_ok = uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
-    env_ok = environment in ("uat", "") or (commander_ok and environment in ("uat", "prd", ""))
+    commander_ok = (
+        uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
+    )
+    env_ok = environment in ("uat", "") or (
+        commander_ok and environment in ("uat", "prd", "")
+    )
     if not env_ok:
         return None, (
             f"{uat_env_path} has ENVIRONMENT={environment!r}; expected uat "
@@ -287,7 +290,8 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
+# issue #710: live-browser UAT
+from services.sprint_manager import agent_browser_runner  # noqa: E402
 from services.sprint_manager.state import (  # noqa: E402
     IssueState,
     SprintState,
@@ -296,7 +300,10 @@ from services.sprint_manager.state import (  # noqa: E402
 )
 
 try:
-    from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
+    # issue #860
+    from services.sprint_manager.brief_generator import (
+        write_sprint_brief as _write_sprint_brief,
+    )
     _BRIEF_GENERATOR_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _write_sprint_brief = None  # type: ignore[assignment]

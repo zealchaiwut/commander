@@ -1411,10 +1411,31 @@ def rename_sprint(old_label: str, new_label: str) -> None:
         conn.commit()
 
 
-def get_sprint(label: str) -> dict | None:
-    """Return the sprints row for `label` as a dict, or None (issue #757)."""
+def get_sprint(label: str, project: str | None = None) -> dict | None:
+    """Return the sprints row for `label` as a dict, or None (issue #757).
+
+    When ``project`` is set, never return a row owned by a different project
+  (labels like ``sprint-64`` are only unique per repo, not globally).
+    """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
+        if project is not None:
+            prow = (project or "").strip()
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE label = ? AND project = ?",
+                (label, prow),
+            ).fetchone()
+            if row:
+                return dict(row)
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE label = ?", (label,)
+            ).fetchone()
+            if not row:
+                return None
+            stored = (row["project"] or "").strip()
+            if stored and stored != prow:
+                return None
+            return dict(row)
         row = conn.execute(
             "SELECT * FROM sprints WHERE label = ?", (label,)
         ).fetchone()

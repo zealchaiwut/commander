@@ -1089,6 +1089,13 @@ Replace the existing draft (${data.existing_label})?`
   var _histLedgerCacheAt = 0;
   var _HIST_LEDGER_TTL_MS = 45e3;
   var _histLedgerInflight = null;
+  function _histResetLedgerCache() {
+    _histLedgerData = [];
+    globalThis._histLedgerData = _histLedgerData;
+    _histLedgerCacheRepo = "";
+    _histLedgerCacheAt = 0;
+    _histLedgerInflight = null;
+  }
   var _histRenderRaf = 0;
   var _histStaleBySprint = {};
   var _histRunStats = {};
@@ -7613,6 +7620,7 @@ ${data.errors.join("\n")}`);
   globalThis._histRerunSprint = _histRerunSprint;
   globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
+  globalThis._histResetLedgerCache = _histResetLedgerCache;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
   // apps/dashboard/static/src/index.js

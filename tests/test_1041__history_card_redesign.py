@@ -220,6 +220,16 @@ def test_child_group_uses_parent_row_and_child_wrap():
     assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
     assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
     assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
+    assert "hist-sprint-group collapsed" in body, "collapsed groups hide child wrap via CSS"
+    parent = _fn_body("_histParentRowHtml")
+    assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
+
+
+def test_parent_group_toggle_helper_exists():
+    assert _fn_exists("_histToggleGroup"), "_histToggleGroup must exist for parent collapse"
+    parent = _fn_body("_histParentRowHtml")
+    assert "_histToggleGroup" in parent
+    assert "event.stopPropagation()" in parent
 
 
 def test_ac4_loose_end_band_css_uses_amber():

@@ -28,6 +28,7 @@ export function _histNeedsActionCount() {
 let _histLedgerData = [];
 globalThis._histLedgerData = _histLedgerData;
 const _histExpanded = new Set();   // labels of currently-expanded cards
+const _histGroupCollapsed = new Set(); // base labels whose child wrap is hidden
 let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 // Folding (issue #807): the N most-recent sprints render expanded; older ones
 // collapse into aggregate folds of the same size. _histFoldSize mirrors the
@@ -1073,15 +1074,18 @@ function _histParentFromLabel(label) {
   return `← from ${display}`;
 }
 
-function _histParentRowHtml(s, bulkBtn) {
+function _histParentRowHtml(s, bulkBtn, groupExpanded) {
   const display = sprintLabelDisplay(s.label);
   const lbl = escHtml(s.label || "");
-  return `<div class="hist-parent-row" data-label="${lbl}">
-    <i class="ti ti-chevron-down hist-chev" aria-hidden="true"></i>
+  const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
+  return `<div class="hist-parent-row" data-label="${lbl}" role="button" tabindex="0"
+    onclick="_histToggleGroup('${lbl}')"
+    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
+    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
     <span class="hist-parent-name">${escHtml(display)}</span>
     ${_histStateChip(s.lifecycle_state, s)}
     ${_histHeadStatsHtml(s)}
-    <span class="hist-parent-actions">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
+    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
   </div>`;
 }
 
@@ -1429,6 +1433,17 @@ export function _histToggleCard(label) {
   _histRenderLedger(_histLedgerData);
 }
 
+/** Collapse/expand a parent sprint group — hides all child sprint cards. */
+export function _histToggleGroup(baseLabel) {
+  if (!baseLabel) return;
+  if (_histGroupCollapsed.has(baseLabel)) {
+    _histGroupCollapsed.delete(baseLabel);
+  } else {
+    _histGroupCollapsed.add(baseLabel);
+  }
+  _histRenderLedger(_histLedgerData);
+}
+
 // ── Sub-sprint grouping ─────────────────────────────────────────────────────
 // Re-run siblings (sprint-68.1, sprint-68.2, …) render nested under sprint-68.
 // Top-level History order still follows the newest base-sprint activity first.
@@ -1511,9 +1526,14 @@ function _histGroupHtml(group) {
   const bulkBtn = _histBulkCompleteBtnHtml(group);
   const children = group.children || [];
   if (children.length) {
-    const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn) : "";
+    const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
+    const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
+    const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
+    const parentRow = group.baseSprint
+      ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded)
+      : "";
     const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-    return `<div class="hist-sprint-group">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
+    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
   if (group.baseSprint) {
     return _histIsChild(group.baseSprint.label)

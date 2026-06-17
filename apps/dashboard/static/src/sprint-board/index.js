@@ -20,7 +20,7 @@ import {
 } from './scheduled-run.js';
 import {
   _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
-  _histToggleCard, _histToggleFold, _histFocusLabel, _histStateChip,
+  _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleMetrics, _histClearStaleLabels,
 } from './history.js';
 
@@ -237,6 +237,7 @@ globalThis._histLoadLedger = _histLoadLedger;
 globalThis._histScanStale = _histScanStale;
 globalThis._histCleanupStale = _histCleanupStale;
 globalThis._histToggleCard = _histToggleCard;
+globalThis._histToggleGroup = _histToggleGroup;
 globalThis._histToggleFold = _histToggleFold;
 globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;

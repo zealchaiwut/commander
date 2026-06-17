@@ -82,3 +82,38 @@ test("unmount clears host and payload", () => {
   assert.equal(host.innerHTML, "");
   assert.equal(getProgressActivityPayload(host), null);
 });
+
+test("append log preserves scroll position when user scrolled up", () => {
+  const streams = new Map();
+  const host = { id: "host-e", dataset: {}, hidden: true, innerHTML: "" };
+  globalThis.document = {
+    getElementById(id) {
+      if (id === host.id) return host;
+      if (id.startsWith("pa-log-stream-")) return streams.get(id) || null;
+      return null;
+    },
+  };
+  try {
+    mountProgressActivity(host, {
+      status: "running",
+      mode: "bar",
+      done: 0,
+      total: 3,
+      log_tail: [{ type: "dispatch", message: "line-1", timestamp: "00:00:00" }],
+    }, { id: "overlay-pa" });
+    const streamId = "pa-log-stream-overlay-pa";
+    const stream = {
+      scrollTop: 40,
+      scrollHeight: 400,
+      clientHeight: 100,
+    };
+    streams.set(streamId, stream);
+    appendProgressActivityLog(host, "line-2", "dispatch", { id: "overlay-pa" });
+    assert.equal(stream.scrollTop, 40, "scroll position preserved when not at bottom");
+    stream.scrollTop = 300;
+    appendProgressActivityLog(host, "line-3", "dispatch", { id: "overlay-pa" });
+    assert.equal(stream.scrollTop, stream.scrollHeight, "auto-scroll when at bottom");
+  } finally {
+    globalThis.document = undefined;
+  }
+});

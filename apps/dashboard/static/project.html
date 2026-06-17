@@ -4792,7 +4792,7 @@
       font-size: 14px; font-weight: 600;
       color: var(--text);
       box-shadow: 0 8px 32px rgba(0,0,0,.28);
-      pointer-events: none;
+      pointer-events: auto;
       max-width: min(520px, 92vw);
       min-width: 280px;
     }
@@ -4802,7 +4802,7 @@
     .smgmt-op-pa-host { display: block; }
     .smgmt-op-pa-host[hidden] { display: none !important; }
     .smgmt-op-pa-host .pa-root { margin-top: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
-    .smgmt-op-pa-host .pa-log-stream { max-height: 120px; }
+    .smgmt-op-pa-host .pa-log-stream { max-height: 200px; overflow-y: auto; }
     .smgmt-op-progress-bar {
       flex: 1; height: 6px; background: var(--surface-2);
       border-radius: 999px; overflow: hidden;

@@ -492,11 +492,39 @@
     _payloadById.set(paId, snap);
     return snap;
   }
+  function _logStreamId(paId) {
+    return `pa-log-stream-${paId}`;
+  }
+  function _captureLogScroll(paId) {
+    if (typeof document === "undefined")
+      return null;
+    const el = document.getElementById(_logStreamId(paId));
+    if (!el)
+      return null;
+    return {
+      top: el.scrollTop,
+      atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 8
+    };
+  }
+  function _restoreLogScroll(paId, state) {
+    if (!state || typeof document === "undefined")
+      return;
+    const el = document.getElementById(_logStreamId(paId));
+    if (!el)
+      return;
+    if (state.atBottom)
+      el.scrollTop = el.scrollHeight;
+    else
+      el.scrollTop = state.top;
+  }
   function _renderIntoHost(hostEl, payload, opts) {
     if (!hostEl)
       return;
     const renderOpts = opts || {};
+    const paId = _resolvePaId(hostEl, renderOpts.id);
+    const scrollState = _captureLogScroll(paId);
     hostEl.innerHTML = renderProgressActivity2(payload, renderOpts);
+    _restoreLogScroll(paId, scrollState);
   }
   function mountProgressActivity(host, payload, opts) {
     const hostEl = _resolveHost(host);
@@ -2970,14 +2998,7 @@ Replace the existing draft (${data.existing_label})?`
     }
     _bcOpen();
     try {
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete-preview`
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${res.status}`);
-      }
-      const preview = await res.json();
+      const preview = await _bcFetchPreview(owner, repoName, label);
       _bcPreview = preview;
       const listEl = document.getElementById("bc-ticket-list");
       const allTickets = preview.all_tickets || [];
@@ -3020,6 +3041,20 @@ Replace the existing draft (${data.existing_label})?`
       errEl.classList.remove("hidden");
     }
   }
+  async function _bcFetchPreview(owner, repoName, label) {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete-preview`
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+  async function _bcRemainingMergeSteps(owner, repoName, label) {
+    const preview = await _bcFetchPreview(owner, repoName, label);
+    return preview.merge_steps || [];
+  }
   async function _bcMergeStep(owner, repoName, step) {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprint-branch-merge`,
@@ -3049,8 +3084,8 @@ Replace the existing draft (${data.existing_label})?`
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
     const label = _bcLabel;
-    const mergeSteps = _bcPreview.merge_steps || [];
     const allTickets = _bcPreview.all_tickets || [];
+    const settleSteps = 2;
     const confirmBtn = document.getElementById("bc-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
@@ -3058,8 +3093,10 @@ Replace the existing draft (${data.existing_label})?`
     }
     _bcClose();
     const refreshLabel = "Refreshing board\u2026";
-    const totalSteps = mergeSteps.length + allTickets.length + 2;
     let doneSteps = 0;
+    let mergeSteps = _bcPreview.merge_steps || [];
+    const _bcRecalcTotal = (pendingMerges) => doneSteps + pendingMerges.length + allTickets.length + settleSteps;
+    let totalSteps = _bcRecalcTotal(mergeSteps);
     _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
@@ -3067,13 +3104,24 @@ Replace the existing draft (${data.existing_label})?`
     });
     _smgmtBoardLog("Starting bulk complete\u2026", "step");
     try {
-      for (const step of mergeSteps) {
-        const stepLabel = step.label || `${step.head} \u2192 ${step.base}`;
-        _smgmtBoardLog(stepLabel, "step");
-        await _bcMergeStep(owner, repoName, step);
-        doneSteps += 1;
-        _smgmtBoardProgress(doneSteps, totalSteps);
-        _smgmtBoardLog(`\u2713 ${stepLabel}`, "ok");
+      while (mergeSteps.length > 0) {
+        for (const step of mergeSteps) {
+          const stepLabel = step.label || `${step.head} \u2192 ${step.base}`;
+          _smgmtBoardLog(stepLabel, "step");
+          await _bcMergeStep(owner, repoName, step);
+          doneSteps += 1;
+          _smgmtBoardProgress(doneSteps, totalSteps);
+          _smgmtBoardLog(`\u2713 ${stepLabel}`, "ok");
+        }
+        mergeSteps = await _bcRemainingMergeSteps(owner, repoName, label);
+        if (mergeSteps.length > 0) {
+          totalSteps = _bcRecalcTotal(mergeSteps);
+          _smgmtBoardLog(
+            `Re-checking merge chain (${mergeSteps.length} step${mergeSteps.length !== 1 ? "s" : ""} remaining)\u2026`,
+            "step"
+          );
+          _smgmtBoardProgress(doneSteps, totalSteps);
+        }
       }
       for (const t of allTickets) {
         const closeLabel = `Closing #${t.number} \u2014 ${t.title || ""}`.trim();

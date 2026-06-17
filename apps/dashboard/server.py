@@ -5551,7 +5551,7 @@ def get_sprint_management_issues(repo: str):
     # Ledger-backed "this label actually ran" — board re-run / merge affordances
     # use this instead of ticket labels (needs-rework/SIT from a prior sprint move).
     sprint_has_run: dict[str, bool] = {
-        lbl: _sprint_has_own_run_outcome(project_root, lbl)
+        lbl: _sprint_has_own_run_outcome(project_root, lbl, repo)
         for lbl in renderable_sprint_labels
     }
 
@@ -8260,9 +8260,14 @@ def _state_data_is_dry_run_only(state_data: dict) -> bool:
     return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
 
 
-def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
-    """True when run artifacts for *this* label are ingested in the DB."""
-    row = db.get_sprint(sprint_label)
+def _sprint_has_own_run_outcome(
+    project_root: Path,
+    sprint_label: str,
+    project: str,
+) -> bool:
+    """True when run artifacts for *this* label are ingested in the DB for *project*."""
+    del project_root  # kept for call-site symmetry; outcome is DB-only (issue #1161)
+    row = db.get_sprint(sprint_label, project=project)
     return bool(row and row.get("run_ingested_at"))
 
 
@@ -8645,8 +8650,8 @@ def get_sprint_outcome(sprint_label: str, project: str, preview: bool = Query(Fa
     if _is_sprint_running(project_root, sprint_label):
         return {"sprint_label": sprint_label, "state": "running", "lifecycle": "running"}
 
-    if _sprint_has_own_run_outcome(project_root, sprint_label):
-        ingested = db.get_sprint(sprint_label)
+    if _sprint_has_own_run_outcome(project_root, sprint_label, project):
+        ingested = db.get_sprint(sprint_label, project=project)
         if ingested and ingested.get("run_ingested_at"):
             return _outcome_from_ingested_row(ingested, sprint_label, project)
 
@@ -8655,7 +8660,7 @@ def get_sprint_outcome(sprint_label: str, project: str, preview: bool = Query(Fa
         if partial:
             return partial
 
-    if not _sprint_has_own_run_outcome(project_root, sprint_label):
+    if not _sprint_has_own_run_outcome(project_root, sprint_label, project):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
 
     raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r}")
@@ -9655,14 +9660,14 @@ def get_sprint_finish_card(sprint_label: str, project: str):
             "started_at":      started_at_str,
         }
 
-    if not _sprint_has_own_run_outcome(project_root, sprint_label):
+    if not _sprint_has_own_run_outcome(project_root, sprint_label, project):
         return {
             "sprint_label":  sprint_label,
             "sprint_number": sprint_number,
             "state":         "no_data",
         }
 
-    ingested = db.get_sprint(sprint_label)
+    ingested = db.get_sprint(sprint_label, project=project)
     if ingested and ingested.get("run_ingested_at"):
         return _finish_card_from_ingested_row(ingested, sprint_label, sprint_number, project)
 

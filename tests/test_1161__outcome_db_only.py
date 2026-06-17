@@ -213,7 +213,7 @@ class TestSprintHasOwnRunOutcomeDbOnly:
         sprints_dir = project_root / ".commander" / "sprints"
         _write_disk_state(sprints_dir)
 
-        result = srv._sprint_has_own_run_outcome(project_root, _LABEL)
+        result = srv._sprint_has_own_run_outcome(project_root, _LABEL, _PROJECT)
         assert result is False, (
             "_sprint_has_own_run_outcome must return False when no DB row, "
             "regardless of disk state file"
@@ -226,7 +226,7 @@ class TestSprintHasOwnRunOutcomeDbOnly:
         sprints_dir = project_root / ".commander" / "sprints"
         _write_disk_state(sprints_dir)
 
-        result = srv._sprint_has_own_run_outcome(project_root, _LABEL)
+        result = srv._sprint_has_own_run_outcome(project_root, _LABEL, _PROJECT)
         assert result is False, (
             "_sprint_has_own_run_outcome must return False when run_ingested_at "
             "is NULL, even if disk state file exists"
@@ -238,7 +238,7 @@ class TestSprintHasOwnRunOutcomeDbOnly:
         db.ingest_sprint_run_artifact(_LABEL, _make_state_dict(), project=_PROJECT)
 
         project_root = tmp_path / "proj"
-        result = srv._sprint_has_own_run_outcome(project_root, _LABEL)
+        result = srv._sprint_has_own_run_outcome(project_root, _LABEL, _PROJECT)
         assert result is True, (
             "_sprint_has_own_run_outcome must return True when run_ingested_at is set"
         )

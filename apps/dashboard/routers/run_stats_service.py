@@ -222,7 +222,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
     # clean runs omit the field so the frontend never paints a spurious ✕.
     lifecycle = None
     try:
-        row = _db().get_sprint(label)
+        row = _db().get_sprint(label, project=project)
         if row:
             lifecycle = _db().canonical_lifecycle(row.get("state"))
     except Exception:

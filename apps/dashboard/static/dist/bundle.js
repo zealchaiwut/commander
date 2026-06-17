@@ -188,6 +188,37 @@
     streamEl.innerHTML = lines.length ? lines.map((l) => _logLineHtml(l, colorize || null)).join("") : emptyMsg;
     streamEl.scrollTop = streamEl.scrollHeight;
   }
+  function patchProgressActivityInPlace2(rootId, payload, opts) {
+    if (typeof document === "undefined" || !rootId)
+      return false;
+    const root2 = document.getElementById(rootId);
+    if (!root2)
+      return false;
+    const status = payload.status || "running";
+    if (status === "done" || status === "error")
+      return false;
+    const mode = payload.mode || _detectMode(payload);
+    if (mode !== "bar")
+      return false;
+    const fill = root2.querySelector(".pa-bar-fill");
+    if (!fill)
+      return false;
+    const done = Number(payload.done ?? 0);
+    const total = Number(payload.total ?? 0);
+    const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+    fill.style.transform = `scaleX(${pct / 100})`;
+    const cur = root2.querySelector(".pa-current");
+    if (cur && payload.current != null)
+      cur.textContent = String(payload.current);
+    const counts = root2.querySelector(".pa-counts");
+    if (counts) {
+      counts.textContent = total > 0 ? `${done} of ${total}` : "";
+    }
+    if (Array.isArray(payload.log_tail)) {
+      updateProgressActivityLog(rootId, payload.log_tail, opts && opts.colorize);
+    }
+    return true;
+  }
   function paToggleLog(rootId) {
     if (typeof document === "undefined")
       return;
@@ -1136,8 +1167,13 @@ Replace the existing draft (${data.existing_label})?`
     const progress = _histProgressText(s);
     if (progress)
       parts.push(progress);
-    if (s.duration != null)
+    const stats = _histRunStats[s.label];
+    const agentSecs = stats && stats.has_runs && stats.agent_total_seconds != null ? stats.agent_total_seconds : null;
+    if (agentSecs != null) {
+      parts.push(_histFmtSecs(agentSecs) + " agent");
+    } else if (s.duration != null) {
       parts.push(_histFmtSecs(s.duration));
+    }
     const looseN = _histLooseEndCount(s);
     if (looseN)
       parts.push(looseN + " loose end" + (looseN !== 1 ? "s" : ""));
@@ -1286,7 +1322,7 @@ Replace the existing draft (${data.existing_label})?`
     const displayState = s === "needs_rework" && (er === "natural" || er === "merge_sprint") && sprint && !_histSprintFailed(sprint) ? "ready_to_merge" : s;
     const map = {
       completed: ["completed", "COMPLETED"],
-      ready_to_merge: ["completed", "READY TO MERGE"],
+      ready_to_merge: ["ready_to_merge", "READY TO MERGE"],
       needs_rework: ["failed", "FAILED"],
       partial_finished: ["partial", "PARTIAL"],
       deleted: ["deleted", "DELETED"],
@@ -1372,37 +1408,6 @@ Replace the existing draft (${data.existing_label})?`
       return Number(a.ticket) - Number(b.ticket);
     });
   }
-  function _histGanttHtml(s, stats) {
-    const tickets = _histMergeGanttTickets(s, stats);
-    if (!tickets.length)
-      return "";
-    const scale = Math.max(1, stats.wall_seconds || 0);
-    const sprintFailed = _histSprintFailed(s);
-    const crash = stats.crash;
-    const rows = tickets.map((t) => {
-      const segs = (t.segments || []).map((seg) => {
-        const left = seg.start / scale * 100;
-        const width = seg.duration / scale * 100;
-        const agentCls = seg.agent === "tester" ? "g-tester" : "g-coder";
-        const cls = "g-seg " + agentCls;
-        const title = `${seg.agent}${seg.fix_round ? " (fix round)" : ""} \xB7 ${_histFmtSecs(seg.duration)}`;
-        return `<span class="${cls}" style="left:${left}%;width:${width}%" title="${escHtml(title)}"></span>`;
-      }).join("");
-      let marker = "";
-      if (sprintFailed && crash && crash.ticket === t.ticket) {
-        const at = crash.offset / scale * 100;
-        marker = `<span class="g-crash" style="left:${at}%" title="Crashed here">\u2715</span>`;
-      }
-      return `<div class="g-row">
-      <span class="g-label">#${escHtml(String(t.ticket))}</span>
-      <span class="g-track">${segs}${marker}</span>
-    </div>`;
-    }).join("");
-    return `<div class="stats-block">
-    <div class="stats-section-label">Timeline</div>
-    <div class="hist-gantt"><div class="gantt">${rows}</div></div>
-  </div>`;
-  }
   function _histStatsHtml(s) {
     const stats = _histRunStats[s.label];
     const hasRuns = !!(stats && stats.has_runs);
@@ -1472,11 +1477,9 @@ Replace the existing draft (${data.existing_label})?`
       }
     }
     const splitHtml = hasRuns ? _histSplitBarHtml(stats) : "";
-    const ganttHtml = hasRuns ? _histGanttHtml(s, stats) : "";
     return `<div class="stats" data-stats-label="${escHtml(s.label || "")}">
     <div class="stat-chips">${chips.join("")}</div>
     ${splitHtml}
-    ${ganttHtml}
   </div>`;
   }
   async function _histLoadRunStats(label) {
@@ -1825,13 +1828,16 @@ Replace the existing draft (${data.existing_label})?`
       return "";
     return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
   }
+  var _histAgentTimeExpanded = /* @__PURE__ */ new Set();
+  var _histMetricsDetailsExpanded = /* @__PURE__ */ new Set();
   function _histChildMetricsHtml(s) {
     const stats = _histRunStats[s.label];
-    const metricsOpen = _histMetricsExpanded.has(s.label);
+    const metricsOpen = _histAgentTimeExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
     const chev = metricsOpen ? "ti-chevron-down" : "ti-chevron-right";
     const barHtml = stats && stats.has_runs ? _histAgentTimeBarHtml(stats) : "";
     const elapsed = _histMetricsElapsedLabel(s, stats);
+    const elapsedHtml = elapsed ? `<span class="hist-metrics-elapsed">${elapsed}</span>` : "";
     const body = metricsOpen ? `<div class="hist-metrics-body">
         ${_histAgentBreakdownHtml(stats)}
         ${_histMetricsChipsHtml(s, stats)}
@@ -1840,11 +1846,11 @@ Replace the existing draft (${data.existing_label})?`
         ${_histReconcileHtml(s)}
       </div>` : "";
     return `<div class="hist-metrics-v2${metricsOpen ? " open" : ""}">
-    <div class="hist-metrics-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
+    <div class="hist-metrics-head" onclick="event.stopPropagation();_histToggleAgentTime('${lbl}')">
       <i class="ti ${chev} hist-chev"></i>
       <span class="hist-metrics-label">Agent time</span>
       ${barHtml}
-      <span class="hist-metrics-elapsed">${elapsed}</span>
+      ${elapsedHtml}
     </div>
     ${body}
   </div>`;
@@ -1876,8 +1882,10 @@ Replace the existing draft (${data.existing_label})?`
     const state = (s.lifecycle_state || "").toLowerCase();
     const displayState = state === "needs_rework" && s.end_reason && (String(s.end_reason).toLowerCase() === "natural" || String(s.end_reason).toLowerCase() === "merge_sprint") && !_histSprintFailed(s) ? "ready_to_merge" : state;
     const cls = ["hist-child-card"];
-    if (displayState === "ready_to_merge" || displayState === "completed")
+    if (displayState === "ready_to_merge")
       cls.push("ready");
+    if (displayState === "completed")
+      cls.push("settled");
     if (expanded)
       cls.push("expanded");
     const display = sprintLabelDisplay(s.label);
@@ -1891,8 +1899,7 @@ Replace the existing draft (${data.existing_label})?`
       _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-child-body">
         ${_histLooseEndBandHtml(s)}
-        ${_histChildMetricsHtml(s)}
-        ${_histDoneIssuesHtml(s)}
+        ${_histCardOutcomeHtml(s)}
       </div>` : "";
     return `<div class="${cls.join(" ")}" data-label="${lbl}">
     <div class="hist-child-head" onclick="_histToggleCard('${lbl}')">
@@ -2018,31 +2025,37 @@ Replace the existing draft (${data.existing_label})?`
     }).join("");
     return `<div class="hist-recon-passed">${items}</div>`;
   }
-  var _histMetricsExpanded = /* @__PURE__ */ new Set();
   function _histDetailsHtml(s) {
-    const expanded = _histMetricsExpanded.has(s.label);
+    const expanded = _histMetricsDetailsExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const body = expanded ? `<div class="hist-details-body">
       ${_histStatsHtml(s)}
-      ${_histPostSprintHtml(s)}
-      ${_histReconcileHtml(s)}
       ${_histReconPassedHtml(s)}
     </div>` : "";
     return `<div class="hist-details${expanded ? " expanded" : ""}">
     <div class="hist-details-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
       <i class="ti ti-chart-bar hist-details-icon" aria-hidden="true"></i>
-      <span class="hist-details-label">Metrics, timeline &amp; reconciliation</span>
+      <span class="hist-details-label">Metrics &amp; reconciliation</span>
       <i class="ti ${chev} hist-chev hist-details-chev" aria-hidden="true"></i>
     </div>
     ${body}
   </div>`;
   }
-  function _histToggleMetrics(label) {
-    if (_histMetricsExpanded.has(label)) {
-      _histMetricsExpanded.delete(label);
+  function _histToggleAgentTime(label) {
+    if (_histAgentTimeExpanded.has(label)) {
+      _histAgentTimeExpanded.delete(label);
     } else {
-      _histMetricsExpanded.add(label);
+      _histAgentTimeExpanded.add(label);
+      _histLoadRunStats(label);
+    }
+    _histRenderLedger(_histLedgerData);
+  }
+  function _histToggleMetrics(label) {
+    if (_histMetricsDetailsExpanded.has(label)) {
+      _histMetricsDetailsExpanded.delete(label);
+    } else {
+      _histMetricsDetailsExpanded.add(label);
       _histLoadRunStats(label);
     }
     _histRenderLedger(_histLedgerData);
@@ -2123,6 +2136,11 @@ Replace the existing draft (${data.existing_label})?`
       cls.push("child");
     if (expanded)
       cls.push("expanded");
+    const lifecycle = (s.lifecycle_state || "").toLowerCase();
+    if (lifecycle === "completed")
+      cls.push("settled");
+    if (lifecycle === "ready_to_merge")
+      cls.push("ready");
     const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(s.label) : s.label || "";
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const lbl = escHtml(s.label || "");
@@ -2842,16 +2860,14 @@ Replace the existing draft (${data.existing_label})?`
     const slot = _fsProgressSlot();
     if (!slot || slot.classList.contains("hidden"))
       return;
-    const logEl = document.getElementById("pa-log-stream-fs-pa");
-    const atBottom = !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
-    slot.innerHTML = renderProgressActivity(snap, {
-      id: "fs-pa",
+    const patched = patchProgressActivityInPlace("fs-pa", snap, {
       retryFn: "_fsRetry"
     });
-    if (atBottom) {
-      const newLog = document.getElementById("pa-log-stream-fs-pa");
-      if (newLog)
-        newLog.scrollTop = newLog.scrollHeight;
+    if (!patched) {
+      slot.innerHTML = renderProgressActivity(snap, {
+        id: "fs-pa",
+        retryFn: "_fsRetry"
+      });
     }
   }
   function _fsDone(snap) {
@@ -7595,6 +7611,7 @@ ${data.errors.join("\n")}`);
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
   globalThis._histRerunSprint = _histRerunSprint;
+  globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
@@ -7606,6 +7623,7 @@ ${data.errors.join("\n")}`);
   root.AGENT_NAMES = AGENT_NAMES;
   root.renderProgressActivity = renderProgressActivity2;
   root.updateProgressActivityLog = updateProgressActivityLog;
+  root.patchProgressActivityInPlace = patchProgressActivityInPlace2;
   root.paToggleLog = paToggleLog;
   root.mountProgressActivity = mountProgressActivity;
   root.patchProgressActivity = patchProgressActivity;

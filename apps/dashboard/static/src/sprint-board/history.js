@@ -132,7 +132,15 @@ function _histHeadStatsHtml(s) {
   const parts = [];
   const progress = _histProgressText(s);
   if (progress) parts.push(progress);
-  if (s.duration != null) parts.push(_histFmtSecs(s.duration));
+  const stats = _histRunStats[s.label];
+  const agentSecs = stats && stats.has_runs && stats.agent_total_seconds != null
+    ? stats.agent_total_seconds
+    : null;
+  if (agentSecs != null) {
+    parts.push(_histFmtSecs(agentSecs) + ' agent');
+  } else if (s.duration != null) {
+    parts.push(_histFmtSecs(s.duration));
+  }
   const looseN = _histLooseEndCount(s);
   if (looseN) parts.push(looseN + ' loose end' + (looseN !== 1 ? 's' : ''));
   if (!parts.length) return '';
@@ -490,7 +498,7 @@ export function _histStateChip(state, sprint) {
     : s;
   const map = {
     completed:        ['completed', 'COMPLETED'],
-    ready_to_merge:   ['completed', 'READY TO MERGE'],
+    ready_to_merge:   ['ready_to_merge', 'READY TO MERGE'],
     needs_rework:     ['failed',    'FAILED'],
     partial_finished: ['partial',   'PARTIAL'],
     deleted:          ['deleted',   'DELETED'],
@@ -684,11 +692,9 @@ function _histStatsHtml(s) {
   }
 
   const splitHtml = hasRuns ? _histSplitBarHtml(stats) : '';
-  const ganttHtml = hasRuns ? _histGanttHtml(s, stats) : '';
   return `<div class="stats" data-stats-label="${escHtml(s.label || '')}">
     <div class="stat-chips">${chips.join('')}</div>
     ${splitHtml}
-    ${ganttHtml}
   </div>`;
 }
 
@@ -1109,13 +1115,19 @@ function _histCardOutcomeHtml(s) {
   return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
 }
 
+const _histAgentTimeExpanded = new Set();
+const _histMetricsDetailsExpanded = new Set();
+
 function _histChildMetricsHtml(s) {
   const stats = _histRunStats[s.label];
-  const metricsOpen = _histMetricsExpanded.has(s.label);
+  const metricsOpen = _histAgentTimeExpanded.has(s.label);
   const lbl = escHtml(s.label || "");
   const chev = metricsOpen ? "ti-chevron-down" : "ti-chevron-right";
   const barHtml = stats && stats.has_runs ? _histAgentTimeBarHtml(stats) : "";
   const elapsed = _histMetricsElapsedLabel(s, stats);
+  const elapsedHtml = elapsed
+    ? `<span class="hist-metrics-elapsed">${elapsed}</span>`
+    : "";
   const body = metricsOpen
     ? `<div class="hist-metrics-body">
         ${_histAgentBreakdownHtml(stats)}
@@ -1126,11 +1138,11 @@ function _histChildMetricsHtml(s) {
       </div>`
     : "";
   return `<div class="hist-metrics-v2${metricsOpen ? " open" : ""}">
-    <div class="hist-metrics-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
+    <div class="hist-metrics-head" onclick="event.stopPropagation();_histToggleAgentTime('${lbl}')">
       <i class="ti ${chev} hist-chev"></i>
       <span class="hist-metrics-label">Agent time</span>
       ${barHtml}
-      <span class="hist-metrics-elapsed">${elapsed}</span>
+      ${elapsedHtml}
     </div>
     ${body}
   </div>`;
@@ -1168,7 +1180,8 @@ function _histChildCardHtml(s) {
     ? "ready_to_merge"
     : state;
   const cls = ["hist-child-card"];
-  if (displayState === "ready_to_merge" || displayState === "completed") cls.push("ready");
+  if (displayState === "ready_to_merge") cls.push("ready");
+  if (displayState === "completed") cls.push("settled");
   if (expanded) cls.push("expanded");
   const display = sprintLabelDisplay(s.label);
   const fromLine = _histParentFromLabel(s.label);
@@ -1183,8 +1196,7 @@ function _histChildCardHtml(s) {
   const body = expanded
     ? `<div class="hist-child-body">
         ${_histLooseEndBandHtml(s)}
-        ${_histChildMetricsHtml(s)}
-        ${_histDoneIssuesHtml(s)}
+        ${_histCardOutcomeHtml(s)}
       </div>`
     : "";
 
@@ -1342,35 +1354,40 @@ function _histReconPassedHtml(s) {
   return `<div class="hist-recon-passed">${items}</div>`;
 }
 
-// Metrics / timeline / reconciliation — collapsed by default at the bottom of
-// an expanded card (mock: "Metrics, timeline & reconciliation").
-const _histMetricsExpanded = new Set();
-
+// Metrics / reconciliation — collapsed by default at the bottom of an expanded card.
 function _histDetailsHtml(s) {
-  const expanded = _histMetricsExpanded.has(s.label);
+  const expanded = _histMetricsDetailsExpanded.has(s.label);
   const lbl = escHtml(s.label || '');
   const chev = expanded ? 'ti-chevron-down' : 'ti-chevron-right';
   const body = expanded ? `<div class="hist-details-body">
       ${_histStatsHtml(s)}
-      ${_histPostSprintHtml(s)}
-      ${_histReconcileHtml(s)}
       ${_histReconPassedHtml(s)}
     </div>` : '';
   return `<div class="hist-details${expanded ? ' expanded' : ''}">
     <div class="hist-details-head" onclick="event.stopPropagation();_histToggleMetrics('${lbl}')">
       <i class="ti ti-chart-bar hist-details-icon" aria-hidden="true"></i>
-      <span class="hist-details-label">Metrics, timeline &amp; reconciliation</span>
+      <span class="hist-details-label">Metrics &amp; reconciliation</span>
       <i class="ti ${chev} hist-chev hist-details-chev" aria-hidden="true"></i>
     </div>
     ${body}
   </div>`;
 }
 
-export function _histToggleMetrics(label) {
-  if (_histMetricsExpanded.has(label)) {
-    _histMetricsExpanded.delete(label);
+export function _histToggleAgentTime(label) {
+  if (_histAgentTimeExpanded.has(label)) {
+    _histAgentTimeExpanded.delete(label);
   } else {
-    _histMetricsExpanded.add(label);
+    _histAgentTimeExpanded.add(label);
+    _histLoadRunStats(label);
+  }
+  _histRenderLedger(_histLedgerData);
+}
+
+export function _histToggleMetrics(label) {
+  if (_histMetricsDetailsExpanded.has(label)) {
+    _histMetricsDetailsExpanded.delete(label);
+  } else {
+    _histMetricsDetailsExpanded.add(label);
     _histLoadRunStats(label);
   }
   _histRenderLedger(_histLedgerData);
@@ -1452,6 +1469,9 @@ function _histCardHtml(s, opts) {
   if (locked)   cls.push('locked');
   if (child)    cls.push('child');
   if (expanded) cls.push('expanded');
+  const lifecycle = (s.lifecycle_state || '').toLowerCase();
+  if (lifecycle === 'completed') cls.push('settled');
+  if (lifecycle === 'ready_to_merge') cls.push('ready');
 
   const display = (typeof sprintLabelDisplay === 'function') ? sprintLabelDisplay(s.label) : (s.label || '');
   const chev = expanded ? 'ti-chevron-down' : 'ti-chevron-right';

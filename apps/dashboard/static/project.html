@@ -1999,6 +1999,8 @@
       border-color: var(--border);
       background: var(--surface-2);
     }
+    .hist-card.settled .hist-card-title { color: var(--text-muted); }
+    .hist-card.settled:not(.expanded) { opacity: .92; }
     .hist-card.locked:not(.expanded) .hist-card-head {
       align-items: center;
     }
@@ -2055,6 +2057,7 @@
       border-color: var(--green);
       box-shadow: 0 0 0 2px var(--green-bg);
     }
+    .hist-child-card.settled .hist-child-title { color: var(--text-muted); }
     .hist-child-head {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       padding: 13px 16px; border-bottom: 1px solid var(--border);
@@ -2278,7 +2281,8 @@
       font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
       letter-spacing: .01em; text-transform: none; flex: none;
     }
-    .hist-state.completed { color: var(--green);  background: var(--green-bg); }
+    .hist-state.completed { color: var(--text-muted); background: var(--surface-2); }
+    .hist-state.ready_to_merge { color: var(--green); background: var(--green-bg); }
     .hist-state.partial   { color: var(--text-muted); background: var(--surface-2); }
     .hist-state.finished  { color: var(--text-muted); background: var(--surface-2); }
     .hist-state.failed    { color: var(--red);    background: var(--red-bg); }
@@ -3017,6 +3021,14 @@
     /* Finish Sprint modal extras */
     .rr-cat-summary { background: var(--surface-2); color: var(--text-muted); }
     .fs-actions { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .fs-progress-slot {
+      margin-top: 4px;
+      min-height: 248px;
+    }
+    .fs-progress-slot .pa-log-stream {
+      height: 200px;
+      max-height: 200px;
+    }
     .fs-action-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-sub); }
     .fs-action-row i { color: var(--green); font-size: 14px; }
     .fs-action-row a { color: var(--accent); text-decoration: none; font-size: 12px; }
@@ -27009,7 +27021,7 @@ document.addEventListener('keydown', function(e) {
     </div>
     <div class="modal-error hidden" id="fs-error"></div>
     <!-- Progress component slot (issue #929) -->
-    <div id="fs-progress" class="hidden" style="margin-top:4px"></div>
+    <div id="fs-progress" class="hidden fs-progress-slot"></div>
   </div>
   <div class="modal-footer">
     <button class="btn-ghost" id="fs-cancel-btn" type="button">Cancel</button>

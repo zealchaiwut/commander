@@ -165,13 +165,20 @@ def test_ac3_failed_pill_is_red():
         "Failed pill must be red"
 
 
-def test_ac3_completed_pill_is_green():
-    """Complete outcome pill must use green color (not steel/blue)."""
+def test_ac3_completed_pill_is_grey():
+    """Completed outcome pill must use muted grey (distinct from ready-to-merge green)."""
     completed_css = _css_rule(".hist-state.completed")
-    assert "green" in completed_css.lower() or "var(--green)" in completed_css, \
-        "Complete pill must be green"
-    assert "steel" not in completed_css.lower(), \
-        "Complete pill must not use steel (steel is blue-grey, not green)"
+    assert "text-muted" in completed_css or "surface-2" in completed_css, \
+        "Complete pill must use muted grey styling"
+    assert "var(--green)" not in completed_css, \
+        "Complete pill must not use green — that is reserved for ready_to_merge"
+
+
+def test_ac3_ready_to_merge_pill_is_green():
+    """Ready-to-merge pill must use green (actionable sign-off state)."""
+    ready_css = _css_rule(".hist-state.ready_to_merge")
+    assert "green" in ready_css.lower() or "var(--green)" in ready_css, \
+        "Ready-to-merge pill must be green"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -335,9 +342,11 @@ def test_ac8_details_html_function_exists():
 
 
 def test_ac8_metrics_expanded_tracking_set_exists():
-    """A _histMetricsExpanded Set must track which cards have metrics open."""
-    assert "_histMetricsExpanded" in HISTORY_JS, \
-        "_histMetricsExpanded Set must exist to track metrics expansion"
+    """Sets must track agent-time vs metrics-details expansion separately."""
+    assert "_histMetricsDetailsExpanded" in HISTORY_JS, \
+        "_histMetricsDetailsExpanded Set must exist to track metrics expansion"
+    assert "_histAgentTimeExpanded" in HISTORY_JS, \
+        "_histAgentTimeExpanded Set must exist to track agent-time expansion"
 
 
 def test_ac8_metrics_toggle_function_exists():
@@ -362,10 +371,10 @@ def test_ac8_details_body_css_exists():
 
 
 def test_ac8_details_metrics_label():
-    """Metrics toggle must use the mock label text."""
+    """Metrics toggle must use the updated label (timeline lives in agent time)."""
     body = _fn_body("_histDetailsHtml")
-    assert "Metrics, timeline" in body, \
-        "_histDetailsHtml must label the section 'Metrics, timeline & reconciliation'"
+    assert "Metrics &amp; reconciliation" in body or "Metrics & reconciliation" in body, \
+        "_histDetailsHtml must label the section 'Metrics & reconciliation'"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

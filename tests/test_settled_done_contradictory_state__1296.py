@@ -7,7 +7,6 @@ AC4: Unit test covers the contradictory state and asserts both functions return
      the same settled-done value.
 """
 from pathlib import Path
-import sys
 
 import pytest
 

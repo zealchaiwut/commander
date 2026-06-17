@@ -151,7 +151,7 @@ def test_ac1_focus_guide_step_css_exists():
 
 
 # =============================================================================
-# AC2 — Section order: Lineage → Up next → Planning → Backlog
+# AC2 — Section order: Lineage → Ready to merge → Draft → Backlog
 # =============================================================================
 
 
@@ -182,45 +182,41 @@ def test_ac2_render_emits_lineage_section():
     )
 
 
-def test_ac2_render_emits_planning_section():
-    """_smgmtRender must emit a Planning section for the draft sprint."""
+def test_ac2_render_emits_draft_section():
+    """_smgmtRender must emit a Draft section for pending-to-run sprints."""
     render_body = _fn_body("_smgmtRender")
-    has_planning = (
-        "Planning" in render_body
-        or "smgmt-planning-section" in render_body
+    has_draft = (
+        "Draft" in render_body
+        or "smgmt-section-draft" in render_body
+        or "smgmt-board-section--draft" in render_body
         or "_smgmtDraftCardHtml" in render_body
     )
-    assert has_planning, (
-        "_smgmtRender must emit a 'Planning' section header and place the draft sprint "
-        "under it so the section order (Lineage → Up next → Planning → Backlog) is enforced"
+    assert has_draft, (
+        "_smgmtRender must emit a 'Draft' section for pending-to-run and planning sprints"
     )
 
 
-def test_ac2_render_emits_up_next_section():
-    """_smgmtRender must emit an Up Next section for queued sprints."""
+def test_ac2_render_emits_merge_section():
+    """_smgmtRender must emit a Ready to merge section when post-run sprints exist."""
     render_body = _fn_body("_smgmtRender")
-    has_up_next = (
-        "Up next" in render_body
-        or "up-next" in render_body.lower()
-        or "upnext" in render_body.lower()
-        or "smgmt-section" in render_body
+    has_merge = (
+        "Ready to merge" in render_body
+        or "smgmt-section-merge" in render_body
+        or "_smgmtCardBucket" in render_body
     )
-    assert has_up_next, (
-        "_smgmtRender must emit an 'Up next' section header for queued (not-yet-running) "
-        "sprints so the board section order is explicit"
+    assert has_merge, (
+        "_smgmtRender must support a 'Ready to merge' section for post-run sprints"
     )
 
 
-def test_ac2_planning_section_css_exists():
-    """CSS for the Planning section container must exist."""
-    has_planning_css = (
-        _css_exists(".smgmt-planning-section")
-        or _css_exists(".smgmt-board-planning")
-        or _css_exists(".smgmt-section-planning")
+def test_ac2_draft_section_css_exists():
+    """CSS for the Draft section container must exist."""
+    has_draft_css = (
+        _css_exists(".smgmt-board-section--draft")
+        or _css_exists(".smgmt-section-draft")
     )
-    assert has_planning_css, (
-        "CSS for the Planning section container must exist (.smgmt-planning-section or similar) "
-        "to visually separate the draft sprint from Up Next and Backlog sections"
+    assert has_draft_css, (
+        "CSS for the Draft section container must exist (.smgmt-board-section--draft)"
     )
 
 

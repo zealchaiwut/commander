@@ -137,6 +137,53 @@ export function _smgmtSprintLabelSortKey(label) {
   return m[1].split(".").map((n) => parseInt(n, 10));
 }
 
+/** Base label for sprint-N or sprint-N.M (matches history ledger grouping). */
+export function _smgmtSprintBaseLabel(label) {
+  const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  return m ? `sprint-${m[1]}` : String(label);
+}
+
+/** Sub-index for sprint-N.M (0 for base sprint-N). */
+export function _smgmtSprintSubIndex(label) {
+  const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+  return m && m[2] ? parseInt(m[2], 10) : 0;
+}
+
+function _smgmtChildrenForParent(parentLabel, parents, order) {
+  const fromMeta = (order || []).filter((l) => (parents || {})[l] === parentLabel);
+  const fromLabel =
+    _smgmtSprintSubIndex(parentLabel) === 0
+      ? (order || []).filter(
+          (l) =>
+            l !== parentLabel &&
+            _smgmtSprintBaseLabel(l) === parentLabel &&
+            _smgmtSprintSubIndex(l) > 0,
+        )
+      : [];
+  return [...new Set([...fromMeta, ...fromLabel])];
+}
+
+/** Latest child sub-sprint for a parent label present in the current order. */
+export function _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order) {
+  if (rerunInto && rerunInto[parentLabel]) return rerunInto[parentLabel];
+  const children = _smgmtChildrenForParent(parentLabel, parents, order);
+  if (!children.length) return null;
+  return [...children].sort((a, b) => {
+    const ka = _smgmtSprintLabelSortKey(a);
+    const kb = _smgmtSprintLabelSortKey(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      const d = (ka[i] ?? -1) - (kb[i] ?? -1);
+      if (d !== 0) return d;
+    }
+    return 0;
+  })[children.length - 1];
+}
+
+/** Collapse parent into Lineage whenever a child sub-sprint exists in order. */
+export function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
+  return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+}
+
 export function _smgmtRender(data) {
   const listEl = document.getElementById("smgmt-sprint-list");
   if (!listEl) return;
@@ -187,36 +234,17 @@ export function _smgmtRender(data) {
   const _sprintParents = data.sprint_parents || {};
   const _rerunInto = data.sprint_rerun_into || {};
 
-  const _smgmtWorkTickets = (tickets) =>
-    (tickets || []).filter((t) => {
-      const names = (t.labels || []).map((l) => l.name);
-      return !names.some((n) =>
-        ["sprint-summary", "docs", "documentation"].includes(n),
-      );
-    });
-  const _smgmtTicketSettledOnBoard = (t) => {
-    const names = (t.labels || []).map((l) => l.name);
-    return names.some((n) =>
-      ["UAT", "UAT-approved", "released", "SIT"].includes(n),
-    );
-  };
-  const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
-    if (!rerunInto[label]) return false;
-    const work = _smgmtWorkTickets(tickets);
-    return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
-  };
-
-  // After a re-run moves tickets to a child label, hide the empty parent card until refresh
-  // would have dropped it from the order list anyway (issue #512 UX).
-  // Resolved ancestors: sprints that ran and were rerun into a child sprint.
-  // Previously hidden; now rendered as compact collapsed rows (issue #1043).
+  // When a child sub-sprint exists (e.g. 85.1), collapse the parent (85) into
+  // the Lineage section — do not show it in Draft / Ready to merge (issue #512).
   _smgmtResolvedAncestors = new Set();
   const orderedLabels = orderedLabelsRaw.filter((label) => {
-    const tickets = bySprint[label] || [];
-    if (_smgmtHideRerunParent(label, tickets, _rerunInto)) {
+    if (
+      _smgmtShouldCollapseParent(label, _sprintParents, _rerunInto, orderedLabelsRaw)
+    ) {
       _smgmtResolvedAncestors.add(label);
-      return true; // keep for compact ancestor row rendering
+      return true;
     }
+    const tickets = bySprint[label] || [];
     const ticketCount = tickets.length;
     if (ticketCount > 0) return true;
     if (_finishedSet.has(label)) return false;
@@ -259,7 +287,7 @@ export function _smgmtRender(data) {
     focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
   }
 
-  // ── Categorize sprints into Lineage / Up Next / Planning sections ────────────
+  // ── Categorize sprints into Lineage / Ready to merge / Rework / Running / Draft ─
   const _planStates = data.sprint_plan_states || {};
   const planningLabel = orderedLabels.find((l) => {
     if (_smgmtResolvedAncestors.has(l)) return false;
@@ -268,11 +296,21 @@ export function _smgmtRender(data) {
     return ["draft", "planned", "planning"].includes(ps);
   });
 
+  const _usesDraftCard = (label) => {
+    const ps = (_planStates[label] || "").toLowerCase();
+    return label === planningLabel && ["draft", "planning"].includes(ps);
+  };
+
   const _buildCard = (label) => {
     const tickets = bySprint[label] || [];
 
     if (_smgmtResolvedAncestors.has(label)) {
-      const childLabel = _rerunInto[label];
+      const childLabel = _smgmtChildSprintLabel(
+        label,
+        _sprintParents,
+        _rerunInto,
+        orderedLabelsRaw,
+      );
       const outcome = _smgmtOutcomeCache[label] || null;
       return (
         `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` +
@@ -281,7 +319,7 @@ export function _smgmtRender(data) {
       );
     }
 
-    if (label === planningLabel) {
+    if (_usesDraftCard(label)) {
       return (
         `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` +
         _smgmtDraftCardHtml(label, tickets) +
@@ -302,7 +340,7 @@ export function _smgmtRender(data) {
       null,
       tickets,
       outcome,
-      label === _smgmtNextUpLabel,
+      false,
       parent,
       _smgmtFinishedLabels.has(label),
     );
@@ -313,10 +351,21 @@ export function _smgmtRender(data) {
     );
   };
 
-  const lineageLabels  = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
-  const upNextLabels   = orderedLabels.filter((l) =>
-    !_smgmtResolvedAncestors.has(l) && l !== planningLabel,
-  );
+  const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
+  const otherLabels = orderedLabels.filter((l) => !_smgmtResolvedAncestors.has(l));
+
+  const mergeLabels = [];
+  const reworkLabels = [];
+  const runningLabels = [];
+  const draftLabels = [];
+
+  for (const lbl of otherLabels) {
+    const bucket = _smgmtCardBucket(lbl, _planStates);
+    if (bucket === "ready_to_merge") mergeLabels.push(lbl);
+    else if (bucket === "needs_rework") reworkLabels.push(lbl);
+    else if (bucket === "running") runningLabels.push(lbl);
+    else draftLabels.push(lbl);
+  }
 
   const sectionLabel = (text, cls) =>
     `<div class="smgmt-section-label ${cls}">${text}</div>`;
@@ -338,26 +387,47 @@ export function _smgmtRender(data) {
     cards += `</div>`;
   }
 
-  // Section: Up next (queued non-draft sprints)
-  if (upNextLabels.length > 0) {
-    const upLabel =
-      upNextLabels.length === 1
-        ? "Up next — queued to run 1"
-        : `Up next — queued to run ${upNextLabels.length}`;
-    cards += sectionLabel(upLabel, "smgmt-section-upnext");
-    cards += `<div class="smgmt-board-section smgmt-board-section--upnext">`;
-    cards += upNextLabels.map(_buildCard).join("");
+  // Section: Ready to merge (post-run success — operator sign-off)
+  if (mergeLabels.length > 0) {
+    const mergeLabel =
+      mergeLabels.length === 1
+        ? "Ready to merge — 1"
+        : `Ready to merge — ${mergeLabels.length}`;
+    cards += sectionLabel(mergeLabel, "smgmt-section-merge");
+    cards += `<div class="smgmt-board-section smgmt-board-section--merge">`;
+    cards += mergeLabels.map(_buildCard).join("");
     cards += `</div>`;
   }
 
-  // Section: Planning (draft sprint)
-  if (planningLabel) {
-    cards += sectionLabel(
-      "Planning — building this next 1",
-      "smgmt-section-planning smgmt-planning-section",
-    );
-    cards += `<div class="smgmt-board-section smgmt-board-section--planning">`;
-    cards += _buildCard(planningLabel);
+  // Section: Needs rework (failed / partial post-run)
+  if (reworkLabels.length > 0) {
+    const reworkLabel =
+      reworkLabels.length === 1
+        ? "Needs rework — 1"
+        : `Needs rework — ${reworkLabels.length}`;
+    cards += sectionLabel(reworkLabel, "smgmt-section-rework");
+    cards += `<div class="smgmt-board-section smgmt-board-section--rework">`;
+    cards += reworkLabels.map(_buildCard).join("");
+    cards += `</div>`;
+  }
+
+  // Section: Running (live sprint — detail in Running pane)
+  if (runningLabels.length > 0) {
+    const runLabel =
+      runningLabels.length === 1 ? "Running — 1" : `Running — ${runningLabels.length}`;
+    cards += sectionLabel(runLabel, "smgmt-section-running");
+    cards += `<div class="smgmt-board-section smgmt-board-section--running">`;
+    cards += runningLabels.map(_buildCard).join("");
+    cards += `</div>`;
+  }
+
+  // Section: Draft — pending to run + active planning (single blue frame)
+  if (draftLabels.length > 0) {
+    const draftLabel =
+      draftLabels.length === 1 ? "Draft — 1" : `Draft — ${draftLabels.length}`;
+    cards += sectionLabel(draftLabel, "smgmt-section-draft");
+    cards += `<div class="smgmt-board-section smgmt-board-section--draft">`;
+    cards += draftLabels.map(_buildCard).join("");
     cards += `</div>`;
   }
 
@@ -553,6 +623,38 @@ export function _smgmtApplyRerunOptimistic(
       (t) => !nums.has(t.number),
     );
   }
+}
+
+/** Bucket a sprint label for board section grouping (issue #1044). */
+export function _smgmtCardBucket(label, planStates) {
+  if (_smgmtRunningLabels.has(label)) return "running";
+  const inLinger =
+    typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+  const outcome = _smgmtOutcomeCache[label] || null;
+  const hasRun = _smgmtHasLedgerRun(label);
+
+  if (inLinger && !hasRun) return "running";
+
+  if (hasRun && outcome && typeof _smgmtStateMeta === "function") {
+    const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
+    const st = meta.state;
+    if (st === "ready_to_merge" || st === "completed") return "ready_to_merge";
+    if (st === "needs_rework" || st === "partial_finished") return "needs_rework";
+  }
+  if (hasRun && _smgmtFinishedLabels && _smgmtFinishedLabels.has(label)) {
+    return "ready_to_merge";
+  }
+  if (hasRun && outcome) {
+    const lc = ((outcome.lifecycle) || "").toLowerCase();
+    if (lc === "ready_to_merge") return "ready_to_merge";
+    if (lc === "needs_rework" || lc === "partial_finished") return "needs_rework";
+  }
+  if (hasRun && !outcome && inLinger) return "running";
+
+  const ps = ((planStates || {})[label] || "").toLowerCase();
+  if (hasRun && ["draft", "planned", "planning"].includes(ps)) return "draft";
+
+  return "draft";
 }
 
 /** True when the history ledger says this label has its own run (not ticket labels). */
@@ -1192,8 +1294,8 @@ export function _smgmtCardHtml(
   const cancelBannerHtml = "";
 
   const plannedBadge =
-    !isNext && !finished && !isPostRun && !outcomeBadgeHtml
-      ? '<span class="sc-planned-badge">PLANNED</span>'
+    !finished && !isPostRun && !outcomeBadgeHtml && !isRunningView
+      ? '<span class="sc-draft-badge">DRAFT</span>'
       : "";
   const blockedHint =
     _smgmtAnySprintRunning && !isPostRun && !isRunningView
@@ -1241,9 +1343,8 @@ export function _smgmtCardHtml(
   const collapseLabel =
     (isCollapsed ? "Expand " : "Collapse ") +
     escHtml(sprintLabelDisplay(label));
-  const nextClass = isNext && !isRunning ? " sc-v5--next" : "";
   return `
-    <div class="smgmt-sprint-card sc-v5${nextClass}${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
          ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
          ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
@@ -1260,7 +1361,6 @@ export function _smgmtCardHtml(
           ${parentLineage}
           ${runningBadgeHtml}
           ${showRunningChrome ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
-          ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
@@ -1283,12 +1383,12 @@ export function _smgmtCardHtml(
       </div>
       ${(function() {
         const _ss = _smgmtCardStatusSentence(label, {
-          isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
+          isRunning, isLinger, isHasRework, isReadyToMerge,
           isAwaitingMerge, planState, outcome, tickets, parent,
+          isPostRun, isRunningView,
         });
         if (!_ss) return "";
-        const cls = isNext && !isRunning ? " sc-status-line--next" : "";
-        return `<div class="sc-status-line${cls}"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
+        return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
       })()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -1651,8 +1751,9 @@ export function _smgmtTicketHasEstimate(t) {
  */
 export function _smgmtCardStatusSentence(label, opts) {
   const {
-    isRunning, isLinger, isNext, isHasRework, isReadyToMerge,
+    isRunning, isLinger, isHasRework, isReadyToMerge,
     isAwaitingMerge, planState, outcome, tickets, parent,
+    isPostRun, isRunningView,
   } = opts;
   if (isRunning) return "";
   if (isLinger) return "Sprint finished — snapshot kept 1 hour.";
@@ -1669,7 +1770,7 @@ export function _smgmtCardStatusSentence(label, opts) {
   if (isReadyToMerge || isAwaitingMerge) {
     return "All tickets passed. Ready to merge.";
   }
-  if (isNext) {
+  if (!isPostRun && !isRunningView) {
     const n = tickets.length;
     const parentShort = parent
       ? sprintLabelDisplay(parent).replace("Sprint ", "")
@@ -1685,19 +1786,19 @@ export function _smgmtCardStatusSentence(label, opts) {
         ? _smgmtRunningBlockerShort() : "another sprint";
       return `Ready to run.${held} Waiting on ${blocker} to finish.`;
     }
+    if (!planState || planState === "draft" || planState === "planning") {
+      return tickets.length === 0
+        ? "No tickets yet — drag some from the backlog."
+        : "Set a sprint goal to enable the run.";
+    }
     return held ? `Ready to run.${held}` : "Ready to run.";
   }
   if (_smgmtAnySprintRunning) {
     return "Blocked: another sprint is running.";
   }
-  if (!planState || planState === "draft" || planState === "planning") {
-    return tickets.length === 0
-      ? "No tickets yet — drag some from the backlog."
-      : "Set a sprint goal to enable the run.";
-  }
   return tickets.length === 0
     ? "No tickets — add some from the backlog."
-    : "Planned.";
+    : "Ready to run.";
 }
 
 /** Short label for the sprint blocking Run, e.g. "S56". */
@@ -2411,7 +2512,7 @@ export function _smgmtDraftCardHtml(label, tickets) {
     `<button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0">` +
     `<i class="ti ti-chevron-down"></i></button>` +
     `<span class="smgmt-sprint-name">${escHtml(display)}</span>` +
-    `<span class="smgmt-draft-badge">Draft</span>` +
+    `<span class="smgmt-draft-badge">DRAFT</span>` +
     `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span>` +
     `<div class="smgmt-card-actions">` +
     `<button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint"` +

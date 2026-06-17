@@ -10,7 +10,7 @@ AC coverage:
   AC3  — Segment colours: coder=purple, tester=amber, documenter=teal, reviewer=indigo.
   AC4  — Retry rounds render dimmed + hatched over the base segment colour.
   AC5  — The live running segment and its projected remainder both blink.
-  AC6  — 15-minute gridlines and minute markers span all tracks; sprint start at 0.
+  AC6  — Eight evenly spaced axis markers (start + 2…7 + est. finish); minute labels use ceil(total/8).
   AC7  — A green vertical "now" line cuts across all tracks at current elapsed time.
   AC8  — Projected finish labelled "est. finish HH:MM"; colliding minute markers suppressed.
   AC9  — Done issues show a grey estimate envelope behind the coloured segments.
@@ -98,16 +98,18 @@ def test_ac1_timeline_container_in_run_shell():
     )
 
 
-def test_ac1_timeline_above_orchestrator_panel():
-    """Timeline sits below run-head and above orchestrator (visible without scrolling past issues)."""
+def test_ac1_run_shell_section_order():
+    """Run shell order: head → orchestrator → all issues → timeline → coder/tester lanes."""
     shell_start = PROJECT_HTML.index('id="smgmt-run-shell"')
     shell = PROJECT_HTML[shell_start:shell_start + 4000]
-    tl_pos = shell.find('id="smgmt-rp-timeline"')
-    orch_pos = shell.find('id="smgmt-orch-panel"')
     head_pos = shell.find('id="smgmt-run-head"')
-    assert tl_pos != -1 and orch_pos != -1 and head_pos != -1
-    assert head_pos < tl_pos < orch_pos, (
-        "Timeline must render between run-head and orchestrator panel"
+    orch_pos = shell.find('id="smgmt-orch-panel"')
+    issues_pos = shell.find('id="smgmt-all-issues"')
+    tl_pos = shell.find('id="smgmt-rp-timeline"')
+    lanes_pos = shell.find('id="smgmt-lanes"')
+    assert all(p != -1 for p in (head_pos, orch_pos, issues_pos, tl_pos, lanes_pos))
+    assert head_pos < orch_pos < issues_pos < tl_pos < lanes_pos, (
+        "Run shell must be: run-head, orchestrator, all issues, timeline, coder/tester lanes"
     )
 
 
@@ -383,11 +385,11 @@ def test_ac5_projected_remainder_class_uses_blink():
     )
 
 
-# ─────────── AC6: 15-minute gridlines + minute markers ───────────────────────
+# ─────────── AC6: Eight axis markers + minute labels ─────────────────────────
 
 
 def test_ac6_gridline_css_exists():
-    """CSS class for 15-minute gridlines exists."""
+    """CSS class for axis gridlines exists."""
     has_grid = (
         _css_rule_exists(".rp-tl-grid")
         or _css_rule_exists(".rp-tl-gridline")
@@ -396,12 +398,12 @@ def test_ac6_gridline_css_exists():
         or ("rp-tl-grid" in PROJECT_HTML)
     )
     assert has_grid, (
-        "No gridline CSS found for running-pane timeline — 15-min gridlines required"
+        "No gridline CSS found for running-pane timeline — axis gridlines required"
     )
 
 
 def test_ac6_minute_markers_rendered():
-    """Render function or HTML includes minute marker logic."""
+    """Render function divides the plan axis into eight markers."""
     fn_name = None
     for name in ("_smgmtTimelineHtml", "_smgmtTimelineRender", "_smgmtRpTimelineHtml"):
         if name in PROJECT_HTML:
@@ -410,14 +412,12 @@ def test_ac6_minute_markers_rendered():
     assert fn_name, "No timeline render function found"
     fn = _fn_body(fn_name)
     has_markers = (
-        "minute" in fn.lower()
-        or "15" in fn
+        "AXIS_MARKER_COUNT" in fn
+        or ("8" in fn and "gridline" in fn.lower())
         or "gridline" in fn.lower()
-        or "grid" in fn.lower()
-        or "tick" in fn.lower()
     )
     assert has_markers, (
-        f"{fn_name} does not render minute markers or gridlines — 15-min marks required"
+        f"{fn_name} does not render eighth-interval axis markers — 8-marker axis required"
     )
 
 

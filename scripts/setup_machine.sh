@@ -163,6 +163,59 @@ open(path, "w").write("\n".join(out) + "\n")
 PY
 }
 
+# _get_env_val FILE KEY — print the current effective value of KEY in FILE.
+# Strips leading # so commented-out entries are also found.
+# Prints nothing (empty) if KEY is absent or the file does not exist.
+_get_env_val() {
+    SM_KEY="$2" python3 - "$1" <<'PY'
+import os, sys
+path = sys.argv[1]
+key = os.environ["SM_KEY"]
+try:
+    lines = open(path).read().splitlines()
+except FileNotFoundError:
+    sys.exit(0)
+for ln in lines:
+    stripped = ln.lstrip("#").lstrip()
+    if stripped.startswith(key + "="):
+        print(stripped[len(key) + 1:], end="")
+        sys.exit(0)
+PY
+}
+
+# _is_placeholder VAL — returns 0 (true) if VAL is empty or an angle-bracket
+# template like <your-key-here>.
+_is_placeholder() {
+    local v="$1"
+    [ -z "$v" ] && return 0
+    case "$v" in
+        \<*\>) return 0 ;;
+    esac
+    return 1
+}
+
+# _get_secret_keys EXAMPLE_FILE — print one key per line for every entry in
+# EXAMPLE_FILE whose key name ends in _TOKEN, _KEY, _SECRET, or _PASSWORD.
+# Handles both uncommented (KEY=VAL) and commented (# KEY=VAL) entries.
+_get_secret_keys() {
+    SM_EXAMPLE="$1" python3 - <<'PY'
+import os, sys
+example = os.environ["SM_EXAMPLE"]
+SUFFIXES = ("_TOKEN", "_KEY", "_SECRET", "_PASSWORD")
+try:
+    lines = open(example).read().splitlines()
+except FileNotFoundError:
+    sys.exit(0)
+for ln in lines:
+    stripped = ln.lstrip("#").strip()
+    if "=" not in stripped:
+        continue
+    key = stripped.split("=", 1)[0].strip()
+    if key and any(key.endswith(s) for s in SUFFIXES):
+        print(key)
+PY
+}
+
 # prompt_secret KEY LABEL FILE — silently read a secret and store it in FILE.
 prompt_secret() {
     local key="$1" label="$2" file="$3" val=""
@@ -185,20 +238,29 @@ prompt_secret() {
 setup_env() {
     local env_file="$DASHBOARD_DIR/.env"
     local example="$DASHBOARD_DIR/.env.example"
-    if [ -f "$env_file" ]; then
-        echo "[env] $env_file already present — skipping."
-        return 0
-    fi
     if [ ! -f "$example" ]; then
         echo "[env] WARNING: $example not found — cannot create .env." >&2
         return 0
     fi
-    echo "[env] Creating $env_file from .env.example …"
-    run_step cp "$example" "$env_file"
-    # Prompt for required secret keys. Values are read silently and never echoed.
-    if [ "${SETUP_MACHINE_DRY_RUN:-}" != "1" ]; then
-        prompt_secret GH_TOKEN "GitHub token for headless gh (GH_TOKEN)" "$env_file"
+    if [ -f "$env_file" ]; then
+        echo "[env] $env_file already present — checking for unset secret keys."
+    else
+        echo "[env] Creating $env_file from .env.example …"
+        run_step cp "$example" "$env_file"
     fi
+    # Prompt for every secret key in .env.example that still has a placeholder
+    # value (empty or <...>). Keys already set to real values are skipped.
+    # fd 9 carries the key list so stdin (fd 0) stays free for prompt_secret's read.
+    local key cur_val
+    while IFS= read -r key <&9; do
+        [ -z "$key" ] && continue
+        cur_val="$(_get_env_val "$env_file" "$key")"
+        if ! _is_placeholder "$cur_val"; then
+            echo "  [env] $key already set — skipping prompt." >&2
+            continue
+        fi
+        prompt_secret "$key" "$key" "$env_file"
+    done 9< <(_get_secret_keys "$example")
 }
 
 # ── 3. prd/uat clone layout + coder/tester worktrees ──────────────────────────
@@ -244,10 +306,10 @@ restore_db() {
     local target="$DASHBOARD_DIR/commander.db"
     echo "[restore] Restoring DB from $source via backup.py …"
     if [ "${SETUP_MACHINE_DRY_RUN:-}" = "1" ]; then
-        echo "DRY-RUN: (cd $REPO_ROOT && $PYTHON -m services.sprint_manager.backup restore-db --from $source --target $target)"
+        echo "DRY-RUN: (cd $REPO_ROOT && $PYTHON -m services.sprint_manager.backup restore-db --from $source --target $target --force)"
     else
         ( cd "$REPO_ROOT" && "$PYTHON" -m services.sprint_manager.backup \
-            restore-db --from "$source" --target "$target" )
+            restore-db --from "$source" --target "$target" --force )
     fi
 }
 
@@ -259,7 +321,7 @@ setup_agent_skills() {
         extra+=(--force)
     fi
     echo "[skills] Installing caveman + code-review-graph (install_agent_skills.sh) …"
-    run_step bash "$SCRIPT_DIR/install_agent_skills.sh" "${extra[@]}"
+    run_step bash "$SCRIPT_DIR/install_agent_skills.sh" ${extra[@]+"${extra[@]}"}
 }
 
 # ── 5. doctor ─────────────────────────────────────────────────────────────────

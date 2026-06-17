@@ -16,8 +16,10 @@ bash ~/dev/commander/prd/scripts/setup_machine.sh
 ```
 
 `setup_machine.sh` is idempotent: it creates the venv and installs
-requirements, copies `.env` from `.env.example` (prompting for secret keys
-without echoing them), constructs the `~/dev/commander/{prd,uat}` layout, and
+requirements, copies `.env` from `.env.example` (prompting without echoing for
+every secret key — those ending in `_TOKEN`/`_KEY`/`_SECRET`/`_PASSWORD` — and
+re-prompting only for keys still unset on an existing `.env`), constructs the
+`~/dev/commander/{prd,uat}` layout, and
 finishes with a preflight **doctor** that prints a PASS/FAIL table for
 `gh auth`, the `claude` CLI, `tailscale`, the dashboard port, and `sqlite3`.
 The script exits nonzero if any doctor check fails. Pass `--restore-gist <id>`

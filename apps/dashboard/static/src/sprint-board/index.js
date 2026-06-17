@@ -19,7 +19,7 @@ import {
   _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
 } from './scheduled-run.js';
 import {
-  _histNeedsActionCount, _histLoadLedger, _histScanStale, _histCleanupStale,
+  _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleMetrics, _histClearStaleLabels,
 } from './history.js';
@@ -234,6 +234,7 @@ globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
 // History ledger (issue #806 / #797 extraction)
 globalThis._histNeedsActionCount = _histNeedsActionCount;
 globalThis._histLoadLedger = _histLoadLedger;
+globalThis._histPrefetchLedger = _histPrefetchLedger;
 globalThis._histScanStale = _histScanStale;
 globalThis._histCleanupStale = _histCleanupStale;
 globalThis._histToggleCard = _histToggleCard;

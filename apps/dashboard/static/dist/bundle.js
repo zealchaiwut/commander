@@ -994,6 +994,11 @@ Replace the existing draft (${data.existing_label})?`
   var _histDidAutoExpand = false;
   var _histFoldSize = 10;
   var _histFoldExpanded = /* @__PURE__ */ new Set();
+  var _histLedgerCacheRepo = "";
+  var _histLedgerCacheAt = 0;
+  var _HIST_LEDGER_TTL_MS = 45e3;
+  var _histLedgerInflight = null;
+  var _histRenderRaf = 0;
   var _histStaleBySprint = {};
   var _histRunStats = {};
   function _histIsLocked(state) {
@@ -1402,9 +1407,27 @@ Replace the existing draft (${data.existing_label})?`
       if (!resp.ok)
         return;
       _histRunStats[label] = await resp.json();
-      _histRenderLedger(_histLedgerData);
+      _histScheduleLedgerRender();
     } catch (_) {
     }
+  }
+  function _histScheduleLedgerRender() {
+    if (_histRenderRaf)
+      return;
+    _histRenderRaf = requestAnimationFrame(() => {
+      _histRenderRaf = 0;
+      _histRenderLedger(_histLedgerData);
+    });
+  }
+  function _histShowLedgerSkeleton() {
+    const el = document.getElementById("hist-ledger");
+    if (!el || _histLedgerData && _histLedgerData.length)
+      return;
+    el.innerHTML = `<div class="hist-ledger-skeleton" aria-busy="true" aria-label="Loading sprint history">
+    <div class="hist-skeleton-card"></div>
+    <div class="hist-skeleton-card"></div>
+    <div class="hist-skeleton-card"></div>
+  </div>`;
   }
   function _histReconcileLabel(name) {
     return {
@@ -2369,34 +2392,87 @@ Replace the existing draft (${data.existing_label})?`
       return globalThis.smgmtRerunSprint(label);
     }
   }
-  async function _histLoadLedger2(repo) {
+  function _histPrefetchLedger(repo) {
+    if (!repo)
+      return;
+    const hasData = (_histLedgerData || []).length > 0;
+    const fresh = repo === _histLedgerCacheRepo && Date.now() - _histLedgerCacheAt < _HIST_LEDGER_TTL_MS && hasData;
+    if (fresh || _histLedgerInflight)
+      return;
+    _histLoadLedger2(repo, { background: true });
+  }
+  async function _histLoadLedger2(repo, opts) {
+    opts = opts || {};
     if (!repo)
       return;
     const el = document.getElementById("hist-ledger");
-    try {
+    const force = opts.force === true;
+    const background = opts.background === true;
+    const hasCache = repo === _histLedgerCacheRepo && (_histLedgerData || []).length > 0;
+    const fresh = !force && hasCache && Date.now() - _histLedgerCacheAt < _HIST_LEDGER_TTL_MS;
+    if (fresh) {
+      if (!background && el && !el.querySelector(".hist-card, .hist-sprint-group, .hist-fold")) {
+        _histRenderLedger(_histLedgerData);
+      }
+      return;
+    }
+    if (_histLedgerInflight) {
+      await _histLedgerInflight;
+      if (!background && (_histLedgerData || []).length) {
+        _histRenderLedger(_histLedgerData);
+        _smgmtUpdateSubnav();
+      }
+      return;
+    }
+    if (!hasCache && !background)
+      _histShowLedgerSkeleton();
+    else if (hasCache && !background)
+      _histRenderLedger(_histLedgerData);
+    const loadPromise = (async () => {
       try {
-        const sresp = await fetch(`/api/projects/${encodeURIComponent(_slug)}/settings`);
-        if (sresp.ok) {
-          const settings = await sresp.json();
-          const fs = parseInt(settings.history_fold_size, 10);
-          if (!isNaN(fs) && fs > 0)
-            _histFoldSize = fs;
+        const settingsUrl = `/api/projects/${encodeURIComponent(_slug)}/settings`;
+        const historyUrl = "/api/sprints/history?limit=50&project=" + encodeURIComponent(repo || "");
+        const [sresp, resp] = await Promise.all([
+          fetch(settingsUrl).catch(() => null),
+          fetch(historyUrl)
+        ]);
+        if (sresp && sresp.ok) {
+          try {
+            const settings = await sresp.json();
+            const fs = parseInt(settings.history_fold_size, 10);
+            if (!isNaN(fs) && fs > 0)
+              _histFoldSize = fs;
+          } catch (_) {
+          }
+        }
+        if (!resp.ok) {
+          if (!hasCache && el && !background) {
+            el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+          }
+          return;
+        }
+        const data = await resp.json();
+        const sprints = data.sprints || [];
+        _histLedgerData = sprints;
+        globalThis._histLedgerData = sprints;
+        _histLedgerCacheRepo = repo;
+        _histLedgerCacheAt = Date.now();
+        const histOpen = document.getElementById("smgmt-subview-history")?.classList.contains("show");
+        if (!background || histOpen) {
+          _histRenderLedger(sprints);
+          _smgmtUpdateSubnav();
         }
       } catch (_) {
+        if (!hasCache && el && !background) {
+          el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+        }
+      } finally {
+        if (_histLedgerInflight === loadPromise)
+          _histLedgerInflight = null;
       }
-      const resp = await fetch("/api/sprints/history?limit=50&project=" + encodeURIComponent(repo || ""));
-      if (!resp.ok)
-        return;
-      const data = await resp.json();
-      let sprints = data.sprints || [];
-      _histLedgerData = sprints;
-      globalThis._histLedgerData = sprints;
-      _histRenderLedger(sprints);
-      _smgmtUpdateSubnav();
-    } catch (_) {
-      if (el)
-        el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
-    }
+    })();
+    _histLedgerInflight = loadPromise;
+    await loadPromise;
   }
   function _histNextChildLabel(parentLabel) {
     return _nextSprintSublabel(parentLabel);
@@ -3123,6 +3199,7 @@ Replace the existing draft (${data.existing_label})?`
     const repoName = parts.slice(1).join("/");
     const label = _bcLabel;
     const allTickets = _bcPreview.all_tickets || [];
+    let mergeSteps = _bcPreview.merge_steps || [];
     const settleSteps = 2;
     const confirmBtn = document.getElementById("bc-confirm-btn");
     if (confirmBtn) {
@@ -3132,7 +3209,6 @@ Replace the existing draft (${data.existing_label})?`
     _bcClose();
     const refreshLabel = "Refreshing board\u2026";
     let doneSteps = 0;
-    let mergeSteps = _bcPreview.merge_steps || [];
     const _bcRecalcTotal = (pendingMerges) => doneSteps + pendingMerges.length + allTickets.length + settleSteps;
     let totalSteps = _bcRecalcTotal(mergeSteps);
     _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}\u2026`, {
@@ -5068,25 +5144,44 @@ ${data.errors.join("\n")}`);
     ) : [];
     return [.../* @__PURE__ */ new Set([...fromMeta, ...fromLabel])];
   }
+  function _smgmtCompareSprintLabels(a, b) {
+    const ka = _smgmtSprintLabelSortKey(a);
+    const kb = _smgmtSprintLabelSortKey(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      const d = (ka[i] ?? -1) - (kb[i] ?? -1);
+      if (d !== 0)
+        return d;
+    }
+    return 0;
+  }
   function _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order) {
     if (rerunInto && rerunInto[parentLabel])
       return rerunInto[parentLabel];
     const children = _smgmtChildrenForParent(parentLabel, parents, order);
     if (!children.length)
       return null;
-    return [...children].sort((a, b) => {
-      const ka = _smgmtSprintLabelSortKey(a);
-      const kb = _smgmtSprintLabelSortKey(b);
-      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-        const d = (ka[i] ?? -1) - (kb[i] ?? -1);
-        if (d !== 0)
-          return d;
-      }
-      return 0;
-    })[children.length - 1];
+    return [...children].sort(_smgmtCompareSprintLabels)[children.length - 1];
+  }
+  function _smgmtLatestLineageLabel(baseLabel, parents, rerunInto, order) {
+    const base = _smgmtSprintBaseLabel(baseLabel);
+    const members = (order || []).filter(
+      (l) => l === base || _smgmtSprintBaseLabel(l) === base && _smgmtSprintSubIndex(l) > 0
+    );
+    if (!members.length)
+      return null;
+    return [...members].sort(_smgmtCompareSprintLabels)[members.length - 1];
   }
   function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
     return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+  }
+  function _smgmtShouldCollapseToLineage(label, parents, rerunInto, order) {
+    if (_smgmtShouldCollapseParent(label, parents, rerunInto, order))
+      return true;
+    const base = _smgmtSprintBaseLabel(label);
+    const latest = _smgmtLatestLineageLabel(base, parents, rerunInto, order);
+    if (!latest || label === latest)
+      return false;
+    return _smgmtCompareSprintLabels(label, latest) < 0;
   }
   function _smgmtRender2(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
@@ -5121,7 +5216,7 @@ ${data.errors.join("\n")}`);
     const _rerunInto = data.sprint_rerun_into || {};
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      if (_smgmtShouldCollapseParent(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
+      if (_smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
         _smgmtResolvedAncestors.add(label);
         return true;
       }
@@ -5183,12 +5278,22 @@ ${data.errors.join("\n")}`);
     const _buildCard = (label) => {
       const tickets = bySprint[label] || [];
       if (_smgmtResolvedAncestors.has(label)) {
-        const childLabel = _smgmtChildSprintLabel(
+        let childLabel = _smgmtChildSprintLabel(
           label,
           _sprintParents,
           _rerunInto,
           orderedLabelsRaw
         );
+        if (!childLabel) {
+          const latest = _smgmtLatestLineageLabel(
+            _smgmtSprintBaseLabel(label),
+            _sprintParents,
+            _rerunInto,
+            orderedLabelsRaw
+          );
+          if (latest && latest !== label)
+            childLabel = latest;
+        }
         const outcome2 = _smgmtOutcomeCache[label] || null;
         return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, outcome2, childLabel) + `</div>`;
       }
@@ -7018,6 +7123,7 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
   globalThis._histNeedsActionCount = _histNeedsActionCount;
   globalThis._histLoadLedger = _histLoadLedger2;
+  globalThis._histPrefetchLedger = _histPrefetchLedger;
   globalThis._histScanStale = _histScanStale;
   globalThis._histCleanupStale = _histCleanupStale;
   globalThis._histToggleCard = _histToggleCard;

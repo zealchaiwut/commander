@@ -1949,6 +1949,17 @@
       padding: 28px 18px; text-align: center;
       color: var(--text-sub); font-size: 12.5px; font-style: italic;
     }
+    .hist-ledger-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 14px; }
+    .hist-skeleton-card {
+      height: 52px; border-radius: 10px;
+      background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+      background-size: 200% 100%;
+      animation: hist-skeleton-shimmer 1.2s ease-in-out infinite;
+    }
+    @keyframes hist-skeleton-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
     /* Emphasis on a card is a full border + tint ring, never a side stripe. */
     .hist-card {
       background: var(--surface); border: 1px solid var(--border);
@@ -9283,7 +9294,8 @@
                     aria-selected="false" onclick="_smgmtShowSubView('running')">Running<span
                     class="subtab-live-dot" id="smgmt-running-dot" aria-label="A sprint is running" hidden></span></button>
             <button class="subtab" id="smgmt-subtab-history" role="tab"
-                    aria-selected="false" onclick="_smgmtShowSubView('history')">History<span
+                    aria-selected="false" onclick="_smgmtShowSubView('history')"
+                    onmouseenter="if(typeof _histPrefetchLedger==='function')_histPrefetchLedger(_cachedFullRepo[_slug])">History<span
                     class="subtab-badge needs-action" id="smgmt-history-count"
                     aria-label="Sprints needing your action" hidden>0</span></button>
             <div class="subnav-actions">
@@ -9392,6 +9404,11 @@
                   <i class="ti ti-wand"></i> Estimate unsized
                 </button>
                 <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
+                <button type="button" class="bl-filter-est" id="smgmt-backlog-cleanup-btn"
+                        onclick="_blCleanupBacklog(this)"
+                        title="Close test tickets and stale follow-ups in the backlog">
+                  <i class="ti ti-trash"></i> Clean up backlog
+                </button>
                 <select class="bl-ms-filter" id="bl-ms-filter" aria-label="Filter by milestone"
                         onchange="_blSetMilestoneFilter(this.value)">
                   <option value="">All milestones</option>
@@ -12609,7 +12626,7 @@ function _projConnectSse() {
       const repo = _cachedFullRepo[_slug];
       if (!repo) return;
       if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
-      if (typeof _histLoadLedger === 'function') _histLoadLedger(repo);
+      if (typeof _histLoadLedger === 'function') _histLoadLedger(repo, { force: true });
     } catch (_) {}
   };
 }
@@ -17176,6 +17193,74 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
 
   // Fade out progress after 3s
   setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
+}
+
+async function _blCleanupBacklog(btnEl) {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtShowToast('No repo configured — cannot clean backlog'); return; }
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Scanning…'; }
+  try {
+    const previewResp = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup-preview`,
+      { method: 'POST' },
+    );
+    if (!previewResp.ok) {
+      const err = await previewResp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${previewResp.status}`);
+    }
+    const preview = await previewResp.json();
+    const candidates = preview.candidates || [];
+    if (!candidates.length) {
+      _smgmtShowToast('Backlog looks clean — nothing to close');
+      return;
+    }
+    const lines = candidates.slice(0, 20).map(c =>
+      `#${c.number} · ${c.reason}\n  ${c.title}`,
+    );
+    if (candidates.length > 20) {
+      lines.push(`… and ${candidates.length - 20} more`);
+    }
+    const msg = `Close ${candidates.length} backlog issue${candidates.length !== 1 ? 's' : ''}?\n\n`
+      + lines.join('\n\n')
+      + '\n\nThis closes them on GitHub as "not planned".';
+    if (!confirm(msg)) return;
+    if (btnEl) btnEl.textContent = 'Closing…';
+    const closeResp = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirmed: true,
+          issue_numbers: candidates.map(c => c.number),
+        }),
+      },
+    );
+    if (!closeResp.ok) {
+      const err = await closeResp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${closeResp.status}`);
+    }
+    const result = await closeResp.json();
+    const closed = (result.closed || []).length;
+    const failed = (result.errors || []).length;
+    if (failed) {
+      _smgmtShowToast(`Closed ${closed}; ${failed} failed — see console`);
+      console.warn('Backlog cleanup errors:', result.errors);
+    } else {
+      _smgmtShowToast(`Closed ${closed} backlog issue${closed !== 1 ? 's' : ''}`);
+    }
+    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
+  } catch (e) {
+    _smgmtShowToast('Backlog cleanup failed: ' + e.message);
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.innerHTML = '<i class="ti ti-trash"></i> Clean up backlog';
+    }
+  }
 }
 
 // ── Fix all pre-flight issues (generate missing AC + estimate unsized) ────────

@@ -370,6 +370,18 @@ def test_bulk_complete_modal_mounts():
     assert "while (mergeSteps.length > 0)" in modal_js
 
 
+def test_bc_confirm_reads_merge_steps_before_close():
+    """_bcClose() nulls _bcPreview — merge_steps must be captured first."""
+    modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
+    body = _fn_body("_bcConfirm", modal_js)
+    close_at = body.find("_bcClose()")
+    preview_merge_at = body.find("_bcPreview.merge_steps")
+    assert close_at != -1 and preview_merge_at != -1
+    assert preview_merge_at < close_at, (
+        "_bcPreview.merge_steps must be read before _bcClose clears _bcPreview"
+    )
+
+
 def test_locked_collapsed_cards_hide_header_details():
     """Locked rows stay collapsed by default; auto-expand skips them."""
     auto = _fn_body("_histAutoExpandRecent")

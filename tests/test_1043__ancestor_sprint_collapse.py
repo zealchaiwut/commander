@@ -543,8 +543,22 @@ def test_parent_collapses_when_child_exists_regardless_of_tickets():
         "when plan.json parent is missing"
     )
     render_body = _fn_body("_smgmtRender")
-    assert "_smgmtShouldCollapseParent" in render_body, (
-        "_smgmtRender must call _smgmtShouldCollapseParent before showing sprint cards"
+    assert "_smgmtShouldCollapseToLineage" in render_body, (
+        "_smgmtRender must collapse parent and superseded siblings into Lineage"
+    )
+
+
+def test_superseded_sibling_collapses_when_newer_exists():
+    """sprint-85.1 moves to Lineage when sprint-85.2 is the latest sibling."""
+    assert _fn_exists("_smgmtLatestLineageLabel"), (
+        "_smgmtLatestLineageLabel must pick the newest sprint-N.M in a lineage"
+    )
+    assert _fn_exists("_smgmtShouldCollapseToLineage"), (
+        "_smgmtShouldCollapseToLineage must gate superseded rerun drafts"
+    )
+    body = _fn_body("_smgmtShouldCollapseToLineage")
+    assert "_smgmtLatestLineageLabel" in body, (
+        "superseded sibling collapse must compare against the latest lineage label"
     )
 
 

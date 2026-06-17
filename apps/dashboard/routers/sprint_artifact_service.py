@@ -236,13 +236,16 @@ def _compute_summary_counts(issues_raw: list[dict]) -> dict:
     """Compute denormalized summary counts from raw state-file issues.
 
     settled_done = total - not_yet_settled, where "not yet settled" means the
-    issue was never dispatched to an agent (no agent action, status still in
-    pending/in-progress/sit).  This matches _settled_done_from_columns applied
-    to the same run data:
-        settled = total - backlog(pending) - in_progress - sit
+    issue column-status is still backlog/in-progress/sit (mirrors the canonical
+    _settled_done_from_columns formula: settled = total - backlog - in_progress - sit).
 
-    An issue with agent_status set (completed/failed) or failure_reason set is
-    always settled — the agent ran on it — regardless of the status field.
+    Column-status takes unconditional priority: an issue whose status is pending,
+    in-progress, or sit is never settled-done, even if agent_status='completed'
+    (contradictory state).  This matches _settled_done_from_columns exactly for
+    all normal-flow AND contradictory states.
+
+    For issues with no recorded status (empty string), the agent-action flag is
+    used as a fallback: if the agent ran (has_agent_action), treat as settled.
 
     uat_count    = issues with status 'uat'.
     failure_count = issues where agent_status=='failed' or failure_reason is set.
@@ -258,9 +261,7 @@ def _compute_summary_counts(issues_raw: list[dict]) -> dict:
         agent = (iss.get("agent_status") or "").lower()
         fr = iss.get("failure_reason")
         has_agent_action = agent in ("completed", "done", "failed") or bool(fr)
-        if not has_agent_action and status in _NOT_SETTLED_STATUSES or (
-            not has_agent_action and status == ""
-        ):
+        if status in _NOT_SETTLED_STATUSES or (not has_agent_action and status == ""):
             not_settled += 1
         if status == "uat":
             uat_count += 1

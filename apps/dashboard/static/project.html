@@ -8328,24 +8328,44 @@
       background-image: repeating-linear-gradient(
         45deg, transparent, transparent 3px, rgba(0,0,0,.15) 3px, rgba(0,0,0,.15) 5px); }
 
-    /* Axis row: gridlines + now-line — top band for start/finish, lower band for ticks */
+    /* Axis row: gridlines — start/finish in header band, minute ticks below */
+    .rp-tl-issues { border-bottom: 1px solid var(--border); }
+    .rp-tl-body { position: relative; }
+  .rp-tl-now-rail {
+      position: absolute; top: 0; bottom: 0;
+      left: var(--rp-tl-gutter-left); right: var(--rp-tl-gutter-right);
+      pointer-events: none; z-index: 4;
+    }
+    .rp-tl-now-marker {
+      position: absolute; top: 0; bottom: 0;
+      left: calc(var(--rp-tl-now-pct, 0) * 1%);
+      transform: translateX(-50%);
+    }
+    .rp-tl-now-badge {
+      position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; font-family: var(--mono); color: var(--green, #16a34a);
+      font-weight: 700; white-space: nowrap; z-index: 6;
+      padding: 0 5px; background: var(--surface);
+    }
+    .rp-tl-now-line-full, .rp-tl-now-line {
+      position: absolute; top: 26px; bottom: 0; left: 50%;
+      width: 2px; transform: translateX(-50%);
+      background: var(--green, #16a34a);
+      box-shadow: 0 0 4px color-mix(in srgb, var(--green, #16a34a) 50%, transparent);
+    }
     .rp-tl-axis-wrap {
-      position: relative; min-height: 54px; padding: 8px 0 6px;
-      border-bottom: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+      position: relative; min-height: 48px; padding: 8px 0 4px;
+      border-bottom: 1px solid var(--border); background: var(--surface);
+      overflow: visible; z-index: 2;
     }
     .rp-tl-started {
       position: absolute; left: 10px; top: 8px; z-index: 3;
       font-size: 11px; font-family: var(--mono); color: var(--text-sub); white-space: nowrap;
       display: inline-flex; align-items: center; gap: 5px;
     }
-    .rp-tl-now-label {
-      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-      font-size: 10px; font-family: var(--mono); color: var(--green, #16a34a); font-weight: 700;
-      white-space: nowrap; z-index: 5; padding: 0 4px; background: var(--surface-2);
-    }
     .rp-tl-grid {
       position: absolute;
-      top: 28px; right: var(--rp-tl-gutter-right); bottom: 4px;
+      top: 26px; right: var(--rp-tl-gutter-right); bottom: 2px;
       left: var(--rp-tl-gutter-left); pointer-events: none;
     }
     .rp-tl-gridline {
@@ -8356,13 +8376,8 @@
     .rp-tl-gridline-label {
       font-size: 10px; color: var(--text-sub); font-family: var(--mono);
       padding: 0 2px; white-space: nowrap; user-select: none;
-      transform: translateY(-100%); margin-top: -2px;
+      transform: translateY(-100%); margin-top: -1px;
     }
-    .rp-tl-now {
-      position: absolute; top: 28px; bottom: 4px; pointer-events: none; z-index: 4;
-    }
-    .rp-tl-now-line { position: absolute; top: 0; bottom: 0; left: 0; width: 2px;
-      background: var(--green, #16a34a); box-shadow: 0 0 4px var(--green, #16a34a); }
     .rp-tl-finish-label {
       position: absolute; right: 8px; top: 8px; z-index: 3;
       font-size: 11px; font-family: var(--mono); color: var(--text-sub);
@@ -8370,28 +8385,43 @@
     }
 
     /* Per-issue row */
-    .rp-tl-row { display: flex; align-items: stretch; min-height: 40px; border-bottom: 1px solid var(--border); }
+    .rp-tl-row {
+      display: flex; align-items: stretch; min-height: 44px;
+      border-bottom: 1px solid var(--border); background: var(--surface);
+    }
     .rp-tl-row:last-child { border-bottom: none; }
     .rp-tl-row-left {
       flex: 0 0 var(--rp-tl-gutter-left); display: flex; align-items: center; justify-content: flex-end;
-      gap: 5px; padding-right: 10px; background: var(--surface-2);
-      border-right: 1px solid var(--border);
+      gap: 6px; padding-right: 10px; background: transparent;
     }
-    .rp-tl-row-icon { font-size: 12px; flex-shrink: 0; width: 16px; text-align: center; }
+    .rp-tl-row-icon { font-size: 13px; flex-shrink: 0; width: 16px; text-align: center; }
     .rp-tl-row-icon--done { color: var(--green); }
     .rp-tl-row-icon--running { color: var(--blue); }
     .rp-tl-row-icon--queued { color: var(--text-sub); }
     .rp-tl-row-num { font-family: var(--mono); font-size: 11px; font-weight: 700;
       color: var(--text); }
-    .rp-tl-track { flex: 1 1 auto; position: relative; min-height: 40px; overflow: hidden; }
+    .rp-tl-track {
+      flex: 1 1 auto; position: relative; min-height: 44px;
+      display: flex; align-items: center; padding: 8px 0; overflow: visible;
+    }
+    .rp-tl-track-inner {
+      position: relative; width: 100%; height: 20px; border-radius: 10px;
+      background: var(--surface-2);
+    }
 
-    /* Estimate envelope — grey background behind done-issue segments */
-    .rp-tl-envelope { position: absolute; top: 8px; bottom: 8px; border-radius: 4px;
-      background: #9ca3af; opacity: .18; pointer-events: none; }
+    /* Estimate envelope — muted pill behind segments */
+    .rp-tl-envelope {
+      position: absolute; top: 0; bottom: 0; border-radius: 10px;
+      background: color-mix(in srgb, #94a3b8 22%, var(--surface-2));
+      border: 1px solid color-mix(in srgb, var(--border) 80%, #94a3b8);
+      pointer-events: none;
+    }
 
-    /* Segment base */
-    .rp-tl-seg { position: absolute; top: 10px; bottom: 10px; border-radius: 4px;
-      min-width: 3px; pointer-events: none; }
+    /* Segment base — pill bars inside the lane */
+    .rp-tl-seg {
+      position: absolute; top: 0; bottom: 0; border-radius: 10px;
+      min-width: 4px; pointer-events: none;
+    }
     .rp-tl-seg--coder    { background: var(--purple); }
     .rp-tl-seg--tester   { background: var(--amber); }
     .rp-tl-seg--documenter { background: var(--teal); }
@@ -8409,27 +8439,28 @@
     .rp-tl-seg--projected { animation: rpTlBlink 1.4s ease-in-out infinite; }
     @keyframes rpTlBlink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-    /* Ghost: queued or projected remainder — faint + hatched */
+    /* Ghost: queued or projected remainder — agent tint + hatched */
     .rp-tl-seg--ghost {
-      opacity: 0.42;
+      opacity: 0.72;
       background-image: repeating-linear-gradient(
-        45deg, transparent, transparent 4px, rgba(0,0,0,.40) 4px, rgba(0,0,0,.40) 7px);
+        45deg, transparent, transparent 4px, rgba(255,255,255,.45) 4px, rgba(255,255,255,.45) 7px);
     }
 
     /* Wrap-up row */
     .rp-tl-wrapup { margin-top: 0; }
     .rp-tl-row--wrapup { margin-top: 12px; border-top: 1px dashed var(--border) !important; }
 
-    /* Right-side label */
+    /* Right-side label — right-aligned like mock */
     .rp-tl-row-label {
       flex: 0 0 var(--rp-tl-gutter-right); display: flex; flex-direction: column;
-      align-items: flex-start; justify-content: center; padding: 0 10px 0 6px;
-      border-left: 1px solid var(--border); min-width: 0;
+      align-items: flex-end; justify-content: center; padding: 0 12px 0 6px;
+      min-width: 0; text-align: right;
     }
     .rp-tl-metric { font-family: var(--mono); font-size: 12px; font-weight: 700;
       color: var(--text); white-space: nowrap; line-height: 1.25; }
     .rp-tl-sub { font-family: var(--mono); font-size: 10px; color: var(--text-sub);
-      white-space: nowrap; line-height: 1.3; margin-top: 1px; }
+      white-space: nowrap; line-height: 1.3; margin-top: 2px; }
+    .rp-tl-row--queued .rp-tl-metric { color: var(--text-sub); }
 
     @media (max-width: 720px) {
       .rp-timeline-wrap {
@@ -15262,28 +15293,30 @@ function _smgmtRpTimelineHtml(data, live) {
   let gridLines = '';
   for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
     const p = pct(axisStartMs + t);
-    const label = String(Math.round(t / 60000));
-    const tooCloseFinish = Math.abs(p - finishPct) < 6 && t > 0;
-    const tooCloseStart = p < 7;
-    const tooCloseNow = Math.abs(p - nowPct) < 5;
-    const showLabel = t > 0 && !tooCloseFinish && !tooCloseStart && !tooCloseNow;
+    const label = t === 0 ? '0' : (Math.round(t / 60000) + 'm');
+    const tooCloseFinish = Math.abs(p - finishPct) < 4 && t > 0;
+    const tooCloseNow = Math.abs(p - nowPct) < 3.5;
+    const showLabel = !tooCloseFinish && !tooCloseNow;
     const labelHtml = showLabel
-      ? '<span class="rp-tl-gridline-label">' + escHtml(label + 'm') + '</span>'
+      ? '<span class="rp-tl-gridline-label">' + escHtml(label) + '</span>'
       : '';
     gridLines += '<div class="rp-tl-gridline" style="left:' + p.toFixed(2) + '%">' + labelHtml + '</div>';
   }
 
   const finishHHMM = fmtHHMM(new Date(axisEndMs).toISOString());
+  const nowHHMM = fmtHHMM(data.server_now);
   const axisHtml = '<div class="rp-tl-axis-wrap">'
     + '<span class="rp-tl-started"><i class="ti ti-player-play-filled" aria-hidden="true"></i>'
     + 'started ' + escHtml(startedHHMM) + '</span>'
     + '<div class="rp-tl-grid">' + gridLines + '</div>'
-    + '<div class="rp-tl-now" style="left:calc(' + nowPct.toFixed(2) + '% - 1px)">'
-    + '<div class="rp-tl-now-line"></div>'
-    + '<span class="rp-tl-now-label">now ' + escHtml(fmtHHMM(data.server_now)) + '</span>'
-    + '</div>'
     + '<div class="rp-tl-finish-label">est. finish ' + escHtml(finishHHMM) + '</div>'
     + '</div>';
+
+  const nowRailHtml = '<div class="rp-tl-now-rail rp-tl-now" aria-hidden="true">'
+    + '<div class="rp-tl-now-marker">'
+    + '<span class="rp-tl-now-badge">now ' + escHtml(nowHHMM) + '</span>'
+    + '<div class="rp-tl-now-line-full rp-tl-now-line"></div>'
+    + '</div></div>';
 
   let issueRowsHtml = '';
   let queuedStartMs = nowMs;
@@ -15320,10 +15353,15 @@ function _smgmtRpTimelineHtml(data, live) {
 
     let envelopeHtml = '';
     if (isDone && estMin) {
-      const envW = pct(axisStartMs + estMs) - pct(axisStartMs);
-      if (envW > 0) {
-        envelopeHtml = '<div class="rp-tl-envelope" style="left:0%;width:' + envW.toFixed(2) + '%"></div>';
-      }
+      const firstStart = segs.reduce(function(min, seg) {
+        if (!seg.start) return min;
+        const st = Date.parse(seg.start);
+        return min == null || st < min ? st : min;
+      }, null);
+      const envL = pct(firstStart != null ? firstStart : axisStartMs);
+      const envW = Math.max(pct((firstStart != null ? firstStart : axisStartMs) + estMs) - envL, 2);
+      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
+        + '%;width:' + envW.toFixed(2) + '%"></div>';
     } else if (isQueued) {
       const envL = pct(queuedStartMs);
       const envW = Math.max(pct(queuedStartMs + estMs) - envL, 1.5);
@@ -15415,7 +15453,7 @@ function _smgmtRpTimelineHtml(data, live) {
     issueRowsHtml += '<div class="rp-tl-row' + rowExtraCls + '">'
       + '<div class="rp-tl-row-left">' + iconHtml
       + '<span class="rp-tl-row-num">#' + escHtml(String(issNum)) + '</span></div>'
-      + '<div class="rp-tl-track">' + envelopeHtml + segsHtml + '</div>'
+      + '<div class="rp-tl-track"><div class="rp-tl-track-inner">' + envelopeHtml + segsHtml + '</div></div>'
       + '<div class="rp-tl-row-label">'
       + '<div class="rp-tl-metric">' + escHtml(mainMetric) + '</div>'
       + (subLine ? '<div class="rp-tl-sub">' + escHtml(subLine) + '</div>' : '')
@@ -15447,7 +15485,7 @@ function _smgmtRpTimelineHtml(data, live) {
     wrapUpHtml = '<div class="rp-tl-row rp-tl-row--wrapup rp-tl-wrapup">'
       + '<div class="rp-tl-row-left"><span class="rp-tl-row-icon rp-tl-row-icon--done" aria-hidden="true">'
       + '<i class="ti ti-flag" aria-hidden="true"></i></span></div>'
-      + '<div class="rp-tl-track">' + wrapSegsHtml + '</div>'
+      + '<div class="rp-tl-track"><div class="rp-tl-track-inner">' + wrapSegsHtml + '</div></div>'
       + '<div class="rp-tl-row-label">'
       + '<div class="rp-tl-metric">' + escHtml(fmtMin(wrapEstMs)) + '</div>'
       + '<div class="rp-tl-sub">doc + review (sprint)</div>'
@@ -15460,9 +15498,18 @@ function _smgmtRpTimelineHtml(data, live) {
     + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--teal)"></span>documenter (end)</span>'
     + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--indigo,#6366f1)"></span>reviewer (end, if enabled)</span>'
     + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:repeating-linear-gradient(45deg,var(--border),var(--border) 2px,transparent 2px,transparent 4px)"></span>planned / upcoming</span>'
-    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:#9ca3af;opacity:.35"></span>estimate envelope</span>'
+    + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:color-mix(in srgb,#94a3b8 35%,var(--surface-2));border:1px solid var(--border)"></span>estimate envelope</span>'
     + '<span class="rp-tl-footer-item"><span class="rp-tl-split-swatch" style="background:var(--amber)"></span>running</span>'
     + '</div>';
+
+  const issuesHtml = '<div class="rp-tl-issues">'
+    + '<div class="rp-tl-section-label">Per-issue timeline</div>'
+    + '<div class="rp-tl-body" style="--rp-tl-now-pct:' + nowPct.toFixed(2) + '">'
+    + nowRailHtml
+    + axisHtml
+    + issueRowsHtml
+    + wrapUpHtml
+    + '</div></div>';
 
   return '<div class="rp-tl-card">'
     + '<div class="rp-tl-card-header">'
@@ -15470,10 +15517,7 @@ function _smgmtRpTimelineHtml(data, live) {
     + '<span class="rp-tl-card-meta">' + escHtml(headerMeta) + '</span>'
     + '</div>'
     + splitHtml
-    + '<div class="rp-tl-section-label">Per-issue timeline</div>'
-    + axisHtml
-    + issueRowsHtml
-    + wrapUpHtml
+    + issuesHtml
     + footerHtml
     + '</div>';
 }

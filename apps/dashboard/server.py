@@ -969,12 +969,12 @@ from routers import (  # noqa: E402
     suggestions_router,
     system_router,
     tickets_router,
-    timeline_router,
+    timeline_router, maintenance_router,
 )
 # broadcast and _subscribers are now owned by routers/logs_service.py; import
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
-
+app.include_router(maintenance_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
 app.include_router(suggestions_router)

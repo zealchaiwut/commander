@@ -710,6 +710,17 @@ def test_ac11_wrapup_row_visually_separated():
     )
 
 
+def test_ac11_wrapup_starts_after_all_issue_work():
+    """Wrap-up row is scheduled after all coder+tester work, not at now."""
+    fn = _fn_body("_smgmtRpTimelineHtml")
+    assert "workEndMs" in fn or "_smgmtRpBuildIssueSchedule" in PROJECT_HTML, (
+        "_smgmtRpTimelineHtml must schedule wrap-up from workEndMs after all issues"
+    )
+    assert "_smgmtRpIssueActivelyRunning" in PROJECT_HTML, (
+        "in-progress tickets waiting for dispatch must not count as actively running"
+    )
+
+
 def test_ac11_reviewer_shown_only_when_enabled():
     """Render function shows reviewer in wrap-up only when reviewer is enabled."""
     fn_name = None
@@ -845,3 +856,16 @@ def test_ac15_timeline_fetch_from_endpoint():
         "JS does not fetch from /api/sprints/{label}/timeline — "
         "the running-pane timeline must pull data from the timeline endpoint"
     )
+
+
+# ─────────── Dispatch order matches All Issues panel ─────────────────────────
+
+
+def test_timeline_rows_share_dispatch_order_with_all_issues():
+    """Timeline reorders API issues to match the live snapshot dispatch order."""
+    assert "_smgmtFlatIssueOrder" in PROJECT_HTML
+    assert "_smgmtMergeTimelineIssues" in PROJECT_HTML
+    merge_body = _fn_body("_smgmtMergeTimelineIssues")
+    assert "_smgmtFlatIssueOrder" in merge_body
+    render_body = _fn_body("_smgmtRpTimelineHtml")
+    assert "_smgmtMergeTimelineIssues" in render_body

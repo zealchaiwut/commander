@@ -11,8 +11,10 @@ finish_sprint, set_sprint_status — plus get_sprint_management_issues,
 get_sprint_estimate_vs_actual, get_sprint_estimate_summary and
 get_sprint_branch_status.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+import config
 
 from . import brief
 from . import scheduler
@@ -95,12 +97,16 @@ def plan_next_sprint(body: PlanNextSprintBody):
     ``replace: true`` to discard and re-plan). No GitHub label is changed unless
     ``status == "ok"``.
     """
+    if config.sprint_planning_disabled():
+        raise HTTPException(404, detail="Sprint planning is disabled")
     return sprints_service.plan_next_sprint(body.project, body.replace)
 
 
 @router.get("/api/sprints/pending-signoff")
 def get_pending_signoff_sprints(project: str):
     """Labels of sprints in pending-sign-off state for a project (issue #861)."""
+    if config.sprint_signoff_disabled():
+        return {"labels": []}
     return sprints_service.pending_signoff_sprints(project)
 
 

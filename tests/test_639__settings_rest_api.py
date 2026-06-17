@@ -31,11 +31,19 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 
 
-def _make_engine():
+def _make_engine(db_path: Path | None = None):
+    if db_path is None:
+        url = "sqlite:///:memory:"
+        connect_args = {"check_same_thread": False}
+        poolclass = StaticPool
+    else:
+        url = f"sqlite:///{db_path}"
+        connect_args = {"check_same_thread": False}
+        poolclass = None
     engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        url,
+        connect_args=connect_args,
+        poolclass=poolclass,
     )
     with engine.connect() as conn:
         conn.execute(text("""
@@ -54,21 +62,46 @@ def _make_engine():
 
 
 @pytest.fixture()
-def client_ctx():
+def client_ctx(tmp_path, monkeypatch):
     """Yield (client, srv, settings_repo, engine) with in-memory DB and projects patched."""
-    engine = _make_engine()
+    engine = _make_engine(tmp_path / "settings.db")
 
-    for mod in ("server", "services.sprint_manager.settings_repo", "services.sprint_manager.settings_schema"):
+    for mod in (
+        "server",
+        "settings_repo",
+        "settings_schema",
+        "services.sprint_manager.settings_repo",
+        "services.sprint_manager.settings_schema",
+        "routers.settings_service",
+        "routers.settings",
+    ):
         sys.modules.pop(mod, None)
 
+    import settings_repo as settings_repo
+
+    # Alias before importing server so server + settings_service share one module.
+    sys.modules["services.sprint_manager.settings_repo"] = settings_repo
+    monkeypatch.setattr(
+        settings_repo,
+        "_fallback_store_path",
+        lambda: tmp_path / "settings_store.json",
+    )
+
     import server as srv
-    import services.sprint_manager.settings_repo as settings_repo
 
     SessionLocal = sessionmaker(bind=engine)
     settings_repo._session_factory = SessionLocal
 
+    import routers.settings_service as settings_service
+
+    settings_service._settings_repo = settings_repo
+
     from fastapi.testclient import TestClient
-    with patch.object(srv.projects_module, "load_projects", return_value=[{"repo": "owner/test-proj"}]):
+    with patch.object(srv.projects_module, "load_projects", return_value=[
+        {"repo": "owner/test-proj"},
+        {"repo": "owner/override-proj"},
+        {"repo": "owner/fallback-proj"},
+    ]):
         with patch.object(srv, "_settings_repo", settings_repo):
             client = TestClient(srv.app, raise_server_exceptions=False)
             yield client, srv, settings_repo, engine
@@ -192,8 +225,8 @@ def test_get_project_settings_project_override_wins(client_ctx):
     """Project override must take precedence over global value."""
     client, srv, repo, engine = client_ctx
     client.put("/api/settings", json={"default_model": "global-model"})
-    client.put("/api/projects/test-proj/settings", json={"default_model": "project-model"})
-    resp = client.get("/api/projects/test-proj/settings")
+    client.put("/api/projects/override-proj/settings", json={"default_model": "project-model"})
+    resp = client.get("/api/projects/override-proj/settings")
     data = resp.json()
     assert data["default_model"] == "project-model", (
         f"Project override must win; got {data.get('default_model')}"
@@ -204,7 +237,7 @@ def test_get_project_settings_falls_back_to_global(client_ctx):
     """Non-overridden fields must reflect global value in project settings."""
     client, srv, repo, engine = client_ctx
     client.put("/api/settings", json={"default_model": "global-model"})
-    resp = client.get("/api/projects/test-proj/settings")
+    resp = client.get("/api/projects/fallback-proj/settings")
     data = resp.json()
     assert data["default_model"] == "global-model", (
         f"Non-overridden field must reflect global; got {data.get('default_model')}"

@@ -58,19 +58,17 @@ export function _smgmtUpdateSelectionUI() {
   const onBoard = typeof _smgmtSubView === 'undefined' || _smgmtSubView === 'board';
 
   if (count > 0 && bar && onSprintTab && onBoard) {
-    bar.classList.add('show');
     bar.classList.remove('hidden');
     if (listEl) listEl.classList.add('has-selection');
     const countEl = document.getElementById('smgmt-sel-count');
     if (countEl) countEl.textContent = count === 1 ? '1 issue selected' : `${count} issues selected`;
-    const deleteBtn = document.getElementById('smgmt-sel-delete-btn');
-    if (deleteBtn) {
-      const showDelete = count === 1 && _smgmtIsDeletableIssue([..._smgmtSelectedIssues][0]);
-      deleteBtn.classList.toggle('show', showDelete);
+    const closeBtn = document.getElementById('smgmt-sel-close-btn');
+    if (closeBtn) {
+      const label = count === 1 ? 'Close ticket' : `Close ${count} tickets`;
+      closeBtn.innerHTML = `<i class="ti ti-circle-x"></i> ${label}`;
     }
   } else {
     if (bar) {
-      bar.classList.remove('show');
       bar.classList.add('hidden');
     }
     if (listEl) listEl.classList.remove('has-selection');

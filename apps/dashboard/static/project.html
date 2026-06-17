@@ -1735,7 +1735,7 @@
     .ct-modal { width: min(400px, calc(100vw - 32px)); }
     /* ── Create Label modal ── */
     .cl-modal { width: min(420px, calc(100vw - 32px)); }
-    /* ── Bulk close action bar (sticky under tab nav, Issues tab only) ── */
+    /* ── Bulk close action bar (Issues tab, under project tab nav) ── */
     .bulk-action-bar {
       display: none;
       align-items: center;
@@ -1767,6 +1767,27 @@
       background: none; color: var(--text-muted); cursor: pointer; transition: background .12s;
     }
     .bab-dismiss-btn:hover { background: var(--surface-2); }
+
+    /* ── Sprint board multi-select bar (Sprint tab / Board subview, in proj-header) ── */
+    .proj-selection-bar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 28px;
+      margin: 0;
+      background: var(--blue-bg);
+      border: none;
+      border-top: 1px solid var(--blue);
+      font-size: 13px;
+      color: var(--blue);
+      white-space: nowrap;
+      flex-wrap: wrap;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .proj-selection-bar:not(.hidden) { display: flex; }
+    .proj-selection-bar-hint { color: var(--text-muted); }
+    .smgmt-sel-bar-spacer { flex: 1; min-width: 8px; }
     /* ── Bulk close confirm modal ── */
     .bcm-modal { width: min(480px, calc(100vw - 32px)); }
     .bcm-ticket-list {
@@ -3287,6 +3308,10 @@
     /* Expanded body */
     .slp-ancestor-body { padding: 0 var(--space-4) var(--space-2); border-top: 1px solid var(--border); }
     .slp-no-tickets { font-size: 12px; color: var(--text-sub); padding: 10px 0; }
+    .slp-ancestor-stats {
+      font-size: 12px; color: var(--text-sub); padding: 8px 4px 4px;
+      font-family: var(--mono); letter-spacing: .01em;
+    }
     /* Per-ticket rows */
     .slp-ancestor-ticket-row {
       display: flex; align-items: center; gap: 8px;
@@ -3295,6 +3320,9 @@
     }
     .slp-ancestor-ticket-row:last-child { border-bottom: none; }
     .slp-ticket-merged { color: var(--green); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-uat { color: var(--blue); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-failed { color: var(--red); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-incomplete { color: var(--text-sub); font-size: 14px; flex-shrink: 0; }
     .slp-ticket-carried { color: var(--amber); font-size: 14px; flex-shrink: 0; }
     .slp-ticket-title {
       flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -3305,10 +3333,29 @@
       color: var(--green); background: var(--green-bg);
       padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
     }
+    .slp-fate-uat {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--blue); background: var(--blue-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-failed {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--red); background: var(--red-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-incomplete {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--text-sub); background: var(--surface-2);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
     .slp-fate-carried {
       font-size: 11px; font-weight: 600; font-family: var(--mono);
       color: var(--amber); background: var(--amber-bg);
       padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-ticket-elapsed {
+      font-size: 11px; color: var(--text-sub); font-family: var(--mono);
+      flex-shrink: 0; margin-left: auto;
     }
     /* Action buttons for needs_merge ancestors */
     .slp-ancestor-actions {
@@ -3636,27 +3683,8 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (sticky at top of sprint board pane) ── */
-    .proj-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
-      margin: 0 0 10px;
-      background: var(--blue-bg);
-      border: 1px solid var(--blue);
-      border-radius: 8px;
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      flex-wrap: wrap;
-      box-shadow: 0 2px 8px rgba(0,0,0,.06);
-      position: sticky;
-      top: 6px;
-      z-index: 20;
-    }
-    .proj-selection-bar.show { display: flex; }
-    .proj-selection-bar-hint { color: var(--text-muted); }
+    /* ── Project-level selection bar (legacy inline — now lives in proj-header) ── */
+    .proj-selection-bar.legacy-inline { display: none !important; }
 
     /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
     .smgmt-selection-bar {
@@ -3685,11 +3713,11 @@
       font-weight: 600;
     }
     .smgmt-sel-bar-actions {
-      margin-left: auto;
       display: flex;
       gap: 8px;
       align-items: center;
       position: relative;
+      flex-shrink: 0;
     }
     .smgmt-selection-bar-deselect {
       padding: 5px 10px;
@@ -3727,6 +3755,21 @@
       cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
     }
     .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .smgmt-sel-close-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--red);
+      border: 1px solid var(--red-bg);
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .smgmt-sel-close-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -4255,7 +4298,6 @@
       border-top: none;
     }
     .bl-filter-est {
-      margin-left: auto;
       font: inherit; font-size: 12px; line-height: 1.5;
       padding: 4px 12px; min-height: 28px;
       border: 1px solid var(--border);
@@ -4264,6 +4306,14 @@
       color: var(--text-muted);
       cursor: pointer;
       display: inline-flex; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+    .bl-filter-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
     }
     .bl-filter-est:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
     .bl-filter-est.hidden { display: none; }
@@ -8330,8 +8380,9 @@
        Per-issue horizontal track rows on a shared sprint time axis.
        Prefix: rp-tl-  (running-pane timeline). All colours use CSS tokens. */
     .rp-timeline-wrap {
-      --rp-tl-gutter-left: 76px;
-      --rp-tl-gutter-right: 96px;
+      --rp-tl-gutter-left: 70px;
+      --rp-tl-gutter-right: 112px;
+      --rp-tl-chart-trim: 0.05;
       display: flex; flex-direction: column; gap: 0; overflow: hidden;
       border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
       margin: 0;
@@ -8377,10 +8428,16 @@
 
     /* Axis row: gridlines — start/finish in header band, minute ticks below */
     .rp-tl-issues { border-bottom: 1px solid var(--border); }
-    .rp-tl-body { position: relative; }
+    .rp-tl-body {
+      position: relative;
+      --rp-tl-chart-end-inset: calc(
+        var(--rp-tl-gutter-right) +
+        (100% - var(--rp-tl-gutter-left) - var(--rp-tl-gutter-right)) * var(--rp-tl-chart-trim)
+      );
+    }
   .rp-tl-now-rail {
       position: absolute; top: 0; bottom: 0;
-      left: var(--rp-tl-gutter-left); right: var(--rp-tl-gutter-right);
+      left: var(--rp-tl-gutter-left); right: var(--rp-tl-chart-end-inset);
       pointer-events: none; z-index: 4;
     }
     .rp-tl-now-marker {
@@ -8401,7 +8458,7 @@
       box-shadow: 0 0 4px color-mix(in srgb, var(--green, #16a34a) 50%, transparent);
     }
     .rp-tl-axis-wrap {
-      position: relative; min-height: 48px; padding: 8px 0 4px;
+      position: relative; min-height: 34px; padding: 6px 0 2px;
       border-bottom: 1px solid var(--border); background: var(--surface);
       overflow: visible; z-index: 2;
     }
@@ -8414,7 +8471,7 @@
     }
     .rp-tl-grid {
       position: absolute;
-      top: 26px; right: var(--rp-tl-gutter-right); bottom: 2px;
+      top: 26px; right: var(--rp-tl-chart-end-inset); bottom: 2px;
       left: var(--rp-tl-gutter-left); pointer-events: none;
     }
     .rp-tl-gridline {
@@ -8428,34 +8485,34 @@
       transform: translateY(-100%); margin-top: -1px;
     }
     .rp-tl-finish-label {
-      position: absolute; right: 8px; top: 8px; z-index: 3;
+      position: absolute; right: calc(var(--rp-tl-gutter-right) - 4px); top: 8px; z-index: 3;
       font-size: 11px; font-family: var(--mono); color: var(--text-sub);
       white-space: nowrap; font-weight: 700; text-align: right;
     }
 
-    /* Per-issue row */
+    /* Per-issue row — compact (~30% shorter than original 44px track) */
     .rp-tl-row {
-      display: flex; align-items: stretch; min-height: 44px;
+      display: flex; align-items: stretch; min-height: 30px;
       border-bottom: 1px solid var(--border); background: var(--surface);
     }
     .rp-tl-row:last-child { border-bottom: none; }
     .rp-tl-row-left {
       flex: 0 0 var(--rp-tl-gutter-left); display: flex; align-items: center; justify-content: flex-end;
-      gap: 6px; padding-right: 10px; background: transparent;
+      gap: 4px; padding-right: 8px; background: transparent;
     }
-    .rp-tl-row-icon { font-size: 13px; flex-shrink: 0; width: 16px; text-align: center; }
+    .rp-tl-row-icon { font-size: 12px; flex-shrink: 0; width: 14px; text-align: center; }
     .rp-tl-row-icon--done { color: var(--green); }
     .rp-tl-row-icon--running { color: var(--blue); }
     .rp-tl-row-icon--queued { color: var(--text-sub); }
-    .rp-tl-row-num { font-family: var(--mono); font-size: 11px; font-weight: 700;
+    .rp-tl-row-num { font-family: var(--mono); font-size: 10px; font-weight: 700;
       color: var(--text); }
     .rp-tl-track {
-      flex: 1 1 auto; position: relative; min-height: 44px;
-      display: flex; align-items: center; padding: 8px 0; overflow: visible;
+      flex: 1 1 auto; position: relative; min-height: 30px;
+      display: flex; align-items: center; padding: 4px 0 4px 0; overflow: hidden;
     }
     .rp-tl-track-inner {
-      position: relative; width: 100%; height: 20px; border-radius: 10px;
-      background: var(--surface-2);
+      position: relative; width: calc(100% * (1 - var(--rp-tl-chart-trim, 0.1))); height: 14px;
+      border-radius: 7px; background: var(--surface-2); overflow: hidden;
     }
 
     /* Estimate envelope — muted pill behind segments */
@@ -8468,8 +8525,8 @@
 
     /* Segment base — pill bars inside the lane */
     .rp-tl-seg {
-      position: absolute; top: 0; bottom: 0; border-radius: 6px;
-      min-width: 6px; pointer-events: none;
+      position: absolute; top: 0; bottom: 0; border-radius: 4px;
+      min-width: 4px; pointer-events: none;
     }
     .rp-tl-seg--coder    { background: var(--purple); }
     .rp-tl-seg--tester   { background: var(--amber); }
@@ -8502,10 +8559,11 @@
     /* Right-side label — right-aligned like mock */
     .rp-tl-row-label {
       flex: 0 0 var(--rp-tl-gutter-right); display: flex; flex-direction: column;
-      align-items: flex-end; justify-content: center; padding: 0 12px 0 6px;
-      min-width: 0; text-align: right;
+      align-items: flex-end; justify-content: center; padding: 0 8px 0 2px;
+      min-width: 0; text-align: right; position: relative; z-index: 3;
+      background: var(--surface);
     }
-    .rp-tl-metric { font-family: var(--mono); font-size: 12px; font-weight: 700;
+    .rp-tl-metric { font-family: var(--mono); font-size: 11px; font-weight: 700;
       color: var(--text); white-space: nowrap; line-height: 1.25; }
     .rp-tl-sub { font-family: var(--mono); font-size: 10px; color: var(--text-sub);
       white-space: nowrap; line-height: 1.3; margin-top: 2px; }
@@ -8513,8 +8571,9 @@
 
     @media (max-width: 720px) {
       .rp-timeline-wrap {
-        --rp-tl-gutter-left: 68px;
-        --rp-tl-gutter-right: 84px;
+        --rp-tl-gutter-left: 62px;
+        --rp-tl-gutter-right: 96px;
+        --rp-tl-chart-trim: 0.06;
       }
       .rp-tl-card-meta { font-size: 11px; }
     }
@@ -8683,8 +8742,16 @@
     .ai-row:last-child { border-bottom: none; }
     .ai-row-body { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px;
       background: none; border: none; cursor: pointer; text-align: left; color: inherit;
-      font-size: 13px; }
+      font-size: 13px; transition: background-color .12s ease; }
     .ai-row-body:hover { background: var(--surface-hover); }
+    .ai-row--done .ai-row-body { background: var(--green-bg); }
+    .ai-row--done .ai-row-body:hover {
+      background: color-mix(in srgb, var(--green) 16%, var(--surface));
+    }
+    .ai-row--queued .ai-row-body { background: var(--surface-2); }
+    .ai-row--queued .ai-row-body:hover {
+      background: color-mix(in srgb, var(--text-sub) 8%, var(--surface-2));
+    }
     .ai-row--locked .ai-row-body { cursor: default; }
     .ai-row-icon { font-size: 13px; flex-shrink: 0; width: 18px; text-align: center;
       display: inline-flex; align-items: center; justify-content: center; }
@@ -9247,6 +9314,30 @@
         <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close issues</button>
         <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
       </div>
+      <!-- Sprint board multi-select bar (Sprint tab / Board subview only) -->
+      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+        <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+          <i class="ti ti-x"></i> Deselect all
+        </button>
+        <i class="ti ti-checkbox" aria-hidden="true"></i>
+        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+        <span class="proj-selection-bar-hint">— batch move, close, or reestimate</span>
+        <div class="smgmt-sel-bar-spacer" aria-hidden="true"></div>
+        <div class="smgmt-sel-bar-actions">
+          <button type="button" class="smgmt-sel-close-btn" id="smgmt-sel-close-btn"
+                  onclick="_smgmtCloseSelected()">
+            <i class="ti ti-circle-x"></i> Close ticket
+          </button>
+          <button type="button" class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
+          <button type="button" class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                  onclick="_smgmtMoveToModalOpen()">
+            <i class="ti ti-send"></i> Move to Sprint
+          </button>
+        </div>
+      </div>
     </header>
 
     </div><!-- /proj-sticky-chrome -->
@@ -9328,29 +9419,6 @@
         <!-- Sprint list -->
         <div class="smgmt-content">
 
-          <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-            <i class="ti ti-checkbox"></i>
-            <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-            <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
-            <div class="smgmt-sel-bar-actions">
-              <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                      onclick="_smgmtDeleteSelected()">
-                <i class="ti ti-trash"></i> Delete
-              </button>
-              <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                      onclick="_smgmtReEstimateSelected()">
-                <i class="ti ti-sparkles"></i> Reestimate
-              </button>
-              <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-                <i class="ti ti-x"></i> Deselect all
-              </button>
-              <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                      onclick="_smgmtMoveToModalOpen()">
-                <i class="ti ti-send"></i> Move to Sprint
-              </button>
-            </div>
-          </div>
-
           <!-- Focus Guide (issue #1044) — synthesized from board state by _smgmtFocusGuideHtml -->
           <div class="smgmt-focus-guide" id="smgmt-focus-guide" aria-live="polite"></div>
 
@@ -9397,18 +9465,20 @@
                         onclick="_blToggleFilter('size','XL',this)">XL</button>
                 <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
                         onclick="_blToggleFilter('unestimated','1',this)">unestimated</button>
-                <button type="button" class="bl-filter-est smgmt-bulk-est-btn hidden"
-                        id="smgmt-backlog-bulk-est-btn"
-                        onclick="_smgmtBulkEstimate('__backlog__', this)"
-                        title="Estimate all unsized backlog tickets">
-                  <i class="ti ti-wand"></i> Estimate unsized
-                </button>
-                <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
-                <button type="button" class="bl-filter-est" id="smgmt-backlog-cleanup-btn"
-                        onclick="_blCleanupBacklog(this)"
-                        title="Close test tickets and stale follow-ups in the backlog">
-                  <i class="ti ti-trash"></i> Clean up backlog
-                </button>
+                <div class="bl-filter-actions">
+                  <button type="button" class="bl-filter-est smgmt-bulk-est-btn hidden"
+                          id="smgmt-backlog-bulk-est-btn"
+                          onclick="_smgmtBulkEstimate('__backlog__', this)"
+                          title="Estimate all unsized backlog tickets">
+                    <i class="ti ti-wand"></i> Estimate unsized
+                  </button>
+                  <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
+                  <button type="button" class="bl-filter-est" id="smgmt-backlog-cleanup-btn"
+                          onclick="_blCleanupBacklog(this)"
+                          title="Close test tickets and stale follow-ups in the backlog">
+                    <i class="ti ti-trash"></i> Clean up backlog
+                  </button>
+                </div>
                 <select class="bl-ms-filter" id="bl-ms-filter" aria-label="Filter by milestone"
                         onchange="_blSetMilestoneFilter(this.value)">
                   <option value="">All milestones</option>
@@ -9467,16 +9537,16 @@
           </div>
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
-            <!-- Running-pane Gantt timeline (issue #1147) — below run-head gauge -->
+            <!-- Orchestrator log panel (issue #1106) -->
+            <div class="orch-panel" id="smgmt-orch-panel" role="region" aria-label="Orchestrator log"></div>
+            <!-- All issues panel (issue #1106) -->
+            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
+            <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
             <!-- Running metrics strip (issue #803) — folded into run-head gauge; kept for tests -->
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
-            <!-- Orchestrator log panel (issue #1106) -->
-            <div class="orch-panel" id="smgmt-orch-panel" role="region" aria-label="Orchestrator log"></div>
             <!-- Two-queue coder/tester lane view (issue #927) -->
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
-            <!-- All issues panel (issue #1106) -->
-            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
           </div>
           <!-- Node inspector panel (issue #1193) — bottom sheet on mobile ≤640px,
                inline below the run-shell on desktop. Toggled by _smgmtInspectorFeed. -->
@@ -11902,6 +11972,7 @@ async function closeTicketModalConfirm() {
 // ── Bulk Close flow ───────────────────────────────────────────────────────────
 const _bulkSelected = new Map(); // num → title
 let _bulkCloseTargets = null;    // when set, modal/confirm use this instead of selection
+let _bulkCloseFromSmgmt = false; // true when closing from sprint-board multi-select bar
 
 function _onTicketCheckbox(el) {
   const num   = parseInt(el.dataset.num, 10);
@@ -11989,13 +12060,24 @@ function _bulkCloseCancel() {
   document.getElementById('bcm-backdrop')?.classList.add('hidden');
   document.getElementById('bcm-modal')?.classList.add('hidden');
   _bulkCloseTargets = null;
+  _bulkCloseFromSmgmt = false;
   const titleEl = document.querySelector('#bcm-modal .modal-title');
   if (titleEl) titleEl.textContent = 'Close tickets';
 }
 
 async function _bulkCloseConfirm() {
   const targets = _bulkCloseTargets || _bulkSelected;
-  if (targets.size === 0 || !_ticketsRepo) return;
+  const fromSmgmt = _bulkCloseFromSmgmt;
+  const repo = fromSmgmt ? (_smgmtRepo() || '') : _ticketsRepo;
+  if (targets.size === 0) return;
+  if (!repo) {
+    if (fromSmgmt && typeof _smgmtShowToast === 'function') {
+      _smgmtShowToast('Cannot close — project repo not loaded');
+    } else if (typeof _ticketsShowError === 'function') {
+      _ticketsShowError('Cannot close — project repo not loaded');
+    }
+    return;
+  }
   const fromUatBulk = !!_bulkCloseTargets;
   const confirmBtn = document.getElementById('bcm-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Closing…'; }
@@ -12006,7 +12088,7 @@ async function _bulkCloseConfirm() {
   for (const [num, title] of tickets) {
     try {
       const res = await fetch(
-        `/api/issues/${num}/close?repo=${encodeURIComponent(_ticketsRepo)}`,
+        `/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`,
         { method: 'POST' }
       );
       if (!res.ok) {
@@ -12020,6 +12102,24 @@ async function _bulkCloseConfirm() {
   }
 
   _bulkCloseCancel();
+
+  const successNums = results.filter(r => r.ok).map(r => r.num);
+
+  if (fromSmgmt) {
+    const okCount = successNums.length;
+    const failCount = results.filter(r => !r.ok).length;
+    successNums.forEach(num => {
+      if (typeof _smgmtSelectedIssues !== 'undefined') _smgmtSelectedIssues.delete(num);
+    });
+    if (typeof _smgmtUpdateSelectionUI === 'function') _smgmtUpdateSelectionUI();
+    await loadSprintMgmt();
+    if (failCount === 0) {
+      _smgmtShowToast(`${okCount} ticket${okCount !== 1 ? 's' : ''} closed`);
+    } else {
+      _smgmtShowToast(`${okCount} closed, ${failCount} failed`);
+    }
+    return;
+  }
 
   // Render result summary (success/error per ticket) in action bar results list
   const resultListEl = document.getElementById('bab-result-list');
@@ -12037,7 +12137,6 @@ async function _bulkCloseConfirm() {
   if (closeBtnEl) closeBtnEl.classList.add('hidden');
 
   // Remove successful tickets from selection and DOM
-  const successNums = results.filter(r => r.ok).map(r => r.num);
   successNums.forEach(num => {
     _bulkSelected.delete(num);
     document.getElementById(`ticket-row-${num}`)?.remove();
@@ -12303,6 +12402,10 @@ async function init() {
 
   _slug = slug;
   _activeTab = tab;
+  // Feature flags (sign-off, advisor, plan-next) — hide disabled surfaces before first paint.
+  if (typeof loadCommanderFeatures === 'function') {
+    await loadCommanderFeatures();
+  }
   // Stash deck deep-link intent; switchTab/logsInit consume it once on this load.
   _deepLinkView = view;
   _deepLinkFilter = filter;
@@ -15272,29 +15375,54 @@ function _smgmtRpBuildIssueSchedule(issues, nowMs, parallel, estFn, remFn) {
   const queuedSlots = {};
   let runningRemMs = 0;
   const queuedEstMs = [];
+  let lastTicketEndMs = nowMs;
+
+  function maxSegEndMs(iss) {
+    let maxEnd = null;
+    for (const seg of (iss.segments || [])) {
+      let en = seg.end ? Date.parse(seg.end) : null;
+      if (!en && seg.start && seg.duration) {
+        en = Date.parse(seg.start) + seg.duration * 1000;
+      }
+      if (en && !isNaN(en)) {
+        maxEnd = maxEnd == null ? en : Math.max(maxEnd, en);
+      }
+    }
+    return maxEnd;
+  }
 
   for (const iss of issues) {
     const num = iss.number || iss.issue_number;
     const estMs = estFn(iss) * 60000;
-    if (_smgmtRpIssueDone(iss)) continue;
+    if (_smgmtRpIssueDone(iss)) {
+      const doneEnd = maxSegEndMs(iss);
+      if (doneEnd) lastTicketEndMs = Math.max(lastTicketEndMs, doneEnd);
+      continue;
+    }
     if (_smgmtRpIssueActivelyRunning(iss)) {
       const remMs = remFn(iss, estMs);
       runningRemMs = Math.max(runningRemMs, remMs);
-      cursorMs = Math.max(cursorMs, nowMs + remMs);
+      const endMs = nowMs + remMs;
+      lastTicketEndMs = Math.max(lastTicketEndMs, endMs);
+      cursorMs = Math.max(cursorMs, endMs);
     } else {
       queuedSlots[num] = { startMs: cursorMs, estMs: estMs };
       queuedEstMs.push(estMs);
+      lastTicketEndMs = Math.max(lastTicketEndMs, cursorMs + estMs);
       cursorMs += estMs;
     }
   }
 
-  let workEndMs = cursorMs;
+  let workEndMs = lastTicketEndMs;
   if (parallel && queuedEstMs.length) {
     const coderTotal = queuedEstMs.reduce(function(a, e) {
       return a + e * _SMGMT_RP_CODER_FRAC;
     }, 0);
-    const lastTester = queuedEstMs[queuedEstMs.length - 1] * (1 - _SMGMT_RP_CODER_FRAC);
-    workEndMs = nowMs + runningRemMs + coderTotal + lastTester;
+    const maxTesterTail = Math.max.apply(null, queuedEstMs.map(function(e) {
+      return e * (1 - _SMGMT_RP_CODER_FRAC);
+    }));
+    const parallelEnd = nowMs + runningRemMs + coderTotal + maxTesterTail;
+    workEndMs = Math.max(workEndMs, parallelEnd);
   }
 
   return { workEndMs: workEndMs, queuedSlots: queuedSlots };
@@ -15346,6 +15474,7 @@ function _smgmtRpTimelineHtml(data, live) {
         if (!liveIss) return ti;
         return Object.assign({}, ti, {
           agent_status: liveIss.agent_status != null ? liveIss.agent_status : ti.agent_status,
+          agent: liveIss.agent != null ? liveIss.agent : ti.agent,
         });
       }),
     });
@@ -15363,6 +15492,19 @@ function _smgmtRpTimelineHtml(data, live) {
     if (!/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
     const n = Date.parse(s);
     return isNaN(n) ? null : n;
+  }
+
+  function clampBarPct(L, W) {
+    L = Math.max(0, Math.min(100, L));
+    W = Math.max(0, W);
+    W = Math.min(W, 100 - L);
+    if (W > 0 && W < 1) W = Math.min(100 - L, 1);
+    return { l: L, w: W };
+  }
+
+  function barStyle(L, W) {
+    const c = clampBarPct(L, W);
+    return 'left:' + c.l.toFixed(2) + '%;width:' + c.w.toFixed(2) + '%';
   }
 
   const nowMs = parseIsoMs(data.server_now) || Date.now();
@@ -15417,9 +15559,9 @@ function _smgmtRpTimelineHtml(data, live) {
     const tW = Math.max(pctFn(startMs + elapsedMs) - tL, 2);
     const live = opts && opts.live;
     let html = '<div class="rp-tl-seg rp-tl-seg--coder' + (live ? ' rp-tl-seg--running' : '')
-      + '" style="left:' + cL.toFixed(2) + '%;width:' + cW.toFixed(2) + '%"></div>';
+      + '" style="' + barStyle(cL, cW) + '"></div>';
     html += '<div class="rp-tl-seg rp-tl-seg--tester' + (live ? ' rp-tl-seg--running' : '')
-      + '" style="left:' + tL.toFixed(2) + '%;width:' + tW.toFixed(2) + '%"></div>';
+      + '" style="' + barStyle(tL, tW) + '"></div>';
     return html;
   }
 
@@ -15430,10 +15572,46 @@ function _smgmtRpTimelineHtml(data, live) {
     const cW = Math.max(pctFn(startMs + coderMs) - cL, 2);
     const tL = pctFn(startMs + coderMs);
     const tW = Math.max(pctFn(startMs + estMs) - tL, 2);
-    return '<div class="rp-tl-seg rp-tl-seg--coder rp-tl-seg--ghost" style="left:'
-      + cL.toFixed(2) + '%;width:' + cW.toFixed(2) + '%"></div>'
-      + '<div class="rp-tl-seg rp-tl-seg--tester rp-tl-seg--ghost" style="left:'
-      + tL.toFixed(2) + '%;width:' + tW.toFixed(2) + '%"></div>';
+    return '<div class="rp-tl-seg rp-tl-seg--coder rp-tl-seg--ghost" style="'
+      + barStyle(cL, cW) + '"></div>'
+      + '<div class="rp-tl-seg rp-tl-seg--tester rp-tl-seg--ghost" style="'
+      + barStyle(tL, tW) + '"></div>';
+  }
+
+  function ghostTesterOnlyHtml(startMs, testerMs, pctFn) {
+    if (!testerMs || testerMs <= 0) return '';
+    const tL = pctFn(startMs);
+    const tW = Math.max(pctFn(startMs + testerMs) - tL, 2);
+    return '<div class="rp-tl-seg rp-tl-seg--tester rp-tl-seg--ghost" style="'
+      + barStyle(tL, tW) + '"></div>';
+  }
+
+  function rpTlActiveAgent(segs, iss) {
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const seg = segs[i];
+      if (seg.start && !seg.end) {
+        return (seg.agent || 'coder').toLowerCase();
+      }
+    }
+    if (iss) {
+      const a = iss.agent ? String(iss.agent).toLowerCase() : '';
+      if ((a === 'coder' || a === 'tester') && iss.agent_status === 'running') {
+        return a;
+      }
+    }
+    return null;
+  }
+
+  /** Projected remainder on an actively running issue — skip redundant coder ghost. */
+  function runningRemainderGhostHtml(activeAgent, startMs, remMs, pctFn) {
+    if (!remMs || remMs <= 0) return '';
+    if (activeAgent === 'tester') return '';
+    if (activeAgent === 'coder') {
+      const coderRemMs = remMs * CODER_FRAC;
+      const testerRemMs = remMs * (1 - CODER_FRAC);
+      return ghostTesterOnlyHtml(startMs + coderRemMs, testerRemMs, pctFn);
+    }
+    return '';
   }
 
   const wu = resolveWrapUp();
@@ -15540,10 +15718,15 @@ function _smgmtRpTimelineHtml(data, live) {
     + '</div>';
 
   let gridLines = '';
-  for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
+  const AXIS_MARKER_COUNT = 8;
+  const totalMin = totalMs / 60000;
+  // Eight markers total: start (started HH:MM, no "0"), 2…7 at 1/8…6/8, est. finish at end.
+  for (let k = 1; k <= AXIS_MARKER_COUNT - 2; k++) {
+    const t = (k / AXIS_MARKER_COUNT) * totalMs;
     const p = pct(axisStartMs + t);
-    const label = t === 0 ? '0' : (Math.round(t / 60000) + 'm');
-    const tooCloseFinish = Math.abs(p - finishPct) < 4 && t > 0;
+    const labelMin = Math.ceil((k * totalMin) / AXIS_MARKER_COUNT);
+    const label = labelMin + 'm';
+    const tooCloseFinish = Math.abs(p - finishPct) < 4;
     const tooCloseNow = Math.abs(p - nowPct) < 3.5;
     const showLabel = !tooCloseFinish && !tooCloseNow;
     const labelHtml = showLabel
@@ -15607,21 +15790,18 @@ function _smgmtRpTimelineHtml(data, live) {
       const envStart = issueStartMs != null ? issueStartMs : axisStartMs;
       const envL = pct(envStart);
       const envW = Math.max(pct(envStart + estMs) - envL, 2);
-      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
-        + '%;width:' + envW.toFixed(2) + '%"></div>';
+      envelopeHtml = '<div class="rp-tl-envelope" style="' + barStyle(envL, envW) + '"></div>';
     } else if (isQueued) {
       const slot = queuedSlots[issNum] || queuedSlots[iss.number];
       const slotMs = slot ? slot.startMs : workEndMs;
       const envL = pct(slotMs);
       const envW = Math.max(pct(slotMs + estMs) - envL, 2);
-      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
-        + '%;width:' + envW.toFixed(2) + '%"></div>';
+      envelopeHtml = '<div class="rp-tl-envelope" style="' + barStyle(envL, envW) + '"></div>';
     } else if (isRunning) {
       const envStart = issueStartMs != null ? issueStartMs : (nowMs - elapsedMs);
       const envL = pct(envStart);
       const envW = Math.max(pct(nowMs + remMs) - envL, 2);
-      envelopeHtml = '<div class="rp-tl-envelope" style="left:' + envL.toFixed(2)
-        + '%;width:' + envW.toFixed(2) + '%"></div>';
+      envelopeHtml = '<div class="rp-tl-envelope" style="' + barStyle(envL, envW) + '"></div>';
     }
 
     let segsHtml = '';
@@ -15652,8 +15832,8 @@ function _smgmtRpTimelineHtml(data, live) {
       if (isRetry)  cls += ' rp-tl-seg--retry';
       if (isLiveSeg) cls += ' rp-tl-seg--running';
 
-      const wStr = Math.max(W, 2).toFixed(2);
-      segsHtml += '<div class="' + cls + '" style="left:' + L.toFixed(2) + '%;width:' + wStr + '%"></div>';
+      const wStr = Math.max(W, 2);
+      segsHtml += '<div class="' + cls + '" style="' + barStyle(L, wStr) + '"></div>';
     }
 
     if (isRunning && !segsHtml && elapsedMs > 0) {
@@ -15662,7 +15842,7 @@ function _smgmtRpTimelineHtml(data, live) {
     }
 
     if (isRunning && remMs > 0) {
-      segsHtml += ghostSplitHtml(nowMs, remMs, pct);
+      segsHtml += runningRemainderGhostHtml(rpTlActiveAgent(segs, iss), nowMs, remMs, pct);
     }
 
     if (isQueued) {
@@ -15712,8 +15892,8 @@ function _smgmtRpTimelineHtml(data, live) {
     const docW = Math.max(pct(wrapStartMs + docMs) - docL, 2);
     let wrapSegsHtml = '';
     if (docW > 0) {
-      wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost" style="left:'
-        + docL.toFixed(2) + '%;width:' + docW.toFixed(2) + '%"></div>';
+      wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--documenter rp-tl-seg--ghost" style="'
+        + barStyle(docL, docW) + '"></div>';
     }
     let revEndMs = wrapStartMs + docMs;
     if (wu.reviewer) {
@@ -15722,8 +15902,8 @@ function _smgmtRpTimelineHtml(data, live) {
       const revW = Math.max(pct(revEndMs + revMs) - revL, 2);
       revEndMs += revMs;
       if (revW > 0) {
-        wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost" style="left:'
-          + revL.toFixed(2) + '%;width:' + revW.toFixed(2) + '%"></div>';
+        wrapSegsHtml += '<div class="rp-tl-seg rp-tl-seg--reviewer rp-tl-seg--ghost" style="'
+          + barStyle(revL, revW) + '"></div>';
       }
     }
     const wrapEstMs = wrapUpMs;
@@ -16264,6 +16444,7 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
 
   let rowClass = 'ai-row';
   if (isDone) rowClass += ' ai-row--done';
+  else if (isQueued && !isRetrying) rowClass += ' ai-row--queued';
   if (isLevelLocked) rowClass += ' ai-row--locked';
   if (isExpanded) rowClass += ' ai-row--expanded';
 
@@ -16472,8 +16653,12 @@ function _smgmtAiPatchRow(iss, live, isLevelLocked) {
   const state = _smgmtRailNodeState(iss);
   const isDone = iss.status === 'done' || iss.status === 'skipped';
   const isExpanded = _smgmtAiExpandedNums.has(num);
+  const fr = _smgmtRailFixRound(iss);
+  const isRetrying = !!fr && !isDone && state !== 'coder-active' && state !== 'tester-active';
+  const isQueued = state === 'queued' && !isDone && !isRetrying;
   row.dataset.state = state;
   row.classList.toggle('ai-row--done', isDone);
+  row.classList.toggle('ai-row--queued', isQueued);
   row.classList.toggle('ai-row--locked', !!isLevelLocked);
   row.classList.toggle('ai-row--expanded', isExpanded);
   _smgmtAiPatchRowIcon(row.querySelector('.ai-row-icon'), iss);
@@ -19392,6 +19577,29 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
 
 let _smgmtCloseIssueNum = null;
 
+/** Batch close from the sprint-board selection bar. */
+function _smgmtCloseSelected() {
+  if (!_smgmtSelectedIssues || _smgmtSelectedIssues.size === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) {
+    _smgmtShowToast('Cannot close — project repo not loaded');
+    return;
+  }
+  const issues = _smgmtData?.issues || [];
+  _bulkCloseTargets = new Map();
+  for (const num of _smgmtSelectedIssues) {
+    const iss = issues.find(i => i.number === num);
+    _bulkCloseTargets.set(num, iss?.title || `#${num}`);
+  }
+  _bulkCloseFromSmgmt = true;
+  const n = _bulkCloseTargets.size;
+  openBulkCloseModal({
+    title: n === 1 ? 'Close ticket' : 'Close tickets',
+    intro: `${n} selected ticket${n !== 1 ? 's' : ''} will be closed on GitHub. `
+      + 'This cannot be undone from the dashboard.',
+  });
+}
+
 function _smgmtCloseIssueOpen(issueNum) {
   _smgmtRowMenuClose();
   _smgmtCloseIssueNum = issueNum;
@@ -19429,6 +19637,10 @@ async function _smgmtCloseIssueConfirm() {
     const res = await fetch(`/api/issues/${issueNum}/close?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
     _smgmtCloseIssueCancel();
+    if (_smgmtSelectedIssues?.has(issueNum)) {
+      _smgmtSelectedIssues.delete(issueNum);
+      if (typeof _smgmtUpdateSelectionUI === 'function') _smgmtUpdateSelectionUI();
+    }
     await loadSprintMgmt();
     _smgmtShowToast(`#${issueNum} closed`);
   } catch (e) {
@@ -22975,6 +23187,12 @@ function _gssModelOpts(current) {
   ).join('');
 }
 
+function _gssFeatureDisableOpts(key, data) {
+  const disabled = data[key] !== false;
+  return `<option value="true"${disabled ? ' selected' : ''}>Disabled</option>` +
+    `<option value="false"${!disabled ? ' selected' : ''}>Enabled</option>`;
+}
+
 function _gssRender(data) {
   _gssData = data;
 
@@ -23069,6 +23287,47 @@ function _gssRender(data) {
           <div class="gss-control">
             <select class="gss-select gss-inp" data-gss-key="log_level">
               ${['DEBUG','INFO','WARNING','ERROR'].map(l => `<option${(data.log_level||'INFO')===l?' selected':''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gss-card">
+      <div class="gss-card-head">
+        <i class="ti ti-toggle-left" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">Feature flags</div><div class="gss-card-sub">Optional product surfaces — takes effect after save (no server restart). Env vars in <code>.env</code> override these when set.</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Sprint sign-off<span class="hint">Approve before Run on planned sprints</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_signoff" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_signoff', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Daily advisor<span class="hint">Roadmap suggestions agent</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_advisor" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_advisor', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Plan next sprint<span class="hint">Milestone-based sprint planner</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_planning" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_planning', data)}
+            </select>
+          </div>
+        </div>
+        <div class="gss-row">
+          <div class="gss-label">Require sprint goal<span class="hint">Goal field must be filled before Run</span></div>
+          <div class="gss-control">
+            <select class="gss-select gss-inp" data-gss-key="disable_sprint_goal_required" data-gss-bool="1">
+              ${_gssFeatureDisableOpts('disable_sprint_goal_required', data)}
             </select>
           </div>
         </div>
@@ -23467,6 +23726,10 @@ async function _gssSave() {
   inputs.forEach(el => {
     const key = el.dataset.gssKey;
     const raw = el.value;
+    if (el.dataset.gssBool === '1') {
+      payload[key] = raw === 'true';
+      return;
+    }
     if (el.type === 'number') {
       const n = parseInt(raw, 10);
       if (!isNaN(n)) payload[key] = n;
@@ -23494,6 +23757,9 @@ async function _gssSave() {
     });
     localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
     _gssData = updated;
+    if (typeof loadCommanderFeatures === 'function') {
+      await loadCommanderFeatures();
+    }
     if (feedback) {
       feedback.textContent = 'Saved';
       feedback.className = 'gss-feedback visible';

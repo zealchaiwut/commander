@@ -1735,7 +1735,7 @@
     .ct-modal { width: min(400px, calc(100vw - 32px)); }
     /* ── Create Label modal ── */
     .cl-modal { width: min(420px, calc(100vw - 32px)); }
-    /* ── Bulk close action bar (sticky under tab nav, Issues tab only) ── */
+    /* ── Bulk close action bar (Issues tab, under project tab nav) ── */
     .bulk-action-bar {
       display: none;
       align-items: center;
@@ -1767,6 +1767,27 @@
       background: none; color: var(--text-muted); cursor: pointer; transition: background .12s;
     }
     .bab-dismiss-btn:hover { background: var(--surface-2); }
+
+    /* ── Sprint board multi-select bar (Sprint tab / Board subview, in proj-header) ── */
+    .proj-selection-bar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 28px;
+      margin: 0;
+      background: var(--blue-bg);
+      border: none;
+      border-top: 1px solid var(--blue);
+      font-size: 13px;
+      color: var(--blue);
+      white-space: nowrap;
+      flex-wrap: wrap;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .proj-selection-bar:not(.hidden) { display: flex; }
+    .proj-selection-bar-hint { color: var(--text-muted); }
+    .smgmt-sel-bar-spacer { flex: 1; min-width: 8px; }
     /* ── Bulk close confirm modal ── */
     .bcm-modal { width: min(480px, calc(100vw - 32px)); }
     .bcm-ticket-list {
@@ -3287,6 +3308,10 @@
     /* Expanded body */
     .slp-ancestor-body { padding: 0 var(--space-4) var(--space-2); border-top: 1px solid var(--border); }
     .slp-no-tickets { font-size: 12px; color: var(--text-sub); padding: 10px 0; }
+    .slp-ancestor-stats {
+      font-size: 12px; color: var(--text-sub); padding: 8px 4px 4px;
+      font-family: var(--mono); letter-spacing: .01em;
+    }
     /* Per-ticket rows */
     .slp-ancestor-ticket-row {
       display: flex; align-items: center; gap: 8px;
@@ -3295,6 +3320,9 @@
     }
     .slp-ancestor-ticket-row:last-child { border-bottom: none; }
     .slp-ticket-merged { color: var(--green); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-uat { color: var(--blue); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-failed { color: var(--red); font-size: 14px; flex-shrink: 0; }
+    .slp-ticket-incomplete { color: var(--text-sub); font-size: 14px; flex-shrink: 0; }
     .slp-ticket-carried { color: var(--amber); font-size: 14px; flex-shrink: 0; }
     .slp-ticket-title {
       flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -3305,10 +3333,29 @@
       color: var(--green); background: var(--green-bg);
       padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
     }
+    .slp-fate-uat {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--blue); background: var(--blue-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-failed {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--red); background: var(--red-bg);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-fate-incomplete {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--text-sub); background: var(--surface-2);
+      padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
     .slp-fate-carried {
       font-size: 11px; font-weight: 600; font-family: var(--mono);
       color: var(--amber); background: var(--amber-bg);
       padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+    }
+    .slp-ticket-elapsed {
+      font-size: 11px; color: var(--text-sub); font-family: var(--mono);
+      flex-shrink: 0; margin-left: auto;
     }
     /* Action buttons for needs_merge ancestors */
     .slp-ancestor-actions {
@@ -3636,27 +3683,8 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (sticky at top of sprint board pane) ── */
-    .proj-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
-      margin: 0 0 10px;
-      background: var(--blue-bg);
-      border: 1px solid var(--blue);
-      border-radius: 8px;
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      flex-wrap: wrap;
-      box-shadow: 0 2px 8px rgba(0,0,0,.06);
-      position: sticky;
-      top: 6px;
-      z-index: 20;
-    }
-    .proj-selection-bar.show { display: flex; }
-    .proj-selection-bar-hint { color: var(--text-muted); }
+    /* ── Project-level selection bar (legacy inline — now lives in proj-header) ── */
+    .proj-selection-bar.legacy-inline { display: none !important; }
 
     /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
     .smgmt-selection-bar {
@@ -3685,11 +3713,11 @@
       font-weight: 600;
     }
     .smgmt-sel-bar-actions {
-      margin-left: auto;
       display: flex;
       gap: 8px;
       align-items: center;
       position: relative;
+      flex-shrink: 0;
     }
     .smgmt-selection-bar-deselect {
       padding: 5px 10px;
@@ -3727,6 +3755,21 @@
       cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
     }
     .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .smgmt-sel-close-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--surface);
+      color: var(--red);
+      border: 1px solid var(--red-bg);
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .smgmt-sel-close-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
     .smgmt-move-to-btn {
       padding: 5px 10px;
       font-size: 12px;
@@ -4255,7 +4298,6 @@
       border-top: none;
     }
     .bl-filter-est {
-      margin-left: auto;
       font: inherit; font-size: 12px; line-height: 1.5;
       padding: 4px 12px; min-height: 28px;
       border: 1px solid var(--border);
@@ -4264,6 +4306,14 @@
       color: var(--text-muted);
       cursor: pointer;
       display: inline-flex; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+    .bl-filter-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex-shrink: 0;
     }
     .bl-filter-est:hover { background: var(--surface-hover); color: var(--text); border-color: var(--blue); }
     .bl-filter-est.hidden { display: none; }
@@ -9247,6 +9297,30 @@
         <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close issues</button>
         <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
       </div>
+      <!-- Sprint board multi-select bar (Sprint tab / Board subview only) -->
+      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+        <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+          <i class="ti ti-x"></i> Deselect all
+        </button>
+        <i class="ti ti-checkbox" aria-hidden="true"></i>
+        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+        <span class="proj-selection-bar-hint">— batch move, close, or reestimate</span>
+        <div class="smgmt-sel-bar-spacer" aria-hidden="true"></div>
+        <div class="smgmt-sel-bar-actions">
+          <button type="button" class="smgmt-sel-close-btn" id="smgmt-sel-close-btn"
+                  onclick="_smgmtCloseSelected()">
+            <i class="ti ti-circle-x"></i> Close ticket
+          </button>
+          <button type="button" class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                  onclick="_smgmtReEstimateSelected()">
+            <i class="ti ti-sparkles"></i> Reestimate
+          </button>
+          <button type="button" class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                  onclick="_smgmtMoveToModalOpen()">
+            <i class="ti ti-send"></i> Move to Sprint
+          </button>
+        </div>
+      </div>
     </header>
 
     </div><!-- /proj-sticky-chrome -->
@@ -9328,29 +9402,6 @@
         <!-- Sprint list -->
         <div class="smgmt-content">
 
-          <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-            <i class="ti ti-checkbox"></i>
-            <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-            <span class="proj-selection-bar-hint">— batch move to a sprint or backlog</span>
-            <div class="smgmt-sel-bar-actions">
-              <button class="smgmt-selection-bar-delete" id="smgmt-sel-delete-btn"
-                      onclick="_smgmtDeleteSelected()">
-                <i class="ti ti-trash"></i> Delete
-              </button>
-              <button class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                      onclick="_smgmtReEstimateSelected()">
-                <i class="ti ti-sparkles"></i> Reestimate
-              </button>
-              <button class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-                <i class="ti ti-x"></i> Deselect all
-              </button>
-              <button class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                      onclick="_smgmtMoveToModalOpen()">
-                <i class="ti ti-send"></i> Move to Sprint
-              </button>
-            </div>
-          </div>
-
           <!-- Focus Guide (issue #1044) — synthesized from board state by _smgmtFocusGuideHtml -->
           <div class="smgmt-focus-guide" id="smgmt-focus-guide" aria-live="polite"></div>
 
@@ -9397,18 +9448,20 @@
                         onclick="_blToggleFilter('size','XL',this)">XL</button>
                 <button type="button" class="bl-pill" data-filter-type="unestimated" data-filter-val="1"
                         onclick="_blToggleFilter('unestimated','1',this)">unestimated</button>
-                <button type="button" class="bl-filter-est smgmt-bulk-est-btn hidden"
-                        id="smgmt-backlog-bulk-est-btn"
-                        onclick="_smgmtBulkEstimate('__backlog__', this)"
-                        title="Estimate all unsized backlog tickets">
-                  <i class="ti ti-wand"></i> Estimate unsized
-                </button>
-                <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
-                <button type="button" class="bl-filter-est" id="smgmt-backlog-cleanup-btn"
-                        onclick="_blCleanupBacklog(this)"
-                        title="Close test tickets and stale follow-ups in the backlog">
-                  <i class="ti ti-trash"></i> Clean up backlog
-                </button>
+                <div class="bl-filter-actions">
+                  <button type="button" class="bl-filter-est smgmt-bulk-est-btn hidden"
+                          id="smgmt-backlog-bulk-est-btn"
+                          onclick="_smgmtBulkEstimate('__backlog__', this)"
+                          title="Estimate all unsized backlog tickets">
+                    <i class="ti ti-wand"></i> Estimate unsized
+                  </button>
+                  <span class="smgmt-bulk-est-progress" id="smgmt-backlog-bulk-est-btn-progress"></span>
+                  <button type="button" class="bl-filter-est" id="smgmt-backlog-cleanup-btn"
+                          onclick="_blCleanupBacklog(this)"
+                          title="Close test tickets and stale follow-ups in the backlog">
+                    <i class="ti ti-trash"></i> Clean up backlog
+                  </button>
+                </div>
                 <select class="bl-ms-filter" id="bl-ms-filter" aria-label="Filter by milestone"
                         onchange="_blSetMilestoneFilter(this.value)">
                   <option value="">All milestones</option>
@@ -11902,6 +11955,7 @@ async function closeTicketModalConfirm() {
 // ── Bulk Close flow ───────────────────────────────────────────────────────────
 const _bulkSelected = new Map(); // num → title
 let _bulkCloseTargets = null;    // when set, modal/confirm use this instead of selection
+let _bulkCloseFromSmgmt = false; // true when closing from sprint-board multi-select bar
 
 function _onTicketCheckbox(el) {
   const num   = parseInt(el.dataset.num, 10);
@@ -11989,13 +12043,24 @@ function _bulkCloseCancel() {
   document.getElementById('bcm-backdrop')?.classList.add('hidden');
   document.getElementById('bcm-modal')?.classList.add('hidden');
   _bulkCloseTargets = null;
+  _bulkCloseFromSmgmt = false;
   const titleEl = document.querySelector('#bcm-modal .modal-title');
   if (titleEl) titleEl.textContent = 'Close tickets';
 }
 
 async function _bulkCloseConfirm() {
   const targets = _bulkCloseTargets || _bulkSelected;
-  if (targets.size === 0 || !_ticketsRepo) return;
+  const fromSmgmt = _bulkCloseFromSmgmt;
+  const repo = fromSmgmt ? (_smgmtRepo() || '') : _ticketsRepo;
+  if (targets.size === 0) return;
+  if (!repo) {
+    if (fromSmgmt && typeof _smgmtShowToast === 'function') {
+      _smgmtShowToast('Cannot close — project repo not loaded');
+    } else if (typeof _ticketsShowError === 'function') {
+      _ticketsShowError('Cannot close — project repo not loaded');
+    }
+    return;
+  }
   const fromUatBulk = !!_bulkCloseTargets;
   const confirmBtn = document.getElementById('bcm-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Closing…'; }
@@ -12006,7 +12071,7 @@ async function _bulkCloseConfirm() {
   for (const [num, title] of tickets) {
     try {
       const res = await fetch(
-        `/api/issues/${num}/close?repo=${encodeURIComponent(_ticketsRepo)}`,
+        `/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`,
         { method: 'POST' }
       );
       if (!res.ok) {
@@ -12020,6 +12085,24 @@ async function _bulkCloseConfirm() {
   }
 
   _bulkCloseCancel();
+
+  const successNums = results.filter(r => r.ok).map(r => r.num);
+
+  if (fromSmgmt) {
+    const okCount = successNums.length;
+    const failCount = results.filter(r => !r.ok).length;
+    successNums.forEach(num => {
+      if (typeof _smgmtSelectedIssues !== 'undefined') _smgmtSelectedIssues.delete(num);
+    });
+    if (typeof _smgmtUpdateSelectionUI === 'function') _smgmtUpdateSelectionUI();
+    await loadSprintMgmt();
+    if (failCount === 0) {
+      _smgmtShowToast(`${okCount} ticket${okCount !== 1 ? 's' : ''} closed`);
+    } else {
+      _smgmtShowToast(`${okCount} closed, ${failCount} failed`);
+    }
+    return;
+  }
 
   // Render result summary (success/error per ticket) in action bar results list
   const resultListEl = document.getElementById('bab-result-list');
@@ -12037,7 +12120,6 @@ async function _bulkCloseConfirm() {
   if (closeBtnEl) closeBtnEl.classList.add('hidden');
 
   // Remove successful tickets from selection and DOM
-  const successNums = results.filter(r => r.ok).map(r => r.num);
   successNums.forEach(num => {
     _bulkSelected.delete(num);
     document.getElementById(`ticket-row-${num}`)?.remove();
@@ -19392,6 +19474,29 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
 
 let _smgmtCloseIssueNum = null;
 
+/** Batch close from the sprint-board selection bar. */
+function _smgmtCloseSelected() {
+  if (!_smgmtSelectedIssues || _smgmtSelectedIssues.size === 0) return;
+  const repo = _smgmtRepo();
+  if (!repo) {
+    _smgmtShowToast('Cannot close — project repo not loaded');
+    return;
+  }
+  const issues = _smgmtData?.issues || [];
+  _bulkCloseTargets = new Map();
+  for (const num of _smgmtSelectedIssues) {
+    const iss = issues.find(i => i.number === num);
+    _bulkCloseTargets.set(num, iss?.title || `#${num}`);
+  }
+  _bulkCloseFromSmgmt = true;
+  const n = _bulkCloseTargets.size;
+  openBulkCloseModal({
+    title: n === 1 ? 'Close ticket' : 'Close tickets',
+    intro: `${n} selected ticket${n !== 1 ? 's' : ''} will be closed on GitHub. `
+      + 'This cannot be undone from the dashboard.',
+  });
+}
+
 function _smgmtCloseIssueOpen(issueNum) {
   _smgmtRowMenuClose();
   _smgmtCloseIssueNum = issueNum;
@@ -19429,6 +19534,10 @@ async function _smgmtCloseIssueConfirm() {
     const res = await fetch(`/api/issues/${issueNum}/close?repo=${encodeURIComponent(repo)}`, { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
     _smgmtCloseIssueCancel();
+    if (_smgmtSelectedIssues?.has(issueNum)) {
+      _smgmtSelectedIssues.delete(issueNum);
+      if (typeof _smgmtUpdateSelectionUI === 'function') _smgmtUpdateSelectionUI();
+    }
     await loadSprintMgmt();
     _smgmtShowToast(`#${issueNum} closed`);
   } catch (e) {

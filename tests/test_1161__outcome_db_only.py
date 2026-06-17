@@ -242,3 +242,98 @@ class TestSprintHasOwnRunOutcomeDbOnly:
         assert result is True, (
             "_sprint_has_own_run_outcome must return True when run_ingested_at is set"
         )
+
+
+# ── Lineage ancestor preview (partial outcome without DB ingest) ──────────────
+
+class TestOutcomePreviewForAncestors:
+    """preview=1 returns best-effort outcome from disk state without relaxing #1161."""
+
+    def test_preview_200_from_disk_state_when_not_ingested(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        client = TestClient(srv.app)
+        project_root = tmp_path / "proj"
+        sprints_dir = project_root / ".commander" / "sprints"
+        issues = [
+            {
+                "number": 100,
+                "title": "done ticket",
+                "status": "done",
+                "agent_status": "completed",
+                "state": "merged",
+                "time_spent": 120,
+            },
+            {
+                "number": 101,
+                "title": "uat ticket",
+                "status": "uat",
+                "agent_status": "completed",
+                "time_spent": 60,
+            },
+            {
+                "number": 102,
+                "title": "failed ticket",
+                "status": "failed",
+                "agent_status": "failed",
+                "failure_reason": "timeout",
+            },
+        ]
+        _write_disk_state(sprints_dir, issues=issues)
+
+        with patch("server._project_root_path", return_value=project_root), \
+             patch("server._is_sprint_running", return_value=False), \
+             patch("server._get_sprint_issues", return_value=[]), \
+             patch("live_metrics._fetch_sprint_agent_run_rows", return_value=[]):
+            resp = client.get(
+                f"/api/sprints/{_LABEL}/outcome",
+                params={"project": _PROJECT, "preview": True},
+            )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data.get("partial") is True
+        assert data.get("wall_clock_secs") == 300
+        counts = data.get("counts", {})
+        assert counts.get("done") == 1
+        assert counts.get("uat") == 1
+        assert counts.get("failed") == 1
+        by_num = {i["number"]: i for i in data.get("issues", [])}
+        assert by_num[100]["outcome"] == "done"
+        assert by_num[100].get("elapsed_secs") == 120
+        assert by_num[101]["outcome"] == "uat"
+        assert by_num[102]["outcome"] == "failed"
+
+    def test_preview_still_404_without_preview_param(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        client = TestClient(srv.app)
+        project_root = tmp_path / "proj"
+        sprints_dir = project_root / ".commander" / "sprints"
+        _write_disk_state(sprints_dir)
+
+        with patch("server._project_root_path", return_value=project_root), \
+             patch("server._is_sprint_running", return_value=False):
+            resp = client.get(
+                f"/api/sprints/{_LABEL}/outcome",
+                params={"project": _PROJECT},
+            )
+
+        assert resp.status_code == 404
+
+    def test_preview_404_when_no_artifacts(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        client = TestClient(srv.app)
+        project_root = tmp_path / "proj"
+
+        with patch("server._project_root_path", return_value=project_root), \
+             patch("server._is_sprint_running", return_value=False), \
+             patch("server._get_sprint_issues", return_value=[]), \
+             patch("live_metrics._fetch_sprint_agent_run_rows", return_value=[]):
+            resp = client.get(
+                f"/api/sprints/{_LABEL}/outcome",
+                params={"project": _PROJECT, "preview": True},
+            )
+
+        assert resp.status_code == 404

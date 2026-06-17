@@ -4687,6 +4687,41 @@ ${data.errors.join("\n")}`);
       return [Infinity];
     return m[1].split(".").map((n) => parseInt(n, 10));
   }
+  function _smgmtSprintBaseLabel(label) {
+    const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    return m ? `sprint-${m[1]}` : String(label);
+  }
+  function _smgmtSprintSubIndex(label) {
+    const m = String(label).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    return m && m[2] ? parseInt(m[2], 10) : 0;
+  }
+  function _smgmtChildrenForParent(parentLabel, parents, order) {
+    const fromMeta = (order || []).filter((l) => (parents || {})[l] === parentLabel);
+    const fromLabel = _smgmtSprintSubIndex(parentLabel) === 0 ? (order || []).filter(
+      (l) => l !== parentLabel && _smgmtSprintBaseLabel(l) === parentLabel && _smgmtSprintSubIndex(l) > 0
+    ) : [];
+    return [.../* @__PURE__ */ new Set([...fromMeta, ...fromLabel])];
+  }
+  function _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order) {
+    if (rerunInto && rerunInto[parentLabel])
+      return rerunInto[parentLabel];
+    const children = _smgmtChildrenForParent(parentLabel, parents, order);
+    if (!children.length)
+      return null;
+    return [...children].sort((a, b) => {
+      const ka = _smgmtSprintLabelSortKey(a);
+      const kb = _smgmtSprintLabelSortKey(b);
+      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+        const d = (ka[i] ?? -1) - (kb[i] ?? -1);
+        if (d !== 0)
+          return d;
+      }
+      return 0;
+    })[children.length - 1];
+  }
+  function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
+    return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+  }
   function _smgmtRender2(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
@@ -4718,31 +4753,13 @@ ${data.errors.join("\n")}`);
     const orderedLabelsRaw = order.length > 0 ? order.filter((l) => /^sprint-\d+(\.\d+)*$/.test(l)) : [...sprints].sort((a, b) => a - b).map((n) => `sprint-${n}`);
     const _sprintParents = data.sprint_parents || {};
     const _rerunInto = data.sprint_rerun_into || {};
-    const _smgmtWorkTickets = (tickets) => (tickets || []).filter((t) => {
-      const names = (t.labels || []).map((l) => l.name);
-      return !names.some(
-        (n) => ["sprint-summary", "docs", "documentation"].includes(n)
-      );
-    });
-    const _smgmtTicketSettledOnBoard = (t) => {
-      const names = (t.labels || []).map((l) => l.name);
-      return names.some(
-        (n) => ["UAT", "UAT-approved", "released", "SIT"].includes(n)
-      );
-    };
-    const _smgmtHideRerunParent = (label, tickets, rerunInto) => {
-      if (!rerunInto[label])
-        return false;
-      const work = _smgmtWorkTickets(tickets);
-      return work.length === 0 || work.every(_smgmtTicketSettledOnBoard);
-    };
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      const tickets = bySprint[label] || [];
-      if (_smgmtHideRerunParent(label, tickets, _rerunInto)) {
+      if (_smgmtShouldCollapseParent(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
         _smgmtResolvedAncestors.add(label);
         return true;
       }
+      const tickets = bySprint[label] || [];
       const ticketCount = tickets.length;
       if (ticketCount > 0)
         return true;
@@ -4793,14 +4810,23 @@ ${data.errors.join("\n")}`);
       const ps = (_planStates[l] || "").toLowerCase();
       return ["draft", "planned", "planning"].includes(ps);
     });
+    const _usesDraftCard = (label) => {
+      const ps = (_planStates[label] || "").toLowerCase();
+      return label === planningLabel && ["draft", "planning"].includes(ps);
+    };
     const _buildCard = (label) => {
       const tickets = bySprint[label] || [];
       if (_smgmtResolvedAncestors.has(label)) {
-        const childLabel = _rerunInto[label];
+        const childLabel = _smgmtChildSprintLabel(
+          label,
+          _sprintParents,
+          _rerunInto,
+          orderedLabelsRaw
+        );
         const outcome2 = _smgmtOutcomeCache[label] || null;
         return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, outcome2, childLabel) + `</div>`;
       }
-      if (label === planningLabel) {
+      if (_usesDraftCard(label)) {
         return `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtDraftCardHtml(label, tickets) + `</div>`;
       }
       if (_smgmtIsFreshRerunSprint(label))
@@ -4813,16 +4839,29 @@ ${data.errors.join("\n")}`);
         null,
         tickets,
         outcome,
-        label === _smgmtNextUpLabel,
+        false,
         parent,
         _smgmtFinishedLabels.has(label)
       );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     };
     const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
-    const upNextLabels = orderedLabels.filter(
-      (l) => !_smgmtResolvedAncestors.has(l) && l !== planningLabel
-    );
+    const otherLabels = orderedLabels.filter((l) => !_smgmtResolvedAncestors.has(l));
+    const mergeLabels = [];
+    const reworkLabels = [];
+    const runningLabels = [];
+    const draftLabels = [];
+    for (const lbl of otherLabels) {
+      const bucket = _smgmtCardBucket(lbl, _planStates);
+      if (bucket === "ready_to_merge")
+        mergeLabels.push(lbl);
+      else if (bucket === "needs_rework")
+        reworkLabels.push(lbl);
+      else if (bucket === "running")
+        runningLabels.push(lbl);
+      else
+        draftLabels.push(lbl);
+    }
     const sectionLabel = (text, cls) => `<div class="smgmt-section-label ${cls}">${text}</div>`;
     const lineageRangeLabel = (labels) => {
       if (!labels.length)
@@ -4838,20 +4877,32 @@ ${data.errors.join("\n")}`);
       cards += lineageLabels.map(_buildCard).join("");
       cards += `</div>`;
     }
-    if (upNextLabels.length > 0) {
-      const upLabel = upNextLabels.length === 1 ? "Up next \u2014 queued to run 1" : `Up next \u2014 queued to run ${upNextLabels.length}`;
-      cards += sectionLabel(upLabel, "smgmt-section-upnext");
-      cards += `<div class="smgmt-board-section smgmt-board-section--upnext">`;
-      cards += upNextLabels.map(_buildCard).join("");
+    if (mergeLabels.length > 0) {
+      const mergeLabel = mergeLabels.length === 1 ? "Ready to merge \u2014 1" : `Ready to merge \u2014 ${mergeLabels.length}`;
+      cards += sectionLabel(mergeLabel, "smgmt-section-merge");
+      cards += `<div class="smgmt-board-section smgmt-board-section--merge">`;
+      cards += mergeLabels.map(_buildCard).join("");
       cards += `</div>`;
     }
-    if (planningLabel) {
-      cards += sectionLabel(
-        "Planning \u2014 building this next 1",
-        "smgmt-section-planning smgmt-planning-section"
-      );
-      cards += `<div class="smgmt-board-section smgmt-board-section--planning">`;
-      cards += _buildCard(planningLabel);
+    if (reworkLabels.length > 0) {
+      const reworkLabel = reworkLabels.length === 1 ? "Needs rework \u2014 1" : `Needs rework \u2014 ${reworkLabels.length}`;
+      cards += sectionLabel(reworkLabel, "smgmt-section-rework");
+      cards += `<div class="smgmt-board-section smgmt-board-section--rework">`;
+      cards += reworkLabels.map(_buildCard).join("");
+      cards += `</div>`;
+    }
+    if (runningLabels.length > 0) {
+      const runLabel = runningLabels.length === 1 ? "Running \u2014 1" : `Running \u2014 ${runningLabels.length}`;
+      cards += sectionLabel(runLabel, "smgmt-section-running");
+      cards += `<div class="smgmt-board-section smgmt-board-section--running">`;
+      cards += runningLabels.map(_buildCard).join("");
+      cards += `</div>`;
+    }
+    if (draftLabels.length > 0) {
+      const draftLabel = draftLabels.length === 1 ? "Draft \u2014 1" : `Draft \u2014 ${draftLabels.length}`;
+      cards += sectionLabel(draftLabel, "smgmt-section-draft");
+      cards += `<div class="smgmt-board-section smgmt-board-section--draft">`;
+      cards += draftLabels.map(_buildCard).join("");
       cards += `</div>`;
     }
     listEl.innerHTML = cards || '<div class="loading-msg">No sprints found.</div>';
@@ -4990,6 +5041,39 @@ ${data.errors.join("\n")}`);
         (t) => !nums.has(t.number)
       );
     }
+  }
+  function _smgmtCardBucket(label, planStates) {
+    if (_smgmtRunningLabels.has(label))
+      return "running";
+    const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    const outcome = _smgmtOutcomeCache[label] || null;
+    const hasRun = _smgmtHasLedgerRun(label);
+    if (inLinger && !hasRun)
+      return "running";
+    if (hasRun && outcome && typeof _smgmtStateMeta === "function") {
+      const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
+      const st = meta.state;
+      if (st === "ready_to_merge" || st === "completed")
+        return "ready_to_merge";
+      if (st === "needs_rework" || st === "partial_finished")
+        return "needs_rework";
+    }
+    if (hasRun && _smgmtFinishedLabels && _smgmtFinishedLabels.has(label)) {
+      return "ready_to_merge";
+    }
+    if (hasRun && outcome) {
+      const lc = (outcome.lifecycle || "").toLowerCase();
+      if (lc === "ready_to_merge")
+        return "ready_to_merge";
+      if (lc === "needs_rework" || lc === "partial_finished")
+        return "needs_rework";
+    }
+    if (hasRun && !outcome && inLinger)
+      return "running";
+    const ps = ((planStates || {})[label] || "").toLowerCase();
+    if (hasRun && ["draft", "planned", "planning"].includes(ps))
+      return "draft";
+    return "draft";
   }
   function _smgmtHasLedgerRun(label) {
     return Boolean((_smgmtData?.sprint_has_run || {})[label]);
@@ -5516,7 +5600,7 @@ ${data.errors.join("\n")}`);
   <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
     const logHtml = "";
     const cancelBannerHtml = "";
-    const plannedBadge = !isNext && !finished && !isPostRun && !outcomeBadgeHtml ? '<span class="sc-planned-badge">PLANNED</span>' : "";
+    const plannedBadge = !finished && !isPostRun && !outcomeBadgeHtml && !isRunningView ? '<span class="sc-draft-badge">DRAFT</span>' : "";
     const blockedHint = _smgmtAnySprintRunning && !isPostRun && !isRunningView ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>` : "";
     const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
     const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
@@ -5529,9 +5613,8 @@ ${data.errors.join("\n")}`);
     const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
-    const nextClass = isNext && !isRunning ? " sc-v5--next" : "";
     return `
-    <div class="smgmt-sprint-card sc-v5${nextClass}${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
          ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
          ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
@@ -5548,7 +5631,6 @@ ${data.errors.join("\n")}`);
           ${parentLineage}
           ${runningBadgeHtml}
           ${showRunningChrome ? `<button type="button" class="smgmt-running-link" title="Open in the Running pane" onclick="event.stopPropagation();_smgmtShowSubView('running')"><i class="ti ti-player-play"></i> Open in Running</button>` : ""}
-          ${isNext && !isRunning ? '<span class="smgmt-next-badge">NEXT UP</span>' : ""}
           ${plannedBadge}
           ${outcomeBadgeHtml}
           ${headerMetaHtml}
@@ -5573,19 +5655,19 @@ ${data.errors.join("\n")}`);
       const _ss = _smgmtCardStatusSentence(label, {
         isRunning,
         isLinger,
-        isNext,
         isHasRework,
         isReadyToMerge,
         isAwaitingMerge,
         planState,
         outcome,
         tickets,
-        parent
+        parent,
+        isPostRun,
+        isRunningView
       });
       if (!_ss)
         return "";
-      const cls = isNext && !isRunning ? " sc-status-line--next" : "";
-      return `<div class="sc-status-line${cls}"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
+      return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
     }()}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
@@ -5859,14 +5941,15 @@ ${data.errors.join("\n")}`);
     const {
       isRunning,
       isLinger,
-      isNext,
       isHasRework,
       isReadyToMerge,
       isAwaitingMerge,
       planState,
       outcome,
       tickets,
-      parent
+      parent,
+      isPostRun,
+      isRunningView
     } = opts;
     if (isRunning)
       return "";
@@ -5885,7 +5968,7 @@ ${data.errors.join("\n")}`);
     if (isReadyToMerge || isAwaitingMerge) {
       return "All tickets passed. Ready to merge.";
     }
-    if (isNext) {
+    if (!isPostRun && !isRunningView) {
       const n = tickets.length;
       const parentShort = parent ? sprintLabelDisplay(parent).replace("Sprint ", "") : "";
       const held = n > 0 && parentShort ? ` Holds the ${n} ticket${n !== 1 ? "s" : ""} carried from ${parentShort}.` : n > 0 ? ` Holds ${n} ticket${n !== 1 ? "s" : ""}.` : "";
@@ -5893,15 +5976,15 @@ ${data.errors.join("\n")}`);
         const blocker = typeof _smgmtRunningBlockerShort === "function" ? _smgmtRunningBlockerShort() : "another sprint";
         return `Ready to run.${held} Waiting on ${blocker} to finish.`;
       }
+      if (!planState || planState === "draft" || planState === "planning") {
+        return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : "Set a sprint goal to enable the run.";
+      }
       return held ? `Ready to run.${held}` : "Ready to run.";
     }
     if (_smgmtAnySprintRunning) {
       return "Blocked: another sprint is running.";
     }
-    if (!planState || planState === "draft" || planState === "planning") {
-      return tickets.length === 0 ? "No tickets yet \u2014 drag some from the backlog." : "Set a sprint goal to enable the run.";
-    }
-    return tickets.length === 0 ? "No tickets \u2014 add some from the backlog." : "Planned.";
+    return tickets.length === 0 ? "No tickets \u2014 add some from the backlog." : "Ready to run.";
   }
   function _smgmtRunningBlockerShort() {
     if (!_smgmtRunningLabels || _smgmtRunningLabels.size === 0)
@@ -6409,7 +6492,7 @@ ${data.errors.join("\n")}`);
     }).join("");
     const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
     const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">Draft</span><span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
+    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span><span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button><button class="smgmt-run-btn" id="${escHtml(runBtnId)}" disabled title="Enter a sprint goal to enable Run" onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
   }
   function _smgmtUpdateAncestorRow(label, outcome) {
     const card = document.getElementById(`smgmt-card-${label}`);

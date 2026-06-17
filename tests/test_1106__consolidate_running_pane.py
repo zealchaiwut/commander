@@ -778,20 +778,19 @@ def test_ac11_orch_panel_exists_in_run_shell():
     )
 
 
-def test_ac11_orch_panel_below_metrics():
-    """Orchestrator panel appears after the metrics strip in the run-shell HTML."""
+def test_ac11_orch_panel_below_run_head():
+    """Orchestrator panel appears directly after run-head in the run-shell HTML."""
     shell = _html_in_run_shell()
-    metrics_pos = shell.find('id="smgmt-metrics"')
+    head_pos = shell.find('id="smgmt-run-head"')
     orch_pos = (
         shell.find('id="smgmt-orch-panel"') if 'id="smgmt-orch-panel"' in shell
         else shell.find('id="smgmt-orchestrator-panel"') if 'id="smgmt-orchestrator-panel"' in shell
         else shell.find("orch-panel")
     )
-    assert metrics_pos != -1, "smgmt-metrics not found in run-shell"
+    assert head_pos != -1, "smgmt-run-head not found in run-shell"
     assert orch_pos != -1, "Orchestrator panel not found in run-shell"
-    assert orch_pos > metrics_pos, (
-        "Orchestrator panel appears BEFORE the metrics strip — "
-        "it must be placed directly BELOW the header stat row (metrics)"
+    assert orch_pos > head_pos, (
+        "Orchestrator panel must appear directly below the run-head header"
     )
 
 

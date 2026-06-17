@@ -374,6 +374,14 @@ Archives stale per-sprint runtime files for a project's *finished* sprints into 
 |---|---|---|
 | `POST` | `/api/maintenance/sprints/cleanup` | Body `{"project": "<id>", "dry_run": false}`. Archives finished-sprint runtime files; returns `{"archived": [...], "kept_count": N, "dry_run": bool}`. With `dry_run: true` returns the same shape without moving anything (UI preview before confirmation) |
 
+### Calibration cache rebuild (issues #1332–#1334)
+
+Clears `<project-root>/.commander/calibration_cache.json` and rescans every `sprint-*-state.json` under `.commander/sprints/` and `.commander/sprints/archive/`, resolving each completed ticket's size through a three-tier fallback (canonical estimate JSON → sprint-state estimate → `size-*` label). Idempotent — running twice on the same data yields the same counts. The cache also auto-refreshes when a sprint finishes (issue #1333). Canonical estimate JSON lives at `<project-root>/.commander/estimates/issue-<N>.json` (issue #1331). Also available as the CLI `python3 scripts/rebuild_calibration_cache.py --project <slug> [--dry-run]`. See `docs/features/estimation-lifecycle.md`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/maintenance/calibration/rebuild?project=<slug>` | Rebuild the calibration cache from full sprint history; returns a count summary (`processed_count` + `by_size_counts`) |
+
 ### Docs Scaffold
 
 | Method | Path | Description |

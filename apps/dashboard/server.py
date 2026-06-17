@@ -87,6 +87,26 @@ sys.modules[__name__].__dict__.update(
 )
 del _startup_module
 
+# Explicit re-imports from startup so ruff can resolve these names statically.
+from startup import (  # noqa: E402
+    AGENT_IDLE_TIMEOUT_SECONDS,
+    ENVIRONMENT,
+    STATIC_DIR,
+    _BACKUP_AVAILABLE,
+    _GIT_BRANCH,
+    _GIT_SHA,
+    _TIMEOUT_CHECK_INTERVAL,
+    _backup_module,
+    _check_gh_auth,
+    _mark_inflight_jobs_failed,
+    _mirror_sync_repos,
+    _periodic_orphan_sweep_loop,
+    _restore_sprint_statuses_on_startup,
+    _status_md_sync_loop,
+    _sweep_orphan_pid_files,
+    _validate_github_repos,
+)
+
 # Override the logger so log messages show "server" instead of "startup".
 logger = logging.getLogger(__name__)
 

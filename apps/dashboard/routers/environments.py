@@ -1,9 +1,11 @@
 from __future__ import annotations
-import os, sys, uuid, subprocess, json
+import os
+import sys
+import subprocess
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -14,9 +16,8 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import projects as projects_module
-from services.logging import log as _slog
+import projects as projects_module  # noqa: E402
+from services.logging import log as _slog  # noqa: E402
 
 _PROJECTS_BASE = Path.home() / "dev"
 
@@ -29,15 +30,15 @@ def _server():
 
 # ── Module imports ────────────────────────────────────────────────────────────
 
-from services.sprint_manager import deploy_actions as _deploy_actions
-from services.sprint_manager import render_actions as _render_actions
-from services.sprint_manager.deploy_config_schema import (
+from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
+from services.sprint_manager import render_actions as _render_actions  # noqa: E402
+from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     DEPLOY_CONFIG_KEY,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
     enrich_local_working_dirs as _enrich_working_dirs,
 )
-import services.sprint_manager.settings_repo as _settings_repo
+import services.sprint_manager.settings_repo as _settings_repo  # noqa: E402
 
 
 # ── Local helpers ─────────────────────────────────────────────────────────────

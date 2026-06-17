@@ -13,14 +13,13 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
-import time
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from server import app, _bulk_jobs, _bulk_job_queues
+from server import _bulk_jobs, _bulk_job_queues
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +56,7 @@ class TestEstimationCompletesOnBulkCreate:
     @pytest.mark.asyncio
     async def test_bulk_two_tickets_both_reach_sized_state(self):
         """Two concurrently estimated tickets both reach 'sized' state."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         job_id = "test-331-bulk-two"
@@ -94,7 +93,7 @@ class TestEstimationCompletesOnBulkCreate:
     @pytest.mark.asyncio
     async def test_single_ticket_reaches_sized_state(self):
         """A single ticket estimation reaches 'sized' state — no regression."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         job_id = "test-331-single"
@@ -133,7 +132,7 @@ class TestEstimationResultAccuracy:
     @pytest.mark.asyncio
     async def test_size_extracted_correctly_from_subprocess_stdout(self):
         """Size extracted from estimator stdout matches the JSON output."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         for size in ("S", "M", "L", "XL"):
@@ -165,7 +164,7 @@ class TestEstimationResultAccuracy:
     @pytest.mark.asyncio
     async def test_size_is_none_when_estimator_returns_unrecognised_size(self):
         """estimate_size is None (not a crash) when the output size is unrecognised."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         job_id = "test-331-bad-size"
@@ -205,7 +204,7 @@ class TestClearErrorWhenEstimationCannotRun:
     @pytest.mark.asyncio
     async def test_estimate_failed_state_has_error_message(self):
         """estimate_failed ticket has a non-empty estimate_error field."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         job_id = "test-331-clear-error"
@@ -240,8 +239,7 @@ class TestClearErrorWhenEstimationCannotRun:
         Issue #374: estimation now happens in bulk_post_selected (not _bulk_flusher).
         The flusher only holds tickets at draft_ready; this test exercises post-selected.
         """
-        from routers.bulk_tickets import bulk_post_selected, BulkPostSelectedBody, BulkPostSelectedItem
-        from server import _bulk_jobs, _bulk_job_queues
+        from routers.bulk_tickets import BulkPostSelectedBody, BulkPostSelectedItem
 
         job_id = "test-331-no-repo"
         ticket = {
@@ -286,17 +284,14 @@ class TestClearErrorWhenEstimationCannotRun:
             mock_script.exists = lambda: True
             mock_script.__bool__ = lambda self: True
 
-            body = BulkPostSelectedBody(tickets=[BulkPostSelectedItem(index=0, labels=["backlog"])])
+            BulkPostSelectedBody(tickets=[BulkPostSelectedItem(index=0, labels=["backlog"])])
             # Run the _post_task directly by awaiting the coroutine
             from server import _bulk_jobs as jobs
-            import asyncio
 
             job = jobs[job_id]
             job["status"] = "running"
 
             # Manually trigger the post logic
-            from server import github_client as gc_mod
-            from server import _run_bulk_estimator_for_ticket, _ESTIMATE_ISSUE_SCRIPT, _BC_BODY_SIZE_THRESHOLD, _build_body_with_images, _persist_bulk_job, _broadcast_bulk_event
             from datetime import datetime, timezone
 
             t = job["tickets"][0]
@@ -338,7 +333,6 @@ class TestClearErrorWhenEstimationCannotRun:
         Issue #374: this now happens via bulk_post_selected, not _bulk_flusher.
         Verify the post-selected flow sets estimate_failed with an error message.
         """
-        from server import _bulk_jobs, _bulk_job_queues
         from datetime import datetime, timezone
 
         job_id = "test-331-no-script"
@@ -383,7 +377,7 @@ class TestClearErrorWhenEstimationCannotRun:
         ):
             mock_script.exists = lambda: False
 
-            job = _bulk_jobs[job_id]
+            _bulk_jobs[job_id]
             t = ticket
 
             # Simulate the post logic when script is missing
@@ -412,7 +406,7 @@ class TestClearErrorWhenEstimationCannotRun:
         Issue #374: _bulk_flusher now broadcasts job_drafts_ready (not job_done), since
         GitHub issue creation happens later via /post-selected.
         """
-        from server import _bulk_flusher, _bulk_jobs, _bulk_job_queues
+        from server import _bulk_flusher
 
         job_id = "test-331-job-done-no-repo"
         ticket = {
@@ -578,7 +572,7 @@ class TestNoRegressionInOtherEstimationPaths:
     @pytest.mark.asyncio
     async def test_estimate_failed_does_not_affect_other_tickets_in_batch(self):
         """Failure of one estimation does not propagate to other tickets in the same job."""
-        from server import _run_bulk_estimator_for_ticket, _bulk_jobs, _bulk_job_queues
+        from server import _run_bulk_estimator_for_ticket
         from unittest.mock import AsyncMock
 
         job_id = "test-331-regression-isolation"

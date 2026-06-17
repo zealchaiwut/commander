@@ -11,7 +11,6 @@ AC coverage:
 """
 from __future__ import annotations
 
-import ast
 import re
 import sys
 from pathlib import Path

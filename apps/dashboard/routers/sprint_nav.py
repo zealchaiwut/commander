@@ -225,7 +225,6 @@ def get_sprint_progress(project: str = "", repo: str = ""):
     can re-hydrate from disk when the server restarts or live data is not yet
     available.
     """
-    repo_name = repo or (project or None)
 
     key_project = project or repo or ""
 

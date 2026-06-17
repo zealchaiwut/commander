@@ -23,9 +23,9 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import github_client
-from routers.logs_service import broadcast
+import db  # noqa: E402
+import github_client  # noqa: E402
+from routers.logs_service import broadcast  # noqa: E402
 
 router = APIRouter()
 

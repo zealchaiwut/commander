@@ -29,7 +29,6 @@ import sys as _sys  # noqa: E402 (re-import alias for clarity)
 _REPO_ROOT_SVC = Path(__file__).resolve().parent.parent.parent.parent
 if str(_REPO_ROOT_SVC) not in _sys.path:
     _sys.path.insert(0, str(_REPO_ROOT_SVC))
-from services.logging import log as _slog  # noqa: E402
 
 # ── Optional prune_test_files module ─────────────────────────────────────────
 try:

@@ -15,30 +15,26 @@ def _server():
 # Re-import service objects removed with the app factory block so that
 # helper functions (e.g. _cache_refresh_loop) can still call broadcast().
 try:
-    from routers.logs_service import broadcast, _subscribers  # noqa: E402
-    from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
+    from routers.logs_service import broadcast  # noqa: E402
     from routers.bulk_tickets import _get_bulk_job  # noqa: E402
 except Exception:
     pass  # available after server.py finishes importing its routers
 
-import asyncio
-import hashlib
-import importlib.util as _importlib_util
-import json
-import logging
-import os
-import re
-import shutil
-import signal
-import subprocess
-import sys
-import tempfile
-import time
-import uuid
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Optional
+import asyncio  # noqa: E402
+import hashlib  # noqa: E402
+import importlib.util as _importlib_util  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import tempfile  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Optional  # noqa: E402
 
 
 def _auto_install_deps() -> None:
@@ -78,28 +74,25 @@ try:
 except ImportError:
     _psutil = None  # type: ignore[assignment]
 
-from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, model_validator
+from dotenv import load_dotenv  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 # Load .env before importing local modules so that DB_PATH and other env vars
 # are available when db.py executes its module-level startup checks.
 load_dotenv(Path(__file__).parent / ".env")
 
-import db
-import github_client
-import sprint_state
-import github_events_sync
-import live_metrics as _live_metrics
-import projects as projects_module
+import db  # noqa: E402
+import github_client  # noqa: E402
+import sprint_state  # noqa: E402
+import github_events_sync  # noqa: E402
+import projects as projects_module  # noqa: E402
 
 # Structured event logging (services/logging.py at repo root)
 _REPO_ROOT = Path(__file__).parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from services.logging import log as _slog, setup_logging as _setup_logging
+from services.logging import log as _slog, setup_logging as _setup_logging  # noqa: E402
 
 # Install size-rotating prd.log handler at import time so the uvicorn worker
 # (which imports server:app) is covered without disk-exhaustion risk (issue #762).
@@ -107,21 +100,9 @@ try:
     _setup_logging()
 except Exception:  # logging must never break startup
     pass
-from services.sprint_manager.estimate_issue import (
-    fetch_issue as _ei_fetch_issue,
-    run_estimator as _ei_run_estimator,
-    apply_label as _ei_apply_label,
-    apply_estimated_status as _ei_apply_estimated_status,
-)
-from services.sprint_manager import fill_acceptance_criteria as _fill_ac
-from services.sprint_manager.state_machine import (
-    TicketState as _TicketState,
-    transition as _sm_transition,
-    TransitionError as _TransitionError,
-)
 
 # Backup module lives in services/sprint_manager/ — add it to sys.path
-import sys as _sys
+import sys as _sys  # noqa: E402
 _SERVICES_DIR = Path(__file__).parent.parent.parent / "services" / "sprint_manager"
 if str(_SERVICES_DIR) not in _sys.path:
     _sys.path.insert(0, str(_SERVICES_DIR))
@@ -133,16 +114,6 @@ except ImportError:
     _BACKUP_AVAILABLE = False
 
 try:
-    from services.sprint_manager.settings_sync import (
-        load_local_snapshot as _ss_load_local,
-        load_neon_snapshot as _ss_load_neon,
-        compute_diff as _ss_compute_diff,
-        is_already_in_sync as _ss_already_in_sync,
-        apply_upload as _ss_apply_upload,
-        apply_fetch as _ss_apply_fetch,
-        get_sync_status as _ss_get_status,
-        save_sync_status as _ss_save_status,
-    )
     _SYNC_SETTINGS_AVAILABLE = True
 except Exception:
     _SYNC_SETTINGS_AVAILABLE = False
@@ -152,7 +123,7 @@ except Exception:
 # scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
 # disable here.
 
-from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: E402
 
 try:
     _SCAFFOLD_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
@@ -1177,17 +1148,15 @@ def _persist_sprint_progress(project: str, data: dict) -> None:
 
 # ── Settings API (issue #639) ────────────────────────────────────────────────
 
-import services.sprint_manager.settings_repo as _settings_repo
-from services.sprint_manager.settings_schema import (
+import services.sprint_manager.settings_repo as _settings_repo  # noqa: E402
+from services.sprint_manager.settings_schema import (  # noqa: E402
     APP_CONFIG_KEY,
     build_effective_response,
 )
-from services.sprint_manager.deploy_config_schema import (
+from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     DEPLOY_CONFIG_KEY,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
-    known_deploy_slugs as _deploy_known_slugs,
-    overview_entries_for as _deploy_overview_entries_for,
 )
 
 
@@ -1222,9 +1191,9 @@ def _resolve_project_slug(slug: str) -> str:
 # routers/settings.py + routers/settings_service.py
 
 
-from services.sprint_manager.deploy_config_schema import enrich_local_working_dirs as _enrich_working_dirs
+from services.sprint_manager.deploy_config_schema import enrich_local_working_dirs as _enrich_working_dirs  # noqa: E402
 
-from services.sprint_manager import deploy_actions as _deploy_actions
+from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
 
 
 def _dashboard_listen_port() -> Optional[int]:
@@ -1265,8 +1234,7 @@ def _enrich_deploy_readiness(config: dict) -> None:
         entry["start_errors"] = start_errors
 
 
-from services.sprint_manager import render_actions as _render_actions
-from services.sprint_manager import deploy_validation as _deploy_validation
+from services.sprint_manager import render_actions as _render_actions  # noqa: E402
 
 
 def _render_deploy_environment(entry: dict, env: str) -> dict:
@@ -1747,7 +1715,7 @@ def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
                 pass
         sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
 
-    uat_issues = [i for i in all_open if any(l["name"] == "UAT" for l in i.get("labels", []))]
+    uat_issues = [i for i in all_open if any(lbl["name"] == "UAT" for lbl in i.get("labels", []))]
     backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
 
     # The durable SQLite sprints table (issue #757) is authoritative for the
@@ -1826,7 +1794,7 @@ def _home_activity_feed(
     for repo, issues in all_open_by_repo.items():
         slug = repo.split("/")[-1]
         for issue in issues:
-            labels = {l["name"] for l in issue.get("labels", [])}
+            labels = {lbl["name"] for lbl in issue.get("labels", [])}
             ts = issue.get("updatedAt") or issue.get("createdAt") or ""
             if not ts:
                 continue
@@ -2372,9 +2340,6 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
 # one implementation (issue #795). Re-exported under the original private name so
 # existing callers and tests (which patch server._build_sprint_subprocess_env)
 # keep working unchanged.
-from routers.dispatch_service import (  # noqa: E402
-    build_sprint_subprocess_env as _build_sprint_subprocess_env,
-)
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -3633,7 +3598,7 @@ def _compute_analytics_metrics(project_root: Path,
     Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
     throughput, cost. All numeric fields are 0 when no data is available.
     """
-    today = datetime.now(tz=timezone.utc).date()
+    datetime.now(tz=timezone.utc).date()
 
     since_dt = _parse_iso_date(since, "since") if since else None
     until_dt = _parse_iso_date(until, "until", end_of_day=True) if until else None
@@ -4914,7 +4879,6 @@ def _commit_attachments_to_branch(
     On push failure: retries once with fresh fetch+rebase.
     Raises RuntimeError on persistent failure.
     """
-    import tempfile
 
     def _do_commit():
         # Read existing tree for attachments branch
@@ -5008,7 +4972,7 @@ def _commit_attachments_to_branch(
         return new_commit_sha
 
     _sync_attachments_branch_ref(cache_dir)
-    new_sha = _do_commit()
+    _do_commit()
 
     # Push to remote
     push_result = subprocess.run(
@@ -5388,9 +5352,9 @@ async def _run_estimator_for_issue(issue_number: int, repo: str) -> None:
         return
 
     # Invalidate the issues cache so the size badge appears on next load.
-    github_client.invalidate(f"open_issues_body:")
-    github_client.invalidate(f"open_issues:")
-    github_client.invalidate(f"issues:")
+    github_client.invalidate("open_issues_body:")
+    github_client.invalidate("open_issues:")
+    github_client.invalidate("issues:")
 
 
 def _post_estimator_warning(issue_number: int, repo: str, reason: str) -> None:
@@ -5437,8 +5401,6 @@ def _extract_size_from_estimator_stdout(stdout: str) -> str | None:
 
     The script prints the JSON estimate after the 'Saved:' line.
     """
-    import re as _re
-    import logging as _logging
     # Brace-matching scan for the first top-level JSON object in stdout
     start = stdout.find("{")
     if start < 0:
@@ -5827,7 +5789,6 @@ def _bulk_job_created_at(job: dict) -> float:
     try:
         ts = job.get("created_at", "")
         if ts:
-            from datetime import timezone as _tz
             dt = datetime.fromisoformat(ts)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)

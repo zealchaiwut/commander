@@ -6,7 +6,7 @@ import sys
 import uuid
 import re
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -17,10 +17,9 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import github_client
-import projects as projects_module
-from services.logging import log as _slog
+import db  # noqa: E402
+import github_client  # noqa: E402
+from services.logging import log as _slog  # noqa: E402
 
 _PROJECTS_BASE = Path.home() / "dev"
 

@@ -692,7 +692,7 @@ def _check_gh_auth() -> None:
                 "ok": False,
                 "event": "gh_auth_check_failed",
                 "message": "GitHub CLI is not authenticated",
-                "remediation": "Run: gh auth login",
+                "remediation": "Global settings → GitHub CLI → Sign in with GitHub",
             }
             _slog.warn(
                 "gh_auth_check_failed",

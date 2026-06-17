@@ -6859,6 +6859,40 @@
     .gss-card-title { font-size: 14px; font-weight: 700; }
     .gss-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
     .gss-card-body { padding: 14px 16px; }
+    .gss-gh-auth-status {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .gss-gh-auth-pill {
+      font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+      font-family: var(--mono);
+    }
+    .gss-gh-auth-pill--ok { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+    .gss-gh-auth-pill--bad { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+    .gss-gh-auth-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .gss-gh-auth-code-wrap {
+      margin-top: 4px; padding: 12px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface-2);
+    }
+    .gss-gh-auth-code-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+    .gss-gh-auth-code {
+      font-family: var(--mono); font-size: 22px; font-weight: 700;
+      letter-spacing: 0.14em; color: var(--text); margin-bottom: 10px;
+    }
+    .gss-gh-auth-log {
+      max-height: 180px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface-2); padding: 8px 10px;
+      font-size: 11px; font-family: var(--mono); font-weight: 500;
+      line-height: 1.45; color: var(--text-sub);
+    }
+    .gss-gh-auth-log[hidden] { display: none !important; }
+    .gss-gh-auth-log-line--ok { color: var(--green); }
+    .gss-gh-auth-log-line--err { color: var(--red); }
+    .gss-gh-auth-log-line--step { color: var(--blue); }
+    .gss-gh-auth-token-row {
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px;
+    }
+    .gss-gh-auth-token-row .settings-input { flex: 1; min-width: 200px; }
     .gss-row {
       display: flex; align-items: center; gap: 14px;
       padding: 9px 0; border-top: 1px solid var(--border);
@@ -10103,6 +10137,42 @@
               </div>
             </div>
 
+            <div class="settings-section" id="gss-gh-auth-section">
+              <div class="settings-section-title">GitHub CLI</div>
+              <div class="settings-row gss-gh-auth-status">
+                <span class="gss-gh-auth-pill gss-gh-auth-pill--bad" id="gss-gh-auth-pill">Checking…</span>
+                <span class="settings-hint" id="gss-gh-auth-hint"></span>
+              </div>
+              <div class="gss-gh-auth-actions">
+                <button class="settings-btn active" type="button" id="gss-gh-auth-start-btn" onclick="gssGhAuthStart()">
+                  <i class="ti ti-brand-github"></i> Sign in with GitHub
+                </button>
+                <button class="settings-btn" type="button" id="gss-gh-auth-enter-btn" onclick="gssGhAuthSendEnter()" hidden>
+                  Open browser / continue
+                </button>
+                <button class="settings-btn" type="button" id="gss-gh-auth-cancel-btn" onclick="gssGhAuthCancel()" hidden>
+                  Cancel
+                </button>
+                <button class="settings-btn" type="button" onclick="gssGhAuthRefresh()">
+                  <i class="ti ti-refresh"></i> Refresh status
+                </button>
+              </div>
+              <div class="gss-gh-auth-code-wrap" id="gss-gh-auth-code-wrap" hidden>
+                <div class="gss-gh-auth-code-label">One-time code — enter on GitHub</div>
+                <div class="gss-gh-auth-code" id="gss-gh-auth-code">----</div>
+                <a class="settings-btn active" id="gss-gh-auth-url" href="https://github.com/login/device" target="_blank" rel="noopener">
+                  Open GitHub login
+                </a>
+              </div>
+              <div class="gss-gh-auth-log" id="gss-gh-auth-log" hidden></div>
+              <div class="settings-row gss-gh-auth-token-row">
+                <input class="settings-input" id="gss-gh-auth-token" type="password"
+                       placeholder="Paste personal access token (optional)" autocomplete="off">
+                <button class="settings-btn" type="button" onclick="gssGhAuthToken()">Use token</button>
+              </div>
+              <span class="settings-hint">Runs <code>gh auth login</code> on this machine. Scopes: repo, read:org, gist.</span>
+            </div>
+
             <div class="settings-section">
               <div class="settings-section-title">Refresh</div>
               <div class="settings-row">
@@ -11129,11 +11199,14 @@ async function checkGhAuthStatus() {
     const res = await fetch('/api/gh-auth-status');
     if (!res.ok) return;
     const data = await res.json();
+    const banner = document.getElementById('gh-auth-banner');
+    if (!banner) return;
     if (!data.ok) {
-      const banner = document.getElementById('gh-auth-banner');
-      if (!banner) return;
       banner.textContent = `⚠ GitHub CLI: ${data.message}. Fix: ${data.remediation}`;
       banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+      banner.textContent = '';
     }
   } catch { /* banner is optional */ }
 }
@@ -22725,6 +22798,7 @@ async function globalSettingsLoad() {
   if (!bodyEl) return;
   bodyEl.innerHTML = '<div class="gss-loading"><i class="ti ti-loader-2" style="font-size:22px;"></i><br>Loading settings…</div>';
   _gssHideFeedback();
+  gssGhAuthLoad().catch(() => {});
   try {
     const resp = await fetch('/api/settings');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -22733,6 +22807,172 @@ async function globalSettingsLoad() {
   } catch (err) {
     bodyEl.innerHTML =
       `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;
+  }
+}
+
+// ── Global Settings — GitHub CLI auth (device / token login) ─────────────────
+
+let _gssGhAuthPollTimer = null;
+
+function _gssGhAuthEsc(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function gssGhAuthRenderStatus(data) {
+  const pill = document.getElementById('gss-gh-auth-pill');
+  const hint = document.getElementById('gss-gh-auth-hint');
+  if (!pill) return;
+  if (data && data.ok) {
+    pill.textContent = 'Authenticated';
+    pill.className = 'gss-gh-auth-pill gss-gh-auth-pill--ok';
+    if (hint) hint.textContent = data.message || 'GitHub CLI is ready.';
+  } else {
+    pill.textContent = 'Not authenticated';
+    pill.className = 'gss-gh-auth-pill gss-gh-auth-pill--bad';
+    if (hint) hint.textContent = (data && data.message) ? data.message : 'Sign in to load sprints and issues.';
+  }
+}
+
+function gssGhAuthRenderLog(job) {
+  const logEl = document.getElementById('gss-gh-auth-log');
+  const codeWrap = document.getElementById('gss-gh-auth-code-wrap');
+  const codeEl = document.getElementById('gss-gh-auth-code');
+  const urlEl = document.getElementById('gss-gh-auth-url');
+  const startBtn = document.getElementById('gss-gh-auth-start-btn');
+  const enterBtn = document.getElementById('gss-gh-auth-enter-btn');
+  const cancelBtn = document.getElementById('gss-gh-auth-cancel-btn');
+  if (!logEl) return;
+
+  const lines = (job && job.lines) || [];
+  if (lines.length) {
+    logEl.hidden = false;
+    logEl.innerHTML = lines.map(l => {
+      const kind = l.kind ? ` gss-gh-auth-log-line--${l.kind}` : '';
+      return `<div class="gss-gh-auth-log-line${kind}">${_gssGhAuthEsc(l.text)}</div>`;
+    }).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  if (job && job.device_code && codeWrap && codeEl) {
+    codeWrap.hidden = false;
+    codeEl.textContent = job.device_code;
+  }
+  if (job && job.device_url && urlEl) {
+    urlEl.href = job.device_url;
+  }
+
+  const running = !!(job && job.running);
+  if (startBtn) startBtn.disabled = running;
+  if (enterBtn) enterBtn.hidden = !running;
+  if (cancelBtn) cancelBtn.hidden = !running;
+}
+
+function gssGhAuthStopPoll() {
+  if (_gssGhAuthPollTimer) {
+    clearInterval(_gssGhAuthPollTimer);
+    _gssGhAuthPollTimer = null;
+  }
+}
+
+async function gssGhAuthPollOnce() {
+  try {
+    const res = await fetch('/api/gh-auth/login/status', { cache: 'no-store' });
+    if (!res.ok) return;
+    const job = await res.json();
+    gssGhAuthRenderLog(job);
+    if (job.done) {
+      gssGhAuthStopPoll();
+      if (job.ok) {
+        await gssGhAuthLoad();
+        checkGhAuthStatus().catch(() => {});
+      }
+    }
+  } catch (_) {}
+}
+
+function gssGhAuthStartPoll() {
+  gssGhAuthStopPoll();
+  gssGhAuthPollOnce();
+  _gssGhAuthPollTimer = setInterval(gssGhAuthPollOnce, 600);
+}
+
+async function gssGhAuthLoad() {
+  try {
+    const res = await fetch('/api/gh-auth-status', { cache: 'no-store' });
+    if (!res.ok) return;
+    gssGhAuthRenderStatus(await res.json());
+  } catch (_) {}
+}
+
+async function gssGhAuthRefresh() {
+  await gssGhAuthLoad();
+  checkGhAuthStatus().catch(() => {});
+}
+
+async function gssGhAuthStart() {
+  const logEl = document.getElementById('gss-gh-auth-log');
+  const codeWrap = document.getElementById('gss-gh-auth-code-wrap');
+  if (logEl) { logEl.hidden = false; logEl.innerHTML = ''; }
+  if (codeWrap) codeWrap.hidden = true;
+  try {
+    const res = await fetch('/api/gh-auth/login/start', { method: 'POST' });
+    const job = await res.json();
+    if (!res.ok || job.error === 'login_already_running') {
+      gssGhAuthRenderLog(job);
+    } else {
+      gssGhAuthRenderLog(job);
+      gssGhAuthStartPoll();
+    }
+  } catch (err) {
+    if (logEl) {
+      logEl.hidden = false;
+      logEl.innerHTML = `<div class="gss-gh-auth-log-line--err">${_gssGhAuthEsc(err.message)}</div>`;
+    }
+  }
+}
+
+async function gssGhAuthSendEnter() {
+  try {
+    const res = await fetch('/api/gh-auth/login/input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '\n' }),
+    });
+    gssGhAuthRenderLog(await res.json());
+  } catch (_) {}
+}
+
+async function gssGhAuthCancel() {
+  gssGhAuthStopPoll();
+  try {
+    const res = await fetch('/api/gh-auth/login/cancel', { method: 'POST' });
+    gssGhAuthRenderLog(await res.json());
+  } catch (_) {}
+}
+
+async function gssGhAuthToken() {
+  const input = document.getElementById('gss-gh-auth-token');
+  const token = input ? input.value.trim() : '';
+  if (!token) return;
+  const logEl = document.getElementById('gss-gh-auth-log');
+  if (logEl) { logEl.hidden = false; logEl.innerHTML = ''; }
+  try {
+    const res = await fetch('/api/gh-auth/login/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const job = await res.json();
+    gssGhAuthRenderLog(job);
+    if (input) input.value = '';
+    if (job.ok) {
+      await gssGhAuthLoad();
+      checkGhAuthStatus().catch(() => {});
+    }
+  } catch (err) {
+    if (logEl) {
+      logEl.innerHTML = `<div class="gss-gh-auth-log-line--err">${_gssGhAuthEsc(err.message)}</div>`;
+    }
   }
 }
 

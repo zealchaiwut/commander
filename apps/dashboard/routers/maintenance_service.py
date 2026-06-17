@@ -46,7 +46,9 @@ def _resolve_project_slug(slug: str) -> str:
         None,
     )
     if matched is None:
-        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+        raise HTTPException(
+            status_code=404, detail=f"Project '{slug}' not found"
+        )
     return matched["repo"]
 
 
@@ -61,7 +63,10 @@ def _get_configured_minutes(repo: str) -> dict[str, int]:
     except Exception:
         stored = {}
     effective = build_effective_response(stored)
-    return {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+    return {
+        sz: effective[key]
+        for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()
+    }
 
 
 def rebuild_calibration_cache(
@@ -70,7 +75,7 @@ def rebuild_calibration_cache(
     *,
     dry_run: bool = False,
 ) -> dict:
-    """Rebuild calibration cache from scratch by rescanning all sprint state files.
+    """Rebuild calibration cache by rescanning all sprint state files.
 
     Clears processed/by_size/points before rescanning sprints/ and
     sprints/archive/ using the new size resolver (_resolve_calibration_size).
@@ -111,7 +116,9 @@ def rebuild_calibration_cache(
 def _count_summary(cache: dict) -> dict:
     by_size = cache.get("by_size") or {}
     return {
-        "total": sum(int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES),
+        "total": sum(
+            int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES
+        ),
         "by_size": {
             sz: int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES
         },
@@ -126,4 +133,6 @@ def do_rebuild(project_slug: str, dry_run: bool = False) -> dict:
     repo = _resolve_project_slug(project_slug)
     project_root = _project_root_path(repo)
     configured_minutes = _get_configured_minutes(repo)
-    return rebuild_calibration_cache(project_root, configured_minutes, dry_run=dry_run)
+    return rebuild_calibration_cache(
+        project_root, configured_minutes, dry_run=dry_run
+    )

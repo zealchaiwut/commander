@@ -12,9 +12,7 @@ from __future__ import annotations
 import json
 import sys
 import subprocess
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -46,7 +44,7 @@ def test_ac1_no_import_server_in_file():
 # ---------------------------------------------------------------------------
 
 def test_ac2_rebuild_uses_calibration_cache_service(tmp_path):
-    """AC 2 & 3: rebuild_calibration_cache should call helpers via calibration_cache_service."""
+    """AC 2&3: rebuild_calibration_cache uses calibration_cache_service."""
     import maintenance_service as _ms
     import calibration_cache_service as _ccs
 
@@ -107,9 +105,7 @@ def test_ac3_no_srv_references_in_file():
 # ---------------------------------------------------------------------------
 
 def test_ac4_script_doesnt_import_server(tmp_path):
-    """AC 4: Running rebuild_calibration_cache.py should not import apps.dashboard.server."""
-    rebuild_script = _REPO_ROOT / "scripts" / "rebuild_calibration_cache.py"
-
+    """AC 4: rebuild_calibration_cache.py should not import server."""
     # Create a test project structure
     project_root = tmp_path / "test_project"
     project_root.mkdir()
@@ -168,8 +164,10 @@ print(json.dumps({{"imported_dashboard_server": has_dashboard_server}}))
     if result.returncode == 0:
         try:
             output = json.loads(result.stdout.strip())
-            assert not output.get("imported_dashboard_server", False), \
-                f"Importing maintenance_service should not import apps.dashboard.server module. stderr: {result.stderr}"
+            assert not output.get("imported_dashboard_server", False), (
+                "maintenance_service must not import apps.dashboard.server. "
+                f"stderr: {result.stderr}"
+            )
         except json.JSONDecodeError:
             # If we can't parse JSON, just check stderr for import errors
             assert "cannot import" not in result.stderr.lower(), \

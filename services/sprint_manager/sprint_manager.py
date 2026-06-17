@@ -7770,6 +7770,10 @@ def _dispatch_estimator_for_followup(
         "--save-comment",
         "--save-label",
     ]
+    # Write estimate JSON to the canonical project-root .commander/ location so
+    # calibration can always find it regardless of which clone runs the dashboard.
+    if cfg is not None and hasattr(cfg, "sprints_dir"):
+        cmd += ["--commander-dir", str(cfg.sprints_dir.parent)]
 
     sys.stdout.write(str(f"  [estimator] Estimating follow-up #{issue_num} ...") + "\n")
     sys.stdout.flush()

@@ -43,7 +43,9 @@ def _base_sprint_branch(label: str) -> str:
     return _sprint_branch_for_label(_label_base(label))
 
 
-def _pid_file_path(sprint_label: str, cfg: "Optional[SprintConfig]" = None) -> Path:
+def _pid_file_path(
+    sprint_label: str, cfg: "Optional[SprintConfig]" = None
+) -> Path:
     """Return the per-(project, sprint_label) PID file path."""
     if cfg is not None:
         sprints_dir = cfg.sprints_dir
@@ -55,7 +57,10 @@ def _pid_file_path(sprint_label: str, cfg: "Optional[SprintConfig]" = None) -> P
 
 def _plan_json_path(label: str, cfg: "Optional[SprintConfig]" = None) -> Path:
     """Return path to {label}-plan.json in the sprints directory."""
-    sprints_dir = cfg.sprints_dir if cfg is not None else _REPO_ROOT / ".commander" / "sprints"
+    if cfg is not None:
+        sprints_dir = cfg.sprints_dir
+    else:
+        sprints_dir = _REPO_ROOT / ".commander" / "sprints"
     return sprints_dir / f"{label}-plan.json"
 
 

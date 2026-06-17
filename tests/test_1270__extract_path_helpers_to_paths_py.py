@@ -1,13 +1,13 @@
 """Tests for issue #1270: extract sprint_manager path helpers to paths.py.
 
 AC1: services/sprint_manager/paths.py exists and contains all extracted helpers
-     (_pid_file_path, _plan_json_path, _state_path, _summary_path, _sprint_number,
-     _label_base, and any other pure path/constant ops)
-AC2: Original sprint_manager module imports helpers from paths.py; no inline defs
+     (_pid_file_path, _plan_json_path, _state_path, _summary_path,
+     _sprint_number, _label_base, and any other pure path/constant ops)
+AC2: Original sprint_manager imports helpers from paths.py; no inline defs
 AC3: All path resolutions return identical values (no behavioral change)
 AC4: python -m py_compile services/sprint_manager/paths.py exits 0
 AC5: python -m py_compile on the original sprint_manager module exits 0
-AC6: Definitions appear only in paths.py; sprint_manager.py has no inline redefs
+AC6: Definitions appear only in paths.py; sprint_manager.py no inline redefs
 """
 from __future__ import annotations
 
@@ -62,12 +62,14 @@ def test_sprint_manager_has_no_inline_definition(symbol):
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             assert node.name != symbol, (
-                f"sprint_manager.py still defines '{symbol}' inline at line {node.lineno}"
+                f"sprint_manager.py still defines '{symbol}' inline"
+                f" at line {node.lineno}"
             )
 
 
 def test_sprint_manager_imports_from_paths():
-    """AC2: sprint_manager.py must import from services.sprint_manager.paths."""
+    """AC2: sprint_manager.py must import from services.sprint_manager.paths.
+    """
     source = SM_PY.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports_from_paths = False
@@ -82,7 +84,7 @@ def test_sprint_manager_imports_from_paths():
     )
 
 
-# ── AC3: path resolutions return identical values ─────────────────────────────
+# ── AC3: path resolutions return identical values ──────────────────────────
 
 def test_sprint_number_returns_int():
     """AC3: _sprint_number extracts integer from sprint label."""
@@ -138,7 +140,7 @@ def test_state_path_with_cfg(tmp_path):
 
 
 def test_summary_path_with_cfg(tmp_path):
-    """AC3: _summary_path respects cfg.sprints_dir and uses date in filename."""
+    """AC3: _summary_path respects cfg.sprints_dir, uses date in filename."""
     from services.sprint_manager.paths import _summary_path
     from services.sprint_manager.config import SprintConfig
     cfg = SprintConfig()
@@ -166,7 +168,7 @@ def test_py_compile_paths_py():
 # ── AC5: py_compile on sprint_manager.py exits 0 ────────────────────────────
 
 def test_py_compile_sprint_manager_py():
-    """AC5: python -m py_compile services/sprint_manager/sprint_manager.py exits 0."""
+    """AC5: py_compile services/sprint_manager/sprint_manager.py exits 0."""
     result = subprocess.run(
         [sys.executable, "-m", "py_compile", str(SM_PY)],
         capture_output=True,

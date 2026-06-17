@@ -110,4 +110,4 @@ Rules for all render-path code:
 - **Zero label inference.** Do not infer sprint state from GitHub label names. Use `sprint_state.current(label)` (see [sprint-lifecycle.md § Canonical Read Contract](sprint-lifecycle.md)).
 - **Zero multi-source reconciliation at render.** Pick one store (DB for metrics, GitHub for state) and return its data. Reconciliation runs in the background, not in the HTTP path.
 
-If a disk artifact has not been ingested into SQLite yet, trigger a lazy ingest (`db.ingest_sprint_run_artifact(...)`) and return the ingested row — do not return raw disk data.
+If no SQLite row exists for a requested artifact, return 404 or `no_data`. Ingestion runs at end-of-run only (sprint manager), never in response to HTTP requests — the on-demand path was removed in #1161.

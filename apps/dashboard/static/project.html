@@ -8282,44 +8282,43 @@
     /* ── Running-pane Gantt timeline (issue #1147) ───────────────────────────
        Per-issue horizontal track rows on a shared sprint time axis.
        Prefix: rp-tl-  (running-pane timeline). All colours use CSS tokens. */
-    .rp-timeline-wrap { display: flex; flex-direction: column; gap: 0; overflow: hidden;
+    .rp-timeline-wrap {
+      --rp-tl-gutter-left: 76px;
+      --rp-tl-gutter-right: 96px;
+      display: flex; flex-direction: column; gap: 0; overflow: hidden;
       border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
-      margin: 0; }
+      margin: 0;
+    }
     .rp-tl-card-header {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
     }
-    .rp-tl-card-title { font-size: 13px; font-weight: 700; color: var(--text);
+    .rp-tl-card-title { font-size: 14px; font-weight: 700; color: var(--text);
       display: inline-flex; align-items: center; gap: 8px; }
-    .rp-tl-card-meta { font-size: 11px; font-family: var(--mono); color: var(--text-muted); }
+    .rp-tl-card-meta { font-size: 12px; font-family: var(--mono); color: var(--text-sub);
+      line-height: 1.4; }
     .rp-tl-section-label {
-      font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-      color: var(--text-sub); padding: 8px 14px 4px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-sub); padding: 10px 16px 6px;
     }
     .rp-tl-split-legend {
-      display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 6px 14px 8px;
-      font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+      display: flex; flex-wrap: wrap; gap: 12px 16px; padding: 8px 16px 12px;
+      font-size: 11px; font-family: var(--mono); color: var(--text-sub);
     }
-    .rp-tl-split-legend-item { display: inline-flex; align-items: center; gap: 5px; }
-    .rp-tl-split-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .rp-tl-split-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .rp-tl-split-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
     .rp-tl-card-footer {
-      display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 8px 14px 10px;
+      display: flex; flex-wrap: wrap; gap: 12px 16px; padding: 10px 16px 12px;
       border-top: 1px solid var(--border); background: var(--surface-2);
-      font-size: 10px; font-family: var(--mono); color: var(--text-muted);
+      font-size: 11px; font-family: var(--mono); color: var(--text-sub); line-height: 1.45;
     }
-    .rp-tl-footer-item { display: inline-flex; align-items: center; gap: 5px; }
+    .rp-tl-footer-item { display: inline-flex; align-items: center; gap: 6px; }
 
     /* Agent time-split bar */
     .rp-tl-split { padding: 0; border-bottom: 1px solid var(--border);
       background: var(--surface); }
-    .rp-tl-split-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden;
-      background: var(--border); gap: 0; margin: 4px 14px 0; position: relative; }
-    .rp-tl-split-bar-labels {
-      display: flex; height: 8px; margin: 2px 14px 0; font-size: 9px; font-family: var(--mono);
-      font-weight: 700; color: var(--text-sub);
-    }
-    .rp-tl-split-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      padding-top: 2px; min-width: 0; }
+    .rp-tl-split-bar { display: flex; height: 14px; border-radius: 6px; overflow: hidden;
+      background: var(--border); gap: 0; margin: 0 16px; position: relative; }
     .rp-tl-split-seg { height: 100%; border-radius: 0; transition: width .3s ease; }
     .rp-tl-split-seg--coder    { background: var(--purple); }
     .rp-tl-split-seg--tester   { background: var(--amber); }
@@ -8329,49 +8328,70 @@
       background-image: repeating-linear-gradient(
         45deg, transparent, transparent 3px, rgba(0,0,0,.15) 3px, rgba(0,0,0,.15) 5px); }
 
-    /* Axis row: gridlines + now-line */
-    .rp-tl-axis-wrap { position: relative; height: 32px; padding: 0 52px 0 64px;
-      border-bottom: 1px solid var(--border); background: var(--surface-2); overflow: hidden; }
-    .rp-tl-started { position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-      font-size: 9px; font-family: var(--mono); color: var(--text-muted); white-space: nowrap;
-      display: inline-flex; align-items: center; gap: 4px; }
-    .rp-tl-now-label { position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
-      font-size: 8px; font-family: var(--mono); color: var(--green, #16a34a); font-weight: 700;
-      white-space: nowrap; }
-    .rp-tl-grid { position: absolute; inset: 0 52px 0 64px; pointer-events: none; }
-    .rp-tl-gridline { position: absolute; top: 0; bottom: 0; width: 1px;
+    /* Axis row: gridlines + now-line — top band for start/finish, lower band for ticks */
+    .rp-tl-axis-wrap {
+      position: relative; min-height: 54px; padding: 8px 0 6px;
+      border-bottom: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+    }
+    .rp-tl-started {
+      position: absolute; left: 10px; top: 8px; z-index: 3;
+      font-size: 11px; font-family: var(--mono); color: var(--text-sub); white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .rp-tl-now-label {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      font-size: 10px; font-family: var(--mono); color: var(--green, #16a34a); font-weight: 700;
+      white-space: nowrap; z-index: 5; padding: 0 4px; background: var(--surface-2);
+    }
+    .rp-tl-grid {
+      position: absolute;
+      top: 28px; right: var(--rp-tl-gutter-right); bottom: 4px;
+      left: var(--rp-tl-gutter-left); pointer-events: none;
+    }
+    .rp-tl-gridline {
+      position: absolute; top: 0; bottom: 0; width: 1px;
       background: var(--border); display: flex; flex-direction: column;
-      align-items: flex-start; }
-    .rp-tl-gridline-label { font-size: 9px; color: var(--text-muted); font-family: var(--mono);
-      padding: 4px 2px 0; white-space: nowrap; user-select: none; }
-    .rp-tl-now { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 4; }
+      align-items: center;
+    }
+    .rp-tl-gridline-label {
+      font-size: 10px; color: var(--text-sub); font-family: var(--mono);
+      padding: 0 2px; white-space: nowrap; user-select: none;
+      transform: translateY(-100%); margin-top: -2px;
+    }
+    .rp-tl-now {
+      position: absolute; top: 28px; bottom: 4px; pointer-events: none; z-index: 4;
+    }
     .rp-tl-now-line { position: absolute; top: 0; bottom: 0; left: 0; width: 2px;
       background: var(--green, #16a34a); box-shadow: 0 0 4px var(--green, #16a34a); }
-    .rp-tl-finish-label { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-      font-size: 9px; font-family: var(--mono); color: var(--text-sub);
-      white-space: nowrap; font-weight: 700; }
+    .rp-tl-finish-label {
+      position: absolute; right: 8px; top: 8px; z-index: 3;
+      font-size: 11px; font-family: var(--mono); color: var(--text-sub);
+      white-space: nowrap; font-weight: 700; text-align: right;
+    }
 
     /* Per-issue row */
-    .rp-tl-row { display: flex; align-items: stretch; min-height: 32px; border-bottom: 1px solid var(--border); }
+    .rp-tl-row { display: flex; align-items: stretch; min-height: 40px; border-bottom: 1px solid var(--border); }
     .rp-tl-row:last-child { border-bottom: none; }
-    .rp-tl-row-left { flex: 0 0 64px; display: flex; align-items: center; justify-content: flex-end;
-      gap: 4px; padding-right: 8px; background: var(--surface-2);
-      border-right: 1px solid var(--border); }
-    .rp-tl-row-icon { font-size: 11px; flex-shrink: 0; width: 14px; text-align: center; }
+    .rp-tl-row-left {
+      flex: 0 0 var(--rp-tl-gutter-left); display: flex; align-items: center; justify-content: flex-end;
+      gap: 5px; padding-right: 10px; background: var(--surface-2);
+      border-right: 1px solid var(--border);
+    }
+    .rp-tl-row-icon { font-size: 12px; flex-shrink: 0; width: 16px; text-align: center; }
     .rp-tl-row-icon--done { color: var(--green); }
     .rp-tl-row-icon--running { color: var(--blue); }
     .rp-tl-row-icon--queued { color: var(--text-sub); }
-    .rp-tl-row-num { font-family: var(--mono); font-size: 10px; font-weight: 700;
-      color: var(--text-muted); }
-    .rp-tl-track { flex: 1 1 auto; position: relative; min-height: 32px; overflow: hidden; }
+    .rp-tl-row-num { font-family: var(--mono); font-size: 11px; font-weight: 700;
+      color: var(--text); }
+    .rp-tl-track { flex: 1 1 auto; position: relative; min-height: 40px; overflow: hidden; }
 
     /* Estimate envelope — grey background behind done-issue segments */
-    .rp-tl-envelope { position: absolute; top: 4px; bottom: 4px; border-radius: 3px;
+    .rp-tl-envelope { position: absolute; top: 8px; bottom: 8px; border-radius: 4px;
       background: #9ca3af; opacity: .18; pointer-events: none; }
 
     /* Segment base */
-    .rp-tl-seg { position: absolute; top: 6px; bottom: 6px; border-radius: 3px;
-      min-width: 2px; pointer-events: none; }
+    .rp-tl-seg { position: absolute; top: 10px; bottom: 10px; border-radius: 4px;
+      min-width: 3px; pointer-events: none; }
     .rp-tl-seg--coder    { background: var(--purple); }
     .rp-tl-seg--tester   { background: var(--amber); }
     .rp-tl-seg--documenter { background: var(--teal); }
@@ -8401,13 +8421,23 @@
     .rp-tl-row--wrapup { margin-top: 12px; border-top: 1px dashed var(--border) !important; }
 
     /* Right-side label */
-    .rp-tl-row-label { flex: 0 0 76px; display: flex; flex-direction: column;
-      align-items: flex-start; justify-content: center; padding: 0 6px 0 4px;
-      border-left: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
-    .rp-tl-metric { font-family: var(--mono); font-size: 10px; font-weight: 700;
-      color: var(--text); white-space: nowrap; }
-    .rp-tl-sub { font-family: var(--mono); font-size: 9px; color: var(--text-muted);
-      white-space: nowrap; }
+    .rp-tl-row-label {
+      flex: 0 0 var(--rp-tl-gutter-right); display: flex; flex-direction: column;
+      align-items: flex-start; justify-content: center; padding: 0 10px 0 6px;
+      border-left: 1px solid var(--border); min-width: 0;
+    }
+    .rp-tl-metric { font-family: var(--mono); font-size: 12px; font-weight: 700;
+      color: var(--text); white-space: nowrap; line-height: 1.25; }
+    .rp-tl-sub { font-family: var(--mono); font-size: 10px; color: var(--text-sub);
+      white-space: nowrap; line-height: 1.3; margin-top: 1px; }
+
+    @media (max-width: 720px) {
+      .rp-timeline-wrap {
+        --rp-tl-gutter-left: 68px;
+        --rp-tl-gutter-right: 84px;
+      }
+      .rp-tl-card-meta { font-size: 11px; }
+    }
 
     @media (prefers-reduced-motion: reduce) {
       .rp-tl-seg--running, .rp-tl-seg--projected { animation: none; }
@@ -15192,14 +15222,11 @@ function _smgmtRpTimelineHtml(data, live) {
   const revPct        = wu.reviewer ? Math.round(revEstMs / agentTotalMs * 100) : 0;
 
   let splitSegs = '';
-  let splitLabels = '';
   if (coderPct  > 0) {
     splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--coder" style="width:' + coderPct + '%"></div>';
-    splitLabels += '<span class="rp-tl-split-bar-label" style="width:' + coderPct + '%">coder ' + coderPct + '%</span>';
   }
   if (testerPct > 0) {
     splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--tester" style="width:' + testerPct + '%"></div>';
-    splitLabels += '<span class="rp-tl-split-bar-label" style="width:' + testerPct + '%">tester ' + testerPct + '%</span>';
   }
   if (docPct > 0) {
     splitSegs += '<div class="rp-tl-split-seg rp-tl-split-seg--documenter rp-tl-split-seg--pending" style="width:' + docPct + '%"></div>';
@@ -15229,16 +15256,20 @@ function _smgmtRpTimelineHtml(data, live) {
   const splitHtml = '<div class="rp-tl-split">'
     + '<div class="rp-tl-section-label">Agent time split (actual so far · doc + review run at sprint end)</div>'
     + '<div class="rp-tl-split-bar">' + splitSegs + '</div>'
-    + (splitLabels ? '<div class="rp-tl-split-bar-labels">' + splitLabels + '</div>' : '')
     + '<div class="rp-tl-split-legend">' + splitLegendItems.join('') + '</div>'
     + '</div>';
 
   let gridLines = '';
   for (let t = 0; t < totalMs; t += 15 * 60 * 1000) {
     const p = pct(axisStartMs + t);
-    const label = t === 0 ? '0' : String(Math.round(t / 60000));
-    const tooClose = Math.abs(p - finishPct) < 5 && t > 0;
-    const labelHtml = tooClose ? '' : '<span class="rp-tl-gridline-label">' + escHtml(label) + '</span>';
+    const label = String(Math.round(t / 60000));
+    const tooCloseFinish = Math.abs(p - finishPct) < 6 && t > 0;
+    const tooCloseStart = p < 7;
+    const tooCloseNow = Math.abs(p - nowPct) < 5;
+    const showLabel = t > 0 && !tooCloseFinish && !tooCloseStart && !tooCloseNow;
+    const labelHtml = showLabel
+      ? '<span class="rp-tl-gridline-label">' + escHtml(label + 'm') + '</span>'
+      : '';
     gridLines += '<div class="rp-tl-gridline" style="left:' + p.toFixed(2) + '%">' + labelHtml + '</div>';
   }
 
@@ -15248,8 +15279,8 @@ function _smgmtRpTimelineHtml(data, live) {
     + 'started ' + escHtml(startedHHMM) + '</span>'
     + '<div class="rp-tl-grid">' + gridLines + '</div>'
     + '<div class="rp-tl-now" style="left:calc(' + nowPct.toFixed(2) + '% - 1px)">'
-    + '<span class="rp-tl-now-label">now ' + escHtml(fmtHHMM(data.server_now)) + '</span>'
     + '<div class="rp-tl-now-line"></div>'
+    + '<span class="rp-tl-now-label">now ' + escHtml(fmtHHMM(data.server_now)) + '</span>'
     + '</div>'
     + '<div class="rp-tl-finish-label">est. finish ' + escHtml(finishHHMM) + '</div>'
     + '</div>';

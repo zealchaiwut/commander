@@ -272,12 +272,14 @@ def _reconcile_counts(label: str, row: dict) -> bool:
         if (i.get("agent_status") or "").lower() == "failed"
         or bool(i.get("failure_reason"))
     )
-    # UAT count cannot be reliably derived from agent_runs alone — preserve stored.
-    stored_uat = int(row.get("summary_uat_count") or 0)
+    uat_count = sum(
+        1 for i in merged
+        if (i.get("status") or "").lower() == "uat"
+    )
 
     new_json = _json.dumps(merged)
     _db().update_sprint_run_counts(
-        label, new_json, settled_done, stored_uat, failure_count,
+        label, new_json, settled_done, uat_count, failure_count,
     )
     _db().update_sprint_reconciliation(label, {
         "source": "count-reconcile",

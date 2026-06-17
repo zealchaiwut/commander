@@ -42,6 +42,14 @@ let _histLedgerCacheRepo = '';
 let _histLedgerCacheAt = 0;
 const _HIST_LEDGER_TTL_MS = 45000;
 let _histLedgerInflight = null;
+
+export function _histResetLedgerCache() {
+  _histLedgerData = [];
+  globalThis._histLedgerData = _histLedgerData;
+  _histLedgerCacheRepo = "";
+  _histLedgerCacheAt = 0;
+  _histLedgerInflight = null;
+}
 let _histRenderRaf = 0;
 
 // Stale-branch scan (issue #808): label -> { sprint, count, branches[],

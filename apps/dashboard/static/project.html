@@ -2073,7 +2073,16 @@
       background: var(--surface-2);
     }
     .hist-card.settled .hist-card-title { color: var(--text-muted); }
-    .hist-card.settled:not(.expanded) { opacity: .92; }
+    /* Completed/settled sprints visibly recede when collapsed — clearly read as
+       "done", not just barely-dimmed (was opacity .92). */
+    .hist-card.settled:not(.expanded) {
+      opacity: .72;
+      background: var(--surface-2, rgba(127,127,127,.06));
+      border-color: color-mix(in srgb, var(--border) 60%, transparent);
+    }
+    .hist-card.settled:not(.expanded):hover { opacity: 1; }
+    .hist-card.settled:not(.expanded) .hist-card-num,
+    .hist-card.settled:not(.expanded) .hist-card-head .hist-state-chip { filter: grayscale(.4); }
     .hist-card.locked:not(.expanded) .hist-card-head {
       align-items: center;
     }

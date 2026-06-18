@@ -10534,8 +10534,26 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
-        elif step.get("base") == "develop" and pr_num:
-            develop_pr = pr_num
+        elif step.get("base") == "develop":
+            if pr_num:
+                develop_pr = pr_num
+            else:
+                # The sprint→develop PR may have already existed (the merge reused
+                # it), so _gh_merge_branch_via_pr returned no number — that left
+                # the base sprint's History/outcome PR link blank (issue: parent
+                # sprint shows no PR). Recover the number from gh (open or merged).
+                try:
+                    _pr_r = subprocess.run(
+                        ["gh", "pr", "list", "--repo", repo, "--head", step["head"],
+                         "--base", "develop", "--state", "all",
+                         "--json", "number", "--limit", "1"],
+                        capture_output=True, text=True, timeout=20,
+                    )
+                    _pr_arr = json.loads(_pr_r.stdout or "[]")
+                    if _pr_arr:
+                        develop_pr = _pr_arr[0].get("number")
+                except Exception:
+                    pass
     return errors, develop_pr
 
 

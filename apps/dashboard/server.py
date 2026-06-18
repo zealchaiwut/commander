@@ -970,11 +970,13 @@ from routers import (  # noqa: E402
     suggestions_router,
     system_router,
     tickets_router,
-    timeline_router, maintenance_router,
+    timeline_router,
+    maintenance_router,
 )
 # broadcast and _subscribers are now owned by routers/logs_service.py; import
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
+
 app.include_router(maintenance_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
@@ -8144,9 +8146,13 @@ def get_estimates_batch(project: str, issues: str = ""):
     }
 
 
-@app.get("/api/sprints/{sprint_label}/state")
-def get_sprint_state(sprint_label: str, project: str):
+@app.get("/api/sprints/{sprint_label}/state-timing")
+def get_sprint_state_timing(sprint_label: str, project: str):
     """Return timing data from sprint-N-state.json for duration display (issue #212).
+
+    Distinct from GET /api/sprints/{sprint_label}/state (plan.json handler).
+    The original handler was registered on the same path and was unreachable
+    (shadowed by the plan handler above); moved to /state-timing (issue #1301).
 
     Returns:
       - wall_clock_secs: total sprint wall-clock time
@@ -9317,8 +9323,6 @@ from calibration_cache_service import (  # noqa: E402
     _calibration_absorb_state_file,
     _refresh_calibration_cache,
 )
-
-_CALIBRATION_SIZES = _CALIBRATION_SIZES  # re-export for any local references
 
 
 def _iter_calibration_state_files(

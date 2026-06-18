@@ -8,6 +8,8 @@ Self-contained: only stdlib + pathlib. No FastAPI, no Neon, no external deps.
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -122,13 +124,41 @@ def _calibration_add_sample(
         cache["points"].append(point)
 
 
+def _lookup_size_from_db(
+    db_path: Path,
+    repo: str,
+    issue_num: int,
+) -> Optional[str]:
+    """Read size-* label from SQLite issues mirror. No GitHub call — local only."""
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute(
+                "SELECT labels FROM issues WHERE repo = ? AND issue_number = ?",
+                (repo, int(issue_num)),
+            ).fetchone()
+        if row is None:
+            return None
+        for lbl in json.loads(row[0] or "[]"):
+            name = lbl.get("name", "")
+            if name.startswith("size-"):
+                sz = name[5:].upper()
+                if sz in _CALIBRATION_SIZES:
+                    return sz
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_calibration_size(
     issue_num: Optional[int],
     estimates_dir: Path,
     state_estimates: dict,
     issue_labels: list[dict],
+    *,
+    db_path: Optional[Path] = None,
+    repo: Optional[str] = None,
 ) -> Optional[str]:
-    """Resolve size with priority: JSON estimate file → state.estimates → size-* label."""
+    """Resolve size: JSON estimate file → state.estimates → size-* label (state or DB)."""
     if issue_num is not None and estimates_dir.is_dir():
         est_file = estimates_dir / f"issue-{issue_num}.json"
         if est_file.is_file():
@@ -153,6 +183,9 @@ def _resolve_calibration_size(
             if sz in _CALIBRATION_SIZES:
                 return sz
 
+    if issue_num is not None and db_path is not None and repo is not None:
+        return _lookup_size_from_db(db_path, repo, issue_num)
+
     return None
 
 
@@ -161,6 +194,9 @@ def _calibration_issue_sample(
     estimates_dir: Path,
     configured_minutes: dict[str, int],
     state_estimates: Optional[dict] = None,
+    *,
+    db_path: Optional[Path] = None,
+    repo: Optional[str] = None,
 ) -> Optional[tuple[str, float, dict]]:
     """Return (size, actual_minutes, point_dict) for one completed ticket, or None."""
     if issue.get("status") not in _CALIBRATION_DONE_STATUSES:
@@ -171,6 +207,8 @@ def _calibration_issue_sample(
         estimates_dir,
         state_estimates or {},
         issue.get("labels") or [],
+        db_path=db_path,
+        repo=repo,
     )
     if size not in _CALIBRATION_SIZES:
         return None
@@ -204,6 +242,8 @@ def _calibration_absorb_state_file(
     estimates_dir: Path,
     configured_minutes: dict[str, int],
     processed: set[str],
+    *,
+    db_path: Optional[Path] = None,
 ) -> bool:
     """Merge new tickets from one state file into cache; return True if anything added."""
     try:
@@ -211,6 +251,7 @@ def _calibration_absorb_state_file(
     except (json.JSONDecodeError, OSError):
         return False
 
+    repo = state_data.get("project") or None
     state_estimates = state_data.get("estimates") or {}
     changed = False
     for issue in state_data.get("issues", []):
@@ -220,8 +261,12 @@ def _calibration_absorb_state_file(
         key = _calibration_state_key(state_file, sprints_dir, issue_num)
         if key in processed:
             continue
-        sample = _calibration_issue_sample(issue, estimates_dir, configured_minutes,
-                                           state_estimates=state_estimates)
+        sample = _calibration_issue_sample(
+            issue, estimates_dir, configured_minutes,
+            state_estimates=state_estimates,
+            db_path=db_path,
+            repo=repo,
+        )
         if sample is None:
             continue
         size, actual_minutes, point = sample
@@ -235,12 +280,22 @@ def _calibration_absorb_state_file(
 def _refresh_calibration_cache(
     project_root: Path,
     configured_minutes: dict[str, int],
+    *,
+    db_path: Optional[Path] = None,
 ) -> dict:
     """Merge sprint state files into calibration_cache.json (durable local store).
 
     Live sprint-*-state.json files and archive/ copies are scanned every refresh;
-    the processed list prevents double-counting. Returns (cache, new_sample_count).
+    the processed list prevents double-counting. Returns the updated cache dict.
+
+    db_path: path to dashboard.db for SQLite issues-table label fallback.
+    If omitted, auto-detected from DB_PATH env var.
     """
+    if db_path is None:
+        env_db = os.environ.get("DB_PATH")
+        if env_db:
+            db_path = Path(env_db)
+
     commander = project_root / ".commander"
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
@@ -257,6 +312,7 @@ def _refresh_calibration_cache(
             if _calibration_absorb_state_file(
                 cache, state_file, sprints_dir, estimates_dir,
                 configured_minutes, processed,
+                db_path=db_path,
             ):
                 changed = True
 
@@ -264,6 +320,7 @@ def _refresh_calibration_cache(
         if _calibration_absorb_state_file(
             cache, state_file, sprints_dir, estimates_dir,
             configured_minutes, processed,
+            db_path=db_path,
         ):
             changed = True
 

@@ -1344,9 +1344,15 @@ async def health_check(request: Request):
 
 @app.get("/api/environment")
 def get_environment():
-    """Return the current runtime environment (prd or uat) and feature flags."""
+    """Return the current runtime environment (prd or uat), port, and feature flags."""
+    _port = os.environ.get("PORT") or os.environ.get("UVICORN_PORT") or ""
+    try:
+        _port = str(int(_port)) if _port else ""
+    except (TypeError, ValueError):
+        _port = ""
     return {
         "environment": ENVIRONMENT,
+        "port": _port,
         "features": config.commander_features(),
     }
 

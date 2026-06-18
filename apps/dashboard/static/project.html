@@ -125,6 +125,19 @@
       flex-shrink: 0;
     }
     .top-nav-left { display: flex; align-items: center; gap: var(--space-2); }
+    /* Environment indicator (#5): blue bar + port for prd, grey for uat. */
+    .top-nav.env-prd {
+      background: var(--blue, #2563eb);
+      border-bottom-color: color-mix(in srgb, var(--blue, #2563eb) 70%, black);
+    }
+    .top-nav.env-prd .brand-wordmark,
+    .top-nav.env-prd .brand-mark { color: #fff; }
+    .env-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface-2, rgba(127,127,127,.14)); color: var(--text-muted);
+    }
+    .top-nav.env-prd .env-badge { background: rgba(255,255,255,.22); color: #fff; }
     .brand-mark {
       width: 26px; height: 26px; border-radius: var(--radius-md);
       background: var(--text);
@@ -9196,6 +9209,7 @@
   <div class="top-nav-left">
     <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
     <span class="brand-wordmark">Commander</span>
+    <span class="env-badge" id="env-badge" hidden></span>
   </div>
   <div class="global-search-wrap">
     <i class="ti ti-search global-search-icon"></i>
@@ -9210,6 +9224,24 @@
     </button>
   </div>
 </nav>
+<script>
+  // Environment indicator (#5): colour the top nav blue + show the port when this
+  // dashboard is the PRD instance; leave grey for UAT. Default grey on any error.
+  (function () {
+    fetch('/api/environment').then(function (r) { return r.json(); }).then(function (d) {
+      var env = (d && d.environment ? String(d.environment) : '').toLowerCase();
+      var port = (d && d.port) ? String(d.port) : '';
+      var nav = document.querySelector('.top-nav');
+      var badge = document.getElementById('env-badge');
+      var isPrd = env && env !== 'uat' && env !== 'dev';
+      if (nav && isPrd) nav.classList.add('env-prd');
+      if (badge) {
+        var label = (env ? env.toUpperCase() : (isPrd ? 'PRD' : '')) + (port ? ' · :' + port : '');
+        if (label) { badge.textContent = label; badge.hidden = false; }
+      }
+    }).catch(function () { /* leave the default grey bar */ });
+  })();
+</script>
 
 <!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
 <aside class="todo-dock collapsed" id="todo-dock" aria-label="Project to-do list">

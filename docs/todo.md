@@ -117,6 +117,38 @@ Agreed 2026-06-13; do not start while 67.1 is running.
       from `/api/status` (sub-label aware, real progress), GitHub heuristic only
       when nothing runs. One source for "what's running."
 
+### Deferred bug investigations (noted 2026-06-18; investigate later)
+
+Reported during the running-pane / nav hotfix batch (PR #1374). Root-caused but
+intentionally **not fixed yet** — think about A + B before touching them.
+
+- [ ] **A. Running-pane "agents time" is wrong.** Per-issue timeline shows a
+      ticket labelled **M** with `est 120m` while an **L** shows `est 30m`
+      (inverted/nonsensical). Per-issue minutes come from the estimate JSON via
+      `_live_issue_size_and_minutes` (server.py ~7180), **not** the size→minutes
+      table — so the estimator's `minutes` and its size letter disagree. Next
+      step: read an actual `.commander/estimates/issue-<N>.json` for an affected
+      ticket to confirm it's estimator data vs. a `_letter_from_minutes`/
+      `_minutes_from_letter` derivation bug, then decide whether to trust the
+      label or the minutes.
+- [ ] **B. No "dispatch coder" log in the running pane for ~3 min after start.**
+      Orchestrator panel tails `sprint-run-<label>-*.log` via
+      `read_log("dispatch")` (routers/sprints_service.py:450). `sprint_manager`
+      writes `"Dispatching coder for issue #N …"` to **stdout**
+      (sprint_manager.py:5050), but it doesn't reach the tailed log file early —
+      likely stdout buffering or the file is written/flushed later. Next step:
+      trace where the run's stdout is redirected into that log file and ensure
+      early dispatch lines flush (e.g. line-buffered / explicit flush) so at
+      least "Dispatching coder" shows promptly.
+- [ ] **C. Lint gate (F401) fails on tester-written test files.** Tester
+      generated `tests/test_compute_strength_tss__594.py` with `import pytest`
+      that's never used → ruff `F401 'pytest' imported but unused` fails the lint
+      gate and rejects the ticket. Tester should run `ruff check --fix tests/`
+      (or avoid unused imports) before submitting so a trivially auto-fixable
+      lint nit doesn't gate a passing ticket. Consider auto-running `ruff
+      check --fix` on tester output, or adding it to the tester agent's
+      pre-submit checklist.
+
 <!-- Anything above this line is hand-maintained. -->
 
 <!-- AUTO:milestones START -->

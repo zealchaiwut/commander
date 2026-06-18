@@ -8314,8 +8314,14 @@
       border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
     .node-fix-badge {
       flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .03em;
-      padding: 2px 7px; border-radius: 999px; background: var(--red-bg); color: var(--red);
+      padding: 2px 7px; border-radius: 999px; background: var(--amber-bg, rgba(245,158,11,.18)); color: var(--amber, #d97706);
       text-transform: uppercase;
+    }
+    /* A ticket that failed and is pending/under retry — amber tint so it reads
+       differently from a fresh queued node (#2). */
+    .node.node--retrying {
+      background: var(--amber-bg, rgba(245,158,11,.10));
+      border-color: color-mix(in srgb, var(--amber, #d97706) 45%, transparent);
     }
     .node-agent {
       flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
@@ -14929,6 +14935,11 @@ function _smgmtRailFixRound(iss) {
   return null;
 }
 
+function _ordinalAttempt(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 function _smgmtLevelDurationSecs(issues) {
   let max = 0;
   (issues || []).forEach(i => {
@@ -14983,9 +14994,11 @@ function _smgmtRailNodeHtml(iss, live) {
   const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
   const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
   const fr = _smgmtRailFixRound(iss);
-  const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
+  // fr = number of prior attempts that FAILED (a fix round only exists after a
+  // failure), so label it plainly: "1st attempt — failed", etc. The node also
+  // gets an amber tint so a pending-retry reads differently from a fresh queue.
   const fixBadge = fr
-    ? `<span class="node-fix-badge">Fix round ${fr}/${maxRounds}</span>` : '';
+    ? `<span class="node-fix-badge">${_ordinalAttempt(fr)} attempt — failed</span>` : '';
   let agentBadge = '';
   if (state === 'coder-active') {
     const cm = _shortModelName(iss.coder_model);
@@ -15005,7 +15018,8 @@ function _smgmtRailNodeHtml(iss, live) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
   }
   const issueUrl = _smgmtIssueUrl(iss);
-  return `<button type="button" class="node ${state}${selected ? ' selected' : ''}" role="listitem"`
+  const retryCls = (fr && state !== 'done') ? ' node--retrying' : '';
+  return `<button type="button" class="node ${state}${retryCls}${selected ? ' selected' : ''}" role="listitem"`
     + ` data-issue="${num}" aria-selected="${selected ? 'true' : 'false'}"`
     + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`

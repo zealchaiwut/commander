@@ -262,7 +262,7 @@ _AGENT_RUN_FAILED = {"fail", "failed", "reject", "rejected", "crash", "crashed",
                      "skipped", "error"}
 
 
-def _issues_from_agent_runs(label: str) -> list[dict]:
+def _issues_from_agent_runs(label: str, project: str | None = None) -> list[dict]:
     """Synthesize issue rows from agent_runs, deriving each ticket's disposition
     from its run outcomes.
 
@@ -272,7 +272,7 @@ def _issues_from_agent_runs(label: str) -> list[dict]:
     matches the Board rather than hiding successes.
     """
     try:
-        rows = _db().agent_runs_for_sprint(label)
+        rows = _db().agent_runs_for_sprint(label, project=project)
     except Exception:
         return []
     agg: dict[int, dict] = {}
@@ -717,6 +717,7 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
 
     _fill_missing_links(records, sprints_dirs)
     _attribute_issues_to_runs(records)
+    _drop_cross_project_issues(records)
 
 
 def _attribute_issues_to_runs(records: list[dict]) -> None:
@@ -739,7 +740,7 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
         if not label:
             continue
         try:
-            rows = _db().agent_runs_for_sprint(label)
+            rows = _db().agent_runs_for_sprint(label, project=rec.get("project") or None)
         except Exception:
             rows = []
         nums: set[int] = set()
@@ -765,6 +766,46 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
         rec["issues"] = [
             i for i in (rec.get("issues") or [])
             if i.get("ticket_id") in ran_here and i.get("ticket_id") not in ran_in_children
+        ]
+
+
+def _drop_cross_project_issues(records: list[dict]) -> None:
+    """Remove tickets that don't belong to the sprint's project (Tier 1).
+
+    Sprint labels are unique only per repo, and agent_runs / ingested issues_json
+    are keyed by label alone — so a sprint can pick up tickets from another
+    project's same-numbered sprint (e.g. perf-coach sprint-64 showing commander's
+    #839-844). Filter each sprint's issue list to numbers present in THIS
+    project's issue mirror (repo-scoped). Skipped when the project's mirror is
+    empty so we never blank a sprint just because its mirror hasn't synced.
+    """
+    mirror_by_project: dict[str, set[int]] = {}
+    for rec in records:
+        project = rec.get("project") or ""
+        if not project or project in mirror_by_project:
+            continue
+        nums: set[int] = set()
+        try:
+            for i in _db().get_mirrored_issues(project):
+                n = i.get("number", i.get("issue_number"))
+                try:
+                    n = int(n)
+                except (TypeError, ValueError):
+                    continue
+                if n > 0:
+                    nums.add(n)
+        except Exception:
+            nums = set()
+        mirror_by_project[project] = nums
+
+    for rec in records:
+        project = rec.get("project") or ""
+        owned = mirror_by_project.get(project)
+        if not owned:
+            continue  # no mirror for this project — don't risk blanking the list
+        rec["issues"] = [
+            i for i in (rec.get("issues") or [])
+            if i.get("ticket_id") in owned
         ]
 
 

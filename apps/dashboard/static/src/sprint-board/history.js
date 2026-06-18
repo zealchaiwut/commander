@@ -562,15 +562,29 @@ function _histShouldAutoExpand(s) {
   return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge' || st === 'running';
 }
 
+// Base labels whose default group-collapse has already been applied, so a user
+// who manually expands a completed parent isn't re-collapsed on the next render.
+const _histCollapseDefaultsApplied = new Set();
+
 function _histAutoExpandRecent(groups) {
   const _expand = (s) => {
     if (!_histShouldAutoExpand(s)) return;
     _histExpanded.add(s.label);
     _histLoadRunStats(s.label);
   };
-  for (let i = 0; i < groups.length && i < _histFoldSize; i++) {
+  for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
     const children = g.children || [];
+    // Completed parent groups start collapsed by default (just the parent row) —
+    // their detail is historical. Apply once per base label so manual expands
+    // stick (#5). Only relevant to groups that actually have children.
+    const baseLbl = g.baseLabel || (g.baseSprint && g.baseSprint.label) || '';
+    if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
+      _histCollapseDefaultsApplied.add(baseLbl);
+      const st = ((g.baseSprint && g.baseSprint.lifecycle_state) || '').toLowerCase();
+      if (st === 'completed') _histGroupCollapsed.add(baseLbl);
+    }
+    if (i >= _histFoldSize) continue;
     if (children.length) {
       // Re-run chain: collapse the parent and older children; expand only the
       // latest child (children are sub-ascending, so the last one) by default.

@@ -33,8 +33,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "default_branch_prd": {"secret": False, "default": "master"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},
-    # Concurrent pipeline mode (issue #737) — opt-in, default serial
-    "pipeline_mode": {"secret": False, "default": False},
+    # Concurrent pipeline mode (issue #737) — on by default (1 coder + 1 tester
+    # concurrent); projects can still opt out to serial dispatch.
+    "pipeline_mode": {"secret": False, "default": True},
     # Estimation defaults (size → minutes table + buffer)
     "estimation_s_minutes": {"secret": False, "default": 5},
     "estimation_m_minutes": {"secret": False, "default": 15},

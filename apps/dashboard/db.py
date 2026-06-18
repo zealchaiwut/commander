@@ -1072,6 +1072,9 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         ("attempt_kind", "TEXT"),
         ("log_path", "TEXT"),
         ("backend", "TEXT"),
+        # Owning project (owner/repo). Sprint labels are unique only per repo, so
+        # without this a same-numbered sprint in another project mixes in here.
+        ("project", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -1168,6 +1171,7 @@ def record_agent_start(
     attempt_kind: str | None = None,
     log_path: str | None = None,
     backend: str | None = None,
+    project: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -1187,10 +1191,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path, backend) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path, backend, project) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path, backend),
+             worktree_sha, base_sha, attempt_kind, log_path, backend, project),
         )
         conn.commit()
         return cur.lastrowid
@@ -1287,10 +1291,26 @@ def update_worktree_shas(
         conn.commit()
 
 
-def agent_runs_for_sprint(sprint_label: str) -> list[dict]:
-    """Return all agent_runs rows for a sprint, ordered by issue then start (#764)."""
+def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list[dict]:
+    """Return all agent_runs rows for a sprint, ordered by issue then start (#764).
+
+    When *project* is given, rows are scoped to it — sprint labels are unique only
+    per repo, so an unscoped read mixes a same-numbered sprint from another
+    project. Legacy rows written before the project column existed have NULL
+    project; if the project filter finds none, fall back to the label-only read so
+    pre-migration sprints still render (their cross-project bleed, if any, is
+    masked downstream by the issue-mirror filter).
+    """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
+        if project:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE sprint_label = ? AND project = ? "
+                "ORDER BY issue_number, id",
+                (sprint_label, project),
+            ).fetchall()
+            if rows:
+                return [dict(r) for r in rows]
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",

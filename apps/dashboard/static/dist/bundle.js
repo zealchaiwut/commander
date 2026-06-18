@@ -1425,6 +1425,7 @@ Replace the existing draft (${data.existing_label})?`
       return false;
     return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running";
   }
+  var _histCollapseDefaultsApplied = /* @__PURE__ */ new Set();
   function _histAutoExpandRecent(groups) {
     const _expand = (s) => {
       if (!_histShouldAutoExpand(s))
@@ -1432,9 +1433,18 @@ Replace the existing draft (${data.existing_label})?`
       _histExpanded.add(s.label);
       _histLoadRunStats(s.label);
     };
-    for (let i = 0; i < groups.length && i < _histFoldSize; i++) {
+    for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       const children = g.children || [];
+      const baseLbl = g.baseLabel || g.baseSprint && g.baseSprint.label || "";
+      if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
+        _histCollapseDefaultsApplied.add(baseLbl);
+        const st = (g.baseSprint && g.baseSprint.lifecycle_state || "").toLowerCase();
+        if (st === "completed")
+          _histGroupCollapsed.add(baseLbl);
+      }
+      if (i >= _histFoldSize)
+        continue;
       if (children.length) {
         _expand(children[children.length - 1]);
       } else {

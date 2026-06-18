@@ -2157,6 +2157,14 @@
       background: var(--surface);
       cursor: pointer;
     }
+    /* Completed group recedes when collapsed, mirroring .hist-card.settled. */
+    .hist-parent-row.settled:not(.expanded) {
+      opacity: .72;
+      background: var(--surface-2, rgba(127,127,127,.06));
+      border-color: color-mix(in srgb, var(--border) 60%, transparent);
+    }
+    .hist-parent-row.settled:not(.expanded):hover { opacity: 1; }
+    .hist-parent-row.settled:not(.expanded) .hist-parent-name { color: var(--text-muted); }
     .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     .hist-parent-body { padding: 4px 14px 8px; }
@@ -9745,8 +9753,109 @@
                /api/sprints/history feed (issue #805), no GitHub call at read. -->
           <!-- The legacy Sprint Summaries pane was removed — each ledger card
                carries its own Summary link pill now. -->
+          <!-- Sprints-table CSV export/import (PRD→UAT data sync for testing) -->
+          <div class="hist-csv-toolbar">
+            <button type="button" class="hist-head-btn" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
+              <i class="ti ti-download"></i> Export CSV</button>
+            <button type="button" class="hist-head-btn" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
+              <i class="ti ti-upload"></i> Import CSV</button>
+            <input type="file" id="hist-csv-file" accept=".csv,text/csv" hidden onchange="_histCsvImportPicked(event)">
+          </div>
           <div class="hist-ledger" id="hist-ledger"></div>
         </div><!-- /smgmt-subview-history -->
+        <!-- Sprints-CSV confirm modal (shared by export + import) -->
+        <div class="hist-csv-modal-backdrop" id="hist-csv-modal" hidden onclick="if(event.target===this)_histCsvModalClose()">
+          <div class="hist-csv-modal" role="dialog" aria-modal="true">
+            <div class="hist-csv-modal-title" id="hist-csv-modal-title"></div>
+            <div class="hist-csv-modal-body" id="hist-csv-modal-body"></div>
+            <div class="hist-csv-modal-actions">
+              <button type="button" class="btn-ghost" onclick="_histCsvModalClose()">Cancel</button>
+              <button type="button" class="btn-primary" id="hist-csv-modal-confirm">Confirm</button>
+            </div>
+          </div>
+        </div>
+        <style>
+          .hist-csv-toolbar { display: flex; gap: 8px; justify-content: flex-end; margin: 0 0 8px; }
+          .hist-csv-modal-backdrop {
+            position: fixed; inset: 0; z-index: var(--z-modal, 1000);
+            background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center;
+          }
+          .hist-csv-modal-backdrop[hidden] { display: none; }
+          .hist-csv-modal {
+            background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+            box-shadow: var(--shadow-panel); padding: 18px 20px; width: min(440px, 92vw);
+          }
+          .hist-csv-modal-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+          .hist-csv-modal-body { font-size: 13px; color: var(--text-sub); line-height: 1.5; margin-bottom: 16px; }
+          .hist-csv-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        </style>
+        <script>
+          let _histCsvModalCb = null;
+          function _histCsvRepo() { return (typeof _smgmtRepo === 'function' ? (_smgmtRepo() || '') : ''); }
+          function _histCsvModalClose() {
+            const m = document.getElementById('hist-csv-modal'); if (m) m.hidden = true; _histCsvModalCb = null;
+          }
+          function _histCsvModalOpen(title, bodyHtml, confirmLabel, onConfirm) {
+            document.getElementById('hist-csv-modal-title').textContent = title;
+            document.getElementById('hist-csv-modal-body').innerHTML = bodyHtml;
+            const btn = document.getElementById('hist-csv-modal-confirm');
+            btn.textContent = confirmLabel || 'Confirm';
+            _histCsvModalCb = onConfirm;
+            btn.onclick = function () { const cb = _histCsvModalCb; _histCsvModalClose(); if (cb) cb(); };
+            document.getElementById('hist-csv-modal').hidden = false;
+          }
+          function _histCsvExport() {
+            const repo = _histCsvRepo();
+            if (!repo) { if (typeof _smgmtShowToast === 'function') _smgmtShowToast('No project selected'); return; }
+            _histCsvModalOpen(
+              'Export sprints CSV',
+              'Download the <b>' + escHtml(repo) + '</b> sprints table (lifecycle rows only) as CSV. Read-only — nothing changes.',
+              'Export',
+              function () {
+                const a = document.createElement('a');
+                a.href = '/api/maintenance/sprints/export?project=' + encodeURIComponent(repo);
+                a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+                if (typeof _smgmtShowToast === 'function') _smgmtShowToast('Exporting ' + repo + ' sprints…');
+              }
+            );
+          }
+          function _histCsvImportPicked(ev) {
+            const file = ev.target.files && ev.target.files[0];
+            ev.target.value = '';
+            if (!file) return;
+            const repo = _histCsvRepo();
+            if (!repo) { if (typeof _smgmtShowToast === 'function') _smgmtShowToast('No project selected'); return; }
+            const reader = new FileReader();
+            reader.onload = function () {
+              const text = String(reader.result || '');
+              const rowCount = text.split(/\r?\n/).filter(function (l) { return l.trim().length; }).length - 1;
+              _histCsvModalOpen(
+                'Import sprints CSV',
+                'Merge <b>' + Math.max(0, rowCount) + '</b> row(s) into <b>' + escHtml(repo) + '</b>.<br>' +
+                'Rows with a matching sprint label are <b>overwritten</b>; new ones are added; every row is forced to this project.<br>' +
+                '<span style="color:var(--amber,#d97706)">This writes to the database — back up first if unsure.</span>',
+                'Import (merge)',
+                function () {
+                  fetch('/api/maintenance/sprints/import?project=' + encodeURIComponent(repo) + '&mode=merge',
+                        { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: text })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                      if (d && d.ok) {
+                        const skipped = (d.errors && d.errors.length) ? ' · ' + d.errors.length + ' skipped' : '';
+                        if (typeof _smgmtShowToast === 'function')
+                          _smgmtShowToast('Imported: ' + d.inserted + ' new, ' + d.updated + ' updated (' + d.before + '→' + d.after + ')' + skipped);
+                        if (typeof _histLoadLedger === 'function') _histLoadLedger(repo, { force: true });
+                      } else if (typeof _smgmtShowToast === 'function') {
+                        _smgmtShowToast('Import failed: ' + ((d && d.error) || 'unknown error'));
+                      }
+                    })
+                    .catch(function (e) { if (typeof _smgmtShowToast === 'function') _smgmtShowToast('Import error: ' + e); });
+                }
+              );
+            };
+            reader.readAsText(file);
+          }
+        </script>
 
       </div>
 

@@ -6305,7 +6305,7 @@ ${data.errors.join("\n")}`);
   }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
-    const isLinger = !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    const isLinger = false;
     const isRunningView = isRunning || isLinger;
     let isCollapsed = isRunning;
     try {

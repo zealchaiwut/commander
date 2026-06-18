@@ -1208,8 +1208,11 @@ export function _smgmtCardHtml(
   finished,
 ) {
   const isRunning = _smgmtRunningLabels.has(label);
-  const isLinger =
-    !isRunning && typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+  // Linger (the frozen "snapshot kept 1 hour" running-style card) is a Running-pane
+  // concept only. On the Board a just-finished sprint renders as a normal settled
+  // post-run card (rework / ready-to-merge), not a lingering running snapshot. The
+  // Running pane keeps linger via _smgmtRunningCardHtml.
+  const isLinger = false;
   const isRunningView = isRunning || isLinger;
   // Running sprints default to collapsed on the Board — their live detail lives
   // in the Running pane, reachable via the header deep-link (hotfix #5). The

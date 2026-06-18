@@ -1266,6 +1266,42 @@ Replace the existing draft (${data.existing_label})?`
       return false;
     return true;
   }
+  function _histFailedBlockHtml(s) {
+    if (!_histSprintFailed(s))
+      return "";
+    const state = (s.lifecycle_state || "").toLowerCase();
+    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
+    const sprintReason = s.failure_reason || s.end_reason;
+    if (!failed.length && !sprintReason)
+      return "";
+    const items = failed.map((ft) => {
+      const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
+      const reason = ft.failure_reason || "Agent failed";
+      return `<div class="hist-fail-item"><span class="fail-id">${escHtml(String(id))}</span><span>${escHtml(String(reason))}</span></div>`;
+    }).join("");
+    const summary = !failed.length && sprintReason ? `<div class="hist-fail-item"><span>${escHtml(String(sprintReason))}</span></div>` : "";
+    return `<div class="hist-fail-block">
+    <div class="fail-head"><i class="ti ti-alert-triangle"></i> Sprint failed</div>
+    ${items}${summary}
+  </div>`;
+  }
+  function _histPartialChildrenHtml(s) {
+    const state = (s.lifecycle_state || "").toLowerCase();
+    if (state !== "partial_finished")
+      return "";
+    const children = Array.isArray(s.partial_children) ? s.partial_children : [];
+    if (!children.length)
+      return "";
+    const links = children.map((c) => {
+      const lbl = escHtml(c);
+      const display = typeof sprintLabelDisplay === "function" ? sprintLabelDisplay(c) : c;
+      return `<button type="button" class="hist-partial-link" onclick="event.stopPropagation();_histFocusLabel('${lbl}')">${escHtml(display)}</button>`;
+    }).join("");
+    return `<div class="hist-partial-block">
+    <i class="ti ti-arrows-split"></i>
+    <span>Tickets moved to child sprint${children.length !== 1 ? "s" : ""}: ${links}</span>
+  </div>`;
+  }
   function _histFocusLabel(label) {
     if (!label)
       return;
@@ -1274,6 +1310,19 @@ Replace the existing draft (${data.existing_label})?`
     const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function _histIssueListHtml(s) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const isChild = _histIsChild(s.label);
+    const failedBlock = _histFailedBlockHtml(s);
+    const partialBlock = _histPartialChildrenHtml(s);
+    if (!issues.length) {
+      if (partialBlock)
+        return `${failedBlock}${partialBlock}`;
+      const empty = failedBlock ? "" : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
+      return `${failedBlock}${empty}`;
+    }
+    return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>`;
   }
   function _histRepo(s) {
     const cached = _cachedFullRepo[_slug];
@@ -2300,8 +2349,10 @@ Replace the existing draft (${data.existing_label})?`
       const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
       const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
       const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded) : "";
+      const parentOwnIssues = group.baseSprint && Array.isArray(group.baseSprint.issues) ? group.baseSprint.issues : [];
+      const parentBody = groupExpanded && parentOwnIssues.length ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>` : "";
       const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
+      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
     if (group.baseSprint) {
       return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
@@ -6331,7 +6382,16 @@ ${data.errors.join("\n")}`);
         ).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
-        const issueList = outcome.issues || [];
+        const _movedToChild = /* @__PURE__ */ new Set();
+        try {
+          Object.keys(_smgmtBySprint || {}).forEach((cl) => {
+            if (cl !== label && cl.startsWith(label + ".")) {
+              (_smgmtBySprint[cl] || []).forEach((t) => _movedToChild.add(t.number));
+            }
+          });
+        } catch (_) {
+        }
+        const issueList = (outcome.issues || []).filter((i) => !_movedToChild.has(i.number));
         ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
           issueList,
           label,

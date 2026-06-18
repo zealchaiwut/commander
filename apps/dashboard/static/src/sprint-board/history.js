@@ -1650,8 +1650,16 @@ function _histGroupHtml(group) {
     const parentRow = group.baseSprint
       ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded)
       : "";
+    // Render the parent's OWN tickets (the ones it still owns after re-runs
+    // moved some to children) under its row when the group is expanded — a
+    // parent used to show no issue list at all, hiding its completed tickets.
+    const parentOwnIssues = (group.baseSprint && Array.isArray(group.baseSprint.issues))
+      ? group.baseSprint.issues : [];
+    const parentBody = (groupExpanded && parentOwnIssues.length)
+      ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>`
+      : "";
     const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}<div class="hist-child-wrap">${childHtml}</div></div>`;
+    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
   if (group.baseSprint) {
     return _histIsChild(group.baseSprint.label)

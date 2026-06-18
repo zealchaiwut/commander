@@ -8361,6 +8361,22 @@ def _outcome_from_ingested_row(
     except Exception:
         pass
 
+    # Tier-1 cross-project filter: the ingested issues_json and the agent_runs
+    # union are keyed by label only, so a same-numbered sprint in another project
+    # can leak its tickets in (e.g. commander #839-844 into perf-coach sprint-64).
+    # Keep only tickets in THIS project's repo-scoped issue mirror; skip when the
+    # mirror is empty so we never blank an unsynced sprint.
+    try:
+        _owned = {
+            int(i.get("number", i.get("issue_number")))
+            for i in db.get_mirrored_issues(project)
+            if (i.get("number", i.get("issue_number")) is not None)
+        }
+        if _owned:
+            result_issues = [i for i in result_issues if i.get("number") in _owned]
+    except Exception:
+        pass
+
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"

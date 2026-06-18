@@ -1941,7 +1941,12 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(s.label);
     const lbl = escHtml(s.label || "");
     const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
-    return `<div class="hist-parent-row" data-label="${lbl}" role="button" tabindex="0"
+    const cls = ["hist-parent-row"];
+    if (String(s.lifecycle_state || "").toLowerCase() === "completed")
+      cls.push("settled");
+    if (groupExpanded)
+      cls.push("expanded");
+    return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
     onclick="_histToggleGroup('${lbl}')"
     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
     <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
@@ -2308,7 +2313,15 @@ Replace the existing draft (${data.existing_label})?`
         g.children.push(s);
       g.order = Math.min(g.order, i);
     }
-    groupOrder.sort((a, b) => byBase.get(a).order - byBase.get(b).order);
+    const _UNSETTLED = /* @__PURE__ */ new Set(["needs_rework", "failed", "cancelled", "ready_to_merge", "running"]);
+    const _groupUnsettled = (g) => [g.baseSprint, ...g.children || []].filter(Boolean).some((s) => _UNSETTLED.has((s.lifecycle_state || "").toLowerCase()));
+    groupOrder.sort((a, b) => {
+      const ua = _groupUnsettled(byBase.get(a)) ? 0 : 1;
+      const ub = _groupUnsettled(byBase.get(b)) ? 0 : 1;
+      if (ua !== ub)
+        return ua - ub;
+      return byBase.get(a).order - byBase.get(b).order;
+    });
     return groupOrder.map((baseLabel) => {
       const g = byBase.get(baseLabel);
       g.children.sort((a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub);

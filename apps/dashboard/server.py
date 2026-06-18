@@ -4692,7 +4692,7 @@ _NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
 })
 
 
-def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
+def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, project: str | None = None) -> None:
     """Raise 409 when the label *actually ran* and reached a terminal state.
 
     Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
@@ -4709,9 +4709,12 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> 
     not a run.
     """
     # 1. Durable lifecycle table — authoritative when a row exists.
+    #    Scope by project: sprint labels (e.g. sprint-64) are only unique per
+    #    repo, so an unscoped lookup let a completed sprint-64 on one project
+    #    block a brand-new sprint-64 on another (cross-project re-dispatch leak).
     durable_state = None
     try:
-        row = db.get_sprint(sprint_label)
+        row = db.get_sprint(sprint_label, project=project)
         if row:
             durable_state = row.get("state")
     except Exception:
@@ -6478,7 +6481,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     commander    = _commander_dir(project_root)
 
     # One label = one attempt: terminal labels are never re-dispatched (P0).
-    _reject_terminal_label_redispatch(project_root, body.sprint_label)
+    _reject_terminal_label_redispatch(project_root, body.sprint_label, project=body.project)
 
     # Pending sign-off gate (issue #862): a planned sprint must be approved
     # before it can run. Blocks silent advance past the governance gate.
@@ -8458,7 +8461,10 @@ def _derive_outcome_lifecycle(
     Reads parent canonical state and child rows exclusively from the sprints DB
     table (issue #1093). No GitHub label lookups, no disk globs.
     """
-    row = db.get_sprint(sprint_label)
+    # Scope by project — sprint labels are unique only per repo (see
+    # _reject_terminal_label_redispatch): an unscoped lookup leaks a same-label
+    # row from another project.
+    row = db.get_sprint(sprint_label, project=project)
     if row is None:
         return db.canonical_lifecycle(pane_state)
     parent_state = db.canonical_lifecycle(row["state"])

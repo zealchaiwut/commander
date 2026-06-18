@@ -24,6 +24,48 @@ class BacklogCleanupBody(BaseModel):
     issue_numbers: list[int] = []
 
 
+@router.post("/api/projects/{owner}/{repo_name}/backlog/triage-apply")
+def backlog_triage_apply(owner: str, repo_name: str, body: BacklogCleanupBody):
+    """Close the operator-selected triaged backlog tickets.
+
+    Unlike backlog/cleanup (which only closes numbers that the regex scan
+    independently flags), this trusts the human's triage selection and closes the
+    given numbers directly — but stays safe by closing ONLY open backlog issues
+    (no sprint-labelled ones). Returns {closed, errors}.
+    """
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Request must have confirmed=true")
+    repo = f"{owner}/{repo_name}"
+    nums = [int(n) for n in (body.issue_numbers or [])]
+    if not nums:
+        return {"closed": [], "errors": []}
+    try:
+        import github_client as gc  # noqa: PLC0415
+        backlog_nums = {
+            i.get("number") for i in gc.list_open_issues_with_body(repo_name=repo, limit=300)
+            if backlog_cleanup_service.is_backlog_issue(i)
+        }
+        closed: list[int] = []
+        errors: list[str] = []
+        for n in nums:
+            if n not in backlog_nums:
+                errors.append(f"#{n}: not an open backlog issue — skipped")
+                continue
+            try:
+                gc.close_issue(n, repo_name=repo, reason="not planned")
+                closed.append(n)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"#{n}: {exc}")
+        if closed:
+            for k in ("open_issues", "open_issues_body", "all_open_issues"):
+                gc.invalidate(f"{k}:{repo}")
+        return {"closed": closed, "errors": errors}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/api/projects/{owner}/{repo_name}/backlog/cleanup-preview")
 def backlog_cleanup_preview(owner: str, repo_name: str):
     """Scan open backlog for test tickets and stale follow-ups to close."""

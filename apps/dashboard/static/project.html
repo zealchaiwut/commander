@@ -138,6 +138,12 @@
       background: var(--surface-2, rgba(127,127,127,.14)); color: var(--text-muted);
     }
     .top-nav.env-prd .env-badge { background: rgba(255,255,255,.22); color: #fff; }
+    .env-badge-stale {
+      background: var(--amber-bg, rgba(245,158,11,.18)) !important;
+      color: var(--amber, #d97706) !important; cursor: help;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .env-badge-stale i { font-size: 11px; }
     .brand-mark {
       width: 26px; height: 26px; border-radius: var(--radius-md);
       background: var(--text);
@@ -9238,6 +9244,20 @@
       if (badge) {
         var label = (env ? env.toUpperCase() : (isPrd ? 'PRD' : '')) + (port ? ' · :' + port : '');
         if (label) { badge.textContent = label; badge.hidden = false; }
+      }
+      // Stale-deploy warning: dashboard served from a leftover feature branch
+      // instead of develop/master (the recurring "fix not showing" cause).
+      if (d && d.branch_stale && d.serving_branch) {
+        var nav2 = document.querySelector('.top-nav');
+        if (nav2 && !document.getElementById('env-stale-badge')) {
+          var w = document.createElement('span');
+          w.id = 'env-stale-badge';
+          w.className = 'env-badge env-badge-stale';
+          w.title = 'Dashboard is served from ' + d.serving_branch + ' — not develop/master. Likely a stale deploy.';
+          w.innerHTML = '<i class="ti ti-git-branch"></i> stale: ' + d.serving_branch;
+          var left = nav2.querySelector('.top-nav-left');
+          (left || nav2).appendChild(w);
+        }
       }
     }).catch(function () { /* leave the default grey bar */ });
   })();

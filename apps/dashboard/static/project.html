@@ -22315,6 +22315,7 @@ function _bcConnectSSE(jobId) {
         _bcJobState.status = 'done';
         _bcRenderStep2();
         _bcUpdateBadge();
+        _bcStopPostPoll();
         es.close();
         _bcEventSource = null;
         localStorage.removeItem('bc_job_id');
@@ -23381,6 +23382,45 @@ function bcCancelReview() {
   if (overlay) overlay.classList.add('hidden');
 }
 
+// Posting-progress polling fallback. _broadcast_bulk_event drops events when no
+// SSE subscriber is attached, and the stream can disconnect between the draft and
+// post phases — leaving the posting progress frozen at "0 of N". While posting we
+// poll the job directly so per-ticket progress always advances regardless of SSE.
+let _bcPostPollId = null;
+function _bcStopPostPoll() {
+  if (_bcPostPollId) { clearInterval(_bcPostPollId); _bcPostPollId = null; }
+}
+function _bcStartPostPoll() {
+  _bcStopPostPoll();
+  _bcPostPollId = setInterval(async () => {
+    if (!_bcPosting || !_bcJobId) { _bcStopPostPoll(); return; }
+    try {
+      const r = await fetch(`/api/tickets/bulk/${_bcJobId}`);
+      if (!r.ok) return;
+      const job = await r.json();
+      _bcJobState = job;
+      _bcRenderStep2();
+      _bcUpdateBadge();
+      const tracked = (job.tickets || []).filter(t => _bcPostingIndices.includes(t.index));
+      const resolvedStates = ['created', 'failed', 'size_warning', 'sized', 'estimate_failed'];
+      const allResolved = tracked.length > 0 && tracked.every(t => resolvedStates.includes(t.state));
+      if (job.status === 'done' || job.status === 'stopped' || allResolved) {
+        _bcStopPostPoll();
+        if (_bcPosting) {
+          // SSE job_done may never arrive (dropped) — finalize here too.
+          _bcPosting = false;
+          if (_bcEventSource) { try { _bcEventSource.close(); } catch (_) {} _bcEventSource = null; }
+          localStorage.removeItem('bc_job_id');
+          _bcJobId = null;
+          switchTab('sprint-mgmt');
+          loadSprintMgmt();
+          _bcShowStep(1);
+        }
+      }
+    } catch (_) { /* keep polling */ }
+  }, 2000);
+}
+
 async function bcPostSelected() {
   if (!_bcJobId || !_bcJobState) return;
   const tickets = _bcJobState.tickets || [];
@@ -23431,6 +23471,7 @@ async function bcPostSelected() {
   _bcPostingIndices = toPost.map(t => t.index);  // track which tickets are being posted (issue #931)
   bcCancelReview();
   _bcRenderStep2();  // show posting-progress immediately (don't wait for SSE)
+  _bcStartPostPoll();  // poll job progress so the per-ticket status advances even if SSE drops
 
   try {
     const resp = await fetch(`/api/tickets/bulk/${_bcJobId}/post-selected`, {

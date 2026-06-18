@@ -716,6 +716,56 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
                 state_by_label[label] = "completed"
 
     _fill_missing_links(records, sprints_dirs)
+    _attribute_issues_to_runs(records)
+
+
+def _attribute_issues_to_runs(records: list[dict]) -> None:
+    """Filter each sprint's issue list to the tickets it actually owns.
+
+    A sprint owns a ticket only if that ticket actually RAN under its label
+    (agent_runs) AND did not re-run in a descendant child sprint (where it now
+    belongs). This fixes two long-standing History mismatches:
+      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
+        #572/#574 after they re-ran in sprint-63.1), and
+      - a child listing carried-over already-done tickets it never re-ran (e.g.
+        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
+
+    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
+    we never blank a sprint that simply predates run tracking.
+    """
+    ran_by_label: dict[str, set[int]] = {}
+    for rec in records:
+        label = rec.get("label")
+        if not label:
+            continue
+        try:
+            rows = _db().agent_runs_for_sprint(label)
+        except Exception:
+            rows = []
+        nums: set[int] = set()
+        for r in rows:
+            try:
+                n = int(r.get("issue_number"))
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                nums.add(n)
+        ran_by_label[label] = nums
+
+    for rec in records:
+        label = rec.get("label") or ""
+        ran_here = ran_by_label.get(label) or set()
+        if not ran_here:
+            continue  # no run record — leave the list as-is (legacy sprints)
+        prefix = label + "."
+        ran_in_children: set[int] = set()
+        for other, nums in ran_by_label.items():
+            if other != label and other.startswith(prefix):
+                ran_in_children |= nums
+        rec["issues"] = [
+            i for i in (rec.get("issues") or [])
+            if i.get("ticket_id") in ran_here and i.get("ticket_id") not in ran_in_children
+        ]
 
 
 def _pr_from_issues(issues: list | None) -> int | None:

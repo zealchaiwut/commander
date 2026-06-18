@@ -2157,6 +2157,14 @@
       background: var(--surface);
       cursor: pointer;
     }
+    /* Completed group recedes when collapsed, mirroring .hist-card.settled. */
+    .hist-parent-row.settled:not(.expanded) {
+      opacity: .72;
+      background: var(--surface-2, rgba(127,127,127,.06));
+      border-color: color-mix(in srgb, var(--border) 60%, transparent);
+    }
+    .hist-parent-row.settled:not(.expanded):hover { opacity: 1; }
+    .hist-parent-row.settled:not(.expanded) .hist-parent-name { color: var(--text-muted); }
     .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     .hist-parent-body { padding: 4px 14px 8px; }

@@ -1192,7 +1192,13 @@ function _histParentRowHtml(s, bulkBtn, groupExpanded) {
   const display = sprintLabelDisplay(s.label);
   const lbl = escHtml(s.label || "");
   const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
-  return `<div class="hist-parent-row" data-label="${lbl}" role="button" tabindex="0"
+  // Recede a completed group when collapsed, like standalone cards — a group
+  // parent (sprint with a rerun child) used a different class and never got the
+  // settled grey, so a done group looked active next to greyed siblings.
+  const cls = ["hist-parent-row"];
+  if ((String(s.lifecycle_state || "").toLowerCase()) === "completed") cls.push("settled");
+  if (groupExpanded) cls.push("expanded");
+  return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
     onclick="_histToggleGroup('${lbl}')"
     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
     <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
@@ -1611,7 +1617,20 @@ function _histGroupSprints(sprints) {
     else g.children.push(s);
     g.order = Math.min(g.order, i);
   }
-  groupOrder.sort((a, b) => byBase.get(a).order - byBase.get(b).order);
+  // Float groups that still need attention (a failed / needs_rework /
+  // ready_to_merge / running member) to the top, then the rest by recency — so a
+  // failed sprint like 65 sits above already-settled ones even when a sibling's
+  // recent rerun would otherwise pull its group up.
+  const _UNSETTLED = new Set(["needs_rework", "failed", "cancelled", "ready_to_merge", "running"]);
+  const _groupUnsettled = (g) => [g.baseSprint, ...(g.children || [])]
+    .filter(Boolean)
+    .some(s => _UNSETTLED.has((s.lifecycle_state || "").toLowerCase()));
+  groupOrder.sort((a, b) => {
+    const ua = _groupUnsettled(byBase.get(a)) ? 0 : 1;
+    const ub = _groupUnsettled(byBase.get(b)) ? 0 : 1;
+    if (ua !== ub) return ua - ub;
+    return byBase.get(a).order - byBase.get(b).order;
+  });
   return groupOrder.map(baseLabel => {
     const g = byBase.get(baseLabel);
     g.children.sort((a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub);

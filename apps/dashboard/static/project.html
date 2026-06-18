@@ -15238,9 +15238,15 @@ function _smgmtLaneStage(iss) {
   // Fallback: derive from agent field (pre-#927 snapshots)
   if (iss.agent === 'coder') return 'coding';
   if (iss.agent === 'tester') return 'testing';
-  if (iss.status === 'done' || iss.status === 'skipped' || iss.agent_status === 'failed') return 'done';
+  // Terminal ONLY on a terminal ticket status. A failed agent_status during a
+  // retryable fix round is NOT done — it's pending re-dispatch to the coder, so
+  // it belongs in the coder queue (rework), not the Done fold (#3). A
+  // retry-exhausted ticket already carries status 'skipped', caught here.
+  if (iss.status === 'done' || iss.status === 'skipped' || iss.status === 'uat') return 'done';
+  const fr = _smgmtRailFixRound(iss);
   const tac = iss.tester_attempt_count || 0;
-  return tac > 0 ? 'rework' : 'pending';
+  if (iss.agent_status === 'failed' || fr || tac > 0) return 'rework';
+  return 'pending';
 }
 
 /** HTML for a single capacity-dot indicator strip. */

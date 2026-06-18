@@ -609,9 +609,23 @@ def transition_sprint_state(
     """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        row = conn.execute(
-            "SELECT state FROM sprints WHERE label = ?", (label,)
-        ).fetchone()
+        # Scope by project: sprint labels are unique only per repo, so an unscoped
+        # read picked up another project's same-numbered sprint and reported a
+        # bogus 'completed→running' illegal edge (e.g. commander sprint-65 blocking
+        # perf-coach sprint-65). When this project has no row yet, current falls to
+        # 'draft' so the fresh run's →running is legal.
+        # NB: the sprints table still has label as its sole PRIMARY KEY, so the
+        # WRITE below can overwrite another project's same-labelled row — the real
+        # fix is a composite (label, project) key (tracked separately).
+        if project:
+            row = conn.execute(
+                "SELECT state FROM sprints WHERE label = ? AND project = ?",
+                (label, project),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT state FROM sprints WHERE label = ?", (label,)
+            ).fetchone()
     current = canonical_lifecycle(row["state"] if row else "draft")
 
     allowed = _LEGAL_SPRINT_EDGES.get(current, frozenset())

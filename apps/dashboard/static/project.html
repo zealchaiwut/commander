@@ -125,6 +125,25 @@
       flex-shrink: 0;
     }
     .top-nav-left { display: flex; align-items: center; gap: var(--space-2); }
+    /* Environment indicator (#5): blue bar + port for prd, grey for uat. */
+    .top-nav.env-prd {
+      background: var(--blue, #2563eb);
+      border-bottom-color: color-mix(in srgb, var(--blue, #2563eb) 70%, black);
+    }
+    .top-nav.env-prd .brand-wordmark,
+    .top-nav.env-prd .brand-mark { color: #fff; }
+    .env-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      padding: 2px 8px; border-radius: 999px;
+      background: var(--surface-2, rgba(127,127,127,.14)); color: var(--text-muted);
+    }
+    .top-nav.env-prd .env-badge { background: rgba(255,255,255,.22); color: #fff; }
+    .env-badge-stale {
+      background: var(--amber-bg, rgba(245,158,11,.18)) !important;
+      color: var(--amber, #d97706) !important; cursor: help;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .env-badge-stale i { font-size: 11px; }
     .brand-mark {
       width: 26px; height: 26px; border-radius: var(--radius-md);
       background: var(--text);
@@ -2091,7 +2110,16 @@
       background: var(--surface-2);
     }
     .hist-card.settled .hist-card-title { color: var(--text-muted); }
-    .hist-card.settled:not(.expanded) { opacity: .92; }
+    /* Completed/settled sprints visibly recede when collapsed — clearly read as
+       "done", not just barely-dimmed (was opacity .92). */
+    .hist-card.settled:not(.expanded) {
+      opacity: .72;
+      background: var(--surface-2, rgba(127,127,127,.06));
+      border-color: color-mix(in srgb, var(--border) 60%, transparent);
+    }
+    .hist-card.settled:not(.expanded):hover { opacity: 1; }
+    .hist-card.settled:not(.expanded) .hist-card-num,
+    .hist-card.settled:not(.expanded) .hist-card-head .hist-state-chip { filter: grayscale(.4); }
     .hist-card.locked:not(.expanded) .hist-card-head {
       align-items: center;
     }
@@ -8304,8 +8332,14 @@
       border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
     .node-fix-badge {
       flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .03em;
-      padding: 2px 7px; border-radius: 999px; background: var(--red-bg); color: var(--red);
+      padding: 2px 7px; border-radius: 999px; background: var(--amber-bg, rgba(245,158,11,.18)); color: var(--amber, #d97706);
       text-transform: uppercase;
+    }
+    /* A ticket that failed and is pending/under retry — amber tint so it reads
+       differently from a fresh queued node (#2). */
+    .node.node--retrying {
+      background: var(--amber-bg, rgba(245,158,11,.10));
+      border-color: color-mix(in srgb, var(--amber, #d97706) 45%, transparent);
     }
     .node-agent {
       flex: 0 0 auto; font-size: 9px; font-weight: 700; letter-spacing: .04em;
@@ -9205,6 +9239,7 @@
   <div class="top-nav-left">
     <a href="/" class="brand-mark" title="Commander Home"><i class="ti ti-bolt"></i></a>
     <span class="brand-wordmark">Commander</span>
+    <span class="env-badge" id="env-badge" hidden></span>
   </div>
   <div class="global-search-wrap">
     <i class="ti ti-search global-search-icon"></i>
@@ -9219,6 +9254,38 @@
     </button>
   </div>
 </nav>
+<script>
+  // Environment indicator (#5): colour the top nav blue + show the port when this
+  // dashboard is the PRD instance; leave grey for UAT. Default grey on any error.
+  (function () {
+    fetch('/api/environment').then(function (r) { return r.json(); }).then(function (d) {
+      var env = (d && d.environment ? String(d.environment) : '').toLowerCase();
+      var port = (d && d.port) ? String(d.port) : '';
+      var nav = document.querySelector('.top-nav');
+      var badge = document.getElementById('env-badge');
+      var isPrd = env && env !== 'uat' && env !== 'dev';
+      if (nav && isPrd) nav.classList.add('env-prd');
+      if (badge) {
+        var label = (env ? env.toUpperCase() : (isPrd ? 'PRD' : '')) + (port ? ' · :' + port : '');
+        if (label) { badge.textContent = label; badge.hidden = false; }
+      }
+      // Stale-deploy warning: dashboard served from a leftover feature branch
+      // instead of develop/master (the recurring "fix not showing" cause).
+      if (d && d.branch_stale && d.serving_branch) {
+        var nav2 = document.querySelector('.top-nav');
+        if (nav2 && !document.getElementById('env-stale-badge')) {
+          var w = document.createElement('span');
+          w.id = 'env-stale-badge';
+          w.className = 'env-badge env-badge-stale';
+          w.title = 'Dashboard is served from ' + d.serving_branch + ' — not develop/master. Likely a stale deploy.';
+          w.innerHTML = '<i class="ti ti-git-branch"></i> stale: ' + d.serving_branch;
+          var left = nav2.querySelector('.top-nav-left');
+          (left || nav2).appendChild(w);
+        }
+      }
+    }).catch(function () { /* leave the default grey bar */ });
+  })();
+</script>
 
 <!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
 <aside class="todo-dock collapsed" id="todo-dock" aria-label="Project to-do list">
@@ -14884,6 +14951,11 @@ function _smgmtRailFixRound(iss) {
   return null;
 }
 
+function _ordinalAttempt(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 function _smgmtLevelDurationSecs(issues) {
   let max = 0;
   (issues || []).forEach(i => {
@@ -14938,9 +15010,11 @@ function _smgmtRailNodeHtml(iss, live) {
   const elapsedStr = _fmtTicketElapsed(iss.elapsed_secs);
   const timeEl = elapsedStr ? `<span class="node-time">${escHtml(elapsedStr)}</span>` : '';
   const fr = _smgmtRailFixRound(iss);
-  const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
+  // fr = number of prior attempts that FAILED (a fix round only exists after a
+  // failure), so label it plainly: "1st attempt — failed", etc. The node also
+  // gets an amber tint so a pending-retry reads differently from a fresh queue.
   const fixBadge = fr
-    ? `<span class="node-fix-badge">Fix round ${fr}/${maxRounds}</span>` : '';
+    ? `<span class="node-fix-badge">${_ordinalAttempt(fr)} attempt — failed</span>` : '';
   let agentBadge = '';
   if (state === 'coder-active') {
     const cm = _shortModelName(iss.coder_model);
@@ -14960,7 +15034,8 @@ function _smgmtRailNodeHtml(iss, live) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
   }
   const issueUrl = _smgmtIssueUrl(iss);
-  return `<button type="button" class="node ${state}${selected ? ' selected' : ''}" role="listitem"`
+  const retryCls = (fr && state !== 'done') ? ' node--retrying' : '';
+  return `<button type="button" class="node ${state}${retryCls}${selected ? ' selected' : ''}" role="listitem"`
     + ` data-issue="${num}" aria-selected="${selected ? 'true' : 'false'}"`
     + ` onclick="_smgmtRailSelectNode(${num})" title="${escHtml(iss.title || '')}">`
     + `<span class="node-state-icon" aria-hidden="true">${icon}</span>`
@@ -15179,9 +15254,15 @@ function _smgmtLaneStage(iss) {
   // Fallback: derive from agent field (pre-#927 snapshots)
   if (iss.agent === 'coder') return 'coding';
   if (iss.agent === 'tester') return 'testing';
-  if (iss.status === 'done' || iss.status === 'skipped' || iss.agent_status === 'failed') return 'done';
+  // Terminal ONLY on a terminal ticket status. A failed agent_status during a
+  // retryable fix round is NOT done — it's pending re-dispatch to the coder, so
+  // it belongs in the coder queue (rework), not the Done fold (#3). A
+  // retry-exhausted ticket already carries status 'skipped', caught here.
+  if (iss.status === 'done' || iss.status === 'skipped' || iss.status === 'uat') return 'done';
+  const fr = _smgmtRailFixRound(iss);
   const tac = iss.tester_attempt_count || 0;
-  return tac > 0 ? 'rework' : 'pending';
+  if (iss.agent_status === 'failed' || fr || tac > 0) return 'rework';
+  return 'pending';
 }
 
 /** HTML for a single capacity-dot indicator strip. */
@@ -16472,11 +16553,34 @@ async function _smgmtOrchCopyLog(label) {
       _smgmtShowToast('No orchestrator log to copy yet');
       return;
     }
-    await navigator.clipboard.writeText(text);
+    await _copyTextWithFallback(text);
     _smgmtShowToast('Orchestrator log copied to clipboard');
   } catch (e) {
     _smgmtShowToast('Copy failed — try again');
   }
+}
+
+// navigator.clipboard requires a secure context (https/localhost). Over Tailscale
+// (http://100.x.x.x:port) it is undefined and writeText rejects, so fall back to
+// a hidden-textarea execCommand('copy') which works on plain http.
+async function _copyTextWithFallback(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch (_) { /* fall through to the legacy path */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('copy unsupported');
 }
 
 /** Render or refresh the orchestrator panel. Called on every live tick. */

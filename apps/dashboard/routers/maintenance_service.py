@@ -23,6 +23,7 @@ from services.sprint_manager.settings_schema import (  # noqa: E402
     APP_CONFIG_KEY,
     build_effective_response,
 )
+import calibration_cache_service as _ccs  # noqa: E402
 
 _SIZES = ("S", "M", "L", "XL")
 _PROJECTS_BASE = Path.home() / "dev"
@@ -45,7 +46,9 @@ def _resolve_project_slug(slug: str) -> str:
         None,
     )
     if matched is None:
-        raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+        raise HTTPException(
+            status_code=404, detail=f"Project '{slug}' not found"
+        )
     return matched["repo"]
 
 
@@ -60,7 +63,10 @@ def _get_configured_minutes(repo: str) -> dict[str, int]:
     except Exception:
         stored = {}
     effective = build_effective_response(stored)
-    return {sz: effective[key] for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()}
+    return {
+        sz: effective[key]
+        for sz, key in _CALIBRATION_SIZE_SETTING_KEYS.items()
+    }
 
 
 def rebuild_calibration_cache(
@@ -69,7 +75,7 @@ def rebuild_calibration_cache(
     *,
     dry_run: bool = False,
 ) -> dict:
-    """Rebuild calibration cache from scratch by rescanning all sprint state files.
+    """Rebuild calibration cache by rescanning all sprint state files.
 
     Clears processed/by_size/points before rescanning sprints/ and
     sprints/archive/ using the new size resolver (_resolve_calibration_size).
@@ -77,26 +83,24 @@ def rebuild_calibration_cache(
 
     Returns {"total": N, "by_size": {"S": x, "M": y, "L": z, "XL": w}}.
     """
-    import server as _srv  # noqa: PLC0415 — late import avoids router/monolith cycle
-
     commander = project_root / ".commander"
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
 
     # Start completely fresh — no stale keys survive.
-    cache = _srv._calibration_empty_cache()
+    cache = _ccs._calibration_empty_cache()
     processed: set[str] = set()
 
     if sprints_dir.is_dir():
         archive_dir = sprints_dir / "archive"
         if archive_dir.is_dir():
             for state_file in sorted(archive_dir.glob("sprint-*-state.json")):
-                _srv._calibration_absorb_state_file(
+                _ccs._calibration_absorb_state_file(
                     cache, state_file, sprints_dir, estimates_dir,
                     configured_minutes, processed,
                 )
         for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
-            _srv._calibration_absorb_state_file(
+            _ccs._calibration_absorb_state_file(
                 cache, state_file, sprints_dir, estimates_dir,
                 configured_minutes, processed,
             )
@@ -104,7 +108,7 @@ def rebuild_calibration_cache(
     cache["archive_bootstrap_done"] = True
 
     if not dry_run:
-        _srv._save_calibration_cache(commander, cache)
+        _ccs._save_calibration_cache(commander, cache)
 
     return _count_summary(cache)
 
@@ -112,7 +116,9 @@ def rebuild_calibration_cache(
 def _count_summary(cache: dict) -> dict:
     by_size = cache.get("by_size") or {}
     return {
-        "total": sum(int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES),
+        "total": sum(
+            int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES
+        ),
         "by_size": {
             sz: int(by_size.get(sz, {}).get("count", 0) or 0) for sz in _SIZES
         },
@@ -127,4 +133,6 @@ def do_rebuild(project_slug: str, dry_run: bool = False) -> dict:
     repo = _resolve_project_slug(project_slug)
     project_root = _project_root_path(repo)
     configured_minutes = _get_configured_minutes(repo)
-    return rebuild_calibration_cache(project_root, configured_minutes, dry_run=dry_run)
+    return rebuild_calibration_cache(
+        project_root, configured_minutes, dry_run=dry_run
+    )

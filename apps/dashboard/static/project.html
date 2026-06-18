@@ -1423,6 +1423,42 @@
       position: fixed; inset: 0; background: rgba(17,24,39,.45);
       display: none; align-items: center; justify-content: center; z-index: 500;
     }
+    /* ── Backlog triage checklist modal ── */
+    .bl-triage-overlay {
+      position: fixed; inset: 0; background: rgba(17,24,39,.45);
+      display: flex; align-items: center; justify-content: center; z-index: 600;
+    }
+    .bl-triage-card {
+      width: min(720px, 92vw); max-height: 84vh; display: flex; flex-direction: column;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.25); overflow: hidden;
+    }
+    .bl-triage-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .bl-triage-head strong { font-size: 15px; }
+    .bl-triage-sub { flex: 1 1 100%; order: 3; font-size: 12px; color: var(--text-muted); }
+    .bl-triage-x { margin-left: auto; background: none; border: none; font-size: 22px;
+      line-height: 1; cursor: pointer; color: var(--text-muted); }
+    .bl-triage-body { overflow-y: auto; padding: 8px 12px; }
+    .bl-triage-group { margin-bottom: 10px; }
+    .bl-triage-group-h { font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; color: var(--text-muted); padding: 6px 4px; }
+    .bl-triage-keep { opacity: .8; }
+    .bl-triage-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+    .bl-triage-row:hover { background: var(--hover-bg, rgba(127,127,127,.08)); }
+    .bl-triage-num { font-variant-numeric: tabular-nums; color: var(--text-muted); flex: none; }
+    .bl-triage-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bl-triage-reason { flex: 0 1 38%; color: var(--text-muted); font-size: 11px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+    .bl-prio { flex: none; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; }
+    .bl-prio-dup { background: var(--purple-bg, rgba(139,92,246,.15)); color: var(--purple, #8b5cf6); }
+    .bl-prio-neg { background: var(--surface-2, rgba(127,127,127,.12)); color: var(--text-muted); }
+    .bl-prio-low { background: var(--amber-bg, rgba(245,158,11,.15)); color: var(--amber, #d97706); }
+    .bl-prio-keep { background: var(--green-bg, rgba(22,163,74,.12)); color: var(--green, #16a34a); }
+    .bl-triage-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      border-top: 1px solid var(--border); }
+    .bl-triage-count { font-size: 12px; color: var(--text-muted); }
     .ps-modal-overlay.open { display: flex; }
     [data-theme="dark"] .ps-modal-overlay { background: rgba(0,0,0,.6); }
     .ps-browser {
@@ -17452,71 +17488,149 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
   setTimeout(() => { if (progressEl) progressEl.classList.remove('show'); }, 3000);
 }
 
+let _blTriageCtx = null;
+
 async function _blCleanupBacklog(btnEl) {
   const repo = _smgmtRepo();
   if (!repo) { _smgmtShowToast('No repo configured — cannot clean backlog'); return; }
   const parts = repo.split('/');
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Scanning…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader"></i> Triaging…'; }
   try {
-    const previewResp = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup-preview`,
-      { method: 'POST' },
-    );
-    if (!previewResp.ok) {
-      const err = await previewResp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${previewResp.status}`);
+    const base = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog`;
+    // Fast regex preview (test scaffolding) + LLM triage of [follow-up] tickets.
+    const [previewResp, triageResp] = await Promise.all([
+      fetch(`${base}/cleanup-preview`, { method: 'POST' }),
+      fetch(`${base}/triage`, { method: 'POST' }),
+    ]);
+    const preview = previewResp.ok ? await previewResp.json() : { candidates: [] };
+    if (!triageResp.ok) {
+      const err = await triageResp.json().catch(() => ({}));
+      throw new Error(err.detail || `Triage HTTP ${triageResp.status}`);
     }
-    const preview = await previewResp.json();
-    const candidates = preview.candidates || [];
-    if (!candidates.length) {
-      _smgmtShowToast('Backlog looks clean — nothing to close');
+    const triage = await triageResp.json();
+    const testCands = (preview.candidates || []).filter(c => c.category === 'test_issue');
+    const tickets = triage.tickets || [];
+    if (!testCands.length && !tickets.length) {
+      _smgmtShowToast('Backlog looks clean — no follow-ups or test tickets to triage');
       return;
     }
-    const lines = candidates.slice(0, 20).map(c =>
-      `#${c.number} · ${c.reason}\n  ${c.title}`,
-    );
-    if (candidates.length > 20) {
-      lines.push(`… and ${candidates.length - 20} more`);
-    }
-    const msg = `Close ${candidates.length} backlog issue${candidates.length !== 1 ? 's' : ''}?\n\n`
-      + lines.join('\n\n')
-      + '\n\nThis closes them on GitHub as "not planned".';
-    if (!confirm(msg)) return;
-    if (btnEl) btnEl.textContent = 'Closing…';
-    const closeResp = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          confirmed: true,
-          issue_numbers: candidates.map(c => c.number),
-        }),
-      },
-    );
-    if (!closeResp.ok) {
-      const err = await closeResp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${closeResp.status}`);
-    }
-    const result = await closeResp.json();
-    const closed = (result.closed || []).length;
-    const failed = (result.errors || []).length;
-    if (failed) {
-      _smgmtShowToast(`Closed ${closed}; ${failed} failed — see console`);
-      console.warn('Backlog cleanup errors:', result.errors);
-    } else {
-      _smgmtShowToast(`Closed ${closed} backlog issue${closed !== 1 ? 's' : ''}`);
-    }
-    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
+    _blTriageCtx = { owner, repoName };
+    _blTriageModalOpen(testCands, tickets);
   } catch (e) {
-    _smgmtShowToast('Backlog cleanup failed: ' + e.message);
+    _smgmtShowToast('Backlog triage failed: ' + e.message);
   } finally {
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.innerHTML = '<i class="ti ti-trash"></i> Clean up backlog';
     }
+  }
+}
+
+const _BL_PRIO_RANK = { negligible: 0, P2: 1, P1: 2, P0: 3 };
+
+function _blTriageRowHtml(num, title, badge, reason, checked) {
+  const t = (title || '').length > 80 ? title.slice(0, 80) + '…' : (title || '');
+  return `<label class="bl-triage-row">
+    <input type="checkbox" class="bl-triage-cb" data-num="${num}"${checked ? ' checked' : ''}>
+    <span class="bl-triage-num">#${num}</span>
+    ${badge}
+    <span class="bl-triage-title" title="${escHtml(title || '')}">${escHtml(t)}</span>
+    <span class="bl-triage-reason">${escHtml(reason || '')}</span>
+  </label>`;
+}
+
+function _blTriageModalOpen(testCands, tickets) {
+  // Group LLM tickets: duplicates, then negligible/low (recommend_close), then keep.
+  const dups = tickets.filter(t => t.duplicate_of != null);
+  const closeable = tickets.filter(t => t.duplicate_of == null && t.recommend_close);
+  const keep = tickets.filter(t => t.duplicate_of == null && !t.recommend_close);
+  let h = '';
+  if (testCands.length) {
+    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Test scaffolding</div>';
+    testCands.forEach(c => { h += _blTriageRowHtml(c.number, c.title, '<span class="bl-prio bl-prio-neg">test</span>', c.reason, true); });
+    h += '</div>';
+  }
+  if (dups.length) {
+    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Duplicates</div>';
+    dups.forEach(t => { h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio bl-prio-dup">dup of #${t.duplicate_of}</span>`, t.reason, true); });
+    h += '</div>';
+  }
+  if (closeable.length) {
+    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Low priority / negligible</div>';
+    closeable.sort((a, b) => (_BL_PRIO_RANK[a.priority] ?? 1) - (_BL_PRIO_RANK[b.priority] ?? 1));
+    closeable.forEach(t => {
+      const cls = t.priority === 'negligible' ? 'bl-prio-neg' : 'bl-prio-low';
+      h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio ${cls}">${t.priority}</span>`, t.reason, t.priority === 'negligible');
+    });
+    h += '</div>';
+  }
+  if (keep.length) {
+    h += '<div class="bl-triage-group bl-triage-keep"><div class="bl-triage-group-h">Keep (P0/P1) — leave unchecked</div>';
+    keep.sort((a, b) => (_BL_PRIO_RANK[b.priority] ?? 1) - (_BL_PRIO_RANK[a.priority] ?? 1));
+    keep.forEach(t => { h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio bl-prio-keep">${t.priority}</span>`, t.reason, false); });
+    h += '</div>';
+  }
+  const el = document.createElement('div');
+  el.id = 'bl-triage-modal';
+  el.className = 'bl-triage-overlay';
+  el.innerHTML = `<div class="bl-triage-card" role="dialog" aria-label="Backlog triage">
+    <div class="bl-triage-head">
+      <strong>Backlog triage</strong>
+      <span class="bl-triage-sub">Checked tickets will be closed on GitHub as “not planned”. Review before confirming.</span>
+      <button class="bl-triage-x" onclick="_blTriageClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="bl-triage-body">${h || '<div style="padding:16px;color:var(--text-muted)">Nothing to triage.</div>'}</div>
+    <div class="bl-triage-foot">
+      <span class="bl-triage-count" id="bl-triage-count"></span>
+      <span style="flex:1"></span>
+      <button class="rm-btn" onclick="_blTriageClose()">Cancel</button>
+      <button class="rm-btn rm-btn-prim" id="bl-triage-confirm" onclick="_blTriageConfirm(this)">Close selected</button>
+    </div>
+  </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('change', _blTriageUpdateCount);
+  el.addEventListener('click', (e) => { if (e.target === el) _blTriageClose(); });
+  _blTriageUpdateCount();
+}
+
+function _blTriageUpdateCount() {
+  const n = document.querySelectorAll('#bl-triage-modal .bl-triage-cb:checked').length;
+  const el = document.getElementById('bl-triage-count');
+  if (el) el.textContent = `${n} selected`;
+}
+
+function _blTriageClose() {
+  const el = document.getElementById('bl-triage-modal');
+  if (el) el.remove();
+  _blTriageCtx = null;
+}
+
+async function _blTriageConfirm(btn) {
+  if (!_blTriageCtx) return;
+  const nums = [...document.querySelectorAll('#bl-triage-modal .bl-triage-cb:checked')]
+    .map(cb => parseInt(cb.dataset.num, 10)).filter(n => !isNaN(n));
+  if (!nums.length) { _smgmtShowToast('Nothing selected'); return; }
+  const { owner, repoName } = _blTriageCtx;
+  if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, issue_numbers: nums }) },
+    );
+    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${resp.status}`); }
+    const result = await resp.json();
+    const closed = (result.closed || []).length;
+    const failed = (result.errors || []).length;
+    _smgmtShowToast(failed ? `Closed ${closed}; ${failed} failed — see console` : `Closed ${closed} backlog issue${closed !== 1 ? 's' : ''}`);
+    if (failed) console.warn('Backlog cleanup errors:', result.errors);
+    _blTriageClose();
+    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
+  } catch (e) {
+    _smgmtShowToast('Close failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Close selected'; }
   }
 }
 

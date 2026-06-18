@@ -34,6 +34,39 @@ def backlog_cleanup_preview(owner: str, repo_name: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/api/projects/{owner}/{repo_name}/backlog/triage")
+def backlog_triage(owner: str, repo_name: str):
+    """LLM triage of open `[follow-up]` backlog tickets (dry-run).
+
+    Returns a per-ticket assessment (priority, semantic duplicate_of,
+    recommend_close, reason) for the human to review as a checklist. Closes
+    nothing — the confirm step reuses POST .../backlog/cleanup with the chosen
+    issue_numbers.
+    """
+    repo = f"{owner}/{repo_name}"
+    try:
+        import github_client as gc  # noqa: PLC0415  (sibling on path)
+        from services.sprint_manager import backlog_triage as bt  # noqa: PLC0415
+        issues = gc.list_open_issues_with_body(repo_name=repo, limit=200)
+        followups = [
+            i for i in issues
+            if backlog_cleanup_service.is_backlog_issue(i)
+            and backlog_cleanup_service.is_follow_up_title(i.get("title") or "")
+        ]
+        tickets = [
+            {"number": i.get("number"), "title": i.get("title"), "body": i.get("body")}
+            for i in followups
+        ]
+        result, err = bt.triage_backlog(tickets, project=repo)
+        if err and err not in (None, "no_tickets"):
+            raise HTTPException(status_code=502, detail=f"Triage agent error: {err}")
+        return {"tickets": (result or {}).get("tickets", []), "error": err}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/api/projects/{owner}/{repo_name}/backlog/cleanup")
 def backlog_cleanup(owner: str, repo_name: str, body: BacklogCleanupBody):
     """Close selected backlog cleanup candidates on GitHub."""

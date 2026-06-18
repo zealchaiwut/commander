@@ -262,7 +262,7 @@ _AGENT_RUN_FAILED = {"fail", "failed", "reject", "rejected", "crash", "crashed",
                      "skipped", "error"}
 
 
-def _issues_from_agent_runs(label: str) -> list[dict]:
+def _issues_from_agent_runs(label: str, project: str | None = None) -> list[dict]:
     """Synthesize issue rows from agent_runs, deriving each ticket's disposition
     from its run outcomes.
 
@@ -272,7 +272,7 @@ def _issues_from_agent_runs(label: str) -> list[dict]:
     matches the Board rather than hiding successes.
     """
     try:
-        rows = _db().agent_runs_for_sprint(label)
+        rows = _db().agent_runs_for_sprint(label, project=project)
     except Exception:
         return []
     agg: dict[int, dict] = {}
@@ -740,7 +740,7 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
         if not label:
             continue
         try:
-            rows = _db().agent_runs_for_sprint(label)
+            rows = _db().agent_runs_for_sprint(label, project=rec.get("project") or None)
         except Exception:
             rows = []
         nums: set[int] = set()

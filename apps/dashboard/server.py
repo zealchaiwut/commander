@@ -8339,7 +8339,7 @@ def _outcome_from_ingested_row(
     try:
         from routers import sprint_history_service  # noqa: PLC0415
         _seen = {str(i["number"]) for i in result_issues if i.get("number") is not None}
-        for _extra in sprint_history_service._issues_from_agent_runs(sprint_label):
+        for _extra in sprint_history_service._issues_from_agent_runs(sprint_label, project=project):
             _tid = _extra.get("ticket_id")
             if _tid is None:
                 _tid = _extra.get("number")

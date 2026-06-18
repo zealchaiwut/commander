@@ -143,7 +143,7 @@ def ticket_stats(
     (both ``None`` for passing tickets).
     """
     try:
-        rows = _db().agent_runs_for_sprint(sprint_label)
+        rows = _db().agent_runs_for_sprint(sprint_label, project=project)
     except Exception:
         rows = []
 

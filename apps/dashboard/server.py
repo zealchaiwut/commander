@@ -970,11 +970,13 @@ from routers import (  # noqa: E402
     suggestions_router,
     system_router,
     tickets_router,
-    timeline_router, maintenance_router,
+    timeline_router,
+    maintenance_router,
 )
 # broadcast and _subscribers are now owned by routers/logs_service.py; import
 # them here so existing call sites in this file continue to work unchanged.
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
+
 app.include_router(maintenance_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
@@ -4690,7 +4692,7 @@ _NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
 })
 
 
-def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
+def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, project: str | None = None) -> None:
     """Raise 409 when the label *actually ran* and reached a terminal state.
 
     Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
@@ -4707,9 +4709,12 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> 
     not a run.
     """
     # 1. Durable lifecycle table — authoritative when a row exists.
+    #    Scope by project: sprint labels (e.g. sprint-64) are only unique per
+    #    repo, so an unscoped lookup let a completed sprint-64 on one project
+    #    block a brand-new sprint-64 on another (cross-project re-dispatch leak).
     durable_state = None
     try:
-        row = db.get_sprint(sprint_label)
+        row = db.get_sprint(sprint_label, project=project)
         if row:
             durable_state = row.get("state")
     except Exception:
@@ -6476,7 +6481,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     commander    = _commander_dir(project_root)
 
     # One label = one attempt: terminal labels are never re-dispatched (P0).
-    _reject_terminal_label_redispatch(project_root, body.sprint_label)
+    _reject_terminal_label_redispatch(project_root, body.sprint_label, project=body.project)
 
     # Pending sign-off gate (issue #862): a planned sprint must be approved
     # before it can run. Blocks silent advance past the governance gate.
@@ -8144,9 +8149,13 @@ def get_estimates_batch(project: str, issues: str = ""):
     }
 
 
-@app.get("/api/sprints/{sprint_label}/state")
-def get_sprint_state(sprint_label: str, project: str):
+@app.get("/api/sprints/{sprint_label}/state-timing")
+def get_sprint_state_timing(sprint_label: str, project: str):
     """Return timing data from sprint-N-state.json for duration display (issue #212).
+
+    Distinct from GET /api/sprints/{sprint_label}/state (plan.json handler).
+    The original handler was registered on the same path and was unreachable
+    (shadowed by the plan handler above); moved to /state-timing (issue #1301).
 
     Returns:
       - wall_clock_secs: total sprint wall-clock time
@@ -8452,7 +8461,10 @@ def _derive_outcome_lifecycle(
     Reads parent canonical state and child rows exclusively from the sprints DB
     table (issue #1093). No GitHub label lookups, no disk globs.
     """
-    row = db.get_sprint(sprint_label)
+    # Scope by project — sprint labels are unique only per repo (see
+    # _reject_terminal_label_redispatch): an unscoped lookup leaks a same-label
+    # row from another project.
+    row = db.get_sprint(sprint_label, project=project)
     if row is None:
         return db.canonical_lifecycle(pane_state)
     parent_state = db.canonical_lifecycle(row["state"])
@@ -9317,8 +9329,6 @@ from calibration_cache_service import (  # noqa: E402
     _calibration_absorb_state_file,
     _refresh_calibration_cache,
 )
-
-_CALIBRATION_SIZES = _CALIBRATION_SIZES  # re-export for any local references
 
 
 def _iter_calibration_state_files(
@@ -10530,8 +10540,26 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
-        elif step.get("base") == "develop" and pr_num:
-            develop_pr = pr_num
+        elif step.get("base") == "develop":
+            if pr_num:
+                develop_pr = pr_num
+            else:
+                # The sprint→develop PR may have already existed (the merge reused
+                # it), so _gh_merge_branch_via_pr returned no number — that left
+                # the base sprint's History/outcome PR link blank (issue: parent
+                # sprint shows no PR). Recover the number from gh (open or merged).
+                try:
+                    _pr_r = subprocess.run(
+                        ["gh", "pr", "list", "--repo", repo, "--head", step["head"],
+                         "--base", "develop", "--state", "all",
+                         "--json", "number", "--limit", "1"],
+                        capture_output=True, text=True, timeout=20,
+                    )
+                    _pr_arr = json.loads(_pr_r.stdout or "[]")
+                    if _pr_arr:
+                        develop_pr = _pr_arr[0].get("number")
+                except Exception:
+                    pass
     return errors, develop_pr
 
 

@@ -1366,7 +1366,18 @@ export function _smgmtCardHtml(
           : '<div class="smgmt-drop-hint">Drop tickets here</div>';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
-      const issueList = outcome.issues || [];
+      // Tickets re-run into a child sprint (e.g. #572/#574 → sprint-63.1) belong
+      // to the child now — drop them from the parent's finished card so they
+      // aren't listed under both.
+      const _movedToChild = new Set();
+      try {
+        Object.keys(_smgmtBySprint || {}).forEach((cl) => {
+          if (cl !== label && cl.startsWith(label + ".")) {
+            (_smgmtBySprint[cl] || []).forEach((t) => _movedToChild.add(t.number));
+          }
+        });
+      } catch (_) {}
+      const issueList = (outcome.issues || []).filter((i) => !_movedToChild.has(i.number));
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
         issueList,
         label,

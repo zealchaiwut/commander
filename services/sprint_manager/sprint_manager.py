@@ -1142,7 +1142,7 @@ def _db_update_worktree_shas_sm(
 
 def _token_window_utc_now() -> str:
     """UTC timestamp in the exact format token_usage.recorded_at uses."""
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _token_window_sums(role: str, since_utc: str) -> "tuple[int, int]":
@@ -10443,8 +10443,19 @@ def main() -> None:
             _terminal_state = "needs_rework"
             _terminal_reason = "no-dispatchable-tickets"
         else:
+            # A sprint is a clean (ready_to_merge) finish only when every ticket
+            # landed. Besides an explicit agent failure, a ticket left SKIPPED by a
+            # failure category — RETRY_EXHAUSTED / TESTER_REJECTED / gate fail — is
+            # unfinished work that did NOT merge, so it must drive needs_rework
+            # (rerunnable), not let the sprint complete "naturally". Those infra
+            # categories deliberately skip the per-ticket needs-rework *label*
+            # (see ~line 1441), but at the sprint level an unmerged failing ticket
+            # still means the sprint has rework to do. A clean operator skip (no
+            # failure category) is not a failure and stays natural.
             _any_failed = any(
-                (iss.agent_status == "failed") or iss.failure_reason
+                (iss.agent_status == "failed")
+                or iss.failure_reason
+                or (iss.status == "skipped" and iss.category)
                 for iss in state.issues
             )
             if _any_failed:

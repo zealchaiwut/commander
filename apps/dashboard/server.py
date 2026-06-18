@@ -1344,9 +1344,32 @@ async def health_check(request: Request):
 
 @app.get("/api/environment")
 def get_environment():
-    """Return the current runtime environment (prd or uat) and feature flags."""
+    """Return the current runtime environment (prd or uat), port, and feature flags."""
+    _port = os.environ.get("PORT") or os.environ.get("UVICORN_PORT") or ""
+    try:
+        _port = str(int(_port)) if _port else ""
+    except (TypeError, ValueError):
+        _port = ""
+    # Surface the serving clone's git branch so a stale deploy (dashboard served
+    # from a leftover feature branch instead of develop) is visible in the UI —
+    # this kept causing "missing fix" confusion. Best-effort; empty on any error.
+    _branch = ""
+    try:
+        _clone_root = Path(__file__).resolve().parent.parent.parent
+        _r = subprocess.run(
+            ["git", "-C", str(_clone_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if _r.returncode == 0:
+            _branch = _r.stdout.strip()
+    except Exception:
+        _branch = ""
+    _branch_stale = bool(_branch and _branch not in ("develop", "master", "main"))
     return {
         "environment": ENVIRONMENT,
+        "port": _port,
+        "serving_branch": _branch,
+        "branch_stale": _branch_stale,
         "features": config.commander_features(),
     }
 

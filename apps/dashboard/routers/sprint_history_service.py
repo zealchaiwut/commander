@@ -990,29 +990,41 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     db = _db()
 
     records: list[dict] = []
-    seen_labels: set[str] = set()
+    # Dedup by (label, project), NOT label alone: sprint labels are unique only
+    # per repo, so a label-only key let one project's snapshot shadow another's
+    # sprint. E.g. commander's deleted `sprint-66` snapshot claimed the label and
+    # skipped perf-coach's live `sprint-66` lifecycle row, which then got dropped
+    # by the project filter — making perf-coach's sprint invisible in History.
+    seen: set[tuple[str, str]] = set()
+
+    def _key(label, proj) -> tuple[str, str]:
+        return (label or "", (proj or "").strip())
 
     # 1) sprint_history snapshots (deleted etc.) — authoritative, take first.
     for rec in db.list_sprint_history():
-        label = rec.get("label")
-        if label in seen_labels:
+        key = _key(rec.get("label"), rec.get("project"))
+        if key in seen:
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_history(rec))
 
     # 2) sprints lifecycle rows not already represented by a snapshot.
     for row in db.list_sprints_lifecycle():
-        label = row.get("label")
-        if label in seen_labels:
+        key = _key(row.get("label"), row.get("project"))
+        if key in seen:
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_lifecycle(row, search_dirs))
 
-    # 3) file-only sprints with no DB row at all.
+    # 3) file-only sprints with no DB row at all. search_dirs are scoped to
+    # `project`, so attribute file labels to it; in the all-projects view (no
+    # project) skip a label already represented for any project.
+    _seen_any_label = {k[0] for k in seen}
     for label in _discover_file_labels(search_dirs):
-        if label in seen_labels:
+        key = _key(label, project)
+        if key in seen or (not project and label in _seen_any_label):
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_files(label, search_dirs))
 
     if project:

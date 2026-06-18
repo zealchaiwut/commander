@@ -1142,7 +1142,7 @@ def _db_update_worktree_shas_sm(
 
 def _token_window_utc_now() -> str:
     """UTC timestamp in the exact format token_usage.recorded_at uses."""
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _token_window_sums(role: str, since_utc: str) -> "tuple[int, int]":

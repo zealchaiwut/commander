@@ -1079,6 +1079,12 @@ def _sprint_db_ingest_run_sm(
 # duration. Best-effort, like the lifecycle helpers above: a DB write must never
 # interrupt or fail a sprint run.
 
+# Owning project (owner/repo) for the run in progress — set at run_sprint start so
+# every agent_runs row is tagged with its project (sprint labels collide across
+# repos). Read by _db_agent_start_sm without threading it through 8 call sites.
+_CURRENT_RUN_PROJECT: Optional[str] = None
+
+
 def _db_agent_start_sm(
     issue_number,
     sprint_label: str,
@@ -1113,6 +1119,7 @@ def _db_agent_start_sm(
             attempt_kind=attempt_kind,
             log_path=log_path,
             backend=backend,
+            project=_CURRENT_RUN_PROJECT,
         )
     except (Exception, SystemExit):
         pass
@@ -8835,6 +8842,10 @@ def run_sprint(
     # Effective repo: explicit arg > config > github_client
     eff_repo   = repo_name or (cfg.repo_name if cfg else None)
     api_url    = cfg.api_url if cfg else None
+    # Tag every agent_runs row written during this run with its project so the
+    # timeline/run-stats/history stop mixing same-labelled sprints across repos.
+    global _CURRENT_RUN_PROJECT
+    _CURRENT_RUN_PROJECT = eff_repo
 
     summary    = SprintSummary()
     sprint_num = _sprint_number(label)

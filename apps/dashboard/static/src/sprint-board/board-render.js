@@ -1240,13 +1240,24 @@ export function _smgmtCardHtml(
     (outcome.state ||
       (outcome.sprint_status === "completed" ? "completed" : null));
   const hasLedgerRun = _smgmtHasLedgerRun(label);
+  // Align the rework/ready flags with the BADGE source (_smgmtStateMeta), not just
+  // the raw outcome.lifecycle — the two can disagree (e.g. a sprint whose state was
+  // set to needs_rework while the cached outcome.lifecycle still reads
+  // ready_to_merge), which made the badge say NEEDS REWORK but the status line say
+  // "All tickets passed. Ready to merge."
+  const _badgeState =
+    outcome && typeof _smgmtStateMeta === "function"
+      ? (_smgmtStateMeta(outcome, (outcome.issues || []).length).state || "")
+      : "";
   const isHasRework =
     hasLedgerRun &&
     (outcomeLifecycle === "needs_rework" ||
+      _badgeState === "needs_rework" ||
       outcomeState === "has_rework" ||
       outcomeState === "cancelled");
   const isReadyToMerge =
     hasLedgerRun &&
+    _badgeState !== "needs_rework" &&
     (outcomeLifecycle === "ready_to_merge" ||
       (outcomeLifecycle === "completed" && outcomeState === "completed"));
   const isAwaitingMerge =
@@ -1895,7 +1906,9 @@ export function _smgmtCardStatusSentence(label, opts) {
     isPostRun, isRunningView,
   } = opts;
   if (isRunning) return "";
-  if (isLinger) return "Sprint finished — snapshot kept 1 hour.";
+  // Rework is checked BEFORE linger so a needs_rework sprint reads as rework even
+  // inside its 1-hour linger window (otherwise the linger note shadowed it, and a
+  // lingering rework sprint looked identical to a settled one).
   if (isHasRework) {
     const c = (outcome && outcome.counts) || {};
     const done = c.done || 0;
@@ -1906,6 +1919,7 @@ export function _smgmtCardStatusSentence(label, opts) {
     }
     return "Some tickets need rework — re-run or merge what passed.";
   }
+  if (isLinger) return "Sprint finished — snapshot kept 1 hour.";
   if (isReadyToMerge || isAwaitingMerge) {
     return "All tickets passed. Ready to merge.";
   }

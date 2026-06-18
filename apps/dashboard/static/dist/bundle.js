@@ -6328,8 +6328,9 @@ ${data.errors.join("\n")}`);
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const hasLedgerRun = _smgmtHasLedgerRun(label);
-    const isHasRework = hasLedgerRun && (outcomeLifecycle === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled");
-    const isReadyToMerge = hasLedgerRun && (outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed");
+    const _badgeState = outcome && typeof _smgmtStateMeta === "function" ? _smgmtStateMeta(outcome, (outcome.issues || []).length).state || "" : "";
+    const isHasRework = hasLedgerRun && (outcomeLifecycle === "needs_rework" || _badgeState === "needs_rework" || outcomeState === "has_rework" || outcomeState === "cancelled");
+    const isReadyToMerge = hasLedgerRun && _badgeState !== "needs_rework" && (outcomeLifecycle === "ready_to_merge" || outcomeLifecycle === "completed" && outcomeState === "completed");
     const isAwaitingMerge = isReadyToMerge || finished && !isRunning && !isHasRework && !planBlocksPostRun;
     const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
@@ -6806,8 +6807,6 @@ ${data.errors.join("\n")}`);
     } = opts;
     if (isRunning)
       return "";
-    if (isLinger)
-      return "Sprint finished \u2014 snapshot kept 1 hour.";
     if (isHasRework) {
       const c = outcome && outcome.counts || {};
       const done = c.done || 0;
@@ -6818,6 +6817,8 @@ ${data.errors.join("\n")}`);
       }
       return "Some tickets need rework \u2014 re-run or merge what passed.";
     }
+    if (isLinger)
+      return "Sprint finished \u2014 snapshot kept 1 hour.";
     if (isReadyToMerge || isAwaitingMerge) {
       return "All tickets passed. Ready to merge.";
     }

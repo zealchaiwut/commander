@@ -55,7 +55,7 @@ try:
 except ImportError:
     _psutil = None  # type: ignore[assignment]
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -63,7 +63,20 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 # Load .env before importing local modules so that DB_PATH and other env vars
 # are available when db.py executes its module-level startup checks.
-load_dotenv(Path(__file__).parent / ".env")
+_ENV_PATH = Path(__file__).parent / ".env"
+load_dotenv(_ENV_PATH)
+
+# The GitHub token is the one .env value that MUST win over the process
+# environment. load_dotenv() does not override already-set vars, so a stale
+# GH_TOKEN/GITHUB_TOKEN inherited from the launching shell, launchd, or a revoked
+# keyring token silently shadows the valid value in .env — and the dashboard then
+# authenticates `gh` with the wrong (often revoked) token. Make .env authoritative
+# for just these two keys; everything else keeps the normal shell-wins behavior.
+_env_file_vals = dotenv_values(_ENV_PATH)
+for _gh_key in ("GH_TOKEN", "GITHUB_TOKEN"):
+    _gh_val = (_env_file_vals.get(_gh_key) or "").strip()
+    if _gh_val:
+        os.environ[_gh_key] = _gh_val
 
 import config
 import db

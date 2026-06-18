@@ -240,15 +240,22 @@ _BUILD_TIMESTAMP: str = _STARTED_AT
 # ── Build hash (cache-busting) ─────────────────────────────────────────────────
 
 def _compute_build_hash() -> str:
-    """Compute an 8-char MD5 hash over all JS and CSS files in STATIC_DIR.
+    """Compute an 8-char MD5 hash over all JS and CSS files under STATIC_DIR.
 
     The hash changes whenever any local static asset changes, which lets
     browsers cache assets indefinitely while always loading fresh code after
     a deploy/restart.
+
+    Uses rglob (recursive): the esbuild bundle lives at static/dist/bundle.js and
+    the ES module sources at static/src/**, both in subdirectories. A plain
+    non-recursive glob("*.js") only saw top-level files, so the bundle changing
+    never changed the hash — and since bundle.js is served immutable+max-age=1yr
+    on an unversioned URL, returning browsers stayed pinned to the pre-deploy
+    bundle (frontend deploys were invisible until a manual hard-refresh).
     """
     h = hashlib.md5()
     for ext in ("*.js", "*.css"):
-        for f in sorted(STATIC_DIR.glob(ext)):
+        for f in sorted(STATIC_DIR.rglob(ext)):
             try:
                 h.update(f.read_bytes())
             except OSError:

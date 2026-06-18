@@ -16464,11 +16464,34 @@ async function _smgmtOrchCopyLog(label) {
       _smgmtShowToast('No orchestrator log to copy yet');
       return;
     }
-    await navigator.clipboard.writeText(text);
+    await _copyTextWithFallback(text);
     _smgmtShowToast('Orchestrator log copied to clipboard');
   } catch (e) {
     _smgmtShowToast('Copy failed — try again');
   }
+}
+
+// navigator.clipboard requires a secure context (https/localhost). Over Tailscale
+// (http://100.x.x.x:port) it is undefined and writeText rejects, so fall back to
+// a hidden-textarea execCommand('copy') which works on plain http.
+async function _copyTextWithFallback(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch (_) { /* fall through to the legacy path */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('copy unsupported');
 }
 
 /** Render or refresh the orchestrator panel. Called on every live tick. */

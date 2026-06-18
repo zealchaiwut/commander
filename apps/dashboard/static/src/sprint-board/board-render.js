@@ -1284,6 +1284,10 @@ export function _smgmtCardHtml(
   if (isRunning) {
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  } else if (isLinger && isHasRework) {
+    // A rework finish lingers too, but the operator needs to re-run it NOW — don't
+    // make them wait out the 1h snapshot window before the rerun button appears.
+    actionBtn = rerunBtn;
   } else if (isLinger) {
     actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
   } else if (isHasRework && rerunInto && tickets.length === 0) {

@@ -1453,7 +1453,33 @@
     .bl-triage-body { overflow-y: auto; padding: 8px 12px; }
     .bl-triage-group { margin-bottom: 10px; }
     .bl-triage-group-h { font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .04em; color: var(--text-muted); padding: 6px 4px; }
+      letter-spacing: .04em; color: var(--text-muted); padding: 6px 4px;
+      display: flex; align-items: center; justify-content: space-between; }
+    .bl-triage-gn { font-family: var(--mono); font-weight: 500; color: var(--text-sub); }
+    .bl-triage-sep { height: 1px; background: var(--border); margin: 10px 0; }
+    .bl-triage-selall { background: none; border: 1px solid var(--border); border-radius: 999px;
+      font-size: 10px; font-weight: 600; padding: 2px 9px; cursor: pointer; color: var(--text-sub);
+      text-transform: none; letter-spacing: 0; }
+    .bl-triage-selall:hover { border-color: var(--text-sub); color: var(--text); }
+    /* Priority table */
+    .bl-triage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .bl-triage-table thead th { text-align: left; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
+      padding: 4px 6px; border-bottom: 1px solid var(--border); }
+    .bl-triage-trow td { padding: 5px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); vertical-align: top; }
+    .bl-triage-trow:hover { background: var(--hover-bg, rgba(127,127,127,.06)); }
+    .bl-triage-prio-sub td { padding: 8px 6px 3px; font-size: 11px; font-weight: 700; color: var(--text-sub); }
+    .bl-triage-prio-foot td { padding: 3px 6px 10px; }
+    .bl-triage-reason-cell { color: var(--text-muted); font-size: 11px; max-width: 280px; }
+    .bl-triage-table .bl-triage-title { white-space: normal; }
+    /* Progress screen */
+    .bl-triage-progress { padding: 24px 16px; }
+    .bl-triage-prog-label { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .bl-triage-prog-bar { height: 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.12)); overflow: hidden; }
+    .bl-triage-prog-fill { height: 100%; width: 0; background: var(--green, #16a34a); transition: width .2s ease; }
+    .bl-triage-prog-log { margin-top: 14px; max-height: 220px; overflow-y: auto; font-size: 11.5px; font-family: var(--mono); }
+    .bl-triage-prog-log .ok { color: var(--green, #16a34a); }
+    .bl-triage-prog-log .err { color: var(--red, #dc2626); }
     .bl-triage-keep { opacity: .8; }
     .bl-triage-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
       border-radius: 6px; cursor: pointer; font-size: 12.5px; }
@@ -17554,11 +17580,13 @@ async function _blCleanupBacklog(btnEl) {
 }
 
 const _BL_PRIO_RANK = { negligible: 0, P2: 1, P1: 2, P0: 3 };
+const _BL_PRIO_ORDER = ['P0', 'P1', 'P2', 'negligible'];
+const _BL_PRIO_CLS = { P0: 'bl-prio-keep', P1: 'bl-prio-keep', P2: 'bl-prio-low', negligible: 'bl-prio-neg' };
 
-function _blTriageRowHtml(num, title, badge, reason, checked) {
-  const t = (title || '').length > 80 ? title.slice(0, 80) + '…' : (title || '');
+function _blTriageRow(num, title, badge, reason, checked, group) {
+  const t = (title || '').length > 70 ? title.slice(0, 70) + '…' : (title || '');
   return `<label class="bl-triage-row">
-    <input type="checkbox" class="bl-triage-cb" data-num="${num}"${checked ? ' checked' : ''}>
+    <input type="checkbox" class="bl-triage-cb" data-num="${num}" data-group="${group}"${checked ? ' checked' : ''}>
     <span class="bl-triage-num">#${num}</span>
     ${badge}
     <span class="bl-triage-title" title="${escHtml(title || '')}">${escHtml(t)}</span>
@@ -17566,44 +17594,63 @@ function _blTriageRowHtml(num, title, badge, reason, checked) {
   </label>`;
 }
 
+function _blTriageSecHead(label, group, count) {
+  return `<div class="bl-triage-group-h">
+    <span>${label} <span class="bl-triage-gn">${count}</span></span>
+    <button type="button" class="bl-triage-selall" onclick="_blTriageSelectGroup('${group}', this)">Select all</button>
+  </div>`;
+}
+
 function _blTriageModalOpen(testCands, tickets) {
-  // Group LLM tickets: duplicates, then negligible/low (recommend_close), then keep.
   const dups = tickets.filter(t => t.duplicate_of != null);
-  const closeable = tickets.filter(t => t.duplicate_of == null && t.recommend_close);
-  const keep = tickets.filter(t => t.duplicate_of == null && !t.recommend_close);
+  const prio = tickets.filter(t => t.duplicate_of == null);  // priority list = non-duplicates
   let h = '';
+
+  // 1) Test issues
   if (testCands.length) {
-    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Test scaffolding</div>';
-    testCands.forEach(c => { h += _blTriageRowHtml(c.number, c.title, '<span class="bl-prio bl-prio-neg">test</span>', c.reason, true); });
+    h += `<div class="bl-triage-group" data-sec="test">${_blTriageSecHead('Test issues', 'test', testCands.length)}`;
+    testCands.forEach(c => { h += _blTriageRow(c.number, c.title, '<span class="bl-prio bl-prio-neg">test</span>', c.reason, true, 'test'); });
     h += '</div>';
   }
+  // 2) Duplicates
   if (dups.length) {
-    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Duplicates</div>';
-    dups.forEach(t => { h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio bl-prio-dup">dup of #${t.duplicate_of}</span>`, t.reason, true); });
+    if (h) h += '<div class="bl-triage-sep"></div>';
+    h += `<div class="bl-triage-group" data-sec="dup">${_blTriageSecHead('Duplicates', 'dup', dups.length)}`;
+    dups.forEach(t => { h += _blTriageRow(t.number, t.title, `<span class="bl-prio bl-prio-dup">dup of #${t.duplicate_of}</span>`, t.reason, true, 'dup'); });
     h += '</div>';
   }
-  if (closeable.length) {
-    h += '<div class="bl-triage-group"><div class="bl-triage-group-h">Low priority / negligible</div>';
-    closeable.sort((a, b) => (_BL_PRIO_RANK[a.priority] ?? 1) - (_BL_PRIO_RANK[b.priority] ?? 1));
-    closeable.forEach(t => {
-      const cls = t.priority === 'negligible' ? 'bl-prio-neg' : 'bl-prio-low';
-      h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio ${cls}">${t.priority}</span>`, t.reason, t.priority === 'negligible');
+  // 3) Priority list — table with a Reason column, grouped by priority with a
+  //    per-priority "Select all" at the bottom of each group.
+  if (prio.length) {
+    if (h) h += '<div class="bl-triage-sep"></div>';
+    h += `<div class="bl-triage-group" data-sec="prio"><div class="bl-triage-group-h"><span>Priority list <span class="bl-triage-gn">${prio.length}</span></span></div>`;
+    h += `<table class="bl-triage-table"><thead><tr><th></th><th>#</th><th>Title</th><th>Priority</th><th>Reason</th></tr></thead><tbody>`;
+    _BL_PRIO_ORDER.forEach(p => {
+      const rows = prio.filter(t => t.priority === p);
+      if (!rows.length) return;
+      h += `<tr class="bl-triage-prio-sub"><td colspan="5"><span class="bl-prio ${_BL_PRIO_CLS[p]}">${p}</span> · ${rows.length}</td></tr>`;
+      rows.forEach(t => {
+        const ttl = (t.title || '').length > 60 ? t.title.slice(0, 60) + '…' : (t.title || '');
+        h += `<tr class="bl-triage-trow">
+          <td><input type="checkbox" class="bl-triage-cb" data-num="${t.number}" data-group="prio" data-prio="${p}"${p === 'negligible' ? ' checked' : ''}></td>
+          <td class="bl-triage-num">#${t.number}</td>
+          <td class="bl-triage-title" title="${escHtml(t.title || '')}">${escHtml(ttl)}</td>
+          <td><span class="bl-prio ${_BL_PRIO_CLS[p]}">${p}</span></td>
+          <td class="bl-triage-reason-cell">${escHtml(t.reason || '')}</td>
+        </tr>`;
+      });
+      h += `<tr class="bl-triage-prio-foot"><td colspan="5"><button type="button" class="bl-triage-selall" onclick="_blTriageSelectPrio('${p}', this)">Select all ${p}</button></td></tr>`;
     });
-    h += '</div>';
+    h += '</tbody></table></div>';
   }
-  if (keep.length) {
-    h += '<div class="bl-triage-group bl-triage-keep"><div class="bl-triage-group-h">Keep (P0/P1) — leave unchecked</div>';
-    keep.sort((a, b) => (_BL_PRIO_RANK[b.priority] ?? 1) - (_BL_PRIO_RANK[a.priority] ?? 1));
-    keep.forEach(t => { h += _blTriageRowHtml(t.number, t.title, `<span class="bl-prio bl-prio-keep">${t.priority}</span>`, t.reason, false); });
-    h += '</div>';
-  }
+
   const el = document.createElement('div');
   el.id = 'bl-triage-modal';
   el.className = 'bl-triage-overlay';
   el.innerHTML = `<div class="bl-triage-card" role="dialog" aria-label="Backlog triage">
     <div class="bl-triage-head">
       <strong>Backlog triage</strong>
-      <span class="bl-triage-sub">Checked tickets will be closed on GitHub as “not planned”. Review before confirming.</span>
+      <span class="bl-triage-sub">Checked tickets close on GitHub as “not planned”. Review before confirming.</span>
       <button class="bl-triage-x" onclick="_blTriageClose()" aria-label="Close">&times;</button>
     </div>
     <div class="bl-triage-body">${h || '<div style="padding:16px;color:var(--text-muted)">Nothing to triage.</div>'}</div>
@@ -17618,6 +17665,21 @@ function _blTriageModalOpen(testCands, tickets) {
   el.addEventListener('change', _blTriageUpdateCount);
   el.addEventListener('click', (e) => { if (e.target === el) _blTriageClose(); });
   _blTriageUpdateCount();
+}
+
+function _blTriageToggleAll(cbs, btn, allLabel, noneLabel) {
+  const allChecked = cbs.length && cbs.every(c => c.checked);
+  cbs.forEach(c => { c.checked = !allChecked; });
+  if (btn) btn.textContent = allChecked ? allLabel : noneLabel;
+  _blTriageUpdateCount();
+}
+function _blTriageSelectGroup(group, btn) {
+  _blTriageToggleAll([...document.querySelectorAll(`#bl-triage-modal .bl-triage-cb[data-group="${group}"]`)],
+    btn, 'Select all', 'Deselect all');
+}
+function _blTriageSelectPrio(p, btn) {
+  _blTriageToggleAll([...document.querySelectorAll(`#bl-triage-modal .bl-triage-cb[data-prio="${p}"]`)],
+    btn, `Select all ${p}`, `Deselect all ${p}`);
 }
 
 function _blTriageUpdateCount() {
@@ -17638,25 +17700,45 @@ async function _blTriageConfirm(btn) {
     .map(cb => parseInt(cb.dataset.num, 10)).filter(n => !isNaN(n));
   if (!nums.length) { _smgmtShowToast('Nothing selected'); return; }
   const { owner, repoName } = _blTriageCtx;
-  if (btn) { btn.disabled = true; btn.textContent = 'Closing…'; }
-  try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/cleanup`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmed: true, issue_numbers: nums }) },
-    );
-    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${resp.status}`); }
-    const result = await resp.json();
-    const closed = (result.closed || []).length;
-    const failed = (result.errors || []).length;
-    _smgmtShowToast(failed ? `Closed ${closed}; ${failed} failed — see console` : `Closed ${closed} backlog issue${closed !== 1 ? 's' : ''}`);
-    if (failed) console.warn('Backlog cleanup errors:', result.errors);
-    _blTriageClose();
-    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
-  } catch (e) {
-    _smgmtShowToast('Close failed: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Close selected'; }
+  const base = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/backlog/triage-apply`;
+
+  // Progress screen (#5): swap the body for a live bar + log, close one ticket
+  // at a time so the bar reflects real progress (like the move-sprint flow).
+  const body = document.querySelector('#bl-triage-modal .bl-triage-body');
+  const foot = document.querySelector('#bl-triage-modal .bl-triage-foot');
+  if (foot) foot.style.display = 'none';
+  body.innerHTML = `<div class="bl-triage-progress">
+    <div class="bl-triage-prog-label" id="bl-prog-label">Closing 0 / ${nums.length}…</div>
+    <div class="bl-triage-prog-bar"><div class="bl-triage-prog-fill" id="bl-prog-fill"></div></div>
+    <div class="bl-triage-prog-log" id="bl-prog-log"></div>
+  </div>`;
+  const fill = document.getElementById('bl-prog-fill');
+  const label = document.getElementById('bl-prog-label');
+  const log = document.getElementById('bl-prog-log');
+  let done = 0, closed = 0, failed = 0;
+  for (const num of nums) {
+    try {
+      const resp = await fetch(base, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, issue_numbers: [num] }),
+      });
+      const r = resp.ok ? await resp.json() : { errors: [`HTTP ${resp.status}`] };
+      if ((r.closed || []).length) { closed++; if (log) log.innerHTML += `<div class="ok">✓ #${num} closed</div>`; }
+      else { failed++; if (log) log.innerHTML += `<div class="err">✗ #${num} ${escHtml((r.errors || []).join('; ') || 'skipped')}</div>`; }
+    } catch (e) {
+      failed++; if (log) log.innerHTML += `<div class="err">✗ #${num} ${escHtml(e.message)}</div>`;
+    }
+    done++;
+    if (fill) fill.style.width = `${Math.round(done / nums.length * 100)}%`;
+    if (label) label.textContent = `Closing ${done} / ${nums.length}…`;
+    if (log) log.scrollTop = log.scrollHeight;
   }
+  if (label) label.textContent = `Done — ${closed} closed${failed ? `, ${failed} failed` : ''}.`;
+  if (foot) {
+    foot.style.display = '';
+    foot.innerHTML = `<span style="flex:1"></span><button class="rm-btn rm-btn-prim" onclick="_blTriageClose()">Done</button>`;
+  }
+  if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
 }
 
 // ── Fix all pre-flight issues (generate missing AC + estimate unsized) ────────

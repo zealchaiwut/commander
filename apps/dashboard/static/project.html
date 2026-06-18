@@ -14703,12 +14703,10 @@ function _smgmtGaugeHtml(live) {
 
 function _smgmtRunHeadHtml(label, live, isLinger) {
   const display = sprintLabelDisplay(label);
-  const elapsed = live && live.time_spent_sec > 0 ? _fmtRunningTime(live.time_spent_sec) : '0m 0s';
-  const estRem = (!isLinger && live && live.est_remaining_minutes != null)
-    ? `est. remaining ~${live.est_remaining_minutes}m (calibrated)` : '';
-  const metaParts = [`elapsed ${elapsed}`];
-  if (estRem) metaParts.push(estRem);
+  // Elapsed / est-remaining line removed from the running header (#1) — only the
+  // linger snapshot note remains; live elapsed lives in the timeline.
   const cancelled = isLinger && live && live.run_state === 'cancelled';
+  const metaParts = [];
   if (isLinger) metaParts.push(cancelled ? 'cancelled — snapshot' : 'finished — snapshot');
   const safeLabel = escHtml(label);
   const badge = isLinger
@@ -16019,7 +16017,8 @@ function _smgmtRpTimelineHtml(data, live) {
       subLine = 'done · est ' + estMin + 'm' + (sizeTag ? ' (' + sizeTag + ')' : '');
     } else if (isRunning) {
       mainMetric = fmtMin(elapsedMs);
-      subLine = 'running · ~' + fmtMin(remMs) + ' left';
+      // #2: drop the "~Xm left" estimate (sizes drift mid-run) — just "running".
+      subLine = 'running';
     } else if (isQueued) {
       mainMetric = 'est ' + estMin + 'm';
       subLine = (sizeTag ? sizeTag + ' · ' : '') + 'queued';
@@ -17234,6 +17233,21 @@ function _smgmtLivePatch(label, live) {
 }
 
 /** Start or restart the live polling loop for any running sprints. */
+// #3: re-fetch the running-pane timeline every 10 min so size/estimate drift
+// (a ticket runs shorter/longer than the first render) is reflected without the
+// operator reloading. The 2s live poll only patches; the timeline is otherwise
+// rendered once on pane entry.
+let _smgmtTimelineRefreshId = null;
+const _SMGMT_TIMELINE_REFRESH_MS = 600000; // 10 minutes
+function _smgmtTimelineRefreshTick() {
+  if (_smgmtRunningLabels.size === 0) return;
+  const label = Array.from(_smgmtRunningLabels)[0];
+  const repo = _smgmtRepo();
+  if (!label || !repo) return;
+  const snap = (typeof _smgmtLiveCache !== 'undefined' && _smgmtLiveCache) ? _smgmtLiveCache[label] : null;
+  _smgmtRpTimelineFetch(label, repo, snap || null);
+}
+
 function _smgmtLivePollRestart() {
   // Clear existing polls
   if (_smgmtLivePollId !== null) {
@@ -17243,6 +17257,10 @@ function _smgmtLivePollRestart() {
   if (_smgmtLogPollId !== null) {
     clearInterval(_smgmtLogPollId);
     _smgmtLogPollId = null;
+  }
+  if (_smgmtTimelineRefreshId !== null) {
+    clearInterval(_smgmtTimelineRefreshId);
+    _smgmtTimelineRefreshId = null;
   }
 
   if (_smgmtRunningLabels.size === 0) {
@@ -17254,6 +17272,8 @@ function _smgmtLivePollRestart() {
   _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
   // Kick off immediately
   _smgmtLivePollTick();
+  // Periodic timeline re-fetch (every 10 min) for size/estimate drift.
+  _smgmtTimelineRefreshId = setInterval(_smgmtTimelineRefreshTick, _SMGMT_TIMELINE_REFRESH_MS);
 }
 
 /** Fetch live data for all running sprints and patch in place. */

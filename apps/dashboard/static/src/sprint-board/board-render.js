@@ -393,12 +393,13 @@ export function _smgmtRender(data) {
     }
 
     if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
-    const inLinger =
-      typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
-    const outcome =
-      _smgmtRunningLabels.has(label) || inLinger
-        ? null
-        : _smgmtOutcomeCache[label] || null;
+    // Linger is Running-pane only: on the Board a lingering (just-finished) sprint
+    // still resolves its real ingested outcome, so the card renders as a settled
+    // post-run card (rework / ready-to-merge) rather than a frozen live snapshot.
+    // Only an actively-running sprint nulls its outcome (live data drives it).
+    const outcome = _smgmtRunningLabels.has(label)
+      ? null
+      : _smgmtOutcomeCache[label] || null;
     const parent = _sprintParents[label] || null;
     const cardHtml = _smgmtCardHtml(
       label,

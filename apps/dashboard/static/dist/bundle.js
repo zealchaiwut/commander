@@ -5612,8 +5612,7 @@ ${data.errors.join("\n")}`);
       }
       if (_smgmtIsFreshRerunSprint(label))
         delete _smgmtOutcomeCache[label];
-      const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
-      const outcome = _smgmtRunningLabels.has(label) || inLinger ? null : _smgmtOutcomeCache[label] || null;
+      const outcome = _smgmtRunningLabels.has(label) ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
       const cardHtml = _smgmtCardHtml(
         label,

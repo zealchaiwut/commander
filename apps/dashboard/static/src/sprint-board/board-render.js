@@ -1709,10 +1709,15 @@ export function _smgmtBoardBannerPatch(label, live) {
 }
 
 export function _smgmtRunningCardHtml(label, n, tickets) {
-  let isCollapsed = false;
+  // #C: a running sprint card defaults to COLLAPSED right after start — body
+  // (ticket list/levels) hidden, only the header + Cancel button — and the whole
+  // card navigates to the Running pane on click. An explicit "0" pref (operator
+  // expanded it in place) still wins.
+  let isCollapsed = true;
   try {
-    isCollapsed =
-      localStorage.getItem("sprintColumn_" + label + "_collapsed") === "1";
+    const _pref = localStorage.getItem("sprintColumn_" + label + "_collapsed");
+    if (_pref === "0") isCollapsed = false;
+    else if (_pref === "1") isCollapsed = true;
   } catch (_) {}
   const live = _smgmtLiveCache[label] || null;
 
@@ -1771,7 +1776,11 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
     (isCollapsed ? "Expand " : "Collapse ") +
     escHtml(sprintLabelDisplay(label));
   return `
-    <div class="smgmt-sprint-card smgmt-running${runCollapsedClass}" id="smgmt-card-${escHtml(label)}">
+    <div class="smgmt-sprint-card smgmt-running smgmt-running-clickable${runCollapsedClass}" id="smgmt-card-${escHtml(label)}"
+         role="button" tabindex="0"
+         title="Open the Running pane"
+         onclick="if(!event.target.closest('button,a,input')){_smgmtShowSubView('running');}"
+         onkeydown="if((event.key==='Enter'||event.key===' ')&&!event.target.closest('button,a,input')){event.preventDefault();_smgmtShowSubView('running');}">
       <div class="smgmt-running-stripe"></div>
       <div class="smgmt-sprint-header">
         <div class="smgmt-sprint-header-left">

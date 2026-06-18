@@ -6334,6 +6334,8 @@ ${data.errors.join("\n")}`);
     if (isRunning) {
       actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+    } else if (isLinger && isHasRework) {
+      actionBtn = rerunBtn;
     } else if (isLinger) {
       actionBtn = `<span class="smgmt-linger-note">Finished \u2014 snapshot kept 1h</span>`;
     } else if (isHasRework && rerunInto && tickets.length === 0) {

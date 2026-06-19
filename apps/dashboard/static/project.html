@@ -30299,8 +30299,10 @@ function _deployCardHtml(c, i) {
 // action buttons are enabled. idle (never started / unknown) allows everything.
 var _deployRunState = {};
 
-// AC5/AC6: enable/disable each action by run state. The chosen lifecycle is a
-// Stop → Start flow: Deploy and Restart are disabled while the env is stopped.
+// AC5/AC6: enable/disable each action by run state. Deploy is allowed from a
+// stopped env — a deploy is pull + (re)start, which cold-starts a stopped
+// service. Only Stop and Restart need a running process, so they stay disabled
+// while stopped; Start stays disabled while running.
 function _deployBtnDisabled(state, action, card) {
   if (card) {
     if ((action === 'deploy') && card.deploy_ready === false) return true;
@@ -30309,7 +30311,7 @@ function _deployBtnDisabled(state, action, card) {
     if ((action === 'stop') && card.stop_ready === false) return true;
   }
   if (state === 'running') return action === 'start';
-  if (state === 'stopped') return action === 'stop' || action === 'restart' || action === 'deploy';
+  if (state === 'stopped') return action === 'stop' || action === 'restart';
   return false;  // idle → all enabled
 }
 

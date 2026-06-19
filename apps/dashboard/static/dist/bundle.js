@@ -5533,6 +5533,14 @@ ${data.errors.join("\n")}`);
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
       if (_smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
+        const latest = _smgmtLatestLineageLabel(
+          _smgmtSprintBaseLabel(label),
+          _sprintParents,
+          _rerunInto,
+          orderedLabelsRaw
+        );
+        if (latest && _finishedSet.has(latest))
+          return false;
         _smgmtResolvedAncestors.add(label);
         return true;
       }

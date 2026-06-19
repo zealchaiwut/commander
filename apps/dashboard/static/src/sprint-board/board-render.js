@@ -297,6 +297,16 @@ export function _smgmtRender(data) {
     if (
       _smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)
     ) {
+      // A superseded ancestor stays on the active board only while the lineage is
+      // still in play. Once the latest member is finished (whole lineage merged),
+      // the group belongs to History — drop the ancestor instead of parking it in
+      // a permanent Lineage section. Without this a collapsed ancestor returned
+      // early and never reached the _finishedSet drop below, so a fully-completed
+      // lineage lingered on the board forever.
+      const latest = _smgmtLatestLineageLabel(
+        _smgmtSprintBaseLabel(label), _sprintParents, _rerunInto, orderedLabelsRaw,
+      );
+      if (latest && _finishedSet.has(latest)) return false;
       _smgmtResolvedAncestors.add(label);
       return true;
     }

@@ -573,8 +573,14 @@ _GUARD_FROM: frozenset[str] = frozenset({"running"})
 _GUARD_TO: frozenset[str] = frozenset({"ready_to_merge", "needs_rework", "completed"})
 
 # Reconciler-only promotions not in the general edge table (issue #1137).
+# needs_rework→completed (B2): a superseded ancestor whose entire lineage has
+# merged into develop is completed even though its own tickets show rework — the
+# rework moved to a child that has since merged up. Guarded by a real
+# merge-to-develop check in the reconciler, so this edge can never auto-complete
+# a sprint whose work is not actually in develop.
 _RECONCILE_ONLY_EDGES: frozenset[tuple[str, str]] = frozenset({
     ("needs_rework", "ready_to_merge"),
+    ("needs_rework", "completed"),
 })
 
 
@@ -607,6 +613,16 @@ def transition_sprint_state(
     rejects any running→terminal transition where actor != "manager". Returns a
     TransitionResult; never raises on a guard failure.
     """
+    # B1: a child sprint (``sprint-N.M``) must persist parent_label = base
+    # ``sprint-N`` so children_of()'s DB-primary lookup resolves the whole
+    # lineage. The running-state writer was historically called without
+    # parent_label, leaving it NULL — which forced a disk-glob fallback that
+    # silently dropped descendants once any sibling row existed. Derive the base
+    # here so every transition self-heals, regardless of the caller.
+    if parent_label is None and label and "." in label and label.startswith("sprint-"):
+        _base = label.split(".", 1)[0]
+        if _base[len("sprint-"):].isdigit():
+            parent_label = _base
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
         # Scope by project: sprint labels are unique only per repo, so an unscoped
@@ -738,6 +754,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     _migrate_sprints_state_check(conn)
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
+    _backfill_child_parent_labels(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -782,6 +799,29 @@ def _migrate_sprints_run_artifacts(conn: sqlite3.Connection) -> None:
     for col, typedef in _RUN_ARTIFACT_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE sprints ADD COLUMN {col} {typedef}")
+
+
+def _backfill_child_parent_labels(conn: sqlite3.Connection) -> None:
+    """One-time heal: set parent_label = base for child sprints left NULL.
+
+    Child-sprint rows written before parent_label was persisted (the running
+    writer was called without it) keep NULL, which makes children_of()'s
+    DB-primary lookup miss the lineage. Derive base ``sprint-N`` from the label
+    via the first dot. Idempotent: only touches NULL rows matching sprint-N.M.
+    """
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+    conn.execute(
+        """
+        UPDATE sprints
+           SET parent_label = substr(label, 1, instr(label, '.') - 1)
+         WHERE parent_label IS NULL
+           AND label GLOB 'sprint-[0-9]*.[0-9]*'
+        """
+    )
 
 
 def ingest_sprint_run_artifact(

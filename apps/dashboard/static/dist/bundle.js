@@ -2343,7 +2343,13 @@ Replace the existing draft (${data.existing_label})?`
     if (!children.length)
       return false;
     const settled = /* @__PURE__ */ new Set(["completed", "deleted", "ready_to_merge"]);
-    return children.every((s) => settled.has((s.lifecycle_state || "").toLowerCase()));
+    return children.every((s, i) => {
+      if (settled.has((s.lifecycle_state || "").toLowerCase()))
+        return true;
+      return children.slice(i + 1).some(
+        (later) => settled.has((later.lifecycle_state || "").toLowerCase())
+      );
+    });
   }
   function _histBulkCompleteBtnHtml(group) {
     if (!group.children?.length || !group.baseSprint)
@@ -5527,6 +5533,14 @@ ${data.errors.join("\n")}`);
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
       if (_smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
+        const latest = _smgmtLatestLineageLabel(
+          _smgmtSprintBaseLabel(label),
+          _sprintParents,
+          _rerunInto,
+          orderedLabelsRaw
+        );
+        if (latest && _finishedSet.has(latest))
+          return false;
         _smgmtResolvedAncestors.add(label);
         return true;
       }

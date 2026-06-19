@@ -638,7 +638,7 @@
     }
     .stab {
       display: flex; align-items: center; gap: var(--space-1);
-      padding: var(--space-3) 0; margin-right: var(--space-6); flex-shrink: 0;
+      padding: var(--space-3) var(--space-2); margin-right: var(--space-4); flex-shrink: 0;
       min-height: var(--space-12);
       background: none; border: none; border-bottom: 2px solid transparent;
       color: var(--text-muted); font-size: var(--font-size-base); font-weight: var(--font-weight-medium);
@@ -682,11 +682,11 @@
       #stab-group-manage > .stab-dropdown {
         display: flex !important; position: static; flex-direction: row;
         background: none; border: none; box-shadow: none; padding: 0; min-width: 0;
-        gap: var(--space-6);
+        gap: var(--space-4);
       }
       #stab-group-manage > .stab-dropdown .stab {
         width: auto; justify-content: center; border-radius: 0;
-        padding: var(--space-3) 0; margin-right: 0; border-bottom: 2px solid transparent;
+        padding: var(--space-3) var(--space-2); margin-right: 0; border-bottom: 2px solid transparent;
       }
       #stab-group-manage > .stab-dropdown .stab.active { background: none; border-bottom-color: var(--blue); }
       #stab-group-manage > .stab-dropdown .stab:hover:not(.active):not(.disabled) {
@@ -8881,7 +8881,7 @@
     .orch-live-dot--active { background: var(--green); animation: orchDotPulse 2s ease-in-out infinite; }
     @keyframes orchDotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
     .orch-panel-body { padding: 10px 14px; font-family: var(--mono); font-size: 11px;
-      line-height: 1.55; overflow-y: auto; max-height: 4.8em; background: var(--bg); }
+      line-height: 1.55; overflow-y: auto; max-height: 15.5em; background: var(--bg); }
     .orch-panel-body.orch-panel-body--expanded { max-height: 320px; }
 
     .all-issues-panel { border: 1px solid var(--border); border-radius: 10px;
@@ -9732,14 +9732,14 @@
             <div id="smgmt-run-head" aria-live="polite"></div>
             <!-- Orchestrator log panel (issue #1106) -->
             <div class="orch-panel" id="smgmt-orch-panel" role="region" aria-label="Orchestrator log"></div>
-            <!-- All issues panel (issue #1106) -->
-            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
             <!-- Running-pane Gantt timeline (issue #1147) -->
             <div class="rp-timeline-wrap" id="smgmt-rp-timeline" hidden></div>
             <!-- Running metrics strip (issue #803) — folded into run-head gauge; kept for tests -->
             <div class="metrics" id="smgmt-metrics" role="group" aria-label="Sprint metrics" hidden></div>
             <!-- Two-queue coder/tester lane view (issue #927) -->
             <div class="lanes-wrap" id="smgmt-lanes" role="region" aria-label="Coder and tester queues" hidden></div>
+            <!-- All issues panel (issue #1106) — moved to bottom per operator request -->
+            <div class="all-issues-panel" id="smgmt-all-issues" role="region" aria-label="All issues"></div>
           </div>
           <!-- Node inspector panel (issue #1193) — bottom sheet on mobile ≤640px,
                inline below the run-shell on desktop. Toggled by _smgmtInspectorFeed. -->
@@ -9755,9 +9755,9 @@
                carries its own Summary link pill now. -->
           <!-- Sprints-table CSV export/import (PRD→UAT data sync for testing) -->
           <div class="hist-csv-toolbar">
-            <button type="button" class="hist-head-btn" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
+            <button type="button" class="btn-ghost" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
               <i class="ti ti-download"></i> Export CSV</button>
-            <button type="button" class="hist-head-btn" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
+            <button type="button" class="btn-ghost" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
               <i class="ti ti-upload"></i> Import CSV</button>
             <input type="file" id="hist-csv-file" accept=".csv,text/csv" hidden onchange="_histCsvImportPicked(event)">
           </div>
@@ -14543,12 +14543,21 @@ function _fmtRunningTime(secs) {
   return `${m}m ${s}s`;
 }
 
+/** Format seconds as a clock-style elapsed "MM:SSs" (or "H:MM:SSs" past an hour). */
+function _fmtElapsedClock(secs) {
+  secs = Math.max(0, Math.floor(Number(secs) || 0));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = String(secs % 60).padStart(2, '0');
+  return (h > 0 ? h + ':' + String(m).padStart(2, '0') : m) + ':' + s + 's';
+}
+
 /** Format an ISO timestamp as HH:MM local time. Returns null on invalid input. */
 function _fmtStoppedAt(isoStr) {
   if (!isoStr) return null;
   const d = new Date(isoStr);
   if (isNaN(d)) return null;
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 /** Render recent_log_lines array to HTML for the live log stream container. */
@@ -15787,9 +15796,9 @@ function _smgmtRpTimelineHeaderMeta(data, live) {
     return Math.round(ms / 60000) + 'm';
   }
   function fmtHHMM(isoStr) {
-    const d = new Date(isoStr);
-    return d.getHours().toString().padStart(2, '0') + ':'
-      + d.getMinutes().toString().padStart(2, '0');
+    // Bangkok wall-clock (UTC+7) — host may run UTC, so never use getHours().
+    return new Date(isoStr).toLocaleTimeString('en-GB',
+      { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
   }
   const startedHHMM = fmtHHMM(data.sprint_started_at);
   const elapsedLabel = liveSnap.time_spent_sec > 0
@@ -15871,9 +15880,9 @@ function _smgmtRpTimelineHtml(data, live) {
     return Math.round(ms / 60000) + 'm';
   }
   function fmtHHMM(isoStr) {
-    const d = new Date(isoStr);
-    return d.getHours().toString().padStart(2, '0') + ':'
-      + d.getMinutes().toString().padStart(2, '0');
+    // Bangkok wall-clock (UTC+7) — host may run UTC, so never use getHours().
+    return new Date(isoStr).toLocaleTimeString('en-GB',
+      { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
   function issueRemMs(iss, estMs) {
@@ -16083,6 +16092,10 @@ function _smgmtRpTimelineHtml(data, live) {
 
   const finishHHMM = fmtHHMM(new Date(axisEndMs).toISOString());
   const nowHHMM = fmtHHMM(data.server_now);
+  const _startMs = parseIsoMs(data.sprint_started_at);
+  const nowBadgeLabel = _startMs
+    ? 'now ' + nowHHMM + ' (' + _fmtElapsedClock((nowMs - _startMs) / 1000) + ')'
+    : 'now ' + nowHHMM;
   const axisHtml = '<div class="rp-tl-axis-wrap">'
     + '<span class="rp-tl-started"><i class="ti ti-player-play-filled" aria-hidden="true"></i>'
     + 'started ' + escHtml(startedHHMM) + '</span>'
@@ -16092,7 +16105,7 @@ function _smgmtRpTimelineHtml(data, live) {
 
   const nowRailHtml = '<div class="rp-tl-now-rail rp-tl-now" aria-hidden="true">'
     + '<div class="rp-tl-now-marker">'
-    + '<span class="rp-tl-now-badge">now ' + escHtml(nowHHMM) + '</span>'
+    + '<span class="rp-tl-now-badge">' + escHtml(nowBadgeLabel) + '</span>'
     + '<div class="rp-tl-now-line-full rp-tl-now-line"></div>'
     + '</div></div>';
 
@@ -16589,7 +16602,7 @@ function _smgmtInspectorClose() {
 // sprint dispatch log with a live indicator dot. Defaults to ~3 lines; "Show
 // more" loads the full sprint log (scrollable); "Show less" collapses back.
 
-const _SMGMT_ORCH_COLLAPSED_LINES = 3;
+const _SMGMT_ORCH_COLLAPSED_LINES = 10;
 const _SMGMT_ORCH_FULL_LINES = 2000; // API cap — entire sprint dispatch log
 
 /** Fetch dispatch-log tail and render into the orchestrator panel body. */
@@ -16620,6 +16633,8 @@ function _smgmtOrchFetchLines(label, tailLines, opts) {
         }).join('');
         if (displayAll) {
           el.scrollTop = atBottom ? el.scrollHeight : prevScroll;
+        } else {
+          el.scrollTop = el.scrollHeight;  // collapsed: always pin newest line at bottom
         }
       } else {
         el.innerHTML = '<span class="log-empty">No log output yet.</span>';

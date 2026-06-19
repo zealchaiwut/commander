@@ -6,14 +6,24 @@ against GitHub, updates drift in the DB, and broadcasts deltas to the UI.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Callable, Awaitable
 
 _log = logging.getLogger(__name__)
+
+# B4 (history perf): the project history GET fires reconcile_project_background as
+# a BackgroundTask on every page load. For a project with stuck/unmerged sprints
+# that means an N+1 `gh` subprocess fan-out per load. Throttle to at most once per
+# project per TTL so rapid refreshes coalesce. In-process best-effort; a restart
+# clears it (fine — the next load reconciles).
+_RECONCILE_TTL_SECONDS = 60.0
+_last_reconcile_at: dict[str, float] = {}
 
 _TERMINAL_STATES = frozenset({
     "ready_to_merge", "needs_rework", "completed",
@@ -84,6 +94,34 @@ def transition_sprint_state(
     return True
 
 
+def _lineage_fully_in_develop(label: str, project: str) -> bool:
+    """True when *label* is a lineage member whose work is already in develop.
+
+    Used to auto-complete a superseded ancestor (B2). Two conditions:
+      1. The sprint is part of a rerun lineage — it is itself a child
+         (``sprint-N.M``) or it has at least one child row. A standalone
+         needs_rework sprint with no children is a genuine failed run awaiting
+         rerun and must never be auto-completed.
+      2. Its sprint branch has no commits missing from develop — i.e. every
+         commit it produced has merged up the chain into develop.
+
+    Both checks are conservative: a missing repo, a still-open base→develop PR,
+    or any compare error leaves commits "unmerged" and blocks promotion.
+    """
+    if not project:
+        return False
+    try:
+        import server as srv  # noqa: PLC0415 — lazy, avoids import cycle
+    except Exception:
+        return False
+    is_child = srv._is_child_sprint_label(label)
+    has_children = bool(_db().get_sprint_children(label))
+    if not (is_child or has_children):
+        return False
+    branch = srv._sprint_branch_name(label)
+    return not srv._branch_has_unmerged_commits(project, branch, "develop")
+
+
 def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
     """Return updated fields when GitHub state diverges from the DB row, else None."""
     try:
@@ -119,6 +157,15 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
         return {"state": "ready_to_merge", "end_reason": "reconcile-orphan"}
 
     canonical = _db().canonical_lifecycle(stored)
+    # B2: lineage-merge promotion. A superseded ancestor (or settled child) sits
+    # in needs_rework forever because its own tickets failed (that is WHY a rerun
+    # child was spawned) — has_rework never clears. But once the whole chain has
+    # merged up into develop, that sprint's work IS shipped and it is completed.
+    # Gate strictly on a real merge-to-develop check so the half-merged case
+    # (e.g. a lineage whose base→develop PR is still open) is never promoted.
+    if canonical == "needs_rework" and _lineage_fully_in_develop(label, project):
+        return {"state": "completed",
+                "end_reason": row.get("end_reason") or "lineage-merged"}
     if has_rework and canonical in ("ready_to_merge", "completed"):
         # A natural successful run end must not be downgraded because GitHub
         # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).
@@ -497,11 +544,22 @@ async def reconcile_project_background(
     broadcast: Callable[[dict], Awaitable[None]] | None = None,
 ) -> None:
     """Background task: reconcile lifecycle + post-sprint loose ends, then notify."""
+    now = time.monotonic()
+    last = _last_reconcile_at.get(project)
+    if last is not None and (now - last) < _RECONCILE_TTL_SECONDS:
+        return  # coalesce rapid history refreshes — within TTL, skip the gh fan-out
+    _last_reconcile_at[project] = now
     lifecycle_updated: list[str] = []
     reconciliation_updated: list[str] = []
+
+    def _run_sync() -> tuple[list[str], list[str]]:
+        # Both passes shell out to `gh` (blocking). Run them in a worker thread so
+        # the spawning never stalls the event loop and starves concurrent
+        # requests (history loads were taking ~5s while this ran inline).
+        return reconcile_project(project), refresh_post_sprint_reconciliations(project)
+
     try:
-        lifecycle_updated = reconcile_project(project)
-        reconciliation_updated = refresh_post_sprint_reconciliations(project)
+        lifecycle_updated, reconciliation_updated = await asyncio.to_thread(_run_sync)
     except Exception as exc:
         _log.warning("sprint reconcile failed for %s: %s", project, exc)
         return

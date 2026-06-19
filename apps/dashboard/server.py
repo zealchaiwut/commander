@@ -1638,9 +1638,15 @@ def get_sprint_progress(project: str = "", repo: str = ""):
             m = re.search(r"\d+", label)
             sprint_number = int(m.group()) if m else 0
 
+        # Numerator follows the done+uat convention (CLAUDE.md): a ticket counts
+        # once it is merged/skipped OR its tester has passed (reached UAT/gate).
+        # agent_status "tester_done" = tester finished and handed to gates,
+        # "completed" = merged. Without these a tester-passed-but-unmerged ticket
+        # stayed `pending` and the live pill undercounted (showed 2/4 not 3/4).
         done = sum(
             1 for i in issues
             if i.get("status") in ("done", "skipped", "failed")
+            or i.get("agent_status") in ("tester_done", "completed")
         )
         total = len(issues)
 
@@ -5518,6 +5524,20 @@ def get_sprint_management_issues(repo: str):
     # plus locally signed-off merges (merge_sprint / bulk_complete).
     finished_map = _finished_sprint_summaries(repo)
     finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
+    # Also treat any sprint the lifecycle DB marks completed as finished, so the
+    # board honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
+    # auto-complete, manual repair) even when plan.json wasn't dual-written. The
+    # sprints table is the single source of truth for lifecycle state.
+    try:
+        finished_set |= {
+            r.get("label")
+            for r in db.list_sprints_lifecycle()
+            if r.get("label")
+            and (r.get("project") or "") == repo
+            and db.canonical_lifecycle(r.get("state") or "") == "completed"
+        }
+    except Exception:
+        pass
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still

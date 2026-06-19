@@ -900,6 +900,7 @@ from routers import (  # noqa: E402
     backup_router,
     bulk_tickets_router,
     doctor_router,
+    projects_router,
     finish_progress_router,
     home_milestone_router,
     log_search_router,
@@ -965,6 +966,7 @@ app.include_router(sprint_finish_router)
 app.include_router(sprint_run_router)
 app.include_router(bulk_tickets_router)
 app.include_router(system_misc_router)
+app.include_router(projects_router)
 
 logger = logging.getLogger(__name__)
 
@@ -994,23 +996,12 @@ class RejectBody(BaseModel):
     reason: str
 
 
-class NewProjectBody(BaseModel):
-    repo_url: str
-    icon: Optional[str] = "ti-folder"
-    color: Optional[str] = "gray"
-
-
 class InitProjectBody(BaseModel):
     repo_name: str
     projects_dir: str = "~/dev"
     nested: bool = False
     skip_uat: bool = False
     from_existing: bool = False
-
-
-class RemoveProjectBody(BaseModel):
-    delete_local_folders: bool = False
-    delete_github_repo: bool = False
 
 
 class DatabaseStatus(BaseModel):
@@ -1520,94 +1511,8 @@ def get_test_report(issue_id: int, repo: Optional[str] = None):
         raise HTTPException(400, detail=str(e))
 
 
-# ── project endpoints ─────────────────────────────────────────────────────────
-
-@app.get("/api/projects")
-def get_projects():
-    try:
-        agents = db.get_agents()
-        return projects_module.get_all_projects(agents)
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
-
-
-@app.post("/api/projects", status_code=201)
-def add_project(body: NewProjectBody):
-    try:
-        new_proj = projects_module.add_project(
-            repo=body.repo_url,
-            icon=body.icon or "ti-folder",
-            color=body.color or "gray",
-        )
-        # Trigger a background backup after a successful projects.json write
-        if _BACKUP_AVAILABLE:
-            try:
-                _backup_module.schedule_backup()
-            except Exception:
-                pass  # backup trigger failures never affect the response
-        return new_proj
-    except FileExistsError as e:
-        raise HTTPException(409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(422, detail=str(e))
-    except subprocess.CalledProcessError as e:
-        raise _gh_error(e)
-
-
-@app.delete("/api/projects/{owner}/{repo_name}")
-async def remove_project(owner: str, repo_name: str, body: RemoveProjectBody):
-    import shutil
-
-    repo = f"{owner}/{repo_name}"
-
-    if not any(p["repo"] == repo for p in projects_module.load_projects()):
-        raise HTTPException(404, detail="Project not found")
-
-    removed: list[str] = []
-
-    # Remove from all projects.json copies first (not rolled back on subsequent errors)
-    removed.extend(projects_module.remove_project(repo))
-
-    if body.delete_local_folders:
-        projects_dir = Path.home() / "dev"
-        project_root = projects_dir / repo_name
-        nested = (project_root / "main").exists() and (project_root / "main" / ".git").exists()
-        if nested:
-            if project_root.exists():
-                shutil.rmtree(project_root)
-                removed.append(str(project_root))
-        else:
-            uat_dir = project_root / "uat"
-            if uat_dir.exists():
-                shutil.rmtree(uat_dir)
-                removed.append(str(uat_dir))
-            for suffix in ("", "-coder", "-tester"):
-                d = projects_dir / f"{repo_name}{suffix}"
-                if d.exists():
-                    shutil.rmtree(d)
-                    removed.append(str(d))
-
-    if body.delete_github_repo:
-        result = subprocess.run(
-            ["gh", "repo", "delete", repo, "--yes"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            err = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise HTTPException(502, detail=f"Failed to delete GitHub repository: {err}")
-        removed.append(f"GitHub repo {repo}")
-
-    # Trigger a background backup after a successful projects.json write
-    if _BACKUP_AVAILABLE:
-        try:
-            _backup_module.schedule_backup()
-        except Exception:
-            pass  # backup trigger failures never affect the response
-
-    return {"ok": True, "removed": removed}
-
+# GET /api/projects, POST /api/projects, DELETE /api/projects/{owner}/{repo_name}
+# moved to routers/projects.py (issue #1249)
 
 @app.get("/api/projects/{project}/running-sprint")
 def get_running_sprint(project: str):

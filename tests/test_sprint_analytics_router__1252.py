@@ -18,7 +18,7 @@ AC-7: All moved endpoints return identical response shapes as before
 from __future__ import annotations
 
 import importlib.util
-import json
+
 import os
 import subprocess
 import sys
@@ -222,11 +222,6 @@ class TestRouteHandlersDelegation:
         # Handler should NOT be doing raw open() or Path.read_text() calls inline
         # (those belong in the service module).
         # The router should import a service module or use helpers.
-        has_service_import = (
-            "sprint_analytics_service" in source
-            or "from . import" in source
-            or "import sprint_analytics_service" in source
-        )
         has_inline_path_io = (
             "Path(" in source and ".read_text(" in source
             and "sprint_analytics_service" not in source
@@ -273,7 +268,6 @@ class TestOutcomeServiceLayer:
         lines = router_source.splitlines()
         in_outcome = False
         outcome_lines = []
-        brace_depth = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
             if "def get_sprint_outcome" in stripped or (
@@ -287,7 +281,7 @@ class TestOutcomeServiceLayer:
                 if len(outcome_lines) > 3 and stripped == "" and len(outcome_lines) > 5:
                     break
         # The handler itself (excluding docstring) should be short if it delegates
-        non_empty = [l for l in outcome_lines if l.strip() and not l.strip().startswith("#")]
+        non_empty = [ln for ln in outcome_lines if ln.strip() and not ln.strip().startswith("#")]
         assert len(non_empty) <= 20, (
             f"get_sprint_outcome handler is {len(non_empty)} non-empty lines — "
             "outcome logic should be in the service layer (AC-5)"

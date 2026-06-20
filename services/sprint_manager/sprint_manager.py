@@ -1485,27 +1485,29 @@ class IssueState:
     tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
     coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
     coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
+    coder_routing_reason: Optional[str] = None  # routing reason for coder badge tooltip (issue #1403)
 
     def to_dict(self) -> dict:
         return {
-            "number":             self.number,
-            "title":              self.title,
-            "status":             self.status,
-            "skip_reason":        self.skip_reason,
-            "category":           self.category,
-            "tokens_in":          self.tokens_in,
-            "tokens_out":         self.tokens_out,
-            "agent_status":       self.agent_status,
-            "status_changed_at":  self.status_changed_at,
-            "coder_started_at":   self.coder_started_at,
-            "coder_finished_at":  self.coder_finished_at,
-            "tester_started_at":  self.tester_started_at,
-            "tester_finished_at": self.tester_finished_at,
-            "failure_reason":     self.failure_reason,
-            "dispatch_level":     self.dispatch_level,
+            "number":               self.number,
+            "title":                self.title,
+            "status":               self.status,
+            "skip_reason":          self.skip_reason,
+            "category":             self.category,
+            "tokens_in":            self.tokens_in,
+            "tokens_out":           self.tokens_out,
+            "agent_status":         self.agent_status,
+            "status_changed_at":    self.status_changed_at,
+            "coder_started_at":     self.coder_started_at,
+            "coder_finished_at":    self.coder_finished_at,
+            "tester_started_at":    self.tester_started_at,
+            "tester_finished_at":   self.tester_finished_at,
+            "failure_reason":       self.failure_reason,
+            "dispatch_level":       self.dispatch_level,
             "tester_attempt_count": self.tester_attempt_count,
-            "coder_model":        self.coder_model,
-            "coder_backend":      self.coder_backend,
+            "coder_model":          self.coder_model,
+            "coder_backend":        self.coder_backend,
+            "coder_routing_reason": self.coder_routing_reason,
         }
 
     @staticmethod
@@ -1530,6 +1532,7 @@ class IssueState:
         iss.tester_attempt_count = d.get("tester_attempt_count", 0)
         iss.coder_model = d.get("coder_model")
         iss.coder_backend = d.get("coder_backend")
+        iss.coder_routing_reason = d.get("coder_routing_reason")
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -4576,6 +4579,51 @@ def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
 
 # ── Coder model routing by ticket size (issue #789) ───────────────────────────
 
+# Extensions that mark a path as docs/config (issue #1403).
+_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".json"})
+# Extensions that mark a path as code — their presence disqualifies docs-only routing.
+_CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
+
+
+def _is_docs_only(estimate: Optional[dict]) -> tuple[bool, str]:
+    """Determine whether a ticket qualifies for docs-only Haiku routing (issue #1403).
+
+    Returns (True, reason) when the ticket is docs/config-only; (False, "") otherwise.
+    reason is one of "docs-only:flag" or "docs-only:paths".
+
+    This function is the isolation boundary for the heuristic — a follow-up can
+    replace or wrap it per-project via project settings without touching
+    _resolve_coder_model call sites.
+    """
+    if not estimate:
+        return False, ""
+
+    # Explicit risk flag takes precedence over path inspection.
+    risk_flags = estimate.get("risk_flags") or []
+    if "docs-only" in risk_flags:
+        return True, "docs-only:flag"
+
+    # Path heuristic: every path must be docs/config; no code paths allowed.
+    paths = estimate.get("files_likely_affected") or []
+    if not paths:
+        return False, ""
+
+    from pathlib import PurePosixPath  # lightweight; only hits at decision time
+
+    def _is_doc_path(p: str) -> bool:
+        suffix = PurePosixPath(p).suffix.lower()
+        return suffix in _DOCS_PATH_EXTENSIONS or p.startswith("docs/")
+
+    has_code = any(PurePosixPath(p).suffix.lower() in _CODE_PATH_EXTENSIONS for p in paths)
+    if has_code:
+        return False, ""
+
+    if all(_is_doc_path(p) for p in paths):
+        return True, "docs-only:paths"
+
+    return False, ""
+
+
 def _resolve_coder_model(
     issue_num: int,
     cfg: Optional["SprintConfig"],
@@ -4584,18 +4632,30 @@ def _resolve_coder_model(
     """Return (model, routing_reason) for a coder dispatch.
 
     Routing precedence:
+      0. docs-only (flag or paths heuristic) + non-XL → Haiku via _is_docs_only
       1. If estimate has a known size (S/M/L/XL) → look up cfg.coder_by_size
       2. Otherwise → cfg.coder_model flat default (or hardcoded sonnet fallback)
 
-    routing_reason is e.g. "size=S" or "unestimated:default".
+    routing_reason examples: "docs-only:flag", "docs-only:paths", "size=S",
+    "unestimated:default".
     """
     flat_default = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
+    by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
+
     if estimate:
         size = str(estimate.get("size") or "").upper().strip()
+
+        # Docs-only routing takes precedence over size, except XL is never rerouted.
+        if size != "XL":
+            docs_only, docs_reason = _is_docs_only(estimate)
+            if docs_only:
+                haiku_model = by_size.get("S") or _DEFAULT_CODER_BY_SIZE["S"]
+                return haiku_model, docs_reason
+
         if size in ("S", "M", "L", "XL"):
-            by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
             model = by_size.get(size) or flat_default
             return model, f"size={size}"
+
     return flat_default, "unestimated:default"
 
 
@@ -8488,6 +8548,7 @@ def _run_pipeline_dispatch(
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
         ist.coder_model = _coder_model_sel  # surface size-routed model on the live running pane (bug: coder badge had no model)
+        ist.coder_routing_reason = _coder_route_reason  # tooltip/sub-label on running pane badge (issue #1403)
         ist.coder_backend = _effective_coder_backend(label, cfg, ctx["fix_history"] if ctx["fix_history"] else None)
         # Determine attempt_kind for this dispatch (issue #787).
         _pipe_attempt_kind = ctx.get("attempt_kind", "initial")

@@ -15181,7 +15181,8 @@ function _smgmtRailNodeHtml(iss, live) {
   let agentBadge = '';
   if (state === 'coder-active') {
     const cm = _shortModelName(iss.coder_model);
-    const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
+    const rr = iss.coder_routing_reason || '';
+    const modelEl = cm ? ` <span class="node-agent-model"${rr ? ` title="${escHtml(rr)}"` : ''}>${escHtml(cm)}</span>` : '';
     agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}</span>`;
   } else if (state === 'tester-active') {
     agentBadge = '<span class="node-agent node-agent--tester">Tester</span>';
@@ -15307,7 +15308,8 @@ function _smgmtRailPatch(label, live) {
       agentEl.className = `node-agent ${cls}`;
       if (state === 'coder-active') {
         const cm = _shortModelName(iss.coder_model);
-        agentEl.innerHTML = cm ? `Coder <span class="node-agent-model">${escHtml(cm)}</span>` : 'Coder';
+        const rr = iss.coder_routing_reason || '';
+        agentEl.innerHTML = cm ? `Coder <span class="node-agent-model"${rr ? ` title="${escHtml(rr)}"` : ''}>${escHtml(cm)}</span>` : 'Coder';
       } else {
         agentEl.textContent = 'Tester';
       }
@@ -15494,7 +15496,8 @@ function _smgmtLaneCardHtml(iss, stage, live) {
   if (stage === 'coding' || stage === 'rework') {
     if (iss.agent === 'coder') {
       const cm = (typeof _shortModelName === 'function') ? _shortModelName(iss.coder_model) : '';
-      const modelEl = cm ? ` <span class="node-agent-model">${escHtml(cm)}</span>` : '';
+      const rr = iss.coder_routing_reason || '';
+      const modelEl = cm ? ` <span class="node-agent-model"${rr ? ` title="${escHtml(rr)}"` : ''}>${escHtml(cm)}</span>` : '';
       agentBadge = `<span class="node-agent node-agent--coder">Coder${modelEl}${_smgmtLaneSizeInline(iss)}${_smgmtLaneRetryBadge(iss, stage, live)}</span>`;
     }
   } else if (stage === 'testing') {
@@ -16851,7 +16854,9 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
   if (isRunning) {
     if (state === 'coder-active') {
       const cm = _shortModelName(iss.coder_model);
-      agentBadge = '<span class="ai-row-agent ai-row-agent--coder">CODER'
+      const rr = iss.coder_routing_reason || '';
+      agentBadge = '<span class="ai-row-agent ai-row-agent--coder"'
+        + (rr ? ' title="' + escHtml(rr) + '"' : '') + '>CODER'
         + (cm ? ' ' + escHtml(cm) : '') + '</span>';
     } else {
       agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';
@@ -17074,7 +17079,9 @@ function _smgmtAiPatchRowMeta(metaEl, iss, live) {
   if (isRunning) {
     if (state === 'coder-active') {
       const cm = _shortModelName(iss.coder_model);
-      agentBadge = '<span class="ai-row-agent ai-row-agent--coder">CODER'
+      const rr = iss.coder_routing_reason || '';
+      agentBadge = '<span class="ai-row-agent ai-row-agent--coder"'
+        + (rr ? ' title="' + escHtml(rr) + '"' : '') + '>CODER'
         + (cm ? ' ' + escHtml(cm) : '') + '</span>';
     } else {
       agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';

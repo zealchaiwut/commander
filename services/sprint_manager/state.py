@@ -41,6 +41,7 @@ class IssueState:
     tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
     coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
     coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
+    coder_routing_reason: Optional[str] = None  # routing reason for coder badge tooltip (issue #1403)
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +63,7 @@ class IssueState:
             "tester_attempt_count": self.tester_attempt_count,
             "coder_model":        self.coder_model,
             "coder_backend":      self.coder_backend,
+            "coder_routing_reason": self.coder_routing_reason,
         }
 
     @staticmethod
@@ -86,6 +88,7 @@ class IssueState:
         iss.tester_attempt_count = d.get("tester_attempt_count", 0)
         iss.coder_model = d.get("coder_model")
         iss.coder_backend = d.get("coder_backend")
+        iss.coder_routing_reason = d.get("coder_routing_reason")
         return iss
 
     def set_agent_status(self, status: str) -> None:

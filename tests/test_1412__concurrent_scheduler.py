@@ -28,8 +28,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
 from services.sprint_manager.pipeline import StageResult
 from services.sprint_manager.concurrent_scheduler import run_concurrent_level
 
@@ -290,7 +288,6 @@ def test_ac5_level_barrier_no_level2_before_level1_merged():
         return StageResult.PASS
 
     # Level 0: T1, T2 (independent)
-    t0 = time.monotonic()
     run_concurrent_level(
         [1, 2], code, _pass_test,
         max_coder_slots=2,
@@ -315,8 +312,6 @@ def test_ac5_level_barrier_no_level2_before_level1_merged():
 
 def test_ac6_level_barrier_function_blocks_until_all_terminal():
     """run_concurrent_level blocks the caller until all tickets are terminal."""
-    finished = []
-
     def slow_code(t, attempt):
         time.sleep(0.03)
         return StageResult.PASS
@@ -325,13 +320,11 @@ def test_ac6_level_barrier_function_blocks_until_all_terminal():
         time.sleep(0.02)
         return StageResult.PASS
 
-    t0 = time.monotonic()
     res = run_concurrent_level(
         [1, 2, 3], slow_code, slow_test,
         max_coder_slots=3,
         file_map={1: {"a.py"}, 2: {"b.py"}, 3: {"c.py"}},
     )
-    elapsed = time.monotonic() - t0
 
     assert sorted(res.merged) == [1, 2, 3]
     # All 3 coded concurrently (~30ms) + serial tester (3 × 20ms = ~60ms) ≈ 90ms.
@@ -451,10 +444,6 @@ def test_ac9_active_slots_zero_when_level_complete():
 def test_ac9_sprint_state_active_slots_updated_via_callback(monkeypatch, tmp_path):
     """run_sprint records active_coder_slots on SprintState when concurrent mode is active."""
     import services.sprint_manager.sprint_manager as sm
-
-    active_slot_snapshots = []
-
-    original_run_concurrent = None
 
     def _stub_run_concurrent(tickets, code_fn, test_fn, **kwargs):
         cb = kwargs.get("on_active_slots_change")

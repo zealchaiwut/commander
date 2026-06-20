@@ -41,6 +41,43 @@ def _run(*cmd) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
 
 
+def _record_merge_accuracy(issue_num: int, merge_sha: str, repo_root: Path) -> None:
+    """Record estimator file-prediction accuracy for a merged ticket (issue #1417).
+
+    Compares the estimate's files_likely_affected against the files actually
+    changed by the merge commit. Best-effort: failures are logged and ignored.
+    """
+    try:
+        from services.sprint_manager.estimate_accuracy import (
+            find_commander_dir,
+            record_accuracy,
+        )
+
+        commander_dir = find_commander_dir(start=repo_root)
+        if not commander_dir:
+            return
+
+        estimates_json = commander_dir / "estimates" / f"issue-{issue_num}.json"
+        if not estimates_json.exists():
+            return
+
+        import json
+        est = json.loads(estimates_json.read_text(encoding="utf-8"))
+        predicted = est.get("files_likely_affected") or []
+
+        # Get files actually changed by the merge commit vs its first parent.
+        ok, out = _try(
+            "git", "diff-tree", "-r", "--no-commit-id", "--name-only", "--first-parent", merge_sha,
+        )
+        actual = [f for f in out.splitlines() if f.strip()] if ok else []
+
+        accuracy_dir = commander_dir / "estimates" / "accuracy"
+        record_accuracy(issue_num, predicted, actual, accuracy_dir)
+        sys.stdout.write(f"Accuracy recorded for issue #{issue_num} → {accuracy_dir / f'issue-{issue_num}.json'}\n")
+    except Exception as exc:
+        sys.stdout.write(f"Warning: could not record accuracy for #{issue_num}: {exc}\n")
+
+
 def _try(*cmd) -> tuple[bool, str]:
     r = subprocess.run(cmd, capture_output=True, text=True)
     return r.returncode == 0, r.stdout.strip()
@@ -132,6 +169,10 @@ def main():
     ok, merge_sha = _try("git", "rev-parse", "HEAD")
     if not ok or not merge_sha:
         merge_sha = ""
+
+    # Record estimator accuracy before pushing / deleting the branch (AC1/AC7).
+    if merge_sha:
+        _record_merge_accuracy(args.issue, merge_sha, _REPO_ROOT)
 
     _run("git", "push", "origin", target)
     sys.stdout.write(str(f"Pushed {target}.") + "\n")

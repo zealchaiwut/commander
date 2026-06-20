@@ -506,7 +506,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
             size = resolved.get("size")
             est_minutes = _SIZE_TO_MINUTES.get(size, 0) if size else 0
             if _xl_svc.is_xl_suggestion(size=size, estimated_minutes=est_minutes,
-                                         threshold=xl_threshold):
+                                        threshold=xl_threshold):
                 xl_suggestions.append({
                     "issue_number": num,
                     "title": iss.get("title", ""),

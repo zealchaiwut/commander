@@ -33,13 +33,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import email.mime.text
 import json
 import os
 import re
 import shutil
 import signal
-import smtplib
 import subprocess
 import sys
 import tempfile
@@ -48,7 +46,6 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -75,6 +72,14 @@ from services.sprint_manager.config import (  # noqa: E402
     load_config,
     discover_config,
     _default_config,
+)
+
+from services.sprint_manager.worktree_pool import (  # noqa: E402
+    WorktreePool as _WorktreePool,
+)
+
+from services.sprint_manager.commander_paths import (  # noqa: E402
+    discover_commander_dir,
 )
 
 from services.sprint_manager.paths import (  # noqa: E402
@@ -775,6 +780,11 @@ def _sprint_db_ingest_run_sm(
 # repos). Read by _db_agent_start_sm without threading it through 8 call sites.
 _CURRENT_RUN_PROJECT: Optional[str] = None
 
+# Active worktree pool for the current sprint run (issue #1411).
+# Set by run_sprint at sprint start; cleared at sprint end.
+# Provides K isolated worktrees for concurrent coder dispatch.
+_ACTIVE_WORKTREE_POOL: Optional[_WorktreePool] = None
+
 
 def _db_agent_start_sm(
     issue_number,
@@ -1076,12 +1086,16 @@ class FailureCategory:
     MERGE_CONFLICT   = "MERGE_CONFLICT"
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
+    # Merge sequencing issue — not a code quality problem, no coder requeue (issue #1414)
+    REBASE_CONFLICT  = "REBASE_CONFLICT"
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
 # Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
 # TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
 # not a code quality problem, so it must not apply needs-rework.
+# REBASE_CONFLICT is a merge-sequencing issue (not a code defect), so it is intentionally absent
+# from this set — the needs-rework label is applied directly in handle_post_tester (issue #1414).
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
@@ -1090,16 +1104,27 @@ _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
 })
 
 
+def _extract_rebase_conflict_files(output: str) -> list[str]:
+    """Parse 'git rebase' stdout+stderr to extract conflicting file paths (issue #1414).
+
+    Git emits one line per conflict:
+        CONFLICT (content): Merge conflict in path/to/file.py
+    Returns a deduplicated list in order of first occurrence.
+    """
+    import re as _re
+    seen: dict[str, None] = {}
+    for line in output.splitlines():
+        m = _re.search(r"CONFLICT \([^)]+\): Merge conflict in (.+)$", line)
+        if m:
+            seen[m.group(1).strip()] = None
+    return list(seen)
+
+
 # ── alert channels (extracted to alerts.py, issue #1271) ─────────────────────
 
 from services.sprint_manager.alerts import (  # noqa: E402
     AlertMode,
     dispatch_alerts,
-    _alert_dashboard_banner,
-    _alert_email,
-    _alert_discord,
-    _alert_ntfy,
-    _alert_file,
     HangDetector,
 )
 
@@ -3010,8 +3035,14 @@ def _call_finish_feature(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     sprint_label: Optional[str] = None,
-) -> None:
-    """Call finish_feature.py as a subprocess from the worktester root."""
+) -> tuple[bool, list[str]]:
+    """Call finish_feature.py as a subprocess from the worktester root.
+
+    Returns (success, conflict_files).
+    On a rebase conflict after an automated one-shot rebase attempt (issue #1414),
+    conflict_files lists the paths that could not be reconciled automatically.
+    On success or any other failure, conflict_files is empty.
+    """
     if cfg is not None:
         finish_script = cfg.finish_feature_script
         # Prefer the dedicated agents clone for the documentor (falls back to the
@@ -3041,11 +3072,90 @@ def _call_finish_feature(
         result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         sys.stdout.write(str(result.stdout.rstrip()) + "\n")
-    if result.returncode != 0:
-        structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
-    else:
+    if result.returncode == 0:
         sys.stdout.write(str("  finish_feature.py completed successfully") + "\n")
-    return result.returncode == 0
+        return True, []
+
+    structured_log.error(
+        "subprocess_nonzero_exit",
+        f"finish_feature.py exited {result.returncode}",
+        issue_num=issue_num,
+        subprocess="finish_feature.py",
+        exit_code=result.returncode,
+        subprocess_stderr=result.stderr.rstrip() if result.stderr else "",
+    )
+
+    # ── Automated one-shot rebase (issue #1414 AC2) ───────────────────────────
+    # finish_feature.py failing here typically means a concurrent merge landed on
+    # the target branch first, causing a divergence.  Attempt a single automated
+    # rebase to reconcile the feature branch before giving up.
+    sys.stdout.write(str(
+        f"  [rebase] finish_feature.py failed — attempting one-shot rebase of "
+        f"feature/{issue_num}-* onto origin/{target_branch}"
+    ) + "\n")
+
+    # Locate the remote feature branch.
+    ok, br_out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*", cwd=wt_root)
+    if not ok or not br_out.strip():
+        sys.stdout.write(str(
+            f"  [rebase] no remote feature branch found for #{issue_num} — skipping rebase"
+        ) + "\n")
+        return False, []
+
+    feature_branch = br_out.strip().splitlines()[0].strip().removeprefix("origin/")
+
+    # Ensure we have the latest refs.
+    _try("git", "fetch", "origin", cwd=wt_root)
+
+    # Checkout the feature branch in the tester worktree (separate full clone —
+    # not a linked worktree, so this never conflicts with pool-slot worktrees).
+    ok_co, _, co_err = _try(
+        "git", "checkout", "-B", feature_branch, f"origin/{feature_branch}", cwd=wt_root,
+    )
+    if not ok_co:
+        sys.stdout.write(str(f"  [rebase] could not checkout {feature_branch}: {co_err}") + "\n")
+        return False, []
+
+    # Attempt a single rebase onto the current target (AC8: only one attempt).
+    ok_rb, rb_out, rb_err = _try(
+        "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
+    )
+    rebase_combined = rb_out + "\n" + rb_err
+
+    if not ok_rb:
+        conflict_files = _extract_rebase_conflict_files(rebase_combined)
+        sys.stdout.write(str(
+            f"  [rebase] rebase conflict for #{issue_num} in "
+            f"{len(conflict_files)} file(s): {conflict_files}"
+        ) + "\n")
+        _try("git", "rebase", "--abort", cwd=wt_root)
+        return False, conflict_files
+
+    # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
+    sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
+    ok_push, _, push_err = _try(
+        "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
+    )
+    if not ok_push:
+        sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+        return False, []
+
+    # Retry the merge exactly once after the successful rebase (AC8).
+    sys.stdout.write(str(
+        f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
+    ) + "\n")
+    with _develop_merge_guard():
+        result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+    if result2.stdout:
+        sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
+    if result2.returncode == 0:
+        sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
+        return True, []
+
+    sys.stdout.write(str(
+        f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
+    ) + "\n")
+    return False, []
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -3217,7 +3327,29 @@ def handle_post_tester(
     if skip_gates:
         sys.stdout.write(str("  --skip-gates active -- skipping all quality gates, proceeding to merge") + "\n")
         if needs_merge:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok and conflict_files:
+                # Rebase conflict even under skip-gates — label needs-rework (issue #1414 AC4).
+                _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                conflict_body = (
+                    f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                    f"`{target_branch}` failed.\n\n**Conflicting files:**\n"
+                    + "\n".join(f"- `{f}`" for f in conflict_files)
+                    + "\n\nResolve the conflict manually and re-push the feature branch."
+                )
+                try:
+                    github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                except Exception as exc:
+                    structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                return (
+                    False,
+                    f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                    + ", ".join(conflict_files[:3]),
+                    FailureCategory.REBASE_CONFLICT,
+                )
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="typecheck",     passed=True, skipped=True),
@@ -3260,7 +3392,38 @@ def handle_post_tester(
         _post_agent_event("gate:merging", api_url=api_url)
         if needs_merge:
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok:
+                if conflict_files:
+                    # Automated rebase failed — label needs-rework with exact conflict paths
+                    # (issue #1414 AC4/AC7).  This does not halt the sprint (AC5).
+                    _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                    conflict_body = (
+                        f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                        f"`{target_branch}` failed after all quality gates passed.\n\n"
+                        f"**Conflicting files:**\n"
+                        + "\n".join(f"- `{f}`" for f in conflict_files)
+                        + "\n\nResolve the conflict manually and re-push the feature branch."
+                    )
+                    try:
+                        github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                    except Exception as exc:
+                        structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                    return (
+                        False,
+                        f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                        + ", ".join(conflict_files[:3]),
+                        FailureCategory.REBASE_CONFLICT,
+                    )
+                # finish_feature.py failed for a non-rebase reason (e.g. push failed)
+                return (
+                    False,
+                    f"Issue #{issue_num}: merge failed after all gates passed",
+                    FailureCategory.MERGE_CONFLICT,
+                )
         else:
             sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
@@ -4252,6 +4415,23 @@ def _select_coder_backend(
     return "cline"
 
 
+def _pool_acquire() -> Optional[Path]:
+    """Acquire one worktree slot from the active pool (issue #1411).
+
+    Returns the slot path, or None when no pool is active.  Blocks until a
+    free slot is available.
+    """
+    if _ACTIVE_WORKTREE_POOL is not None:
+        return _ACTIVE_WORKTREE_POOL.acquire()
+    return None
+
+
+def _pool_release(slot: Optional[Path]) -> None:
+    """Return a pool slot acquired by _pool_acquire (issue #1411)."""
+    if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
+        _ACTIVE_WORKTREE_POOL.release(slot)
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -4266,6 +4446,7 @@ def _dispatch_coder(
     hang_continuation: Optional[dict] = None,
     attempt_kind: Optional[str] = None,
     coder_backend_override: Optional[str] = None,
+    worktree_override: Optional[Path] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -4282,10 +4463,16 @@ def _dispatch_coder(
     prior_failures: accumulated failure records from the fix-loop (issue #618).
     When provided, an accumulated context suffix is built from these records
     instead of reading the single-failure sidecar.
+
+    worktree_override: when set, use this path as the working directory instead
+    of cfg.worktree_coder.  Used by the worktree pool (issue #1411) to assign
+    an isolated worktree slot to each concurrent coder dispatch.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
-    if cfg:
+    if worktree_override is not None:
+        cwd_path = worktree_override
+    elif cfg:
         cwd_path = cfg.worktree_coder
     else:
         # No sprint.yaml: cwd is the coder clone when dispatched from the dashboard.
@@ -7788,14 +7975,19 @@ def _run_pipeline_dispatch(
         _stage_coder_t0 = time.monotonic()
         _stage_coder_utc0 = _token_window_utc_now()
         _pipe_hang_continuation = ctx.get("hang_continuation")
-        coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running, sprint_label=label,
-            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-            hang_continuation=_pipe_hang_continuation,
-            attempt_kind=_pipe_attempt_kind,
-        )
+        _pipe_pool_slot = _pool_acquire()
+        try:
+            coder_ok, coder_category = _dispatch_coder(
+                num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_coder_running, sprint_label=label,
+                prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                hang_continuation=_pipe_hang_continuation,
+                attempt_kind=_pipe_attempt_kind,
+                worktree_override=_pipe_pool_slot,
+            )
+        finally:
+            _pool_release(_pipe_pool_slot)
         _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
         state.total_tokens_in += _ctin
         state.total_tokens_out += _ctout
@@ -7864,14 +8056,19 @@ def _run_pipeline_dispatch(
                         attempt_kind="hang_continue",
                         log_path=str(_issue_log_path(num, cfg=cfg)),
                     )
-                    coder_ok, coder_category = _dispatch_coder(
-                        num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-                        chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                        on_running=_on_coder_running, sprint_label=label,
-                        prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-                        hang_continuation=ctx["hang_continuation"],
-                        attempt_kind="hang_continue",
-                    )
+                    _hc_pool_slot = _pool_acquire()
+                    try:
+                        coder_ok, coder_category = _dispatch_coder(
+                            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                            on_running=_on_coder_running, sprint_label=label,
+                            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                            hang_continuation=ctx["hang_continuation"],
+                            attempt_kind="hang_continue",
+                            worktree_override=_hc_pool_slot,
+                        )
+                    finally:
+                        _pool_release(_hc_pool_slot)
                     _db_agent_finish_sm(
                         num, label, "coder",
                         duration_seconds=time.monotonic() - _stage_hc_t0,
@@ -8103,11 +8300,43 @@ def _run_pipeline_dispatch(
         if not level_nums:
             continue
 
-        # Hard level barrier: run_level does not return until the level drains.
-        _run_pipeline_level(
-            level_nums, _coder_stage, _tester_stage, pipeline=True,
-            on_merged=_on_merged, on_needs_rework=_on_needs_rework,
-        )
+        # Use resolved slot count from state (set at run start, issue #1415).
+        _max_coder_slots = state.max_coder_slots
+
+        if _max_coder_slots > 1:
+            # Build file_map for conflict-aware concurrent dispatch.
+            _file_map: dict = {}
+            for _fnum in level_nums:
+                _est = _load_estimate(_fnum)
+                if _est:
+                    _files = (
+                        _est.get("files_touched")
+                        or _est.get("files_likely_affected")
+                        or []
+                    )
+                    _file_map[_fnum] = set(_files)
+
+            def _on_slot_change(_count: int) -> None:
+                state.active_coder_slots = _count
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+            from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415
+                run_concurrent_level as _run_concurrent_level,
+            )
+            _run_concurrent_level(
+                level_nums, _coder_stage, _tester_stage,
+                max_coder_slots=_max_coder_slots,
+                file_map=_file_map,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+                on_active_slots_change=_on_slot_change,
+            )
+        else:
+            # Hard level barrier: run_level does not return until the level drains.
+            _run_pipeline_level(
+                level_nums, _coder_stage, _tester_stage, pipeline=True,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+            )
 
     if prev_level_idx >= 0:
         try:
@@ -8145,6 +8374,8 @@ def run_sprint(
     skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
     pipeline_mode: Optional[bool] = None,
+    max_coder_slots: Optional[int] = None,
+    max_tester_slots: Optional[int] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -8291,6 +8522,20 @@ def run_sprint(
             ],
         )
 
+    # ── Slot capacity resolution (issue #1415) ────────────────────────────────
+    # Resolve max_coder_slots / max_tester_slots at run start so the running-pane
+    # status payload reflects the correct lane capacity from the very first post.
+    # Precedence: sprint-level param > project settings (cfg) > serial default (1).
+    state.max_coder_slots = (
+        max_coder_slots if max_coder_slots is not None
+        else (cfg.max_coder_slots if cfg is not None and cfg.max_coder_slots is not None else 1)
+    )
+    state.max_tester_slots = (
+        max_tester_slots if max_tester_slots is not None
+        else (cfg.max_tester_slots if cfg is not None and cfg.max_tester_slots is not None else 1)
+    )
+    _post_sprint_status(state, api_url=api_url)
+
     sys.stdout.write(str(f"\n=== Sprint Manager: label={label} ===") + "\n")
     sys.stdout.write(str(f"Target branch: {target_branch}") + "\n")
     sys.stdout.write(str(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}") + "\n")
@@ -8407,6 +8652,35 @@ def run_sprint(
     _sweep_stale_in_progress(label, eff_repo)
     _sweep_stale_status("SIT", label, eff_repo)
 
+    # ── Worktree pool setup (issue #1411) ──────────────────────────────────────
+    # Reconcile any orphaned worktrees from a prior crash, then create a fresh
+    # pool of K isolated worktrees for concurrent coder dispatch.
+    if not dry_run:
+        global _ACTIVE_WORKTREE_POOL
+        _pool_repo_root = Path(cfg.worktree_coder).parent if cfg is not None else REPO_ROOT
+        _pool_commander = (
+            discover_commander_dir(cfg.worktree_coder if cfg is not None else None)
+        )
+        _pool_dir = _pool_commander / "runtime" / "worktree-pool"
+        _WorktreePool.reconcile_orphans(_pool_dir, _pool_repo_root)
+        _pool_slots = state.max_coder_slots
+        _pool_req = (cfg.worktree_coder / "requirements.txt") if cfg is not None else None
+        if _pool_req is not None and not Path(_pool_req).exists():
+            _pool_req = None
+        _pool = _WorktreePool(
+            pool_dir=_pool_dir,
+            repo_root=_pool_repo_root,
+            base_branch=sprint_branch,
+            slots=_pool_slots,
+            requirements_file=Path(_pool_req) if _pool_req else None,
+        )
+        _pool.create()
+        _ACTIVE_WORKTREE_POOL = _pool
+        sys.stdout.write(str(
+            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f" (max_coder_slots={_pool_slots})\n"
+        ))
+
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
         type="sprint_started",
@@ -8438,6 +8712,7 @@ def run_sprint(
         _pipeline_on = False
     # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
     state.pipeline_mode = _pipeline_on
+    # Slot capacity was resolved at run start (issue #1415) — no re-assignment needed.
     sys.stdout.write(str("  Dispatch mode: "
         + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")) + "\n")
     try:
@@ -8762,6 +9037,7 @@ def run_sprint(
 
                 _coder_t0 = time.monotonic()
                 _coder_utc0 = _token_window_utc_now()
+                _serial_pool_slot = _pool_acquire()
                 try:
                     coder_ok, coder_category = _dispatch_coder(
                         num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
@@ -8771,6 +9047,7 @@ def run_sprint(
                         hang_continuation=_hang_continuation,
                         attempt_kind=_next_attempt_kind,
                         coder_backend_override=_next_coder_backend,
+                        worktree_override=_serial_pool_slot,
                     )
                 except SystemExit:
                     _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -8786,6 +9063,8 @@ def run_sprint(
                         action_id=_run_id,
                     )
                     raise
+                finally:
+                    _pool_release(_serial_pool_slot)
                 _coder_elapsed = time.monotonic() - _coder_t0
                 _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
                 state.total_tokens_in += _ctin
@@ -9380,6 +9659,16 @@ def run_sprint(
         if _merged_issue_nums:
             _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
 
+    # ── Worktree pool teardown (issue #1411) ───────────────────────────────────
+    # Tear down the pool at sprint end so no stray worktrees remain.
+    if _ACTIVE_WORKTREE_POOL is not None:
+        try:
+            _ACTIVE_WORKTREE_POOL.teardown()
+        except Exception as _pool_ex:
+            sys.stdout.write(str(f"  [worktree-pool] WARNING: teardown error: {_pool_ex}\n"))
+        finally:
+            _ACTIVE_WORKTREE_POOL = None  # type: ignore[assignment]
+
     return summary, state
 
 
@@ -9563,6 +9852,22 @@ def main() -> None:
         help="Skip the estimator run (on by default; pass --no-skip-estimator to enable).",
     )
 
+    # Sprint-level slot overrides (issue #1415) — take precedence over project settings.
+    p.add_argument(
+        "--max-coder-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent coder slots for this run (overrides sprint.yaml setting).",
+    )
+    p.add_argument(
+        "--max-tester-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent tester slots for this run (overrides sprint.yaml setting).",
+    )
+
     # Rerun manifest (issue #332) — written by the server rerun endpoint
     p.add_argument(
         "--rerun-manifest",
@@ -9705,6 +10010,8 @@ def main() -> None:
             token_budget         = args.budget,
             skip_estimator       = args.skip_estimator,
             rerun_manifest       = _rerun_manifest,
+            max_coder_slots      = args.max_coder_slots,
+            max_tester_slots     = args.max_tester_slots,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)

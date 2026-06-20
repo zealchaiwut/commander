@@ -36,6 +36,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Concurrent pipeline mode (issue #737) — on by default (1 coder + 1 tester
     # concurrent); projects can still opt out to serial dispatch.
     "pipeline_mode": {"secret": False, "default": True},
+    # Warm worktree pool size (issue #1411) — number of isolated worktrees
+    # pre-warmed at sprint start for concurrent coder dispatch (default 2, cap 4).
+    "max_coder_slots": {"secret": False, "default": 2},
     # Estimation defaults (size → minutes table + buffer)
     "estimation_s_minutes": {"secret": False, "default": 5},
     "estimation_m_minutes": {"secret": False, "default": 15},

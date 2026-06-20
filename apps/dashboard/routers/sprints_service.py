@@ -503,6 +503,9 @@ def preview_dag(sprint_label: str, project: str):
     project_root = srv._project_root_path(project)
     estimates_dir = srv._commander_dir(project_root) / "estimates"
 
+    from services.sprint_manager.estimate_accuracy import should_warn_unreliable
+    accuracy_warning = should_warn_unreliable(estimates_dir / "accuracy")
+
     ticket_files: list[dict] = []
     unestimated: list[str] = []
     for iss in pending:
@@ -539,6 +542,7 @@ def preview_dag(sprint_label: str, project: str):
         "conflicts": conflicts,
         "unestimated": unestimated,
         "partial": partial,
+        "accuracy_warning": accuracy_warning,
     }
 
     if not srv._DAG_BUILDER_AVAILABLE:

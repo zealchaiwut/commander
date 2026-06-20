@@ -658,7 +658,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     pipeline_mode = bool(status_data.get("pipeline_mode", False))
 
     agent_pid = active_agent.get("pid") if active_agent else None
-    coder_entry = None
+    coder_entries: list[dict] = []
     tester_entry = None
     for iss in issues:
         ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
@@ -667,8 +667,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         if ts and not tf:
             tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
         elif cs and not cf:
-            coder_entry = {"name": "coder", "ticket": ticket, "pid": agent_pid}
-    active_agents: list[dict] = [e for e in (coder_entry, tester_entry) if e]
+            coder_entries.append({"name": "coder", "ticket": ticket, "pid": agent_pid})
+    active_agents: list[dict] = coder_entries + ([tester_entry] if tester_entry else [])
     if not active_agents and active_agent:
         active_agents = [active_agent]
 

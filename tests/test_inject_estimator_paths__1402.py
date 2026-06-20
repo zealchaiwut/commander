@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from services.sprint_manager.sprint_manager import _build_estimate_paths_block, _load_estimate
+from services.sprint_manager.sprint_manager import _build_estimate_paths_block, _load_estimate  # noqa: E402
 
 # Test files are run against the main repo, not UAT
 MAIN_REPO = Path(os.environ.get("MAIN_REPO") or REPO_ROOT)

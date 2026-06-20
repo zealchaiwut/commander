@@ -55,6 +55,7 @@ from .reports import router as reports_router
 from .finish_card import router as finish_card_router
 from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
+from .split_ticket import router as split_ticket_router
 
 __all__ = [
     "activity_router",
@@ -106,4 +107,5 @@ __all__ = [
     "finish_card_router",
     "deploy_router",
     "mis_sizing_router",
+    "split_ticket_router",
 ]

@@ -68,6 +68,11 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},
+    # XL split suggestions (issue #1424) — surfaced in Run Sprint preflight modal
+    # Tickets at or above this minute threshold (or sized XL) trigger a "Consider splitting" nudge.
+    "xl_minute_threshold": {"secret": False, "default": 90},
+    # When True, Run Sprint is blocked until all flagged tickets are split or dismissed.
+    "strict_xl_gate": {"secret": False, "default": False},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

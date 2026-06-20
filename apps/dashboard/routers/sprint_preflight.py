@@ -28,6 +28,12 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from services.sprint_manager import fill_acceptance_criteria as _fill_ac
+from services.sprint_manager.sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
+import services.sprint_manager.settings_repo as _settings_repo
+from services.sprint_manager.settings_schema import (
+    APP_CONFIG_KEY as _APP_CONFIG_KEY,
+    build_effective_response as _build_effective_response,
+)
 from services.sprint_manager.estimate_issue import (
     apply_estimated_status as _ei_apply_estimated_status,
     apply_label as _ei_apply_label,
@@ -46,6 +52,8 @@ except ImportError:
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in sys.path:
     sys.path.insert(0, str(_DASHBOARD_ROOT))
+
+from . import xl_suggestions_service as _xl_svc  # noqa: E402
 
 router = APIRouter(tags=["sprint_preflight"])
 
@@ -472,6 +480,44 @@ def get_sprint_preflight(sprint_label: str, project: str):
         except Exception:
             pass  # Flags are decorative — don't fail the preflight
 
+    # ── XL split suggestions (issue #1424) ───────────────────────────────────
+    xl_suggestions: list[dict] = []
+    xl_minutes_saved: int = 0
+    strict_xl_gate: bool = False
+    try:
+        project_root = srv._project_root_path(project)
+        _stored = _settings_repo.get_setting(_APP_CONFIG_KEY, project=project)
+        _eff = _build_effective_response(_stored)
+        xl_threshold: int = int(_eff.get("xl_minute_threshold", 90))
+        strict_xl_gate = bool(_eff.get("strict_xl_gate", False))
+        dismissed = _xl_svc.load_xl_dismissed(project_root, sprint_label)
+        _xl_mins: list[int] = []
+        _pf_non_work = getattr(srv, "_PF_NON_WORK", {"sprint-summary", "docs", "documentation"})
+        for iss in sprint_issues:
+            num = iss["number"]
+            label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+            if label_names & _pf_non_work:
+                continue
+            if num in dismissed:
+                continue
+            resolved = srv._resolve_issue_estimate(
+                iss, srv._commander_dir(project_root) / "estimates"
+            )
+            size = resolved.get("size")
+            est_minutes = _SIZE_TO_MINUTES.get(size, 0) if size else 0
+            if _xl_svc.is_xl_suggestion(size=size, estimated_minutes=est_minutes,
+                                         threshold=xl_threshold):
+                xl_suggestions.append({
+                    "issue_number": num,
+                    "title": iss.get("title", ""),
+                    "size": size,
+                    "estimated_minutes": est_minutes,
+                })
+                _xl_mins.append(est_minutes)
+        xl_minutes_saved = _xl_svc.compute_minutes_saved(_xl_mins)
+    except Exception:
+        pass  # XL suggestions are advisory — don't fail the preflight
+
     return {
         "ok": True,
         "sprint_label": sprint_label,
@@ -482,4 +528,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
         "stale_threshold_days": _STALE_ESTIMATE_DAYS,
         "mis_sizing_flags": mis_sizing_flags,
         "models": srv._effective_agent_models(srv._project_root_path(project)),
+        "xl_suggestions": xl_suggestions,
+        "xl_minutes_saved": xl_minutes_saved,
+        "strict_xl_gate": strict_xl_gate,
     }

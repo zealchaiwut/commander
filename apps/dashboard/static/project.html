@@ -7514,6 +7514,58 @@
       font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
     }
 
+    /* ── XL split suggestions section (issue #1424) ── */
+    .pf-xl-section { margin-top: 16px; }
+    .pf-xl-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pf-xl-strict-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 99px;
+      background: rgba(234, 88, 12, .12); color: #c2410c;
+      border: 1px solid rgba(234, 88, 12, .35); text-transform: none; letter-spacing: 0;
+    }
+    .pf-xl-saved {
+      font-size: 12px; color: var(--green, #16a34a); margin-bottom: 8px;
+    }
+    .pf-xl-item {
+      margin-bottom: 8px; padding: 9px 12px;
+      background: rgba(234, 179, 8, .06); border: 1px solid rgba(234, 179, 8, .3);
+      border-radius: 6px;
+    }
+    .pf-xl-item-header {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+    }
+    .pf-xl-item-num {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-xl-item-title {
+      font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-xl-consider-label {
+      font-size: 11px; padding: 2px 7px; border-radius: 99px; flex-shrink: 0;
+      background: rgba(234, 179, 8, .15); color: #92400e;
+      border: 1px solid rgba(234, 179, 8, .4);
+    }
+    .pf-xl-estimate {
+      font-size: 12px; color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-xl-item-actions { display: flex; gap: 6px; }
+    .pf-xl-split-btn, .pf-xl-dismiss-btn {
+      font-size: 12px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-xl-split-btn { border-color: rgba(59, 130, 246, .5); color: #1d4ed8; }
+    .pf-xl-split-btn:hover { background: rgba(59, 130, 246, .08); }
+    .pf-xl-dismiss-btn { color: var(--text-muted); }
+    .pf-xl-dismiss-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); }
+
     /* ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ── */
     .pf-stepper { display: flex; flex-direction: column; gap: 0; padding: 4px 0; }
     .pf-step-item {

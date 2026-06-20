@@ -6132,6 +6132,14 @@
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 12px; font-weight: 600; color: var(--red);
     }
+    .mr-accuracy-warn {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 8px; padding: 6px 10px; border-radius: 6px;
+      font-size: 12px; font-weight: 600;
+      color: var(--amber, #d97706);
+      background: var(--amber-bg, #fef3c7);
+      border: 1px solid color-mix(in srgb, var(--amber, #d97706) 35%, transparent);
+    }
     [data-theme="dark"] .mr-chip { background: rgba(96,165,250,.14); }
     /* Scheduling dependency inline badge (issue #597) */
     .smgmt-sched-dep-badge {
@@ -13670,8 +13678,16 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       </span>`
     : `<span class="mr-status-ok" role="status">no cycles · no conflicts</span>`;
 
+  const accuracyBanner = data.accuracy_warning
+    ? `<div class="mr-accuracy-warn" role="alert">
+        <i class="ti ti-alert-triangle"></i>
+        predictions too unreliable to parallelize safely
+      </div>`
+    : '';
+
   return `<div class="mini-rail" id="mini-rail-${safeLabel}" role="group"
        aria-label="Run preview">
+    ${accuracyBanner}
     <div class="mr-head">
       <span class="mr-title">Run preview</span>
       ${warn}

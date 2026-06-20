@@ -33,13 +33,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import email.mime.text
 import json
 import os
 import re
 import shutil
 import signal
-import smtplib
 import subprocess
 import sys
 import tempfile
@@ -48,7 +46,6 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -80,7 +77,6 @@ from services.sprint_manager.config import (  # noqa: E402
 from services.sprint_manager.worktree_pool import (  # noqa: E402
     WorktreePool as _WorktreePool,
     DEFAULT_SLOTS as _WORKTREE_POOL_DEFAULT_SLOTS,
-    MAX_SLOTS as _WORKTREE_POOL_MAX_SLOTS,
 )
 
 from services.sprint_manager.commander_paths import (  # noqa: E402
@@ -1110,11 +1106,6 @@ _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
 from services.sprint_manager.alerts import (  # noqa: E402
     AlertMode,
     dispatch_alerts,
-    _alert_dashboard_banner,
-    _alert_email,
-    _alert_discord,
-    _alert_ntfy,
-    _alert_file,
     HangDetector,
 )
 

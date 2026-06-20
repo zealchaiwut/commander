@@ -10,10 +10,6 @@ Acceptance Criteria:
 - AC7: Accuracy artifacts present for all merged tickets after sprint completes
 """
 import os
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 import httpx

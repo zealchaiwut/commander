@@ -566,3 +566,133 @@ def preview_dag(sprint_label: str, project: str):
         for layer in result.layers
     ]
     return {**result_base, "levels": levels, "cycles": []}
+
+
+def compute_dag_order(
+    current_order: list[int],
+    levels: list[list[str]],
+    conflicts: list[dict],
+) -> dict:
+    """Compute DAG-topological ticket order and diff vs current order (issue #1420).
+
+    Reorders ``current_order`` so tickets in lower DAG levels appear before
+    higher levels; within each level the relative order from ``current_order``
+    is preserved. Tickets absent from ``levels`` are appended after all levelled
+    tickets in their original relative order.
+
+    Returns:
+      new_order   — list[int] in topological order
+      diff        — list[str] describing each moved ticket
+      is_noop     — True when new_order == current_order
+    """
+    # level index per ticket number
+    level_by_num: dict[int, int] = {}
+    for li, lvl in enumerate(levels):
+        for tid in lvl:
+            try:
+                level_by_num[int(tid.lstrip("#"))] = li
+            except ValueError:
+                pass
+
+    # conflict set for dep-edge hints
+    conflicts_set: set[tuple[int, int]] = set()
+    for c in conflicts:
+        a = c.get("ticket1_id")
+        b = c.get("ticket2_id")
+        if a and b:
+            conflicts_set.add((min(int(a), int(b)), max(int(a), int(b))))
+
+    n_levels = len(levels)
+    # group current_order tickets by DAG level, preserving within-level order
+    by_level: dict[int, list[int]] = {}
+    for num in current_order:
+        li = level_by_num.get(num, n_levels)   # unknown → append after DAG tickets
+        by_level.setdefault(li, []).append(num)
+
+    max_level = max([n_levels] + list(by_level.keys())) if by_level else n_levels
+    new_order: list[int] = []
+    for li in range(max_level + 1):
+        new_order.extend(by_level.get(li, []))
+
+    is_noop = new_order == list(current_order)
+    if is_noop:
+        return {"new_order": new_order, "diff": [], "is_noop": True}
+
+    # Build diff: one line per ticket that moves to an earlier position.
+    new_idx_map = {num: i for i, num in enumerate(new_order)}
+    old_idx_map = {num: i for i, num in enumerate(current_order)}
+    seen_pairs: set[tuple[int, int]] = set()
+    diff_lines: list[str] = []
+
+    for num in current_order:
+        old_idx = old_idx_map[num]
+        new_idx = new_idx_map.get(num, old_idx)
+        if new_idx >= old_idx:
+            continue  # didn't move earlier — skip
+
+        # Find the first ticket in new_order immediately after this one
+        if new_idx + 1 < len(new_order):
+            other = new_order[new_idx + 1]
+            pair = (min(num, other), max(num, other))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+
+            num_level = level_by_num.get(num)
+            other_level = level_by_num.get(other)
+            reason = ""
+            if (num_level is not None and other_level is not None
+                    and num_level < other_level
+                    and pair in conflicts_set):
+                reason = f" — dep edge #{num} blocks #{other}"
+            elif (num_level is not None and other_level is not None
+                    and num_level < other_level):
+                reason = f" — #{num} (level {num_level}) before #{other} (level {other_level})"
+            diff_lines.append(f"#{num} moves before #{other}{reason}")
+
+    return {"new_order": new_order, "diff": diff_lines, "is_noop": False}
+
+
+def dag_order_preview(sprint_label: str, project: str) -> dict:
+    """Compute DAG-ordered ticket sequence without persisting (issue #1420).
+
+    Returns new_order, diff, is_noop, and the partial flag from preview_dag.
+    Raises HTTPException 409 if the sprint has circular dependencies.
+    """
+    srv = _server()
+
+    dag_data = preview_dag(sprint_label, project)
+    if dag_data.get("cycles"):
+        raise HTTPException(
+            409,
+            detail="Sprint has circular dependencies — cannot compute DAG order",
+        )
+
+    levels: list[list[str]] = dag_data.get("levels") or []
+    conflicts: list[dict] = dag_data.get("conflicts") or []
+    partial: bool = bool(dag_data.get("partial"))
+
+    # Current order: plan.json tickets field, then ascending issue-number from DAG levels.
+    project_root = srv._project_root_path(project)
+    plan_data = srv._read_plan_json(project_root, sprint_label)
+    current_order: list[int] = []
+    if plan_data is not None:
+        raw = plan_data.get("tickets", plan_data) if isinstance(plan_data, dict) else plan_data
+        if isinstance(raw, list) and all(isinstance(n, int) for n in raw):
+            current_order = list(raw)
+
+    if not current_order:
+        # Fall back to ascending issue-number order from DAG ticket list
+        seen: set[int] = set()
+        for lvl in levels:
+            for tid in lvl:
+                try:
+                    num = int(tid.lstrip("#"))
+                    if num not in seen:
+                        seen.add(num)
+                        current_order.append(num)
+                except ValueError:
+                    pass
+
+    result = compute_dag_order(current_order, levels, conflicts)
+    return {**result, "partial": partial}

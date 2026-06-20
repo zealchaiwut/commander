@@ -1862,6 +1862,15 @@ def get_projects():
         raise HTTPException(400, detail=str(e))
 
 
+def _regenerate_home_brief_after_project_change() -> None:
+    """Rebuild today's home brief so new projects appear on the daily brief screen."""
+    try:
+        from routers import brief_artifact as _ba  # noqa: PLC0415
+        _ba.get_or_create_home_artifact(force=True)
+    except Exception:
+        pass
+
+
 @app.post("/api/projects", status_code=201)
 def add_project(body: NewProjectBody):
     try:
@@ -1870,6 +1879,7 @@ def add_project(body: NewProjectBody):
             icon=body.icon or "ti-folder",
             color=body.color or "gray",
         )
+        _regenerate_home_brief_after_project_change()
         # Trigger a background backup after a successful projects.json write
         if _BACKUP_AVAILABLE:
             try:
@@ -3078,6 +3088,7 @@ async def init_project(body: InitProjectBody):
         cmd.append("--skip-uat")
     if body.from_existing:
         cmd.append("--from-existing")
+    cmd.append("--no-restart-dashboard")
 
     async def _stream():
         proc = await asyncio.create_subprocess_exec(
@@ -3101,6 +3112,7 @@ async def init_project(body: InitProjectBody):
 
         await proc.wait()
         if proc.returncode == 0:
+            _regenerate_home_brief_after_project_change()
             yield f"event: done\ndata: {json.dumps('ok')}\n\n"
         else:
             yield f"event: error\ndata: {json.dumps(last_line or 'init_project.py failed')}\n\n"

@@ -652,26 +652,32 @@
 
   // ── AC6–AC13: per-project brief blocks ─────────────────────────────────────
   function renderProjectsShell(projects, available){
+    const artifactSlugs = new Set((projects || []).map(p => p.project));
+    const liveSlugs = Object.keys(_repoBySlug);
+    const mergedSlugs = [...new Set([...artifactSlugs, ...liveSlugs])].sort();
+    const bySlug = {};
+    (projects || []).forEach(p => { if (p.project) bySlug[p.project] = p; });
+    const mergedProjects = mergedSlugs.map(slug => bySlug[slug] || {
+      project: slug,
+      in_progress: null,
+      shipped: [],
+      blocked: [],
+      recent_activity: [],
+      _live_only: true,
+    });
+
     let blocks = '';
-    if (!projects.length){
+    if (!mergedProjects.length){
       const _addCta = '<a class="btn btn-primary" href="/static/home-preview.html" onclick="return openAdd(event)">Add new project</a>';
       blocks = available
         ? '<div class="empty-state"><i class="ti ti-folder-off"></i><div>No projects to report on for this date.</div>' + _addCta + '</div>'
         : '<div class="empty-state"><i class="ti ti-clipboard-off"></i><div>No brief was stored for this date.</div>' + _addCta + '</div>';
-      // Still show the tracked projects so the page is navigable without a brief.
-      const slugs = Object.keys(_repoBySlug);
-      blocks += slugs.map(s => `
-        <div class="pbrief collapsed">
-          <div class="pbrief-head">
-            ${_projectTitleLinkHtml(s)}
-          </div>
-        </div>`).join('');
     } else {
-      blocks = projects.map(renderProject).join('');
+      blocks = mergedProjects.map(renderProject).join('');
     }
     return `
     <div>
-      <div class="sec-title"><i class="ti ti-clipboard-text"></i> Project briefs <span class="count">${projects.length} project${projects.length === 1 ? '' : 's'}</span></div>
+      <div class="sec-title"><i class="ti ti-clipboard-text"></i> Project briefs <span class="count">${mergedProjects.length} project${mergedProjects.length === 1 ? '' : 's'}</span></div>
       ${blocks}
       <a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>
     </div>`;

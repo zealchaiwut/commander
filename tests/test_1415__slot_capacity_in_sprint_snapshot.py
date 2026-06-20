@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Optional
 from unittest import mock
 
-import pytest
 
 # ── sys.path setup ────────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).parent.parent
@@ -368,7 +367,7 @@ class TestAC6BothFieldsAlwaysPresent:
 
     def test_no_layout_branching_single_path(self, tmp_path):
         """Slot values are passed through state.to_dict() — no separate code path for serial vs concurrent."""
-        from services.sprint_manager.state import SprintState, IssueState
+        from services.sprint_manager.state import SprintState
         state = SprintState(sprint_label="sprint-99", sprint_number=99)
         state.max_coder_slots = 3
         state.max_tester_slots = 2

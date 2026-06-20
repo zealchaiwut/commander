@@ -76,7 +76,6 @@ from services.sprint_manager.config import (  # noqa: E402
 
 from services.sprint_manager.worktree_pool import (  # noqa: E402
     WorktreePool as _WorktreePool,
-    DEFAULT_SLOTS as _WORKTREE_POOL_DEFAULT_SLOTS,
 )
 
 from services.sprint_manager.commander_paths import (  # noqa: E402

@@ -477,7 +477,7 @@ add zero GitHub API calls.
 |---|---|---|
 | `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, `reconciliation`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls. The `reconciliation` field (issue #856) carries the post-sprint loose-ends result `{all_clear, checks[], ...}` read verbatim from `<label>-state.json`, or `null` for sprints that closed before the feature was deployed |
 | `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Optional `project` query param |
-| `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only |
+| `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only. Edges honour explicit ticket dependencies declared in issue bodies (issue #1404). Also returns `accuracy_warning` (issue #1417): set when the rolling estimator file-prediction accuracy under `.commander/estimates/accuracy/` is unreliable, so the preview can caution that the predicted file-conflict edges may be off |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, and flag merged vs unmerged (issue #808). Query params: `repo` (required), `target` (optional base branch). Returns branches plus a `by_sprint` grouping |
 | `POST` | `/cleanup-stale-branches` | Dry-run, then (with `confirm: true`) delete only merged stale branches — never unmerged (issue #808). Body `{repo, branches, target?, confirm}`; returns `{dry_run, target_branch, to_delete, deleted, skipped_unmerged, failed}` |
 | `GET` | `/logs/tail` | Per-issue log tail for the Running-view node inspector (issue #804). Query params: `sprint`, `issue` (int), `project`, `tail_lines` (default, 1–2000). Keyed by sprint + issue (no agent segment); returns `{found, path, tail, mtime}` or `{found: false, candidate_paths, tail}` |
@@ -496,6 +496,54 @@ before older ones collapse into aggregate folds (issue #807); and
 capacity bar (issue #801). A third setting, `reviewer_enabled` (default `false`,
 issue #1146), gates the post-sprint reviewer wrap-up agent; when enabled the
 timeline endpoint's `wrap_up_estimate` includes a `reviewer` minutes entry.
+
+### Concurrent multi-coder dispatch (issues #1411–#1417)
+
+The sprint runner can drive more than one coder at a time, each in an isolated
+git worktree, instead of the prior serial loop. Three settings/config keys
+govern lane capacity:
+
+- `max_coder_slots` — warm worktree pool size (`settings_schema.py`, default 2,
+  cap 4, issue #1411). Also readable from `sprint.yaml` as a top-level
+  `max_coder_slots` key or `agent.coder.max_slots` (`config.py`, issue #1415);
+  when unset there it falls back to the serial default of 1.
+- `max_tester_slots` — `sprint.yaml` top-level key (`config.py`, issue #1415);
+  unset → 1.
+
+Resolution precedence at run start: per-run param > project settings (`cfg`) >
+serial default (1). The resolved values are persisted on `SprintState`
+(`state.py`, issue #1412): `max_coder_slots`, `max_tester_slots`, and
+`active_coder_slots` (live count, updated by the scheduler). They are written
+into the sprint status payload from the first post so the running pane shows
+correct capacity immediately.
+
+The **warm worktree pool** (`services/sprint_manager/worktree_pool.py`) lives at
+`.commander/runtime/worktree-pool/slot-<i>/`, each slot a full worktree with its
+own fresh virtualenv. Orphans from a prior crash are reconciled at sprint start;
+the pool is torn down at sprint end. The **conflict-aware concurrent scheduler**
+(`concurrent_scheduler.py`, issues #1412/#1413) runs role-flexible slots — each
+slot executes a code task or a test task, preferring code and falling back to
+tests, with file-overlap checks gating both; a tester rejection re-queues the
+ticket to the front of the coder queue. With `max_coder_slots <= 1` it delegates
+to the existing pipeline path (zero divergence). Concurrent merges are
+serialized via the develop-merge guard, and `scripts/finish_feature.py` attempts
+a single automated rebase on merge conflict before falling back to manual
+(issue #1414).
+
+The live snapshot endpoint (`GET .../live`) reports lane capacity
+(`max_coder_slots` / `max_tester_slots` via `live_metrics.lane_capacity`) and now
+lists **every active coder** as its own entry in `active_agents` (previously a
+single coder slot), so the project page can render a multi-lane running view
+(issue #1416).
+
+**Estimator file-prediction accuracy (issue #1417).** On each merge,
+`finish_feature.py` compares the ticket estimate's `files_likely_affected`
+against the files the merge commit actually changed (`git diff-tree
+--first-parent`) and writes a per-ticket precision/recall artifact to
+`.commander/estimates/accuracy/issue-<N>.json`, updating a rolling `summary.json`
+(`services/sprint_manager/estimate_accuracy.py`). All I/O is local — no GitHub or
+network calls. `preview-dag` reads this rolling summary to set its
+`accuracy_warning`.
 
 ### Daily Brief (issues #839–#842)
 

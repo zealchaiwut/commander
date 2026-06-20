@@ -27,7 +27,6 @@ pipeline=True — the delegate path ensures zero divergence.
 from __future__ import annotations
 
 import threading
-from collections import deque
 from typing import Any, Callable, Optional
 
 from services.sprint_manager.pipeline import (

@@ -24,10 +24,6 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
-
-import pytest
-
 from services.sprint_manager.pipeline import StageResult
 from services.sprint_manager.concurrent_scheduler import run_concurrent_level
 
@@ -340,7 +336,6 @@ def test_ac5_test_task_blocked_while_coding_same_files():
 def test_ac5_test_task_not_blocked_by_different_files():
     """A test task on different files is NOT blocked by an active coding task."""
     test_started = threading.Event()
-    coding_done = threading.Event()
 
     def code(t, attempt):
         if t == "A":

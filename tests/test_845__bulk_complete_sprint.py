@@ -64,6 +64,7 @@ def _bulk_complete(srv, tmp_path, owner="owner", repo_name="proj-bc", label="spr
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
         patch("server._bulk_complete_merge_pending", return_value=[]),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
         patch("server._get_sprint_issues", side_effect=fake_get_issues),
         patch("server._open_summary_issues_for_labels", side_effect=fake_summary),
         patch("server._plan_json_set_state", return_value=None),
@@ -122,6 +123,7 @@ def test_bulk_complete_mirrors_completed_into_lifecycle_db(srv, tmp_path):
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
         patch("server._bulk_complete_merge_pending", return_value=[]),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
         patch("server._get_sprint_issues", return_value=[]),
         patch("server._open_summary_issues_for_labels", return_value=[]),
         patch("server._plan_json_set_state", return_value=None),
@@ -154,6 +156,8 @@ def test_bulk_complete_preview_lists_summary_category(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._get_sprint_issues", return_value=[]),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
+        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
         patch(
             "server._open_summary_issues_for_labels",
             return_value=[{
@@ -201,6 +205,8 @@ def test_bulk_complete_preview_includes_merge_steps(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._get_sprint_issues", return_value=[]),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
+        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
         patch("server._open_summary_issues_for_labels", return_value=[]),
         patch("server._bulk_complete_merge_steps", return_value=fake_steps),
     ]
@@ -224,6 +230,7 @@ def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._is_sprint_running", return_value=False),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
         patch(
             "server._bulk_complete_merge_pending",
             return_value=["sprint/sprint-68.1 → sprint/sprint-68", "sprint/sprint-68 → develop"],
@@ -337,6 +344,8 @@ def test_bulk_complete_preview_allows_ready_to_merge_child_chain(srv, tmp_path):
     patches = [
         patch("server._project_root_path", return_value=project_root),
         patch("server._get_sprint_issues", return_value=[]),
+        patch("server._bulk_complete_unsettled_children", return_value=[]),
+        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
         patch("server._open_summary_issues_for_labels", return_value=[]),
         patch("server._merge_steps_for_sprint_chain", return_value=[]),
         patch(

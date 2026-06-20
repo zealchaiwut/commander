@@ -69,6 +69,10 @@ export async function smgmtBulkCompleteSprint(label) {
     const preview = await _bcFetchPreview(owner, repoName, label);
     _bcPreview = preview;
 
+    if (preview.conflict_error) {
+      throw new Error(preview.conflict_error);
+    }
+
     const listEl = document.getElementById('bc-ticket-list');
     const allTickets = preview.all_tickets || [];
     if (allTickets.length === 0) {
@@ -119,7 +123,11 @@ async function _bcFetchPreview(owner, repoName, label) {
   );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const detail = err.detail || `HTTP ${res.status}`;
+    if (res.status === 409 && /merge conflict/i.test(detail)) {
+      throw new Error(`Merge conflict — bulk complete stopped: ${detail}`);
+    }
+    throw new Error(detail);
   }
   return res.json();
 }
@@ -147,7 +155,11 @@ async function _bcMergeStep(owner, repoName, step) {
   );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const detail = err.detail || `HTTP ${res.status}`;
+    if (res.status === 409 && /merge conflict/i.test(detail)) {
+      throw new Error(`Merge conflict — bulk complete stopped: ${detail}`);
+    }
+    throw new Error(detail);
   }
   return res.json();
 }

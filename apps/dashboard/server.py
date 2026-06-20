@@ -10434,6 +10434,155 @@ def _bulk_complete_assert_children_completed(project_root: Path, base_label: str
         )
 
 
+# Doc paths auto-resolved from develop before sprint→develop merge (CHANGELOG/README drift).
+_DEVELOP_MERGE_DOC_PATHS: frozenset[str] = frozenset({
+    "CHANGELOG.md", "README.md", "CLAUDE.md", "AGENTS.md",
+})
+
+
+def _is_merge_conflict_detail(detail: str) -> bool:
+    """True when a merge/PR failure message indicates a merge conflict."""
+    d = (detail or "").lower()
+    return any(
+        token in d
+        for token in (
+            "conflict", "conflicting", "mergeable", "dirty",
+            "can't be merged", "cannot be merged", "not mergeable",
+        )
+    )
+
+
+def _git_repo_for_merge(repo: str) -> Path | None:
+    """Best-effort local clone for pre-merge git operations."""
+    project_root = _project_root_path(repo)
+    for candidate in (_coder_clone_path(project_root), project_root):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _is_doc_merge_path(path: str) -> bool:
+    if path in _DEVELOP_MERGE_DOC_PATHS:
+        return True
+    return path.startswith("docs/") and path.endswith(".md")
+
+
+def _prepare_sprint_branch_for_develop_merge(repo: str, head_branch: str) -> tuple[bool, str]:
+    """Merge origin/develop into the sprint branch; resolve doc conflicts from develop."""
+    cwd = _git_repo_for_merge(repo)
+    if cwd is None:
+        return True, "skipped (no local clone for doc sync)"
+
+    def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            list(args), cwd=cwd, capture_output=True, text=True,
+            timeout=180, check=check,
+        )
+
+    try:
+        fetch = _run("git", "fetch", "origin", head_branch, "develop")
+        if fetch.returncode != 0:
+            return False, fetch.stderr.strip() or "git fetch failed"
+
+        co = _run("git", "checkout", head_branch)
+        if co.returncode != 0:
+            track = _run("git", "checkout", "-B", head_branch, f"origin/{head_branch}")
+            if track.returncode != 0:
+                return False, co.stderr.strip() or "git checkout failed"
+
+        merge = _run(
+            "git", "merge", "origin/develop",
+            "-m", f"sync develop into {head_branch} before sprint merge",
+        )
+        if merge.returncode != 0:
+            status = _run("git", "diff", "--name-only", "--diff-filter=U")
+            unmerged = [ln.strip() for ln in (status.stdout or "").splitlines() if ln.strip()]
+            if not unmerged:
+                return False, merge.stderr.strip() or "git merge develop failed"
+            non_doc = [p for p in unmerged if not _is_doc_merge_path(p)]
+            if non_doc:
+                _run("git", "merge", "--abort")
+                return False, f"merge conflict in non-doc files: {', '.join(non_doc)}"
+            for path in unmerged:
+                _run("git", "checkout", "--theirs", path)
+                _run("git", "add", path)
+            commit = _run(
+                "git", "commit", "-m",
+                f"sync develop into {head_branch} (resolve doc conflicts)",
+            )
+            if commit.returncode != 0:
+                _run("git", "merge", "--abort")
+                return False, commit.stderr.strip() or "failed to commit doc resolution"
+
+        push = _run("git", "push", "origin", head_branch)
+        if push.returncode != 0:
+            return False, push.stderr.strip() or "git push failed"
+        return True, "synced with develop"
+    except Exception as exc:
+        try:
+            _run("git", "merge", "--abort")
+        except Exception:
+            pass
+        return False, str(exc)
+
+
+def _check_branch_merge_conflict(
+    repo: str, head: str, base: str,
+) -> tuple[bool, str, list[str]]:
+    """Return (has_conflict, message, conflicting_file_paths) for head→base."""
+    if not _branch_has_unmerged_commits(repo, head, base):
+        return False, "", []
+    try:
+        pr_res = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", head, "--base", base,
+             "--state", "open", "--json", "number", "--limit", "1"],
+            capture_output=True, text=True, timeout=30,
+        )
+        pr_number: int | None = None
+        if pr_res.returncode == 0 and pr_res.stdout.strip():
+            prs = json.loads(pr_res.stdout)
+            if prs:
+                pr_number = prs[0].get("number")
+        if pr_number is None:
+            create = subprocess.run(
+                ["gh", "pr", "create", "--repo", repo, "--base", base, "--head", head,
+                 "--title", f"Merge check: {head} → {base}",
+                 "--body", "Ephemeral merge-conflict check (Commander)."],
+                capture_output=True, text=True, timeout=60,
+            )
+            if create.returncode != 0:
+                stderr = create.stderr.strip()
+                if _is_merge_conflict_detail(stderr):
+                    return True, stderr, []
+                return False, "", []
+            m = re.search(r"/pull/(\d+)", create.stdout or "")
+            if m:
+                pr_number = int(m.group(1))
+        if pr_number is None:
+            return False, "", []
+        view = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--repo", repo,
+             "--json", "mergeable,mergeStateStatus,files"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if view.returncode != 0 or not view.stdout.strip():
+            return False, "", []
+        pr = json.loads(view.stdout)
+        conflicting = (
+            pr.get("mergeable") == "CONFLICTING"
+            or pr.get("mergeStateStatus") == "DIRTY"
+        )
+        files = [
+            f.get("path") for f in (pr.get("files") or [])
+            if isinstance(f, dict) and f.get("path")
+        ]
+        if conflicting:
+            return True, f"PR #{pr_number} has merge conflicts", files
+        return False, "", []
+    except Exception:
+        return False, "", []
+
+
 def _gh_branch_exists(repo: str, branch: str) -> bool:
     try:
         from urllib.parse import quote
@@ -10455,6 +10604,16 @@ def _gh_merge_branch_via_pr(
     delete_branch: bool = True,
 ) -> tuple[bool, str, int | None]:
     """Create (or reuse) a PR head→base and merge it. Returns (ok, detail)."""
+    if base == "develop":
+        prep_ok, prep_detail = _prepare_sprint_branch_for_develop_merge(repo, head)
+        if not prep_ok:
+            return False, f"prepare for develop merge failed: {prep_detail}", None
+
+    has_conflict, conflict_msg, conflict_files = _check_branch_merge_conflict(repo, head, base)
+    if has_conflict:
+        suffix = f" ({', '.join(conflict_files)})" if conflict_files else ""
+        return False, f"merge conflict: {conflict_msg}{suffix}", None
+
     pr_url: Optional[str] = None
     try:
         pr_res = subprocess.run(
@@ -10486,7 +10645,10 @@ def _gh_merge_branch_via_pr(
             merge_args.append("--delete-branch")
         merge_res = subprocess.run(merge_args, capture_output=True, text=True, timeout=120)
         if merge_res.returncode != 0:
-            return False, merge_res.stderr.strip() or "PR merge failed", None
+            detail = merge_res.stderr.strip() or merge_res.stdout.strip() or "PR merge failed"
+            if _is_merge_conflict_detail(detail):
+                detail = f"merge conflict: {detail}"
+            return False, detail, None
         return True, pr_url or f"{head} → {base}", _parse_pr_number_from_url(pr_url)
     except Exception as exc:
         return False, str(exc), None
@@ -10578,6 +10740,7 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
+            break
     return errors
 
 
@@ -10619,6 +10782,7 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
+            break
         elif step.get("base") == "develop":
             if pr_num:
                 develop_pr = pr_num
@@ -10683,6 +10847,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
 
     next_sprint_exists = next_num in existing_sprints
     conflict_error: str | None = None
+    conflicting_files: list[str] = []
 
     is_child = _is_child_sprint_label(label)
     try:
@@ -10711,6 +10876,15 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
             "base": step["base"],
             "label": step["label"],
         })
+        if conflict_error is None:
+            has_conflict, msg, files = _check_branch_merge_conflict(
+                repo, step["head"], step["base"],
+            )
+            if has_conflict:
+                conflict_error = (
+                    f"Merge conflict merging {step['label']}: {msg}"
+                )
+                conflicting_files = files
     base_branch = _sprint_branch_name(base_label)
     try:
         branch_name = _sprint_branch_name(label)
@@ -10763,6 +10937,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         "next_sprint_label": next_sprint_label,
         "next_sprint_exists": next_sprint_exists,
         "conflict_error": conflict_error,
+        "conflicting_files": conflicting_files,
     }
 
 
@@ -10826,7 +11001,17 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
 
     # 1. Merge sprint branches for this label only
     merge_errors, merge_pr_number = _merge_sprint_branches_for_label(repo, label)
-    errors.extend(merge_errors)
+    if merge_errors:
+        detail = "; ".join(merge_errors)
+        if any(_is_merge_conflict_detail(e) for e in merge_errors):
+            raise HTTPException(
+                409,
+                detail=f"Merge conflict — sprint not completed: {detail}",
+            )
+        raise HTTPException(
+            409,
+            detail=f"Merge failed — sprint not completed: {detail}",
+        )
 
     # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)
     if body.merge_pr and body.sprint_pr_url:
@@ -10836,9 +11021,23 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
                 capture_output=True, text=True, check=False,
             )
             if merge_res.returncode != 0:
-                errors.append(f"PR merge failed: {merge_res.stderr.strip()}")
+                err = merge_res.stderr.strip() or "PR merge failed"
+                if _is_merge_conflict_detail(err):
+                    raise HTTPException(
+                        409,
+                        detail=f"Merge conflict — sprint not completed: {err}",
+                    )
+                raise HTTPException(
+                    409,
+                    detail=f"Merge failed — sprint not completed: {err}",
+                )
+        except HTTPException:
+            raise
         except Exception as exc:
-            errors.append(f"PR merge error: {exc}")
+            raise HTTPException(
+                409,
+                detail=f"Merge failed — sprint not completed: {exc}",
+            ) from exc
 
     _NON_WORK_LABELS_FS2 = {"sprint-summary", "docs", "documentation"}
 
@@ -10888,14 +11087,14 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         "type": "update",
         "event": {
             "event_type": "sprint_finished",
-            "sprint_label": base_label,
+            "sprint_label": label,
         },
     })
 
     _emit_dashboard_event(
         project=repo,
         type="sprint_finished",
-        target=base_label,
+        target=label,
         detail={
             "sprint_id": base_label,
             "summary_issue_url": _read_sprint_summary_url(project_root, base_label),
@@ -11028,6 +11227,16 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         )
 
     merge_steps = _bulk_complete_merge_steps(project_root, repo, base_label)
+    conflict_error: str | None = None
+    conflicting_files: list[str] = []
+    for step in merge_steps:
+        has_conflict, msg, files = _check_branch_merge_conflict(
+            repo, step["head"], step["base"],
+        )
+        if has_conflict:
+            conflict_error = f"Merge conflict merging {step.get('label', step['head'])}: {msg}"
+            conflicting_files = files
+            break
 
     return {
         "all_tickets": _bulk_complete_ticket_rows(sprint_issues),
@@ -11035,6 +11244,8 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
+        "conflict_error": conflict_error,
+        "conflicting_files": conflicting_files,
     }
 
 
@@ -11060,7 +11271,8 @@ def sprint_branch_merge(owner: str, repo_name: str, body: SprintBranchMergeBody)
         repo, body.head, body.base, title, body.delete_branch,
     )
     if not ok:
-        raise HTTPException(400, detail=detail)
+        status = 409 if _is_merge_conflict_detail(detail) else 400
+        raise HTTPException(status, detail=detail)
     # PR may have been the sprint's outstanding loose end — refresh reconciliation.
     m = re.match(r"^sprint/sprint-(\d+(?:\.\d+)*)$", body.head or "")
     if m:

@@ -1,5 +1,5 @@
 (() => {
-  // apps/dashboard/static/src/logpanel.js
+  // static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
     "tester",
@@ -37,7 +37,7 @@
     });
   }
 
-  // apps/dashboard/static/src/progress-activity.js
+  // static/src/progress-activity.js
   function _e(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -493,7 +493,7 @@
     document.head.appendChild(style);
   }
 
-  // apps/dashboard/static/src/progress-host.js
+  // static/src/progress-host.js
   var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
   var _payloadById = /* @__PURE__ */ new Map();
   var _MAX_LOG_LINES = 200;
@@ -648,7 +648,7 @@
     _payloadById.delete(paId);
   }
 
-  // apps/dashboard/static/src/shell/tabs.js
+  // static/src/shell/tabs.js
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -834,7 +834,7 @@
     switchTab(effTab, false);
   });
 
-  // apps/dashboard/static/src/shell/features.js
+  // static/src/shell/features.js
   var _features = null;
   function commanderFeatures() {
     return _features || {};
@@ -888,7 +888,7 @@
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/state.js
+  // static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
@@ -908,7 +908,7 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
-  // apps/dashboard/static/src/sprint-board/plan-next.js
+  // static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
     try {
@@ -1012,7 +1012,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/scheduled-run.js
+  // static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
     const on = !!_schedMap[label];
@@ -1070,7 +1070,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/history.js
+  // static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
@@ -2680,7 +2680,7 @@ Replace the existing draft (${data.existing_label})?`
     return _nextSprintSublabel(parentLabel);
   }
 
-  // apps/dashboard/static/src/sprint-board/rerun-modal.js
+  // static/src/sprint-board/rerun-modal.js
   function _rrShowPreviewLoading(current) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
@@ -2879,7 +2879,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/finish-modal.js
+  // static/src/sprint-board/finish-modal.js
   function _fsOpen() {
     _setBodyInert(["fs-backdrop", "fs-modal"]);
     document.getElementById("fs-backdrop").classList.remove("hidden");
@@ -3248,7 +3248,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
+  // static/src/sprint-board/bulk-complete-modal.js
   function _bcShowPreviewLoading(current) {
     const loading = document.getElementById("bc-loading");
     if (!loading)
@@ -3314,6 +3314,9 @@ Replace the existing draft (${data.existing_label})?`
     try {
       const preview = await _bcFetchPreview(owner, repoName, label);
       _bcPreview = preview;
+      if (preview.conflict_error) {
+        throw new Error(preview.conflict_error);
+      }
       const listEl = document.getElementById("bc-ticket-list");
       const allTickets = preview.all_tickets || [];
       if (allTickets.length === 0) {
@@ -3361,7 +3364,11 @@ Replace the existing draft (${data.existing_label})?`
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+      const detail = err.detail || `HTTP ${res.status}`;
+      if (res.status === 409 && /merge conflict/i.test(detail)) {
+        throw new Error(`Merge conflict \u2014 bulk complete stopped: ${detail}`);
+      }
+      throw new Error(detail);
     }
     return res.json();
   }
@@ -3386,7 +3393,11 @@ Replace the existing draft (${data.existing_label})?`
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+      const detail = err.detail || `HTTP ${res.status}`;
+      if (res.status === 409 && /merge conflict/i.test(detail)) {
+        throw new Error(`Merge conflict \u2014 bulk complete stopped: ${detail}`);
+      }
+      throw new Error(detail);
     }
     return res.json();
   }
@@ -3497,7 +3508,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/run-controls.js
+  // static/src/sprint-board/run-controls.js
   var PF_STEPS = [
     { key: "ac", label: "Acceptance criteria", autoFixable: true },
     { key: "estimates", label: "Estimate coverage", autoFixable: true },
@@ -4494,7 +4505,7 @@ Replace the existing draft (${data.existing_label})?`
     await _ksFinish(label);
   }
 
-  // apps/dashboard/static/src/sprint-board/drag-drop.js
+  // static/src/sprint-board/drag-drop.js
   var _smgmtBoardOverlayHasProgress = false;
   function isDragBlocked(state) {
     return !!(state && state.moveLock);
@@ -5334,7 +5345,7 @@ ${data.errors.join("\n")}`);
       _smgmtArStartTicker();
   }
 
-  // apps/dashboard/static/src/sprint-board/board-render.js
+  // static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
@@ -7589,7 +7600,7 @@ ${data.errors.join("\n")}`);
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/index.js
+  // static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
   globalThis._rrCatClass = _rrCatClass;
@@ -7745,7 +7756,7 @@ ${data.errors.join("\n")}`);
   globalThis._histResetLedgerCache = _histResetLedgerCache;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
-  // apps/dashboard/static/src/index.js
+  // static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;

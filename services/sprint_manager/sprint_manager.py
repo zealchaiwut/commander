@@ -77,6 +77,16 @@ from services.sprint_manager.config import (  # noqa: E402
     _default_config,
 )
 
+from services.sprint_manager.worktree_pool import (  # noqa: E402
+    WorktreePool as _WorktreePool,
+    DEFAULT_SLOTS as _WORKTREE_POOL_DEFAULT_SLOTS,
+    MAX_SLOTS as _WORKTREE_POOL_MAX_SLOTS,
+)
+
+from services.sprint_manager.commander_paths import (  # noqa: E402
+    discover_commander_dir,
+)
+
 from services.sprint_manager.paths import (  # noqa: E402
     _pid_file_path,
     _plan_json_path,
@@ -774,6 +784,11 @@ def _sprint_db_ingest_run_sm(
 # every agent_runs row is tagged with its project (sprint labels collide across
 # repos). Read by _db_agent_start_sm without threading it through 8 call sites.
 _CURRENT_RUN_PROJECT: Optional[str] = None
+
+# Active worktree pool for the current sprint run (issue #1411).
+# Set by run_sprint at sprint start; cleared at sprint end.
+# Provides K isolated worktrees for concurrent coder dispatch.
+_ACTIVE_WORKTREE_POOL: Optional[_WorktreePool] = None
 
 
 def _db_agent_start_sm(
@@ -4252,6 +4267,23 @@ def _select_coder_backend(
     return "cline"
 
 
+def _pool_acquire() -> Optional[Path]:
+    """Acquire one worktree slot from the active pool (issue #1411).
+
+    Returns the slot path, or None when no pool is active.  Blocks until a
+    free slot is available.
+    """
+    if _ACTIVE_WORKTREE_POOL is not None:
+        return _ACTIVE_WORKTREE_POOL.acquire()
+    return None
+
+
+def _pool_release(slot: Optional[Path]) -> None:
+    """Return a pool slot acquired by _pool_acquire (issue #1411)."""
+    if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
+        _ACTIVE_WORKTREE_POOL.release(slot)
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -4266,6 +4298,7 @@ def _dispatch_coder(
     hang_continuation: Optional[dict] = None,
     attempt_kind: Optional[str] = None,
     coder_backend_override: Optional[str] = None,
+    worktree_override: Optional[Path] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -4282,10 +4315,16 @@ def _dispatch_coder(
     prior_failures: accumulated failure records from the fix-loop (issue #618).
     When provided, an accumulated context suffix is built from these records
     instead of reading the single-failure sidecar.
+
+    worktree_override: when set, use this path as the working directory instead
+    of cfg.worktree_coder.  Used by the worktree pool (issue #1411) to assign
+    an isolated worktree slot to each concurrent coder dispatch.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
-    if cfg:
+    if worktree_override is not None:
+        cwd_path = worktree_override
+    elif cfg:
         cwd_path = cfg.worktree_coder
     else:
         # No sprint.yaml: cwd is the coder clone when dispatched from the dashboard.
@@ -7788,14 +7827,19 @@ def _run_pipeline_dispatch(
         _stage_coder_t0 = time.monotonic()
         _stage_coder_utc0 = _token_window_utc_now()
         _pipe_hang_continuation = ctx.get("hang_continuation")
-        coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running, sprint_label=label,
-            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-            hang_continuation=_pipe_hang_continuation,
-            attempt_kind=_pipe_attempt_kind,
-        )
+        _pipe_pool_slot = _pool_acquire()
+        try:
+            coder_ok, coder_category = _dispatch_coder(
+                num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_coder_running, sprint_label=label,
+                prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                hang_continuation=_pipe_hang_continuation,
+                attempt_kind=_pipe_attempt_kind,
+                worktree_override=_pipe_pool_slot,
+            )
+        finally:
+            _pool_release(_pipe_pool_slot)
         _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
         state.total_tokens_in += _ctin
         state.total_tokens_out += _ctout
@@ -7864,14 +7908,19 @@ def _run_pipeline_dispatch(
                         attempt_kind="hang_continue",
                         log_path=str(_issue_log_path(num, cfg=cfg)),
                     )
-                    coder_ok, coder_category = _dispatch_coder(
-                        num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-                        chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                        on_running=_on_coder_running, sprint_label=label,
-                        prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-                        hang_continuation=ctx["hang_continuation"],
-                        attempt_kind="hang_continue",
-                    )
+                    _hc_pool_slot = _pool_acquire()
+                    try:
+                        coder_ok, coder_category = _dispatch_coder(
+                            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                            on_running=_on_coder_running, sprint_label=label,
+                            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                            hang_continuation=ctx["hang_continuation"],
+                            attempt_kind="hang_continue",
+                            worktree_override=_hc_pool_slot,
+                        )
+                    finally:
+                        _pool_release(_hc_pool_slot)
                     _db_agent_finish_sm(
                         num, label, "coder",
                         duration_seconds=time.monotonic() - _stage_hc_t0,
@@ -8407,6 +8456,35 @@ def run_sprint(
     _sweep_stale_in_progress(label, eff_repo)
     _sweep_stale_status("SIT", label, eff_repo)
 
+    # ── Worktree pool setup (issue #1411) ──────────────────────────────────────
+    # Reconcile any orphaned worktrees from a prior crash, then create a fresh
+    # pool of K isolated worktrees for concurrent coder dispatch.
+    if not dry_run:
+        global _ACTIVE_WORKTREE_POOL
+        _pool_repo_root = Path(cfg.worktree_coder).parent if cfg is not None else REPO_ROOT
+        _pool_commander = (
+            discover_commander_dir(cfg.worktree_coder if cfg is not None else None)
+        )
+        _pool_dir = _pool_commander / "runtime" / "worktree-pool"
+        _WorktreePool.reconcile_orphans(_pool_dir, _pool_repo_root)
+        _pool_slots = getattr(cfg, "max_coder_slots", _WORKTREE_POOL_DEFAULT_SLOTS) if cfg else _WORKTREE_POOL_DEFAULT_SLOTS
+        _pool_req = (cfg.worktree_coder / "requirements.txt") if cfg is not None else None
+        if _pool_req is not None and not Path(_pool_req).exists():
+            _pool_req = None
+        _pool = _WorktreePool(
+            pool_dir=_pool_dir,
+            repo_root=_pool_repo_root,
+            base_branch=sprint_branch,
+            slots=_pool_slots,
+            requirements_file=Path(_pool_req) if _pool_req else None,
+        )
+        _pool.create()
+        _ACTIVE_WORKTREE_POOL = _pool
+        sys.stdout.write(str(
+            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f" (max_coder_slots={_pool_slots})\n"
+        ))
+
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
         type="sprint_started",
@@ -8762,6 +8840,7 @@ def run_sprint(
 
                 _coder_t0 = time.monotonic()
                 _coder_utc0 = _token_window_utc_now()
+                _serial_pool_slot = _pool_acquire()
                 try:
                     coder_ok, coder_category = _dispatch_coder(
                         num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
@@ -8771,6 +8850,7 @@ def run_sprint(
                         hang_continuation=_hang_continuation,
                         attempt_kind=_next_attempt_kind,
                         coder_backend_override=_next_coder_backend,
+                        worktree_override=_serial_pool_slot,
                     )
                 except SystemExit:
                     _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -8786,6 +8866,8 @@ def run_sprint(
                         action_id=_run_id,
                     )
                     raise
+                finally:
+                    _pool_release(_serial_pool_slot)
                 _coder_elapsed = time.monotonic() - _coder_t0
                 _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
                 state.total_tokens_in += _ctin
@@ -9379,6 +9461,16 @@ def run_sprint(
         ]
         if _merged_issue_nums:
             _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
+
+    # ── Worktree pool teardown (issue #1411) ───────────────────────────────────
+    # Tear down the pool at sprint end so no stray worktrees remain.
+    if _ACTIVE_WORKTREE_POOL is not None:
+        try:
+            _ACTIVE_WORKTREE_POOL.teardown()
+        except Exception as _pool_ex:
+            sys.stdout.write(str(f"  [worktree-pool] WARNING: teardown error: {_pool_ex}\n"))
+        finally:
+            _ACTIVE_WORKTREE_POOL = None  # type: ignore[assignment]
 
     return summary, state
 

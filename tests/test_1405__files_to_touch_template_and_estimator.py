@@ -17,16 +17,13 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 FEATURE_TEMPLATE = REPO_ROOT / ".github" / "ISSUE_TEMPLATE" / "feature.md"
 SERVER_PY = REPO_ROOT / "apps" / "dashboard" / "server.py"
 
-from services.sprint_manager.estimate_issue import (
-    extract_json,
+from services.sprint_manager.estimate_issue import (  # noqa: E402
     parse_files_to_touch,
     run_estimator,
 )

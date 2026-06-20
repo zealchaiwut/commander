@@ -29,21 +29,21 @@ AGENT_PATH = REPO_ROOT / "apps" / "dashboard" / ".claude" / "agents" / "estimato
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
 
 _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
-from sizing import minutes_from_letter as _minutes_from_letter
-from calibration import (
+from sizing import minutes_from_letter as _minutes_from_letter  # noqa: E402
+from calibration import (  # noqa: E402
     CalibrationResult,
     load_calibration,
     calibration_prompt_section,
     db_calibration_records,
     sqlite_calibration_records,
 )
-from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
+from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg  # noqa: E402
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
         "number": raw.get("number"),
         "title": raw.get("title", ""),
         "body": raw.get("body") or "",
-        "labels": [{"name": l.get("name", "")} for l in (raw.get("labels") or [])],
+        "labels": [{"name": lbl.get("name", "")} for lbl in (raw.get("labels") or [])],
     }
 
 

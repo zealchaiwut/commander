@@ -8689,6 +8689,30 @@ def _run_pipeline_dispatch(
         if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
             record_failure(num, category, detail=summary_line)
             ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
+            # Consecutive-identical-failure early abort (issue #1401): mirror the
+            # serial loop's _last_failure_sig guard so pipeline mode doesn't burn
+            # all three fix rounds on a stuck ticket.
+            _sig = f"{category}:{summary_line[:80]}"
+            _last = ctx.get("last_failure_sig")
+            ctx["last_failure_sig"] = _sig
+            if _sig == _last:
+                sys.stdout.write(
+                    f"  [pipeline] consecutive identical failure ({category}): aborting early\n"
+                )
+                sys.stdout.flush()
+                try:
+                    structured_log.error(
+                        "fix_loop_exhausted",
+                        f"consecutive identical gate failure ({category}): aborting early",
+                        issue_num=num,
+                        fix_history=ctx["fix_history"],
+                        reason="consecutive_identical",
+                        failure_sig=_sig,
+                        failure_class=str(category),
+                    )
+                except Exception:
+                    pass
+                return _StageResult.EXHAUST
             return _StageResult.REJECT  # scheduler re-queues to front of coder queue
 
         # Non-logic gate failure or rerun-tester-direct path: terminal drop.

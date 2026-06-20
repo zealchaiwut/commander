@@ -8554,6 +8554,61 @@
     }
     @media (prefers-reduced-motion: reduce) { .lane-chip-pulse { animation: none; } }
 
+    /* ── Multi-lane worker view (issue #1416) ───────────────────────────────────
+       Per-worker lanes for concurrent coder dispatch (max_coder_slots > 1).
+       Each lane shows: ticket ID + phase pill + live log tail.
+       Layout: responsive grid; log tail scrolls independently per lane.
+       Colors use CSS tokens only — no hardcoded hex. */
+    .worker-lanes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .worker-lane {
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--surface); overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .worker-lane-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+      background: var(--surface-2); min-width: 0;
+    }
+    .worker-lane-num {
+      font-family: var(--mono); font-size: 13px; font-weight: 700;
+      color: var(--blue); text-decoration: none; flex-shrink: 0;
+    }
+    .worker-lane-num:hover { text-decoration: underline; }
+    .worker-lane-phase {
+      font-size: 10px; font-weight: 700; letter-spacing: .05em;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .worker-lane-phase--coding  { background: var(--purple-bg); color: var(--purple); }
+    .worker-lane-phase--rework  { background: var(--amber-bg);  color: var(--amber); }
+    .worker-lane-phase--testing { background: var(--green-bg);  color: var(--green); }
+    .worker-lane-phase--merging { background: var(--teal-bg);   color: var(--teal); }
+    .worker-lane-title {
+      font-size: 12px; color: var(--text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1; min-width: 0;
+    }
+    .worker-lane-log {
+      flex: 1; overflow-y: auto; max-height: 160px;
+      padding: 6px 12px; font-family: var(--mono);
+      font-size: 11px; line-height: 1.6;
+    }
+    .worker-log-line {
+      white-space: pre-wrap; word-break: break-all; color: var(--text-muted);
+    }
+    .worker-lane-log-msg {
+      color: var(--text-sub); font-family: var(--mono); font-size: 11px;
+      padding: 4px 0;
+    }
+    .worker-lanes-empty {
+      color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;
+    }
+
     /* ── Running-pane Gantt timeline (issue #1147) ───────────────────────────
        Per-issue horizontal track rows on a shared sprint time axis.
        Prefix: rp-tl-  (running-pane timeline). All colours use CSS tokens. */
@@ -15686,6 +15741,81 @@ function _smgmtLanesHtml(label, live) {
     + upcomingFold;
 }
 
+// ── Multi-lane worker view (issue #1416) ─────────────────────────────────────
+// When max_coder_slots > 1, replaces the two-queue view with per-worker lanes.
+// Each active coder gets its own lane showing ticket ID, phase pill, and a live
+// log tail from GET /api/sprints/{label}/issue/{N}/log.
+// In single-slot mode (max_coder_slots === 1), the existing two-lane view is
+// rendered unchanged (AC5).
+
+/** Build HTML for per-worker lanes (one lane per active coder).
+ *  Only active workers (coding / rework) get a lane — idle slots are hidden (AC3). */
+function _smgmtWorkerLanesHtml(label, live) {
+  const issues = (live && live.issues) || [];
+  const coderWorking = issues.filter(function(iss) {
+    const stage = _smgmtLaneStage(iss);
+    return (stage === 'coding' || stage === 'rework') && iss.agent === 'coder';
+  });
+
+  if (!coderWorking.length) {
+    return '<div class="worker-lanes-empty">No active workers</div>';
+  }
+
+  const lanes = coderWorking.map(function(iss) {
+    const num = iss.number;
+    const stage = _smgmtLaneStage(iss);
+    const phaseLabel = stage === 'rework' ? 'rework' : 'coding';
+    const phaseCls = 'worker-lane-phase--' + phaseLabel;
+    const issueUrl = _smgmtIssueUrl(iss);
+    return `<div class="worker-lane" data-worker-issue="${num}">
+      <div class="worker-lane-head">
+        <a class="worker-lane-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener">#${num}</a>
+        <span class="worker-lane-phase ${escHtml(phaseCls)}">${escHtml(phaseLabel)}</span>
+        <span class="worker-lane-title" title="${escHtml(iss.title || '')}">${escHtml(iss.title || '')}</span>
+      </div>
+      <div class="worker-lane-log" id="smgmt-worker-log-${num}">
+        <div class="worker-lane-log-msg">Loading log…</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="worker-lanes-grid">${lanes}</div>`;
+}
+
+/** Fetch per-issue log tail and inject into each worker lane container.
+ *  Preserves scroll position independently per lane (AC7). */
+function _smgmtWorkerLogFetch(label, repo, activeCoders) {
+  if (!label || !repo || !activeCoders || !activeCoders.length) return;
+  activeCoders.forEach(function(iss) {
+    const num = iss.number;
+    const el = document.getElementById('smgmt-worker-log-' + num);
+    if (!el) return;
+    const url = '/api/sprints/' + encodeURIComponent(label) +
+      '/issue/' + num + '/log?tail_lines=40&project=' + encodeURIComponent(repo);
+    fetch(url)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !el.isConnected) return;
+        const tail = data.tail || '';
+        const lines = tail.split('\n').filter(Boolean);
+        if (!lines.length) {
+          el.innerHTML = '<div class="worker-lane-log-msg">Waiting for log…</div>';
+          return;
+        }
+        const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+        const html = lines.map(function(line) {
+          const safe = colorize ? colorize(line, '') : escHtml(line);
+          return '<div class="worker-log-line">' + safe + '</div>';
+        }).join('');
+        // Preserve scroll position: only auto-scroll when already at bottom (AC7)
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+        el.innerHTML = html;
+        if (atBottom) el.scrollTop = el.scrollHeight;
+      })
+      .catch(function() { /* ignore transient fetch errors */ });
+  });
+}
+
 /** Toggle a lane fold open/closed. */
 function _smgmtLaneFoldToggle(foldId) {
   const foldEl = document.getElementById(foldId);
@@ -15704,7 +15834,11 @@ function _smgmtLaneFoldToggle(foldId) {
 }
 
 /** Update the lanes pane from a live snapshot. Full re-render each tick
- *  (lane view is simpler than the rail — no flicker risk at 2s poll). */
+ *  (lane view is simpler than the rail — no flicker risk at 2s poll).
+ *
+ *  When max_coder_slots > 1 (multi-slot mode), renders per-worker lanes with
+ *  independent log tails (issue #1416). When max_coder_slots === 1 (single-slot
+ *  pipeline), renders the existing two-lane coder/tester view unchanged (AC5). */
 function _smgmtLanesUpdate(label, live) {
   const lanesEl = document.getElementById('smgmt-lanes');
   if (!lanesEl) return;
@@ -15714,14 +15848,28 @@ function _smgmtLanesUpdate(label, live) {
     return;
   }
   lanesEl.hidden = false;
-  // Preserve fold-open state across re-renders
-  const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
-    && document.querySelector('#smgmt-lanes-done-fold .lane-fold-toggle[aria-expanded="true"]'));
-  const upOpen = !!(document.getElementById('smgmt-lanes-upcoming-fold')
-    && document.querySelector('#smgmt-lanes-upcoming-fold .lane-fold-toggle[aria-expanded="true"]'));
-  lanesEl.innerHTML = _smgmtLanesHtml(label, live);
-  if (doneOpen) _smgmtLaneFoldToggle('smgmt-lanes-done-fold');
-  if (upOpen)   _smgmtLaneFoldToggle('smgmt-lanes-upcoming-fold');
+
+  const maxCoder = (live && live.max_coder_slots) || 1;
+  const activeCoders = issues.filter(function(iss) {
+    const stage = _smgmtLaneStage(iss);
+    return (stage === 'coding' || stage === 'rework') && iss.agent === 'coder';
+  });
+
+  if (maxCoder > 1 && activeCoders.length > 1) {
+    // Multi-slot mode: per-worker lanes with live log tails (issue #1416, AC4/AC6)
+    lanesEl.innerHTML = _smgmtWorkerLanesHtml(label, live);
+    const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+    _smgmtWorkerLogFetch(label, repo, activeCoders);
+  } else {
+    // Single-slot mode: existing two-lane coder/tester view unchanged (AC5)
+    const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
+      && document.querySelector('#smgmt-lanes-done-fold .lane-fold-toggle[aria-expanded="true"]'));
+    const upOpen = !!(document.getElementById('smgmt-lanes-upcoming-fold')
+      && document.querySelector('#smgmt-lanes-upcoming-fold .lane-fold-toggle[aria-expanded="true"]'));
+    lanesEl.innerHTML = _smgmtLanesHtml(label, live);
+    if (doneOpen) _smgmtLaneFoldToggle('smgmt-lanes-done-fold');
+    if (upOpen)   _smgmtLaneFoldToggle('smgmt-lanes-upcoming-fold');
+  }
 }
 
 // ── Running-pane Gantt timeline (issue #1147) ─────────────────────────────────

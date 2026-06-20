@@ -95,11 +95,11 @@ class SprintConfig:
     cline_model: Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
-    # Warm worktree pool for concurrent coder dispatch (issue #1411)
-    # Number of isolated worktrees to pre-warm at sprint start (default 2, hard cap 4).
-    max_coder_slots: int = 2
-    # Tester concurrency slots (issue #1412) — persisted but scheduling is a follow-up.
-    max_tester_slots: int = 1
+    # Concurrent coder/tester slot counts (issues #1411, #1415).
+    # None means "not configured in sprint.yaml" → sprint manager defaults to 1
+    # (existing serial behaviour).  Explicit values override the default.
+    max_coder_slots:  Optional[int] = None
+    max_tester_slots: Optional[int] = None
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -303,8 +303,9 @@ def load_config(path: Path) -> "SprintConfig":
         if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
             cline_model = str(_cline_sub["model"])
 
-    # ── max_coder_slots (issue #1411) — worktree pool size (default 2, cap 4) ─
-    max_coder_slots: int = 2
+    # ── max_coder_slots / max_tester_slots (issues #1411, #1415) ──────────────
+    # None = not configured in yaml → sprint manager defaults to 1 (serial).
+    max_coder_slots: Optional[int] = None
     if isinstance(agent_cfg, dict):
         _coder_sub_slots = agent_cfg.get("coder") or {}
         if isinstance(_coder_sub_slots, dict) and _coder_sub_slots.get("max_slots") is not None:
@@ -316,6 +317,13 @@ def load_config(path: Path) -> "SprintConfig":
     if data.get("max_coder_slots") is not None:
         try:
             max_coder_slots = int(data["max_coder_slots"])
+        except (TypeError, ValueError):
+            pass
+
+    max_tester_slots: Optional[int] = None
+    if data.get("max_tester_slots") is not None:
+        try:
+            max_tester_slots = int(data["max_tester_slots"])
         except (TypeError, ValueError):
             pass
 
@@ -349,6 +357,7 @@ def load_config(path: Path) -> "SprintConfig":
         cline_model=cline_model,
         use_cline_followups=use_cline_followups,
         max_coder_slots=max_coder_slots,
+        max_tester_slots=max_tester_slots,
     )
 
 

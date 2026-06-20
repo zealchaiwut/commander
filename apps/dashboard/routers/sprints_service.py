@@ -653,6 +653,77 @@ def compute_dag_order(
     return {"new_order": new_order, "diff": diff_lines, "is_noop": False}
 
 
+def compute_order_violations(
+    current_order: list[int],
+    levels: list[list[str]],
+    conflicts: list[dict],
+) -> dict[int, list[dict]]:
+    """Return tickets that violate DAG order (issue #1422).
+
+    A violation occurs when ticket B appears before its upstream dependency A
+    in current_order. Dependency relationships are derived from conflicts
+    (file-ownership edges: ticket1_id must precede ticket2_id).
+
+    Returns a dict mapping violating ticket numbers to a list of violation
+    objects, each with keys:
+      upstream_num  — int, the dependency that must come first
+      reason        — str, human-readable explanation
+    """
+    if not conflicts:
+        return {}
+
+    pos: dict[int, int] = {num: i for i, num in enumerate(current_order)}
+
+    violations: dict[int, list[dict]] = {}
+    for c in conflicts:
+        upstream = c.get("ticket1_id")
+        downstream = c.get("ticket2_id")
+        if upstream is None or downstream is None:
+            continue
+        upstream = int(upstream)
+        downstream = int(downstream)
+        if upstream not in pos or downstream not in pos:
+            continue
+        # Violation: downstream appears before upstream
+        if pos[downstream] < pos[upstream]:
+            shared = c.get("shared_files", [])
+            file_hint = shared[0] if shared else "shared file"
+            reason = f"#{downstream} must come after #{upstream} (shares {file_hint})"
+            violations.setdefault(downstream, []).append({
+                "upstream_num": upstream,
+                "reason": reason,
+            })
+
+    return violations
+
+
+def compute_fix_order_slot(
+    current_order: list[int],
+    ticket_num: int,
+    violations: list[dict],
+) -> list[int]:
+    """Move ticket_num to the earliest valid slot after all its dependencies (issue #1422).
+
+    Removes ticket_num from current_order, finds the latest position among all
+    upstream dependencies, then inserts ticket_num immediately after it.
+    Other tickets keep their relative positions.
+
+    Returns the new order list.
+    """
+    upstream_nums = {int(v["upstream_num"]) for v in violations}
+
+    remaining = [n for n in current_order if n != ticket_num]
+
+    latest_upstream_idx = -1
+    for i, n in enumerate(remaining):
+        if n in upstream_nums:
+            latest_upstream_idx = i
+
+    insert_at = latest_upstream_idx + 1
+    new_order = remaining[:insert_at] + [ticket_num] + remaining[insert_at:]
+    return new_order
+
+
 def dag_order_preview(sprint_label: str, project: str) -> dict:
     """Compute DAG-ordered ticket sequence without persisting (issue #1420).
 

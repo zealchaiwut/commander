@@ -6198,6 +6198,26 @@
     }
     .mr-fix-chip:disabled { opacity: .5; cursor: not-allowed; }
     .mr-fix-chip-error { font-size: 11px; color: var(--red, #dc2626); }
+    /* Order violation warning chips (issue #1422) */
+    .smgmt-order-warn-chip {
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .smgmt-order-warn-chip .ti-alert-triangle {
+      font-size: 13px; color: var(--amber, #d97706); cursor: help;
+    }
+    .smgmt-order-fix-btn {
+      display: inline-flex; align-items: center;
+      font-size: 11px; font-weight: 600;
+      padding: 1px 8px; border-radius: 999px;
+      background: var(--amber-bg, #fef3c7); color: var(--amber, #d97706);
+      border: 1px solid color-mix(in srgb, var(--amber, #d97706) 30%, transparent);
+      cursor: pointer; transition: opacity .15s; white-space: nowrap;
+    }
+    .smgmt-order-fix-btn:hover { opacity: .8; }
+    .smgmt-order-fix-btn:disabled { opacity: .5; cursor: not-allowed; }
+    [data-theme="dark"] .smgmt-order-fix-btn {
+      background: rgba(234,179,8,.13); color: var(--amber, #eab308);
+    }
     /* Scheduling dependency inline badge (issue #597) */
     .smgmt-sched-dep-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
@@ -13683,6 +13703,7 @@ function _smgmtInjectMiniRailHtml(label, html) {
   const slot = document.getElementById(`sc-preview-${label}`);
   if (slot) {
     slot.innerHTML = html;
+    _smgmtUpdateOrderViolations(label);
     return;
   }
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -13690,10 +13711,14 @@ function _smgmtInjectMiniRailHtml(label, html) {
   const existing = card.querySelector('.mini-rail');
   if (existing) {
     existing.outerHTML = html;
+    _smgmtUpdateOrderViolations(label);
     return;
   }
   const anchor = card.querySelector('.sc-budget-section') || card.querySelector('.smgmt-sprint-header');
-  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+  if (anchor) {
+    anchor.insertAdjacentHTML('afterend', html);
+    _smgmtUpdateOrderViolations(label);
+  }
 }
 
 /** Build the mini-rail markup from a /preview-dag payload + optional pre-flight hints. */
@@ -13843,12 +13868,13 @@ function _smgmtInjectMiniRail(label, data, pfHints, tickets) {
   if (tickets) {
     _smgmtMiniRailCache[label] = { sig: _smgmtMiniRailSig(tickets, pfHints), html };
   }
-  _smgmtInjectMiniRailHtml(label, html);
-  // Cache raw DAG data and update Apply DAG Order button state (issue #1420).
+  // Update DAG data cache BEFORE injecting HTML so _smgmtUpdateOrderViolations
+  // (called from _smgmtInjectMiniRailHtml) can read the fresh data (issue #1422).
   if (data && typeof data.levels !== 'undefined') {
     _smgmtDagDataCache[label] = data;
     _smgmtUpdateDagOrderBtn(label, data);
   }
+  _smgmtInjectMiniRailHtml(label, html);
 }
 
 /** Update the Apply DAG Order button enabled state for a sprint (issue #1420). */
@@ -13866,6 +13892,112 @@ function _smgmtUpdateDagOrderBtn(label, dagData) {
     btn.title = dagData.partial
       ? 'Apply DAG Order (preview is partial — some tickets unestimated)'
       : 'Apply DAG Order';
+  }
+}
+
+// ── Order violation warnings (issue #1422) ────────────────────────────────────
+
+/**
+ * Compute order violations for a sprint from the cached DAG data and the
+ * current DOM ticket order. Returns {ticketNum: [{upstream_num, reason}]}.
+ */
+function _smgmtGetOrderViolations(sprintLabel) {
+  const dagData = _smgmtDagDataCache[sprintLabel];
+  if (!dagData) return {};
+  const conflicts = dagData.conflicts || [];
+  if (!conflicts.length) return {};
+
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  const currentOrder = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  if (currentOrder.length < 2) return {};
+
+  const pos = {};
+  currentOrder.forEach((num, i) => { pos[num] = i; });
+
+  const violations = {};
+  for (const c of conflicts) {
+    const upstream = parseInt(c.ticket1_id, 10);
+    const downstream = parseInt(c.ticket2_id, 10);
+    if (isNaN(upstream) || isNaN(downstream)) continue;
+    if (!(upstream in pos) || !(downstream in pos)) continue;
+    if (pos[downstream] < pos[upstream]) {
+      const shared = c.shared_files || [];
+      const fileHint = shared[0] || 'shared file';
+      const reason = `#${downstream} must come after #${upstream} (shares ${fileHint})`;
+      if (!violations[downstream]) violations[downstream] = [];
+      violations[downstream].push({ upstream_num: upstream, reason });
+    }
+  }
+  return violations;
+}
+
+/**
+ * Inject or clear order violation warning chips on each ticket row.
+ * Called after mini-rail injection so the DAG cache is populated.
+ */
+function _smgmtUpdateOrderViolations(sprintLabel) {
+  const violations = _smgmtGetOrderViolations(sprintLabel);
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  for (const row of rows) {
+    const num = parseInt(row.dataset.issue, 10);
+    if (isNaN(num)) continue;
+    const existing = row.querySelector('.smgmt-order-warn-chip');
+    if (existing) existing.remove();
+
+    const viols = violations[num];
+    if (!viols || viols.length === 0) continue;
+
+    const tip = viols.map(v => v.reason).join('\n');
+    const chip = document.createElement('span');
+    chip.className = 'smgmt-order-warn-chip';
+    chip.innerHTML =
+      `<i class="ti ti-alert-triangle" title="${escHtml(tip)}"></i>` +
+      `<button class="smgmt-order-fix-btn" title="${escHtml(tip)}"` +
+      ` onclick="event.stopPropagation();smgmtFixOrderViolation(${JSON.stringify(sprintLabel)},${num},this)">Fix order</button>`;
+
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) row.insertBefore(chip, statusEl);
+    else row.appendChild(chip);
+  }
+}
+
+/**
+ * Fix a single ticket's order violation: compute new order, POST to plan API,
+ * then reload the sprint board.
+ */
+async function smgmtFixOrderViolation(sprintLabel, ticketNum, btnEl) {
+  const violations = _smgmtGetOrderViolations(sprintLabel);
+  const viols = violations[ticketNum];
+  if (!viols || viols.length === 0) return;
+
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  const currentOrder = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  const upstreamNums = new Set(viols.map(v => v.upstream_num));
+  const remaining = currentOrder.filter(n => n !== ticketNum);
+  let latestIdx = -1;
+  remaining.forEach((n, i) => { if (upstreamNums.has(n)) latestIdx = i; });
+  const insertAt = latestIdx + 1;
+  const newOrder = [...remaining.slice(0, insertAt), ticketNum, ...remaining.slice(insertAt)];
+
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Fixing…'; }
+  try {
+    const repo = _smgmtRepo();
+    const qs = repo ? `?project=${encodeURIComponent(repo)}` : '';
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan${qs}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newOrder) }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    loadSprintMgmt();
+  } catch (err) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix order'; }
+    console.error('smgmtFixOrderViolation:', err);
   }
 }
 

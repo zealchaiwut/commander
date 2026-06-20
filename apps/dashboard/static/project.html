@@ -6218,6 +6218,30 @@
     [data-theme="dark"] .smgmt-order-fix-btn {
       background: rgba(234,179,8,.13); color: var(--amber, #eab308);
     }
+    /* ── Pre-run checklist (issue #1425) ── */
+    .mr-checklist {
+      list-style: none; margin: 0 0 10px; padding: 0;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .mr-checklist-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text);
+    }
+    .mr-cl-icon { font-size: 11px; color: var(--text-muted); }
+    .mr-cl-link {
+      background: none; border: none; padding: 0;
+      font-size: 12px; font-family: inherit; cursor: pointer;
+      color: var(--blue); text-decoration: underline; text-underline-offset: 2px;
+    }
+    .mr-cl-link:hover { color: var(--text); }
+    .mr-ready {
+      margin-left: auto;
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      color: var(--green); background: var(--green-bg);
+      border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+    }
     /* Scheduling dependency inline badge (issue #597) */
     .smgmt-sched-dep-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
@@ -13666,7 +13690,8 @@ function _smgmtPreflightHints(tickets) {
   ).length;
   const unsized = _preflightCheckEstimates(tickets || []).size;
   const conflicts = syncItems.filter(i => i.type === 'Conflicting labels').length;
-  return { missingAC, unsized, conflicts };
+  const xlCount = (tickets || []).filter(t => _smgmtTicketSize(t) === 'XL').length;
+  return { missingAC, unsized, conflicts, xlCount };
 }
 
 /** Cache + generation counter so async preview-dag fetches don't race full re-renders. */
@@ -13676,10 +13701,13 @@ let _smgmtMiniRailGen = 0;
 /** Raw preview-dag response per sprint label — drives Apply DAG Order button state (issue #1420). */
 const _smgmtDagDataCache = {}; // label → raw preview-dag payload
 
+/** Labels that showed a pre-run checklist at least once — drives "Ready to run" state (issue #1425). */
+const _smgmtChecklistPrimed = new Set();
+
 function _smgmtMiniRailSig(tickets, pfHints) {
   const nums = (tickets || []).map(t => t.number).sort((a, b) => a - b).join(',');
   const pf = pfHints
-    ? `${pfHints.missingAC}:${pfHints.unsized}:${pfHints.conflicts}`
+    ? `${pfHints.missingAC}:${pfHints.unsized}:${pfHints.conflicts}:${pfHints.xlCount || 0}`
     : '';
   return `${nums}|${pf}`;
 }
@@ -13787,17 +13815,64 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
 
   const unestimated = data.unestimated || [];
   const conflicts = data.conflicts || [];
+
+  // ── Pre-run checklist (issue #1425) ──────────────────────────────────────
+  const unestimatedCount = data.partial ? unestimated.length : 0;
+  const conflictsCount = conflicts.length;
+  const xlCount = pfHints ? (pfHints.xlCount || 0) : 0;
+
+  const checklistItems = [];
+  if (unestimatedCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="_smgmtBulkEstimate(${jsLabel}, null)">
+          Estimate ${unestimatedCount} ticket${unestimatedCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+  if (conflictsCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="smgmtApplyDagOrder(${jsLabel})">
+          Resolve ${conflictsCount} file conflict${conflictsCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+  if (xlCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="smgmtRunSprint(${jsLabel})">
+          Split ${xlCount} XL ticket${xlCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+
+  const hasChecklist = checklistItems.length > 0;
+  if (hasChecklist) _smgmtChecklistPrimed.add(label);
+
+  const checklistSection = hasChecklist
+    ? `<ul class="mr-checklist" aria-label="Pre-run checklist">${checklistItems.join('')}</ul>`
+    : '';
+
+  // ── Status indicator in mr-head ───────────────────────────────────────────
   const hintParts = [];
   if (pfHints && pfHints.missingAC > 0) hintParts.push(`${pfHints.missingAC} missing AC`);
   if (pfHints && pfHints.unsized > 0) hintParts.push(`${pfHints.unsized} unsized`);
-  if (data.partial && unestimated.length > 0) hintParts.push(`${unestimated.length} unestimated`);
-  if (conflicts.length > 0) hintParts.push(`${conflicts.length} file conflict${conflicts.length > 1 ? 's' : ''}`);
-  const warn = hintParts.length > 0
-    ? `<span class="mr-warn" role="status">
+  if (unestimatedCount > 0) hintParts.push(`${unestimatedCount} unestimated`);
+  if (conflictsCount > 0) hintParts.push(`${conflictsCount} file conflict${conflictsCount > 1 ? 's' : ''}`);
+
+  let warn;
+  if (hintParts.length > 0) {
+    warn = `<span class="mr-warn" role="status">
         <i class="ti ti-alert-circle"></i>
         ${escHtml(hintParts.join(' · '))} — preview partial
-      </span>`
-    : `<span class="mr-status-ok" role="status">no cycles · no conflicts</span>`;
+      </span>`;
+  } else if (_smgmtChecklistPrimed.has(label)) {
+    // All checklist items resolved — transition to "Ready to run" (AC7)
+    warn = `<span class="mr-ready" role="status"><i class="ti ti-circle-check"></i> Ready to run</span>`;
+  } else {
+    warn = `<span class="mr-status-ok" role="status">no cycles · no conflicts</span>`;
+  }
 
   const accuracyBanner = data.accuracy_warning
     ? `<div class="mr-accuracy-warn" role="alert">
@@ -13856,6 +13931,7 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       <span class="mr-title">Run preview</span>
       ${warn}
     </div>
+    ${checklistSection}
     <div class="mr-levels"><div class="mr-level"><div class="mr-chips">${chips.join('')}</div></div></div>
     ${conflictSection}
   </div>`;
@@ -18633,6 +18709,8 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
 
   if (succeeded > 0) {
     _smgmtShowToast(`Estimated ${succeeded} of ${total} ticket${total !== 1 ? 's' : ''}`);
+    // Auto-refresh preview-dag so the checklist Estimate item checks off (AC6, issue #1425).
+    await _smgmtRefreshPreviewDag(sprintLabel);
   }
 
   // Fade out progress after 3s

@@ -3786,6 +3786,60 @@ def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
 
 # ── Coder model routing by ticket size (issue #789) ───────────────────────────
 
+# Extensions that mark a path as docs/config (issue #1403).
+_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".json"})
+# Extensions that mark a path as code — their presence disqualifies docs-only routing.
+_CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
+
+
+def _build_estimate_paths_block(estimate: Optional[dict]) -> str:
+    """Return a 'Start here' paths block from an estimate dict, or '' if none.
+
+    Prefers files_touched over files_likely_affected (issue #1402).
+    """
+    if not estimate:
+        return ""
+    paths = estimate.get("files_touched") or estimate.get("files_likely_affected") or []
+    if not paths:
+        return ""
+    header = "Start here — do not broad-search the repo unless these paths are insufficient."
+    path_lines = "\n".join(f"  {p}" for p in paths)
+    return f"{header}\n\n{path_lines}"
+
+
+def _is_docs_only(estimate: Optional[dict]) -> tuple[bool, str]:
+    """Determine whether a ticket qualifies for docs-only Haiku routing (issue #1403).
+
+    Returns (True, reason) when the ticket is docs/config-only; (False, "") otherwise.
+    reason is one of "docs-only:flag" or "docs-only:paths".
+    """
+    if not estimate:
+        return False, ""
+
+    risk_flags = estimate.get("risk_flags") or []
+    if "docs-only" in risk_flags:
+        return True, "docs-only:flag"
+
+    paths = estimate.get("files_likely_affected") or []
+    if not paths:
+        return False, ""
+
+    from pathlib import PurePosixPath
+
+    def _is_doc_path(p: str) -> bool:
+        suffix = PurePosixPath(p).suffix.lower()
+        return suffix in _DOCS_PATH_EXTENSIONS or p.startswith("docs/")
+
+    has_code = any(PurePosixPath(p).suffix.lower() in _CODE_PATH_EXTENSIONS for p in paths)
+    if has_code:
+        return False, ""
+
+    if all(_is_doc_path(p) for p in paths):
+        return True, "docs-only:paths"
+
+    return False, ""
+
+
 def _resolve_coder_model(
     issue_num: int,
     cfg: Optional["SprintConfig"],
@@ -3794,18 +3848,29 @@ def _resolve_coder_model(
     """Return (model, routing_reason) for a coder dispatch.
 
     Routing precedence:
+      0. docs-only (flag or paths heuristic) + non-XL → Haiku via _is_docs_only
       1. If estimate has a known size (S/M/L/XL) → look up cfg.coder_by_size
       2. Otherwise → cfg.coder_model flat default (or hardcoded sonnet fallback)
 
-    routing_reason is e.g. "size=S" or "unestimated:default".
+    routing_reason examples: "docs-only:flag", "docs-only:paths", "size=S",
+    "unestimated:default".
     """
     flat_default = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
+    by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
+
     if estimate:
         size = str(estimate.get("size") or "").upper().strip()
+
+        if size != "XL":
+            docs_only, docs_reason = _is_docs_only(estimate)
+            if docs_only:
+                haiku_model = by_size.get("S") or _DEFAULT_CODER_BY_SIZE["S"]
+                return haiku_model, docs_reason
+
         if size in ("S", "M", "L", "XL"):
-            by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
             model = by_size.get(size) or flat_default
             return model, f"size={size}"
+
     return flat_default, "unestimated:default"
 
 
@@ -4289,6 +4354,10 @@ def _dispatch_coder(
     log_path = _issue_log_path(issue_num, cfg=cfg)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Load estimate early for paths injection (issue #1402) and model routing below.
+    _coder_estimate = _load_estimate(issue_num)
+    _paths_block = _build_estimate_paths_block(_coder_estimate)
+
     # Build prompt
     if cfg and cfg.coder_prompt_template:
         issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
@@ -4400,7 +4469,6 @@ def _dispatch_coder(
     # `cmd[-1] += sprint_hint` (below) works for both backends.
     # coder_backend_override takes precedence when supplied by the caller (issue #920:
     # the fix-loop pre-computes the backend and escalates from cline to claude-code on failure).
-    _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
     coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
     if coder_backend == "cline":
@@ -4410,6 +4478,10 @@ def _dispatch_coder(
     sys.stdout.write(str(
         f"  [size-routing] issue #{issue_num}: model={dispatch_model}, reason={dispatch_routing_reason}, backend={coder_backend}"
     ) + "\n")
+    if _paths_block:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: injecting paths into coder prompt\n{_paths_block}\n")
+    else:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: no estimate file — prompt unchanged\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
@@ -4438,7 +4510,14 @@ def _dispatch_coder(
                 worktree=str(cwd_path),
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
-        full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
+        if _paths_block and coder_persona:
+            full_prompt = _paths_block + "\n\n" + coder_persona + "\n\n" + prompt
+        elif _paths_block:
+            full_prompt = _paths_block + "\n\n" + prompt
+        elif coder_persona:
+            full_prompt = coder_persona + "\n\n" + prompt
+        else:
+            full_prompt = prompt
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
@@ -4451,7 +4530,8 @@ def _dispatch_coder(
         coder_persona = _load_agent_persona("coder", cwd_path)
         if coder_persona:
             cmd += ["--append-system-prompt", coder_persona]
-        cmd += ["-p", prompt]
+        _p_prompt = (_paths_block + "\n\n" + prompt) if _paths_block else prompt
+        cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)
 
@@ -7681,6 +7761,7 @@ def _run_pipeline_dispatch(
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
         ist.coder_model = _coder_model_sel  # surface size-routed model on the live running pane (bug: coder badge had no model)
+        ist.coder_routing_reason = _coder_route_reason  # tooltip/sub-label on running pane badge (issue #1403)
         ist.coder_backend = _effective_coder_backend(label, cfg, ctx["fix_history"] if ctx["fix_history"] else None)
         # Determine attempt_kind for this dispatch (issue #787).
         _pipe_attempt_kind = ctx.get("attempt_kind", "initial")
@@ -7914,6 +7995,27 @@ def _run_pipeline_dispatch(
         if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
             record_failure(num, category, detail=summary_line)
             ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
+            _sig = f"{category}:{summary_line[:80]}"
+            _last = ctx.get("last_failure_sig")
+            ctx["last_failure_sig"] = _sig
+            if _sig == _last:
+                sys.stdout.write(
+                    f"  [pipeline] consecutive identical failure ({category}): aborting early\n"
+                )
+                sys.stdout.flush()
+                try:
+                    structured_log.error(
+                        "fix_loop_exhausted",
+                        f"consecutive identical gate failure ({category}): aborting early",
+                        issue_num=num,
+                        fix_history=ctx["fix_history"],
+                        reason="consecutive_identical",
+                        failure_sig=_sig,
+                        failure_class=str(category),
+                    )
+                except Exception:
+                    pass
+                return _StageResult.EXHAUST
             return _StageResult.REJECT  # scheduler re-queues to front of coder queue
 
         # Non-logic gate failure or rerun-tester-direct path: terminal drop.

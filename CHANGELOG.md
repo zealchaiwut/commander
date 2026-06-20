@@ -1,5 +1,14 @@
 # Changelog
 
+## Sprint 91
+
+Coder-dispatch efficiency improvements driven by the estimator. Tickets whose estimate is docs/config-only — flagged `docs-only` or where every likely-affected path is a doc/config file (`.md`/`.yaml`/`.json` or under `docs/`) with no code paths — now route to Haiku regardless of size, except XL is never rerouted; the routing reason (`docs-only:flag` / `docs-only:paths`) surfaces as a tooltip on the coder badge in the live running pane. The estimator's `files_touched`/`files_likely_affected` paths are now injected as a "Start here" block at the top of the coder dispatch prompt so the agent skips a broad repo search. The feature template and BA ticket generation gained an optional `## Files to touch` section; the estimator parses it and unions those explicit paths (first) with its own inferred ones into `files_likely_affected`. And pipeline-mode dispatch now mirrors the serial loop's consecutive-identical-failure early abort via a new `StageResult.EXHAUST` — a ticket that fails the same gate twice in a row is finalized as needs-rework immediately instead of burning all three fix rounds.
+
+- [#1401](https://github.com/zealchaiwut/commander/issues/1401) Port identical-failure early abort to pipeline dispatch — 2026-06-20
+- [#1402](https://github.com/zealchaiwut/commander/issues/1402) Inject estimator target paths into coder dispatch prompts — 2026-06-20
+- [#1403](https://github.com/zealchaiwut/commander/issues/1403) Route docs-only and config-only tickets to Haiku — 2026-06-20
+- [#1405](https://github.com/zealchaiwut/commander/issues/1405) Add 'Files to touch' section to feature template and estimator — 2026-06-20
+
 ## Sprint 85.5
 
 Continuation of the backend decomposition (strangler-fig): mis-sizing flag routes were lifted out of `apps/dashboard/server.py` into `apps/dashboard/routers/mis_sizing.py` (delegating to `services/sprint_manager/mis_sizing.py`). Analytics and metrics routes from #1252 are covered by the #1267 estimates/calibration/metrics router split. No behavior, endpoint, or schema changes — routes and logic were relocated, not modified.

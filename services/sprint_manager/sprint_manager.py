@@ -1087,18 +1087,38 @@ class FailureCategory:
     MERGE_CONFLICT   = "MERGE_CONFLICT"
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
+    # Merge sequencing issue — not a code quality problem, no coder requeue (issue #1414)
+    REBASE_CONFLICT  = "REBASE_CONFLICT"
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
 # Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
 # TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
 # not a code quality problem, so it must not apply needs-rework.
+# REBASE_CONFLICT is a merge-sequencing issue (not a code defect), so it is intentionally absent
+# from this set — the needs-rework label is applied directly in handle_post_tester (issue #1414).
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
     FailureCategory.LINT_FAIL,
     FailureCategory.PYTEST_FAIL,
 })
+
+
+def _extract_rebase_conflict_files(output: str) -> list[str]:
+    """Parse 'git rebase' stdout+stderr to extract conflicting file paths (issue #1414).
+
+    Git emits one line per conflict:
+        CONFLICT (content): Merge conflict in path/to/file.py
+    Returns a deduplicated list in order of first occurrence.
+    """
+    import re as _re
+    seen: dict[str, None] = {}
+    for line in output.splitlines():
+        m = _re.search(r"CONFLICT \([^)]+\): Merge conflict in (.+)$", line)
+        if m:
+            seen[m.group(1).strip()] = None
+    return list(seen)
 
 
 # ── alert channels (extracted to alerts.py, issue #1271) ─────────────────────
@@ -3016,8 +3036,14 @@ def _call_finish_feature(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     sprint_label: Optional[str] = None,
-) -> None:
-    """Call finish_feature.py as a subprocess from the worktester root."""
+) -> tuple[bool, list[str]]:
+    """Call finish_feature.py as a subprocess from the worktester root.
+
+    Returns (success, conflict_files).
+    On a rebase conflict after an automated one-shot rebase attempt (issue #1414),
+    conflict_files lists the paths that could not be reconciled automatically.
+    On success or any other failure, conflict_files is empty.
+    """
     if cfg is not None:
         finish_script = cfg.finish_feature_script
         # Prefer the dedicated agents clone for the documentor (falls back to the
@@ -3047,11 +3073,90 @@ def _call_finish_feature(
         result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         sys.stdout.write(str(result.stdout.rstrip()) + "\n")
-    if result.returncode != 0:
-        structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
-    else:
+    if result.returncode == 0:
         sys.stdout.write(str("  finish_feature.py completed successfully") + "\n")
-    return result.returncode == 0
+        return True, []
+
+    structured_log.error(
+        "subprocess_nonzero_exit",
+        f"finish_feature.py exited {result.returncode}",
+        issue_num=issue_num,
+        subprocess="finish_feature.py",
+        exit_code=result.returncode,
+        subprocess_stderr=result.stderr.rstrip() if result.stderr else "",
+    )
+
+    # ── Automated one-shot rebase (issue #1414 AC2) ───────────────────────────
+    # finish_feature.py failing here typically means a concurrent merge landed on
+    # the target branch first, causing a divergence.  Attempt a single automated
+    # rebase to reconcile the feature branch before giving up.
+    sys.stdout.write(str(
+        f"  [rebase] finish_feature.py failed — attempting one-shot rebase of "
+        f"feature/{issue_num}-* onto origin/{target_branch}"
+    ) + "\n")
+
+    # Locate the remote feature branch.
+    ok, br_out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*", cwd=wt_root)
+    if not ok or not br_out.strip():
+        sys.stdout.write(str(
+            f"  [rebase] no remote feature branch found for #{issue_num} — skipping rebase"
+        ) + "\n")
+        return False, []
+
+    feature_branch = br_out.strip().splitlines()[0].strip().removeprefix("origin/")
+
+    # Ensure we have the latest refs.
+    _try("git", "fetch", "origin", cwd=wt_root)
+
+    # Checkout the feature branch in the tester worktree (separate full clone —
+    # not a linked worktree, so this never conflicts with pool-slot worktrees).
+    ok_co, _, co_err = _try(
+        "git", "checkout", "-B", feature_branch, f"origin/{feature_branch}", cwd=wt_root,
+    )
+    if not ok_co:
+        sys.stdout.write(str(f"  [rebase] could not checkout {feature_branch}: {co_err}") + "\n")
+        return False, []
+
+    # Attempt a single rebase onto the current target (AC8: only one attempt).
+    ok_rb, rb_out, rb_err = _try(
+        "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
+    )
+    rebase_combined = rb_out + "\n" + rb_err
+
+    if not ok_rb:
+        conflict_files = _extract_rebase_conflict_files(rebase_combined)
+        sys.stdout.write(str(
+            f"  [rebase] rebase conflict for #{issue_num} in "
+            f"{len(conflict_files)} file(s): {conflict_files}"
+        ) + "\n")
+        _try("git", "rebase", "--abort", cwd=wt_root)
+        return False, conflict_files
+
+    # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
+    sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
+    ok_push, _, push_err = _try(
+        "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
+    )
+    if not ok_push:
+        sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+        return False, []
+
+    # Retry the merge exactly once after the successful rebase (AC8).
+    sys.stdout.write(str(
+        f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
+    ) + "\n")
+    with _develop_merge_guard():
+        result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+    if result2.stdout:
+        sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
+    if result2.returncode == 0:
+        sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
+        return True, []
+
+    sys.stdout.write(str(
+        f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
+    ) + "\n")
+    return False, []
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -3223,7 +3328,29 @@ def handle_post_tester(
     if skip_gates:
         sys.stdout.write(str("  --skip-gates active -- skipping all quality gates, proceeding to merge") + "\n")
         if needs_merge:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok and conflict_files:
+                # Rebase conflict even under skip-gates — label needs-rework (issue #1414 AC4).
+                _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                conflict_body = (
+                    f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                    f"`{target_branch}` failed.\n\n**Conflicting files:**\n"
+                    + "\n".join(f"- `{f}`" for f in conflict_files)
+                    + "\n\nResolve the conflict manually and re-push the feature branch."
+                )
+                try:
+                    github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                except Exception as exc:
+                    structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                return (
+                    False,
+                    f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                    + ", ".join(conflict_files[:3]),
+                    FailureCategory.REBASE_CONFLICT,
+                )
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="typecheck",     passed=True, skipped=True),
@@ -3266,7 +3393,38 @@ def handle_post_tester(
         _post_agent_event("gate:merging", api_url=api_url)
         if needs_merge:
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok:
+                if conflict_files:
+                    # Automated rebase failed — label needs-rework with exact conflict paths
+                    # (issue #1414 AC4/AC7).  This does not halt the sprint (AC5).
+                    _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                    conflict_body = (
+                        f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                        f"`{target_branch}` failed after all quality gates passed.\n\n"
+                        f"**Conflicting files:**\n"
+                        + "\n".join(f"- `{f}`" for f in conflict_files)
+                        + "\n\nResolve the conflict manually and re-push the feature branch."
+                    )
+                    try:
+                        github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                    except Exception as exc:
+                        structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                    return (
+                        False,
+                        f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                        + ", ".join(conflict_files[:3]),
+                        FailureCategory.REBASE_CONFLICT,
+                    )
+                # finish_feature.py failed for a non-rebase reason (e.g. push failed)
+                return (
+                    False,
+                    f"Issue #{issue_num}: merge failed after all gates passed",
+                    FailureCategory.MERGE_CONFLICT,
+                )
         else:
             sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)

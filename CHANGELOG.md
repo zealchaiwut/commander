@@ -1,5 +1,12 @@
 # Changelog
 
+## Sprint 85.5
+
+Continuation of the backend decomposition (strangler-fig): two more route clusters were lifted out of `apps/dashboard/server.py` into dedicated `apps/dashboard/routers/*.py` modules — analytics & metrics (`sprint_analytics.py`, with logic in `sprint_analytics_service.py`) and mis-sizing flags (`mis_sizing.py`, delegating to `services/sprint_manager/mis_sizing.py`). No behavior, endpoint, or schema changes — routes and logic were relocated, not modified.
+
+- [#1252](https://github.com/zealchaiwut/commander/issues/1252) Extract analytics and metrics routes to sprint_analytics router — 2026-06-19
+- [#1253](https://github.com/zealchaiwut/commander/issues/1253) Extract mis-sizing routes from server.py to dedicated router — 2026-06-19
+
 ## Sprint 85
 
 Backend decomposition sprint (strangler-fig): the dashboard's monolithic `apps/dashboard/server.py` was slimmed by extracting route clusters into dedicated `apps/dashboard/routers/*.py` modules (system/health, page-serving, project branches, preflight & DAG, sprint live/log, sprint CRUD, sprint summary & home, system/misc, sprint finish preview/write, sprint run read/write, and bulk job reads), and `services/sprint_manager/sprint_manager.py` was split into focused submodules (`state.py` data classes, `config.py` config loading, `paths.py` path helpers, `alerts.py` alert channels). No behavior, endpoint, or schema changes — routes and logic were relocated, not modified.

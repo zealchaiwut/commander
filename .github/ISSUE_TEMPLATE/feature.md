@@ -28,6 +28,11 @@ assignees: ''
 1. 
    **Expected:** 
 
+## Files to touch
+
+<!-- Optional — list one repo-relative path per line (e.g. services/sprint_manager/pipeline.py).
+     The estimator will merge these with its inferred paths. Leave blank if unknown. -->
+
 ## Out of Scope
 
 <!-- Explicitly list what this ticket does NOT cover to prevent scope creep. -->

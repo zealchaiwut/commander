@@ -12092,6 +12092,8 @@ async def create_ticket_draft(
         "  - ## What & Why (1-3 sentences)\n"
         "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
         "  - ## UAT Test Steps (numbered, each with Expected: line)\n"
+        "  - ## Files to touch (optional stub — leave the heading but add no paths; "
+        "the developer will fill this in)\n"
         "  - ## Out of Scope (brief list)\n\n"
         f"Reference files — read them and incorporate relevant details:\n{file_list}\n\n"
         'Output ONLY valid JSON with exactly two string fields: "title" and "body".\n'
@@ -12927,6 +12929,7 @@ async def _run_single_ba_ticket(
         "  - ## What & Why (1-3 sentences)\n"
         "  - ## Acceptance Criteria (checkbox list, specific and testable)\n"
         "  - ## UAT Test Steps (numbered, each with Expected: line)\n"
+        "  - ## Files to touch (optional stub — include the heading with no paths pre-filled)\n"
         "  - ## Out of Scope (brief list)\n"
         + labels_clause + "\n"
         + json_spec

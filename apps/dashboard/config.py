@@ -19,3 +19,66 @@ TEST_GITHUB_REPO: str = (
 # polling. Default is 60 s; override per-machine in apps/dashboard/.env.
 # The authoritative resolver lives in github_events_sync.get_sync_interval().
 SYNC_INTERVAL_SECONDS: int = int(os.environ.get("SYNC_INTERVAL_SECONDS", "60") or "60")
+
+
+def _env_bool_from_value(val) -> bool:
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("1", "true", "yes")
+
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return _env_bool_from_value(os.environ.get(name, default))
+
+
+def _read_global_app_config() -> dict:
+    """Best-effort read of persisted global settings (JSON fallback or Neon)."""
+    try:
+        import settings_repo  # noqa: PLC0415
+        from settings_schema import APP_CONFIG_KEY  # noqa: PLC0415
+
+        return settings_repo.get_setting_scoped("global", APP_CONFIG_KEY) or {}
+    except Exception:
+        return {}
+
+
+def _resolve_disable_flag(env_name: str, settings_key: str, *, default: str = "1") -> bool:
+    """True when a product surface is disabled.
+
+    Precedence: explicit env var → global settings store → default (disabled).
+    """
+    raw_env = os.environ.get(env_name)
+    if raw_env is not None and str(raw_env).strip() != "":
+        return _env_bool_from_value(raw_env)
+    stored = _read_global_app_config()
+    if settings_key in stored:
+        return bool(stored[settings_key])
+    return _env_bool(name=env_name, default=default)
+
+
+def sprint_signoff_disabled() -> bool:
+    return _resolve_disable_flag("COMMANDER_DISABLE_SIGNOFF", "disable_sprint_signoff")
+
+
+def advisor_disabled() -> bool:
+    return _resolve_disable_flag("COMMANDER_DISABLE_ADVISOR", "disable_advisor")
+
+
+def sprint_planning_disabled() -> bool:
+    return _resolve_disable_flag("COMMANDER_DISABLE_PLANNING", "disable_sprint_planning")
+
+
+def sprint_goal_required_disabled() -> bool:
+    return _resolve_disable_flag(
+        "COMMANDER_DISABLE_SPRINT_GOAL_REQUIRED", "disable_sprint_goal_required",
+    )
+
+
+def commander_features() -> dict[str, bool]:
+    """Feature flags exposed to the dashboard UI (/api/environment)."""
+    return {
+        "signoff": not sprint_signoff_disabled(),
+        "advisor": not advisor_disabled(),
+        "planning": not sprint_planning_disabled(),
+        "goal_required": not sprint_goal_required_disabled(),
+    }

@@ -184,7 +184,7 @@ Repository: {repo}
 
 ## For EACH issue, you must
 
-1. Read the full issue body via: `gh issue view <N> --repo {repo} --json number,title,body,labels`
+1. Read the full issue body via: `gh api repos/{repo}/issues/<N>`
 2. Scan the codebase for likely-impacted files using grep/find on AC keywords:
    - Look for file mentions in the issue body
    - Use `grep -r "<keyword>" --include="*.py" --include="*.js" --include="*.html" -l .`

@@ -815,6 +815,18 @@
     <!-- Calibration panel: scatter + by-size table -->
     <div class="anl-panel" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
 
+      <!-- Stale-cache banner: shown only when processed=0 AND sprint state files exist (AC4, #1334) -->
+      <div id="cal-stale-banner" role="alert"
+           style="display:none;padding:10px 14px;margin-bottom:12px;border-radius:6px;
+                  background:#fff7e6;border:1px solid #f0a500;color:#7a4800;
+                  display:flex;align-items:center;gap:8px;font-size:.875rem">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <span>Calibration cache empty or stale &mdash;
+          <a href="#" id="cal-rebuild-link" style="color:inherit;font-weight:600"
+             onclick="_rebuildCalibrationCache();return false;">Rebuild</a>
+        </span>
+      </div>
+
       <div class="anl-card">
         <div class="anl-card-head">
           <i class="ti ti-target-arrow"></i>
@@ -1426,9 +1438,35 @@
           var empty   = document.getElementById('cal-empty');
           var hasData = (data.points || []).length > 0;
           if (empty) empty.style.display = hasData ? 'none' : '';
+          /* Stale-cache banner: show only when processed=0 AND sprint state files exist (AC4/AC6, #1334) */
+          var banner = document.getElementById('cal-stale-banner');
+          if (banner) {
+            var processedCount = typeof data.processed_count === 'number' ? data.processed_count : -1;
+            var hasStateFiles = data.has_sprint_state_files === true;
+            banner.style.display = (processedCount === 0 && hasStateFiles) ? 'flex' : 'none';
+          }
         })
         .catch(function(err) {
           console.error('Calibration fetch failed:', err);
+        });
+    };
+
+    /* ── Calibration cache rebuild (AC5, #1334) ── */
+    window._rebuildCalibrationCache = function() {
+      var link = document.getElementById('cal-rebuild-link');
+      if (link) link.textContent = 'Rebuilding…';
+      var rebuildUrl = '/api/maintenance/calibration/rebuild?project=' + encodeURIComponent(_slug);
+      fetch(rebuildUrl, {method: 'POST'})
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function() {
+          fetchCalibration();
+        })
+        .catch(function(err) {
+          console.error('Calibration rebuild failed:', err);
+          if (link) link.textContent = 'Rebuild';
         });
     };
 

@@ -33,8 +33,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "default_branch_prd": {"secret": False, "default": "master"},
     "bulk_create_concurrency": {"secret": False, "default": 3},
     "log_level": {"secret": False, "default": "INFO"},
-    # Concurrent pipeline mode (issue #737) — opt-in, default serial
-    "pipeline_mode": {"secret": False, "default": False},
+    # Concurrent pipeline mode (issue #737) — on by default (1 coder + 1 tester
+    # concurrent); projects can still opt out to serial dispatch.
+    "pipeline_mode": {"secret": False, "default": True},
     # Estimation defaults (size → minutes table + buffer)
     "estimation_s_minutes": {"secret": False, "default": 5},
     "estimation_m_minutes": {"secret": False, "default": 15},
@@ -55,6 +56,12 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "reviewer_enabled": {"secret": False, "default": False},
     # Coder dispatch CLI — claude-code (subscription) default; cline opt-in (issue #917)
     "coder_backend": {"secret": False, "default": "claude-code"},
+    # Optional product surfaces — disabled by default; overridable via Global Settings
+    # or COMMANDER_DISABLE_* env vars (env wins when set).
+    "disable_sprint_signoff": {"secret": False, "default": True},
+    "disable_advisor": {"secret": False, "default": True},
+    "disable_sprint_planning": {"secret": False, "default": True},
+    "disable_sprint_goal_required": {"secret": False, "default": True},
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},

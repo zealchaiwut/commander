@@ -361,6 +361,14 @@ def test_settings_pane_contains_overrides_section():
     )
 
 
+def test_settings_pane_pipeline_mode_toggle():
+    """Overrides must expose pipeline_mode toggle (issue #737 — opt-in concurrent dispatch)."""
+    html = (STATIC_DIR / "project.html").read_text()
+    assert "ps-pipeline-mode-toggle" in html
+    assert "projSettingsTogglePipelineMode" in html
+    assert "pipeline_mode" in html
+
+
 def test_settings_pane_contains_project_section():
     """pane-settings must contain a Project section."""
     html = (STATIC_DIR / "project.html").read_text()

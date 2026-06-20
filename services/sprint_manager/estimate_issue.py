@@ -412,6 +412,9 @@ def main() -> None:
     p.add_argument("--draft-file", default=None,
                    help="Estimate an unposted draft from a JSON file {title, body}; prints estimate to stdout")
     p.add_argument("--calibration-sprint", default=None, help="Past sprint label to pull DB calibration records from")
+    p.add_argument("--commander-dir", default=None,
+                   help="Canonical .commander/ directory to write issue-N.json into (overrides CWD walk and "
+                        "COMMANDER_PROJECT_ROOT env var)")
     args = p.parse_args()
 
     # Draft mode: size text before any issue exists (bulk-create pre-post estimate).
@@ -443,8 +446,14 @@ def main() -> None:
             sys.stderr.write(str("Error: --repo not specified and auto-detection failed") + "\n")
             sys.exit(1)
 
-    # Find .commander dir
-    commander_dir = find_commander_dir()
+    # Find .commander dir: --commander-dir > COMMANDER_PROJECT_ROOT env var > CWD walk
+    _env_root = os.environ.get("COMMANDER_PROJECT_ROOT")
+    if args.commander_dir:
+        commander_dir = Path(args.commander_dir)
+    elif _env_root:
+        commander_dir = Path(_env_root)
+    else:
+        commander_dir = find_commander_dir()
     if not commander_dir:
         sys.stderr.write(str("Error: could not find .commander/ directory (searched from CWD upward)") + "\n")
         sys.exit(1)

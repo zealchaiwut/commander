@@ -292,6 +292,14 @@ def test_finish_modal_calls_render_progress_activity():
     )
 
 
+def test_finish_modal_uses_incremental_progress_patch():
+    """SSE updates should patch bar/log in place instead of full re-render."""
+    js = _finish_modal_js()
+    assert "patchProgressActivityInPlace" in js, (
+        "finish-modal.js must use patchProgressActivityInPlace to avoid modal resize"
+    )
+
+
 def test_finish_modal_no_bespoke_progress_elements():
     """AC9 — finish-modal.js must not define one-off progress bar elements."""
     js = _finish_modal_js()
@@ -322,7 +330,7 @@ def _make_mock_server(close_error=None):
     """Build a minimal mock server for service unit tests."""
     srv = MagicMock()
     srv._sprint_label_base.return_value = "sprint-73"
-    srv._merge_sprint_branch_chain.return_value = []
+    srv._merge_sprint_branches_for_label.return_value = ([], None)
     srv._project_root_path.return_value = Path("/tmp/test-project")
     srv.children_of.return_value = []
     srv._plan_json_set_state.return_value = None
@@ -458,3 +466,34 @@ def test_service_error_state_on_exception():
     error = next((e for e in events if e.get("status") == "error"), None)
     assert error is not None, "No error event emitted"
     assert error.get("error"), "error field is empty in error snapshot"
+
+
+def test_service_merge_errors_abort_without_completing():
+    """Merge failure must emit error and must not mark the sprint completed."""
+    svc = _import_svc()
+    selected = [42]
+    srv = _make_mock_server()
+    srv._merge_sprint_branches_for_label.return_value = (
+        ["sprint/sprint-73 -> develop: merge conflict"],
+        None,
+    )
+    srv._is_child_sprint_label.return_value = False
+    key = "sprint-73@owner/repo-merge"
+
+    async def run():
+        svc._FINISH_JOBS.clear()
+        svc._FINISH_SUBS.clear()
+        with patch.object(svc, "_server", return_value=srv):
+            return await _collect_events(
+                svc, key,
+                svc.run_finish_sprint(
+                    key, "owner/repo-merge", "sprint-73", selected, [], False, None, "",
+                ),
+            )
+
+    events = asyncio.run(run())
+    error = next((e for e in events if e.get("status") == "error"), None)
+    assert error is not None, f"Expected error, got: {events[-1] if events else None}"
+    assert "merge conflict" in (error.get("error") or "").lower()
+    srv._plan_json_set_state.assert_not_called()
+    srv._sprint_db_set_state.assert_not_called()

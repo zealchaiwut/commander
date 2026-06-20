@@ -15,6 +15,7 @@ from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
 from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
+from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
 from .roadmap import router as roadmap_router
 from .runs import router as runs_router
@@ -66,6 +67,7 @@ __all__ = [
     "finish_progress_router",
     "home_milestone_router",
     "log_search_router",
+    "maintenance_router",
     "milestones_router",
     "roadmap_router",
     "runs_router",

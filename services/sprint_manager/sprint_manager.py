@@ -290,6 +290,7 @@ import github_client  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
+from services.logging import install_orchestrator_stdout_timestamps  # noqa: E402
 # issue #710: live-browser UAT
 from services.sprint_manager import agent_browser_runner  # noqa: E402
 from services.sprint_manager.state import (  # noqa: E402
@@ -372,6 +373,10 @@ DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
 # threading.Event for thread-safe signaling across worker threads.
 _sprint_user_cancelled: threading.Event = threading.Event()
 
+# Calibration cache: if incremental refresh completes within this budget it runs
+# inline (no perceived delay); otherwise dispatched as a background thread (issue #1333).
+_CALIBRATION_INLINE_THRESHOLD_S: float = 0.5
+
 
 def _emit_sprint_lifecycle_event(
     type: str,
@@ -396,6 +401,80 @@ def _emit_sprint_lifecycle_event(
         )
     except Exception:
         pass
+
+
+def _run_calibration_cache_refresh(
+    project_root: Path,
+    configured_minutes: dict,
+    project: str = "",
+) -> None:
+    """Refresh the calibration cache after a sprint finishes (issue #1333).
+
+    Runs _refresh_calibration_cache incrementally. If it completes within
+    _CALIBRATION_INLINE_THRESHOLD_S it runs inline; otherwise it continues in a
+    daemon background thread so the sprint-finish UX is not blocked.
+
+    Emits a calibration_cache_updated event when new samples are absorbed.
+    """
+    try:
+        from calibration_cache_service import _refresh_calibration_cache as _rcr  # noqa: PLC0415
+    except ImportError:
+        return
+
+    commander = project_root / ".commander"
+    cache_path = commander / "calibration_cache.json"
+    try:
+        prev_processed = len(
+            json.loads(cache_path.read_text(encoding="utf-8")).get("processed") or []
+        ) if cache_path.is_file() else 0
+    except Exception:
+        prev_processed = 0
+
+    result_holder: list = [None]
+
+    def _work() -> None:
+        try:
+            result_holder[0] = _rcr(project_root, configured_minutes)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_work, daemon=True, name="calibration-refresh")
+    t.start()
+    t.join(timeout=_CALIBRATION_INLINE_THRESHOLD_S)
+
+    if t.is_alive():
+        def _bg_log() -> None:
+            t.join()
+            cache = result_holder[0]
+            if cache is not None:
+                _emit_calibration_updated_event(cache, prev_processed, project)
+        threading.Thread(target=_bg_log, daemon=True, name="calibration-refresh-log").start()
+        return
+
+    cache = result_holder[0]
+    if cache is not None:
+        _emit_calibration_updated_event(cache, prev_processed, project)
+
+
+def _emit_calibration_updated_event(cache: dict, prev_processed: int, project: str) -> None:
+    """Emit calibration_cache_updated event when new samples were absorbed."""
+    processed_after = len(cache.get("processed") or [])
+    new_samples = processed_after - prev_processed
+    if new_samples <= 0:
+        return
+    by_size = cache.get("by_size") or {}
+    total_samples = sum(
+        int(by_size[sz]["count"] or 0)
+        for sz in ("S", "M", "L", "XL")
+        if sz in by_size
+    )
+    _emit_sprint_lifecycle_event(
+        type="calibration_cache_updated",
+        target="calibration_cache",
+        actor="sprint_manager:calibration",
+        detail={"new_samples": new_samples, "total_samples": total_samples},
+        project=project,
+    )
 
 
 def _failure_event_detail(
@@ -691,6 +770,12 @@ def _sprint_db_ingest_run_sm(
 # duration. Best-effort, like the lifecycle helpers above: a DB write must never
 # interrupt or fail a sprint run.
 
+# Owning project (owner/repo) for the run in progress — set at run_sprint start so
+# every agent_runs row is tagged with its project (sprint labels collide across
+# repos). Read by _db_agent_start_sm without threading it through 8 call sites.
+_CURRENT_RUN_PROJECT: Optional[str] = None
+
+
 def _db_agent_start_sm(
     issue_number,
     sprint_label: str,
@@ -725,6 +810,7 @@ def _db_agent_start_sm(
             attempt_kind=attempt_kind,
             log_path=log_path,
             backend=backend,
+            project=_CURRENT_RUN_PROJECT,
         )
     except (Exception, SystemExit):
         pass
@@ -747,7 +833,7 @@ def _db_update_worktree_shas_sm(
 
 def _token_window_utc_now() -> str:
     """UTC timestamp in the exact format token_usage.recorded_at uses."""
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _token_window_sums(role: str, since_utc: str) -> "tuple[int, int]":
@@ -1311,21 +1397,25 @@ def _sweep_stale_status(
     ticket) and one ``SIT`` (the tester's active ticket) at a time. In pipeline
     mode both run concurrently, so a crash between the remove-label and add-label
     calls, or an interrupted prior run, can leave a ghost label on a ticket no
-    longer being worked (issue #738 AC5). One ``gh issue list`` finds them; we
+    longer being worked (issue #738 AC5). One REST ``gh api`` issue query finds them; we
     clear all except ``active_issue``. Best-effort and bounded (no per-ticket
     fetches).
     """
     r = _r(repo_name)
     try:
         out = subprocess.run(
-            ["gh", "issue", "list", "--repo", r,
-             "--label", status_label, "--label", sprint_label,
-             "--state", "open", "--json", "number", "--limit", "100"],
+            [
+                "gh", "api", f"repos/{r}/issues",
+                "-f", "state=open",
+                "-f", f"labels={status_label},{sprint_label}",
+                "-f", "per_page=100",
+                "--jq", ".[].number",
+            ],
             capture_output=True, text=True, timeout=15,
         )
         if out.returncode != 0:
             return
-        nums = [i["number"] for i in json.loads(out.stdout or "[]")]
+        nums = [int(n) for n in (out.stdout or "").split() if n.strip().isdigit()]
     except Exception:
         return
     cleared: list[int] = []
@@ -6137,7 +6227,7 @@ git diff {base_sha}..{head_sha} --stat
 Run:
 
 ```
-gh issue view {summary_issue_num} --json body
+gh api repos/{repo_name}/issues/{summary_issue_num} --jq .body
 ```
 
 Parse the sprint summary body to extract the list of merged ticket numbers \
@@ -6145,7 +6235,7 @@ Parse the sprint summary body to extract the list of merged ticket numbers \
 For each merged ticket N, run:
 
 ```
-gh issue view N --json number,title,body,labels
+gh api repos/{repo_name}/issues/N
 ```
 
 Skip any ticket that:
@@ -6397,7 +6487,7 @@ git diff {base_sha}..{head_sha}
 
 For each ticket in the sprint, read:
 ```
-gh issue view <N> --json number,title,body,labels
+gh api repos/{repo_name}/issues/<N>
 ```
 
 Only document tickets that are in a merged/done state.
@@ -6500,6 +6590,7 @@ def _dispatch_documenter(
             head_sha          = head_sha,
             sprint_filter_url = sprint_filter_url,
             summary_issue_num = summary_issue_num or 0,
+            repo_name         = eff_repo or "",
         )
     except KeyError as e:
         structured_log.error("documenter_template_error", f"[documenter] prompt template has unknown placeholder {e}", placeholder=str(e))
@@ -6877,7 +6968,7 @@ You are a Business Analyst. Issue #{issue_num} in repository {repo} was created 
 automated code reviewer as a follow-up ticket. Its body may be minimal or unstructured.
 
 Your task:
-1. Read the issue with: gh issue view {issue_num} --repo {repo} --json title,body
+1. Read the issue with: gh api repos/{repo}/issues/{issue_num}
 2. Rewrite the body to the standard Commander format with ALL of these sections:
    ## What & Why
    ## Acceptance Criteria
@@ -6989,6 +7080,10 @@ def _dispatch_estimator_for_followup(
         "--save-comment",
         "--save-label",
     ]
+    # Write estimate JSON to the canonical project-root .commander/ location so
+    # calibration can always find it regardless of which clone runs the dashboard.
+    if cfg is not None and hasattr(cfg, "sprints_dir"):
+        cmd += ["--commander-dir", str(cfg.sprints_dir.parent)]
 
     sys.stdout.write(str(f"  [estimator] Estimating follow-up #{issue_num} ...") + "\n")
     sys.stdout.flush()
@@ -7972,6 +8067,10 @@ def run_sprint(
     # Effective repo: explicit arg > config > github_client
     eff_repo   = repo_name or (cfg.repo_name if cfg else None)
     api_url    = cfg.api_url if cfg else None
+    # Tag every agent_runs row written during this run with its project so the
+    # timeline/run-stats/history stop mixing same-labelled sprints across repos.
+    global _CURRENT_RUN_PROJECT
+    _CURRENT_RUN_PROJECT = eff_repo
 
     summary    = SprintSummary()
     sprint_num = _sprint_number(label)
@@ -9159,6 +9258,15 @@ def run_sprint(
         action_id=_run_id,
     )
 
+    # Auto-refresh calibration cache with newly completed sprint data (issue #1333)
+    try:
+        from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: PLC0415
+        _cal_project_root = _eff_sprints_dir.parent.parent
+        _cal_minutes = dict(_SIZE_TO_MINUTES)
+        _run_calibration_cache_refresh(_cal_project_root, _cal_minutes, project=eff_repo or label)
+    except Exception:
+        pass
+
     # Run documentor once for all merged tickets, before reviewer (issue #697)
     _eff_documentor = cfg.documentor_enabled if cfg is not None else False
     if _eff_documentor and summary.merged:
@@ -9362,6 +9470,7 @@ def main() -> None:
     )
 
     args = p.parse_args()
+    install_orchestrator_stdout_timestamps()
 
     # ── Config resolution (AC-4 + AC-5 + AC-6) ───────────────────────────────
     cfg: Optional[SprintConfig] = None
@@ -9559,8 +9668,19 @@ def main() -> None:
             _terminal_state = "needs_rework"
             _terminal_reason = "no-dispatchable-tickets"
         else:
+            # A sprint is a clean (ready_to_merge) finish only when every ticket
+            # landed. Besides an explicit agent failure, a ticket left SKIPPED by a
+            # failure category — RETRY_EXHAUSTED / TESTER_REJECTED / gate fail — is
+            # unfinished work that did NOT merge, so it must drive needs_rework
+            # (rerunnable), not let the sprint complete "naturally". Those infra
+            # categories deliberately skip the per-ticket needs-rework *label*
+            # (see ~line 1441), but at the sprint level an unmerged failing ticket
+            # still means the sprint has rework to do. A clean operator skip (no
+            # failure category) is not a failure and stays natural.
             _any_failed = any(
-                (iss.agent_status == "failed") or iss.failure_reason
+                (iss.agent_status == "failed")
+                or iss.failure_reason
+                or (iss.status == "skipped" and iss.category)
                 for iss in state.issues
             )
             if _any_failed:

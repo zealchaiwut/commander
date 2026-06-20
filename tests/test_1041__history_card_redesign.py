@@ -12,7 +12,7 @@ AC coverage:
           re-rendered by a separate reconciliation/sprint-failed block
   AC6  — partial "Unfinished N of M" list exists in _histWhatListHtml
   AC7  — complete/locked cards: _histLooseEndBandHtml returns '' and _histWhatListHtml returns ''
-  AC8  — Details block: _histDetailsHtml wraps stats + recon; collapsed by default via _histDetailsExpanded
+  AC8  — Metrics block: _histDetailsHtml wraps stats + recon; collapsed by default via _histMetricsExpanded
   AC9  — passed recon checks render as grey checkmarks inside Details, not as green boxes outside
   AC10 — _histStatsHtml is called ONLY inside _histDetailsHtml, not directly in _histCardHtml body
   AC11 — delete action is quiet icon: class ends in -icon or -quiet, no red color in CSS rule,
@@ -137,7 +137,7 @@ def test_ac2_complete_card_has_no_rerun_in_header():
         # If ready_to_merge appears, it should be in a DIFFERENT if-branch (after the rerun block)
         # or the rerun block should be inside a guard that excludes ready_to_merge
         assert ready_idx > rerun_idx or "completed" not in body[max(0, rerun_idx - 50):rerun_idx], \
-            "ready_to_merge must not trigger the Re-run button (it has its own Merge action)"
+            "ready_to_merge must not trigger the Re-run button (it has its own Complete action)"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -165,13 +165,20 @@ def test_ac3_failed_pill_is_red():
         "Failed pill must be red"
 
 
-def test_ac3_completed_pill_is_green():
-    """Complete outcome pill must use green color (not steel/blue)."""
+def test_ac3_completed_pill_is_grey():
+    """Completed outcome pill must use muted grey (distinct from ready-to-merge green)."""
     completed_css = _css_rule(".hist-state.completed")
-    assert "green" in completed_css.lower() or "var(--green)" in completed_css, \
-        "Complete pill must be green"
-    assert "steel" not in completed_css.lower(), \
-        "Complete pill must not use steel (steel is blue-grey, not green)"
+    assert "text-muted" in completed_css or "surface-2" in completed_css, \
+        "Complete pill must use muted grey styling"
+    assert "var(--green)" not in completed_css, \
+        "Complete pill must not use green — that is reserved for ready_to_merge"
+
+
+def test_ac3_ready_to_merge_pill_is_green():
+    """Ready-to-merge pill must use green (actionable sign-off state)."""
+    ready_css = _css_rule(".hist-state.ready_to_merge")
+    assert "green" in ready_css.lower() or "var(--green)" in ready_css, \
+        "Ready-to-merge pill must be green"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -189,10 +196,47 @@ def test_ac4_loose_end_band_returns_early_after_first_match():
     # Must have at least one early return so only ONE band is emitted
     # (not two appended band strings)
     assert "return" in body, "_histLooseEndBandHtml must return after first match"
+    assert "sprint_pr" in body, "sprint PR unmerged must be a loose-end priority"
     # The function must not concatenate two separate band HTML strings
     band_count = body.count("hist-loose-end-band")
-    assert band_count <= 2, \
-        f"Should define the band class at most twice (one per branch), got {band_count}"
+    assert band_count <= 3, \
+        f"Should define the band class at most three times (sprint PR, stale labels, branches), got {band_count}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Child sprint mock — legend, parent row, nested child card, agent-time bar
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_child_sprint_legend_renders_above_ledger():
+    """Agent colour legend must render above the sprint list."""
+    render_body = _fn_body("_histRenderLedger")
+    assert "_histLegendHtml" in render_body, "_histRenderLedger must inject the agent legend"
+
+
+def test_child_sprint_card_helpers_exist():
+    """Nested child sprint layout helpers must exist."""
+    assert _fn_exists("_histChildCardHtml"), "_histChildCardHtml must exist"
+    assert _fn_exists("_histParentRowHtml"), "_histParentRowHtml must exist"
+    assert _fn_exists("_histAgentTimeBarHtml") or "hist-agent-bar" in _fn_body("_histChildMetricsHtml"), \
+        "collapsed agent-time bar must be implemented"
+
+
+def test_child_group_uses_parent_row_and_child_wrap():
+    """Groups with children must nest under a parent row + L-connector wrap."""
+    body = _fn_body("_histGroupHtml")
+    assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
+    assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
+    assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
+    assert "hist-sprint-group collapsed" in body, "collapsed groups hide child wrap via CSS"
+    parent = _fn_body("_histParentRowHtml")
+    assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
+
+
+def test_parent_group_toggle_helper_exists():
+    assert _fn_exists("_histToggleGroup"), "_histToggleGroup must exist for parent collapse"
+    parent = _fn_body("_histParentRowHtml")
+    assert "_histToggleGroup" in parent
+    assert "event.stopPropagation()" in parent
 
 
 def test_ac4_loose_end_band_css_uses_amber():
@@ -211,6 +255,21 @@ def test_ac4_partial_pill_not_amber():
 # ═════════════════════════════════════════════════════════════════════════════
 # AC5 — Failed "Why it failed" list: no issue duplication
 # ═════════════════════════════════════════════════════════════════════════════
+
+def test_failed_sprint_with_issues_shows_done_summary():
+    """Failed sprints with issues must still render agent time + full ticket rows."""
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "_histSprintFailed" in shows, \
+        "_histCardShowsDoneSummary must branch on failed sprints with issues"
+    outcome = _fn_body("_histCardOutcomeHtml")
+    assert "_histDoneIssuesHtml" in outcome
+
+
+def test_ac5_failed_with_issues_uses_header_only_what_list():
+    """When issues exist, what-list must not duplicate failed_tickets rows (AC14)."""
+    body = _fn_body("_histWhatListHtml")
+    assert "issues.length" in body, \
+        "_histWhatListHtml must skip per-ticket wl-items when s.issues is populated"
 
 def test_ac5_what_list_for_failed_uses_failed_tickets():
     """_histWhatListHtml must use s.failed_tickets (not s.issues) for the failed branch."""
@@ -289,23 +348,25 @@ def test_ac7_what_list_returns_empty_for_locked():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# AC8 — Details block collapsed by default; contains metrics + split + gantt + recon
+# AC8 — Metrics block collapsed by default at card bottom
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_ac8_details_html_function_exists():
-    """_histDetailsHtml must exist as the collapsed Details block builder."""
+    """_histDetailsHtml must exist as the metrics/timeline block builder."""
     assert _fn_exists("_histDetailsHtml"), "_histDetailsHtml must exist"
 
 
-def test_ac8_details_expanded_tracking_set_exists():
-    """A _histDetailsExpanded Set must track which cards have Details open."""
-    assert "_histDetailsExpanded" in HISTORY_JS, \
-        "_histDetailsExpanded Set must exist to track Details expansion"
+def test_ac8_metrics_expanded_tracking_set_exists():
+    """Sets must track agent-time vs metrics-details expansion separately."""
+    assert "_histMetricsDetailsExpanded" in HISTORY_JS, \
+        "_histMetricsDetailsExpanded Set must exist to track metrics expansion"
+    assert "_histAgentTimeExpanded" in HISTORY_JS, \
+        "_histAgentTimeExpanded Set must exist to track agent-time expansion"
 
 
-def test_ac8_details_toggle_function_exists():
-    """_histToggleDetails must exist to toggle the Details sub-section."""
-    assert _fn_exists("_histToggleDetails"), "_histToggleDetails must exist"
+def test_ac8_metrics_toggle_function_exists():
+    """_histToggleMetrics must exist to toggle the metrics sub-section."""
+    assert _fn_exists("_histToggleMetrics"), "_histToggleMetrics must exist"
 
 
 def test_ac8_details_html_contains_stats():
@@ -315,13 +376,20 @@ def test_ac8_details_html_contains_stats():
 
 
 def test_ac8_details_head_css_exists():
-    """CSS for .hist-details-head must exist (the clickable Details toggle row)."""
+    """CSS for .hist-details-head must exist (the clickable metrics toggle row)."""
     assert _css_exists(".hist-details-head"), "CSS rule .hist-details-head must exist"
 
 
 def test_ac8_details_body_css_exists():
-    """CSS for .hist-details-body must exist (the collapsible details content)."""
+    """CSS for .hist-details-body must exist (the collapsible metrics content)."""
     assert _css_exists(".hist-details-body"), "CSS rule .hist-details-body must exist"
+
+
+def test_ac8_details_metrics_label():
+    """Metrics toggle must use the updated label (timeline lives in agent time)."""
+    body = _fn_body("_histDetailsHtml")
+    assert "Metrics &amp; reconciliation" in body or "Metrics & reconciliation" in body, \
+        "_histDetailsHtml must label the section 'Metrics & reconciliation'"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -454,10 +522,26 @@ def test_ac12_secondary_class_visually_different_from_recovery():
 def test_ac13_hist_card_html_uses_helper_functions():
     """_histCardHtml must delegate to new helper functions for all variants."""
     card_body = _fn_body("_histCardHtml")
-    required_helpers = ["_histLooseEndBandHtml", "_histWhatListHtml", "_histDetailsHtml"]
+    required_helpers = [
+        "_histLooseEndBandHtml",
+        "_histWhatListHtml",
+        "_histCardOutcomeHtml",
+        "_histDetailsHtml",
+    ]
     for helper in required_helpers:
         assert helper in card_body, \
             f"_histCardHtml must call {helper} to ensure consistent layout across variants"
+
+
+def test_standalone_ready_card_shows_done_issues_and_agent_bar():
+    """Ready-to-merge standalone sprints show ticket rows + agent bar like child cards."""
+    card_body = _fn_body("_histCardHtml")
+    assert "_histCardOutcomeHtml" in card_body
+    outcome = _fn_body("_histCardOutcomeHtml")
+    assert "_histChildMetricsHtml" in outcome
+    assert "_histDoneIssuesHtml" in outcome
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "ready_to_merge" in shows
 
 
 def test_ac13_hist_loose_end_band_css_exists():
@@ -498,12 +582,12 @@ def test_ac14_what_list_and_issue_list_not_both_called():
 # Structural check — new functions are exported or globally accessible
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_hist_toggle_details_is_exported():
-    """_histToggleDetails must be exported or globally accessible for inline onclick."""
-    assert "export function _histToggleDetails" in HISTORY_JS \
-        or "globalThis._histToggleDetails" in HISTORY_JS \
-        or "_histToggleDetails" in HISTORY_JS, \
-        "_histToggleDetails must be exported for onclick handlers"
+def test_hist_metrics_toggle_is_exported():
+    """_histToggleMetrics must be exported or globally accessible for inline onclick."""
+    assert "export function _histToggleMetrics" in HISTORY_JS \
+        or "globalThis._histToggleMetrics" in HISTORY_JS \
+        or "_histToggleMetrics" in HISTORY_JS, \
+        "_histToggleMetrics must be exported for onclick handlers"
 
 
 def test_hist_loose_end_band_css_has_band_cta():

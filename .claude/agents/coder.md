@@ -67,7 +67,7 @@ The branch name is printed as the last line of output. Note it.
 ### Step 3 — Read the ticket
 
 ```bash
-gh issue view <N> --json number,title,body,labels
+gh api repos/<owner>/<repo>/issues/<N>
 ```
 
 Read the **What & Why**, **Acceptance Criteria**, and **UAT Test Steps** sections carefully. Implement exactly what the AC says — nothing more.

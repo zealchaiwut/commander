@@ -1,15 +1,23 @@
-"""Maintenance endpoints — test file cleanup.
+"""Maintenance endpoints — test cleanup (#1267) and calibration/sprint CSV (#1332).
 
 Routes in this module:
   POST /api/maintenance/tests/cleanup
+  GET  /api/maintenance/sprints/export
+  POST /api/maintenance/sprints/import
+  POST /api/maintenance/calibration/rebuild
+
+New endpoints belong in routers/<area>.py, never in server.py
+(COMMANDER_GATE_MONOLITH, issue #761).
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
+
+from . import maintenance_service, sprints_csv_service
 
 # ── Path setup ───────────────────────────────────────────────────────────────
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent  # apps/dashboard/
@@ -23,13 +31,6 @@ import projects as _projects_module  # noqa: E402
 
 _PROJECTS_BASE = Path.home() / "dev"
 
-# ── Logging ──────────────────────────────────────────────────────────────────
-import sys as _sys  # noqa: E402 (re-import alias for clarity)
-
-_REPO_ROOT_SVC = Path(__file__).resolve().parent.parent.parent.parent
-if str(_REPO_ROOT_SVC) not in _sys.path:
-    _sys.path.insert(0, str(_REPO_ROOT_SVC))
-
 # ── Optional prune_test_files module ─────────────────────────────────────────
 try:
     import prune_test_files as _prune_test_files  # noqa: E402
@@ -38,7 +39,7 @@ except ImportError:
     _prune_test_files = None  # type: ignore[assignment]
     _PRUNE_TESTS_AVAILABLE = False
 
-router = APIRouter()
+router = APIRouter(tags=["maintenance"])
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,16 +66,6 @@ def _project_root_path(repo: str) -> Path:
     return _PROJECTS_BASE / slug
 
 
-# ── Request body ──────────────────────────────────────────────────────────────
-
-class _TestCleanupBody(BaseModel):
-    project: str
-    keep: int = 100
-    dry_run: bool = True
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
 def _maintenance_repo_root(project: str) -> Path:
     """Resolve the git clone that holds tests/ for maintenance actions."""
     slug = _resolve_project_slug(project.strip())
@@ -86,7 +77,15 @@ def _maintenance_repo_root(project: str) -> Path:
     return project_root.resolve()
 
 
-# ── Route ─────────────────────────────────────────────────────────────────────
+# ── Request body ──────────────────────────────────────────────────────────────
+
+class _TestCleanupBody(BaseModel):
+    project: str
+    keep: int = 100
+    dry_run: bool = True
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/api/maintenance/tests/cleanup")
 def post_test_files_cleanup(body: _TestCleanupBody):
@@ -118,3 +117,44 @@ def post_test_files_cleanup(body: _TestCleanupBody):
         return _prune_test_files.run_prune(repo_root, keep=keep, dry_run=body.dry_run)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Test cleanup failed: {exc}") from exc
+
+
+@router.get("/api/maintenance/sprints/export")
+def export_sprints(project: str):
+    """GET /api/maintenance/sprints/export?project=<owner/repo>.
+
+    Download one project's `sprints` lifecycle rows as CSV — a snapshot to load
+    into another instance (e.g. PRD → UAT) for testing. Read-only.
+    """
+    csv_text = sprints_csv_service.export_sprints_csv(project)
+    fname = "sprints-" + (project.split("/")[-1] or "project") + ".csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.post("/api/maintenance/sprints/import")
+async def import_sprints(project: str, request: Request, mode: str = "merge"):
+    """POST /api/maintenance/sprints/import?project=<owner/repo>&mode=merge.
+
+    Body is raw CSV (text/csv) from a prior export. Upserts rows into the given
+    project by sprint label; mode=replace wipes the project's rows first.
+    Returns {ok, inserted, updated, before, after, errors}.
+    """
+    raw = await request.body()
+    csv_text = raw.decode("utf-8", errors="replace")
+    return sprints_csv_service.import_sprints_csv(project, csv_text, mode=mode)
+
+
+@router.post("/api/maintenance/calibration/rebuild")
+def post_rebuild_calibration(project: str):
+    """POST /api/maintenance/calibration/rebuild?project=<slug>.
+
+    Clears and rebuilds the calibration cache by rescanning all sprint-*-state.json
+    files under .commander/sprints/ and .commander/sprints/archive/.
+
+    Returns {"total": N, "by_size": {"S": x, "M": y, "L": z, "XL": w}}.
+    """
+    return maintenance_service.do_rebuild(project, dry_run=False)

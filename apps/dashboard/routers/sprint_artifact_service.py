@@ -232,6 +232,50 @@ def find_summary_path(sprints_dir: Path, label: str) -> str | None:
     return None
 
 
+def _compute_summary_counts(issues_raw: list[dict]) -> dict:
+    """Compute denormalized summary counts from raw state-file issues.
+
+    settled_done = total - not_yet_settled, where "not yet settled" means the
+    issue column-status is still backlog/in-progress/sit (mirrors the canonical
+    _settled_done_from_columns formula: settled = total - backlog - in_progress - sit).
+
+    Column-status takes unconditional priority: an issue whose status is pending,
+    in-progress, or sit is never settled-done, even if agent_status='completed'
+    (contradictory state).  This matches _settled_done_from_columns exactly for
+    all normal-flow AND contradictory states.
+
+    For issues with no recorded status (empty string), the agent-action flag is
+    used as a fallback: if the agent ran (has_agent_action), treat as settled.
+
+    uat_count    = issues with status 'uat'.
+    failure_count = issues where agent_status=='failed' or failure_reason is set.
+    """
+    _NOT_SETTLED_STATUSES = frozenset({"pending", "in-progress", "sit"})
+
+    total = len(issues_raw)
+    not_settled = 0
+    uat_count = 0
+    failure_count = 0
+    for iss in issues_raw:
+        status = (iss.get("status") or "").lower()
+        agent = (iss.get("agent_status") or "").lower()
+        fr = iss.get("failure_reason")
+        has_agent_action = agent in ("completed", "done", "failed") or bool(fr)
+        # Unsettled if status is in not-settled columns (unconditional),
+        # or if status is empty and agent hasn't run yet.
+        if status in _NOT_SETTLED_STATUSES or (not has_agent_action and status == ""):
+            not_settled += 1
+        if status == "uat":
+            uat_count += 1
+        if agent == "failed" or fr:
+            failure_count += 1
+    return {
+        "summary_settled_done": max(0, total - not_settled),
+        "summary_uat_count": uat_count,
+        "summary_failure_count": failure_count,
+    }
+
+
 def artifact_fields_from_state(
     state: dict,
     *,
@@ -248,6 +292,7 @@ def artifact_fields_from_state(
     spath = summary_path
     if spath is None and sprints_dir is not None:
         spath = find_summary_path(sprints_dir, state.get("sprint_label") or "")
+    counts = _compute_summary_counts(issues_raw)
     return {
         "issues_json": json.dumps(issues),
         "tokens": int(tin) + int(tout),
@@ -258,6 +303,7 @@ def artifact_fields_from_state(
         "pr_number": _parse_pr_number(state),
         "post_sprint_json": json.dumps(ps) if (ps := build_post_sprint(state)) else None,
         "estimate_accuracy": _compute_estimate_accuracy(state),
+        **counts,
     }
 
 
@@ -303,4 +349,8 @@ def enrichment_from_db_row(row: dict) -> dict:
         "failed_tickets": failed_tickets,
         "failure_reason": failed_tickets[-1]["failure_reason"] if failed_tickets else None,
         "post_sprint": post_sprint,
+        # Materialized summary counts (preferred over re-derivation when present)
+        "summary_settled_done": row.get("summary_settled_done"),
+        "summary_uat_count": row.get("summary_uat_count"),
+        "summary_failure_count": row.get("summary_failure_count"),
     }

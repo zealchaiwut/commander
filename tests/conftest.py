@@ -19,6 +19,11 @@ from pathlib import Path
 _TEST_DB = Path(os.environ.get("COMMANDER_TEST_DB", "/tmp/commander-pytest.db"))
 os.environ.setdefault("DB_PATH", str(_TEST_DB))
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
+# Feature flags default off in config.py; tests opt back in to sign-off/planning/advisor.
+os.environ.setdefault("COMMANDER_DISABLE_SIGNOFF", "0")
+os.environ.setdefault("COMMANDER_DISABLE_ADVISOR", "0")
+os.environ.setdefault("COMMANDER_DISABLE_PLANNING", "0")
+os.environ.setdefault("COMMANDER_DISABLE_SPRINT_GOAL_REQUIRED", "0")
 
 _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
@@ -28,6 +33,11 @@ _STATIC_DIR = _DASHBOARD_DIR / "static"
 for _p in (str(_REPO_ROOT), str(_SPRINT_MGR_DIR), str(_DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+# Single settings_repo module object for both import paths (bare + package).
+import settings_repo as _settings_repo  # noqa: E402
+
+sys.modules["services.sprint_manager.settings_repo"] = _settings_repo
 
 import pytest  # noqa: E402
 
@@ -66,3 +76,13 @@ def agent_browser_find(selector: str) -> str:
     rc, out, err = _abr.run_cli(["find", selector], timeout=30)
     assert rc == 0, f"agent-browser find {selector!r} failed: {err}"
     return out
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings_repo(tmp_path, monkeypatch):
+    """One settings_repo module + per-test JSON fallback (no repo .commander bleed)."""
+    import settings_repo
+
+    sys.modules["services.sprint_manager.settings_repo"] = settings_repo
+    store = tmp_path / "settings_store.json"
+    monkeypatch.setattr(settings_repo, "_fallback_store_path", lambda: store)

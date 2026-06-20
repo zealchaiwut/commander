@@ -262,7 +262,7 @@ _AGENT_RUN_FAILED = {"fail", "failed", "reject", "rejected", "crash", "crashed",
                      "skipped", "error"}
 
 
-def _issues_from_agent_runs(label: str) -> list[dict]:
+def _issues_from_agent_runs(label: str, project: str | None = None) -> list[dict]:
     """Synthesize issue rows from agent_runs, deriving each ticket's disposition
     from its run outcomes.
 
@@ -272,7 +272,7 @@ def _issues_from_agent_runs(label: str) -> list[dict]:
     matches the Board rather than hiding successes.
     """
     try:
-        rows = _db().agent_runs_for_sprint(label)
+        rows = _db().agent_runs_for_sprint(label, project=project)
     except Exception:
         return []
     agg: dict[int, dict] = {}
@@ -488,19 +488,45 @@ def _record_from_history(rec: dict) -> dict:
 
 
 def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
-    """Build the response row from a `sprints` lifecycle row + DB/disk enrichment."""
+    """Build the response row from a `sprints` lifecycle row + DB/disk enrichment.
+
+    Uses a lazy-ingest pattern (issue #1160): when run_ingested_at is NULL and
+    a disk artifact exists, ingest it into the DB first so all subsequent reads
+    are served from SQLite only — no dual render-time read path.
+    """
     label = row.get("label")
+    if not row.get("run_ingested_at"):
+        state = _read_state_file(sprints_dirs, label)
+        if state is not None:
+            try:
+                summary_path = _find_summary_path(sprints_dirs, label)
+                _db().ingest_sprint_run_artifact(
+                    label, state,
+                    project=row.get("project") or "",
+                    summary_path=summary_path,
+                )
+                refreshed = _db().get_sprint(label)
+                if refreshed:
+                    row = refreshed
+            except Exception:
+                pass
+    from . import sprint_artifact_service  # noqa: PLC0415
     if row.get("run_ingested_at"):
-        from . import sprint_artifact_service  # noqa: PLC0415
         enrich = sprint_artifact_service.enrichment_from_db_row(row)
     else:
-        enrich = _enrich_from_state(label, sprints_dirs)
+        enrich = sprint_artifact_service.enrichment_from_db_row({})
+    # Plan files are not run artifacts and are never ingested — read them at
+    # render time to supply bulk_complete lifecycle signals (plan_status,
+    # plan-derived end_reason) that have no DB column.
+    plan = _read_plan_file(sprints_dirs, label) or {}
+    if not enrich.get("plan_status"):
+        enrich["plan_status"] = plan.get("state") or plan.get("status")
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
     from . import sprint_state  # noqa: PLC0415
     lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
-    end_reason = row.get("end_reason") or enrich.get("end_reason")
+    end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
     issues = enrich["issues"]
     lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)
     pr_number = row.get("pr_number") if row.get("pr_number") is not None else enrich["pr_number"]
@@ -625,12 +651,6 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
 
     for rec in records:
         label = rec.get("label") or ""
-        if not rec.get("post_sprint"):
-            # Pre-P3 rows: post_sprint may only exist on disk.
-            state = _read_state_file(sprints_dirs, label)
-            if state:
-                rec["post_sprint"] = _build_post_sprint(state)
-
         if not rec.get("issues"):
             run_issues = _issues_from_agent_runs(label)
             if run_issues:
@@ -696,6 +716,97 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
                 state_by_label[label] = "completed"
 
     _fill_missing_links(records, sprints_dirs)
+    _attribute_issues_to_runs(records)
+    _drop_cross_project_issues(records)
+
+
+def _attribute_issues_to_runs(records: list[dict]) -> None:
+    """Filter each sprint's issue list to the tickets it actually owns.
+
+    A sprint owns a ticket only if that ticket actually RAN under its label
+    (agent_runs) AND did not re-run in a descendant child sprint (where it now
+    belongs). This fixes two long-standing History mismatches:
+      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
+        #572/#574 after they re-ran in sprint-63.1), and
+      - a child listing carried-over already-done tickets it never re-ran (e.g.
+        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
+
+    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
+    we never blank a sprint that simply predates run tracking.
+    """
+    ran_by_label: dict[str, set[int]] = {}
+    for rec in records:
+        label = rec.get("label")
+        if not label:
+            continue
+        try:
+            rows = _db().agent_runs_for_sprint(label, project=rec.get("project") or None)
+        except Exception:
+            rows = []
+        nums: set[int] = set()
+        for r in rows:
+            try:
+                n = int(r.get("issue_number"))
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                nums.add(n)
+        ran_by_label[label] = nums
+
+    for rec in records:
+        label = rec.get("label") or ""
+        ran_here = ran_by_label.get(label) or set()
+        if not ran_here:
+            continue  # no run record — leave the list as-is (legacy sprints)
+        prefix = label + "."
+        ran_in_children: set[int] = set()
+        for other, nums in ran_by_label.items():
+            if other != label and other.startswith(prefix):
+                ran_in_children |= nums
+        rec["issues"] = [
+            i for i in (rec.get("issues") or [])
+            if i.get("ticket_id") in ran_here and i.get("ticket_id") not in ran_in_children
+        ]
+
+
+def _drop_cross_project_issues(records: list[dict]) -> None:
+    """Remove tickets that don't belong to the sprint's project (Tier 1).
+
+    Sprint labels are unique only per repo, and agent_runs / ingested issues_json
+    are keyed by label alone — so a sprint can pick up tickets from another
+    project's same-numbered sprint (e.g. perf-coach sprint-64 showing commander's
+    #839-844). Filter each sprint's issue list to numbers present in THIS
+    project's issue mirror (repo-scoped). Skipped when the project's mirror is
+    empty so we never blank a sprint just because its mirror hasn't synced.
+    """
+    mirror_by_project: dict[str, set[int]] = {}
+    for rec in records:
+        project = rec.get("project") or ""
+        if not project or project in mirror_by_project:
+            continue
+        nums: set[int] = set()
+        try:
+            for i in _db().get_mirrored_issues(project):
+                n = i.get("number", i.get("issue_number"))
+                try:
+                    n = int(n)
+                except (TypeError, ValueError):
+                    continue
+                if n > 0:
+                    nums.add(n)
+        except Exception:
+            nums = set()
+        mirror_by_project[project] = nums
+
+    for rec in records:
+        project = rec.get("project") or ""
+        owned = mirror_by_project.get(project)
+        if not owned:
+            continue  # no mirror for this project — don't risk blanking the list
+        rec["issues"] = [
+            i for i in (rec.get("issues") or [])
+            if i.get("ticket_id") in owned
+        ]
 
 
 def _pr_from_issues(issues: list | None) -> int | None:
@@ -766,7 +877,7 @@ def _github_summary_by_label(project: str) -> dict[str, dict]:
 
 
 def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
-    """Backfill PR / summary targets from disk, events, GitHub cache, and parents."""
+    """Backfill PR / summary targets from events, GitHub cache, and parents (DB-only; no disk reads)."""
     by_label = {r.get("label"): r for r in records if r.get("label")}
     github_by_project: dict[str, dict[str, dict]] = {}
 
@@ -774,16 +885,6 @@ def _fill_missing_links(records: list[dict], sprints_dirs: Path | list[Path]) ->
         label = rec.get("label")
         if not label:
             continue
-
-        disk = _enrich_from_state(label, sprints_dirs)
-        if rec.get("pr_number") is None and disk.get("pr_number") is not None:
-            rec["pr_number"] = disk["pr_number"]
-        if not rec.get("summary_issue_url") and disk.get("summary_issue_url"):
-            rec["summary_issue_url"] = disk["summary_issue_url"]
-        if rec.get("summary_issue_num") is None and disk.get("summary_issue_num") is not None:
-            rec["summary_issue_num"] = disk["summary_issue_num"]
-        if not rec.get("summary_path") and disk.get("summary_path"):
-            rec["summary_path"] = disk["summary_path"]
 
         if rec.get("pr_number") is None:
             rec["pr_number"] = _pr_from_issues(rec.get("issues"))
@@ -889,29 +990,41 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     db = _db()
 
     records: list[dict] = []
-    seen_labels: set[str] = set()
+    # Dedup by (label, project), NOT label alone: sprint labels are unique only
+    # per repo, so a label-only key let one project's snapshot shadow another's
+    # sprint. E.g. commander's deleted `sprint-66` snapshot claimed the label and
+    # skipped perf-coach's live `sprint-66` lifecycle row, which then got dropped
+    # by the project filter — making perf-coach's sprint invisible in History.
+    seen: set[tuple[str, str]] = set()
+
+    def _key(label, proj) -> tuple[str, str]:
+        return (label or "", (proj or "").strip())
 
     # 1) sprint_history snapshots (deleted etc.) — authoritative, take first.
     for rec in db.list_sprint_history():
-        label = rec.get("label")
-        if label in seen_labels:
+        key = _key(rec.get("label"), rec.get("project"))
+        if key in seen:
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_history(rec))
 
     # 2) sprints lifecycle rows not already represented by a snapshot.
     for row in db.list_sprints_lifecycle():
-        label = row.get("label")
-        if label in seen_labels:
+        key = _key(row.get("label"), row.get("project"))
+        if key in seen:
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_lifecycle(row, search_dirs))
 
-    # 3) file-only sprints with no DB row at all.
+    # 3) file-only sprints with no DB row at all. search_dirs are scoped to
+    # `project`, so attribute file labels to it; in the all-projects view (no
+    # project) skip a label already represented for any project.
+    _seen_any_label = {k[0] for k in seen}
     for label in _discover_file_labels(search_dirs):
-        if label in seen_labels:
+        key = _key(label, project)
+        if key in seen or (not project and label in _seen_any_label):
             continue
-        seen_labels.add(label)
+        seen.add(key)
         records.append(_record_from_files(label, search_dirs))
 
     if project:

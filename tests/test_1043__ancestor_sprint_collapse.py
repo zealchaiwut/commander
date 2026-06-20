@@ -520,10 +520,45 @@ def test_ac8_render_passes_child_label_to_ancestor_html():
         "rerunInto" in render_body
         or "_rerunInto" in render_body
         or "sprint_rerun_into" in render_body
+        or "_smgmtChildSprintLabel" in render_body
     )
     assert has_child_passed, (
         "_smgmtRender must pass the child sprint label (from sprint_rerun_into) "
         "to _smgmtAncestorRowHtml so carry links reference the correct sprint"
+    )
+
+
+def test_parent_collapses_when_child_exists_regardless_of_tickets():
+    """Parent sprint must move to Lineage whenever a child sub-sprint is in order."""
+    assert _fn_exists("_smgmtShouldCollapseParent"), (
+        "_smgmtShouldCollapseParent must exist to gate parent collapse"
+    )
+    body = _fn_body("_smgmtShouldCollapseParent")
+    assert "ticket" not in body.lower() and "settled" not in body.lower(), (
+        "Parent collapse must not depend on ticket count — any child sub-sprint "
+        "hides the parent from Draft / Ready to merge sections"
+    )
+    assert _fn_exists("_smgmtSprintBaseLabel"), (
+        "_smgmtSprintBaseLabel must exist to infer parent/child from dotted labels "
+        "when plan.json parent is missing"
+    )
+    render_body = _fn_body("_smgmtRender")
+    assert "_smgmtShouldCollapseToLineage" in render_body, (
+        "_smgmtRender must collapse parent and superseded siblings into Lineage"
+    )
+
+
+def test_superseded_sibling_collapses_when_newer_exists():
+    """sprint-85.1 moves to Lineage when sprint-85.2 is the latest sibling."""
+    assert _fn_exists("_smgmtLatestLineageLabel"), (
+        "_smgmtLatestLineageLabel must pick the newest sprint-N.M in a lineage"
+    )
+    assert _fn_exists("_smgmtShouldCollapseToLineage"), (
+        "_smgmtShouldCollapseToLineage must gate superseded rerun drafts"
+    )
+    body = _fn_body("_smgmtShouldCollapseToLineage")
+    assert "_smgmtLatestLineageLabel" in body, (
+        "superseded sibling collapse must compare against the latest lineage label"
     )
 
 
@@ -591,3 +626,44 @@ def test_ac9_failed_has_icon():
         "The Failed state mark must include an icon (ti-*) in addition to "
         "red color so it is distinguishable for colorblind users"
     )
+
+
+# =============================================================================
+# Ancestor outcome preview — UAT / elapsed / done-failed stats (lineage enrichment)
+# =============================================================================
+
+
+def test_ancestor_fetch_uses_preview_query_for_resolved_ancestors():
+    """Resolved ancestor rows must request preview=1 so partial outcomes load."""
+    body = _fn_body("_smgmtFetchMissingOutcomes")
+    assert "preview=1" in body, (
+        "_smgmtFetchMissingOutcomes must pass preview=1 for resolved ancestor sprints"
+    )
+    assert "_smgmtResolvedAncestors" in body
+
+
+def test_ancestor_stats_line_includes_uat_and_elapsed():
+    """Expanded ancestor body shows done/failed/UAT counts and elapsed time."""
+    assert _fn_exists("_smgmtAncestorStatsLine")
+    stats_body = _fn_body("_smgmtAncestorStatsLine")
+    assert "awaiting UAT" in stats_body
+    assert "elapsed" in stats_body
+    assert "_fmtRunningTime" in stats_body
+
+    row_body = _fn_body("_smgmtAncestorRowHtml")
+    assert "slp-ancestor-stats" in row_body
+    assert "_smgmtAncestorStatsLine" in row_body
+
+
+def test_ancestor_tickets_show_uat_and_failed_fates():
+    """Per-ticket rows distinguish done, UAT-holding, failed, and carried."""
+    body = _fn_body("_smgmtAncestorTicketsHtml")
+    assert "awaiting UAT" in body
+    assert "slp-fate-uat" in body
+    assert "slp-fate-failed" in body
+    assert "slp-ticket-elapsed" in body
+
+
+def test_ancestor_carry_summary_mentions_uat_when_present():
+    body = _fn_body("_smgmtAncestorCarrySummary")
+    assert "awaiting UAT" in body

@@ -190,6 +190,10 @@ Index: `(repo, state)`.
 `sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
 
+**Run-artifact columns (issue #1160).** `sprints` also carries the ingested run artifact, written by `ingest_sprint_run_artifact()` at end-of-run and on lazy ingest: `issues_json`, `tokens`, `wall_clock_secs`, `reconciliation_json`, `summary_issue_url`, `summary_path`, `pr_number`, `post_sprint_json`, `estimate_accuracy`, `run_ingested_at`. The Sprint History / summary read path reads these from SQLite only — no disk fallback (issue #1161); on a cache miss it triggers a lazy ingest and returns the ingested row rather than reading raw disk (issue #1160).
+
+**Denormalized summary counts (issues #1162, #1163).** `summary_settled_done`, `summary_uat_count`, `summary_failure_count` — all `INTEGER NOT NULL DEFAULT 0`. Materialized on run finish so the finish-card / history panes render counts without recomputation. The reconcile job repairs stale counts via `update_sprint_run_counts(label, issues_json, settled_done, uat_count, failure_count)`, which overwrites `issues_json` plus the three count columns in one write.
+
 **DB is the sole source of truth for lifecycle state (sprint 74.2).** plan.json / labels / PID files are no longer read as state.
 
 - **Read:** `sprint_state.current(label)` is the only sanctioned reader (issue #1091). It returns `canonical_lifecycle(db.get_sprint(label)["state"])` — zero disk reads, zero GitHub label lookups, zero fallback. Missing row → `"unknown"`. The History pane and `_derive_outcome_lifecycle` were migrated onto it (issues #1092, #1093); GET endpoints no longer mutate plan.json (issue #1096). See `docs/architecture/sprint-lifecycle.md`.
@@ -369,6 +373,14 @@ Archives stale per-sprint runtime files for a project's *finished* sprints into 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/maintenance/sprints/cleanup` | Body `{"project": "<id>", "dry_run": false}`. Archives finished-sprint runtime files; returns `{"archived": [...], "kept_count": N, "dry_run": bool}`. With `dry_run: true` returns the same shape without moving anything (UI preview before confirmation) |
+
+### Calibration cache rebuild (issues #1332–#1334)
+
+Clears `<project-root>/.commander/calibration_cache.json` and rescans every `sprint-*-state.json` under `.commander/sprints/` and `.commander/sprints/archive/`, resolving each completed ticket's size through a fallback chain (canonical estimate JSON → sprint-state estimate → `size-*` label, read from the state file or, failing that, the local SQLite `issues` mirror — no GitHub call, issue #1341). Idempotent — running twice on the same data yields the same counts. The cache also auto-refreshes when a sprint finishes (issue #1333). Canonical estimate JSON lives at `<project-root>/.commander/estimates/issue-<N>.json` (issue #1331). Also available as the CLI `python3 scripts/rebuild_calibration_cache.py --project <slug> [--dry-run]`. See `docs/features/estimation-lifecycle.md`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/maintenance/calibration/rebuild?project=<slug>` | Rebuild the calibration cache from full sprint history; returns a count summary (`processed_count` + `by_size_counts`) |
 
 ### Docs Scaffold
 

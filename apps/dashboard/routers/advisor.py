@@ -10,6 +10,7 @@ Routes:
 """
 from __future__ import annotations
 
+import config
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -22,12 +23,18 @@ class TickBody(BaseModel):
     project: str
 
 
+def _require_advisor_enabled() -> None:
+    if config.advisor_disabled():
+        raise HTTPException(404, detail="Daily advisor is disabled")
+
+
 @router.get("/api/projects/{project}/advisor/suggestions")
 def get_advisor_suggestions(project: str):
     """Return the current draft suggestions for *project* (AC8).
 
     Returns an empty list when the advisor has never run for this project.
     """
+    _require_advisor_enabled()
     return advisor_service.get_suggestions(project)
 
 
@@ -37,6 +44,7 @@ def run_advisor_on_demand(project: str):
 
     Runs synchronously so the caller receives the suggestions in the response.
     """
+    _require_advisor_enabled()
     try:
         suggestions = advisor_service.run_advisor(project, on_demand=True)
     except ValueError as exc:
@@ -53,6 +61,7 @@ def get_advisor_look_ahead(project: str):
     Returns an empty list when the advisor has not yet produced a look-ahead.
     Never creates any GitHub objects.
     """
+    _require_advisor_enabled()
     return {"look_ahead": advisor_service.get_look_ahead(project)}
 
 
@@ -63,4 +72,5 @@ def advisor_tick(body: TickBody):
     Intended to be POSTed once a minute by the external runner (launchd / cron).
     Returns immediately; when due, the run fires in a background thread.
     """
+    _require_advisor_enabled()
     return advisor_service.tick(body.project)

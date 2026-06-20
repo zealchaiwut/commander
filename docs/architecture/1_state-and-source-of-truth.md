@@ -55,3 +55,59 @@ Neon is a **mirror**, not the primary runtime store today:
 - **Target (section 8.2):** Neon holds sprint lifecycle + ticket order for instant UI render; GitHub remains label authority; reconciliation on every refresh closes drift within seconds.
 
 Until schema is migrated on all machines, treat Neon as optional and wrap all writes in try/except — never crash the dashboard on a Neon failure.
+
+## 1.5 Four-store contract
+
+The table below is the single reference for how each store is used. Do not add
+a new read or write path without updating this table.
+
+| Store | Role | Read path | Write path |
+|-------|------|-----------|------------|
+| **GitHub** (Issues / PRs) | Authoritative state — ticket labels, sprint membership, open/closed status | `GET /repos/:owner/:repo/issues` via `gh` or MCP; cached 30 s in `_github_label_cache` | `state_machine.transition()` only — no direct label writes outside the state machine |
+| **SQLite** (`commander.db`) | Metrics — run durations, token counts, sprint history, agent events | Single read path at render time: `db.*` helpers in `apps/dashboard/db.py`; **never disk at render** | Sprint manager and hook scripts via `db.*` helpers; REST endpoints via `db.ingest_sprint_run_artifact()` |
+| **Disk JSON** (`.commander/sprints/*`, `bulk-jobs/*`, `estimates/*`) | Write-once audit — sprint plan files, run status sidecars, bulk-create job state, estimates cache | Lazy-load on cache miss only (e.g. `_get_bulk_job()` on restart); **do not read disk at render** | Sprint manager end-of-run; scripts write sidecars; never rewritten once closed |
+| **Neon Postgres** (optional) | Export / analytics — sprint/ticket rows, cross-machine settings KV, projects registry | Disabled by default (`COMMANDER_DISABLE_NEON=1`); when enabled, reads from `sprint_repo.py` helpers | `sprint_repo.py` on sprint create/complete; wrapped in `try/except` — Neon failure must never crash the dashboard |
+
+### Conflict resolution (canonical)
+
+When stores disagree, apply these rules in order:
+
+1. **GitHub wins for state** — ticket labels and sprint membership are what GitHub says, regardless of what SQLite or disk hold.
+2. **SQLite is the single read path for metrics at render** — durations, token counts, and history rows come from DB helpers only. If the DB row is missing, show a missing-data indicator, never fall back to disk.
+3. **Disk is write-once audit** — disk artifacts are ingested into SQLite at end-of-run. After ingestion, disk is not read again at render time.
+4. **Neon is an optional mirror** — when enabled, Neon may supplement analytics, but all runtime render paths fall back to SQLite if Neon is unavailable.
+
+## 1.6 Metric definitions and pane rules
+
+### Canonical settled-done count
+
+> **settled** = tickets that have moved past SIT: `uat + done + needs-rework`  
+> Formula: `total − backlog − in-progress − sit`  
+> Canonical helper: **`_settled_done_from_columns(total, columns)`** in `apps/dashboard/server.py`  
+> Frontend mirror: **`_snavSettledDone()`** in `apps/dashboard/static/project.html`
+
+The old `done + uat` formula undercounted needs-rework; `total − backlog` overcounted by treating in-progress + SIT as done. Both are incorrect and must not be used.
+
+### Which panes use which metric
+
+| Pane | Metric | Why |
+|------|--------|-----|
+| **Donut center** (sprint nav panel) | `completed` (done + uat) | Shows how many tickets crossed the finish line — in-flight work excluded |
+| **Sprint nav pill** | `settled` (`_settled_done_from_columns`) | Reflects mid-sprint forward progress including needs-rework tickets |
+| **Sidebar badge** | `settled` | Same reason as pill |
+| **Board running badge** | `settled` | Same reason as pill |
+| **History / outcome panes** | DB-backed counts from `sprint_history` / `agent_runs` | Post-run accounting; not a live GitHub count |
+
+> **Invariant:** Donut center shows COMPLETED % (done + uat); the pill/badge show PROCESSED (settled). They are intentionally different. Do not unify them.
+
+## 1.7 Render-time read rules
+
+**Do not read disk at render.** Disk artifacts (plan files, state sidecars, status JSON) are write-once records produced by the sprint manager. Reading them at HTTP request time introduces races with the manager and causes the disagreements documented in §1.3.
+
+Rules for all render-path code:
+
+- **Zero disk reads** in HTTP handlers. No `plan.json`, no `-state.json`, no `-status.json` reads inside `@app.get` / `@app.post` handlers.
+- **Zero label inference.** Do not infer sprint state from GitHub label names. Use `sprint_state.current(label)` (see [sprint-lifecycle.md § Canonical Read Contract](sprint-lifecycle.md)).
+- **Zero multi-source reconciliation at render.** Pick one store (DB for metrics, GitHub for state) and return its data. Reconciliation runs in the background, not in the HTTP path.
+
+If no SQLite row exists for a requested artifact, return 404 or `no_data`. Ingestion runs at end-of-run only (sprint manager), never in response to HTTP requests — the on-demand path was removed in #1161.

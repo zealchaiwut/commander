@@ -361,32 +361,30 @@ def test_ac4_headroom_label_shown_when_positive():
 # =============================================================================
 
 
-def test_ac5_next_up_badge_is_green():
-    """smgmt-next-badge must use green color (Next up = go signal)."""
-    next_css = _css_rule(".smgmt-next-badge")
-    assert "green" in next_css.lower() or "var(--green)" in next_css, (
-        ".smgmt-next-badge must use green — it signals the sprint is ready to run next"
-    )
-
-
-def test_ac5_draft_planned_badge_is_blue():
-    """Draft / planned badge must use blue color (neutral planning state).
-
-    The old sc-planned-badge was grey/muted.  AC5 says Draft → blue.
-    """
-    # May be sc-planned-badge (updated) or a new sc-draft-badge
-    badge_classes = [".sc-planned-badge", ".sc-draft-badge"]
+def test_ac5_draft_badge_is_blue():
+    """Pre-run DRAFT badge must use blue (pending-to-work sprints in the Draft section)."""
+    badge_classes = [".sc-draft-badge", ".sc-planned-badge", ".smgmt-draft-badge"]
     found_css = None
     for cls in badge_classes:
         if _css_exists(cls):
             found_css = _css_rule(cls)
             break
     assert found_css is not None, (
-        "A CSS rule for the Draft/planned badge must exist (.sc-planned-badge or .sc-draft-badge)"
+        "A CSS rule for the DRAFT badge must exist (.sc-draft-badge or .smgmt-draft-badge)"
     )
     assert "blue" in found_css.lower() or "var(--blue)" in found_css, (
-        "The Draft badge must use blue color (var(--blue)) per AC5 — "
-        f"not grey/muted. Got: {found_css!r}"
+        "The DRAFT badge must use blue color (var(--blue)). "
+        f"Got: {found_css!r}"
+    )
+
+
+def test_ac5_no_next_up_badge_in_board_render():
+    """NEXT UP / PLANNED badges removed — single DRAFT badge for pre-run sprints."""
+    assert "smgmt-next-badge" not in BOARD_JS, (
+        "Board render must not reference smgmt-next-badge"
+    )
+    assert "sc-draft-badge" in BOARD_JS, (
+        "Board must use sc-draft-badge for pre-run sprint cards"
     )
 
 
@@ -400,15 +398,11 @@ def test_ac5_needs_rework_badge_is_amber():
     )
 
 
-def test_ac5_needs_merge_badge_is_amber():
-    """state-finished badge must use amber color (Needs merge = awaiting operator action).
-
-    The old state-finished used steel (blue-grey) which doesn't signal urgency.
-    AC5 mandates amber for 'Needs merge' — it awaits operator action.
-    """
+def test_ac5_ready_to_merge_badge_is_green():
+    """state-finished badge must use green (ready to merge = success awaiting sign-off)."""
     finished_css = _css_rule(".smgmt-state-badge.state-finished")
-    assert "amber" in finished_css.lower() or "var(--amber)" in finished_css, (
-        ".smgmt-state-badge.state-finished must use amber — 'Needs merge' awaits operator action. "
+    assert "green" in finished_css.lower() or "var(--green)" in finished_css, (
+        ".smgmt-state-badge.state-finished must use green for READY TO MERGE. "
         f"Got: {finished_css!r}"
     )
 
@@ -420,9 +414,8 @@ def test_ac5_no_badge_uses_loud_red_fill():
     draft, needs-merge, needs-rework) must use calm tones.
     """
     planning_badge_classes = [
-        ".smgmt-next-badge",
-        ".sc-planned-badge",
         ".sc-draft-badge",
+        ".smgmt-draft-badge",
         ".smgmt-state-badge.state-rework",
         ".smgmt-state-badge.state-finished",
         ".smgmt-state-badge.state-partial",

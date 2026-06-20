@@ -778,20 +778,19 @@ def test_ac11_orch_panel_exists_in_run_shell():
     )
 
 
-def test_ac11_orch_panel_below_metrics():
-    """Orchestrator panel appears after the metrics strip in the run-shell HTML."""
+def test_ac11_orch_panel_below_run_head():
+    """Orchestrator panel appears directly after run-head in the run-shell HTML."""
     shell = _html_in_run_shell()
-    metrics_pos = shell.find('id="smgmt-metrics"')
+    head_pos = shell.find('id="smgmt-run-head"')
     orch_pos = (
         shell.find('id="smgmt-orch-panel"') if 'id="smgmt-orch-panel"' in shell
         else shell.find('id="smgmt-orchestrator-panel"') if 'id="smgmt-orchestrator-panel"' in shell
         else shell.find("orch-panel")
     )
-    assert metrics_pos != -1, "smgmt-metrics not found in run-shell"
+    assert head_pos != -1, "smgmt-run-head not found in run-shell"
     assert orch_pos != -1, "Orchestrator panel not found in run-shell"
-    assert orch_pos > metrics_pos, (
-        "Orchestrator panel appears BEFORE the metrics strip — "
-        "it must be placed directly BELOW the header stat row (metrics)"
+    assert orch_pos > head_pos, (
+        "Orchestrator panel must appear directly below the run-head header"
     )
 
 
@@ -882,7 +881,7 @@ def test_ac12_orch_panel_default_line_count():
         "tail_lines=3" in fn
         or "tail=3" in fn
         or "tailLines = 3" in fn
-        or "3" in fn  # likely 3 lines default — loose check
+        or "_SMGMT_ORCH_COLLAPSED_LINES" in PROJECT_HTML
         or "ORCH_DEFAULT_LINES" in PROJECT_HTML
         or "orchDefault" in PROJECT_HTML
     )
@@ -909,7 +908,7 @@ def test_ac12_show_more_control():
     )
     assert has_show_more, (
         "No 'Show more' control found for the Orchestrator panel — "
-        "the panel must have a 'Show more' button to expand to ~15 lines"
+        "the panel must have a 'Show more' button to expand the full sprint log"
     )
 
 
@@ -929,8 +928,8 @@ def test_ac12_show_less_control():
     )
 
 
-def test_ac12_show_more_expands_to_15_lines():
-    """Orchestrator panel expands to approximately 15 lines on Show more."""
+def test_ac12_show_more_expands_to_full_sprint_log():
+    """Orchestrator panel loads the full sprint log on Show more."""
     fn_name = None
     for name in (
         "_smgmtOrchToggleMore",
@@ -946,28 +945,26 @@ def test_ac12_show_more_expands_to_15_lines():
             break
     assert fn_name, "No Orchestrator expand/toggle function found"
     fn = _fn_body(fn_name)
-    has_15 = (
-        "15" in fn
-        or "tail_lines=15" in fn
-        or "ORCH_EXPANDED_LINES" in PROJECT_HTML
-        or "orchExpanded" in PROJECT_HTML
+    has_full = (
+        "_SMGMT_ORCH_FULL_LINES" in PROJECT_HTML
+        or "displayAll" in PROJECT_HTML
+        or "2000" in fn
+        or "tail_lines=2000" in fn
     )
-    if not has_15:
-        # Check the broader orch context for 15
+    if not has_full:
         for name in (
             "_smgmtOrchPanelUpdate",
-            "_smgmtOrchPanel",
+            "_smgmtOrchFetchLines",
             "_smgmtOrchToggleMore",
-            "_smgmtOrchShowMore",
         ):
             if name in PROJECT_HTML:
                 f2 = _fn_body(name)
-                if "15" in f2:
-                    has_15 = True
+                if "_SMGMT_ORCH_FULL_LINES" in f2 or "displayAll" in f2 or "2000" in f2:
+                    has_full = True
                     break
-    assert has_15, (
-        "Orchestrator panel does not use ~15 lines in expanded mode — "
-        "clicking 'Show more' must expand the panel to approximately 15 scrollable lines"
+    assert has_full, (
+        "Orchestrator panel does not load the full sprint log in expanded mode — "
+        "clicking 'Show more' must fetch the entire dispatch log for scrolling"
     )
 
 

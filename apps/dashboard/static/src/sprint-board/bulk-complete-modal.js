@@ -66,15 +66,12 @@ export async function smgmtBulkCompleteSprint(label) {
   _bcOpen();
 
   try {
-    const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete-preview`
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    const preview = await res.json();
+    const preview = await _bcFetchPreview(owner, repoName, label);
     _bcPreview = preview;
+
+    if (preview.conflict_error) {
+      throw new Error(preview.conflict_error);
+    }
 
     const listEl = document.getElementById('bc-ticket-list');
     const allTickets = preview.all_tickets || [];
@@ -120,6 +117,27 @@ export async function smgmtBulkCompleteSprint(label) {
   }
 }
 
+async function _bcFetchPreview(owner, repoName, label) {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete-preview`,
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = err.detail || `HTTP ${res.status}`;
+    if (res.status === 409 && /merge conflict/i.test(detail)) {
+      throw new Error(`Merge conflict — bulk complete stopped: ${detail}`);
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+/** Re-query merge chain after each merge — parent→develop only appears once child→parent lands. */
+async function _bcRemainingMergeSteps(owner, repoName, label) {
+  const preview = await _bcFetchPreview(owner, repoName, label);
+  return preview.merge_steps || [];
+}
+
 async function _bcMergeStep(owner, repoName, step) {
   const res = await fetch(
     `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprint-branch-merge`,
@@ -137,7 +155,11 @@ async function _bcMergeStep(owner, repoName, step) {
   );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const detail = err.detail || `HTTP ${res.status}`;
+    if (res.status === 409 && /merge conflict/i.test(detail)) {
+      throw new Error(`Merge conflict — bulk complete stopped: ${detail}`);
+    }
+    throw new Error(detail);
   }
   return res.json();
 }
@@ -149,8 +171,9 @@ export async function _bcConfirm() {
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
   const label = _bcLabel;
-  const mergeSteps = _bcPreview.merge_steps || [];
   const allTickets = _bcPreview.all_tickets || [];
+  let mergeSteps = _bcPreview.merge_steps || [];
+  const settleSteps = 2; // mark sprints completed + refresh board
 
   const confirmBtn = document.getElementById('bc-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Completing…'; }
@@ -158,8 +181,12 @@ export async function _bcConfirm() {
   _bcClose();
 
   const refreshLabel = 'Refreshing board…';
-  const totalSteps = mergeSteps.length + allTickets.length + 2;
   let doneSteps = 0;
+
+  const _bcRecalcTotal = (pendingMerges) =>
+    doneSteps + pendingMerges.length + allTickets.length + settleSteps;
+
+  let totalSteps = _bcRecalcTotal(mergeSteps);
 
   _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}…`, {
     progress: true,
@@ -169,13 +196,24 @@ export async function _bcConfirm() {
   _smgmtBoardLog('Starting bulk complete…', 'step');
 
   try {
-    for (const step of mergeSteps) {
-      const stepLabel = step.label || `${step.head} → ${step.base}`;
-      _smgmtBoardLog(stepLabel, 'step');
-      await _bcMergeStep(owner, repoName, step);
-      doneSteps += 1;
-      _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog(`✓ ${stepLabel}`, 'ok');
+    while (mergeSteps.length > 0) {
+      for (const step of mergeSteps) {
+        const stepLabel = step.label || `${step.head} → ${step.base}`;
+        _smgmtBoardLog(stepLabel, 'step');
+        await _bcMergeStep(owner, repoName, step);
+        doneSteps += 1;
+        _smgmtBoardProgress(doneSteps, totalSteps);
+        _smgmtBoardLog(`✓ ${stepLabel}`, 'ok');
+      }
+      mergeSteps = await _bcRemainingMergeSteps(owner, repoName, label);
+      if (mergeSteps.length > 0) {
+        totalSteps = _bcRecalcTotal(mergeSteps);
+        _smgmtBoardLog(
+          `Re-checking merge chain (${mergeSteps.length} step${mergeSteps.length !== 1 ? 's' : ''} remaining)…`,
+          'step',
+        );
+        _smgmtBoardProgress(doneSteps, totalSteps);
+      }
     }
 
     for (const t of allTickets) {

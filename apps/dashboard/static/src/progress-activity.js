@@ -17,6 +17,7 @@
  * Exported:
  *   renderProgressActivity(payload, opts?)  → HTML string
  *   updateProgressActivityLog(rootId, logTail, colorize?)  → DOM patch (log only)
+ *   patchProgressActivityInPlace(rootId, payload, opts?) → DOM patch (bar + log)
  *   paToggleLog(rootId)  → toggle collapse state of mounted log stream
  *   PA_CSS  → string of component CSS (inject once via injectProgressActivityCss())
  *   injectProgressActivityCss()  → idempotent <style> injector
@@ -247,6 +248,43 @@ export function updateProgressActivityLog(rootId, logTail, colorize) {
     ? lines.map((l) => _logLineHtml(l, colorize || null)).join("")
     : emptyMsg;
   streamEl.scrollTop = streamEl.scrollHeight;
+}
+
+/**
+ * Patch a mounted bar-mode ProgressActivity without replacing the whole tree.
+ * Returns false when a full renderProgressActivity() call is required.
+ */
+export function patchProgressActivityInPlace(rootId, payload, opts) {
+  if (typeof document === "undefined" || !rootId) return false;
+  const root = document.getElementById(rootId);
+  if (!root) return false;
+
+  const status = payload.status || "running";
+  if (status === "done" || status === "error") return false;
+
+  const mode = payload.mode || _detectMode(payload);
+  if (mode !== "bar") return false;
+
+  const fill = root.querySelector(".pa-bar-fill");
+  if (!fill) return false;
+
+  const done = Number(payload.done ?? 0);
+  const total = Number(payload.total ?? 0);
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  fill.style.transform = `scaleX(${pct / 100})`;
+
+  const cur = root.querySelector(".pa-current");
+  if (cur && payload.current != null) cur.textContent = String(payload.current);
+
+  const counts = root.querySelector(".pa-counts");
+  if (counts) {
+    counts.textContent = total > 0 ? `${done} of ${total}` : "";
+  }
+
+  if (Array.isArray(payload.log_tail)) {
+    updateProgressActivityLog(rootId, payload.log_tail, opts && opts.colorize);
+  }
+  return true;
 }
 
 /**

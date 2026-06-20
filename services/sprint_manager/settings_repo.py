@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,7 +54,91 @@ def _fkey(scope: str, project: Optional[str], key: str) -> str:
     return f"{scope}|{project or ''}|{key}"
 
 
+# ── Durable sqlite backend (issue #8) ────────────────────────────────────────
+# When Neon is disabled, prefer the local sqlite DB (DB_PATH, e.g. commander.db)
+# over the per-clone settings_store.json so estimation/pipeline/etc. settings
+# survive deploys instead of resetting to schema defaults. The JSON file stays
+# as a last-resort fallback (and as the seed for a one-time back-fill).
+_kv_init_done: set[str] = set()
+
+
+def _sqlite_db_path() -> Optional[str]:
+    p = (os.environ.get("DB_PATH") or "").strip()
+    return p or None
+
+
+def _kv_conn() -> Optional[sqlite3.Connection]:
+    """Open the settings sqlite DB (ensuring table + one-time back-fill), or None."""
+    path = _sqlite_db_path()
+    if not path:
+        return None
+    try:
+        conn = sqlite3.connect(path, timeout=5)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings_kv ("
+            " scope TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',"
+            " key TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT,"
+            " PRIMARY KEY (scope, project, key))"
+        )
+        if path not in _kv_init_done:
+            _kv_backfill_from_json(conn)
+            _kv_init_done.add(path)
+        return conn
+    except Exception:
+        return None
+
+
+def _kv_backfill_from_json(conn: sqlite3.Connection) -> None:
+    """Seed the sqlite table from settings_store.json once, so values customized
+    before this change (e.g. estimation minutes) carry over."""
+    try:
+        if conn.execute("SELECT COUNT(*) FROM settings_kv").fetchone()[0]:
+            return  # already populated — don't clobber
+        p = _fallback_store_path()
+        store = json.loads(p.read_text()) if p.exists() else {}
+    except Exception:
+        return
+    if not store:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for fkey, value in store.items():
+        parts = fkey.split("|", 2)
+        if len(parts) != 3:
+            continue
+        scope, project, key = parts
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings_kv (scope, project, key, value, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (scope, project, key, json.dumps(value), now),
+            )
+        except Exception:
+            continue
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+
 def _fallback_read_all() -> dict:
+    conn = _kv_conn()
+    if conn is not None:
+        try:
+            rows = conn.execute(
+                "SELECT scope, project, key, value FROM settings_kv"
+            ).fetchall()
+            out: dict = {}
+            for scope, project, key, value in rows:
+                try:
+                    out[_fkey(scope, project or None, key)] = json.loads(value)
+                except Exception:
+                    continue
+            return out
+        except Exception:
+            pass
+        finally:
+            conn.close()
+    # Last resort: per-clone JSON file.
     p = _fallback_store_path()
     if not p.exists():
         return {}
@@ -63,6 +149,27 @@ def _fallback_read_all() -> dict:
 
 
 def _fallback_write_all(data: dict) -> None:
+    conn = _kv_conn()
+    if conn is not None:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute("DELETE FROM settings_kv")
+            for fkey, value in data.items():
+                parts = fkey.split("|", 2)
+                if len(parts) != 3:
+                    continue
+                scope, project, key = parts
+                conn.execute(
+                    "INSERT INTO settings_kv (scope, project, key, value, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (scope, project, key, json.dumps(value), now),
+                )
+            conn.commit()
+            return
+        except Exception:
+            pass
+        finally:
+            conn.close()
     try:
         _fallback_store_path().write_text(json.dumps(data, indent=2))
     except Exception:

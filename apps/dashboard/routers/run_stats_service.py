@@ -125,6 +125,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
     agent_seconds = {a: 0 for a in SPLIT_AGENTS}
     total_tokens = 0
     fix_round_count = 0
+    fix_round_seconds = 0
     fix_round_tickets: list[int] = []
     latest_end_dt: Optional[datetime] = None
     # issue #920: per-backend coder split (cline vs claude-code run counts and seconds)
@@ -166,6 +167,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
         ticket = int(r.get("issue_number") or 0)
         if is_fix:
             fix_round_count += 1
+            fix_round_seconds += dur
             if ticket and ticket not in fix_round_tickets:
                 fix_round_tickets.append(ticket)
 
@@ -220,7 +222,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
     # clean runs omit the field so the frontend never paints a spurious ✕.
     lifecycle = None
     try:
-        row = _db().get_sprint(label)
+        row = _db().get_sprint(label, project=project)
         if row:
             lifecycle = _db().canonical_lifecycle(row.get("state"))
     except Exception:
@@ -240,6 +242,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
         "parallel_saved_seconds": parallel_saved_seconds,
         "split": split,
         "fix_round_count": fix_round_count,
+        "fix_round_seconds": fix_round_seconds,
         "fix_round_tickets": fix_round_tickets,
         "slowest_ticket": slowest_ticket,
         "crash": crash,

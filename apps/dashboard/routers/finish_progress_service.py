@@ -60,6 +60,25 @@ def unsubscribe(key: str, q: asyncio.Queue) -> None:
         subs.remove(q)
 
 
+def _norm_error_str(err) -> str:
+    """Coerce merge/close errors to a string for logging and comparisons."""
+    if err is None:
+        return ""
+    if isinstance(err, str):
+        return err
+    if isinstance(err, (list, tuple)):
+        parts = [_norm_error_str(x) for x in err if x is not None]
+        return "; ".join(p for p in parts if p)
+    return str(err)
+
+
+def _merge_failure_message(errors: list[str]) -> str:
+    joined = "; ".join(_norm_error_str(e) for e in errors if e)
+    if any(_norm_error_str(e) and "merge conflict" in _norm_error_str(e).lower() for e in errors):
+        return f"Merge conflict — sprint not completed. {joined}".strip()
+    return f"Merge failed — sprint not completed. {joined}".strip()
+
+
 async def _emit(key: str, snapshot: dict) -> None:
     """Persist snapshot and fan-out to all subscriber queues."""
     _FINISH_JOBS[key] = snapshot
@@ -91,7 +110,7 @@ async def run_finish_sprint(
 ) -> None:
     """Run finish-sprint steps in the background, emitting progress events.
 
-    Steps:
+    Steps (merge must succeed before any settlement):
       1. Merge sprint branch chain      (1 step — done=1)
       2. Close each selected issue      (N steps — done=1+i+1 per issue)
       3. Update plan.json + caches      (1 step — done=total)
@@ -131,40 +150,60 @@ async def run_finish_sprint(
 
         # Fatal if label can't be parsed — propagates to outer except (AC8).
         base_label = srv._sprint_label_base(label)
+        merge_errors: list[str] = []
+        merge_pr_number: int | None = None
 
         try:
-            merge_errors: list[str] = await asyncio.to_thread(
+            merge_errors, merge_pr_number = await asyncio.to_thread(
                 srv._merge_sprint_branches_for_label, repo, label
             )
-            errors.extend(merge_errors)
+            if not isinstance(merge_errors, list):
+                merge_errors = []
             for err in merge_errors:
                 _log(f"Merge error: {err}")
             if not merge_errors:
                 _log("Sprint branches merged.")
         except Exception as exc:
-            errors.append(f"Merge step failed: {exc}")
+            merge_errors = [f"Merge step failed: {exc}"]
             _log(f"Merge error: {exc}")
-            base_label = label  # fallback
 
         if merge_pr and sprint_pr_url:
             _url = sprint_pr_url
 
-            def _merge_pr() -> None:
+            def _merge_pr() -> str | None:
                 r = subprocess.run(
                     ["gh", "pr", "merge", _url, "--repo", repo, "--merge", "--delete-branch"],
                     capture_output=True, text=True, check=False,
                 )
                 if r.returncode != 0:
-                    errors.append(f"PR merge failed: {r.stderr.strip()}")
-                    _log(f"PR merge failed: {r.stderr.strip()}")
-                else:
-                    _log("Sprint PR merged.")
+                    return r.stderr.strip() or "PR merge failed"
+                return None
 
             try:
-                await asyncio.to_thread(_merge_pr)
+                pr_err = await asyncio.to_thread(_merge_pr)
+                if pr_err:
+                    merge_errors.append(f"PR merge failed: {pr_err}")
+                    _log(f"PR merge failed: {pr_err}")
+                else:
+                    _log("Sprint PR merged.")
             except Exception as exc:
-                errors.append(f"PR merge error: {exc}")
+                merge_errors.append(f"PR merge error: {exc}")
                 _log(f"PR merge error: {exc}")
+
+        if merge_errors:
+            msg = _merge_failure_message(merge_errors)
+            _log(msg)
+            error_snap: dict = {
+                "status": "error",
+                "mode": "bar",
+                "error": msg,
+                "log_tail": list(log_tail),
+                "done": 1,
+                "total": total,
+                "errors": merge_errors,
+            }
+            await _emit(key, error_snap)
+            return
 
         snapshot = {**snapshot, "done": 1, "log_tail": list(log_tail)}
         await _emit(key, snapshot)
@@ -202,7 +241,6 @@ async def run_finish_sprint(
 
         try:
             project_root = srv._project_root_path(repo)
-            base_label = srv._sprint_label_base(label)
             if srv._is_child_sprint_label(label):
                 finish_labels = [label]
             else:
@@ -225,6 +263,12 @@ async def run_finish_sprint(
                     ended_at=datetime.now(timezone.utc).isoformat(),
                     end_reason="merge_sprint",
                 )
+            if merge_pr_number:
+                try:
+                    import db as _db  # noqa: PLC0415
+                    _db.update_sprint_pr_number(base_label, merge_pr_number)
+                except Exception:
+                    pass
         except Exception as exc:
             errors.append(f"Cleanup error: {exc}")
             _log(f"Cleanup error: {exc}")
@@ -237,10 +281,7 @@ async def run_finish_sprint(
 
         _log("Done.")
 
-        pr_failed = any("merge" in e.lower() or "PR" in e for e in errors)
-        parts: list[str] = [f"{closed} issue{'s' if closed != 1 else ''} closed"]
-        if not pr_failed:
-            parts.append("sprint merged")
+        parts: list[str] = [f"{closed} issue{'s' if closed != 1 else ''} closed", "sprint merged"]
         result = ", ".join(parts)
         if errors:
             n_err = len(errors)
@@ -262,7 +303,7 @@ async def run_finish_sprint(
         try:
             asyncio.create_task(srv.broadcast({
                 "type": "update",
-                "event": {"event_type": "sprint_finished", "sprint_label": base_label},
+                "event": {"event_type": "sprint_finished", "sprint_label": label},
             }))
         except Exception:
             pass

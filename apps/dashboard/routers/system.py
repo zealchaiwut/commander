@@ -30,7 +30,7 @@ def get_version():
 
 @router.get("/api/gh-auth-status")
 def get_gh_auth_status():
-    """Return the GitHub CLI auth preflight result from startup (issue #424)."""
+    """Return the GitHub CLI auth preflight result (issue #424)."""
     return system_service.get_gh_auth_status()
 
 
@@ -77,3 +77,28 @@ def post_create_label(body: CreateLabelBody):
         description=body.description,
         repo=body.repo,
     )
+
+
+@router.post("/api/gh-auth/login/start")
+def start_gh_auth_login():
+    return system_service.start_gh_auth_login()
+
+
+@router.get("/api/gh-auth/login/status")
+def get_gh_auth_login_status():
+    return system_service.get_gh_auth_login_status()
+
+
+@router.post("/api/gh-auth/login/input")
+def send_gh_auth_input(payload: dict):
+    return system_service.send_gh_auth_input(payload)
+
+
+@router.post("/api/gh-auth/login/cancel")
+def cancel_gh_auth_login():
+    return system_service.cancel_gh_auth_login()
+
+
+@router.post("/api/gh-auth/login/token")
+def gh_auth_login_with_token(payload: dict):
+    return system_service.gh_auth_login_with_token(payload)

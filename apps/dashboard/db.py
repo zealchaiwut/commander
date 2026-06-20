@@ -573,8 +573,14 @@ _GUARD_FROM: frozenset[str] = frozenset({"running"})
 _GUARD_TO: frozenset[str] = frozenset({"ready_to_merge", "needs_rework", "completed"})
 
 # Reconciler-only promotions not in the general edge table (issue #1137).
+# needs_rework→completed (B2): a superseded ancestor whose entire lineage has
+# merged into develop is completed even though its own tickets show rework — the
+# rework moved to a child that has since merged up. Guarded by a real
+# merge-to-develop check in the reconciler, so this edge can never auto-complete
+# a sprint whose work is not actually in develop.
 _RECONCILE_ONLY_EDGES: frozenset[tuple[str, str]] = frozenset({
     ("needs_rework", "ready_to_merge"),
+    ("needs_rework", "completed"),
 })
 
 
@@ -607,11 +613,35 @@ def transition_sprint_state(
     rejects any running→terminal transition where actor != "manager". Returns a
     TransitionResult; never raises on a guard failure.
     """
+    # B1: a child sprint (``sprint-N.M``) must persist parent_label = base
+    # ``sprint-N`` so children_of()'s DB-primary lookup resolves the whole
+    # lineage. The running-state writer was historically called without
+    # parent_label, leaving it NULL — which forced a disk-glob fallback that
+    # silently dropped descendants once any sibling row existed. Derive the base
+    # here so every transition self-heals, regardless of the caller.
+    if parent_label is None and label and "." in label and label.startswith("sprint-"):
+        _base = label.split(".", 1)[0]
+        if _base[len("sprint-"):].isdigit():
+            parent_label = _base
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        row = conn.execute(
-            "SELECT state FROM sprints WHERE label = ?", (label,)
-        ).fetchone()
+        # Scope by project: sprint labels are unique only per repo, so an unscoped
+        # read picked up another project's same-numbered sprint and reported a
+        # bogus 'completed→running' illegal edge (e.g. commander sprint-65 blocking
+        # perf-coach sprint-65). When this project has no row yet, current falls to
+        # 'draft' so the fresh run's →running is legal.
+        # NB: the sprints table still has label as its sole PRIMARY KEY, so the
+        # WRITE below can overwrite another project's same-labelled row — the real
+        # fix is a composite (label, project) key (tracked separately).
+        if project:
+            row = conn.execute(
+                "SELECT state FROM sprints WHERE label = ? AND project = ?",
+                (label, project),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT state FROM sprints WHERE label = ?", (label,)
+            ).fetchone()
     current = canonical_lifecycle(row["state"] if row else "draft")
 
     allowed = _LEGAL_SPRINT_EDGES.get(current, frozenset())
@@ -724,6 +754,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     _migrate_sprints_state_check(conn)
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
+    _backfill_child_parent_labels(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -751,6 +782,9 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("post_sprint_json", "TEXT"),
     ("estimate_accuracy", "REAL"),
     ("run_ingested_at", "TEXT"),
+    ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -765,6 +799,29 @@ def _migrate_sprints_run_artifacts(conn: sqlite3.Connection) -> None:
     for col, typedef in _RUN_ARTIFACT_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE sprints ADD COLUMN {col} {typedef}")
+
+
+def _backfill_child_parent_labels(conn: sqlite3.Connection) -> None:
+    """One-time heal: set parent_label = base for child sprints left NULL.
+
+    Child-sprint rows written before parent_label was persisted (the running
+    writer was called without it) keep NULL, which makes children_of()'s
+    DB-primary lookup miss the lineage. Derive base ``sprint-N`` from the label
+    via the first dot. Idempotent: only touches NULL rows matching sprint-N.M.
+    """
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+    conn.execute(
+        """
+        UPDATE sprints
+           SET parent_label = substr(label, 1, instr(label, '.') - 1)
+         WHERE parent_label IS NULL
+           AND label GLOB 'sprint-[0-9]*.[0-9]*'
+        """
+    )
 
 
 def ingest_sprint_run_artifact(
@@ -798,6 +855,9 @@ def ingest_sprint_run_artifact(
                 fields["post_sprint_json"],
                 fields["estimate_accuracy"],
                 ingested_at,
+                fields["summary_settled_done"],
+                fields["summary_uat_count"],
+                fields["summary_failure_count"],
             ]
             project_sql = ""
             if (project or "").strip():
@@ -815,7 +875,10 @@ def ingest_sprint_run_artifact(
                     pr_number = ?,
                     post_sprint_json = ?,
                     estimate_accuracy = ?,
-                    run_ingested_at = ?{project_sql}
+                    run_ingested_at = ?,
+                    summary_settled_done = ?,
+                    summary_uat_count = ?,
+                    summary_failure_count = ?{project_sql}
                 WHERE label = ?
                 """,
                 tuple(updates) + (label,),
@@ -826,8 +889,10 @@ def ingest_sprint_run_artifact(
                 INSERT INTO sprints (label, project, state, created_at, run_ingested_at,
                                      issues_json, tokens, wall_clock_secs,
                                      reconciliation_json, summary_issue_url, summary_path,
-                                     pr_number, post_sprint_json, estimate_accuracy)
-                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     pr_number, post_sprint_json, estimate_accuracy,
+                                     summary_settled_done, summary_uat_count,
+                                     summary_failure_count)
+                VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     label,
@@ -843,6 +908,9 @@ def ingest_sprint_run_artifact(
                     fields["pr_number"],
                     fields["post_sprint_json"],
                     fields["estimate_accuracy"],
+                    fields["summary_settled_done"],
+                    fields["summary_uat_count"],
+                    fields["summary_failure_count"],
                 ),
             )
         conn.commit()
@@ -869,6 +937,36 @@ def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
         conn.execute(
             "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
             (json.dumps(reconciliation), label),
+        )
+        conn.commit()
+
+
+def update_sprint_run_counts(
+    label: str,
+    issues_json: str,
+    summary_settled_done: int,
+    summary_uat_count: int,
+    summary_failure_count: int,
+) -> None:
+    """Overwrite issues_json and denormalized count columns (reconcile path)."""
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            UPDATE sprints SET
+                issues_json = ?,
+                summary_settled_done = ?,
+                summary_uat_count = ?,
+                summary_failure_count = ?
+            WHERE label = ?
+            """,
+            (
+                issues_json,
+                int(summary_settled_done),
+                int(summary_uat_count),
+                int(summary_failure_count),
+                label,
+            ),
         )
         conn.commit()
 
@@ -1028,6 +1126,9 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         ("attempt_kind", "TEXT"),
         ("log_path", "TEXT"),
         ("backend", "TEXT"),
+        # Owning project (owner/repo). Sprint labels are unique only per repo, so
+        # without this a same-numbered sprint in another project mixes in here.
+        ("project", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -1124,6 +1225,7 @@ def record_agent_start(
     attempt_kind: str | None = None,
     log_path: str | None = None,
     backend: str | None = None,
+    project: str | None = None,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -1143,10 +1245,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path, backend) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path, backend, project) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path, backend),
+             worktree_sha, base_sha, attempt_kind, log_path, backend, project),
         )
         conn.commit()
         return cur.lastrowid
@@ -1243,10 +1345,26 @@ def update_worktree_shas(
         conn.commit()
 
 
-def agent_runs_for_sprint(sprint_label: str) -> list[dict]:
-    """Return all agent_runs rows for a sprint, ordered by issue then start (#764)."""
+def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list[dict]:
+    """Return all agent_runs rows for a sprint, ordered by issue then start (#764).
+
+    When *project* is given, rows are scoped to it — sprint labels are unique only
+    per repo, so an unscoped read mixes a same-numbered sprint from another
+    project. Legacy rows written before the project column existed have NULL
+    project; if the project filter finds none, fall back to the label-only read so
+    pre-migration sprints still render (their cross-project bleed, if any, is
+    masked downstream by the issue-mirror filter).
+    """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
+        if project:
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE sprint_label = ? AND project = ? "
+                "ORDER BY issue_number, id",
+                (sprint_label, project),
+            ).fetchall()
+            if rows:
+                return [dict(r) for r in rows]
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",
@@ -1367,10 +1485,31 @@ def rename_sprint(old_label: str, new_label: str) -> None:
         conn.commit()
 
 
-def get_sprint(label: str) -> dict | None:
-    """Return the sprints row for `label` as a dict, or None (issue #757)."""
+def get_sprint(label: str, project: str | None = None) -> dict | None:
+    """Return the sprints row for `label` as a dict, or None (issue #757).
+
+    When ``project`` is set, never return a row owned by a different project
+  (labels like ``sprint-64`` are only unique per repo, not globally).
+    """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
+        if project is not None:
+            prow = (project or "").strip()
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE label = ? AND project = ?",
+                (label, prow),
+            ).fetchone()
+            if row:
+                return dict(row)
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE label = ?", (label,)
+            ).fetchone()
+            if not row:
+                return None
+            stored = (row["project"] or "").strip()
+            if stored and stored != prow:
+                return None
+            return dict(row)
         row = conn.execute(
             "SELECT * FROM sprints WHERE label = ?", (label,)
         ).fetchone()

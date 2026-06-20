@@ -14,7 +14,7 @@
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, loadSprintMgmt,
    _fsLabel:writable, _fsPreview:writable, _fsActiveJob:writable,
-   renderProgressActivity */
+   renderProgressActivity, patchProgressActivityInPlace */
 
 export function _fsOpen() {
   _setBodyInert(["fs-backdrop", "fs-modal"]);
@@ -109,18 +109,14 @@ function _fsUpdateProgress(snap) {
   const slot = _fsProgressSlot();
   if (!slot || slot.classList.contains("hidden")) return;
 
-  const logEl = document.getElementById("pa-log-stream-fs-pa");
-  const atBottom =
-    !logEl || logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 5;
-
-  slot.innerHTML = renderProgressActivity(snap, {
-    id: "fs-pa",
+  const patched = patchProgressActivityInPlace("fs-pa", snap, {
     retryFn: "_fsRetry",
   });
-
-  if (atBottom) {
-    const newLog = document.getElementById("pa-log-stream-fs-pa");
-    if (newLog) newLog.scrollTop = newLog.scrollHeight;
+  if (!patched) {
+    slot.innerHTML = renderProgressActivity(snap, {
+      id: "fs-pa",
+      retryFn: "_fsRetry",
+    });
   }
 }
 

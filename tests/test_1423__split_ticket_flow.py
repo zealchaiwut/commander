@@ -21,7 +21,7 @@ import sys
 import json
 import py_compile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
@@ -310,6 +310,7 @@ def test_ac5_children_trigger_estimate_run():
     }
 
     triggered_estimates = []
+
     def fake_trigger(issue_num, project, repo):
         triggered_estimates.append(issue_num)
 

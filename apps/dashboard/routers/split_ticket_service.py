@@ -102,7 +102,7 @@ def _parse_ba_suggest_output(raw: Optional[str]) -> dict:
         return _empty
 
     try:
-        data = json.loads(text[start : end + 1])
+        data = json.loads(text[start:end + 1])
     except (json.JSONDecodeError, ValueError):
         return _empty
 

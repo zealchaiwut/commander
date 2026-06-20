@@ -6,7 +6,7 @@ Endpoints:
 
 Route handlers are thin; all business logic lives in split_ticket_service.
 """
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel

@@ -30,8 +30,12 @@ def load_xl_dismissed(project_root: Path, sprint_label: str) -> set[int]:
         return set()
 
 
-def save_xl_dismissed(project_root: Path, sprint_label: str, dismissed: set[int]) -> None:
-    """Persist the full set of dismissed issue numbers for this sprint."""
+def save_xl_dismissed(
+    project_root: Path,
+    sprint_label: str,
+    dismissed: set[int],
+) -> None:
+    """Persist the dismissed issue numbers for this sprint."""
     path = _xl_dismiss_path(project_root, sprint_label)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sorted(dismissed)), encoding="utf-8")

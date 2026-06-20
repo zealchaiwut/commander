@@ -117,7 +117,11 @@ async def preflight_fix(sprint_label: str, project: str):
         needs_ac = not _fill_ac.has_acceptance_criteria(iss.get("body") or "")
         needs_size = not _issue_has_estimate(iss, estimates_dir)
         if needs_ac or needs_size:
-            work.append({"num": iss["number"], "needs_ac": needs_ac, "needs_size": needs_size})
+            work.append({
+                "num": iss["number"],
+                "needs_ac": needs_ac,
+                "needs_size": needs_size,
+            })
 
     def _sse(event: str, payload) -> str:
         return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
@@ -126,7 +130,16 @@ async def preflight_fix(sprint_label: str, project: str):
         total = len(work)
         if total == 0:
             yield _sse("log", "No auto-fixable pre-flight issues found.")
-            yield _sse("done", {"filled": 0, "estimated": 0, "skipped": 0, "errors": [], "total": 0})
+            yield _sse(
+                "done",
+                {
+                    "filled": 0,
+                    "estimated": 0,
+                    "skipped": 0,
+                    "errors": [],
+                    "total": 0,
+                },
+            )
             return
 
         filled = estimated = skipped = 0
@@ -136,9 +149,17 @@ async def preflight_fix(sprint_label: str, project: str):
         for idx, item in enumerate(work, start=1):
             num = item["num"]
             if item["needs_ac"]:
-                yield _sse("log", f"Generating acceptance criteria for #{num} ({idx}/{total})…")
+                yield _sse(
+                    "log",
+                    f"Generating acceptance criteria for #{num} ({idx}/{total})…",
+                )
                 try:
-                    status, err = await asyncio.to_thread(_fill_ac.fill_issue, num, repo, False)
+                    status, err = await asyncio.to_thread(
+                        _fill_ac.fill_issue,
+                        num,
+                        repo,
+                        False,
+                    )
                     if status == "filled":
                         filled += 1
                     elif status == "skipped":
@@ -161,10 +182,18 @@ async def preflight_fix(sprint_label: str, project: str):
 
         srv.github_client.invalidate("open_issues_body:")
         srv.github_client.invalidate("open_issues:")
-        summary = {"filled": filled, "estimated": estimated, "skipped": skipped,
-                   "errors": errors, "total": total}
-        yield _sse("log", f"Done — {filled} AC added, {estimated} estimated"
-                          + (f", {len(errors)} error(s)" if errors else "") + ".")
+        summary = {
+            "filled": filled,
+            "estimated": estimated,
+            "skipped": skipped,
+            "errors": errors,
+            "total": total,
+        }
+        msg = f"Done — {filled} AC added, {estimated} estimated"
+        if errors:
+            msg += f", {len(errors)} error(s)"
+        msg += "."
+        yield _sse("log", msg)
         yield _sse("done", summary)
 
     return StreamingResponse(
@@ -179,8 +208,9 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
     """Run DAG cycle detection for a sprint before dispatch.
 
     Returns {"has_cycle": false} when acyclic.
-    Returns {"has_cycle": true, "error": "cycle_detected", "cycles": [...]} when cycle(s) found.
-    Returns {"has_cycle": false, "warning": "dag_builder_unavailable"} if dag_builder not loaded.
+    Returns {"has_cycle": true, "error": "cycle_detected", "cycles": [...]}
+    when cycle(s) found. Returns {"has_cycle": false, "warning":
+    "dag_builder_unavailable"} if dag_builder not loaded.
     """
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
@@ -190,7 +220,10 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
         return {"has_cycle": False, "warning": "dag_builder_unavailable"}
 
     try:
-        issues = srv.github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        issues = srv.github_client.list_open_issues_with_body(
+            repo_name=project,
+            limit=200,
+        )
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
@@ -212,10 +245,11 @@ def get_sprint_cycle_check(sprint_label: str, project: str):
 
 @router.get("/api/sprints/{sprint_label}/conflicts")
 def get_sprint_conflicts(sprint_label: str, project: str):
-    """Return all pairs of pending tickets in a sprint that share at least one file path.
+    """Return all pairs of pending tickets in a sprint that share files.
 
-    Pending = issues with no in-progress/sit/uat/done label (i.e. backlog status).
-    File paths are sourced from .commander/estimates/issue-<N>.json files_likely_affected.
+    Pending = issues with no in-progress/sit/uat/done label (backlog).
+    File paths sourced from .commander/estimates/issue-<N>.json
+    files_likely_affected.
 
     Returns {"conflicts": [...], "pending_count": N} on success.
     Returns 404 when no issues with sprint_label exist.
@@ -225,7 +259,10 @@ def get_sprint_conflicts(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        all_issues = srv.github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        all_issues = srv.github_client.list_open_issues_with_body(
+            repo_name=project,
+            limit=200,
+        )
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
@@ -256,7 +293,11 @@ def get_sprint_conflicts(sprint_label: str, project: str):
                 files = est.get("files_likely_affected") or []
             except (json.JSONDecodeError, OSError):
                 pass
-        ticket_files.append({"id": num, "title": iss["title"], "files": set(files)})
+        ticket_files.append({
+            "id": num,
+            "title": iss["title"],
+            "files": set(files),
+        })
 
     conflicts = []
     for i in range(len(ticket_files)):
@@ -277,11 +318,11 @@ def get_sprint_conflicts(sprint_label: str, project: str):
 
 @router.get("/api/sprints/{sprint_label}/dep-order")
 def get_sprint_dep_order(sprint_label: str, project: str):
-    """Return dependency order hints derived from file-overlap DAG for pending tickets.
+    """Return dependency order hints from file-overlap DAG for pending.
 
-    For each ticket with at least one DAG edge, returns upstream (should run after)
-    and downstream (should run before) lists.  If the DAG contains cycles, returns
-    has_cycle=True with in_cycle_tickets so the frontend can render the warning.
+    For each ticket with at least one DAG edge, returns upstream (run after)
+    and downstream (run before) lists. If DAG contains cycles, returns
+    has_cycle=True with in_cycle_tickets for frontend warning.
 
     Returns {"has_cycle": bool, "dep_hints": {...}, "pending_count": N}.
     Returns 404 when no issues with sprint_label exist.
@@ -291,7 +332,10 @@ def get_sprint_dep_order(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     try:
-        all_issues = srv.github_client.list_open_issues_with_body(repo_name=project, limit=200)
+        all_issues = srv.github_client.list_open_issues_with_body(
+            repo_name=project,
+            limit=200,
+        )
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
@@ -322,7 +366,11 @@ def get_sprint_dep_order(sprint_label: str, project: str):
                 files = est.get("files_likely_affected") or []
             except (json.JSONDecodeError, OSError):
                 pass
-        ticket_files.append({"id": num, "title": iss["title"], "files": files})
+        ticket_files.append({
+            "id": num,
+            "title": iss["title"],
+            "files": files,
+        })
 
     if srv._build_dag is None:
         return {
@@ -331,7 +379,9 @@ def get_sprint_dep_order(sprint_label: str, project: str):
             "warning": "dag_builder_unavailable",
         }
 
-    dag_tickets = [{"id": str(tf["id"]), "files_touched": tf["files"]} for tf in ticket_files]
+    dag_tickets = [
+        {"id": str(tf["id"]), "files_touched": tf["files"]} for tf in ticket_files
+    ]
     title_map = {str(tf["id"]): tf["title"] for tf in ticket_files}
 
     result = srv._build_dag(dag_tickets)
@@ -390,7 +440,9 @@ def get_sprint_preflight(sprint_label: str, project: str):
         if sprint_issues:
             project_root = srv._project_root_path(project)
             estimates_dir = srv._commander_dir(project_root) / "estimates"
-            stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
+            stale_cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
+            )
 
             ticket_map: dict[str, dict] = {}
             for iss in sprint_issues:
@@ -416,7 +468,10 @@ def get_sprint_preflight(sprint_label: str, project: str):
                 est_path = estimates_dir / f"issue-{num}.json"
                 if est_path.exists():
                     try:
-                        mtime = datetime.fromtimestamp(est_path.stat().st_mtime, tz=timezone.utc)
+                        mtime = datetime.fromtimestamp(
+                            est_path.stat().st_mtime,
+                            tz=timezone.utc,
+                        )
                         est_stale = mtime < stale_cutoff
                     except OSError:
                         pass
@@ -492,7 +547,11 @@ def get_sprint_preflight(sprint_label: str, project: str):
         strict_xl_gate = bool(_eff.get("strict_xl_gate", False))
         dismissed = _xl_svc.load_xl_dismissed(project_root, sprint_label)
         _xl_mins: list[int] = []
-        _pf_non_work = getattr(srv, "_PF_NON_WORK", {"sprint-summary", "docs", "documentation"})
+        _pf_non_work = getattr(
+            srv,
+            "_PF_NON_WORK",
+            {"sprint-summary", "docs", "documentation"},
+        )
         for iss in sprint_issues:
             num = iss["number"]
             label_names = {lbl["name"] for lbl in iss.get("labels", [])}

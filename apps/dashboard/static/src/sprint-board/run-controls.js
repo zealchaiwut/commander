@@ -9,10 +9,10 @@
 /* global _smgmtRepo, _smgmtShowToast, escHtml, sprintLabelDisplay, loadSprintMgmt,
    _smgmtShowSubView, _smgmtRunningLabels, _smgmtAnySprintRunning, _smgmtLivePollRestart,
    _smgmtLingerStart, _smgmtLingerLive, _smgmtRunningViewUpdate,
-   _pfCurrentLabel:writable, _pfCurrentRepo:writable, _pfState:writable,
-   _pfDagData:writable, _pfWarnings:writable, _pfCycle:writable,
-   _pfFlags:writable, _pfSelectedIds:writable, _pfUseClineFollowups:writable,
-   _pfXLSuggestions:writable, _pfStrictXLGate:writable, _pfXLMinutesSaved:writable */
+   _pfCurrentLabel, _pfCurrentRepo, _pfState,
+   _pfDagData, _pfWarnings, _pfCycle,
+   _pfFlags, _pfSelectedIds, _pfUseClineFollowups,
+   _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved */
 
 import {
   mountProgressActivity,

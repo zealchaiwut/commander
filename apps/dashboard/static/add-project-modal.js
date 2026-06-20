@@ -96,12 +96,27 @@ function _apmAppendLog(line) {
   if (l) { l.textContent += line + '\n'; l.scrollTop = l.scrollHeight; }
 }
 
-// Close + refresh. Home defines loadHomeData(); the project page does not, so
-// fall back to a reload (which refreshes the sidebar project list).
-function _apmAfterSuccess() {
+function _apmSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Close + refresh. Home defines loadHomeData(); daily brief defines loadBrief().
+async function _apmAfterSuccess() {
   closeAddProjectModal();
-  if (typeof loadHomeData === 'function') loadHomeData(true);
-  else window.location.reload();
+  try {
+    await fetch('/api/brief/daily/regenerate', { method: 'POST' });
+  } catch (_) { /* best-effort — nav still refreshes */ }
+  if (typeof loadHomeData === 'function') {
+    await loadHomeData(true);
+  } else if (typeof loadBrief === 'function') {
+    const d = typeof _curDate !== 'undefined' ? _curDate : null;
+    await loadBrief(d);
+  }
+  if (typeof _prefetchFullRepo === 'function') {
+    await _prefetchFullRepo();
+  } else if (typeof loadHomeData !== 'function' && typeof loadBrief !== 'function') {
+    window.location.reload();
+  }
 }
 
 // Parse the repo slug from a URL or owner/repo string.
@@ -111,16 +126,25 @@ function _apmRepoNameFromUrl(url) {
   return (parts[parts.length - 1] || '').trim();
 }
 
-// Source-of-truth check: did the project end up registered? Used to confirm a
-// long-running init/clone that may have finished after the SSE stream dropped.
+function _apmProjectListed(projects, slug) {
+  return (projects || []).some((p) =>
+    p.slug === slug || String(p.repo || '').split('/').pop() === slug);
+}
+
+// Source-of-truth check: did the project end up registered? Retries tolerate a
+// brief pause while projects.json is flushed (API init no longer restarts uvicorn).
 async function _apmProjectExists(slug) {
-  try {
-    const r = await fetch('/api/home');
-    if (!r.ok) return false;
-    const d = await r.json();
-    return (d.projects || []).some(p =>
-      p.slug === slug || String(p.repo || '').split('/').pop() === slug);
-  } catch { return false; }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const r = await fetch('/api/projects');
+      if (r.ok) {
+        const d = await r.json();
+        if (_apmProjectListed(d.projects, slug)) return true;
+      }
+    } catch (_) { /* retry */ }
+    if (attempt < 4) await _apmSleep(1500);
+  }
+  return false;
 }
 
 // POST /api/projects/init and stream its SSE log into the shared log area.
@@ -202,7 +226,7 @@ async function apmSubmitAdd(event) {
       'apm-repo',
     );
     btn.disabled = false; _apmUpdateSubmitLabel();
-    if (ok) _apmAfterSuccess();
+    if (ok) await _apmAfterSuccess();
     else _apmShowError('apm-repo', 'Clone did not complete — see the log above.');
     return;
   }
@@ -218,7 +242,7 @@ async function apmSubmitAdd(event) {
     if (res.status === 409) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Project already added.'); return; }
     if (res.status === 422) { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Invalid repo or repo not found on GitHub.'); return; }
     if (!res.ok)            { const d = await res.json().catch(() => ({})); _apmShowError('apm-repo', d.detail || 'Error ' + res.status); return; }
-    _apmAfterSuccess();
+    await _apmAfterSuccess();
   } catch (e) {
     _apmShowError('apm-repo', 'Network error: ' + e.message);
   } finally {
@@ -249,7 +273,7 @@ async function apmSubmitInit(event) {
     'apm-name',
   );
   btn.disabled = false; _apmUpdateSubmitLabel();
-  if (ok) _apmAfterSuccess();
+  if (ok) await _apmAfterSuccess();
   else if (!document.getElementById('apm-init-error').textContent) {
     _apmShowError('apm-name', 'init_project.py failed — see the log above.');
   }

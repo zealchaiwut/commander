@@ -899,6 +899,11 @@ def main() -> None:
             "Default is flat layout (backward compatible)."
         ),
     )
+    parser.add_argument(
+        "--no-restart-dashboard",
+        action="store_true",
+        help="Skip PRD dashboard restart (used when init is invoked from the dashboard API).",
+    )
 
     args = parser.parse_args()
 
@@ -1036,15 +1041,19 @@ def main() -> None:
     step7_tracked_repos(owner, repo_name)
     info("done")
 
-    # ── Step 8: Restart dashboard ─────────────────────────────────────────────
-    step(9, TOTAL_STEPS, "Restarting PRD dashboard...")
-    step8_restart_dashboard()
-    info("done")
+    # ── Step 8: Restart dashboard (skipped for API-init — avoids killing the SSE stream) ──
+    if args.no_restart_dashboard:
+        step(9, TOTAL_STEPS, "Skipping dashboard restart (API init)…")
+        info("skipped")
+    else:
+        step(9, TOTAL_STEPS, "Restarting PRD dashboard...")
+        step8_restart_dashboard()
+        info("done")
 
-    # ── Step 9: Verify via API ─────────────────────────────────────────────────
-    step(10, TOTAL_STEPS, "Verifying project appears in /api/projects...")
-    step9_verify(owner, repo_name)
-    info("done")
+        # ── Step 9: Verify via API ─────────────────────────────────────────────
+        step(10, TOTAL_STEPS, "Verifying project appears in /api/projects...")
+        step9_verify(owner, repo_name)
+        info("done")
 
     # ── Step 10: Print summary ────────────────────────────────────────────────
     step(11, TOTAL_STEPS, "Printing ready summary...")

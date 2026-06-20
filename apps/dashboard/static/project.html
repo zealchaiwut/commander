@@ -552,6 +552,22 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       min-width: 0;
     }
+    .proj-mobile-switcher {
+      display: none;
+      max-width: min(52vw, 220px);
+      font-size: 15px;
+      font-weight: var(--font-weight-bold);
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 28px 6px 10px;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      min-width: 0;
+    }
     .proj-header-gh-link {
       display: inline-flex; align-items: center; justify-content: center;
       color: var(--text-muted); font-size: var(--font-size-2xl); flex-shrink: 0;
@@ -1917,6 +1933,8 @@
     /* ── Mobile ── */
     @media (max-width: 699px) {
       .sidebar { display: none; }
+      .proj-header-name { display: none; }
+      .proj-mobile-switcher { display: block; }
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
@@ -9359,6 +9377,8 @@
           <div class="proj-header-icon" id="proj-header-icon">
             <i class="ti ti-folder"></i>
           </div>
+          <select id="proj-mobile-switcher" class="proj-mobile-switcher" aria-label="Switch project"
+                  onchange="projMobileSwitch(this.value)"></select>
           <span class="proj-header-name" id="proj-header-name">Loading…</span>
           <a class="proj-header-gh-link hidden" id="proj-header-gh-link"
              href="#" target="_blank" rel="noopener noreferrer"
@@ -11588,6 +11608,7 @@ function buildSidebar(projects) {
 
   if (!projects || projects.length === 0) {
     list.innerHTML = '<div style="padding:8px 16px;font-size:12px;color:var(--text-sub)">No projects</div>';
+    _buildMobileProjectSwitcher([]);
     return;
   }
 
@@ -11615,6 +11636,27 @@ function buildSidebar(projects) {
       ${statusHtml}
     </a>`;
   }).join('');
+  _buildMobileProjectSwitcher(sorted);
+}
+
+function _buildMobileProjectSwitcher(projects) {
+  const sel = document.getElementById('proj-mobile-switcher');
+  if (!sel) return;
+  if (!projects || !projects.length) {
+    sel.innerHTML = '';
+    return;
+  }
+  sel.innerHTML = projects.map((proj) => {
+    const slug = proj.slug || '';
+    const name = proj.name || slug;
+    const selected = slug === _slug ? ' selected' : '';
+    return `<option value="${escHtml(slug)}"${selected}>${escHtml(name)}</option>`;
+  }).join('');
+}
+
+function projMobileSwitch(slug) {
+  if (!slug || slug === _slug) return;
+  window.location.href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
 }
 
 // Add Project modal logic now lives in the shared /static/add-project-modal.js
@@ -13037,6 +13079,9 @@ function _projConnectSse() {
       if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
       const repo = _cachedFullRepo[_slug];
       if (!repo) return;
+      _sprintProgressStore = null;
+      if (typeof _sprintProgressFetch === 'function') _sprintProgressFetch().catch(() => {});
+      if (typeof snavRefresh === 'function') snavRefresh();
       if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
       if (typeof _histLoadLedger === 'function') _histLoadLedger(repo, { force: true });
     } catch (_) {}
@@ -24441,8 +24486,9 @@ async function _sprintProgressFetch() {
     if (!res.ok) return;
     const data = await res.json();
     if (data.source === 'github' && _sprintProgressStore?.source === 'live') {
+      const ghFinished = data.run_state === 'finished' || data.state === 'finished';
       const age = Date.now() - (_sprintProgressStore.fetched_at || 0);
-      if (age < 300000) return;
+      if (!ghFinished && age < 60000) return;
     }
     _sprintProgressStore = { ...data, fetched_at: Date.now() };
     _sprintProgressRender();
@@ -24590,21 +24636,30 @@ async function snavRefresh() {
         _snavAwaitingSignoff = !!(bj.waiting_on_you && bj.waiting_on_you.length);
       }
     } catch (_) { /* leave last-known indicator state */ }
-    // Seed the shared store from GitHub data as fallback (live poll data takes precedence)
-    if (_snavState && _snavState.has_sprint && !_sprintProgressStore) {
+    // Seed or refresh the shared store from GitHub (live poll takes precedence while running).
+    if (_snavState && _snavState.has_sprint) {
       const cols = _snavState.columns || {};
-      const ghDone = (_snavState.state === 'finished')
+      const ghState = _snavState.state || 'running';
+      const ghDone = (ghState === 'finished')
         ? (_snavState.done || 0) + (_snavState.uat || 0)
         : _snavSettledDone(_snavState.total, cols);
-      _sprintProgressStore = {
-        has_sprint: true,
-        sprint_label: `sprint-${_snavState.sprint}`,
-        sprint: _snavState.sprint,
-        done: ghDone,
-        total: _snavState.total || 0,
-        run_state: _snavState.state || 'running',
-        fetched_at: Date.now(),
-      };
+      const liveAge = Date.now() - (_sprintProgressStore?.fetched_at || 0);
+      const shouldRefresh = !_sprintProgressStore
+        || _sprintProgressStore.source !== 'live'
+        || ghState === 'finished'
+        || liveAge > 60000;
+      if (shouldRefresh) {
+        _sprintProgressStore = {
+          has_sprint: true,
+          sprint_label: `sprint-${_snavState.sprint}`,
+          sprint: _snavState.sprint,
+          done: ghDone,
+          total: _snavState.total || 0,
+          run_state: ghState,
+          source: ghState === 'finished' ? 'github' : (_sprintProgressStore?.source || 'github'),
+          fetched_at: Date.now(),
+        };
+      }
     }
     _sprintProgressRender();
     if (_snavPanelOpen) _snavRenderPanel();

@@ -98,6 +98,8 @@ class SprintConfig:
     # Warm worktree pool for concurrent coder dispatch (issue #1411)
     # Number of isolated worktrees to pre-warm at sprint start (default 2, hard cap 4).
     max_coder_slots: int = 2
+    # Tester concurrency slots (issue #1412) — persisted but scheduling is a follow-up.
+    max_tester_slots: int = 1
 
     @property
     def worktree_tester_app(self) -> Path:

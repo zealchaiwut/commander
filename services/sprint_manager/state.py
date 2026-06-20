@@ -127,6 +127,11 @@ class SprintState:
     # Post-sprint reconciliation result (issue #856) — {all_clear, checks[], ...}
     reconciliation:          Optional[dict]      = None
     summary_issue_url:         Optional[str]       = None
+    # Concurrent scheduler slot config (issue #1412).  Persisted at sprint start
+    # so a resumed or inspected sprint shows correct lane capacity and occupancy.
+    max_coder_slots:         int                 = 1
+    max_tester_slots:        int                 = 1
+    active_coder_slots:      int                 = 0
 
     def to_dict(self) -> dict:
         return {
@@ -152,6 +157,9 @@ class SprintState:
             "pipeline_mode":             self.pipeline_mode,
             "reconciliation":            self.reconciliation,
             "summary_issue_url":           self.summary_issue_url,
+            "max_coder_slots":           self.max_coder_slots,
+            "max_tester_slots":          self.max_tester_slots,
+            "active_coder_slots":        self.active_coder_slots,
         }
 
     @staticmethod
@@ -180,6 +188,9 @@ class SprintState:
         s.pipeline_mode            = bool(d.get("pipeline_mode", False))
         s.reconciliation           = d.get("reconciliation")
         s.summary_issue_url        = d.get("summary_issue_url")
+        s.max_coder_slots          = int(d.get("max_coder_slots", 1))
+        s.max_tester_slots         = int(d.get("max_tester_slots", 1))
+        s.active_coder_slots       = int(d.get("active_coder_slots", 0))
         return s
 
     def save(self, path: Path) -> None:

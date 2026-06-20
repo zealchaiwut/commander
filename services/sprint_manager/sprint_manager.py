@@ -33,13 +33,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import email.mime.text
 import json
 import os
 import re
 import shutil
 import signal
-import smtplib
 import subprocess
 import sys
 import tempfile
@@ -48,7 +46,6 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -80,7 +77,6 @@ from services.sprint_manager.config import (  # noqa: E402
 from services.sprint_manager.worktree_pool import (  # noqa: E402
     WorktreePool as _WorktreePool,
     DEFAULT_SLOTS as _WORKTREE_POOL_DEFAULT_SLOTS,
-    MAX_SLOTS as _WORKTREE_POOL_MAX_SLOTS,
 )
 
 from services.sprint_manager.commander_paths import (  # noqa: E402
@@ -1110,11 +1106,6 @@ _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
 from services.sprint_manager.alerts import (  # noqa: E402
     AlertMode,
     dispatch_alerts,
-    _alert_dashboard_banner,
-    _alert_email,
-    _alert_discord,
-    _alert_ntfy,
-    _alert_file,
     HangDetector,
 )
 
@@ -8152,11 +8143,43 @@ def _run_pipeline_dispatch(
         if not level_nums:
             continue
 
-        # Hard level barrier: run_level does not return until the level drains.
-        _run_pipeline_level(
-            level_nums, _coder_stage, _tester_stage, pipeline=True,
-            on_merged=_on_merged, on_needs_rework=_on_needs_rework,
-        )
+        # Resolve concurrent coder slots from config (issue #1412).
+        _max_coder_slots = getattr(cfg, "max_coder_slots", 1) if cfg is not None else 1
+
+        if _max_coder_slots > 1:
+            # Build file_map for conflict-aware concurrent dispatch.
+            _file_map: dict = {}
+            for _fnum in level_nums:
+                _est = _load_estimate(_fnum)
+                if _est:
+                    _files = (
+                        _est.get("files_touched")
+                        or _est.get("files_likely_affected")
+                        or []
+                    )
+                    _file_map[_fnum] = set(_files)
+
+            def _on_slot_change(_count: int) -> None:
+                state.active_coder_slots = _count
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+            from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415
+                run_concurrent_level as _run_concurrent_level,
+            )
+            _run_concurrent_level(
+                level_nums, _coder_stage, _tester_stage,
+                max_coder_slots=_max_coder_slots,
+                file_map=_file_map,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+                on_active_slots_change=_on_slot_change,
+            )
+        else:
+            # Hard level barrier: run_level does not return until the level drains.
+            _run_pipeline_level(
+                level_nums, _coder_stage, _tester_stage, pipeline=True,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+            )
 
     if prev_level_idx >= 0:
         try:
@@ -8516,6 +8539,9 @@ def run_sprint(
         _pipeline_on = False
     # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
     state.pipeline_mode = _pipeline_on
+    # Persist slot config for resumed / inspected sprints (issue #1412).
+    state.max_coder_slots = getattr(cfg, "max_coder_slots", 1) if cfg is not None else 1
+    state.max_tester_slots = getattr(cfg, "max_tester_slots", 1) if cfg is not None else 1
     sys.stdout.write(str("  Dispatch mode: "
         + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")) + "\n")
     try:

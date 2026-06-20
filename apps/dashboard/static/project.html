@@ -3201,6 +3201,14 @@
     }
     .smgmt-delete-btn:hover { color: var(--text); background: var(--surface-2); }
     .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .smgmt-dag-order-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-dag-order-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+    .smgmt-dag-order-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
@@ -13596,6 +13604,9 @@ function _smgmtPreflightHints(tickets) {
 const _smgmtMiniRailCache = {}; // label → { sig, html }
 let _smgmtMiniRailGen = 0;
 
+/** Raw preview-dag response per sprint label — drives Apply DAG Order button state (issue #1420). */
+const _smgmtDagDataCache = {}; // label → raw preview-dag payload
+
 function _smgmtMiniRailSig(tickets, pfHints) {
   const nums = (tickets || []).map(t => t.number).sort((a, b) => a - b).join(',');
   const pf = pfHints
@@ -13704,6 +13715,29 @@ function _smgmtInjectMiniRail(label, data, pfHints, tickets) {
     _smgmtMiniRailCache[label] = { sig: _smgmtMiniRailSig(tickets, pfHints), html };
   }
   _smgmtInjectMiniRailHtml(label, html);
+  // Cache raw DAG data and update Apply DAG Order button state (issue #1420).
+  if (data && typeof data.levels !== 'undefined') {
+    _smgmtDagDataCache[label] = data;
+    _smgmtUpdateDagOrderBtn(label, data);
+  }
+}
+
+/** Update the Apply DAG Order button enabled state for a sprint (issue #1420). */
+function _smgmtUpdateDagOrderBtn(label, dagData) {
+  const btn = document.getElementById('dag-order-btn-' + label);
+  if (!btn) return;
+  const hasCycles = dagData && (dagData.cycles || []).length > 0;
+  const hasLevels = dagData && (dagData.levels || []).length > 0;
+  btn.disabled = !hasLevels || hasCycles;
+  if (hasCycles) {
+    btn.title = 'Apply DAG Order — disabled: sprint has circular dependencies';
+  } else if (!hasLevels) {
+    btn.title = 'Apply DAG Order — disabled: no DAG preview available';
+  } else {
+    btn.title = dagData.partial
+      ? 'Apply DAG Order (preview is partial — some tickets unestimated)'
+      : 'Apply DAG Order';
+  }
 }
 
 /** Fetch preview-dag and render the mini-rail for each planned / has-rework sprint. */
@@ -13749,6 +13783,146 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   }
 }
 
+
+// ── Apply DAG Order (issue #1420) ─────────────────────────────────────────────
+
+let _smgmtDagOrderTargetLabel = null;
+
+/** Open the Apply DAG Order confirmation dialog for a sprint. */
+async function smgmtApplyDagOrder(label) {
+  _smgmtDagOrderTargetLabel = label;
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  if (!repo) return;
+
+  const backdrop = document.getElementById('dao-backdrop');
+  const modal = document.getElementById('dao-modal');
+  const title = document.getElementById('dao-modal-title');
+  const body = document.getElementById('dao-body');
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const errorEl = document.getElementById('dao-error');
+
+  if (!modal) return;
+
+  title.textContent = 'Apply DAG Order';
+  body.innerHTML = '<div class="loading-msg" style="padding:8px 0">Computing order…</div>';
+  errorEl.classList.add('hidden');
+  confirmBtn.disabled = true;
+  backdrop.classList.remove('hidden');
+  modal.classList.remove('hidden');
+
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/dag-order-preview?project=${encodeURIComponent(repo)}`
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    const data = await resp.json();
+    _smgmtDagOrderRenderDialog(data);
+  } catch (err) {
+    body.innerHTML = '';
+    errorEl.textContent = `Failed to compute DAG order: ${err.message}`;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+function _smgmtDagOrderRenderDialog(data) {
+  const body = document.getElementById('dao-body');
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const title = document.getElementById('dao-modal-title');
+
+  const partial = data.partial;
+  const isNoop = data.is_noop;
+  const diff = data.diff || [];
+
+  // Store new_order on the confirm button for use on click
+  confirmBtn.dataset.newOrder = JSON.stringify(data.new_order || []);
+  confirmBtn.dataset.isNoop = isNoop ? '1' : '0';
+
+  if (partial) {
+    title.textContent = 'Apply DAG Order — Partial Preview';
+    const warn = `<div class="gc-note" style="color:var(--amber);margin-bottom:8px">
+      <strong>Warning:</strong> The DAG preview is incomplete — some tickets are unestimated,
+      so their file dependencies are unknown. The order below is based on available data only.
+    </div>`;
+    body.innerHTML = warn + _smgmtDagOrderDiffHtml(diff, isNoop);
+  } else {
+    title.textContent = 'Apply DAG Order';
+    body.innerHTML = _smgmtDagOrderDiffHtml(diff, isNoop);
+  }
+
+  confirmBtn.disabled = false;
+}
+
+function _smgmtDagOrderDiffHtml(diff, isNoop) {
+  if (isNoop || diff.length === 0) {
+    return '<p style="color:var(--text-muted);margin:0">Order is already up to date — no changes needed.</p>';
+  }
+  const lines = diff.map(line =>
+    `<li style="font-family:var(--mono);font-size:12px;margin:2px 0;color:var(--text)">${escHtml(line)}</li>`
+  ).join('');
+  return `<p style="margin:0 0 8px;color:var(--text-muted)">The following tickets will change position:</p>
+    <ul style="list-style:none;padding:0;margin:0">${lines}</ul>`;
+}
+
+function _smgmtDagOrderModalClose() {
+  document.getElementById('dao-backdrop').classList.add('hidden');
+  document.getElementById('dao-modal').classList.add('hidden');
+  _smgmtDagOrderTargetLabel = null;
+}
+
+async function _smgmtDagOrderConfirm() {
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const errorEl = document.getElementById('dao-error');
+  const label = _smgmtDagOrderTargetLabel;
+  if (!label) return;
+
+  const isNoop = confirmBtn.dataset.isNoop === '1';
+  if (isNoop) {
+    _smgmtDagOrderModalClose();
+    return; // AC10: no write when already in DAG order
+  }
+
+  let newOrder;
+  try {
+    newOrder = JSON.parse(confirmBtn.dataset.newOrder || '[]');
+  } catch (_) {
+    newOrder = [];
+  }
+  if (!newOrder.length) {
+    _smgmtDagOrderModalClose();
+    return;
+  }
+
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  if (!repo) return;
+
+  confirmBtn.disabled = true;
+  errorEl.classList.add('hidden');
+
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/plan?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+      }
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    _smgmtDagOrderModalClose();
+    // Reload the board so the new order is reflected
+    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
+  } catch (err) {
+    errorEl.textContent = `Failed to apply order: ${err.message}`;
+    errorEl.classList.remove('hidden');
+    confirmBtn.disabled = false;
+  }
+}
 
 function _smgmtUpdateEstimateBadge(issueNum) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
@@ -27743,6 +27917,22 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer">
     <button class="btn-ghost" type="button" onclick="_smgmtCloseIssueCancel()">Cancel</button>
     <button class="btn-danger" id="ci-confirm-btn" type="button" onclick="_smgmtCloseIssueConfirm()">Close issue</button>
+  </div>
+</div>
+
+<!-- ── Apply DAG Order confirm modal (issue #1420) ── -->
+<div class="modal-backdrop hidden" id="dao-backdrop" onclick="_smgmtDagOrderModalClose()"></div>
+<div class="modal hidden" id="dao-modal"
+     role="dialog" aria-modal="true" aria-labelledby="dao-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="dao-modal-title">Apply DAG Order</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtDagOrderModalClose()">&times;</button>
+  </div>
+  <div class="modal-body" id="dao-body"></div>
+  <div class="gc-error hidden" id="dao-error"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtDagOrderModalClose()">Cancel</button>
+    <button class="btn-blue" type="button" id="dao-confirm-btn" onclick="_smgmtDagOrderConfirm()" disabled>Apply</button>
   </div>
 </div>
 

@@ -1,5 +1,5 @@
 (() => {
-  // static/src/logpanel.js
+  // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
     "tester",
@@ -37,7 +37,7 @@
     });
   }
 
-  // static/src/progress-activity.js
+  // apps/dashboard/static/src/progress-activity.js
   function _e(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -493,7 +493,7 @@
     document.head.appendChild(style);
   }
 
-  // static/src/progress-host.js
+  // apps/dashboard/static/src/progress-host.js
   var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
   var _payloadById = /* @__PURE__ */ new Map();
   var _MAX_LOG_LINES = 200;
@@ -648,7 +648,7 @@
     _payloadById.delete(paId);
   }
 
-  // static/src/shell/tabs.js
+  // apps/dashboard/static/src/shell/tabs.js
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -834,7 +834,7 @@
     switchTab(effTab, false);
   });
 
-  // static/src/shell/features.js
+  // apps/dashboard/static/src/shell/features.js
   var _features = null;
   function commanderFeatures() {
     return _features || {};
@@ -888,7 +888,7 @@
     }
   }
 
-  // static/src/sprint-board/state.js
+  // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
@@ -908,7 +908,7 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
-  // static/src/sprint-board/plan-next.js
+  // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
     try {
@@ -1012,7 +1012,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/scheduled-run.js
+  // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
     const on = !!_schedMap[label];
@@ -1070,7 +1070,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/history.js
+  // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
@@ -2680,7 +2680,7 @@ Replace the existing draft (${data.existing_label})?`
     return _nextSprintSublabel(parentLabel);
   }
 
-  // static/src/sprint-board/rerun-modal.js
+  // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrShowPreviewLoading(current) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
@@ -2879,7 +2879,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/finish-modal.js
+  // apps/dashboard/static/src/sprint-board/finish-modal.js
   function _fsOpen() {
     _setBodyInert(["fs-backdrop", "fs-modal"]);
     document.getElementById("fs-backdrop").classList.remove("hidden");
@@ -3248,7 +3248,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/bulk-complete-modal.js
+  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
   function _bcShowPreviewLoading(current) {
     const loading = document.getElementById("bc-loading");
     if (!loading)
@@ -3508,7 +3508,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/run-controls.js
+  // apps/dashboard/static/src/sprint-board/run-controls.js
   var PF_STEPS = [
     { key: "ac", label: "Acceptance criteria", autoFixable: true },
     { key: "estimates", label: "Estimate coverage", autoFixable: true },
@@ -4505,7 +4505,7 @@ Replace the existing draft (${data.existing_label})?`
     await _ksFinish(label);
   }
 
-  // static/src/sprint-board/drag-drop.js
+  // apps/dashboard/static/src/sprint-board/drag-drop.js
   var _smgmtBoardOverlayHasProgress = false;
   function isDragBlocked(state) {
     return !!(state && state.moveLock);
@@ -5345,7 +5345,7 @@ ${data.errors.join("\n")}`);
       _smgmtArStartTicker();
   }
 
-  // static/src/sprint-board/board-render.js
+  // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
@@ -6482,6 +6482,17 @@ ${data.errors.join("\n")}`);
     const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
+    const showDagOrderBtn = !isRunningView && !isPostRun && !finished && ["planned", "draft", "planning"].includes(planState);
+    const cachedDagData = showDagOrderBtn ? typeof _smgmtDagDataCache !== "undefined" ? _smgmtDagDataCache[label] : null : null;
+    const dagHasLevels = cachedDagData && (cachedDagData.levels || []).length > 0;
+    const dagHasCycles = cachedDagData && (cachedDagData.cycles || []).length > 0;
+    const dagOrderBtnDisabled = !dagHasLevels || dagHasCycles ? "disabled" : "";
+    const dagOrderBtnTitle = dagHasCycles ? "Apply DAG Order \u2014 disabled: circular dependencies detected" : !dagHasLevels ? "Apply DAG Order \u2014 loading DAG preview\u2026" : cachedDagData && cachedDagData.partial ? "Apply DAG Order (partial preview \u2014 some tickets unestimated)" : "Apply DAG Order";
+    const dagOrderBtn = showDagOrderBtn ? `<button class="smgmt-dag-order-btn" id="dag-order-btn-${escHtml(label)}"
+               ${dagOrderBtnDisabled}
+               title="${escHtml(dagOrderBtnTitle)}"
+               onclick="smgmtApplyDagOrder('${escHtml(label)}')">
+         <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
@@ -6512,6 +6523,7 @@ ${data.errors.join("\n")}`);
                   title="Delete sprint"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
+          ${dagOrderBtn}
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
@@ -7600,7 +7612,7 @@ ${data.errors.join("\n")}`);
     }
   }
 
-  // static/src/sprint-board/index.js
+  // apps/dashboard/static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
   globalThis._rrCatClass = _rrCatClass;
@@ -7756,7 +7768,7 @@ ${data.errors.join("\n")}`);
   globalThis._histResetLedgerCache = _histResetLedgerCache;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
-  // static/src/index.js
+  // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;

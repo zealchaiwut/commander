@@ -106,13 +106,19 @@ def _seed_lineage(db):
     db.record_sprint_start("sprint-68.2", project="zealchaiwut/perf-coach")
 
 
-def test_b2_promotes_ancestor_when_branch_in_develop(fresh_db, reconcile, monkeypatch):
-    """needs_rework base with a merged-to-develop branch → completed."""
+def test_b2_does_not_auto_complete_ancestor_when_branch_in_develop(fresh_db, reconcile, monkeypatch):
+    """needs_rework base whose branch is in develop must not flip to completed."""
     _seed_lineage(fresh_db)
     import server as srv
-    # branch fully in develop → no unmerged commits
     monkeypatch.setattr(srv, "_branch_has_unmerged_commits", lambda *a, **k: False)
-    assert reconcile._lineage_fully_in_develop("sprint-68", "zealchaiwut/perf-coach") is True
+    monkeypatch.setattr(srv, "_has_rework_tickets", lambda *a, **k: True)
+    fresh_db.record_sprint_needs_rework("sprint-68", end_reason="ticket-failures")
+    patch = reconcile._github_reconcile_row(
+        "sprint-68", "zealchaiwut/perf-coach",
+        fresh_db.get_sprint("sprint-68"),
+    )
+    assert patch is None or patch.get("state") != "completed"
+    assert fresh_db.get_sprint("sprint-68")["state"] == "needs_rework"
 
 
 def test_b2_refuses_half_merged_ancestor(fresh_db, reconcile, monkeypatch):

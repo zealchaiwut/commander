@@ -1,16 +1,13 @@
 from __future__ import annotations
 import hashlib
 import json
-import os
 import subprocess
 import sys
-import uuid
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from typing import Optional
+from fastapi import APIRouter, HTTPException
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -19,11 +16,9 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import github_client
-import projects as projects_module
-from services.logging import log as _slog
-from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES, letter_from_minutes as _letter_from_minutes, minutes_from_letter as _minutes_from_letter
+import db  # noqa: E402
+import github_client  # noqa: E402
+from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: E402
 
 _PROJECTS_BASE = Path.home() / "dev"
 
@@ -778,7 +773,6 @@ def get_sprint_outcome(sprint_label: str, project: str):
 
     # Derive sprint status from summary file (most authoritative)
     sprint_status: Optional[str] = None
-    sprints_dir = commander / "sprints"
     for sf in sorted(
         list((commander / "sprints").glob(f"{sprint_label}-summary-*.md"))
         + list((commander / "sprints").glob(f"sprint-{n}-summary-*.md")),

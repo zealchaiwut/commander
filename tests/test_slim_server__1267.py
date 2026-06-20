@@ -1,6 +1,5 @@
 """Tests for issue #1267: Slim server.py to thin app factory (runs against UAT)"""
 import os
-import subprocess
 from pathlib import Path
 
 import pytest

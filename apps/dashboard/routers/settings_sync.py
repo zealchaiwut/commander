@@ -1,9 +1,8 @@
 from __future__ import annotations
-import os, sys, uuid, subprocess, json
+import sys
 from pathlib import Path
-from typing import Optional, Any
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -13,9 +12,6 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import projects as projects_module
-from services.logging import log as _slog
 
 _PROJECTS_BASE = Path.home() / "dev"
 

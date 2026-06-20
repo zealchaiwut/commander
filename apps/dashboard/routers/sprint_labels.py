@@ -9,11 +9,10 @@ import os
 import re
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -23,8 +22,8 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import github_client
+import db  # noqa: E402
+import github_client  # noqa: E402
 
 router = APIRouter()
 

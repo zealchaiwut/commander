@@ -1,8 +1,11 @@
 from __future__ import annotations
-import os, sys, re, uuid, subprocess, json
+import sys
+import re
+import subprocess
+import json
 from pathlib import Path
-from typing import Optional, Any
-from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -12,10 +15,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import db
-import projects as projects_module
-import github_client
-from services.logging import log as _slog
+import github_client  # noqa: E402
 
 _PROJECTS_BASE = Path.home() / "dev"
 

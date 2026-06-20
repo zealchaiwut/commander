@@ -95,6 +95,9 @@ class SprintConfig:
     cline_model: Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
+    # Warm worktree pool for concurrent coder dispatch (issue #1411)
+    # Number of isolated worktrees to pre-warm at sprint start (default 2, hard cap 4).
+    max_coder_slots: int = 2
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -298,6 +301,22 @@ def load_config(path: Path) -> "SprintConfig":
         if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
             cline_model = str(_cline_sub["model"])
 
+    # ── max_coder_slots (issue #1411) — worktree pool size (default 2, cap 4) ─
+    max_coder_slots: int = 2
+    if isinstance(agent_cfg, dict):
+        _coder_sub_slots = agent_cfg.get("coder") or {}
+        if isinstance(_coder_sub_slots, dict) and _coder_sub_slots.get("max_slots") is not None:
+            try:
+                max_coder_slots = int(_coder_sub_slots["max_slots"])
+            except (TypeError, ValueError):
+                pass
+    # Also support top-level max_coder_slots key in the yaml
+    if data.get("max_coder_slots") is not None:
+        try:
+            max_coder_slots = int(data["max_coder_slots"])
+        except (TypeError, ValueError):
+            pass
+
     return SprintConfig(
         repo_name=repo_name,
         worktree_coder=worktree_coder,
@@ -327,6 +346,7 @@ def load_config(path: Path) -> "SprintConfig":
         coder_backend=coder_backend,
         cline_model=cline_model,
         use_cline_followups=use_cline_followups,
+        max_coder_slots=max_coder_slots,
     )
 
 

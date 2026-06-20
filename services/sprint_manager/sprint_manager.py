@@ -4132,6 +4132,21 @@ def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> s
     return "\n".join(lines)
 
 
+def _build_estimate_paths_block(estimate: Optional[dict]) -> str:
+    """Return a 'Start here' paths block from an estimate dict, or '' if none.
+
+    Prefers files_touched over files_likely_affected (issue #1402).
+    """
+    if not estimate:
+        return ""
+    paths = estimate.get("files_touched") or estimate.get("files_likely_affected") or []
+    if not paths:
+        return ""
+    header = "Start here — do not broad-search the repo unless these paths are insufficient."
+    path_lines = "\n".join(f"  {p}" for p in paths)
+    return f"{header}\n\n{path_lines}"
+
+
 # ── unified failure-recording chokepoint ─────────────────────────────────────
 
 def _build_crash_detail(log_path: Path, exit_code: Optional[int] = None,
@@ -5064,6 +5079,10 @@ def _dispatch_coder(
     log_path = _issue_log_path(issue_num, cfg=cfg)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Load estimate early for paths injection (issue #1402) and model routing below.
+    _coder_estimate = _load_estimate(issue_num)
+    _paths_block = _build_estimate_paths_block(_coder_estimate)
+
     # Build prompt
     if cfg and cfg.coder_prompt_template:
         issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
@@ -5175,7 +5194,6 @@ def _dispatch_coder(
     # `cmd[-1] += sprint_hint` (below) works for both backends.
     # coder_backend_override takes precedence when supplied by the caller (issue #920:
     # the fix-loop pre-computes the backend and escalates from cline to claude-code on failure).
-    _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
     coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
     if coder_backend == "cline":
@@ -5185,6 +5203,10 @@ def _dispatch_coder(
     sys.stdout.write(str(
         f"  [size-routing] issue #{issue_num}: model={dispatch_model}, reason={dispatch_routing_reason}, backend={coder_backend}"
     ) + "\n")
+    if _paths_block:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: injecting paths into coder prompt\n{_paths_block}\n")
+    else:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: no estimate file — prompt unchanged\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
@@ -5213,7 +5235,15 @@ def _dispatch_coder(
                 worktree=str(cwd_path),
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
-        full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
+        # Inject paths block before persona (issue #1402): paths → persona → prompt+failure_suffix
+        if _paths_block and coder_persona:
+            full_prompt = _paths_block + "\n\n" + coder_persona + "\n\n" + prompt
+        elif _paths_block:
+            full_prompt = _paths_block + "\n\n" + prompt
+        elif coder_persona:
+            full_prompt = coder_persona + "\n\n" + prompt
+        else:
+            full_prompt = prompt
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
@@ -5226,7 +5256,9 @@ def _dispatch_coder(
         coder_persona = _load_agent_persona("coder", cwd_path)
         if coder_persona:
             cmd += ["--append-system-prompt", coder_persona]
-        cmd += ["-p", prompt]
+        # Inject paths block at start of -p prompt (issue #1402).
+        _p_prompt = (_paths_block + "\n\n" + prompt) if _paths_block else prompt
+        cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)
 

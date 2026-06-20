@@ -301,7 +301,8 @@ tail -f ~/Library/Logs/commander-dashboard.out.log
 commander/
 ├── apps/
 │   └── dashboard/          # FastAPI app — PRD server
-│       ├── server.py        # App wiring + remaining inline routes
+│       ├── server.py        # Thin app factory (under 400 lines, no route handlers)
+│       ├── startup.py       # Helper functions extracted from server.py (issue #1267)
 │       ├── routers/         # Extracted route clusters + *_service.py logic
 │       ├── projects.py      # GitHub data layer
 │       ├── sprint_manager/  # Sprint orchestration engine

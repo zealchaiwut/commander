@@ -37,8 +37,23 @@ from .system_misc import router as system_misc_router
 from .sprint_finish import router as sprint_finish_router
 from .sprint_run import router as sprint_run_router
 from .bulk_tickets import router as bulk_tickets_router
+# Routers extracted from server.py in issue #1267
+from .sprint_nav import router as sprint_nav_router
+from .issues import router as issues_router
+from .projects import router as projects_router
+from .environments import router as environments_router
+from .settings_sync import router as settings_sync_router
+from .maintenance import router as maintenance_router
+from .sprint_planning import router as sprint_planning_router
+from .sprint_labels import router as sprint_labels_router
+from .sprint_dispatch import router as sprint_dispatch_router
+from .estimates import router as estimates_router
+from .calibration import router as calibration_router
+from .metrics import router as metrics_router
+from .reports import router as reports_router
+from .finish_card import router as finish_card_router
+from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
-from .sprint_analytics import router as sprint_analytics_router
 
 __all__ = [
     "activity_router",
@@ -73,6 +88,20 @@ __all__ = [
     "sprint_finish_router",
     "sprint_run_router",
     "bulk_tickets_router",
+    "sprint_nav_router",
+    "issues_router",
+    "projects_router",
+    "environments_router",
+    "settings_sync_router",
+    "maintenance_router",
+    "sprint_planning_router",
+    "sprint_labels_router",
+    "sprint_dispatch_router",
+    "estimates_router",
+    "calibration_router",
+    "metrics_router",
+    "reports_router",
+    "finish_card_router",
+    "deploy_router",
     "mis_sizing_router",
-    "sprint_analytics_router",
 ]

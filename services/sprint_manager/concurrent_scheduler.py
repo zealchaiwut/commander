@@ -1,20 +1,27 @@
-"""Conflict-aware concurrent coder scheduler (issue #1412).
+"""Role-flexible concurrent slot scheduler (issue #1413, extends #1412).
 
-Runs up to max_coder_slots coders in parallel within a single dispatch level,
-subject to file-conflict constraints. Tickets whose files_likely_affected overlap
-with an actively-coding ticket are held until that ticket completes (merges or
-is dropped). The level does not return until every ticket is terminal.
+Each worker slot can execute either a code_fn task or a test_fn task; the role
+is determined by the task pulled from the queues, not by the slot. Workers
+prefer code tasks (to keep the pipeline fed) and fall back to test tasks when
+no eligible code task is available.
 
-Algorithm per scheduling tick:
-  1. Gather pending tickets whose file sets do not conflict with any ticket
-     currently in the coding state.
-  2. From those eligible tickets, greedily select a non-mutually-conflicting
-     subset (largest independent set approximation) up to the available slots.
-  3. Dispatch each selected ticket in its own coder worker thread.
-  4. When a coder finishes, hand off to the tester queue (serial) and free the
-     slot for the next eligible ticket.
+This enables natural load rebalancing across the sprint:
+- Early sprint (all tickets unstarted): slots predominantly run code_fn.
+- Late sprint (all tickets coded): slots run test_fn.
+- Mid sprint: slots dynamically mix roles as work becomes available.
 
-When max_coder_slots == 1, behaviour is identical to pipeline.run_level with
+Merge serialization from issue #738 is preserved: the production test_fn
+wraps its git-merge step in develop_merge_guard(), so concurrent test tasks
+never merge to develop at the same time regardless of slot count.
+
+Tester rejection re-queues the ticket to the FRONT of the coder queue so it
+is retried before any other pending ticket (issue #1413 AC6).
+
+Conflict rules (file-overlap checks) apply when picking BOTH code and test
+tasks: a test task is not started while a coding task on the same files is
+active (AC5).
+
+When max_coder_slots <= 1, behaviour is identical to pipeline.run_level with
 pipeline=True — the delegate path ensures zero divergence.
 """
 from __future__ import annotations
@@ -44,22 +51,23 @@ def run_concurrent_level(
     on_dropped: Optional[Callable[[Any], None]] = None,
     on_active_slots_change: Optional[Callable[[int], None]] = None,
 ) -> LevelResult:
-    """Process all tickets in one dispatch level with concurrent coders.
+    """Process all tickets in one dispatch level with role-flexible slots.
 
-    ``code_fn(ticket, attempt)`` and ``test_fn(ticket, attempt)`` carry the
-    same semantics as in pipeline.run_level.
+    Each slot picks the next eligible task from whichever queue has work —
+    code tasks are preferred (to keep the pipeline fed), test tasks taken
+    when no eligible code task is available.
 
-    ``file_map`` maps each ticket to the set of file paths it touches
-    (files_likely_affected / files_touched from the estimate).  Tickets whose
-    file sets intersect with any currently-coding ticket are held until that
-    ticket exits the coding state.
+    ``file_map`` maps each ticket to the set of file paths it touches.
+    Tickets whose file sets intersect with any currently-coding ticket are
+    held regardless of whether the waiting ticket is a code or test task
+    (AC5: same conflict rules for both roles).
 
     ``on_active_slots_change(count)`` is called (thread-safely) each time the
-    number of actively-coding tickets changes, so the sprint state can track
-    lane occupancy in real time (AC9).
+    number of actively-coding tickets changes (backward-compatible with AC9
+    from issue #1412).
 
     When ``max_coder_slots <= 1`` the call delegates to ``run_level(pipeline=True)``
-    for exact behavioural equivalence (AC2).
+    for exact behavioural equivalence.
     """
     if max_coder_slots <= 1:
         return run_level(
@@ -96,127 +104,139 @@ def _run_concurrent(
     cond = threading.Condition(lock)
 
     # All mutable state is protected by `cond` (which wraps `lock`).
-    pending: list = list(tickets)       # tickets not yet started / re-queued after REJECT
-    coding_set: set = set()             # tickets whose code_fn is currently running
-    tester_q: deque = deque()           # (ticket, attempt) waiting for test_fn
-    terminal: set = set()               # tickets that have reached a final state
+    #
+    # coder_q is a list (not deque) so we can insert(0, t) to re-queue a
+    # rejected ticket at the FRONT without copying the whole structure.
+    coder_q: list = list(tickets)    # tickets waiting to be coded
+    tester_q: list = []              # (ticket, attempt) pairs ready to test
+    coding_set: set = set()          # tickets whose code_fn is currently running
+    terminal: set = set()            # tickets that have reached a final state
     total: int = len(tickets)
 
     def _active_files() -> set:
+        """Files touched by tickets currently being coded."""
         f: set = set()
         for t in coding_set:
             f |= file_map.get(t, set())
         return f
 
-    def _find_eligible():
-        """Return the first pending ticket that doesn't conflict with coding_set."""
+    def _find_eligible_code():
+        """First pending code task whose files don't conflict with coding_set."""
         active = _active_files()
-        for t in pending:
+        for t in coder_q:
             if not (file_map.get(t, set()) & active):
                 return t
+        return None
+
+    def _find_eligible_test():
+        """First test-ready task whose files don't conflict with coding_set (AC5)."""
+        active = _active_files()
+        for item in tester_q:
+            t, _att = item
+            if not (file_map.get(t, set()) & active):
+                return item
         return None
 
     def _finished() -> bool:
         return len(terminal) >= total
 
-    # ── coder worker ─────────────────────────────────────────────────────────
+    # ── flexible worker ───────────────────────────────────────────────────────
 
-    def coder_worker() -> None:
+    def worker() -> None:
         while True:
+            task_type: Optional[str] = None
+            t = None
+            attempt = None
+
             with cond:
-                # Wait until there is an eligible ticket or all work is done.
                 while True:
                     if _finished():
                         cond.notify_all()
                         return
-                    t = _find_eligible()
-                    if t is not None:
+
+                    # Prefer code tasks to keep the pipeline flowing.
+                    tc = _find_eligible_code()
+                    if tc is not None:
+                        coder_q.remove(tc)
+                        coding_set.add(tc)
+                        attempts[tc] += 1
+                        t, attempt, task_type = tc, attempts[tc], "code"
+                        if on_active_slots_change is not None:
+                            on_active_slots_change(len(coding_set))
                         break
+
+                    # Fall back to a test task when no eligible code task exists.
+                    tt = _find_eligible_test()
+                    if tt is not None:
+                        tester_q.remove(tt)
+                        t, attempt = tt
+                        task_type = "test"
+                        break
+
                     cond.wait()
-                # Claim the ticket atomically.
-                pending.remove(t)
-                coding_set.add(t)
-                attempts[t] += 1
-                attempt = attempts[t]
-                if on_active_slots_change is not None:
-                    on_active_slots_change(len(coding_set))
 
-            # Run code_fn outside the lock so other workers can proceed.
-            code_res = code_fn(t, attempt)
+            # ── run the task outside the lock ─────────────────────────────────
 
-            with cond:
-                result.order.append((t, "coder", attempt))
-                coding_set.discard(t)
-                if code_res is StageResult.PASS:
-                    tester_q.append((t, attempt))
-                else:
-                    # Coder failure: terminal immediately (no tester).
-                    terminal.add(t)
-                    result.dropped.append(t)
-                    if on_dropped is not None:
-                        on_dropped(t)
-                if on_active_slots_change is not None:
-                    on_active_slots_change(len(coding_set))
-                cond.notify_all()
+            if task_type == "code":
+                code_res = code_fn(t, attempt)
+                with cond:
+                    result.order.append((t, "coder", attempt))
+                    coding_set.discard(t)
+                    if on_active_slots_change is not None:
+                        on_active_slots_change(len(coding_set))
+                    if code_res is StageResult.PASS:
+                        tester_q.append((t, attempt))
+                    else:
+                        terminal.add(t)
+                        result.dropped.append(t)
+                        if on_dropped is not None:
+                            on_dropped(t)
+                    cond.notify_all()
 
-    # ── tester worker (serial — one ticket at a time) ─────────────────────────
-
-    def tester_worker() -> None:
-        while True:
-            with cond:
-                # Wait until there is something to test or all work is done.
-                while not tester_q:
-                    if _finished():
-                        cond.notify_all()
-                        return
-                    cond.wait()
-                t, attempt = tester_q.popleft()
-
-            # Run test_fn outside the lock.
-            test_res = test_fn(t, attempt)
-
-            with cond:
-                result.order.append((t, "tester", attempt))
-                if test_res is StageResult.PASS:
-                    terminal.add(t)
-                    result.merged.append(t)
-                    if on_merged is not None:
-                        on_merged(t)
-                elif test_res is StageResult.EXHAUST:
-                    terminal.add(t)
-                    result.needs_rework.append(t)
-                    if on_needs_rework is not None:
-                        on_needs_rework(t)
-                elif test_res is StageResult.REJECT:
-                    if attempts[t] >= max_attempts:
+            else:  # "test"
+                # Merge serialization is the responsibility of test_fn itself
+                # (production test_fn wraps git-merge in develop_merge_guard from
+                # serialization.py — issue #738). The scheduler imposes no additional
+                # merge lock so that test tasks can overlap in their non-merge work.
+                test_res = test_fn(t, attempt)
+                with cond:
+                    result.order.append((t, "tester", attempt))
+                    if test_res is StageResult.PASS:
+                        terminal.add(t)
+                        result.merged.append(t)
+                        if on_merged is not None:
+                            on_merged(t)
+                    elif test_res is StageResult.EXHAUST:
                         terminal.add(t)
                         result.needs_rework.append(t)
                         if on_needs_rework is not None:
                             on_needs_rework(t)
-                    else:
-                        # Re-add to pending for the next coder pick-up.
-                        pending.append(t)
-                else:  # StageResult.FAIL
-                    terminal.add(t)
-                    result.dropped.append(t)
-                    if on_dropped is not None:
-                        on_dropped(t)
-                cond.notify_all()
+                    elif test_res is StageResult.REJECT:
+                        if attempts[t] >= max_attempts:
+                            terminal.add(t)
+                            result.needs_rework.append(t)
+                            if on_needs_rework is not None:
+                                on_needs_rework(t)
+                        else:
+                            # Re-queue to FRONT of coder queue so this ticket is
+                            # retried before any other pending ticket (AC6).
+                            coder_q.insert(0, t)
+                    else:  # StageResult.FAIL
+                        terminal.add(t)
+                        result.dropped.append(t)
+                        if on_dropped is not None:
+                            on_dropped(t)
+                    cond.notify_all()
 
-    # ── launch threads ────────────────────────────────────────────────────────
+    # ── launch flexible worker threads ────────────────────────────────────────
 
     workers = [
-        threading.Thread(target=coder_worker, daemon=True)
+        threading.Thread(target=worker, daemon=True)
         for _ in range(max_coder_slots)
     ]
-    tester_t = threading.Thread(target=tester_worker, daemon=True)
-
     for w in workers:
         w.start()
-    tester_t.start()
-
     for w in workers:
         w.join()
-    tester_t.join()
 
     return result

@@ -157,15 +157,8 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
         return {"state": "ready_to_merge", "end_reason": "reconcile-orphan"}
 
     canonical = _db().canonical_lifecycle(stored)
-    # B2: lineage-merge promotion. A superseded ancestor (or settled child) sits
-    # in needs_rework forever because its own tickets failed (that is WHY a rerun
-    # child was spawned) — has_rework never clears. But once the whole chain has
-    # merged up into develop, that sprint's work IS shipped and it is completed.
-    # Gate strictly on a real merge-to-develop check so the half-merged case
-    # (e.g. a lineage whose base→develop PR is still open) is never promoted.
-    if canonical == "needs_rework" and _lineage_fully_in_develop(label, project):
-        return {"state": "completed",
-                "end_reason": row.get("end_reason") or "lineage-merged"}
+    # needs_rework→completed is never reconciler-driven: parent/ancestor sprints
+    # stay open until an explicit Merge Sprint or Bulk complete (manager actor).
     if has_rework and canonical in ("ready_to_merge", "completed"):
         # A natural successful run end must not be downgraded because GitHub
         # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).

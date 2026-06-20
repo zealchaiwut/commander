@@ -468,8 +468,8 @@ def test_service_error_state_on_exception():
     assert error.get("error"), "error field is empty in error snapshot"
 
 
-def test_service_merge_errors_tuple_unpack_completes_with_warnings():
-    """Merge helper returns (errors, pr_num) — must not append the raw tuple to errors."""
+def test_service_merge_errors_abort_without_completing():
+    """Merge failure must emit error and must not mark the sprint completed."""
     svc = _import_svc()
     selected = [42]
     srv = _make_mock_server()
@@ -477,6 +477,7 @@ def test_service_merge_errors_tuple_unpack_completes_with_warnings():
         ["sprint/sprint-73 -> develop: merge conflict"],
         None,
     )
+    srv._is_child_sprint_label.return_value = False
     key = "sprint-73@owner/repo-merge"
 
     async def run():
@@ -491,10 +492,8 @@ def test_service_merge_errors_tuple_unpack_completes_with_warnings():
             )
 
     events = asyncio.run(run())
-    done = next((e for e in events if e.get("status") == "done"), None)
-    assert done is not None, f"Expected done, got error: {events[-1] if events else None}"
-    errs = done.get("errors") or []
-    assert all(isinstance(e, str) for e in errs), f"errors must be strings, got {errs!r}"
-    assert any("merge conflict" in e for e in errs)
-    log_tail = done.get("log_tail") or []
-    assert not any(isinstance(line, list) for line in log_tail)
+    error = next((e for e in events if e.get("status") == "error"), None)
+    assert error is not None, f"Expected error, got: {events[-1] if events else None}"
+    assert "merge conflict" in (error.get("error") or "").lower()
+    srv._plan_json_set_state.assert_not_called()
+    srv._sprint_db_set_state.assert_not_called()

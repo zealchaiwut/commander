@@ -18,8 +18,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SERVICES_DIR = REPO_ROOT / "services" / "sprint_manager"

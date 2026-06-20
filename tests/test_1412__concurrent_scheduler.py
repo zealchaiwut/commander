@@ -117,11 +117,16 @@ def test_ac1_max_coder_slots_round_trips_through_dict():
 
 
 def test_ac1_sprint_config_has_max_tester_slots():
-    """SprintConfig carries max_tester_slots with default 1."""
+    """SprintConfig carries max_tester_slots; None means 'not configured in yaml'.
+
+    Issue #1415 changed the default from 1 to None to distinguish 'not set'
+    from 'explicitly set to 1'. The sprint runner resolves None → 1 (serial).
+    """
     from services.sprint_manager.config import SprintConfig
     cfg = SprintConfig()
     assert hasattr(cfg, "max_tester_slots")
-    assert cfg.max_tester_slots == 1
+    # None = not configured; runner resolves to 1 (serial) via run_sprint logic.
+    assert cfg.max_tester_slots is None
 
 
 # ── AC2: max_coder_slots=1 is identical to existing pipeline ────────────────

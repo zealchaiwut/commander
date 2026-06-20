@@ -8301,8 +8301,8 @@ def _run_pipeline_dispatch(
         if not level_nums:
             continue
 
-        # Resolve concurrent coder slots from config (issue #1412).
-        _max_coder_slots = getattr(cfg, "max_coder_slots", 1) if cfg is not None else 1
+        # Use resolved slot count from state (set at run start, issue #1415).
+        _max_coder_slots = state.max_coder_slots
 
         if _max_coder_slots > 1:
             # Build file_map for conflict-aware concurrent dispatch.
@@ -8375,6 +8375,8 @@ def run_sprint(
     skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
     pipeline_mode: Optional[bool] = None,
+    max_coder_slots: Optional[int] = None,
+    max_tester_slots: Optional[int] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -8521,6 +8523,20 @@ def run_sprint(
             ],
         )
 
+    # ── Slot capacity resolution (issue #1415) ────────────────────────────────
+    # Resolve max_coder_slots / max_tester_slots at run start so the running-pane
+    # status payload reflects the correct lane capacity from the very first post.
+    # Precedence: sprint-level param > project settings (cfg) > serial default (1).
+    state.max_coder_slots = (
+        max_coder_slots if max_coder_slots is not None
+        else (cfg.max_coder_slots if cfg is not None and cfg.max_coder_slots is not None else 1)
+    )
+    state.max_tester_slots = (
+        max_tester_slots if max_tester_slots is not None
+        else (cfg.max_tester_slots if cfg is not None and cfg.max_tester_slots is not None else 1)
+    )
+    _post_sprint_status(state, api_url=api_url)
+
     sys.stdout.write(str(f"\n=== Sprint Manager: label={label} ===") + "\n")
     sys.stdout.write(str(f"Target branch: {target_branch}") + "\n")
     sys.stdout.write(str(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}") + "\n")
@@ -8648,7 +8664,7 @@ def run_sprint(
         )
         _pool_dir = _pool_commander / "runtime" / "worktree-pool"
         _WorktreePool.reconcile_orphans(_pool_dir, _pool_repo_root)
-        _pool_slots = getattr(cfg, "max_coder_slots", _WORKTREE_POOL_DEFAULT_SLOTS) if cfg else _WORKTREE_POOL_DEFAULT_SLOTS
+        _pool_slots = state.max_coder_slots
         _pool_req = (cfg.worktree_coder / "requirements.txt") if cfg is not None else None
         if _pool_req is not None and not Path(_pool_req).exists():
             _pool_req = None
@@ -8697,9 +8713,7 @@ def run_sprint(
         _pipeline_on = False
     # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
     state.pipeline_mode = _pipeline_on
-    # Persist slot config for resumed / inspected sprints (issue #1412).
-    state.max_coder_slots = getattr(cfg, "max_coder_slots", 1) if cfg is not None else 1
-    state.max_tester_slots = getattr(cfg, "max_tester_slots", 1) if cfg is not None else 1
+    # Slot capacity was resolved at run start (issue #1415) — no re-assignment needed.
     sys.stdout.write(str("  Dispatch mode: "
         + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")) + "\n")
     try:
@@ -9839,6 +9853,22 @@ def main() -> None:
         help="Skip the estimator run (on by default; pass --no-skip-estimator to enable).",
     )
 
+    # Sprint-level slot overrides (issue #1415) — take precedence over project settings.
+    p.add_argument(
+        "--max-coder-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent coder slots for this run (overrides sprint.yaml setting).",
+    )
+    p.add_argument(
+        "--max-tester-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent tester slots for this run (overrides sprint.yaml setting).",
+    )
+
     # Rerun manifest (issue #332) — written by the server rerun endpoint
     p.add_argument(
         "--rerun-manifest",
@@ -9981,6 +10011,8 @@ def main() -> None:
             token_budget         = args.budget,
             skip_estimator       = args.skip_estimator,
             rerun_manifest       = _rerun_manifest,
+            max_coder_slots      = args.max_coder_slots,
+            max_tester_slots     = args.max_tester_slots,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)

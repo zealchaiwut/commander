@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import dataclasses
 import json
 import os
 import re
@@ -3879,52 +3880,54 @@ def _run_pipeline_dispatch(
 
 # ── sprint loop ────────────────────────────────────────────────────────────────
 
-def run_sprint(
+
+@dataclasses.dataclass
+class _SprintPreflightResult:
+    """Structured result returned by run_sprint_preflight."""
+    state: "SprintState"
+    state_path: "Path"
+    summary: "SprintSummary"
+    sprint_num: Optional[int]
+    sprint_branch: str
+    target_branch: str
+    eff_repo: Optional[str]
+    api_url: Optional[str]
+    run_id: str
+    rerun_decisions: dict
+    eff_sprints_dir: "Path"
+    dispatch_levels: list
+    level_nums_by_idx: list
+    pipeline_on: bool
+    start_time: float
+    early_exit: bool = False
+
+
+def run_sprint_preflight(
     label: str,
-    skip_gates: bool,
-    gate_pytest: bool,
-    gate_lint: bool,
-    gate_merge_preview: bool,
-    gate_typecheck: bool = True,
-    gate_design: bool = True,
-    gate_frontend_lint: bool = True,
-    gate_monolith: bool = True,
-    alert_modes: Optional[list[str]] = None,
+    alert_modes: list,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
     resume: bool = False,
     retry_failed: bool = False,
     target_branch: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
-    preflight_approved: Optional[list[int]] = None,
-    gate_scope: str = "changed",
     token_budget: int = 0,
     skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
     pipeline_mode: Optional[bool] = None,
     max_coder_slots: Optional[int] = None,
     max_tester_slots: Optional[int] = None,
-) -> tuple[SprintSummary, SprintState]:
-    """Main sprint loop -- processes backlog issues sequentially.
+) -> _SprintPreflightResult:
+    """Preflight and branch-setup phase for run_sprint.
 
-    Returns (SprintSummary, SprintState).
-    Supports resume/retry_failed from persisted state.
+    Runs all pre-dispatch preparation: environment setup, state loading/building,
+    sprint branch creation, estimator, DAG ordering, worktree pool initialisation,
+    and pipeline-mode resolution.  Returns a _SprintPreflightResult carrying every
+    local variable that the dispatch loop in run_sprint needs.
 
-    target_branch: branch to merge feature branches into after gates pass.
-    Defaults to this sprint's branch (sprint/sprint-N or sprint/sprint-N.M).
-    Chain promotion (child → base → develop) happens only at Merge Sprint.
-    Pass 'develop' to override (AC-5 #269).
-
-    preflight_approved: optional list of issue numbers approved by the pre-flight
-    review. When provided, only issues in this list are dispatched; others are
-    skipped with reason 'preflight-skipped'.
-
-    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
-    relative to the base branch; 'full' restores legacy full-codebase behaviour.
+    When early_exit is True on the returned result, the caller must immediately
+    return (result.summary, result.state) without entering the dispatch loop.
     """
-    if alert_modes is None:
-        alert_modes = [AlertMode.DASHBOARD_BANNER]
-
     # Effective repo: explicit arg > config > github_client
     eff_repo   = repo_name or (cfg.repo_name if cfg else None)
     api_url    = cfg.api_url if cfg else None
@@ -4000,7 +4003,15 @@ def run_sprint(
                 project         = eff_repo or "",
                 start_timestamp = _utcnow(),
             )
-            return summary, state
+            return _SprintPreflightResult(
+                state=state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions=rerun_decisions,
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
         state = SprintState(
             sprint_label    = label,
@@ -4036,7 +4047,15 @@ def run_sprint(
                 project       = eff_repo or "",
                 start_timestamp = _utcnow(),
             )
-            return summary, state
+            return _SprintPreflightResult(
+                state=state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions=rerun_decisions,
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
         state = SprintState(
             sprint_label    = label,
@@ -4209,12 +4228,11 @@ def run_sprint(
             f" (max_coder_slots={_pool_slots})\n"
         ))
 
-    total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
         type="sprint_started",
         target=f"sprint-{sprint_num}" if sprint_num is not None else label,
         actor="system",
-        detail={"ticket_count": total_issues, "levels": len(_dispatch_levels)},
+        detail={"ticket_count": len(state.issues), "levels": len(_dispatch_levels)},
         project=eff_repo or label,
         action_id=_run_id,
     )
@@ -4251,6 +4269,108 @@ def run_sprint(
         )
     except Exception:
         pass
+
+    return _SprintPreflightResult(
+        state=state,
+        state_path=state_path,
+        summary=summary,
+        sprint_num=sprint_num,
+        sprint_branch=sprint_branch,
+        target_branch=target_branch,
+        eff_repo=eff_repo,
+        api_url=api_url,
+        run_id=_run_id,
+        rerun_decisions=rerun_decisions,
+        eff_sprints_dir=_eff_sprints_dir,
+        dispatch_levels=_dispatch_levels,
+        level_nums_by_idx=_level_nums_by_idx,
+        pipeline_on=_pipeline_on,
+        start_time=start_time,
+        early_exit=False,
+    )
+
+
+def run_sprint(
+    label: str,
+    skip_gates: bool,
+    gate_pytest: bool,
+    gate_lint: bool,
+    gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
+    gate_frontend_lint: bool = True,
+    gate_monolith: bool = True,
+    alert_modes: Optional[list[str]] = None,
+    repo_name: Optional[str] = None,
+    dry_run: bool = False,
+    resume: bool = False,
+    retry_failed: bool = False,
+    target_branch: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+    preflight_approved: Optional[list[int]] = None,
+    gate_scope: str = "changed",
+    token_budget: int = 0,
+    skip_estimator: bool = True,
+    rerun_manifest: Optional[dict] = None,
+    pipeline_mode: Optional[bool] = None,
+    max_coder_slots: Optional[int] = None,
+    max_tester_slots: Optional[int] = None,
+) -> tuple[SprintSummary, SprintState]:
+    """Main sprint loop -- processes backlog issues sequentially.
+
+    Returns (SprintSummary, SprintState).
+    Supports resume/retry_failed from persisted state.
+
+    target_branch: branch to merge feature branches into after gates pass.
+    Defaults to this sprint's branch (sprint/sprint-N or sprint/sprint-N.M).
+    Chain promotion (child → base → develop) happens only at Merge Sprint.
+    Pass 'develop' to override (AC-5 #269).
+
+    preflight_approved: optional list of issue numbers approved by the pre-flight
+    review. When provided, only issues in this list are dispatched; others are
+    skipped with reason 'preflight-skipped'.
+
+    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
+    relative to the base branch; 'full' restores legacy full-codebase behaviour.
+    """
+    if alert_modes is None:
+        alert_modes = [AlertMode.DASHBOARD_BANNER]
+
+    pf = run_sprint_preflight(
+        label=label,
+        alert_modes=alert_modes,
+        repo_name=repo_name,
+        dry_run=dry_run,
+        resume=resume,
+        retry_failed=retry_failed,
+        target_branch=target_branch,
+        cfg=cfg,
+        token_budget=token_budget,
+        skip_estimator=skip_estimator,
+        rerun_manifest=rerun_manifest,
+        pipeline_mode=pipeline_mode,
+        max_coder_slots=max_coder_slots,
+        max_tester_slots=max_tester_slots,
+    )
+    if pf.early_exit:
+        return pf.summary, pf.state
+
+    state              = pf.state
+    state_path         = pf.state_path
+    summary            = pf.summary
+    sprint_num         = pf.sprint_num
+    sprint_branch      = pf.sprint_branch
+    target_branch      = pf.target_branch
+    eff_repo           = pf.eff_repo
+    api_url            = pf.api_url
+    _run_id            = pf.run_id
+    rerun_decisions    = pf.rerun_decisions
+    _eff_sprints_dir   = pf.eff_sprints_dir
+    _dispatch_levels   = pf.dispatch_levels
+    _level_nums_by_idx = pf.level_nums_by_idx
+    _pipeline_on       = pf.pipeline_on
+    start_time         = pf.start_time
+    total_issues       = len(state.issues)
 
     if _pipeline_on:
         _run_pipeline_dispatch(
@@ -5189,6 +5309,7 @@ def run_sprint(
 
     # ── Worktree pool teardown (issue #1411) ───────────────────────────────────
     # Tear down the pool at sprint end so no stray worktrees remain.
+    global _ACTIVE_WORKTREE_POOL
     if _ACTIVE_WORKTREE_POOL is not None:
         try:
             _ACTIVE_WORKTREE_POOL.teardown()

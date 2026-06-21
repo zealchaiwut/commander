@@ -193,7 +193,7 @@ def test_build_sprint_dag_layers_missing_estimates(monkeypatch):
 def test_build_sprint_dag_layers_unavailable(monkeypatch):
     """If dag_builder unavailable, return None."""
     monkeypatch.setattr(
-        "services.sprint_manager.sprint_manager._DAG_BUILDER_AVAILABLE",
+        "services.sprint_manager.pipeline._DAG_BUILDER_AVAILABLE",
         False,
     )
     issues = _issues(1, 2)

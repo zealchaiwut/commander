@@ -8657,7 +8657,13 @@ def run_sprint(
     # pool of K isolated worktrees for concurrent coder dispatch.
     if not dry_run:
         global _ACTIVE_WORKTREE_POOL
-        _pool_repo_root = Path(cfg.worktree_coder).parent if cfg is not None else REPO_ROOT
+        # The worktree pool runs `git worktree add` with cwd=repo_root, so it MUST
+        # be the coder clone (a real git repo that has the sprint branch). Using
+        # its .parent pointed at the project root — not a git repo in the nested
+        # layout (~/dev/<project>/coder) — so worktree creation failed with
+        # "invalid reference: <sprint-branch>", leaving an empty slot whose missing
+        # PRODUCT.md/DESIGN.md then surfaced as a bogus design_docs_missing failure.
+        _pool_repo_root = Path(cfg.worktree_coder) if cfg is not None else REPO_ROOT
         _pool_commander = (
             discover_commander_dir(cfg.worktree_coder if cfg is not None else None)
         )

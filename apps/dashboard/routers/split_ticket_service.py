@@ -27,7 +27,9 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import github_client as gc_module  # noqa: E402
 
 # Labels that are per-ticket lifecycle state — never inherited by children.
-_STRIP_LABELS = frozenset({"size-S", "size-M", "size-L", "size-XL", "estimated", "in-progress"})
+_STRIP_LABELS = frozenset({
+    "size-S", "size-M", "size-L", "size-XL", "estimated", "in-progress"
+})
 _MODEL = "claude-haiku-4-5-20251001"
 
 
@@ -59,12 +61,11 @@ def _build_suggest_prompt(issue_title: str, issue_body: str) -> str:
         f"focused child issues.\n\n"
         f"TICKET TITLE: {issue_title}\n\n"
         f"TICKET BODY:\n{body_excerpt}\n\n"
-        f"Return ONLY a JSON object (no markdown fences, no commentary) with this shape:\n"
+        f"Return ONLY a JSON object (no markdown, no commentary) with shape:\n"
         f'{{"child1":{{"title":"...","ac_scope":"..."}},'
         f'"child2":{{"title":"...","ac_scope":"..."}}}}\n\n'
-        f"Each child title should be a concise focused description of one half of "
-        f"the original ticket. Each ac_scope should be 2-4 acceptance-criteria lines "
-        f"in the format '- [ ] ...'."
+        f"Each child title: concise focused description of one half.\n"
+        f"Each ac_scope: 2-4 acceptance-criteria lines in format '- [ ] ...'."
     )
 
 
@@ -236,7 +237,8 @@ def confirm_split(
     if action == "close":
         comment = (
             f"Split into #{child1_num} and #{child2_num}.\n\n"
-            f"Child issues:\n- #{child1_num}: {child1_title}\n- #{child2_num}: {child2_title}"
+            f"Child issues:\n- #{child1_num}: {child1_title}\n"
+            f"- #{child2_num}: {child2_title}"
         )
         gc.add_comment(issue_num, comment, repo_name=project)
         gc.close_issue(issue_num, repo_name=project, reason="not planned")

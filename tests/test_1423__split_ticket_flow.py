@@ -57,38 +57,42 @@ def test_ac1a_size_xl_label_triggers_split_eligibility():
 # ── AC1 (b): Split button condition — DAG blocking ≥2 peer waves ─────────────
 
 def test_ac1b_dag_blocking_eligibility_function_in_project_html():
-    """AC1b: project.html contains JS to detect DAG-blocking tickets (≥2 wave overlaps)."""
+    """AC1b: detect DAG-blocking tickets (≥2 wave overlaps) in project.html."""
     source = PROJECT_HTML_PATH.read_text(encoding="utf-8")
     # Must reference conflicts and levels from DAG cache
     assert "_smgmtDagDataCache" in source, (
         "project.html must use _smgmtDagDataCache to evaluate DAG-blocking condition"
     )
     # Must have a function that checks split eligibility
-    assert "IsSplitEligible" in source or "splitEligible" in source or "_smgmtSplitEligible" in source, (
-        "project.html must define a function that evaluates split eligibility"
-    )
+    assert (
+        "IsSplitEligible" in source
+        or "splitEligible" in source
+        or "_smgmtSplitEligible" in source
+    ), ("project.html must define a function that evaluates split eligibility")
 
 
 # ── AC1 (c): Split button condition — capacity bar red ───────────────────────
 
 def test_ac1c_capacity_red_triggers_split():
-    """AC1c: project.html checks whether the capacity bar is red to show Split."""
+    """AC1c: project.html checks capacity bar red to show Split."""
     source = PROJECT_HTML_PATH.read_text(encoding="utf-8")
     # cap-bar--red or similar class plus a check that drives split eligibility
     assert "cap-bar--red" in source, (
         "project.html must define the cap-bar--red class (already exists) — "
         "split eligibility must read whether cap bar is in red state"
     )
-    # The split eligibility must somehow correlate with capacity-over state
-    assert "IsCapacityRed" in source or "capacityRed" in source or "cap-bar--red" in source, (
-        "project.html must expose a way to detect capacity-red state for split eligibility"
-    )
+    # The split eligibility must correlate with capacity-over state
+    assert (
+        "IsCapacityRed" in source
+        or "capacityRed" in source
+        or "cap-bar--red" in source
+    ), ("project.html must expose capacity-red state for split eligibility")
 
 
 # ── AC2: Modal pre-fill via suggest API ──────────────────────────────────────
 
 def test_ac2_suggest_endpoint_exists_in_router():
-    """AC2: split_ticket.py defines a POST endpoint for generating BA draft suggestions."""
+    """AC2: split_ticket.py defines POST endpoint for BA suggestions."""
     source = SPLIT_ROUTER_PATH.read_text(encoding="utf-8")
     assert "split/suggest" in source or "suggest" in source, (
         "split_ticket.py must define the /suggest endpoint"
@@ -99,12 +103,18 @@ def test_ac2_suggest_endpoint_exists_in_router():
 
 
 def test_ac2_suggest_service_returns_two_children():
-    """AC2: suggest_split() returns child1 and child2 with title and ac_scope keys."""
+    """AC2: suggest_split() returns child1 and child2 with correct keys."""
     from routers.split_ticket_service import _parse_ba_suggest_output
 
     raw = json.dumps({
-        "child1": {"title": "Part A: Handle UI", "ac_scope": "AC1: render form\nAC2: submit"},
-        "child2": {"title": "Part B: Backend API", "ac_scope": "AC1: POST endpoint\nAC2: persist"},
+        "child1": {
+            "title": "Part A: Handle UI",
+            "ac_scope": "AC1: render form\nAC2: submit",
+        },
+        "child2": {
+            "title": "Part B: Backend API",
+            "ac_scope": "AC1: POST endpoint\nAC2: persist",
+        },
     })
     result = _parse_ba_suggest_output(raw)
 
@@ -200,8 +210,9 @@ def test_ac3_confirm_creates_two_issues_via_github():
         gc=mock_gc,
     )
 
-    assert mock_gc.create_issue.call_count == 2, (
-        f"create_issue must be called twice; called {mock_gc.create_issue.call_count} times"
+    call_count = mock_gc.create_issue.call_count
+    assert call_count == 2, (
+        f"create_issue must be called twice; called {call_count} times"
     )
     assert result["child1_num"] == 101
     assert result["child2_num"] == 102
@@ -248,13 +259,15 @@ def test_ac4_action_remove_strips_sprint_label():
         "sprint-93" in str(c)
         for c in update_calls
     )
-    assert removed_from_sprint or mock_gc.update_labels.called or mock_gc.assign_sprint_by_label.called, (
-        "action='remove' must strip the sprint label from the original ticket"
-    )
+    assert (
+        removed_from_sprint
+        or mock_gc.update_labels.called
+        or mock_gc.assign_sprint_by_label.called
+    ), ("action='remove' must strip the sprint label from the original ticket")
 
 
 def test_ac4_action_close_closes_with_comment():
-    """AC4: action='close' adds a comment referencing child issues and closes original."""
+    """AC4: action='close' adds comment and closes original."""
     from routers import split_ticket_service
 
     mock_gc = MagicMock()
@@ -287,7 +300,11 @@ def test_ac4_action_close_closes_with_comment():
     assert mock_gc.add_comment.called, (
         "action='close' must add a comment referencing the child issues"
     )
-    comment_text = mock_gc.add_comment.call_args[0][1] if mock_gc.add_comment.call_args else ""
+    comment_text = (
+        mock_gc.add_comment.call_args[0][1]
+        if mock_gc.add_comment.call_args
+        else ""
+    )
     assert "101" in comment_text and "102" in comment_text, (
         f"Comment must reference both child issue numbers; got: {comment_text!r}"
     )
@@ -314,7 +331,9 @@ def test_ac5_children_trigger_estimate_run():
     def fake_trigger(issue_num, project, repo):
         triggered_estimates.append(issue_num)
 
-    with patch.object(split_ticket_service, "_trigger_estimate", side_effect=fake_trigger):
+    with patch.object(
+        split_ticket_service, "_trigger_estimate", side_effect=fake_trigger
+    ):
         split_ticket_service.confirm_split(
             issue_num=100,
             sprint_label="sprint-93",
@@ -328,17 +347,19 @@ def test_ac5_children_trigger_estimate_run():
         )
 
     assert 101 in triggered_estimates, (
-        f"Re-estimate must be triggered for child1 (#101); triggered for {triggered_estimates}"
+        "Re-estimate must be triggered for child1 (#101); "
+        f"triggered for {triggered_estimates}"
     )
     assert 102 in triggered_estimates, (
-        f"Re-estimate must be triggered for child2 (#102); triggered for {triggered_estimates}"
+        "Re-estimate must be triggered for child2 (#102); "
+        f"triggered for {triggered_estimates}"
     )
 
 
 # ── AC7: Fallback when BA call unavailable ────────────────────────────────────
 
 def test_ac7_fallback_notice_when_ba_fails():
-    """AC7: when the BA subprocess call fails, suggest returns fallback=True with empty fields."""
+    """AC7: BA failure returns fallback=True with empty fields."""
     from routers.split_ticket_service import _parse_ba_suggest_output
 
     result = _parse_ba_suggest_output(None)  # None simulates BA call failure
@@ -368,11 +389,13 @@ def test_ac7_fallback_on_invalid_json():
 # ── AC7: Modal in project.html has fallback notice element ───────────────────
 
 def test_ac7_fallback_notice_element_in_html():
-    """AC7: project.html contains a fallback notice element in the split modal."""
+    """AC7: project.html contains fallback notice in split modal."""
     source = PROJECT_HTML_PATH.read_text(encoding="utf-8")
-    assert "fallback" in source.lower() or "ba-unavailable" in source.lower() or "split-fallback" in source.lower(), (
-        "project.html must show a fallback notice when BA is unavailable"
-    )
+    assert (
+        "fallback" in source.lower()
+        or "ba-unavailable" in source.lower()
+        or "split-fallback" in source.lower()
+    ), ("project.html must show a fallback notice when BA is unavailable")
 
 
 # ── Router file structure ─────────────────────────────────────────────────────
@@ -434,7 +457,7 @@ def test_ac8_project_html_refreshes_dag_after_split():
     )
     # After confirm, should trigger _smgmtFetchPreviewDag or similar
     assert "_smgmtFetchPreviewDag" in source or "preview-dag" in source, (
-        "project.html must re-fetch preview-dag after split to update the mini-rail (AC8)"
+        "project.html must re-fetch preview-dag after split to update mini-rail"
     )
 
 

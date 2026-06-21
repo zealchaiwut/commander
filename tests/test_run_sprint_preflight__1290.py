@@ -1,6 +1,4 @@
 """Tests for issue #1290: Extract run_sprint preflight/branch-setup into helper (runs against UAT)"""
-import os
-import sys
 import subprocess
 import ast
 
@@ -71,14 +69,6 @@ def test_preflight_logic_not_in_run_sprint_body():
 
     # Check that preflight call happens early
     assert "run_sprint_preflight(" in sprint_body, "preflight not called early in run_sprint"
-
-    # Verify key parts of preflight logic are NOT duplicated in run_sprint
-    # (would be after the preflight call)
-    preflight_duplicate_markers = [
-        "eff_repo   = repo_name or",  # Early env setup
-        "_run_id = uuid4()",  # Run ID generation (should be in preflight)
-        "_estimator_summary = None",  # Estimator (should be in preflight)
-    ]
 
     # Get the part of run_sprint after the preflight call
     pf_call_index = sprint_body.find("run_sprint_preflight(")
@@ -162,13 +152,6 @@ def test_no_new_public_api_surface():
         if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
     }
 
-    # run_sprint_preflight is the only new public function expected
-    # Existing public functions should still be there
-    expected_public = {"run_sprint", "run_sprint_preflight"}
-
-    # Check that we're not adding unexpected functions
-    new_functions = public_funcs - expected_public
-
     # Some functions like main(), parse_args() etc. are expected to exist
     # The important check is that we're not adding multiple new functions
     assert "run_sprint_preflight" in public_funcs, "run_sprint_preflight not in public API"
@@ -183,8 +166,6 @@ def test_diff_is_code_motion_only():
         text=True,
         cwd="."
     )
-
-    diff_lines = result.stdout.split("\n")
 
     # Count additions vs deletions of key logic patterns
     # The diff should show:

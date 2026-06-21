@@ -4290,71 +4290,37 @@ def run_sprint_preflight(
     )
 
 
-def run_sprint(
+def run_sprint_loop(
+    pf: "_SprintPreflightResult",
+    *,
     label: str,
+    preflight_approved: "Optional[list[int]]",
+    dry_run: bool,
+    resume: bool,
+    retry_failed: bool,
     skip_gates: bool,
     gate_pytest: bool,
     gate_lint: bool,
     gate_merge_preview: bool,
-    gate_typecheck: bool = True,
-    gate_design: bool = True,
-    gate_frontend_lint: bool = True,
-    gate_monolith: bool = True,
-    alert_modes: Optional[list[str]] = None,
-    repo_name: Optional[str] = None,
-    dry_run: bool = False,
-    resume: bool = False,
-    retry_failed: bool = False,
-    target_branch: Optional[str] = None,
-    cfg: Optional["SprintConfig"] = None,
-    preflight_approved: Optional[list[int]] = None,
-    gate_scope: str = "changed",
-    token_budget: int = 0,
-    skip_estimator: bool = True,
-    rerun_manifest: Optional[dict] = None,
-    pipeline_mode: Optional[bool] = None,
-    max_coder_slots: Optional[int] = None,
-    max_tester_slots: Optional[int] = None,
-) -> tuple[SprintSummary, SprintState]:
-    """Main sprint loop -- processes backlog issues sequentially.
+    gate_typecheck: bool,
+    gate_design: bool,
+    gate_frontend_lint: bool,
+    gate_monolith: bool,
+    gate_scope: str,
+    alert_modes: list,
+    cfg: "Optional[SprintConfig]",
+) -> None:
+    """Per-ticket iteration loop for run_sprint.
 
-    Returns (SprintSummary, SprintState).
-    Supports resume/retry_failed from persisted state.
+    Processes each ticket in the flat dispatch list sequentially:
+    dispatches the coder agent, then the tester agent, runs post-tester
+    gates, and updates sprint state.  Emits level_start / level_complete
+    events at dispatch-level boundaries.
 
-    target_branch: branch to merge feature branches into after gates pass.
-    Defaults to this sprint's branch (sprint/sprint-N or sprint/sprint-N.M).
-    Chain promotion (child → base → develop) happens only at Merge Sprint.
-    Pass 'develop' to override (AC-5 #269).
-
-    preflight_approved: optional list of issue numbers approved by the pre-flight
-    review. When provided, only issues in this list are dispatched; others are
-    skipped with reason 'preflight-skipped'.
-
-    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
-    relative to the base branch; 'full' restores legacy full-codebase behaviour.
+    Mutates ``pf.state`` and ``pf.summary`` in place.  Called by
+    ``run_sprint`` after the preflight and (optional) pipeline-dispatch
+    phases complete.
     """
-    if alert_modes is None:
-        alert_modes = [AlertMode.DASHBOARD_BANNER]
-
-    pf = run_sprint_preflight(
-        label=label,
-        alert_modes=alert_modes,
-        repo_name=repo_name,
-        dry_run=dry_run,
-        resume=resume,
-        retry_failed=retry_failed,
-        target_branch=target_branch,
-        cfg=cfg,
-        token_budget=token_budget,
-        skip_estimator=skip_estimator,
-        rerun_manifest=rerun_manifest,
-        pipeline_mode=pipeline_mode,
-        max_coder_slots=max_coder_slots,
-        max_tester_slots=max_tester_slots,
-    )
-    if pf.early_exit:
-        return pf.summary, pf.state
-
     state              = pf.state
     state_path         = pf.state_path
     summary            = pf.summary
@@ -4371,21 +4337,6 @@ def run_sprint(
     _pipeline_on       = pf.pipeline_on
     start_time         = pf.start_time
     total_issues       = len(state.issues)
-
-    if _pipeline_on:
-        _run_pipeline_dispatch(
-            state=state, state_path=state_path, summary=summary,
-            dispatch_levels=_dispatch_levels, level_nums_by_idx=_level_nums_by_idx,
-            label=label, sprint_num=sprint_num, eff_repo=eff_repo, api_url=api_url,
-            target_branch=target_branch, sprint_branch=sprint_branch,
-            alert_modes=alert_modes, cfg=cfg, run_id=_run_id,
-            eff_sprints_dir=_eff_sprints_dir, rerun_decisions=rerun_decisions,
-            skip_gates=skip_gates, gate_pytest=gate_pytest, gate_lint=gate_lint,
-            gate_merge_preview=gate_merge_preview, gate_typecheck=gate_typecheck,
-            gate_design=gate_design, gate_frontend_lint=gate_frontend_lint,
-            gate_monolith=gate_monolith,
-            gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
-        )
 
     # Flat iteration preserving level boundaries for level_start / level_complete events.
     # Empty when pipeline mode handled dispatch above.
@@ -5268,6 +5219,123 @@ def run_sprint(
             )
         except Exception:
             pass
+
+
+
+def run_sprint(
+    label: str,
+    skip_gates: bool,
+    gate_pytest: bool,
+    gate_lint: bool,
+    gate_merge_preview: bool,
+    gate_typecheck: bool = True,
+    gate_design: bool = True,
+    gate_frontend_lint: bool = True,
+    gate_monolith: bool = True,
+    alert_modes: Optional[list[str]] = None,
+    repo_name: Optional[str] = None,
+    dry_run: bool = False,
+    resume: bool = False,
+    retry_failed: bool = False,
+    target_branch: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+    preflight_approved: Optional[list[int]] = None,
+    gate_scope: str = "changed",
+    token_budget: int = 0,
+    skip_estimator: bool = True,
+    rerun_manifest: Optional[dict] = None,
+    pipeline_mode: Optional[bool] = None,
+    max_coder_slots: Optional[int] = None,
+    max_tester_slots: Optional[int] = None,
+) -> tuple[SprintSummary, SprintState]:
+    """Main sprint loop -- processes backlog issues sequentially.
+
+    Returns (SprintSummary, SprintState).
+    Supports resume/retry_failed from persisted state.
+
+    target_branch: branch to merge feature branches into after gates pass.
+    Defaults to this sprint's branch (sprint/sprint-N or sprint/sprint-N.M).
+    Chain promotion (child → base → develop) happens only at Merge Sprint.
+    Pass 'develop' to override (AC-5 #269).
+
+    preflight_approved: optional list of issue numbers approved by the pre-flight
+    review. When provided, only issues in this list are dispatched; others are
+    skipped with reason 'preflight-skipped'.
+
+    gate_scope: 'changed' (default) scopes pytest/lint gates to files changed
+    relative to the base branch; 'full' restores legacy full-codebase behaviour.
+    """
+    if alert_modes is None:
+        alert_modes = [AlertMode.DASHBOARD_BANNER]
+
+    pf = run_sprint_preflight(
+        label=label,
+        alert_modes=alert_modes,
+        repo_name=repo_name,
+        dry_run=dry_run,
+        resume=resume,
+        retry_failed=retry_failed,
+        target_branch=target_branch,
+        cfg=cfg,
+        token_budget=token_budget,
+        skip_estimator=skip_estimator,
+        rerun_manifest=rerun_manifest,
+        pipeline_mode=pipeline_mode,
+        max_coder_slots=max_coder_slots,
+        max_tester_slots=max_tester_slots,
+    )
+    if pf.early_exit:
+        return pf.summary, pf.state
+
+    state              = pf.state
+    state_path         = pf.state_path
+    summary            = pf.summary
+    sprint_num         = pf.sprint_num
+    sprint_branch      = pf.sprint_branch
+    target_branch      = pf.target_branch
+    eff_repo           = pf.eff_repo
+    api_url            = pf.api_url
+    _run_id            = pf.run_id
+    rerun_decisions    = pf.rerun_decisions
+    _eff_sprints_dir   = pf.eff_sprints_dir
+    _dispatch_levels   = pf.dispatch_levels
+    _level_nums_by_idx = pf.level_nums_by_idx
+    _pipeline_on       = pf.pipeline_on
+    start_time         = pf.start_time
+    if _pipeline_on:
+        _run_pipeline_dispatch(
+            state=state, state_path=state_path, summary=summary,
+            dispatch_levels=_dispatch_levels, level_nums_by_idx=_level_nums_by_idx,
+            label=label, sprint_num=sprint_num, eff_repo=eff_repo, api_url=api_url,
+            target_branch=target_branch, sprint_branch=sprint_branch,
+            alert_modes=alert_modes, cfg=cfg, run_id=_run_id,
+            eff_sprints_dir=_eff_sprints_dir, rerun_decisions=rerun_decisions,
+            skip_gates=skip_gates, gate_pytest=gate_pytest, gate_lint=gate_lint,
+            gate_merge_preview=gate_merge_preview, gate_typecheck=gate_typecheck,
+            gate_design=gate_design, gate_frontend_lint=gate_frontend_lint,
+            gate_monolith=gate_monolith,
+            gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
+        )
+
+    run_sprint_loop(
+        pf,
+        label=label,
+        preflight_approved=preflight_approved,
+        dry_run=dry_run,
+        resume=resume,
+        retry_failed=retry_failed,
+        skip_gates=skip_gates,
+        gate_pytest=gate_pytest,
+        gate_lint=gate_lint,
+        gate_merge_preview=gate_merge_preview,
+        gate_typecheck=gate_typecheck,
+        gate_design=gate_design,
+        gate_frontend_lint=gate_frontend_lint,
+        gate_monolith=gate_monolith,
+        gate_scope=gate_scope,
+        alert_modes=alert_modes,
+        cfg=cfg,
+    )
 
     # Final elapsed time
     state.wall_clock_secs = time.monotonic() - start_time

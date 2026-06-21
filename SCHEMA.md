@@ -601,3 +601,33 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
+
+### Sprint label collision audit (issues #1461, #1464, #1465)
+
+The `sprints` table keys rows by `label` alone (`label TEXT PRIMARY KEY`), so two
+projects that reuse a sprint label compete for the same row — an `ON
+CONFLICT(label) DO UPDATE` write from one project clobbers the other's row. This
+sprint adds an audit/repair tool-chain plus project-scoped read paths to contain
+that until a composite `(project, label)` key migration lands.
+
+**Read-path scoping (#1464).** `db.get_sprint_children(parent_label, project=None)`
+and `startup.children_of(parent_label, project_root=None, project=None)` now take an
+optional `project` argument; when provided, child-sprint lookups add `AND project =
+?` so they never match another project's rows. Callers in `startup.py`
+(`_derive_outcome_lifecycle`, `_bulk_complete_unsettled_children`,
+`_bulk_complete_assert_children_completed`, `_merge_steps_for_sprint_chain`,
+`_sprint_merge_chain_pending`) thread the project through. The unscoped fallback
+still works but logs a warning.
+
+**Audit + repair scripts.**
+`scripts/audit_sprint_collisions.py` is read-only: it cross-references `sprints`,
+`sprint_history`, `agent_runs`, and per-clone `plan.json`/`state.json`, prints a
+markdown collision table, and writes the `.commander/runtime/sprint-collisions.json`
+manifest. `scripts/repair_sprint_collisions.py` (`--dry-run` / `--apply`) is a
+surgical fix for the `sprint-66` incident — it restores commander's clobbered base
+row from `plan.json → state.json → agent_runs` without touching perf-coach's row,
+and asserts no stale running row survives.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/debug/sprint-collisions` | Return the `.commander/runtime/sprint-collisions.json` manifest written by `audit_sprint_collisions.py`. Returns `[]` when the manifest has not been generated yet (or is unreadable). Read-only; reads from disk, no DB query |

@@ -1,6 +1,5 @@
 """Tests for issue #1279: Extract sprint_manager failure handling to failures.py (runs against UAT)"""
 import os
-import pytest
 import subprocess
 import sys
 from pathlib import Path

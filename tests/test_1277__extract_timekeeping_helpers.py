@@ -177,7 +177,6 @@ def test_acquire_pid_lock_returns_path(tmp_path, monkeypatch):
 
     # Patch _pid_file_path to use tmp_path
     import services.sprint_manager.timekeeping as tk
-    original = tk._pid_file_path
 
     def _fake_pid_file_path(label, cfg=None):
         return pid_file
@@ -211,8 +210,8 @@ def test_no_new_top_level_imports():
     source = TIMEKEEPING_PATH.read_text(encoding="utf-8")
     # Only check non-indented import lines (module-level); lazy imports inside
     # functions are pre-existing patterns (e.g. `import db`) and not new deps.
-    lines = [l for l in source.splitlines()
-             if l.startswith(("import ", "from "))]
+    lines = [line for line in source.splitlines()
+             if line.startswith(("import ", "from "))]
     allowed_prefixes = (
         "import atexit",
         "import json",

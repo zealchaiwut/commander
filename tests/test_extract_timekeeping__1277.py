@@ -1,10 +1,6 @@
 """Tests for issue #1277: Extract timekeeping helpers to services/sprint_manager/timekeeping.py"""
-import sys
-import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-
-import pytest
 
 
 class TestTimekeepingExtraction:

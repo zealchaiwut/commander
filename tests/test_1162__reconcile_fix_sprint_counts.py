@@ -51,15 +51,16 @@ class TestReconcileCountsFixesDrift:
     def test_missing_issues_merged_and_counts_corrected(self, fresh_db):
         """Agent_runs has issues absent from issues_json; reconcile unions them."""
         label = "sprint-77"
-        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural")
+        _proj = "o/r"
+        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural", project=_proj)
         fresh_db.ingest_sprint_run_artifact(label, {
             "sprint_label": label,
             "issues": [
                 {"number": 100, "title": "t1", "status": "done", "agent_status": "completed"},
             ],
             "wall_clock_secs": 60,
-        })
-        row_before = fresh_db.get_sprint(label)
+        }, project=_proj)
+        row_before = fresh_db.get_sprint(label, project=_proj)
         assert row_before["summary_settled_done"] == 1
         assert row_before["summary_failure_count"] == 0
 
@@ -72,10 +73,10 @@ class TestReconcileCountsFixesDrift:
         fresh_db.record_agent_finish(102, label, "coder", outcome="failed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_proj), project=_proj)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_proj)
         issues = json.loads(row["issues_json"])
         issue_ids = {int(i.get("ticket_id") or i.get("number") or 0) for i in issues}
         assert 100 in issue_ids
@@ -117,20 +118,21 @@ class TestReconcileCountsFixesDrift:
     def test_failed_issue_corrects_failure_count(self, fresh_db):
         """Failed agent_run for missing issue increments failure_count."""
         label = "sprint-fail"
-        fresh_db.record_sprint_needs_rework(label, end_reason="ticket-failures")
+        _proj = "o/r"
+        fresh_db.record_sprint_needs_rework(label, end_reason="ticket-failures", project=_proj)
         fresh_db.ingest_sprint_run_artifact(label, {
             "sprint_label": label,
             "issues": [],
             "wall_clock_secs": 5,
-        })
+        }, project=_proj)
         fresh_db.record_agent_start(200, label, "coder")
         fresh_db.record_agent_finish(200, label, "coder", outcome="failed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_proj), project=_proj)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_proj)
         assert row["summary_failure_count"] == 1
         assert row["summary_settled_done"] == 0
 

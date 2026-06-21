@@ -52,8 +52,7 @@ def _insert_sprint(label: str, project: str, parent_label: str | None = None) ->
             """
             INSERT INTO sprints (label, project, state, created_at, parent_label)
             VALUES (?, ?, 'running', '2026-01-01T00:00:00Z', ?)
-            ON CONFLICT(label) DO UPDATE SET
-                project = excluded.project,
+            ON CONFLICT(label, project) DO UPDATE SET
                 parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
             """,
             (label, project, parent_label),

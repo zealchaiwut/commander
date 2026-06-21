@@ -47,14 +47,14 @@ def fresh_db(tmp_path):
     _db.DB_PATH = original
 
 
-def _set_state_direct(db, label: str, state: str) -> None:
+def _set_state_direct(db, label: str, state: str, project: str = "") -> None:
     """Bypass the guard and write state directly — only for test setup."""
     with db.get_conn() as conn:
         db._create_sprint_lifecycle_tables(conn)
         conn.execute(
-            "INSERT INTO sprints (label, state) VALUES (?, ?) "
-            "ON CONFLICT(label) DO UPDATE SET state = excluded.state",
-            (label, state),
+            "INSERT INTO sprints (label, project, state) VALUES (?, ?, ?) "
+            "ON CONFLICT(label, project) DO UPDATE SET state = excluded.state",
+            (label, project, state),
         )
         conn.commit()
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Sprint 93.1
+
+Guided ticket splitting from the sprint board. A **Split** action on a ticket row decomposes an oversized or parallelism-blocking ticket into two focused child issues without leaving the board. Two new endpoints back the flow: `POST /api/sprints/{sprint_label}/tickets/{issue_number}/split/suggest` runs a lightweight BA call to pre-fill two editable draft child titles and AC scopes (returning `fallback: true` with empty fields when the BA call is unavailable, so the user can still split manually), and `POST .../split/confirm` creates the two GitHub child issues — inheriting the parent's labels minus per-ticket lifecycle/size labels (`size-*`, `estimated`, `in-progress`) so each child gets a fresh estimate (`build_child_labels`) — then either removes the original from the sprint or closes it with a comment referencing the two children (`action: remove | close`), and fires a background re-estimate (`--save-label`) for each new child.
+
+- [#1423](https://github.com/zealchaiwut/commander/issues/1423) Add split-ticket flow from DAG and capacity bar — 2026-06-21
+
 ## Sprint 93
 
 Sprint-planning board gains DAG-aware ordering tools. An **Apply DAG Order** button on each planned/draft sprint card (shown only when a DAG preview with levels and no cycles is cached) reorders tickets to follow the dispatch DAG — lower topological levels first, within-level order preserved, unlevelled tickets appended last. The reorder is computed by a new read-only `GET /api/sprints/{sprint_label}/dag-order-preview` endpoint (`compute_dag_order`) that returns the proposed order, a human-readable diff with dependency-edge hints, an `is_noop` flag, and the `partial` flag from `preview-dag`; it returns HTTP 409 on circular dependencies and adds zero GitHub calls. The preview-dag rail surfaces inline fix chips for file conflicts and dependency cycles, and the board now warns when a manual ticket order violates DAG levels (a downstream ticket placed before its upstream dependency) with a one-click auto-fix (`compute_order_violations` / `compute_fix_order_slot`) that slots the offending ticket to the earliest valid position after all its dependencies. Partial preview-dag runs (some tickets unestimated) now display a pre-run checklist on the mini-rail.

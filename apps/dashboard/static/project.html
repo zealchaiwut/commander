@@ -5992,6 +5992,74 @@
       animation: smgmt-ring-spin .6s linear infinite;
       display: inline-block;
     }
+    /* Split-ticket button (issue #1423) */
+    .smgmt-split-btn {
+      padding: 1px 5px; font-size: 10px; font-weight: 600;
+      background: transparent; color: var(--amber);
+      border: 1px solid var(--amber); border-radius: 3px;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+      font-family: var(--mono);
+      display: none;
+    }
+    .smgmt-ticket:hover .smgmt-split-btn,
+    .smgmt-split-btn:focus-visible { display: inline-flex; align-items: center; gap: 3px; }
+    .smgmt-split-btn:hover { background: var(--amber-bg); }
+    .smgmt-split-btn:disabled { opacity: .4 !important; cursor: not-allowed; }
+    /* Split modal (issue #1423) */
+    .split-modal-overlay {
+      position: fixed; inset: 0; z-index: 9000;
+      background: rgba(0,0,0,.6); display: flex;
+      align-items: center; justify-content: center;
+    }
+    .split-modal-overlay.hidden { display: none; }
+    .split-modal {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; width: min(640px, 96vw);
+      max-height: 88vh; overflow-y: auto;
+      padding: 24px; display: flex; flex-direction: column; gap: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    .split-modal-title { font-size: 16px; font-weight: 700; margin: 0; }
+    .split-modal-fallback {
+      background: var(--amber-bg); border: 1px solid var(--amber);
+      border-radius: 4px; padding: 8px 10px; font-size: 12px;
+      color: var(--amber); display: flex; align-items: center; gap: 6px;
+    }
+    .split-modal-fallback.hidden { display: none; }
+    .split-child-section { display: flex; flex-direction: column; gap: 8px; }
+    .split-child-section label { font-size: 12px; font-weight: 600; color: var(--text-sub); }
+    .split-child-title {
+      width: 100%; padding: 6px 8px; font-size: 13px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); font-family: inherit;
+      box-sizing: border-box;
+    }
+    .split-child-title:focus { border-color: var(--blue); outline: none; }
+    .split-child-ac {
+      width: 100%; padding: 6px 8px; font-size: 12px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); font-family: var(--mono);
+      resize: vertical; min-height: 80px; box-sizing: border-box;
+    }
+    .split-child-ac:focus { border-color: var(--blue); outline: none; }
+    .split-modal-action-row { display: flex; flex-direction: column; gap: 8px; }
+    .split-modal-action-row label { font-size: 12px; font-weight: 600; color: var(--text-sub); }
+    .split-radio-group { display: flex; gap: 12px; }
+    .split-radio-opt { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+    .split-modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+    .split-cancel-btn {
+      padding: 6px 14px; font-size: 13px; border-radius: 4px;
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-sub); cursor: pointer;
+    }
+    .split-cancel-btn:hover { background: var(--surface-2); }
+    .split-confirm-btn {
+      padding: 6px 14px; font-size: 13px; font-weight: 600;
+      border-radius: 4px; background: var(--amber); border: none;
+      color: #000; cursor: pointer;
+    }
+    .split-confirm-btn:hover { opacity: .85; }
+    .split-confirm-btn:disabled { opacity: .45; cursor: not-allowed; }
     /* Bulk estimate button (issue #598) */
     .smgmt-bulk-est-btn {
       font-size: 11px; padding: 3px 8px; border-radius: 4px;
@@ -9890,6 +9958,44 @@
         <div class="smgmt-est-popover hidden" id="smgmt-est-popover" role="dialog" aria-modal="false" aria-label="Estimate details"></div>
         <!-- Per-column sort menu (issue #550) -->
         <div class="smgmt-sort-menu hidden" id="smgmt-sort-menu" role="menu" aria-label="Sort column"></div>
+
+        <!-- Split-ticket modal (issue #1423) -->
+        <div class="split-modal-overlay hidden" id="split-modal-overlay" role="dialog" aria-modal="true" aria-label="Split ticket">
+          <div class="split-modal">
+            <h2 class="split-modal-title">Split ticket</h2>
+            <div class="split-modal-fallback hidden" id="split-modal-fallback">
+              <i class="ti ti-alert-circle"></i>
+              BA unavailable — enter child titles and AC scopes manually.
+            </div>
+            <div class="split-child-section" id="split-child1-section">
+              <label for="split-child1-title">Child 1 — title</label>
+              <input class="split-child-title" id="split-child1-title" type="text" placeholder="Child issue title…" autocomplete="off">
+              <label for="split-child1-ac">Child 1 — acceptance criteria</label>
+              <textarea class="split-child-ac" id="split-child1-ac" placeholder="- [ ] …"></textarea>
+            </div>
+            <div class="split-child-section" id="split-child2-section">
+              <label for="split-child2-title">Child 2 — title</label>
+              <input class="split-child-title" id="split-child2-title" type="text" placeholder="Child issue title…" autocomplete="off">
+              <label for="split-child2-ac">Child 2 — acceptance criteria</label>
+              <textarea class="split-child-ac" id="split-child2-ac" placeholder="- [ ] …"></textarea>
+            </div>
+            <div class="split-modal-action-row">
+              <label>After split, the original ticket should:</label>
+              <div class="split-radio-group">
+                <label class="split-radio-opt">
+                  <input type="radio" name="split-action" value="remove" checked> Remove from sprint
+                </label>
+                <label class="split-radio-opt">
+                  <input type="radio" name="split-action" value="close"> Close with reference
+                </label>
+              </div>
+            </div>
+            <div class="split-modal-footer">
+              <button class="split-cancel-btn" onclick="smgmtSplitClose()">Cancel</button>
+              <button class="split-confirm-btn" id="split-confirm-btn" onclick="smgmtSplitConfirm()">Confirm Split</button>
+            </div>
+          </div>
+        </div>
 
         </div><!-- /smgmt-subview-board -->
 
@@ -13951,6 +14057,8 @@ function _smgmtInjectMiniRail(label, data, pfHints, tickets) {
     _smgmtUpdateDagOrderBtn(label, data);
   }
   _smgmtInjectMiniRailHtml(label, html);
+  // Refresh split-button eligibility after DAG data updates (AC1b).
+  if (typeof _smgmtInjectSplitButtons === 'function') _smgmtInjectSplitButtons(label);
 }
 
 /** Update the Apply DAG Order button enabled state for a sprint (issue #1420). */
@@ -19214,6 +19322,215 @@ function _smgmtReEstimateSelected() {
   _smgmtBulkReEstimate(nums);
 }
 
+// ── Split-ticket flow (issue #1423) ──────────────────────────────────────────
+
+/** State for the currently open split modal. */
+let _smgmtSplitState = { issueNum: null, sprintLabel: null };
+
+/**
+ * Returns true when the capacity bar for *sprintLabel* is currently red
+ * (total estimated time exceeds configured budget).
+ */
+function _smgmtIsCapacityRed(sprintLabel) {
+  const bar = document.querySelector(`#smgmt-cap-${CSS.escape(sprintLabel)} .cap-bar--red`);
+  return bar !== null;
+}
+
+/**
+ * Returns true when *issueNum* appears in the DAG conflicts list and its
+ * conflicting partners span ≥2 distinct DAG levels (file set overlaps ≥2 peer waves).
+ */
+function _smgmtIsDagBlocking(issueNum, sprintLabel) {
+  const dagData = _smgmtDagDataCache[sprintLabel];
+  if (!dagData) return false;
+  const conflicts = dagData.conflicts || [];
+  const levels = dagData.levels || [];
+  if (!conflicts.length || !levels.length) return false;
+
+  // Build a map: ticket id → level index
+  const levelByNum = {};
+  levels.forEach((lvl, i) => {
+    lvl.forEach(tid => {
+      const n = parseInt(tid.slice(1), 10);
+      if (!isNaN(n)) levelByNum[n] = i;
+    });
+  });
+
+  // Collect levels of all tickets that conflict with issueNum
+  const conflictingLevels = new Set();
+  for (const c of conflicts) {
+    const a = c.ticket1_id, b = c.ticket2_id;
+    if (a === issueNum && levelByNum[b] !== undefined) conflictingLevels.add(levelByNum[b]);
+    if (b === issueNum && levelByNum[a] !== undefined) conflictingLevels.add(levelByNum[a]);
+  }
+  return conflictingLevels.size >= 2;
+}
+
+/**
+ * Returns true when *issueNum* should show the Split button:
+ * (a) size-XL label, (b) DAG-blocking ≥2 peer waves, or (c) capacity bar red.
+ */
+function _smgmtIsSplitEligible(issueNum, sprintLabel) {
+  const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+  if (!row) return false;
+  // (a) size-XL
+  if (row.dataset.size === 'XL') return true;
+  // (b) DAG blocking
+  if (_smgmtIsDagBlocking(issueNum, sprintLabel)) return true;
+  // (c) capacity red
+  if (_smgmtIsCapacityRed(sprintLabel)) return true;
+  return false;
+}
+
+/** Inject or remove Split buttons on all ticket rows of *sprintLabel*. */
+function _smgmtInjectSplitButtons(sprintLabel) {
+  const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
+  if (!container) return;
+  const rows = container.querySelectorAll('.smgmt-ticket[data-issue]');
+  rows.forEach(row => {
+    const issueNum = parseInt(row.dataset.issue, 10);
+    if (isNaN(issueNum)) return;
+    let btn = row.querySelector('.smgmt-split-btn');
+    const eligible = _smgmtIsSplitEligible(issueNum, sprintLabel);
+    if (eligible && !btn) {
+      btn = document.createElement('button');
+      btn.className = 'smgmt-split-btn';
+      btn.textContent = 'Split';
+      btn.title = 'Split this ticket into two focused child issues';
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        smgmtSplitOpen(issueNum, sprintLabel);
+      };
+      row.appendChild(btn);
+    } else if (!eligible && btn) {
+      btn.remove();
+    }
+  });
+}
+
+/** Open the split modal for *issueNum* in *sprintLabel*. */
+async function smgmtSplitOpen(issueNum, sprintLabel) {
+  _smgmtSplitState = { issueNum, sprintLabel };
+  const overlay = document.getElementById('split-modal-overlay');
+  const fallbackEl = document.getElementById('split-modal-fallback');
+  const title1El = document.getElementById('split-child1-title');
+  const ac1El = document.getElementById('split-child1-ac');
+  const title2El = document.getElementById('split-child2-title');
+  const ac2El = document.getElementById('split-child2-ac');
+  const confirmBtn = document.getElementById('split-confirm-btn');
+  if (!overlay) return;
+
+  // Reset fields
+  title1El.value = '';
+  ac1El.value = '';
+  title2El.value = '';
+  ac2El.value = '';
+  fallbackEl.classList.add('hidden');
+  if (confirmBtn) confirmBtn.disabled = true;
+  overlay.classList.remove('hidden');
+  title1El.placeholder = 'Loading…';
+  title2El.placeholder = 'Loading…';
+
+  // Call suggest API
+  const repo = _smgmtRepo() || '';
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/${issueNum}/split/suggest`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: repo }),
+      }
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.fallback) {
+        fallbackEl.classList.remove('hidden');
+      }
+      title1El.value = data.child1?.title || '';
+      ac1El.value = data.child1?.ac_scope || '';
+      title2El.value = data.child2?.title || '';
+      ac2El.value = data.child2?.ac_scope || '';
+    } else {
+      fallbackEl.classList.remove('hidden');
+    }
+  } catch (_) {
+    fallbackEl.classList.remove('hidden');
+  }
+  title1El.placeholder = 'Child issue title…';
+  title2El.placeholder = 'Child issue title…';
+  if (confirmBtn) confirmBtn.disabled = false;
+}
+
+/** Close the split modal. */
+function smgmtSplitClose() {
+  const overlay = document.getElementById('split-modal-overlay');
+  if (overlay) overlay.classList.add('hidden');
+  _smgmtSplitState = { issueNum: null, sprintLabel: null };
+}
+
+/** Confirm the split: create child issues and update original. */
+async function smgmtSplitConfirm() {
+  const { issueNum, sprintLabel } = _smgmtSplitState;
+  if (!issueNum || !sprintLabel) return;
+  const title1 = (document.getElementById('split-child1-title')?.value || '').trim();
+  const ac1 = (document.getElementById('split-child1-ac')?.value || '').trim();
+  const title2 = (document.getElementById('split-child2-title')?.value || '').trim();
+  const ac2 = (document.getElementById('split-child2-ac')?.value || '').trim();
+  const action = document.querySelector('input[name="split-action"]:checked')?.value || 'remove';
+
+  if (!title1 || !title2) {
+    alert('Both child titles are required.');
+    return;
+  }
+
+  const confirmBtn = document.getElementById('split-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Splitting…'; }
+
+  const repo = _smgmtRepo() || '';
+  const child1Body = ac1 ? `## Acceptance Criteria\n\n${ac1}` : '';
+  const child2Body = ac2 ? `## Acceptance Criteria\n\n${ac2}` : '';
+
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/tickets/${issueNum}/split/confirm`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project: repo,
+          child1_title: title1,
+          child1_body: child1Body,
+          child2_title: title2,
+          child2_body: child2Body,
+          action,
+        }),
+      }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(`Split failed: ${err.detail || resp.status}`);
+      if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm Split'; }
+      return;
+    }
+    const data = await resp.json();
+    smgmtSplitClose();
+
+    // AC8: reflect original's updated state immediately
+    const row = document.getElementById(`smgmt-ticket-${issueNum}`);
+    if (row) row.remove();
+
+    // AC6/AC8: re-fetch preview-dag to reflect new children
+    _smgmtRefreshPreviewDag(sprintLabel).then(() => _smgmtInjectSplitButtons(sprintLabel));
+
+    // Notify the user
+    alert(`Ticket #${issueNum} split into #${data.child1_num} and #${data.child2_num}.`);
+  } catch (exc) {
+    alert(`Split failed: ${exc.message || exc}`);
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm Split'; }
+  }
+}
+
 /**
  * Entrypoint for batch or single-ticket reestimate.
  * Single ticket (<2): delegates to lightweight _smgmtReEstimateRun.
@@ -19753,6 +20070,8 @@ function _smgmtUpdateCapBar(label) {
       budgetLine +
       `<div class="cap-bar ${barColorClass}">${barHtml}</div>` +
       `<div class="${hintClass}">${hintText}</div>`;
+    // Refresh split eligibility when capacity bar changes state (AC1c).
+    if (typeof _smgmtInjectSplitButtons === 'function') _smgmtInjectSplitButtons(label);
   } catch (_) {
     el.innerHTML = '';
   }

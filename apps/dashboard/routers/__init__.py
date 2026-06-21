@@ -44,7 +44,6 @@ from .issues import router as issues_router
 from .projects import router as projects_router
 from .environments import router as environments_router
 from .settings_sync import router as settings_sync_router
-from .maintenance import router as maintenance_router
 from .sprint_planning import router as sprint_planning_router
 from .sprint_labels import router as sprint_labels_router
 from .sprint_dispatch import router as sprint_dispatch_router
@@ -96,7 +95,6 @@ __all__ = [
     "projects_router",
     "environments_router",
     "settings_sync_router",
-    "maintenance_router",
     "sprint_planning_router",
     "sprint_labels_router",
     "sprint_dispatch_router",

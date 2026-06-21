@@ -44,8 +44,6 @@ import tempfile
 import traceback
 import threading
 import time
-import urllib.request
-import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -102,12 +100,8 @@ from services.sprint_manager.serialization import (  # noqa: E402
 )
 
 from services.sprint_manager.model_routing import (  # noqa: E402
-    _DEFAULT_CODER_BY_SIZE,
-    _DOCS_PATH_EXTENSIONS,
-    _CODE_PATH_EXTENSIONS,
-    _plan_json_use_cline_followups,
     _effective_coder_backend,
-    _is_docs_only,
+    _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
     _resolve_cline_model,
     _select_coder_backend,
@@ -345,7 +339,6 @@ except ImportError:
 # so all existing call sites within this module remain unmodified.
 from services.sprint_manager.events import (  # noqa: E402
     _emit_sprint_lifecycle_event,
-    _failure_event_detail,
     _emit_ticket_failed,
     _post_agent_event,
     _post_sprint_status,

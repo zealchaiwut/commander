@@ -12,11 +12,11 @@ AC-7: All existing tests pass without modification
 from __future__ import annotations
 
 import inspect
+import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,12 +24,10 @@ REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SM_DIR = REPO_ROOT / "services" / "sprint_manager"
 
+os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
-
-import os
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 
 import services.sprint_manager.sprint_manager as sm  # noqa: E402
 

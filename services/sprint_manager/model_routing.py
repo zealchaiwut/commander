@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from services.sprint_manager.config import SprintConfig
 
 from services.sprint_manager.paths import _plan_json_path
 from services.logging import log as structured_log

@@ -153,7 +153,6 @@ class TestAC4AC5PyCompile:
 class TestAC6TesterDispatchBehavior:
     def test_stub_subprocess_success(self, tmp_path):
         """_dispatch_tester returns (0, None) when subprocess stub exits 0."""
-        import services.sprint_manager.dispatch as dp
         import services.sprint_manager.sprint_manager as sm
 
         cfg = MagicMock()

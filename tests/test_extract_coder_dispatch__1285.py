@@ -1,10 +1,7 @@
 """Tests for issue #1285: Extract coder dispatch logic to dispatch.py (runs against UAT)"""
-import os
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 
 # Resolved from environment at runtime — should be set by pytest conftest or sprint_manager.

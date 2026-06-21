@@ -101,7 +101,6 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _effective_coder_backend,
     _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
-    _resolve_cline_model,
     _select_coder_backend,
 )
 

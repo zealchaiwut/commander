@@ -9,8 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT        = Path(__file__).parent.parent
 FAILURES_PATH    = REPO_ROOT / "services" / "sprint_manager" / "failures.py"
 SPRINT_MGR_PATH  = REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"

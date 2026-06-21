@@ -905,6 +905,9 @@
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
   globalThis._pfUseClineFollowups ??= false;
+  globalThis._pfXLSuggestions ??= [];
+  globalThis._pfStrictXLGate ??= false;
+  globalThis._pfXLMinutesSaved ??= 0;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
@@ -3650,6 +3653,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfShowLoadingActivity("Loading pre-flight checks\u2026");
   }
   function _pfClose() {
@@ -3665,6 +3671,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfStepFails = 0;
     _pfAutofixPending = false;
   }
@@ -3687,6 +3696,9 @@ Replace the existing draft (${data.existing_label})?`
       _pfCycle = data.cycle || null;
       _pfFlags = data.mis_sizing_flags || null;
       _pfModels = data.models || null;
+      _pfXLSuggestions = data.xl_suggestions || [];
+      _pfStrictXLGate = data.strict_xl_gate || false;
+      _pfXLMinutesSaved = data.xl_minutes_saved || 0;
       if (_pfDagData) {
         for (const t of _pfDagData.tickets || [])
           _pfSelectedIds.add(t.id);
@@ -3709,6 +3721,7 @@ Replace the existing draft (${data.existing_label})?`
     const warningsHtml = _pfBuildWarningsHtml();
     const cycleHtml = _pfBuildCycleHtml();
     const flagsHtml = _pfBuildFlagsHtml();
+    const xlHtml = _pfBuildXLSuggestionsHtml();
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
     const modelsHtml = _pfBuildModelsHtml();
@@ -3724,6 +3737,7 @@ Replace the existing draft (${data.existing_label})?`
      ${modelsHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
+     ${xlHtml}
      ${cycleHtml}
      ${flagsHtml}
      ${dagHtml}
@@ -3748,16 +3762,21 @@ Replace the existing draft (${data.existing_label})?`
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
     const hasPending = pendingFlags.length > 0;
     const hasFail = _pfStepFails > 0;
+    const hasBlockingXL = _pfStrictXLGate && _pfXLSuggestions && _pfXLSuggestions.length > 0;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     if (!confirmBtn)
       return;
-    confirmBtn.disabled = hasCycle || hasPending || hasFail;
+    confirmBtn.disabled = hasCycle || hasPending || hasFail || hasBlockingXL;
     if (hasCycle) {
       confirmBtn.title = "Cannot run: dependency cycle detected. Resolve the cycle first.";
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: dependency cycle detected");
     } else if (hasPending) {
       confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? "s" : ""} need review.`;
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: mis-sizing flags need review");
+    } else if (hasBlockingXL) {
+      const n = _pfXLSuggestions.length;
+      confirmBtn.title = `Cannot run: ${n} XL ticket${n > 1 ? "s" : ""} must be split or dismissed (Strict XL gate is on).`;
+      confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: strict XL gate blocks ${n} ticket(s)`);
     } else if (hasFail) {
       confirmBtn.title = `Cannot run: ${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} detected.`;
       confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: ${_pfStepFails} blocking issue(s)`);
@@ -3787,6 +3806,37 @@ Replace the existing draft (${data.existing_label})?`
     return `<div class="pf-warnings-section">
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join("")}</div>
+  </div>`;
+  }
+  function _pfBuildXLSuggestionsHtml() {
+    const suggestions = _pfXLSuggestions || [];
+    if (!suggestions.length)
+      return "";
+    const label = _pfCurrentLabel;
+    const strictNote = _pfStrictXLGate ? '<span class="pf-xl-strict-badge">Strict gate on \u2014 split or dismiss to proceed</span>' : "";
+    const savedNote = _pfXLMinutesSaved > 0 ? `<div class="pf-xl-saved">~${_pfXLMinutesSaved} minutes saved if split</div>` : "";
+    const rows = suggestions.map((s) => {
+      const sizeLabel = s.size ? escHtml(s.size) : "?";
+      const minsLabel = s.estimated_minutes ? `${s.estimated_minutes} min` : "";
+      const estimate = [sizeLabel, minsLabel].filter(Boolean).join(" \xB7 ");
+      const splitBtn = typeof smgmtSplitOpen === "function" ? `<button class="pf-xl-split-btn" onclick="smgmtSplitOpen(${s.issue_number}, '${escHtml(label || "")}')" title="Open Split flow for #${s.issue_number}">Split</button>` : `<a class="pf-xl-split-btn" href="https://github.com/${_smgmtRepo()}/issues/${s.issue_number}" target="_blank" rel="noopener">Split</a>`;
+      return `<div class="pf-xl-item" id="pf-xl-item-${s.issue_number}">
+      <div class="pf-xl-item-header">
+        <span class="pf-xl-item-num">#${s.issue_number}</span>
+        <span class="pf-xl-item-title" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
+        <span class="pf-xl-consider-label">Consider splitting</span>
+        <span class="pf-xl-estimate">${escHtml(estimate)}</span>
+      </div>
+      <div class="pf-xl-item-actions">
+        ${splitBtn}
+        <button class="pf-xl-dismiss-btn" onclick="_pfDismissXLSuggestion(${s.issue_number})">Dismiss</button>
+      </div>
+    </div>`;
+    });
+    return `<div class="pf-xl-section" id="pf-xl-section">
+    <div class="pf-xl-section-label">XL tickets \u2014 consider splitting ${strictNote}</div>
+    ${savedNote}
+    ${rows.join("")}
   </div>`;
   }
   function _pfPatchWarnings() {

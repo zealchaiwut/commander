@@ -94,7 +94,6 @@ from services.sprint_manager.paths import (  # noqa: E402
 # develop merge and one status-label write at a time, plus ghost reconciliation.
 from services.sprint_manager.serialization import (  # noqa: E402
     develop_merge_guard as _develop_merge_guard,
-    label_transition_guard as _label_transition_guard,
     ghost_status_labels as _ghost_status_labels,  # noqa: F401
 )
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Sprint 86
+
+Continuation of the strangler-fig decomposition of the monolithic `services/sprint_manager/sprint_manager.py`. Cohesive helper clusters were lifted into dedicated submodules under `services/sprint_manager/`: event emission to `events.py` (#1275), model routing to `model_routing.py` (#1276), timekeeping helpers to `timekeeping.py` (#1277), pytest/lint and quality gates to `gates.py` (#1280, #1281), label-transition logic to `label_transitions.py` (#1282), worktree/env helpers to `worktree.py` (#1283), coder-dispatch logic to `dispatch.py` (#1285, part 1), sprint-summary generation to `summary.py` (#1287), and post-sprint agent orchestration to `post_sprint.py` (#1288). Within `sprint_manager.py` itself, the long `run_sprint` entry point was split into a `run_sprint_preflight()` preflight/branch-setup helper (#1290) and a `run_sprint_loop()` per-ticket loop helper (#1291). No behavior, endpoint, or schema changes — logic was relocated, not modified, leaving `sprint_manager.py` substantially slimmer.
+
+- [#1275](https://github.com/zealchaiwut/commander/issues/1275) Extract sprint_manager event emission to events.py — 2026-06-21
+- [#1276](https://github.com/zealchaiwut/commander/issues/1276) Extract sprint_manager model routing to dedicated module — 2026-06-21
+- [#1277](https://github.com/zealchaiwut/commander/issues/1277) Extract timekeeping helpers to services/sprint_manager/timekeeping.py — 2026-06-21
+- [#1280](https://github.com/zealchaiwut/commander/issues/1280) Extract pytest/lint gates to services/sprint_manager/gates.py — 2026-06-21
+- [#1281](https://github.com/zealchaiwut/commander/issues/1281) Extract sprint_manager quality gates to gates.py — 2026-06-21
+- [#1282](https://github.com/zealchaiwut/commander/issues/1282) Extract label transition logic to dedicated service module — 2026-06-21
+- [#1283](https://github.com/zealchaiwut/commander/issues/1283) Extract worktree/env helpers to services/sprint_manager/worktree.py — 2026-06-21
+- [#1285](https://github.com/zealchaiwut/commander/issues/1285) Extract coder dispatch logic to dispatch.py (Part 1) — 2026-06-21
+- [#1287](https://github.com/zealchaiwut/commander/issues/1287) Extract sprint summary generation to dedicated module — 2026-06-21
+- [#1288](https://github.com/zealchaiwut/commander/issues/1288) Extract post-sprint agents to post_sprint.py — 2026-06-21
+- [#1290](https://github.com/zealchaiwut/commander/issues/1290) Extract run_sprint preflight/branch-setup into helper — 2026-06-22
+- [#1291](https://github.com/zealchaiwut/commander/issues/1291) Extract per-ticket loop from run_sprint into helper — 2026-06-22
+
 ## Sprint 92
 
 Concurrent multi-coder dispatch. The sprint runner can now drive more than one coder at a time, each in its own isolated git worktree, instead of the prior one-coder-at-a-time serial loop. A warm worktree pool (`services/sprint_manager/worktree_pool.py`) pre-creates K isolated worktrees — each with its own fresh virtualenv — under `.commander/runtime/worktree-pool/` at sprint start, reconciling any orphans left by a prior crash and tearing the pool down at the end; pool size comes from `max_coder_slots` (default 2, cap 4). A new conflict-aware concurrent scheduler (`concurrent_scheduler.py`) fans tickets across role-flexible slots: each slot can run a code task or a test task, preferring code to keep the pipeline fed and falling back to tests when no eligible code task is available, with file-overlap checks gating both and a tester rejection re-queued to the front of the coder queue. When `max_coder_slots <= 1` it delegates to the existing pipeline path for zero behavioural divergence. Concurrent merges are serialized through a develop-merge guard, and on a merge conflict `finish_feature` now attempts a single automated rebase before falling back to manual. The DAG builder honours explicit ticket dependencies (issue #1404). On the dashboard, the live snapshot now reports lane capacity (`max_coder_slots` / `max_tester_slots`) from run start and lists every active coder as its own entry in `active_agents`, and the project page renders a multi-lane running view for concurrent coder runs. Finally, `finish_feature` records estimator file-prediction accuracy (precision/recall of `files_likely_affected` vs the files the merge actually touched) per ticket under `.commander/estimates/accuracy/`, and `preview-dag` surfaces an `accuracy_warning` when recent predictions are unreliable.

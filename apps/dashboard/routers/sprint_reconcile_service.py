@@ -115,7 +115,7 @@ def _lineage_fully_in_develop(label: str, project: str) -> bool:
     except Exception:
         return False
     is_child = srv._is_child_sprint_label(label)
-    has_children = bool(_db().get_sprint_children(label))
+    has_children = bool(_db().get_sprint_children(label, project=project or None))
     if not (is_child or has_children):
         return False
     branch = srv._sprint_branch_name(label)

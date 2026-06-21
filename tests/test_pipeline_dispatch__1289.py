@@ -1,8 +1,6 @@
 """Tests for issue #1289: Extract sprint_manager pipeline dispatch to services module (signature-preserving refactor)"""
 import subprocess
 import sys
-import os
-import pytest
 
 
 def test_pipeline_dispatch__pipeline_py_compiles():

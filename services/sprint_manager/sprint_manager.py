@@ -59,9 +59,7 @@ except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
 from services.sprint_manager.pipeline import (  # noqa: E402
-    StageResult as _StageResult,
     pipeline_mode_enabled as _pipeline_mode_enabled,
-    run_level as _run_pipeline_level,
     _run_pipeline_dispatch,
     _compute_dispatch_levels,
     _build_sprint_dag_layers,

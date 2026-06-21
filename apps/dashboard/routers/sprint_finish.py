@@ -80,7 +80,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         else:
             sprint_issues = srv._get_sprint_issues(repo, base_label)
             seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-            for child_label in srv.children_of(base_label, project_root):
+            for child_label in srv.children_of(base_label, project_root, project=repo):
                 try:
                     for iss in srv._get_sprint_issues(repo, child_label):
                         if iss["number"] not in seen_nums:
@@ -167,7 +167,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 
-    unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label)
+    unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label, project=repo)
     children_all_completed = not unsettled_children
     if not children_all_completed:
         raise HTTPException(
@@ -226,7 +226,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     repo = f"{owner}/{repo_name}"
     project_root = srv._project_root_path(repo)
     base_label = srv._sprint_label_base(label)
-    child_labels = srv.children_of(base_label, project_root)
+    child_labels = srv.children_of(base_label, project_root, project=repo)
     is_child = srv._is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
     finish_labels = [label] if is_child else all_labels
@@ -372,7 +372,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     # Cheap local child-state gate first — a 409 here avoids N+1 GitHub calls
     # in _bulk_complete_collect_issues. Silently passes when no children exist,
     # so collect_issues still raises its own 400 for the "no child sprints" case.
-    srv._bulk_complete_assert_children_completed(project_root, base_label)
+    srv._bulk_complete_assert_children_completed(project_root, base_label, project=repo)
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 

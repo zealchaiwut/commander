@@ -474,10 +474,15 @@ def get_sprint_management_issues(repo: str):
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
     # shows as a drop target. Finished sprints whose tickets are all closed are
-    # not resurrected as empty planning panes.
+    # not resurrected as empty planning panes. Superseded empty ghosts — a 0-ticket
+    # sprint (incl. an abandoned draft) numbered below the lowest active sprint —
+    # are dropped so they stop lingering on the board after later sprints ran
+    # (e.g. an empty Sprint 9 draft left behind after the project ran to 11).
+    _empty_ghosts = set(empty_sprint_labels)
     renderable_sprint_labels = [
         lbl for lbl in all_sprint_labels
-        if sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set
+        if (sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set)
+        and lbl not in _empty_ghosts
     ]
     order = _load_sprint_order(project_root, renderable_sprint_labels)
 

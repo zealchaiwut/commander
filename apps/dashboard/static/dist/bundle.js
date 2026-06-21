@@ -1,5 +1,5 @@
 (() => {
-  // static/src/logpanel.js
+  // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
     "tester",
@@ -37,7 +37,7 @@
     });
   }
 
-  // static/src/progress-activity.js
+  // apps/dashboard/static/src/progress-activity.js
   function _e(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -493,7 +493,7 @@
     document.head.appendChild(style);
   }
 
-  // static/src/progress-host.js
+  // apps/dashboard/static/src/progress-host.js
   var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
   var _payloadById = /* @__PURE__ */ new Map();
   var _MAX_LOG_LINES = 200;
@@ -648,7 +648,7 @@
     _payloadById.delete(paId);
   }
 
-  // static/src/shell/tabs.js
+  // apps/dashboard/static/src/shell/tabs.js
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -834,7 +834,7 @@
     switchTab(effTab, false);
   });
 
-  // static/src/shell/features.js
+  // apps/dashboard/static/src/shell/features.js
   var _features = null;
   function commanderFeatures() {
     return _features || {};
@@ -888,7 +888,7 @@
     }
   }
 
-  // static/src/sprint-board/state.js
+  // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
@@ -905,10 +905,13 @@
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
   globalThis._pfUseClineFollowups ??= false;
+  globalThis._pfXLSuggestions ??= [];
+  globalThis._pfStrictXLGate ??= false;
+  globalThis._pfXLMinutesSaved ??= 0;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
-  // static/src/sprint-board/plan-next.js
+  // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
     try {
@@ -1012,7 +1015,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/scheduled-run.js
+  // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
     const on = !!_schedMap[label];
@@ -1070,7 +1073,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/history.js
+  // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
@@ -2680,7 +2683,7 @@ Replace the existing draft (${data.existing_label})?`
     return _nextSprintSublabel(parentLabel);
   }
 
-  // static/src/sprint-board/rerun-modal.js
+  // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrShowPreviewLoading(current) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
@@ -2879,7 +2882,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/finish-modal.js
+  // apps/dashboard/static/src/sprint-board/finish-modal.js
   function _fsOpen() {
     _setBodyInert(["fs-backdrop", "fs-modal"]);
     document.getElementById("fs-backdrop").classList.remove("hidden");
@@ -3248,7 +3251,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/bulk-complete-modal.js
+  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
   function _bcShowPreviewLoading(current) {
     const loading = document.getElementById("bc-loading");
     if (!loading)
@@ -3508,7 +3511,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/run-controls.js
+  // apps/dashboard/static/src/sprint-board/run-controls.js
   var PF_STEPS = [
     { key: "ac", label: "Acceptance criteria", autoFixable: true },
     { key: "estimates", label: "Estimate coverage", autoFixable: true },
@@ -3650,6 +3653,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfShowLoadingActivity("Loading pre-flight checks\u2026");
   }
   function _pfClose() {
@@ -3665,6 +3671,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfStepFails = 0;
     _pfAutofixPending = false;
   }
@@ -3687,6 +3696,9 @@ Replace the existing draft (${data.existing_label})?`
       _pfCycle = data.cycle || null;
       _pfFlags = data.mis_sizing_flags || null;
       _pfModels = data.models || null;
+      _pfXLSuggestions = data.xl_suggestions || [];
+      _pfStrictXLGate = data.strict_xl_gate || false;
+      _pfXLMinutesSaved = data.xl_minutes_saved || 0;
       if (_pfDagData) {
         for (const t of _pfDagData.tickets || [])
           _pfSelectedIds.add(t.id);
@@ -3709,6 +3721,7 @@ Replace the existing draft (${data.existing_label})?`
     const warningsHtml = _pfBuildWarningsHtml();
     const cycleHtml = _pfBuildCycleHtml();
     const flagsHtml = _pfBuildFlagsHtml();
+    const xlHtml = _pfBuildXLSuggestionsHtml();
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
     const modelsHtml = _pfBuildModelsHtml();
@@ -3724,6 +3737,7 @@ Replace the existing draft (${data.existing_label})?`
      ${modelsHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
+     ${xlHtml}
      ${cycleHtml}
      ${flagsHtml}
      ${dagHtml}
@@ -3748,16 +3762,21 @@ Replace the existing draft (${data.existing_label})?`
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
     const hasPending = pendingFlags.length > 0;
     const hasFail = _pfStepFails > 0;
+    const hasBlockingXL = _pfStrictXLGate && _pfXLSuggestions && _pfXLSuggestions.length > 0;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     if (!confirmBtn)
       return;
-    confirmBtn.disabled = hasCycle || hasPending || hasFail;
+    confirmBtn.disabled = hasCycle || hasPending || hasFail || hasBlockingXL;
     if (hasCycle) {
       confirmBtn.title = "Cannot run: dependency cycle detected. Resolve the cycle first.";
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: dependency cycle detected");
     } else if (hasPending) {
       confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? "s" : ""} need review.`;
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: mis-sizing flags need review");
+    } else if (hasBlockingXL) {
+      const n = _pfXLSuggestions.length;
+      confirmBtn.title = `Cannot run: ${n} XL ticket${n > 1 ? "s" : ""} must be split or dismissed (Strict XL gate is on).`;
+      confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: strict XL gate blocks ${n} ticket(s)`);
     } else if (hasFail) {
       confirmBtn.title = `Cannot run: ${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} detected.`;
       confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: ${_pfStepFails} blocking issue(s)`);
@@ -3787,6 +3806,37 @@ Replace the existing draft (${data.existing_label})?`
     return `<div class="pf-warnings-section">
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join("")}</div>
+  </div>`;
+  }
+  function _pfBuildXLSuggestionsHtml() {
+    const suggestions = _pfXLSuggestions || [];
+    if (!suggestions.length)
+      return "";
+    const label = _pfCurrentLabel;
+    const strictNote = _pfStrictXLGate ? '<span class="pf-xl-strict-badge">Strict gate on \u2014 split or dismiss to proceed</span>' : "";
+    const savedNote = _pfXLMinutesSaved > 0 ? `<div class="pf-xl-saved">~${_pfXLMinutesSaved} minutes saved if split</div>` : "";
+    const rows = suggestions.map((s) => {
+      const sizeLabel = s.size ? escHtml(s.size) : "?";
+      const minsLabel = s.estimated_minutes ? `${s.estimated_minutes} min` : "";
+      const estimate = [sizeLabel, minsLabel].filter(Boolean).join(" \xB7 ");
+      const splitBtn = typeof smgmtSplitOpen === "function" ? `<button class="pf-xl-split-btn" onclick="smgmtSplitOpen(${s.issue_number}, '${escHtml(label || "")}')" title="Open Split flow for #${s.issue_number}">Split</button>` : `<a class="pf-xl-split-btn" href="https://github.com/${_smgmtRepo()}/issues/${s.issue_number}" target="_blank" rel="noopener">Split</a>`;
+      return `<div class="pf-xl-item" id="pf-xl-item-${s.issue_number}">
+      <div class="pf-xl-item-header">
+        <span class="pf-xl-item-num">#${s.issue_number}</span>
+        <span class="pf-xl-item-title" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
+        <span class="pf-xl-consider-label">Consider splitting</span>
+        <span class="pf-xl-estimate">${escHtml(estimate)}</span>
+      </div>
+      <div class="pf-xl-item-actions">
+        ${splitBtn}
+        <button class="pf-xl-dismiss-btn" onclick="_pfDismissXLSuggestion(${s.issue_number})">Dismiss</button>
+      </div>
+    </div>`;
+    });
+    return `<div class="pf-xl-section" id="pf-xl-section">
+    <div class="pf-xl-section-label">XL tickets \u2014 consider splitting ${strictNote}</div>
+    ${savedNote}
+    ${rows.join("")}
   </div>`;
   }
   function _pfPatchWarnings() {
@@ -4505,7 +4555,7 @@ Replace the existing draft (${data.existing_label})?`
     await _ksFinish(label);
   }
 
-  // static/src/sprint-board/drag-drop.js
+  // apps/dashboard/static/src/sprint-board/drag-drop.js
   var _smgmtBoardOverlayHasProgress = false;
   function isDragBlocked(state) {
     return !!(state && state.moveLock);
@@ -5345,7 +5395,7 @@ ${data.errors.join("\n")}`);
       _smgmtArStartTicker();
   }
 
-  // static/src/sprint-board/board-render.js
+  // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
@@ -6482,6 +6532,17 @@ ${data.errors.join("\n")}`);
     const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
+    const showDagOrderBtn = !isRunningView && !isPostRun && !finished && ["planned", "draft", "planning"].includes(planState);
+    const cachedDagData = showDagOrderBtn ? typeof _smgmtDagDataCache !== "undefined" ? _smgmtDagDataCache[label] : null : null;
+    const dagHasLevels = cachedDagData && (cachedDagData.levels || []).length > 0;
+    const dagHasCycles = cachedDagData && (cachedDagData.cycles || []).length > 0;
+    const dagOrderBtnDisabled = !dagHasLevels || dagHasCycles ? "disabled" : "";
+    const dagOrderBtnTitle = dagHasCycles ? "Apply DAG Order \u2014 disabled: circular dependencies detected" : !dagHasLevels ? "Apply DAG Order \u2014 loading DAG preview\u2026" : cachedDagData && cachedDagData.partial ? "Apply DAG Order (partial preview \u2014 some tickets unestimated)" : "Apply DAG Order";
+    const dagOrderBtn = showDagOrderBtn ? `<button class="smgmt-dag-order-btn" id="dag-order-btn-${escHtml(label)}"
+               ${dagOrderBtnDisabled}
+               title="${escHtml(dagOrderBtnTitle)}"
+               onclick="smgmtApplyDagOrder('${escHtml(label)}')">
+         <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
@@ -6512,6 +6573,7 @@ ${data.errors.join("\n")}`);
                   title="Delete sprint"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
+          ${dagOrderBtn}
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
@@ -7600,7 +7662,7 @@ ${data.errors.join("\n")}`);
     }
   }
 
-  // static/src/sprint-board/index.js
+  // apps/dashboard/static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
   globalThis._rrCatClass = _rrCatClass;
@@ -7756,7 +7818,7 @@ ${data.errors.join("\n")}`);
   globalThis._histResetLedgerCache = _histResetLedgerCache;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
-  // static/src/index.js
+  // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;

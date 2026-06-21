@@ -211,6 +211,7 @@ from routers import (  # noqa: E402
     metrics_router,
     milestones_router,
     mis_sizing_router,
+    xl_suggestions_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -264,6 +265,7 @@ app.include_router(maintenance_router)
 app.include_router(metrics_router)
 app.include_router(milestones_router)
 app.include_router(mis_sizing_router)
+app.include_router(xl_suggestions_router)
 app.include_router(projects_router)
 app.include_router(reports_router)
 app.include_router(roadmap_router)

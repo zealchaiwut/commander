@@ -36,6 +36,10 @@ globalThis._pfFlags ??= null;
 globalThis._pfSelectedIds ??= new Set();
 // Cline follow-up opt-in (issue #919)
 globalThis._pfUseClineFollowups ??= false;
+// XL split suggestions (issue #1424)
+globalThis._pfXLSuggestions ??= [];
+globalThis._pfStrictXLGate ??= false;
+globalThis._pfXLMinutesSaved ??= 0;
 
 // Drag/drop local locks
 globalThis._smgmtMoveLock ??= false;
@@ -58,6 +62,9 @@ export const SPRINT_BOARD_STATE_KEYS = [
   "_pfFlags",
   "_pfSelectedIds",
   "_pfUseClineFollowups",
+  "_pfXLSuggestions",
+  "_pfStrictXLGate",
+  "_pfXLMinutesSaved",
   "_smgmtMoveLock",
   "_smgmtGhostNextNum",
 ];

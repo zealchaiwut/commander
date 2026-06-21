@@ -536,6 +536,31 @@ def get_sprint_management_issues(repo: str):
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
 
+    # Supplement the lineage maps from the lifecycle DB so the board groups a
+    # rerun lineage even when this clone is missing the plan.json files (the DB
+    # parent_label is authoritative after the B1 backfill). plan.json wins where
+    # present; the DB only fills gaps. Keeps the board's lineage view consistent
+    # with History, which already derives lineage from the DB.
+    def _sub_idx(lbl: str) -> float:
+        m = re.match(r"^sprint-\d+\.(\d+)$", lbl or "")
+        return float(m.group(1)) if m else 0.0
+
+    try:
+        for _row in db.list_sprints_lifecycle():
+            if (_row.get("project") or "") != repo:
+                continue
+            _lbl = _row.get("label") or ""
+            _parent = (_row.get("parent_label") or "").strip()
+            if not _lbl or not _parent:
+                continue
+            if not sprint_parents.get(_lbl):
+                sprint_parents[_lbl] = _parent
+            _existing = sprint_rerun_into.get(_parent)
+            if _existing is None or _sub_idx(_lbl) > _sub_idx(_existing):
+                sprint_rerun_into[_parent] = _lbl
+    except Exception:
+        pass
+
     # Sign-off gate state per renderable label (issue #862) — drives the
     # PENDING SIGN-OFF badge and the muted Run Sprint button on the board.
     sprint_signoff: dict[str, str] = {}

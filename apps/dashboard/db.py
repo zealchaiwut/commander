@@ -674,8 +674,7 @@ def transition_sprint_state(
                 INSERT INTO sprints
                     (label, project, state, created_at, started_at, parent_label)
                 VALUES (?, ?, 'running', ?, ?, ?)
-                ON CONFLICT(label) DO UPDATE SET
-                    project      = excluded.project,
+                ON CONFLICT(label, project) DO UPDATE SET
                     state        = 'running',
                     started_at   = excluded.started_at,
                     created_at   = COALESCE(sprints.created_at, excluded.created_at),
@@ -691,10 +690,13 @@ def transition_sprint_state(
         # (it lives in sprint_history per the lifecycle spec); remove the row.
         with get_conn() as conn:
             _create_sprint_lifecycle_tables(conn)
-            conn.execute("DELETE FROM sprints WHERE label = ?", (label,))
+            conn.execute(
+                "DELETE FROM sprints WHERE label = ? AND project = ?",
+                (label, project),
+            )
             conn.commit()
     else:
-        _set_sprint_terminal(label, to_state, end_reason, ended_at)
+        _set_sprint_terminal(label, to_state, end_reason, ended_at, project=project)
 
     _logger.info(
         "sprint %r: %r → %r by actor=%r", label, current, to_state, actor
@@ -704,7 +706,7 @@ def transition_sprint_state(
 
 _SPRINTS_TABLE_DDL = """
         CREATE TABLE IF NOT EXISTS sprints (
-            label        TEXT PRIMARY KEY,
+            label        TEXT NOT NULL,
             project      TEXT NOT NULL DEFAULT '',
             state        TEXT NOT NULL DEFAULT 'draft'
                          CHECK(state IN (
@@ -716,7 +718,8 @@ _SPRINTS_TABLE_DDL = """
             started_at   TEXT,
             ended_at     TEXT,
             end_reason   TEXT,
-            parent_label TEXT
+            parent_label TEXT,
+            PRIMARY KEY (label, project)
         )
 """
 
@@ -745,6 +748,35 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE sprints_legacy_check")
 
 
+def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
+    """Upgrade sprints table to composite PRIMARY KEY (label, project) (issue #1463).
+
+    SQLite cannot alter a PRIMARY KEY in place. Rename old table, create new one
+    with the composite key, copy rows, drop old table. Idempotent: skips when the
+    composite PK is already present.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+    if "primary key (label, project)" in (row[0] or "").lower():
+        return
+    conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_single_pk")
+    conn.execute(_SPRINTS_TABLE_DDL)
+    existing_cols = [
+        r[1] for r in conn.execute("PRAGMA table_info(sprints_legacy_single_pk)").fetchall()
+    ]
+    new_cols = {r[1] for r in conn.execute("PRAGMA table_info(sprints)").fetchall()}
+    cols = [c for c in existing_cols if c in new_cols]
+    cols_sql = ", ".join(cols)
+    conn.execute(
+        f"INSERT OR IGNORE INTO sprints ({cols_sql}) "
+        f"SELECT {cols_sql} FROM sprints_legacy_single_pk"
+    )
+    conn.execute("DROP TABLE sprints_legacy_single_pk")
+
+
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     """Create the sprints + sprint_ticket_order tables (issue #757).
 
@@ -752,6 +784,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     without running the full init_db() migration first.
     """
     _migrate_sprints_state_check(conn)
+    _migrate_sprints_to_composite_pk(conn)
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
     _backfill_child_parent_labels(conn)
@@ -838,11 +871,18 @@ def ingest_sprint_run_artifact(
         state, summary_path=summary_path,
     )
     ingested_at = _now_iso()
+    _project = (project or "").strip()
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        existing = conn.execute(
-            "SELECT label FROM sprints WHERE label = ?", (label,)
-        ).fetchone()
+        if _project:
+            existing = conn.execute(
+                "SELECT label FROM sprints WHERE label = ? AND project = ?",
+                (label, _project),
+            ).fetchone()
+        else:
+            existing = conn.execute(
+                "SELECT label FROM sprints WHERE label = ?", (label,)
+            ).fetchone()
         if existing:
             updates = [
                 fields["issues_json"],
@@ -859,30 +899,48 @@ def ingest_sprint_run_artifact(
                 fields["summary_uat_count"],
                 fields["summary_failure_count"],
             ]
-            project_sql = ""
-            if (project or "").strip():
-                project_sql = ", project = ?"
-                updates.append(project.strip())
-            conn.execute(
-                f"""
-                UPDATE sprints SET
-                    issues_json = ?,
-                    tokens = ?,
-                    wall_clock_secs = ?,
-                    reconciliation_json = ?,
-                    summary_issue_url = ?,
-                    summary_path = ?,
-                    pr_number = ?,
-                    post_sprint_json = ?,
-                    estimate_accuracy = ?,
-                    run_ingested_at = ?,
-                    summary_settled_done = ?,
-                    summary_uat_count = ?,
-                    summary_failure_count = ?{project_sql}
-                WHERE label = ?
-                """,
-                tuple(updates) + (label,),
-            )
+            if _project:
+                conn.execute(
+                    """
+                    UPDATE sprints SET
+                        issues_json = ?,
+                        tokens = ?,
+                        wall_clock_secs = ?,
+                        reconciliation_json = ?,
+                        summary_issue_url = ?,
+                        summary_path = ?,
+                        pr_number = ?,
+                        post_sprint_json = ?,
+                        estimate_accuracy = ?,
+                        run_ingested_at = ?,
+                        summary_settled_done = ?,
+                        summary_uat_count = ?,
+                        summary_failure_count = ?
+                    WHERE label = ? AND project = ?
+                    """,
+                    tuple(updates) + (label, _project),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE sprints SET
+                        issues_json = ?,
+                        tokens = ?,
+                        wall_clock_secs = ?,
+                        reconciliation_json = ?,
+                        summary_issue_url = ?,
+                        summary_path = ?,
+                        pr_number = ?,
+                        post_sprint_json = ?,
+                        estimate_accuracy = ?,
+                        run_ingested_at = ?,
+                        summary_settled_done = ?,
+                        summary_uat_count = ?,
+                        summary_failure_count = ?
+                    WHERE label = ?
+                    """,
+                    tuple(updates) + (label,),
+                )
         else:
             conn.execute(
                 """
@@ -947,8 +1005,11 @@ def update_sprint_run_counts(
     summary_settled_done: int,
     summary_uat_count: int,
     summary_failure_count: int,
+    project: str = "",
 ) -> None:
     """Overwrite issues_json and denormalized count columns (reconcile path)."""
+    if not (project or "").strip():
+        return
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
         conn.execute(
@@ -958,7 +1019,7 @@ def update_sprint_run_counts(
                 summary_settled_done = ?,
                 summary_uat_count = ?,
                 summary_failure_count = ?
-            WHERE label = ?
+            WHERE label = ? AND project = ?
             """,
             (
                 issues_json,
@@ -966,6 +1027,7 @@ def update_sprint_run_counts(
                 int(summary_uat_count),
                 int(summary_failure_count),
                 label,
+                project.strip(),
             ),
         )
         conn.commit()
@@ -1416,7 +1478,7 @@ def record_sprint_needs_rework(label: str, end_reason: str | None = None,
     """
     transition_sprint_state(
         label, "needs_rework", actor="manager",
-        end_reason=end_reason, ended_at=ended_at,
+        end_reason=end_reason, ended_at=ended_at, project=project,
     )
 
 
@@ -1453,13 +1515,10 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
             """
             INSERT INTO sprints (label, project, state, created_at, ended_at, end_reason)
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(label) DO UPDATE SET
+            ON CONFLICT(label, project) DO UPDATE SET
                 state      = excluded.state,
                 ended_at   = excluded.ended_at,
-                end_reason = COALESCE(excluded.end_reason, sprints.end_reason),
-                project    = CASE
-                    WHEN excluded.project IS NOT NULL AND excluded.project != ''
-                    THEN excluded.project ELSE sprints.project END
+                end_reason = COALESCE(excluded.end_reason, sprints.end_reason)
             """,
             (label, project or "", state, ended_at, ended_at, end_reason),
         )

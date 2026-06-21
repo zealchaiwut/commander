@@ -4491,7 +4491,16 @@ def _dispatch_coder(
         record_failure(issue_num, "dispatch-blocked", detail=doctor_err)
         return False, "dispatch-blocked"
 
-    guard_err = _design_docs_guard(cwd_path)
+    # Check design docs in the STABLE coder clone, not the ephemeral worktree
+    # slot. The slot is reset to its (docs-committed) base branch by worktree
+    # hygiene AFTER this guard, so checking it pre-hygiene saw a transient state:
+    # once a sibling ticket left the pooled slot dirty and `git clean -fdx` ran on
+    # release, the next ticket's guard found no PRODUCT.md/DESIGN.md and
+    # false-failed `design_docs_missing` (observed: #1460/#1461 in sprint-94.1
+    # after #1462 dirtied slot-0). The docs are committed on every branch, so the
+    # coder clone is the reliable place to assert their presence.
+    _docs_check_path = cfg.worktree_coder if cfg is not None else cwd_path
+    guard_err = _design_docs_guard(_docs_check_path)
     if guard_err:
         structured_log.error(
             "design_docs_missing",

@@ -103,6 +103,7 @@ from startup import (  # noqa: E402
     _periodic_orphan_sweep_loop,
     _restore_sprint_statuses_on_startup,
     _status_md_sync_loop,
+    _sweep_orphan_db_running_rows,
     _sweep_orphan_pid_files,
     _validate_github_repos,
 )
@@ -151,6 +152,7 @@ async def lifespan(app: FastAPI):
     _check_gh_auth()
     _validate_github_repos()
     _sweep_orphan_pid_files()
+    _sweep_orphan_db_running_rows()
     _restore_sprint_statuses_on_startup()
     await _mark_inflight_jobs_failed()
     if _BACKUP_AVAILABLE:

@@ -456,14 +456,52 @@ def get_sprint_management_issues(repo: str):
     # plus locally signed-off merges (merge_sprint / bulk_complete).
     finished_map = _finished_sprint_summaries(repo)
     finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
+    # Also treat any sprint the lifecycle DB marks completed as finished, so the
+    # board honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
+    # auto-complete, manual repair) even when plan.json wasn't dual-written. The
+    # sprints table is the single source of truth for lifecycle state.
+    try:
+        finished_set |= {
+            r.get("label")
+            for r in db.list_sprints_lifecycle()
+            if r.get("label")
+            and (r.get("project") or "") == repo
+            and db.canonical_lifecycle(r.get("state") or "") == "completed"
+        }
+    except Exception:
+        pass
+
+    # Display-only cross-clone signal: a sprint whose branch was merged (a merged
+    # PR exists for sprint/<label>) AND whose tickets are all closed (0 open) is
+    # shipped — drop it from the board even without an Executive Summary issue or
+    # a local sign-off, so a sprint completed on another clone stops lingering
+    # here. One cached gh call per load (not per sprint). A sprint with open
+    # tickets (e.g. awaiting UAT sign-off) is intentionally NOT hidden.
+    try:
+        merged_heads = github_client.list_merged_sprint_branches(repo_name=repo)
+        if merged_heads:
+            for lbl in all_sprint_labels:
+                if (
+                    sprint_label_re.match(lbl)
+                    and sprint_ticket_counts.get(lbl, 0) == 0
+                    and f"sprint/{lbl}" in merged_heads
+                ):
+                    finished_set.add(lbl)
+    except Exception:
+        pass
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
     # shows as a drop target. Finished sprints whose tickets are all closed are
-    # not resurrected as empty planning panes.
+    # not resurrected as empty planning panes. Superseded empty ghosts — a 0-ticket
+    # sprint (incl. an abandoned draft) numbered below the lowest active sprint —
+    # are dropped so they stop lingering on the board after later sprints ran
+    # (e.g. an empty Sprint 9 draft left behind after the project ran to 11).
+    _empty_ghosts = set(empty_sprint_labels)
     renderable_sprint_labels = [
         lbl for lbl in all_sprint_labels
-        if sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set
+        if (sprint_ticket_counts.get(lbl, 0) > 0 or lbl not in finished_set)
+        and lbl not in _empty_ghosts
     ]
     order = _load_sprint_order(project_root, renderable_sprint_labels)
 
@@ -521,6 +559,31 @@ def get_sprint_management_issues(repo: str):
     placeholder_sprint = _max_num + 1
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
+
+    # Supplement the lineage maps from the lifecycle DB so the board groups a
+    # rerun lineage even when this clone is missing the plan.json files (the DB
+    # parent_label is authoritative after the B1 backfill). plan.json wins where
+    # present; the DB only fills gaps. Keeps the board's lineage view consistent
+    # with History, which already derives lineage from the DB.
+    def _sub_idx(lbl: str) -> float:
+        m = re.match(r"^sprint-\d+\.(\d+)$", lbl or "")
+        return float(m.group(1)) if m else 0.0
+
+    try:
+        for _row in db.list_sprints_lifecycle():
+            if (_row.get("project") or "") != repo:
+                continue
+            _lbl = _row.get("label") or ""
+            _parent = (_row.get("parent_label") or "").strip()
+            if not _lbl or not _parent:
+                continue
+            if not sprint_parents.get(_lbl):
+                sprint_parents[_lbl] = _parent
+            _existing = sprint_rerun_into.get(_parent)
+            if _existing is None or _sub_idx(_lbl) > _sub_idx(_existing):
+                sprint_rerun_into[_parent] = _lbl
+    except Exception:
+        pass
 
     # Sign-off gate state per renderable label (issue #862) — drives the
     # PENDING SIGN-OFF badge and the muted Run Sprint button on the board.

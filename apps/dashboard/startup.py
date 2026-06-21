@@ -732,6 +732,64 @@ def _validate_github_repos() -> None:
         )
 
 
+def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
+    """Reconcile DB rows stuck at state='running' with no live local sprint.
+
+    ``_all_sprints_running`` only sees sprints that still have a local
+    ``*-plan.json`` with state=running. A ``sprints`` row left at 'running' with
+    no such plan.json — a row copied from another machine, a deleted plan, or a
+    crash before the terminal write — is otherwise never cleared and lingers on
+    the board / pill forever (e.g. a perf-coach sprint showing 'running' for days).
+
+    Sweep such rows to needs_rework when ALL hold:
+      * the (project, label) is not reported live by _all_sprints_running, and
+      * the row's started_at is older than ``max_age_minutes`` (so a sprint
+        mid-startup, before its plan.json lands, is never killed).
+
+    Returns the labels swept. Best-effort; never raises.
+    """
+    swept: list[str] = []
+    try:
+        rows = db.list_sprints_lifecycle()
+    except Exception:
+        return swept
+    try:
+        live = {(r.get("project"), r.get("sprint_label")) for r in _all_sprints_running()}
+    except Exception:
+        live = set()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        if (row.get("state") or "") != "running":
+            continue
+        label = row.get("label") or ""
+        project = row.get("project") or ""
+        if not label or (project, label) in live:
+            continue
+        started = (row.get("started_at") or "").strip()
+        ts = None
+        if started:
+            try:
+                ts = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            except ValueError:
+                ts = None
+            if ts is not None and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        # Skip rows that are too fresh (a real sprint may not have written its
+        # plan.json yet). A row with no/garbled started_at is treated as stale.
+        if ts is not None and (now - ts).total_seconds() < max_age_minutes * 60:
+            continue
+        try:
+            db.record_sprint_needs_rework(
+                label, end_reason="orphaned (no live process)", project=project,
+            )
+            swept.append(label)
+        except Exception:
+            continue
+    if swept:
+        logger.info("[orphan-db-sweep] reconciled stale running rows: %s", swept)
+    return swept
+
+
 async def _periodic_orphan_sweep_loop() -> None:
     """Sweep orphan PID files every 5 minutes while the dashboard is running."""
     while True:
@@ -740,6 +798,10 @@ async def _periodic_orphan_sweep_loop() -> None:
             _sweep_orphan_pid_files()
         except Exception as exc:
             print(f"[periodic-sweep] unexpected error: {exc}")
+        try:
+            _sweep_orphan_db_running_rows()
+        except Exception as exc:
+            print(f"[periodic-sweep] db-running sweep error: {exc}")
 
 
 _STATUS_SYNC_INTERVAL = 30  # seconds
@@ -4623,6 +4685,13 @@ def _gh_merge_branch_via_pr(
 def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
     """True when head has commits not reachable from base."""
     if not _gh_branch_exists(repo, head):
+        return False
+    # A deleted base branch means there is nothing to merge into — the chain
+    # already settled (base merged up and was pruned). Without this guard the
+    # compare below 404s, falls through to `return True`, and bulk-complete then
+    # tries `gh pr create --base <deleted>`, which fails and breaks the whole
+    # merge run. Treat a missing base as "no unmerged commits".
+    if not _gh_branch_exists(repo, base):
         return False
     try:
         from urllib.parse import quote

@@ -27,23 +27,20 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 def client_ctx(tmp_path):
     """Yield (client, srv) with patched projects.json and fresh module import."""
     projects_file = tmp_path / "projects.json"
-    projects_file.write_text(json.dumps([
-        {"repo": "owner/test-proj", "name": "Test Proj", "environments": {
-            "prd": "/fake/prd",
-        }}
-    ]))
-
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    projects_data = [
+        {"repo": "owner/test-proj", "name": "Test Proj", "environments": {"prd": "/fake/prd"}}
+    ]
+    projects_file.write_text(json.dumps(projects_data))
 
     import server as srv
     import projects as projects_module
-
     projects_module.PROJECTS_FILE = projects_file
 
     from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module):
+    # Patch load_projects on the shared projects module — routers import
+    # `projects` directly (refactor #1267), so patching srv.projects_module (and
+    # popping/reimporting) left the already-registered routers on the old module.
+    with patch.object(projects_module, "load_projects", return_value=list(projects_data)):
         client = TestClient(srv.app, raise_server_exceptions=False)
         yield client, srv, projects_module, projects_file
 

@@ -338,5 +338,7 @@ def test_ac8_no_new_columns_in_sprints(fresh_db):
         "summary_path", "pr_number", "reconciliation_json", "tokens",
         "issues_json", "summary_issue_url", "post_sprint_json",
         "estimate_accuracy", "wall_clock_secs", "run_ingested_at",
+        # Run-artifact denormalized counts added later by lifecycle P3:
+        "summary_settled_done", "summary_uat_count", "summary_failure_count",
     }
     assert not issue_new_cols, f"new columns added by this issue: {issue_new_cols}"

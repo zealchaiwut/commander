@@ -267,7 +267,8 @@ def test_ac2_split_link_in_js():
     """AC2: JS opens the split flow via link/button for flagged tickets."""
     js = _js()
     assert "smgmtSplitOpen" in js or "split-flow" in js or "_pfXLSuggestions" in js, (
-        "No split-flow link mechanism found in run-controls.js — each flagged ticket must have a split link"
+        "No split-flow link mechanism found in run-controls.js — "
+        "each flagged ticket must have a split link"
     )
 
 

@@ -15,6 +15,7 @@ import inspect
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,8 +26,6 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
-
-from unittest.mock import MagicMock
 
 if "github_client" not in sys.modules:
     sys.modules["github_client"] = MagicMock()

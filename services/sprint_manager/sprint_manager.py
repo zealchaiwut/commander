@@ -40,11 +40,10 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import traceback
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -83,7 +82,6 @@ from services.sprint_manager.commander_paths import (  # noqa: E402
 from services.sprint_manager.paths import (  # noqa: E402
     _plan_json_path,
     _state_path,
-    _summary_path,
     _sprint_number,
     _is_child_sprint_label,
     _sprint_branch_for_label,
@@ -223,9 +221,9 @@ from services.sprint_manager.timekeeping import (  # noqa: E402
     _token_window_utc_now,
     _token_window_sums,
     _utcnow,
-    _BANGKOK_TZ,
-    _bangkok_now,
-    _to_bangkok,
+    _BANGKOK_TZ,  # noqa: F401
+    _bangkok_now,  # noqa: F401
+    _to_bangkok,  # noqa: F401
     _setup_pid_file,
     _wait_if_paused,
     _acquire_pid_lock,

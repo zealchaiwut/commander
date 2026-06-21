@@ -471,6 +471,25 @@ def get_sprint_management_issues(repo: str):
     except Exception:
         pass
 
+    # Display-only cross-clone signal: a sprint whose branch was merged (a merged
+    # PR exists for sprint/<label>) AND whose tickets are all closed (0 open) is
+    # shipped — drop it from the board even without an Executive Summary issue or
+    # a local sign-off, so a sprint completed on another clone stops lingering
+    # here. One cached gh call per load (not per sprint). A sprint with open
+    # tickets (e.g. awaiting UAT sign-off) is intentionally NOT hidden.
+    try:
+        merged_heads = github_client.list_merged_sprint_branches(repo_name=repo)
+        if merged_heads:
+            for lbl in all_sprint_labels:
+                if (
+                    sprint_label_re.match(lbl)
+                    and sprint_ticket_counts.get(lbl, 0) == 0
+                    and f"sprint/{lbl}" in merged_heads
+                ):
+                    finished_set.add(lbl)
+    except Exception:
+        pass
+
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
     # shows as a drop target. Finished sprints whose tickets are all closed are

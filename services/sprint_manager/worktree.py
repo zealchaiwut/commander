@@ -14,7 +14,10 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from services.sprint_manager.config import SprintConfig
 
 # Ensure repo root is on sys.path so sibling service imports work regardless
 # of invocation path.

@@ -16,16 +16,14 @@ from __future__ import annotations
 import inspect
 import subprocess
 import sys
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SM_DIR = REPO_ROOT / "services" / "sprint_manager"
 
-import os
 os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
@@ -53,17 +51,12 @@ class TestRunSprintPreflightExists:
 
     def test_run_sprint_preflight_returns_preflight_result(self):
         """The return annotation (or actual return) yields a structured result."""
-        sig = inspect.signature(sm.run_sprint_preflight)
         # function must have a return annotation or we rely on behavior tests
         # If no annotation present, at minimum it must be callable and not raise ImportError
         assert callable(sm.run_sprint_preflight)
 
     def test_preflight_result_has_early_exit_field(self):
         """The result type must carry an early_exit indicator."""
-        # Check result dataclass or namedtuple has early_exit
-        # We verify this by calling a minimal smoke test and inspecting the result
-        import dataclasses
-        result_class = sm.run_sprint_preflight.__annotations__.get("return") if hasattr(sm.run_sprint_preflight, "__annotations__") else None
         # If not annotated, we'll rely on the smoke test in AC-6
         # The important thing: the function signature exists
         assert callable(sm.run_sprint_preflight)

@@ -723,6 +723,9 @@ _SPRINTS_TABLE_DDL = """
         )
 """
 
+# Schema version written to _sprint_schema_migrations when composite PK rebuild runs.
+_SPRINTS_COMPOSITE_PK_VERSION = 1
+
 
 def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
     """Rebuild the sprints table when its CHECK predates the unified lifecycle.
@@ -739,7 +742,7 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
     conn.execute(_SPRINTS_TABLE_DDL)
     conn.execute(
         """
-        INSERT INTO sprints
+        INSERT OR IGNORE INTO sprints
         SELECT label, project, state, created_at, started_at, ended_at,
                end_reason, parent_label
         FROM sprints_legacy_check
@@ -749,32 +752,75 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
-    """Upgrade sprints table to composite PRIMARY KEY (label, project) (issue #1463).
+    """Rebuild sprints with composite PRIMARY KEY (label, project) (issue #1462).
 
-    SQLite cannot alter a PRIMARY KEY in place. Rename old table, create new one
-    with the composite key, copy rows, drop old table. Idempotent: skips when the
-    composite PK is already present.
+    Gated on _sprint_schema_migrations version 1 — runs exactly once and is a
+    no-op on subsequent calls. Creates 'sprints_new' with composite PK and all
+    run-artifact columns, copies rows from 'sprints' deduplicating on
+    (label, project) by keeping the highest-rowid row, drops 'sprints',
+    renames 'sprints_new' → 'sprints', and recreates any explicit indexes.
     """
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _sprint_schema_migrations (
+            version    INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+    """)
+    if conn.execute(
+        "SELECT 1 FROM _sprint_schema_migrations WHERE version = ?",
+        (_SPRINTS_COMPOSITE_PK_VERSION,),
+    ).fetchone() is not None:
+        return
+
+    sprints_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
     ).fetchone()
-    if row is None:
-        return
-    if "primary key (label, project)" in (row[0] or "").lower():
-        return
-    conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_single_pk")
-    conn.execute(_SPRINTS_TABLE_DDL)
-    existing_cols = [
-        r[1] for r in conn.execute("PRAGMA table_info(sprints_legacy_single_pk)").fetchall()
-    ]
-    new_cols = {r[1] for r in conn.execute("PRAGMA table_info(sprints)").fetchall()}
-    cols = [c for c in existing_cols if c in new_cols]
-    cols_sql = ", ".join(cols)
-    conn.execute(
-        f"INSERT OR IGNORE INTO sprints ({cols_sql}) "
-        f"SELECT {cols_sql} FROM sprints_legacy_single_pk"
+
+    # Remove any sprints_new left behind by a prior crashed run
+    conn.execute("DROP TABLE IF EXISTS sprints_new")
+
+    # Create sprints_new with composite PK (core columns)
+    new_ddl = _SPRINTS_TABLE_DDL.replace(
+        "CREATE TABLE IF NOT EXISTS sprints",
+        "CREATE TABLE sprints_new",
     )
-    conn.execute("DROP TABLE sprints_legacy_single_pk")
+    conn.execute(new_ddl)
+    # Add run-artifact columns to sprints_new so the copy is complete
+    new_cols = {r[1] for r in conn.execute("PRAGMA table_info(sprints_new)").fetchall()}
+    for col, typedef in _RUN_ARTIFACT_COLUMNS:
+        if col not in new_cols:
+            conn.execute(f"ALTER TABLE sprints_new ADD COLUMN {col} {typedef}")
+
+    if sprints_exists is not None:
+        existing_cols = [
+            r[1] for r in conn.execute("PRAGMA table_info(sprints)").fetchall()
+        ]
+        dest_cols = {r[1] for r in conn.execute("PRAGMA table_info(sprints_new)").fetchall()}
+        copy_cols = [c for c in existing_cols if c in dest_cols]
+        cols_sql = ", ".join(copy_cols)
+        # Deduplicate: keep the highest-rowid row per (label, project)
+        conn.execute(
+            f"INSERT OR IGNORE INTO sprints_new ({cols_sql}) "
+            f"SELECT {cols_sql} FROM sprints "
+            f"WHERE rowid IN ("
+            f"  SELECT MAX(rowid) FROM sprints GROUP BY label, project"
+            f")"
+        )
+        old_indexes = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='index' AND tbl_name='sprints' AND sql IS NOT NULL"
+        ).fetchall()
+        conn.execute("DROP TABLE sprints")
+        conn.execute("ALTER TABLE sprints_new RENAME TO sprints")
+        for (idx_sql,) in old_indexes:
+            conn.execute(idx_sql)
+    else:
+        conn.execute("ALTER TABLE sprints_new RENAME TO sprints")
+
+    conn.execute(
+        "INSERT INTO _sprint_schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+        (_SPRINTS_COMPOSITE_PK_VERSION,),
+    )
 
 
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:

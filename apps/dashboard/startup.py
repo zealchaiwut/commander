@@ -2401,7 +2401,14 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
 # the extracted routers and the sprint_manager-facing run/finish endpoints share
 # one implementation (issue #795). Re-exported under the original private name so
 # existing callers and tests (which patch server._build_sprint_subprocess_env)
-# keep working unchanged.
+# keep working unchanged. The actual re-export was dropped in the refactor, which
+# broke run/finish-sprint with AttributeError at dispatch time — restored here.
+def _build_sprint_subprocess_env() -> dict:
+    # Lazy import: routers.dispatch_service resolves server/startup at request
+    # time, so importing it at module load would be circular.
+    from routers.dispatch_service import build_sprint_subprocess_env
+    return build_sprint_subprocess_env()
+
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:

@@ -1524,14 +1524,28 @@ def list_sprints_lifecycle() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_sprint_children(parent_label: str) -> list[dict]:
-    """Return sprints rows whose parent_label matches the given label (issue #1093)."""
+def get_sprint_children(parent_label: str, project: str | None = None) -> list[dict]:
+    """Return sprints rows whose parent_label matches the given label (issue #1093).
+
+    When project is provided, results are scoped to that project (issue #1464).
+    Without project, all children are returned with a warning (label-only fallback).
+    """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        rows = conn.execute(
-            "SELECT * FROM sprints WHERE parent_label = ? ORDER BY label",
-            (parent_label,),
-        ).fetchall()
+        if project:
+            rows = conn.execute(
+                "SELECT * FROM sprints WHERE parent_label = ? AND project = ? ORDER BY label",
+                (parent_label, project),
+            ).fetchall()
+        else:
+            _logger.warning(
+                "get_sprint_children called without project for parent %r — label-only fallback",
+                parent_label,
+            )
+            rows = conn.execute(
+                "SELECT * FROM sprints WHERE parent_label = ? ORDER BY label",
+                (parent_label,),
+            ).fetchall()
     return [dict(r) for r in rows]
 
 

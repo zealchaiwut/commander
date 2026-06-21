@@ -626,6 +626,38 @@ def _label_base(label: str | None) -> str:
 _CHILD_SETTLED_STATES = frozenset({"completed", "deleted"})
 
 
+def _union_planned_roster(rec: dict, sprints_dirs: Path | list[Path]) -> None:
+    """Add plan.json planned tickets missing from a running sprint's issue list.
+
+    Queued-but-not-yet-dispatched tickets have no agent_runs, so the agent-runs
+    rebuild drops them. Add them as ``open``/queued placeholders so History
+    matches the live Running roster. In-place; no-op when no plan.json roster.
+    """
+    plan = _read_plan_file(sprints_dirs, rec.get("label") or "") or {}
+    raw = plan.get("tickets") if isinstance(plan, dict) else None
+    if not isinstance(raw, list):
+        return
+    planned: list[int] = []
+    for n in raw:
+        try:
+            planned.append(int(n))
+        except (TypeError, ValueError):
+            continue
+    if not planned:
+        return
+    have = {i.get("ticket_id") for i in (rec.get("issues") or [])}
+    issues = rec.setdefault("issues", [])
+    for num in planned:
+        if num not in have:
+            issues.append({
+                "ticket_id": num,
+                "state": "open",
+                "time_spent": None,
+                "pr_number": None,
+                "queued": True,
+            })
+
+
 def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
     """Attach rerun-child flags and derive lifecycle adjustments in-place.
 
@@ -655,6 +687,15 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
             run_issues = _issues_from_agent_runs(label)
             if run_issues:
                 rec["issues"] = run_issues
+
+        # A running sprint's History list is rebuilt from agent_runs, which only
+        # covers tickets that have already been dispatched — so a still-queued
+        # ticket (e.g. #1460 "waiting") was dropped, leaving History showing 2
+        # while the live Running view shows the full planned roster of 3. Union
+        # in the plan.json planned tickets as queued placeholders so the two
+        # panes agree while the sprint is in flight.
+        if (rec.get("lifecycle_state") or "") == "running":
+            _union_planned_roster(rec, sprints_dirs)
 
         base = _label_base(label)
         siblings = sorted(children_by_base.get(base, []), key=_label_sub_index)
@@ -763,9 +804,14 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
         for other, nums in ran_by_label.items():
             if other != label and other.startswith(prefix):
                 ran_in_children |= nums
+        # A running sprint keeps its full planned roster (incl. queued tickets
+        # unioned in above) so History matches the live view; only finished
+        # sprints are narrowed to tickets that actually ran under this label.
+        is_running = (rec.get("lifecycle_state") or "") == "running"
         rec["issues"] = [
             i for i in (rec.get("issues") or [])
-            if i.get("ticket_id") in ran_here and i.get("ticket_id") not in ran_in_children
+            if i.get("ticket_id") not in ran_in_children
+            and (is_running or i.get("ticket_id") in ran_here)
         ]
 
 

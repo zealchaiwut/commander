@@ -1,8 +1,6 @@
 """Tests for issue #1281: Extract sprint_manager quality gates to gates.py"""
-import os
 import sys
 import subprocess
-import importlib
 from pathlib import Path
 
 # Get repo root for module imports

@@ -285,7 +285,7 @@ def _derive_outcome_lifecycle(
     parent_state = db.canonical_lifecycle(row["state"])
     if parent_state not in _OUTCOME_TERMINAL_STATES:
         return parent_state
-    children = db.get_sprint_children(sprint_label)
+    children = db.get_sprint_children(sprint_label, project=project or None)
     if not children:
         return parent_state
     unsettled = [

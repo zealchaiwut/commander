@@ -5302,8 +5302,6 @@ def run_sprint(
     _level_nums_by_idx = pf.level_nums_by_idx
     _pipeline_on       = pf.pipeline_on
     start_time         = pf.start_time
-    total_issues       = len(state.issues)
-
     if _pipeline_on:
         _run_pipeline_dispatch(
             state=state, state_path=state_path, summary=summary,

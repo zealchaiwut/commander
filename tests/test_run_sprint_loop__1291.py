@@ -1,6 +1,5 @@
 """Tests for issue #1291: Extract per-ticket loop from run_sprint into helper"""
 import ast
-import inspect
 import subprocess
 
 

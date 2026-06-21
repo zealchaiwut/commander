@@ -4624,6 +4624,13 @@ def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
     """True when head has commits not reachable from base."""
     if not _gh_branch_exists(repo, head):
         return False
+    # A deleted base branch means there is nothing to merge into — the chain
+    # already settled (base merged up and was pruned). Without this guard the
+    # compare below 404s, falls through to `return True`, and bulk-complete then
+    # tries `gh pr create --base <deleted>`, which fails and breaks the whole
+    # merge run. Treat a missing base as "no unmerged commits".
+    if not _gh_branch_exists(repo, base):
+        return False
     try:
         from urllib.parse import quote
         ref = quote(f"{base}...{head}", safe="")

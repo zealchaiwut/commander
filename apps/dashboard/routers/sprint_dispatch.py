@@ -456,6 +456,20 @@ def get_sprint_management_issues(repo: str):
     # plus locally signed-off merges (merge_sprint / bulk_complete).
     finished_map = _finished_sprint_summaries(repo)
     finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
+    # Also treat any sprint the lifecycle DB marks completed as finished, so the
+    # board honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
+    # auto-complete, manual repair) even when plan.json wasn't dual-written. The
+    # sprints table is the single source of truth for lifecycle state.
+    try:
+        finished_set |= {
+            r.get("label")
+            for r in db.list_sprints_lifecycle()
+            if r.get("label")
+            and (r.get("project") or "") == repo
+            and db.canonical_lifecycle(r.get("state") or "") == "completed"
+        }
+    except Exception:
+        pass
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still

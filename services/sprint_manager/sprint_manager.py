@@ -360,7 +360,7 @@ from services.sprint_manager.timekeeping import (  # noqa: E402
 
 # Gate functions extracted to gates.py (issue #1280); re-exported here so all
 # existing call sites within this module remain unmodified.
-from services.sprint_manager.gates import (  # noqa: E402
+from services.sprint_manager.gates import (  # noqa: E402, F401
     _gate_pytest,
     _lint_autofix_commit,
     _gate_lint,

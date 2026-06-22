@@ -14259,9 +14259,11 @@ async function _smgmtChipMoveAfter(sprintLabel, aNum, bNum, chipEl) {
     const bIdx = currentOrder.indexOf(bNum);
     if (aIdx === -1 || bIdx === -1) throw new Error(`Tickets #${aNum} or #${bNum} not found in sprint`);
 
-    // Already in correct order — treat as no-op (AC9).
+    // Already in correct order — give feedback instead of dying silently, so the
+    // chip doesn't feel unclickable (the conflict is already resolved by order).
     if (aIdx < bIdx) {
       _smgmtChipSetBusy(chipEl, false);
+      _smgmtChipShowError(errEl, `#${bNum} already runs after #${aNum} — nothing to change`);
       _smgmtChipInFlight.delete(key);
       return;
     }

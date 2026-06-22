@@ -388,6 +388,8 @@ class FailureCategory:
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
     REBASE_CONFLICT  = "REBASE_CONFLICT"
+    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
+    ENV_ERROR        = "ENV_ERROR"
 
 
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({

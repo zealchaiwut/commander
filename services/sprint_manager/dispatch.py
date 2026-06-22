@@ -8,7 +8,9 @@ unmodified.
 """
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,6 +37,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
 )
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
 from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
+from services.sprint_manager import agent_browser_runner  # noqa: E402
 
 # Same formula as sprint_manager.REPO_ROOT — this file lives at the same level.
 REPO_ROOT = _REPO_ROOT
@@ -42,11 +45,18 @@ WORKTESTER_ROOT = Path(os.environ.get(
     "WORKTESTER_ROOT",
     str(Path.home() / "dev" / "commander" / "tester"),
 ))
+WORKTESTER_DASHBOARD = WORKTESTER_ROOT / "apps" / "dashboard"
 
 # Mirror sprint_manager.py constants so _dispatch_coder behaviour is unchanged.
 HANG_KILL_SECS = 60 * 60          # 60 minutes
 _RATE_LIMIT_MAX_RETRIES = 3
 _RATE_LIMIT_BACKOFF_DELAYS = [30, 60, 120]   # seconds per attempt
+
+# Doctor auth probe cache (mirrors sprint_manager.py; moved here with the doctor functions).
+_DOCTOR_AUTH_LAST_PROBE: float = 0.0
+_DOCTOR_CLINE_AUTH_LAST_PROBE: float = 0.0
+_DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
+DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
 
 
 class FailureCategory:
@@ -147,12 +157,165 @@ class HangDetector:
         return _RealHangDetector(*args, **kwargs)
 
 
-def _dispatch_doctor(*args, **kwargs):
-    """Proxy to sprint_manager._dispatch_doctor."""
-    _f = _lookup_in_sm("_dispatch_doctor", _dispatch_doctor)
+def _get_issue_labels(*args, **kwargs):
+    """Proxy to sprint_manager._get_issue_labels (label_transitions.py)."""
+    _f = _lookup_in_sm("_get_issue_labels", _get_issue_labels)
     if _f is not None:
         return _f(*args, **kwargs)
-    return None
+    from services.sprint_manager.label_transitions import _get_issue_labels as _real  # noqa: PLC0415
+    return _real(*args, **kwargs)
+
+
+def _classify_risk_tier(*args, **kwargs):
+    """Proxy to sprint_manager._classify_risk_tier."""
+    _f = _lookup_in_sm("_classify_risk_tier", _classify_risk_tier)
+    if _f is not None:
+        return _f(*args, **kwargs)
+    return "LOW"
+
+
+def _check_risk_disagreement(*args, **kwargs):
+    """Proxy to sprint_manager._check_risk_disagreement."""
+    _f = _lookup_in_sm("_check_risk_disagreement", _check_risk_disagreement)
+    if _f is not None:
+        return _f(*args, **kwargs)
+
+
+def _resolve_uat_env_for_tester(*args, **kwargs):
+    """Proxy to sprint_manager._resolve_uat_env_for_tester (worktree.py)."""
+    _f = _lookup_in_sm("_resolve_uat_env_for_tester", _resolve_uat_env_for_tester)
+    if _f is not None:
+        return _f(*args, **kwargs)
+    from services.sprint_manager.worktree import _resolve_uat_env_for_tester as _real  # noqa: PLC0415
+    return _real(*args, **kwargs)
+
+
+# ── Extracted doctor functions (issue #1286) ──────────────────────────────────
+
+
+def _doctor_probe_auth_impl(backend: str = "claude-code") -> Optional[str]:
+    """Real implementation of _doctor_probe_auth."""
+    global _DOCTOR_AUTH_LAST_PROBE, _DOCTOR_CLINE_AUTH_LAST_PROBE
+    now = time.monotonic()
+
+    if backend == "cline":
+        cli = "cline"
+        if now - _DOCTOR_CLINE_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
+            return None
+    else:
+        cli = "claude"
+        if now - _DOCTOR_AUTH_LAST_PROBE < _DOCTOR_AUTH_PROBE_TTL:
+            return None
+
+    try:
+        result = subprocess.run(
+            [cli, "--version"],
+            capture_output=True,
+            timeout=10,
+            text=True,
+        )
+        if result.returncode != 0:
+            return (
+                f"{cli} CLI returned non-zero exit on version check "
+                f"(rc={result.returncode}): {result.stderr.strip()}"
+            )
+        if backend == "cline":
+            _DOCTOR_CLINE_AUTH_LAST_PROBE = now
+        else:
+            _DOCTOR_AUTH_LAST_PROBE = now
+        return None
+    except FileNotFoundError:
+        return f"{cli} CLI not found during auth probe"
+    except subprocess.TimeoutExpired:
+        return f"{cli} CLI timed out during auth probe (>10 s)"
+    except Exception as exc:
+        return f"{cli} CLI auth probe failed: {exc}"
+
+
+def _doctor_probe_auth(backend: str = "claude-code") -> Optional[str]:
+    """Probe coder CLI auth. Returns None on success, error string on failure.
+
+    backend selects which CLI to probe: 'cline' for Cline headless, anything
+    else probes the 'claude' CLI (existing behaviour). Result is cached per
+    backend for _DOCTOR_AUTH_PROBE_TTL seconds.
+    """
+    _f = _lookup_in_sm("_doctor_probe_auth", _doctor_probe_auth)
+    if _f is not None:
+        return _f(backend)
+    return _doctor_probe_auth_impl(backend)
+
+
+def _dispatch_doctor_impl(
+    cfg: Optional["SprintConfig"],
+    alert_modes: list,
+    issue_num: Optional[int] = None,
+    eff_repo: Optional[str] = None,
+) -> Optional[str]:
+    """Real implementation of _dispatch_doctor."""
+    def _fail(err: str) -> str:
+        dispatch_alerts(
+            alert_modes,
+            title=(
+                "dispatch-blocked: environment check failed"
+                + (f" (issue #{issue_num})" if issue_num else "")
+            ),
+            body=err,
+            issue_num=issue_num,
+            category="dispatch-blocked",
+            cfg=cfg,
+            repo=eff_repo,
+        )
+        return err
+
+    # 1. Coder CLI present (backend-aware: cline or claude)
+    _backend = cfg.coder_backend if cfg is not None else "claude-code"
+    _coder_cli = "cline" if _backend == "cline" else "claude"
+    if shutil.which(_coder_cli) is None:
+        return _fail(f"dispatch-blocked: {_coder_cli} CLI not found in PATH")
+
+    # 2. Auth alive (cached probe, backend-specific)
+    auth_err = _doctor_probe_auth(backend=_backend)
+    if auth_err:
+        return _fail(f"dispatch-blocked: auth check failed — {auth_err}")
+
+    # 3. Coder worktree path exists
+    worktree = cfg.worktree_coder if cfg is not None else None
+    if worktree is not None and not Path(worktree).exists():
+        return _fail(f"dispatch-blocked: coder worktree path does not exist: {worktree}")
+
+    # 4. Disk space above threshold
+    check_path = worktree if worktree is not None else Path.cwd()
+    try:
+        free_bytes = shutil.disk_usage(str(check_path)).free
+        if free_bytes < DOCTOR_MIN_DISK_BYTES:
+            free_gb = free_bytes / (1024 ** 3)
+            need_gb = DOCTOR_MIN_DISK_BYTES / (1024 ** 3)
+            return _fail(
+                f"dispatch-blocked: low disk space "
+                f"({free_gb:.1f} GB free, {need_gb:.0f} GB required)"
+            )
+    except OSError:
+        pass  # can't stat path — don't block on it
+
+    return None  # all checks passed
+
+
+def _dispatch_doctor(
+    cfg: Optional["SprintConfig"],
+    alert_modes: list,
+    issue_num: Optional[int] = None,
+    eff_repo: Optional[str] = None,
+) -> Optional[str]:
+    """Pre-dispatch environment health check (issue #789).
+
+    Checks: CLI present, auth alive (cached), worktree exists, disk space.
+    Returns None when healthy. On any failure fires a dispatch-blocked alert
+    and returns the error string so the caller can halt without spawning a worker.
+    """
+    _f = _lookup_in_sm("_dispatch_doctor", _dispatch_doctor)
+    if _f is not None:
+        return _f(cfg, alert_modes, issue_num=issue_num, eff_repo=eff_repo)
+    return _dispatch_doctor_impl(cfg, alert_modes, issue_num=issue_num, eff_repo=eff_repo)
 
 
 def _design_docs_guard(*args, **kwargs):
@@ -811,3 +974,514 @@ def _dispatch_coder(
         summary=f"Issue #{issue_num}: coder dispatch loop exhausted unexpectedly",
     )
     return False, FailureCategory.CRASH
+
+
+# ── Extracted tester dispatch function (issue #1286) ─────────────────────────
+
+
+def _dispatch_tester(
+    issue_num: int,
+    alert_modes: list,
+    sprint_branch: str = "develop",
+    repo_name: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+    chosen_port: Optional[int] = None,
+    rate_limit_events: Optional[list] = None,
+    on_running: Optional[object] = None,
+    sprint_label: Optional[str] = None,
+    pre_dispatch_risk: Optional[str] = None,
+    prior_failures: Optional[list] = None,
+) -> tuple:
+    """Dispatch a tester agent.  Returns (exit_code, failure_category_if_hang).
+
+    When sprint_branch is not 'develop', sets COMMANDER_MERGE_TARGET in the
+    subprocess environment so the tester agent merges the feature branch into
+    the sprint branch instead of develop (AC2, AC4).
+
+    Retries up to _RATE_LIMIT_MAX_RETRIES times on 429/rate-limit errors with
+    exponential backoff.  Appends events to rate_limit_events when provided.
+
+    on_running: optional zero-argument callable invoked immediately after the
+    subprocess is spawned (before proc.wait) to signal tester_running status.
+
+    pre_dispatch_risk: optional pre-computed risk tier ("LOW"/"MEDIUM"/"HIGH").
+    When omitted, the tier is derived from the issue's GitHub labels via
+    _classify_risk_tier() (issue #790).
+
+    prior_failures: accumulated failure records from the fix-loop (mirrors
+    _dispatch_coder).  When provided, the tester receives a stronger fast-path
+    prompt that directs it to re-verify the previously-failing gate/AC first
+    before spot-checking the remaining criteria.  Also sets is_retry=True for
+    worktree hygiene so the feature branch is checked out and rebased rather
+    than being treated as a fresh ticket.
+    """
+    eff_repo = repo_name or (cfg.repo_name if cfg else None)
+    api_url  = cfg.api_url if cfg else None
+    cwd_path = cfg.worktree_tester_app if cfg else WORKTESTER_DASHBOARD
+    # Git root for the tester worktree (hygiene needs the repo root, not a subdir).
+    _tester_wt_root = cfg.worktree_tester if cfg else WORKTESTER_ROOT
+
+    # Worktree hygiene (issue #788 AC7): same treatment as coder — fetch, stash dirty
+    # state, hard-reset — before the tester checks out any code.
+    # When prior_failures is non-empty this is a fix-round retry; set is_retry=True so
+    # the hygiene step checks out the existing feature branch and rebases rather than
+    # treating the ticket as fresh (mirrors _dispatch_coder behaviour).
+    _tester_is_retry = bool(prior_failures)
+    _tester_wt_sha, _tester_base_sha, _tester_hygiene_err = _worktree_hygiene(
+        worktree=_tester_wt_root,
+        ticket_id=issue_num,
+        merge_target=sprint_branch,
+        is_retry=_tester_is_retry,
+    )
+    if sprint_label:
+        _db_update_worktree_shas_sm(issue_num, sprint_label, "tester", _tester_wt_sha, _tester_base_sha)
+    if _tester_hygiene_err:
+        structured_log.error(
+            "tester_worktree_hygiene_failed",
+            f"[tester] worktree hygiene blocked dispatch for issue #{issue_num}: {_tester_hygiene_err}",
+            issue_num=issue_num,
+            hygiene_error=_tester_hygiene_err,
+        )
+        return 1, _tester_hygiene_err
+
+    _crg_update_worktree(_tester_wt_root, role="tester")
+
+    sys.stdout.write(str(f"  Dispatching tester for issue #{issue_num} ...") + "\n")
+    sys.stdout.flush()
+    try:
+        structured_log.event(
+            "tester.dispatch",
+            run_id=os.environ.get("COMMANDER_RUN_ID"),
+            issue_num=issue_num,
+            sprint_label=sprint_label,
+            agent_role="tester",
+        )
+    except Exception:
+        pass
+    _post_agent_event(f"tester:issue-{issue_num}", api_url=api_url)
+
+    log_path = _issue_log_path(issue_num, cfg=cfg)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text("", encoding="utf-8")
+
+    # Build prompt
+    if cfg and cfg.tester_prompt_template:
+        issue_url = f"https://github.com/{_r(eff_repo)}/issues/{issue_num}"
+        prompt = cfg.tester_prompt_template.format(issue_url=issue_url)
+    else:
+        prompt = (
+            f"You are running in autonomous sprint mode. "
+            f"Read the issue at https://github.com/{_r(eff_repo)}/issues/{issue_num} "
+            "and verify it as a tester following the project's testing workflow. "
+            "Use the BA/coder/tester workflow defined in CLAUDE.md. "
+        )
+
+    # Always inject autonomous enforcement — custom templates omit this, so append
+    # unconditionally unless the template already references finish_feature.
+    if "finish_feature" not in prompt:
+        prompt += (
+            " IMPORTANT — autonomous sprint mode: when your verdict is READY_FOR_UAT"
+            " exit with code 0. Do NOT run finish_feature.py or merge the branch —"
+            " sprint_manager runs quality gates after you exit, then merges via"
+            " finish_feature.py and applies the UAT label."
+            " NEVER apply the UAT-approved label or close the issue — UAT-approved is set ONLY by the human"
+            " via the dashboard Approve button or scripts/approve_ticket.py."
+            " Do NOT output language like 'let me know if you want me to...' —"
+            " complete testing autonomously and stop once READY_FOR_UAT is reached."
+            # AC-1 / AC-2 (issue #311): explicit prohibition of direct merge paths
+            " MERGE PATH ENFORCEMENT (issue #311): you must NOT merge. You are FORBIDDEN"
+            " from running finish_feature.py, `git merge`, opening or merging a PR directly,"
+            " or pushing commits to the target branch. Merging is sprint_manager's job"
+            " after gates pass. Violating this constitutes a workflow failure — halt and report."
+        )
+    # Label boundary (issue #509): tester must never touch GitHub labels.
+    if "DO NOT modify any GitHub label" not in prompt:
+        prompt += (
+            " DO NOT modify any GitHub label on this issue or any other issue."
+            " Label transitions are managed by sprint_manager."
+            " Do not run update_ticket.py, gh issue edit --add-label, or any other"
+            " label-mutation command."
+        )
+    # Single pytest run: the tester still WRITES the pytest tests for each AC and
+    # verifies the UAT steps, but does NOT execute the pytest suite itself — the
+    # sprint_manager pytest gate runs it once after the tester exits. Avoids the
+    # double pytest run (tester + gate). Toggle off by setting
+    # COMMANDER_TESTER_RUN_PYTEST=1 (then the tester runs pytest too).
+    if os.environ.get("COMMANDER_TESTER_RUN_PYTEST", "").strip().lower() not in ("1", "true", "yes", "on"):
+        if "do not execute the pytest" not in prompt.lower():
+            prompt += (
+                " PYTEST EXECUTION: write a pytest test for each acceptance criterion,"
+                " but do NOT execute the pytest suite yourself — sprint_manager's"
+                " quality gate runs pytest once after you exit. Verify the UAT steps"
+                " (HTTP / browser / inspection), confirm the tests you wrote are"
+                " anchored to their AC, then report READY_FOR_UAT; the gate validates"
+                " that the tests pass."
+            )
+
+    # Re-run fast path: if a prior attempt failed, point the tester at the
+    # previously-failing AC / gate FIRST so a re-verify isn't a full from-scratch
+    # pass.  When prior_failures is supplied (fix-loop path) inject a stronger
+    # accumulated-history prompt; fall back to the sidecar file for single-attempt
+    # re-runs where prior_failures is not passed.
+    if prior_failures:
+        # Fix-round FAST PATH: accumulated history from the fix-loop.
+        _fp_lines = [
+            f"\n\nTESTER FIX-ROUND FAST PATH: this is fix-round attempt"
+            f" {len(prior_failures) + 1}. Prior coder/gate attempts failed:"
+        ]
+        for _h in prior_failures:
+            _cat = _h.get("category", "?")
+            _detail = _h.get("reason") or _h.get("summary") or ""
+            _fp_lines.append(f"  - Attempt {_h.get('attempt', 0) + 1}: {_cat}: {_detail}")
+        _fp_lines.append(
+            "TESTER FOCUS: re-verify the acceptance criterion / gate tied to the"
+            " LAST failure above FIRST. If it now passes, quickly spot-check the"
+            " remaining AC rather than re-testing everything from scratch."
+            " Do NOT rewrite existing passing tests."
+        )
+        prompt += "\n".join(_fp_lines)
+    else:
+        try:
+            _sc = REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+            if _sc.exists():
+                _scd = json.loads(_sc.read_text(encoding="utf-8"))
+                _fc = _scd.get("failure_class") or _scd.get("category")
+                if _fc:
+                    prompt += (
+                        f" RE-RUN FAST PATH: a prior attempt failed ({_fc}). Re-verify the"
+                        " acceptance criterion / gate tied to that failure FIRST; if it now"
+                        " passes, quickly confirm the remaining AC rather than re-testing"
+                        " everything from scratch."
+                    )
+        except Exception:
+            pass
+
+    # Impeccable design context (issue #713): inject into every tester dispatch so
+    # the tester verifies UI tickets against the same design rules via context.mjs.
+    if "context.mjs" not in prompt:
+        prompt += _impeccable_context_instruction()
+
+    # ── Risk-tier model routing (issue #790) ──────────────────────────────────
+    # Derive risk before dispatch so the model is selected before the subprocess
+    # is spawned.  Use the caller-supplied tier if given, otherwise classify from
+    # the issue's current GitHub labels (best-effort: defaults to LOW on error).
+    if pre_dispatch_risk is None:
+        try:
+            issue_labels = list(_get_issue_labels(issue_num, repo_name=eff_repo))
+        except Exception:
+            issue_labels = []
+        pre_dispatch_risk = _classify_risk_tier(labels=issue_labels)
+
+    risk_tier = pre_dispatch_risk.upper() if pre_dispatch_risk else "LOW"
+    _by_risk = (cfg.tester_by_risk if cfg is not None else None) or {
+        "LOW":    "claude-haiku-4-5",
+        "MEDIUM": "claude-haiku-4-5",
+        "HIGH":   "claude-sonnet-4-6",
+    }
+    tester_model = _by_risk.get(risk_tier) or (
+        cfg.tester_model if cfg is not None else "claude-sonnet-4-6"
+    )
+    sys.stdout.write(str(f"  [risk-tier] issue #{issue_num}: risk={risk_tier}, model={tester_model}") + "\n")
+    sys.stdout.flush()
+
+    # Inject the pre-dispatch risk tier into the prompt so the tester knows what
+    # was computed before invocation and can use it as a baseline (AC3).  The
+    # tester's own derivation acts as a fallback / sanity check.
+    prompt += (
+        f" PRE-DISPATCH RISK TIER (issue #790): the sprint_manager classified"
+        f" this ticket as risk={risk_tier} before invocation."
+        f" If your own analysis produces a different risk tier, output a line"
+        f" '[risk-tier] <YOUR_TIER>' (e.g. '[risk-tier] MEDIUM') anywhere in"
+        f" your run output so the disagreement can be detected and logged."
+    )
+
+    # Same persona fix as the coder: load the tester subagent for the headless run.
+    cmd = [
+        "claude",
+        "--model", tester_model,
+        "--dangerously-skip-permissions",
+    ]
+    tester_persona = _load_agent_persona("tester", cwd_path)
+    if tester_persona:
+        cmd += ["--append-system-prompt", tester_persona]
+    cmd += ["-p", prompt]
+
+    # Build subprocess environment: inherit current env, set COMMANDER_MERGE_TARGET
+    # when in sprint mode (AC2), COMMANDER_APP_PORT if a port was chosen (issue #62),
+    # COMMANDER_PROJECT so log output is tagged by project (issue #122), and
+    # COMMANDER_SPRINT_RUNNING so child scripts enforce RUN_MUTABLE_LABELS (issue #506).
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
+    sub_env["CLAUDE_MODEL"] = tester_model  # hook records model_name on token_usage rows
+    if eff_repo:
+        sub_env["COMMANDER_PROJECT"] = eff_repo
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    if sprint_branch not in ("develop",):
+        sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
+        # Always append sprint-mode instructions regardless of whether a custom
+        # tester_prompt_template is configured (issue #72 regression fix).
+        sprint_hint = (
+            f" IMPORTANT: The env var COMMANDER_MERGE_TARGET is set to {sprint_branch!r}."
+            f" When running finish_feature.py, pass --target-branch {sprint_branch!r}"
+            f" so that the feature branch merges into {sprint_branch!r} instead of develop."
+        )
+        cmd[-1] = cmd[-1] + sprint_hint
+    if chosen_port is not None:
+        sub_env["COMMANDER_APP_PORT"] = str(chosen_port)
+        sys.stdout.write(str(f"  [port] COMMANDER_APP_PORT={chosen_port} injected into tester env") + "\n")
+
+    uat_env_vars, uat_err = _resolve_uat_env_for_tester(cfg, cwd_path)
+    if uat_err:
+        sys.stdout.write(str(f"  [uat-env] ERROR: {uat_err}") + "\n")
+        sys.stdout.flush()
+        record_failure(
+            int(issue_num),
+            "uat-env",
+            detail=uat_err,
+            repo_root=_tester_wt_root,
+        )
+        return 1, "uat-env"
+    if uat_env_vars:
+        sub_env.update(uat_env_vars)
+        cmd[-1] += (
+            f" UAT PRE-VALIDATED (sprint_manager Step 0):"
+            f" UAT_BASE_URL={uat_env_vars['UAT_BASE_URL']!r},"
+            f" UAT_PORT={uat_env_vars['UAT_PORT']!r},"
+            f" UAT_REPO={uat_env_vars['UAT_REPO']!r}."
+            f" These env vars are already set — do NOT re-run Step 0 bash guards"
+            f" and do NOT refuse based on ENVIRONMENT= in .env."
+            f" Proceed directly to Step 1."
+        )
+
+    # ── GITHUB_ISSUE_TEST_REPO injection (issue #301) ─────────────────────────
+    # Read GITHUB_ISSUE_TEST_REPO at tester-dispatch time and inject it into the
+    # tester's environment along with an explicit prompt distinction between the
+    # work repo (GITHUB_REPO / eff_repo) and the issue-test target repo.
+    issue_test_repo = os.environ.get("GITHUB_ISSUE_TEST_REPO", "").strip()
+    if issue_test_repo:
+        sub_env["GITHUB_ISSUE_TEST_REPO"] = issue_test_repo
+        test_repo_hint = (
+            f" GITHUB REPO SEGREGATION (issue #301):"
+            f" GITHUB_ISSUE_TEST_REPO is set to {issue_test_repo!r}."
+            f" The work repo is {eff_repo!r} (all coder commits, sprint issues, and branch operations stay here)."
+            f" Any UAT step that creates a GitHub issue or applies/removes labels MUST target"
+            f" GITHUB_ISSUE_TEST_REPO ({issue_test_repo!r}), NOT the work repo ({eff_repo!r})."
+            f" Use GITHUB_ISSUE_TEST_REPO as the --repo argument for any `gh issue create` or label operations."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        sys.stdout.write(str(f"  [issue-test-repo] GITHUB_ISSUE_TEST_REPO={issue_test_repo!r} injected into tester env") + "\n")
+    else:
+        # GITHUB_ISSUE_TEST_REPO not set — tester must skip live issue/label tests
+        test_repo_hint = (
+            " GITHUB REPO SEGREGATION (issue #301):"
+            " GITHUB_ISSUE_TEST_REPO is NOT set."
+            " Any UAT step that would create a GitHub issue or apply/remove labels on a repo"
+            " MUST be skipped — do NOT perform those operations against the work repo."
+            " Include exactly the note"
+            " \"GITHUB_ISSUE_TEST_REPO not configured — skipped live issue/label verification.\""
+            " in the test report for each skipped step."
+        )
+        cmd[-1] = cmd[-1] + test_repo_hint
+        sys.stdout.write(str("  [issue-test-repo] GITHUB_ISSUE_TEST_REPO not set — tester will skip live issue/label tests") + "\n")
+
+    # ── agent-browser injection (issue #710) ──────────────────────────────────
+    # Make the optional live-browser UAT runner available to the tester and tell
+    # Step 6 how to route browser-interaction UAT steps. We probe availability
+    # here so the prompt can state whether real browser runs are possible or
+    # everything will fall back to MANUAL. The probe is best-effort — any failure
+    # degrades to "not available" so dispatch never crashes on the runner.
+    try:
+        browser_available = agent_browser_runner.is_available()
+    except Exception:
+        browser_available = False
+    sub_env["COMMANDER_AGENT_BROWSER_AVAILABLE"] = "1" if browser_available else "0"
+    sub_env.setdefault(
+        "AGENT_BROWSER_SCREENSHOT_DIR", str(agent_browser_runner.SCREENSHOT_DIR)
+    )
+    browser_hint = (
+        " LIVE BROWSER UAT (issue #710): In Step 6, route each UAT step with"
+        " services/sprint_manager/agent_browser_runner.py."
+        " If the step is flagged agent-testable OR its text describes a browser"
+        " interaction (keywords: open, navigate, click, see, expect, page),"
+        " execute it via agent_browser_runner.run_browser_step(step_text, base_url)"
+        " instead of marking MANUAL. Record the result as PASS or FAIL in the test"
+        " report with the returned screenshot_path attached. A FAIL browser step"
+        " sets the overall ticket status to NEEDS_FIXES, identical to a failed AC."
+        " Mark a step MANUAL ONLY when the runner returns status 'uncovered' or"
+        " agent_browser_runner.is_available() is False. HTTP-only UAT steps"
+        " continue to run via httpx unchanged."
+        f" COMMANDER_AGENT_BROWSER_AVAILABLE={'1' if browser_available else '0'} in your env."
+        " SCREENSHOT CAPTURE (issue #712): for browser steps, save each step's"
+        " screenshot via a single agent_browser_runner.ScreenshotRecorder(sprints_dir,"
+        " sprint_num, issue_num) — call recorder.capture(screenshot_path) once per"
+        " browser step in order (it caps resolution, skips consecutive duplicates,"
+        " and names files step-<k>.png under"
+        " .commander/sprints/sprint-<N>/screenshots/issue-<N>/). After the run, if"
+        " recorder.saved is non-empty, call"
+        " agent_browser_runner.upload_screenshots(recorder.saved, repo, issue_num,"
+        " sprint_num) to get a {filename: url} map, then append"
+        " agent_browser_runner.build_screenshot_section("
+        " agent_browser_runner.collect_issue_screenshots(sprints_dir, sprint_num,"
+        " issue_num, url_map=urls)) to the test report markdown before posting. If a"
+        " ticket produced zero browser steps, add NO screenshot section. The whole"
+        " capture/upload/embed flow is best-effort — never let it abort the test run"
+        " or report posting."
+    )
+    cmd[-1] = cmd[-1] + browser_hint
+    sys.stdout.write(str(f"  [agent-browser] available={browser_available} injected into tester env") + "\n")
+
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        _dispatch_t0 = time.monotonic()
+        structured_log.info(
+            "dispatch_start", f"tester dispatch #{issue_num} (attempt {attempt + 1})",
+            issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+            attempt=attempt + 1, model=tester_model, cmd=cmd[:4],
+        )
+        try:
+            with log_path.open("a") as log_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    cwd=str(cwd_path),
+                    env=sub_env,
+                )
+        except FileNotFoundError:
+            _allow_stub = os.environ.get("COMMANDER_ALLOW_STUB_SUCCESS", "") == "1"
+            if _allow_stub:
+                sys.stdout.write(str("  [tester] claude CLI not found -- stub success") + "\n")
+                if on_running is not None:
+                    try:
+                        on_running()
+                    except Exception:
+                        pass
+                return 0, None
+            err_msg = (
+                f"[tester] ERROR: claude CLI not found for issue #{issue_num}.\n"
+                f"PATH={sub_env.get('PATH', '<empty>')}\n"
+                "Sprint cannot proceed. Install claude CLI or set COMMANDER_ALLOW_STUB_SUCCESS=1 for testing.\n"
+            )
+            structured_log.error("claude_cli_not_found", f"claude CLI not found for issue #{issue_num}", issue_num=issue_num, subprocess="tester", path=sub_env.get("PATH", ""))
+            try:
+                with log_path.open("a") as lf:
+                    lf.write(err_msg)
+            except OSError:
+                pass
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: claude CLI not found",
+                body=f"_dispatch_tester failed to spawn 'claude' subprocess: file not found. PATH={sub_env.get('PATH', '<empty>')}. Sprint cannot proceed.",
+                issue_num=issue_num,
+                category=FailureCategory.CRASH,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return -1, FailureCategory.CRASH
+
+        if on_running is not None:
+            try:
+                on_running()
+            except Exception:
+                pass
+
+        detector = HangDetector(issue_num=issue_num, log_path=log_path, proc=proc,
+                                 agent_role="tester", attempt=attempt + 1)
+        detector.start()
+        rc = proc.wait()
+        detector.stop()
+
+        _dispatch_secs = round(time.monotonic() - _dispatch_t0, 1)
+        if rc == 0:
+            structured_log.info(
+                "dispatch_finished", f"tester #{issue_num} finished",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=0, duration_s=_dispatch_secs,
+            )
+        else:
+            _stderr_tail = ""
+            try:
+                _stderr_tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]
+            except Exception:
+                pass
+            structured_log.error(
+                "dispatch_failed", f"tester #{issue_num} exited {rc}",
+                issue_num=issue_num, agent_role="tester", sprint_label=sprint_label,
+                attempt=attempt + 1, exit_code=rc, duration_s=_dispatch_secs,
+                stderr_tail=_stderr_tail,
+            )
+
+        # Exit code 0 means success unconditionally — check before detector.killed
+        # to guard against a race where the hang detector fires after the process
+        # already exited cleanly (proc.kill raises ProcessLookupError but still
+        # sets _killed=True, causing a false HANG failure on exit 0).
+        if rc == 0:
+            sys.stdout.write(str(f"  Tester for issue #{issue_num} exited 0 — status: passed") + "\n")
+            sys.stdout.flush()
+            # Check for risk-tier disagreement (AC4, issue #790) — non-fatal.
+            try:
+                _check_risk_disagreement(risk_tier, log_path, issue_num)
+            except Exception:
+                pass
+            return 0, None
+
+        if detector.killed:
+            reason = f"Tester: no log activity for {HANG_KILL_SECS//60} minutes"
+            _add_blocked_label(issue_num, reason, repo_name=eff_repo, sprint_label=sprint_label)
+            dispatch_alerts(
+                alert_modes,
+                title=f"Issue #{issue_num}: HANG detected in tester",
+                body=f"The tester subprocess produced no output for {HANG_KILL_SECS//60} minutes.",
+                issue_num=issue_num,
+                category=FailureCategory.HANG,
+                cfg=cfg,
+                repo=eff_repo,
+            )
+            return -1, FailureCategory.HANG
+
+        # Non-zero exit: inspect log for rate-limit signal
+        log_content = ""
+        if log_path.exists():
+            try:
+                log_content = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+
+        is_rl, retry_after = _is_rate_limit_error(log_content)
+
+        if is_rl and attempt < _RATE_LIMIT_MAX_RETRIES:
+            delay = retry_after if retry_after is not None else _RATE_LIMIT_BACKOFF_DELAYS[attempt]
+            retry_num = attempt + 1
+            sys.stdout.write(str(f"  Rate limit hit, retrying in {delay} seconds (attempt {retry_num}/{_RATE_LIMIT_MAX_RETRIES})") + "\n")
+            sys.stdout.flush()
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": retry_num,
+                    "delay_secs": delay,
+                    "timestamp": _utcnow(),
+                })
+            time.sleep(delay)
+            continue
+
+        if is_rl:
+            sys.stdout.write(str(f"  Subscription rate limit exhausted for tester issue #{issue_num} after {_RATE_LIMIT_MAX_RETRIES} retries") + "\n")
+            sys.stdout.flush()
+            if rate_limit_events is not None:
+                rate_limit_events.append({
+                    "issue_num": issue_num,
+                    "role": "tester",
+                    "attempt": _RATE_LIMIT_MAX_RETRIES,
+                    "delay_secs": 0,
+                    "exhausted": True,
+                    "timestamp": _utcnow(),
+                })
+            return rc, FailureCategory.RETRY_EXHAUSTED
+
+        return rc, None
+
+    # Should not be reached
+    return rc, None

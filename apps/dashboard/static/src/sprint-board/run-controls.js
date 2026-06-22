@@ -12,13 +12,15 @@
    _pfCurrentLabel, _pfCurrentRepo, _pfState,
    _pfDagData, _pfWarnings, _pfCycle,
    _pfFlags, _pfSelectedIds, _pfUseClineFollowups,
-   _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved */
+   _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved,
+   _smgmtBySprint */
 
 import {
   mountProgressActivity,
   patchProgressActivityStep,
   unmountProgressActivity,
 } from "../progress-host.js";
+import { _smgmtDorMode, _smgmtDorNotReadyTickets } from "./board-render.js";
 
 // ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
 
@@ -76,6 +78,19 @@ export function smgmtRunBlockedToast() {
 }
 
 export function smgmtRunSprint(label) {
+  const mode = _smgmtDorMode();
+  if (mode === "warn") {
+    const tickets = (typeof _smgmtBySprint !== "undefined" && _smgmtBySprint && _smgmtBySprint[label]) || [];
+    const notReady = _smgmtDorNotReadyTickets(tickets);
+    if (notReady.length > 0) {
+      const summary = notReady
+        .map((t) => `#${t.number} — ${t.reasons.join(", ")}`)
+        .join("\n");
+      if (!confirm(`${notReady.length} ticket(s) are not ready:\n\n${summary}\n\nProceed anyway?`)) {
+        return;
+      }
+    }
+  }
   _pfOpen(label);
 }
 

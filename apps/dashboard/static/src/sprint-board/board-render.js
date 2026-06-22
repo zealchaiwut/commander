@@ -394,7 +394,7 @@ export function _smgmtRender(data) {
   _smgmtFinishedLabels = _finishedSet;
 
   // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
-  let _smgmtNextUpLabel = null;
+  _smgmtNextUpLabel = null;
   const sortedForNext = [...orderedLabels].sort((a, b) => {
     const ka = _smgmtSprintLabelSortKey(a);
     const kb = _smgmtSprintLabelSortKey(b);
@@ -2949,7 +2949,7 @@ export function smgmtPlanningRemove(issueNum, label) {
 }
 
 /** Reorder a ticket within the planning section using keyboard-accessible prompts. */
-export function smgmtPlanningReorder(issueNum, label) {
+export function smgmtPlanningReorder(issueNum, _label) {
   const menu = document.getElementById("smgmt-plan-row-menu");
   if (menu) menu.remove();
   // Reorder: move ticket up/down using the existing drag-drop order API

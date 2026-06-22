@@ -6,7 +6,6 @@ Tests the `readiness` block returned by get_sprint_preflight, including:
   - Mode setting behavior (off, warn, block)
   - Readiness derivation from parse_ticket_spec and estimate resolution
 """
-import json
 import os
 import pytest
 import httpx

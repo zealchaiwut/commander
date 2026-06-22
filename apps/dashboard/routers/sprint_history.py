@@ -84,10 +84,15 @@ def get_sprint_history(
     offset: int = 0,
     limit: int = 20,
     project: str | None = None,
+    active_only: bool = False,
 ):
-    """Return paginated, enriched sprint-history rows. Makes no GitHub calls."""
+    """Return paginated, enriched sprint-history rows. Makes no GitHub calls.
+
+    ``active_only`` returns actionable sprints + the few most-recent closed ones
+    (the History pane's default fast view).
+    """
     result = sprint_history_service.get_sprint_history(
-        offset=offset, limit=limit, project=project,
+        offset=offset, limit=limit, project=project, active_only=active_only,
     )
     if project:
         async def _broadcast(data: dict):

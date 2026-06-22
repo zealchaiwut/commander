@@ -75,33 +75,48 @@ export async function smgmtBulkCompleteSprint(label) {
 
     const listEl = document.getElementById('bc-ticket-list');
     const allTickets = preview.all_tickets || [];
-    if (allTickets.length === 0) {
-      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
-    } else {
-      listEl.innerHTML = allTickets.map(t => {
-        const catClass = _bcCatClass(t.category);
-        const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
-        return `<label class="rr-ticket-row">
+    // Group the close-list by the sprint that owns each ticket (point 2) so it
+    // reads "94.4: #1460 #1464 · 94.2: #1461 …" instead of one flat list.
+    const groups = (preview.tickets_by_sprint && preview.tickets_by_sprint.length)
+      ? preview.tickets_by_sprint
+      : (allTickets.length ? [{ label: preview.base_label, tickets: allTickets }] : []);
+    const _ticketRow = (t) => {
+      const catClass = _bcCatClass(t.category);
+      const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
+      return `<label class="rr-ticket-row">
           <input type="checkbox" checked data-issue="${t.number}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
           <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
           <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
         </label>`;
-      }).join('');
+    };
+    if (groups.length === 0) {
+      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
+    } else {
+      listEl.innerHTML = groups.map(g => (
+        `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">`
+        + `${escHtml(sprintLabelDisplay(g.label))} · ${g.tickets.length}</div>`
+        + g.tickets.map(_ticketRow).join('')
+      )).join('');
     }
 
-    const memberCount = (preview.member_labels || []).length;
-    const mergeSteps = preview.merge_steps || [];
+    // Full chain (deepest → base) with per-step status (point 1): done steps show
+    // ✓ merged/completed, the rest ○ pending — so you see what already happened.
+    const members = preview.members || [];
     const actionsEl = document.getElementById('bc-actions');
-    const actionRows = [];
-    for (const step of mergeSteps) {
-      actionRows.push(
-        `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge `
-        + `<code>${escHtml(step.head)}</code> → <code>${escHtml(step.base)}</code></div>`,
-      );
-    }
+    const actionRows = members.map(m => {
+      const target = m.is_base ? 'develop' : sprintLabelDisplay(m.parent);
+      let icon, color, note;
+      if (m.completed) { icon = 'ti-circle-check-filled'; color = 'var(--green)'; note = 'completed'; }
+      else if (m.merged) { icon = 'ti-git-merge'; color = 'var(--green)'; note = 'merged → will mark completed'; }
+      else { icon = 'ti-circle'; color = 'var(--text-sub)'; note = 'pending'; }
+      return `<div class="fs-action-row"><i class="ti ${icon}" style="color:${color}"></i> `
+        + `${escHtml(sprintLabelDisplay(m.label))} → ${escHtml(target)} `
+        + `<span style="color:var(--text-muted);font-size:11px">· ${note}</span></div>`;
+    });
+    const memberCount = members.length || (preview.member_labels || []).length;
     actionRows.push(
-      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (UAT + summary included)</div>`,
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (grouped above; UAT + summary)</div>`,
       `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? 's' : ''} completed</div>`,
     );
     actionsEl.innerHTML = actionRows.join('');

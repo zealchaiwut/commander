@@ -189,13 +189,65 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
         reverse=True,
     ) + [base_label]
 
+    ticket_rows = srv._bulk_complete_ticket_rows(sprint_issues)
+
+    # Per-member status for the modal's chain view: which steps are already done
+    # (merged ✓ / completed ✓) vs pending ○. merged = branch is NOT a pending
+    # merge step; completed = lifecycle DB says so.
+    pending_heads = {s.get("head") for s in merge_steps}
+    members = []
+    for lbl in complete_order:
+        is_base = lbl == base_label
+        parent = "develop" if is_base else srv._sprint_merge_parent_label(project_root, lbl)
+        branch = srv._sprint_branch_name(lbl)
+        completed = False
+        try:
+            row = srv.db.get_sprint(lbl, project=repo)
+            completed = bool(row) and srv.db.canonical_lifecycle(row.get("state") or "") == "completed"
+        except Exception:
+            pass
+        members.append({
+            "label": lbl,
+            "parent": parent,
+            "is_base": is_base,
+            "merged": branch not in pending_heads,
+            "completed": completed,
+        })
+
+    # Tickets grouped by the sprint that ran them (deepest child wins on reruns;
+    # leftovers fall to the base). Lets the modal break the close-list down by
+    # child sprint instead of one flat "close all N".
+    by_num = {t["number"]: t for t in ticket_rows}
+    assigned: set[int] = set()
+    tickets_by_sprint: list[dict] = []
+    for lbl in complete_order:
+        nums: list[int] = []
+        try:
+            for r in srv.db.agent_runs_for_sprint(lbl, project=repo):
+                n = r.get("issue_number")
+                if n is None:
+                    continue
+                n = int(n)
+                if n in by_num and n not in assigned:
+                    nums.append(n)
+                    assigned.add(n)
+        except Exception:
+            pass
+        if nums:
+            tickets_by_sprint.append({"label": lbl, "tickets": [by_num[n] for n in nums]})
+    leftover = [t for t in ticket_rows if t["number"] not in assigned]
+    if leftover:
+        tickets_by_sprint.append({"label": base_label, "tickets": leftover})
+
     return {
-        "all_tickets": srv._bulk_complete_ticket_rows(sprint_issues),
+        "all_tickets": ticket_rows,
         "member_labels": all_labels,
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
         "complete_order": complete_order,
+        "members": members,
+        "tickets_by_sprint": tickets_by_sprint,
     }
 
 

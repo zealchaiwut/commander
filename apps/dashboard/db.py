@@ -1598,10 +1598,17 @@ def record_sprint_start(
 
 def record_sprint_finish(label: str, ended_at: str | None = None,
                          end_reason: str | None = None,
-                         project: str = "") -> None:
-    """Move a sprints row to `completed` (issue #757)."""
-    transition_sprint_state(
-        label, "completed", actor="manager",
+                         project: str = "",
+                         actor: str = "manager") -> "TransitionResult":
+    """Move a sprints row to `completed` (issue #757).
+
+    actor defaults to "manager"; pass "reconcile" to complete a superseded
+    ancestor still in `needs_rework` whose whole lineage has merged to develop
+    (the B2 edge is reconcile-only). Returns the TransitionResult so callers can
+    detect a silent rejection instead of assuming success.
+    """
+    return transition_sprint_state(
+        label, "completed", actor=actor,
         end_reason=end_reason, ended_at=ended_at, project=project,
     )
 

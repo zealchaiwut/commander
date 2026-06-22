@@ -2673,12 +2673,18 @@ def _sprint_db_set_state(
     project: str,
     state: str,
     **extra_fields,
-) -> None:
+) -> bool:
     """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
 
-    Best-effort: any DB failure is swallowed so it never breaks the request —
-    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    Best-effort on DB *errors*: any exception is swallowed so it never breaks the
+    request — plan.json dual-write remains the cache and the sweep paths reconcile
+    drift. But a state-machine *rejection* (illegal edge → accepted=False) is NOT
+    an exception — it returns False here so callers can surface a silent no-op
+    instead of assuming success. Pass actor="reconcile" via extra_fields to
+    complete a `needs_rework` lineage that has merged (the B2 edge is
+    reconcile-only). Returns True on success, False on rejection/error.
     """
+    actor = extra_fields.get("actor", "manager")
     try:
         if state == "running":
             db.record_sprint_start(
@@ -2686,12 +2692,14 @@ def _sprint_db_set_state(
                 started_at=extra_fields.get("started_at"),
             )
         elif state == "completed":
-            db.record_sprint_finish(
+            res = db.record_sprint_finish(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
                 project=project or "",
+                actor=actor,
             )
+            return bool(getattr(res, "accepted", True))
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
@@ -2709,7 +2717,8 @@ def _sprint_db_set_state(
                 project=project or "",
             )
     except Exception:
-        pass
+        return False
+    return True
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:

@@ -9754,8 +9754,9 @@
           <div class="snav-panel-body" id="snav-panel-body"></div>
         </div>
       </div>
-      <!-- Sprint board multi-select bar — now inside the sub-tabs row so it sits
-           with the nav. (The legacy #bulk-action-bar was removed; unused.) -->
+      </div><!-- /sub-tabs-row -->
+      <!-- Sprint board multi-select bar — its own full-width row beneath the nav
+           tabs (was inline in .sub-tabs-row, which crowded the tabs). -->
       <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
         <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
           <i class="ti ti-x"></i> Deselect all
@@ -9778,8 +9779,7 @@
             <i class="ti ti-send"></i> Move to Sprint
           </button>
         </div>
-      </div>
-      </div><!-- /sub-tabs-row -->
+      </div><!-- /proj-selection-bar -->
     </header>
 
     </div><!-- /proj-sticky-chrome -->

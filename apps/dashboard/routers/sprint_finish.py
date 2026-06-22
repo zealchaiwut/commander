@@ -180,12 +180,22 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     merge_steps = srv._bulk_complete_merge_steps(project_root, repo, base_label)
 
+    # Per-step Complete order: deepest child first, base last. The modal loops
+    # complete-step over this (idempotent), so already-merged-but-not-completed
+    # members still get finalised — not just the ones with unmerged commits.
+    complete_order = sorted(
+        (lbl for lbl in all_labels if lbl != base_label),
+        key=srv._sprint_label_sub_index,
+        reverse=True,
+    ) + [base_label]
+
     return {
         "all_tickets": srv._bulk_complete_ticket_rows(sprint_issues),
         "member_labels": all_labels,
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
+        "complete_order": complete_order,
     }
 
 

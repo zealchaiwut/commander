@@ -171,105 +171,62 @@ export async function _bcConfirm() {
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
   const label = _bcLabel;
-  const allTickets = _bcPreview.all_tickets || [];
-  let mergeSteps = _bcPreview.merge_steps || [];
-  const settleSteps = 2; // mark sprints completed + refresh board
+  // Per-step complete: walk the lineage deepest child → base, finalising each
+  // sprint (merge → close summary → mark completed; base also closes tickets +
+  // merges to develop) via the idempotent complete-step endpoint. A conflict at
+  // any step stops here with a clear message; resolve it and re-run to resume
+  // (merged/closed steps are skipped).
+  const order = (_bcPreview.complete_order || []).slice();
 
   const confirmBtn = document.getElementById('bc-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Completing…'; }
 
   _bcClose();
 
-  const refreshLabel = 'Refreshing board…';
+  if (order.length === 0) { _smgmtShowToast('Nothing to complete.'); return; }
+
   let doneSteps = 0;
+  const totalSteps = order.length + 1; // members + board refresh
 
-  const _bcRecalcTotal = (pendingMerges) =>
-    doneSteps + pendingMerges.length + allTickets.length + settleSteps;
-
-  let totalSteps = _bcRecalcTotal(mergeSteps);
-
-  _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}…`, {
+  _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}…`, {
     progress: true,
     total: totalSteps,
     clearLog: true,
   });
-  _smgmtBoardLog('Starting bulk complete…', 'step');
+  _smgmtBoardLog('Starting per-step complete (deepest child first)…', 'step');
 
   try {
-    while (mergeSteps.length > 0) {
-      for (const step of mergeSteps) {
-        const stepLabel = step.label || `${step.head} → ${step.base}`;
-        _smgmtBoardLog(stepLabel, 'step');
-        await _bcMergeStep(owner, repoName, step);
-        doneSteps += 1;
-        _smgmtBoardProgress(doneSteps, totalSteps);
-        _smgmtBoardLog(`✓ ${stepLabel}`, 'ok');
-      }
-      mergeSteps = await _bcRemainingMergeSteps(owner, repoName, label);
-      if (mergeSteps.length > 0) {
-        totalSteps = _bcRecalcTotal(mergeSteps);
-        _smgmtBoardLog(
-          `Re-checking merge chain (${mergeSteps.length} step${mergeSteps.length !== 1 ? 's' : ''} remaining)…`,
-          'step',
-        );
-        _smgmtBoardProgress(doneSteps, totalSteps);
-      }
-    }
-
-    for (const t of allTickets) {
-      const closeLabel = `Closing #${t.number} — ${t.title || ''}`.trim();
-      _smgmtBoardLog(closeLabel, 'step');
-      const closeRes = await fetch(
-        `/api/issues/${t.number}/close?repo=${encodeURIComponent(repo)}`,
-        { method: 'POST' },
+    for (const sLabel of order) {
+      _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmed: true }),
+        },
       );
-      if (!closeRes.ok) {
-        const err = await closeRes.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed to close #${t.number}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
       }
+      const sd = await res.json();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog(`✓ Closed #${t.number}`, 'ok');
+      const into = sd.merged ? ` → merged into ${sd.merged_into}` : '';
+      _smgmtBoardLog(`✓ ${sprintLabelDisplay(sLabel)} completed${into}`, 'ok');
     }
 
-    _smgmtBoardLog('Marking sprints completed…', 'step');
-    const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          confirmed: true,
-          skip_issue_close: true,
-        }),
-      },
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    doneSteps += 1;
-    _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog('✓ Sprints marked completed', 'ok');
-
-    _smgmtBoardLog(refreshLabel, 'step');
+    _smgmtBoardLog('Refreshing board…', 'step');
     await loadSprintMgmt();
     doneSteps += 1;
     _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog('✓ Bulk complete finished', 'ok');
+    _smgmtBoardLog('✓ Complete finished', 'ok');
 
-    const closedCount = allTickets.length;
-    if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`Bulk complete finished with errors — ${closedCount} closed.`);
-    } else {
-      _smgmtShowToast(
-        `${sprintLabelDisplay(label)} bulk completed — ${closedCount} closed, ${data.completed} marked completed.`,
-      );
-    }
+    _smgmtShowToast(`${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`);
   } catch (e) {
     _smgmtBoardLog(`✗ ${e.message}`, 'err');
-    _smgmtShowToast('Bulk complete failed: ' + e.message);
+    _smgmtShowToast('Stopped: ' + e.message + ' — resolve the conflict, then re-run to resume.');
     try { await loadSprintMgmt(); } catch (_) { /* ignore */ }
   } finally {
     _smgmtBoardUnlock();

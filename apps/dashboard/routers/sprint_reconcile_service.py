@@ -78,6 +78,7 @@ def transition_sprint_state(
     state: str,
     actor: str,
     end_reason: str | None = None,
+    project: str = "",
 ) -> bool:
     """Route a reconciler state transition through the DB write layer.
 
@@ -86,11 +87,11 @@ def transition_sprint_state(
     Returns True when the transition was applied.
     """
     if state == "needs_rework":
-        _db().record_sprint_needs_rework(label, end_reason=end_reason)
+        _db().record_sprint_needs_rework(label, end_reason=end_reason, project=project)
     elif state == "ready_to_merge":
-        _db().record_sprint_ready_to_merge(label, end_reason=end_reason)
+        _db().record_sprint_ready_to_merge(label, end_reason=end_reason, project=project)
     else:
-        _db().record_sprint_finish(label, end_reason=end_reason)
+        _db().record_sprint_finish(label, end_reason=end_reason, project=project)
     return True
 
 
@@ -115,7 +116,7 @@ def _lineage_fully_in_develop(label: str, project: str) -> bool:
     except Exception:
         return False
     is_child = srv._is_child_sprint_label(label)
-    has_children = bool(_db().get_sprint_children(label))
+    has_children = bool(_db().get_sprint_children(label, project=project or None))
     if not (is_child or has_children):
         return False
     branch = srv._sprint_branch_name(label)
@@ -236,7 +237,7 @@ def _issues_from_agent_runs(label: str) -> list[dict]:
     return result
 
 
-def _reconcile_counts(label: str, row: dict) -> bool:
+def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
     """Re-derive issues_json and count columns from agent_runs for a terminal sprint.
 
     Non-terminal rows are skipped (AC4).  The function:
@@ -318,8 +319,9 @@ def _reconcile_counts(label: str, row: dict) -> bool:
     )
 
     new_json = _json.dumps(merged)
+    _proj = (project or row.get("project") or "").strip()
     _db().update_sprint_run_counts(
-        label, new_json, settled_done, uat_count, failure_count,
+        label, new_json, settled_done, uat_count, failure_count, project=_proj,
     )
     _db().update_sprint_reconciliation(label, {
         "source": "count-reconcile",
@@ -337,7 +339,8 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
         return False
     if project and row.get("project") and row.get("project") != project:
         return False
-    patch = _github_reconcile_row(label, project or row.get("project") or "", row)
+    _eff_project = project or row.get("project") or ""
+    patch = _github_reconcile_row(label, _eff_project, row)
     lifecycle_updated = False
     if patch:
         # AC4 (original): all lifecycle writes go through transition_sprint_state.
@@ -346,12 +349,13 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
             patch["state"],
             actor="reconcile",
             end_reason=patch.get("end_reason"),
+            project=_eff_project,
         )
         if lifecycle_updated:
             # Re-fetch so _reconcile_counts sees the updated state.
-            row = _db().get_sprint(label) or row
+            row = _db().get_sprint(label, project=_eff_project or None) or row
     # AC1: re-derive counts for terminal sprints alongside lifecycle correction.
-    counts_updated = _reconcile_counts(label, row)
+    counts_updated = _reconcile_counts(label, row, project=_eff_project)
     return lifecycle_updated or counts_updated
 
 

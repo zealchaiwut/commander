@@ -51,6 +51,7 @@ class StageResult(Enum):
     PASS = "pass"        # coder: branch ready / tester: merged
     REJECT = "reject"    # tester only: send back to the coder queue
     FAIL = "fail"        # infra/non-retryable: drop, no rework label
+    EXHAUST = "exhaust"  # tester only: consecutive identical failure — finalize needs-rework immediately
 
 
 def pipeline_mode_enabled(
@@ -176,6 +177,11 @@ def _apply_tester_outcome(
         result.merged.append(ticket)
         if on_merged:
             on_merged(ticket)
+    elif test_res is StageResult.EXHAUST:
+        # Consecutive identical failure — finalize as needs-rework immediately.
+        result.needs_rework.append(ticket)
+        if on_needs_rework:
+            on_needs_rework(ticket)
     elif test_res is StageResult.REJECT:
         if attempt >= max_attempts:
             # Cap reached — drop from both queues, label needs-rework.
@@ -258,6 +264,12 @@ def _run_pipeline(
                     result.merged.append(ticket)
                     if on_merged:
                         on_merged(ticket)
+                elif test_res is StageResult.EXHAUST:
+                    # Consecutive identical failure — finalize immediately.
+                    terminal.add(ticket)
+                    result.needs_rework.append(ticket)
+                    if on_needs_rework:
+                        on_needs_rework(ticket)
                 elif test_res is StageResult.REJECT:
                     if attempt >= max_attempts:
                         terminal.add(ticket)

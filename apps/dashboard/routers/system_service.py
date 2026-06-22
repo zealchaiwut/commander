@@ -101,5 +101,119 @@ def gh_auth_login_with_token(payload: dict) -> JSONResponse:
 
 def get_diagnostics_page():
     """Serve the system diagnostics page (issue #230)."""
+    from routers.pages import _serve_html, _STATIC_DIR  # noqa: PLC0415
+    return _serve_html(_STATIC_DIR / "diagnostics.html")
+
+
+# ── Issue #1247: health, environment, repo/config, github/labels ──────────────
+
+async def check_health() -> "JSONResponse":
+    """Run the full health check and return a cached JSONResponse.
+
+    Business logic (collectors, cache, helpers) lives in server.py; this
+    function delegates entirely via the deferred import so the monolith
+    remains the single source of truth for those globals.
+    """
+    import asyncio
+    import time
+    from datetime import datetime, timezone
+
     srv = _server()
-    return srv._serve_html(srv.STATIC_DIR / "diagnostics.html")
+    now = time.monotonic()
+
+    if srv._health_cache is not None:
+        ts, cached = srv._health_cache
+        if now - ts < srv._HEALTH_CACHE_TTL:
+            return JSONResponse(content=cached, status_code=200)
+
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    loop = asyncio.get_event_loop()
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                loop.run_in_executor(None, srv._health_collect_gh_auth_scopes),
+                loop.run_in_executor(None, srv._health_collect_disk),
+                loop.run_in_executor(None, srv._health_collect_sprints),
+                loop.run_in_executor(None, srv._health_collect_orphan_pids),
+                loop.run_in_executor(None, srv._health_collect_recent_dispatches),
+                return_exceptions=True,
+            ),
+            timeout=5.0,
+        )
+    except asyncio.TimeoutError:
+        results = [None, None, None, None, None]
+
+    def _safe(r):
+        return None if isinstance(r, Exception) else r
+
+    gh_auth = _safe(results[0])
+    disk = _safe(results[1])
+    sprints = _safe(results[2])
+    orphan_pids = _safe(results[3])
+    recent_dispatches = _safe(results[4])
+
+    status = srv._compute_health_status(gh_auth, disk, orphan_pids, recent_dispatches)
+
+    import time as _time
+    response = {
+        "status": status,
+        "uptime_seconds": int(_time.monotonic() - srv._start_time),
+        "gh_auth_scopes": gh_auth,
+        "disk": disk,
+        "sprints": sprints,
+        "orphan_pids": orphan_pids,
+        "orphans_removed": srv._orphans_removed_total,
+        "recent_dispatches": recent_dispatches,
+        "checked_at": checked_at,
+    }
+    srv._health_cache = (now, response)
+    return JSONResponse(content=response, status_code=200)
+
+
+def get_environment() -> dict:
+    """Return the current runtime environment (prd or uat)."""
+    srv = _server()
+    return {"environment": srv.ENVIRONMENT}
+
+
+def get_repo_config():
+    """Return repo configuration from github_client."""
+    import github_client
+    from fastapi import HTTPException
+    try:
+        return github_client.repo_config()
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
+def list_github_labels(repo: "str | None" = None):
+    """Return all GitHub labels for the repo (cached 30 s)."""
+    import github_client
+    from fastapi import HTTPException
+    srv = _server()
+    try:
+        return github_client.list_labels(repo_name=repo)
+    except Exception as e:
+        import subprocess
+        if isinstance(e, subprocess.CalledProcessError):
+            raise srv._gh_error(e)
+        raise HTTPException(400, detail=str(e))
+
+
+def create_github_label(name: str, color: str, description: str, repo: "str | None"):
+    """Create a new GitHub label and return the updated label list."""
+    import github_client
+    from fastapi import HTTPException
+    srv = _server()
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, detail="Label name is required.")
+    try:
+        github_client.create_label(name, color, description=description, repo_name=repo)
+        return github_client.list_labels(repo_name=repo)
+    except Exception as e:
+        import subprocess
+        if isinstance(e, subprocess.CalledProcessError):
+            raise srv._gh_error(e)
+        raise HTTPException(400, detail=str(e))

@@ -29,21 +29,21 @@ AGENT_PATH = REPO_ROOT / "apps" / "dashboard" / ".claude" / "agents" / "estimato
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
 
 _SIZING_DIR = Path(__file__).parent
 if str(_SIZING_DIR) not in sys.path:
     sys.path.insert(0, str(_SIZING_DIR))
-from sizing import minutes_from_letter as _minutes_from_letter
-from calibration import (
+from sizing import minutes_from_letter as _minutes_from_letter  # noqa: E402
+from calibration import (  # noqa: E402
     CalibrationResult,
     load_calibration,
     calibration_prompt_section,
     db_calibration_records,
     sqlite_calibration_records,
 )
-from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg
+from services.sprint_manager.estimation_config import get_estimation_cfg as _get_estimation_cfg  # noqa: E402
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -72,6 +72,31 @@ def load_agent_instructions() -> str:
         if len(parts) >= 3:
             return parts[2].strip()
     return content.strip()
+
+
+def parse_files_to_touch(body: str) -> list:
+    """Extract repo-relative paths from the '## Files to touch' section of an issue body.
+
+    Returns a deduplicated list of path strings (preserving first-seen order).
+    Returns [] when the section is absent or contains no parseable paths.
+    """
+    in_section = False
+    seen: set = set()
+    paths: list = []
+    for line in body.split("\n"):
+        if re.match(r"^#+\s+Files to touch", line, re.IGNORECASE):
+            in_section = True
+            continue
+        if in_section:
+            if re.match(r"^#", line):
+                break
+            stripped = line.strip()
+            if not stripped or stripped.startswith("<!--") or stripped == "-->":
+                continue
+            if stripped not in seen:
+                seen.add(stripped)
+                paths.append(stripped)
+    return paths
 
 
 def extract_json(text: str) -> Optional[dict]:
@@ -117,7 +142,7 @@ def fetch_issue(issue_num: int, repo: str) -> dict:
         "number": raw.get("number"),
         "title": raw.get("title", ""),
         "body": raw.get("body") or "",
-        "labels": [{"name": l.get("name", "")} for l in (raw.get("labels") or [])],
+        "labels": [{"name": lbl.get("name", "")} for lbl in (raw.get("labels") or [])],
     }
 
 
@@ -234,6 +259,15 @@ Output ONLY the JSON object. No other text."""
                     # Normalize files_touched: absent or non-list → []
                     if not isinstance(parsed.get("files_touched"), list):
                         parsed["files_touched"] = []
+                    # Merge explicit '## Files to touch' paths into files_likely_affected.
+                    # Union: explicit paths first (always included), then inferred paths
+                    # not already listed. When section is absent/empty nothing changes.
+                    explicit = parse_files_to_touch(body)
+                    if explicit:
+                        inferred = parsed.get("files_likely_affected") or []
+                        explicit_set = set(explicit)
+                        merged = explicit + [p for p in inferred if p not in explicit_set]
+                        parsed["files_likely_affected"] = merged
                     # Ensure both size and minutes are present; derive missing field
                     # using settings-resolved size_minutes (falls back to sizing.py defaults).
                     size_val = parsed.get("size", "")

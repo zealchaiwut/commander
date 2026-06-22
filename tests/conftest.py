@@ -30,7 +30,7 @@ _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 _SPRINT_MGR_DIR = _REPO_ROOT / "services" / "sprint_manager"
 _STATIC_DIR = _DASHBOARD_DIR / "static"
 
-for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR), str(_SPRINT_MGR_DIR)):
+for _p in (str(_REPO_ROOT), str(_SPRINT_MGR_DIR), str(_DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -39,9 +39,9 @@ import settings_repo as _settings_repo  # noqa: E402
 
 sys.modules["services.sprint_manager.settings_repo"] = _settings_repo
 
-import pytest
+import pytest  # noqa: E402
 
-import services.sprint_manager.agent_browser_runner as _abr
+import services.sprint_manager.agent_browser_runner as _abr  # noqa: E402
 
 
 @pytest.fixture(scope="module")

@@ -18,13 +18,14 @@ Usage:
     python3 ~/commander/services/sprint_manager/sprint_manager.py <label> [options]
 
 Examples:
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --skip-gates
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --gate-pytest=false
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --alert-mode dashboard-banner,file
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --resume
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --retry-failed
-    python3 ~/commander/services/sprint_manager/sprint_manager.py sprint-5 --dry-run
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --skip-gates
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --gate-pytest=false
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py \
+        sprint-5 --alert-mode dashboard-banner,file
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --resume
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --retry-failed
+    python3 ~/cmd/svc/sprint_mgr/sprint_mgr.py sprint-5 --dry-run
 
 Run from the git root of the repository.
 """
@@ -32,13 +33,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import email.mime.text
 import json
 import os
 import re
 import shutil
 import signal
-import smtplib
 import subprocess
 import sys
 import tempfile
@@ -47,7 +46,6 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -67,6 +65,32 @@ from services.sprint_manager.pipeline import (  # noqa: E402
     StageResult as _StageResult,
     pipeline_mode_enabled as _pipeline_mode_enabled,
     run_level as _run_pipeline_level,
+)
+
+from services.sprint_manager.config import (  # noqa: E402
+    SprintConfig,
+    load_config,
+    discover_config,
+    _default_config,
+)
+
+from services.sprint_manager.worktree_pool import (  # noqa: E402
+    WorktreePool as _WorktreePool,
+)
+
+from services.sprint_manager.commander_paths import (  # noqa: E402
+    discover_commander_dir,
+)
+
+from services.sprint_manager.paths import (  # noqa: E402
+    _pid_file_path,
+    _plan_json_path,
+    _state_path,
+    _summary_path,
+    _sprint_number,
+    _is_child_sprint_label,
+    _sprint_branch_for_label,
+    _base_sprint_branch,
 )
 
 # issue #738: cross-thread serialization for concurrent pipeline mode — one
@@ -236,8 +260,12 @@ def _resolve_uat_env_for_tester(
     if port == "8000":
         return None, f"Refusing port 8000 (PRD) in {uat_env_path}"
 
-    commander_ok = uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
-    env_ok = environment in ("uat", "") or (commander_ok and environment in ("uat", "prd", ""))
+    commander_ok = (
+        uat_repo.resolve() == (project_dir / "uat").resolve() and port == "8001"
+    )
+    env_ok = environment in ("uat", "") or (
+        commander_ok and environment in ("uat", "prd", "")
+    )
     if not env_ok:
         return None, (
             f"{uat_env_path} has ENVIRONMENT={environment!r}; expected uat "
@@ -268,10 +296,20 @@ import github_client  # noqa: E402
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
 from services.logging import install_orchestrator_stdout_timestamps  # noqa: E402
-from services.sprint_manager import agent_browser_runner  # issue #710: live-browser UAT  # noqa: E402
+# issue #710: live-browser UAT
+from services.sprint_manager import agent_browser_runner  # noqa: E402
+from services.sprint_manager.state import (  # noqa: E402
+    IssueState,
+    SprintState,
+    GateResult,
+    SprintSummary,
+)
 
 try:
-    from services.sprint_manager.brief_generator import write_sprint_brief as _write_sprint_brief  # issue #860
+    # issue #860
+    from services.sprint_manager.brief_generator import (
+        write_sprint_brief as _write_sprint_brief,
+    )
     _BRIEF_GENERATOR_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _write_sprint_brief = None  # type: ignore[assignment]
@@ -514,343 +552,7 @@ def _emit_ticket_failed(
     )
 
 
-# ── SprintConfig dataclass + loader ──────────────────────────────────────────
-
-@dataclass
-class SprintConfig:
-    """All runtime paths and settings for a sprint.
-
-    Replaces the six module-level path constants.  When no config file is
-    present the class is populated with the same env-var + hardcoded defaults
-    that existed before this ticket, so backward compatibility is preserved.
-    """
-    repo_name:             Optional[str]  = None
-    worktree_coder:        Path           = field(default_factory=lambda: Path.home() / "commander" / "work-coder")
-    worktree_tester:       Path           = field(default_factory=lambda: WORKTESTER_ROOT)
-    # Dedicated clone for non-coding sprint agents (documenter, reviewer) so they
-    # never check out feature branches in the coder/tester worktrees (which are
-    # mid-sprint) or — worse — the serving uat clone. Optional; falls back to the
-    # tester/coder worktree when unset.
-    worktree_agents:       Optional[Path] = None
-    tester_app_subdir:     str            = "apps/dashboard"
-    scripts_dir:           Path           = field(default_factory=lambda: SCRIPTS_DIR)
-    logs_dir:              Path           = field(default_factory=lambda: DASHBOARD_DIR / "logs")
-    sprints_dir:           Path           = field(default_factory=lambda: SPRINTS_DIR)
-    alerts_dir:            Path           = field(default_factory=lambda: ALERTS_DIR)
-    api_url:               str            = field(default_factory=lambda: DASHBOARD_API_URL)
-    coder_prompt_template:  Optional[str] = None
-    tester_prompt_template: Optional[str] = None
-    # Port detection (issue #62)
-    app_default_port:      Optional[int]  = None
-    app_port_strategy:     str            = "prefer_default"
-    # Documentor (issue #103)
-    documentor_enabled:    bool           = False
-    # Concurrent pipeline mode (issue #737) — per-project opt-in, default serial
-    pipeline_mode:         bool           = False
-    # Reviewer (issue #159)
-    reviewer_prompt_template: Optional[str] = None
-    # Documenter (issue #165)
-    documenter_prompt_template: Optional[str] = None
-    # Agent models (issue #700) — defaults match current hardcoded values
-    coder_model:       str = "claude-sonnet-4-6"
-    tester_model:      str = "claude-sonnet-4-6"
-    reviewer_model:    str = "claude-haiku-4-5"
-    estimator_model:   str = "claude-sonnet-4-6"
-    documentor_model:  str = "claude-sonnet-4-6"
-    # Risk-tier model routing for tester (issue #790)
-    tester_by_risk:    dict = field(default_factory=lambda: {
-        "LOW":    "claude-haiku-4-5",
-        "MEDIUM": "claude-haiku-4-5",
-        "HIGH":   "claude-sonnet-4-6",
-    })
-    # Size-tier model routing for coder (issue #789)
-    coder_by_size:     dict = field(default_factory=lambda: dict(_DEFAULT_CODER_BY_SIZE))
-    # Alternate coder dispatch backend (issue #917) — default claude-code keeps existing behavior
-    coder_backend:     str  = "claude-code"
-    # Cline-specific model id (agent_config.cline.model) — separate namespace from coder_model
-    cline_model:       Optional[str] = None
-    # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
-    use_cline_followups: bool = False
-
-    @property
-    def worktree_tester_app(self) -> Path:
-        """Resolved path where tests/app lives inside the tester worktree."""
-        if self.tester_app_subdir:
-            return self.worktree_tester / self.tester_app_subdir
-        return self.worktree_tester
-
-    @property
-    def finish_feature_script(self) -> Path:
-        return self.scripts_dir / "finish_feature.py"
-
-
-def _resolve_path(raw: str, base_dir: Path) -> Path:
-    """Expand ~ and resolve relative paths against base_dir."""
-    p = Path(raw).expanduser()
-    if p.is_absolute():
-        return p
-    return (base_dir / p).resolve()
-
-
-def load_config(path: Path) -> "SprintConfig":
-    """Parse .commander/sprint.yaml and return a SprintConfig.
-
-    Relative paths in paths.* are resolved relative to the YAML file's
-    directory.  Raises SystemExit on validation errors.
-    """
-    if yaml is None:
-        sys.exit("PyYAML is not installed. Install it with: pip install pyyaml")
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        sys.exit(f"Cannot read config file {path}: {e}")
-
-    try:
-        data = yaml.safe_load(text) or {}
-    except yaml.YAMLError as e:
-        sys.exit(f"YAML parse error in {path}: {e}")
-
-    base_dir = path.parent  # directory containing sprint.yaml
-
-    # ── required fields ───────────────────────────────────────────────────────
-    missing = []
-    repo_name = os.environ.get("COMMANDER_REPO", "").strip() or (data.get("repo_name") or "").strip()
-    if not repo_name:
-        missing.append("repo_name")
-
-    wt = data.get("worktrees") or {}
-    coder_raw  = (wt.get("coder") or "").strip()
-    tester_raw = (wt.get("tester") or "").strip()
-    if not coder_raw:
-        missing.append("worktrees.coder")
-    if not tester_raw:
-        missing.append("worktrees.tester")
-
-    if missing:
-        sys.exit(
-            f"Config file {path} is missing required field(s): "
-            + ", ".join(missing)
-        )
-
-    worktree_coder  = _resolve_path(coder_raw, base_dir)
-    worktree_tester = _resolve_path(tester_raw, base_dir)
-    # Optional dedicated agents clone (documenter/reviewer). Falls back to None
-    # (→ tester/coder worktree) when not configured.
-    agents_raw = (wt.get("agents") or "").strip()
-    worktree_agents = _resolve_path(agents_raw, base_dir) if agents_raw else None
-    tester_app_subdir = (wt.get("tester_app_subdir") or "")
-
-    # ── validate worktree paths ────────────────────────────────────────────────
-    path_errors = []
-    if not worktree_coder.exists():
-        path_errors.append(f"worktrees.coder path does not exist: {worktree_coder}")
-    if not worktree_tester.exists():
-        path_errors.append(f"worktrees.tester path does not exist: {worktree_tester}")
-    if path_errors:
-        sys.exit("Config validation error:\n  " + "\n  ".join(path_errors))
-
-    # ── optional paths ────────────────────────────────────────────────────────
-    paths = data.get("paths") or {}
-
-    scripts_raw = (paths.get("scripts_dir") or "").strip()
-    scripts_dir = _resolve_path(scripts_raw, base_dir) if scripts_raw else SCRIPTS_DIR
-
-    logs_raw  = (paths.get("logs_dir") or "").strip()
-    logs_dir  = _resolve_path(logs_raw, base_dir) if logs_raw else base_dir / "logs"
-
-    sprints_raw  = (paths.get("sprints_dir") or "").strip()
-    sprints_dir  = _resolve_path(sprints_raw, base_dir) if sprints_raw else base_dir / "sprints"
-
-    alerts_raw  = (paths.get("alerts_dir") or "").strip()
-    alerts_dir  = _resolve_path(alerts_raw, base_dir) if alerts_raw else base_dir / "alerts"
-
-    # ── dashboard section ─────────────────────────────────────────────────────
-    dashboard = data.get("dashboard") or {}
-    # A clone-specific DASHBOARD_API_URL (set in that clone's apps/dashboard/.env,
-    # loaded via load_dotenv at import) overrides the shared sprint.yaml value: the
-    # project-root yaml can't tell PRD (8000) from UAT (8001), so when the running
-    # clone's own .env declares the URL it wins. Falls back to yaml, then hardcoded.
-    _env_api_url = os.environ.get("DASHBOARD_API_URL")
-    api_url   = (_env_api_url or dashboard.get("api_url") or DASHBOARD_API_URL).strip()
-
-    # ── agents section ────────────────────────────────────────────────────────
-    agents = data.get("agents") or {}
-    coder_prompt   = agents.get("coder_prompt_template") or None
-    tester_prompt  = agents.get("tester_prompt_template") or None
-
-    # ── app section (issue #62: per-project port detection) ───────────────────
-    app_section = data.get("app") or {}
-    app_default_port: Optional[int] = None
-    app_port_strategy: str = "prefer_default"
-    if app_section:
-        raw_port = app_section.get("default_port")
-        if raw_port is not None:
-            try:
-                app_default_port = int(raw_port)
-            except (TypeError, ValueError):
-                sys.exit(f"Config error: app.default_port must be an integer, got {raw_port!r}")
-        raw_strategy = (app_section.get("port_strategy") or "prefer_default").strip()
-        if raw_strategy not in ("prefer_default", "always_random"):
-            sys.exit(
-                f"Config error: app.port_strategy must be 'prefer_default' or 'always_random', "
-                f"got {raw_strategy!r}"
-            )
-        app_port_strategy = raw_strategy
-
-    # ── documentor section (issue #103) ──────────────────────────────────────
-    documentor_enabled: bool = bool(data.get("documentor_enabled", False))
-
-    # ── pipeline mode (issue #737) ───────────────────────────────────────────
-    pipeline_mode: bool = bool(data.get("pipeline_mode", False))
-
-    # ── reviewer section (issue #159) ────────────────────────────────────────
-    reviewer_prompt = agents.get("reviewer_prompt_template") or None
-
-    # ── documenter section (issue #165) ──────────────────────────────────────
-    documenter_prompt = agents.get("documenter_prompt_template") or None
-
-    # ── agent_config section (issue #700) ────────────────────────────────────
-    agent_cfg = data.get("agent_config") or {}
-    _default_model: Optional[str] = (agent_cfg.get("default_model") or None) if isinstance(agent_cfg, dict) else None
-
-    def _resolve_model(key: str, hardcoded: str) -> str:
-        """Return per-agent override → default_model → hardcoded, in that order."""
-        if isinstance(agent_cfg, dict) and key in agent_cfg:
-            return str(agent_cfg[key])
-        if _default_model:
-            return _default_model
-        return hardcoded
-
-    coder_model      = _resolve_model("coder_model",      "claude-sonnet-4-6")
-    tester_model     = _resolve_model("tester_model",     "claude-sonnet-4-6")
-    reviewer_model   = _resolve_model("reviewer_model",   "claude-haiku-4-5")
-    estimator_model  = _resolve_model("estimator_model",  "claude-sonnet-4-6")
-    documentor_model = _resolve_model("documentor_model", "claude-sonnet-4-6")
-
-    # ── agent_config.tester.by_risk (issue #790) ─────────────────────────────
-    _default_by_risk = {
-        "LOW":    "claude-haiku-4-5",
-        "MEDIUM": "claude-haiku-4-5",
-        "HIGH":   "claude-sonnet-4-6",
-    }
-    tester_by_risk: dict = _default_by_risk.copy()
-    if isinstance(agent_cfg, dict):
-        _tester_sub = agent_cfg.get("tester") or {}
-        if isinstance(_tester_sub, dict) and _tester_sub.get("by_risk"):
-            _from_yaml = _tester_sub["by_risk"]
-            if isinstance(_from_yaml, dict):
-                tester_by_risk.update({str(k): str(v) for k, v in _from_yaml.items()})
-
-    # ── agent_config.coder.by_size (issue #789) ──────────────────────────────
-    coder_by_size: dict = dict(_DEFAULT_CODER_BY_SIZE)
-    if isinstance(agent_cfg, dict):
-        _coder_sub = agent_cfg.get("coder") or {}
-        if isinstance(_coder_sub, dict) and _coder_sub.get("by_size"):
-            _from_yaml_size = _coder_sub["by_size"]
-            if isinstance(_from_yaml_size, dict):
-                coder_by_size.update({str(k).upper(): str(v) for k, v in _from_yaml_size.items()})
-
-    # ── agent_config.coder.backend (issue #917) ───────────────────────────────
-    coder_backend: str = "claude-code"
-    if isinstance(agent_cfg, dict):
-        _coder_sub_b = agent_cfg.get("coder") or {}
-        if isinstance(_coder_sub_b, dict) and _coder_sub_b.get("backend"):
-            coder_backend = str(_coder_sub_b["backend"])
-
-    # ── agent_config.use_cline_followups (issue #918) ────────────────────────
-    use_cline_followups: bool = False
-    if isinstance(agent_cfg, dict):
-        _ucf = agent_cfg.get("use_cline_followups")
-        if _ucf is not None:
-            use_cline_followups = bool(_ucf)
-
-    # ── agent_config.cline.model — Cline CLI model id (not Claude Code names) ─
-    cline_model: Optional[str] = None
-    if isinstance(agent_cfg, dict):
-        _cline_sub = agent_cfg.get("cline") or {}
-        if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
-            cline_model = str(_cline_sub["model"])
-
-    return SprintConfig(
-        repo_name             = repo_name,
-        worktree_coder        = worktree_coder,
-        worktree_tester       = worktree_tester,
-        worktree_agents       = worktree_agents,
-        tester_app_subdir     = tester_app_subdir,
-        scripts_dir           = scripts_dir,
-        logs_dir              = logs_dir,
-        sprints_dir           = sprints_dir,
-        alerts_dir            = alerts_dir,
-        api_url               = api_url,
-        coder_prompt_template = coder_prompt,
-        tester_prompt_template= tester_prompt,
-        app_default_port         = app_default_port,
-        app_port_strategy        = app_port_strategy,
-        documentor_enabled          = documentor_enabled,
-        pipeline_mode               = pipeline_mode,
-        reviewer_prompt_template    = reviewer_prompt,
-        documenter_prompt_template  = documenter_prompt,
-        coder_model                 = coder_model,
-        tester_model                = tester_model,
-        reviewer_model              = reviewer_model,
-        estimator_model             = estimator_model,
-        documentor_model            = documentor_model,
-        tester_by_risk              = tester_by_risk,
-        coder_by_size               = coder_by_size,
-        coder_backend               = coder_backend,
-        cline_model                 = cline_model,
-        use_cline_followups         = use_cline_followups,
-    )
-
-
-def discover_config(start_dir: Optional[Path] = None) -> Optional[Path]:
-    """Walk up from start_dir looking for .commander/sprint.yaml.
-
-    Returns the Path if found, None otherwise.
-    """
-    if start_dir is None:
-        start_dir = Path.cwd()
-    current = start_dir.resolve()
-    while True:
-        candidate = current / ".commander" / "sprint.yaml"
-        if candidate.exists():
-            return candidate
-        parent = current.parent
-        if parent == current:  # reached filesystem root
-            break
-        current = parent
-    return None
-
-
-def _default_config() -> "SprintConfig":
-    """Build a SprintConfig from env-vars + hardcoded defaults (backward compat)."""
-    _dev = Path.home() / "dev" / "commander"
-    return SprintConfig(
-        repo_name          = None,  # will use github_client.repo()
-        worktree_coder     = _dev / "coder",
-        worktree_tester    = WORKTESTER_ROOT,
-        tester_app_subdir  = "apps/dashboard",
-        scripts_dir        = SCRIPTS_DIR,
-        logs_dir           = DASHBOARD_DIR / "logs",
-        sprints_dir        = SPRINTS_DIR,
-        alerts_dir         = ALERTS_DIR,
-        api_url            = DASHBOARD_API_URL,
-        documentor_enabled = False,
-    )
-
-
 # ── per-project PID lock ──────────────────────────────────────────────────────
-
-def _pid_file_path(sprint_label: str, cfg: Optional["SprintConfig"] = None) -> Path:
-    """Return the per-(project, sprint_label) PID file path."""
-    if cfg is not None:
-        sprints_dir = cfg.sprints_dir
-    else:
-        sprints_dir = REPO_ROOT / ".commander" / "sprints"
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    return sprints_dir / f"{sprint_label}-pid"
-
 
 def _acquire_pid_lock(sprint_label: str, project: str,
                       cfg: Optional["SprintConfig"] = None) -> Path:
@@ -915,12 +617,6 @@ def _release_pid_lock(pid_path: Path) -> None:
 
 # ── Plan.json state helpers (issue #507) ─────────────────────────────────────
 
-def _plan_json_path(label: str, cfg: Optional["SprintConfig"] = None) -> Path:
-    """Return path to {label}-plan.json in the sprints directory."""
-    sprints_dir = cfg.sprints_dir if cfg is not None else REPO_ROOT / ".commander" / "sprints"
-    return sprints_dir / f"{label}-plan.json"
-
-
 def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
     """True when ``label`` is a versioned re-run sub-sprint (plan.json has parent)."""
     path = _plan_json_path(label, cfg)
@@ -931,6 +627,24 @@ def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
         return bool(isinstance(raw, dict) and raw.get("parent"))
     except Exception:
         return False
+
+
+def _immediate_parent_branch(label: str, cfg: Optional["SprintConfig"] = None) -> str:
+    """Branch a child sprint promotes into at run-end: its plan.json ``parent``
+    (the immediate parent in the rerun chain, e.g. 94.2 → 94.1), falling back to
+    the base sprint branch when no parent is recorded. This keeps the run-end PR
+    on the SAME immediate-parent chain that Complete / Bulk complete merge, so
+    they reuse one PR instead of creating a conflicting child→base fan-in PR.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        parent = (raw.get("parent") or "").strip() if isinstance(raw, dict) else ""
+        if parent and re.match(r"^sprint-\d+(\.\d+)*$", parent):
+            return f"sprint/{parent}"
+    except Exception:
+        pass
+    return _base_sprint_branch(label)
 
 
 def _plan_json_set_state_sm(
@@ -1083,6 +797,11 @@ def _sprint_db_ingest_run_sm(
 # every agent_runs row is tagged with its project (sprint labels collide across
 # repos). Read by _db_agent_start_sm without threading it through 8 call sites.
 _CURRENT_RUN_PROJECT: Optional[str] = None
+
+# Active worktree pool for the current sprint run (issue #1411).
+# Set by run_sprint at sprint start; cleared at sprint end.
+# Provides K isolated worktrees for concurrent coder dispatch.
+_ACTIVE_WORKTREE_POOL: Optional[_WorktreePool] = None
 
 
 def _db_agent_start_sm(
@@ -1288,34 +1007,6 @@ def _to_bangkok(utc_str: str) -> str:
         return _bangkok_now()
 
 
-def _sprint_number(label: str) -> Optional[int]:
-    m = re.search(r"(\d+)", label)
-    return int(m.group(1)) if m else None
-
-
-def _label_base(label: str) -> str:
-    """Base sprint label: sprint-68.6 → sprint-68 (lineage display only)."""
-    m = re.match(r"^(sprint-\d+)", label)
-    return m.group(1) if m else label
-
-
-def _is_child_sprint_label(label: str) -> bool:
-    return bool(re.match(r"^sprint-\d+\.\d+", label))
-
-
-def _sprint_branch_for_label(label: str) -> str:
-    return f"sprint/{label}"
-
-
-def _base_sprint_branch(label: str) -> str:
-    """Base sprint branch for lineage (sprint/sprint-68 for any 68.x label).
-
-    Used when creating child branches off the base and when promoting the chain
-    at Merge Sprint — not as the per-ticket merge target during a child run.
-    """
-    return _sprint_branch_for_label(_label_base(label))
-
-
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
 
@@ -1327,28 +1018,6 @@ def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
     retry_after = int(m.group(1)) if m else None
     return True, retry_after
-
-
-def _state_path(
-    sprint_number: Optional[int],
-    sprint_label: str,
-    cfg: Optional["SprintConfig"] = None,
-) -> Path:
-    """Per-label state file: ``sprint-68.6-state.json`` (lifecycle P3)."""
-    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    return sprints_dir / f"{sprint_label}-state.json"
-
-
-def _summary_path(
-    sprint_number: Optional[int],
-    sprint_label: str,
-    cfg: Optional["SprintConfig"] = None,
-) -> Path:
-    sprints_dir = cfg.sprints_dir if cfg is not None else SPRINTS_DIR
-    sprints_dir.mkdir(parents=True, exist_ok=True)
-    day = datetime.now().strftime("%Y-%m-%d")
-    return sprints_dir / f"{sprint_label}-summary-{day}.md"
 
 
 # ── PID file management (AC-2) ───────────────────────────────────────────────
@@ -1435,12 +1104,16 @@ class FailureCategory:
     MERGE_CONFLICT   = "MERGE_CONFLICT"
     LINT_FAIL        = "LINT_FAIL"
     PYTEST_FAIL      = "PYTEST_FAIL"
+    # Merge sequencing issue — not a code quality problem, no coder requeue (issue #1414)
+    REBASE_CONFLICT  = "REBASE_CONFLICT"
 
 
 # Logic failures signal bad code/spec and warrant needs-rework label.
 # Infrastructure failures (CRASH, HANG, RETRY_EXHAUSTED, TESTER_REJECTED) are transient and do not.
 # TESTER_REJECTED means tests passed (exit 0) but merge was not detected — a process/infra issue,
 # not a code quality problem, so it must not apply needs-rework.
+# REBASE_CONFLICT is a merge-sequencing issue (not a code defect), so it is intentionally absent
+# from this set — the needs-rework label is applied directly in handle_post_tester (issue #1414).
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
     FailureCategory.MERGE_CONFLICT,
@@ -1449,209 +1122,29 @@ _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
 })
 
 
-# ── alert modes ───────────────────────────────────────────────────────────────
+def _extract_rebase_conflict_files(output: str) -> list[str]:
+    """Parse 'git rebase' stdout+stderr to extract conflicting file paths (issue #1414).
 
-class AlertMode:
-    DASHBOARD_BANNER = "dashboard-banner"
-    EMAIL            = "email"
-    DISCORD          = "discord"
-    FILE             = "file"
-    NTFY             = "ntfy"
-    NONE             = "none"
-
-    ALL_MODES = {DASHBOARD_BANNER, EMAIL, DISCORD, FILE, NTFY, NONE}
-
-
-# ── data structures ───────────────────────────────────────────────────────────
-
-@dataclass
-class IssueState:
-    number:      int
-    title:       str
-    status:      str              = "pending"   # pending | done | skipped
-    skip_reason: Optional[str]   = None
-    category:    Optional[str]   = None         # FailureCategory value
-    tokens_in:   int             = 0
-    tokens_out:  int             = 0
-    # Per-ticket agent lifecycle fields (issue #131)
-    agent_status:         Optional[str] = None  # queued | coder_dispatched | coder_running | coder_done | tester_dispatched | tester_running | tester_done | completed | failed
-    status_changed_at:    Optional[str] = None  # ISO 8601 UTC
-    coder_started_at:     Optional[str] = None
-    coder_finished_at:    Optional[str] = None
-    tester_started_at:    Optional[str] = None
-    tester_finished_at:   Optional[str] = None
-    failure_reason:       Optional[str] = None
-    dispatch_level:       int           = 0   # 1-based execution level; 0 = unset
-    tester_attempt_count: int           = 0   # incremented on each tester dispatch (issue #718)
-    coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
-    coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
-
-    def to_dict(self) -> dict:
-        return {
-            "number":             self.number,
-            "title":              self.title,
-            "status":             self.status,
-            "skip_reason":        self.skip_reason,
-            "category":           self.category,
-            "tokens_in":          self.tokens_in,
-            "tokens_out":         self.tokens_out,
-            "agent_status":       self.agent_status,
-            "status_changed_at":  self.status_changed_at,
-            "coder_started_at":   self.coder_started_at,
-            "coder_finished_at":  self.coder_finished_at,
-            "tester_started_at":  self.tester_started_at,
-            "tester_finished_at": self.tester_finished_at,
-            "failure_reason":     self.failure_reason,
-            "dispatch_level":     self.dispatch_level,
-            "tester_attempt_count": self.tester_attempt_count,
-            "coder_model":        self.coder_model,
-            "coder_backend":      self.coder_backend,
-        }
-
-    @staticmethod
-    def from_dict(d: dict) -> "IssueState":
-        iss = IssueState(
-            number             = d["number"],
-            title              = d["title"],
-            status             = d.get("status", "pending"),
-            skip_reason        = d.get("skip_reason"),
-            category           = d.get("category"),
-            tokens_in          = d.get("tokens_in", 0),
-            tokens_out         = d.get("tokens_out", 0),
-            agent_status       = d.get("agent_status"),
-            status_changed_at  = d.get("status_changed_at"),
-            coder_started_at   = d.get("coder_started_at"),
-            coder_finished_at  = d.get("coder_finished_at"),
-            tester_started_at  = d.get("tester_started_at"),
-            tester_finished_at = d.get("tester_finished_at"),
-            failure_reason     = d.get("failure_reason"),
-        )
-        iss.dispatch_level = d.get("dispatch_level", 0)
-        iss.tester_attempt_count = d.get("tester_attempt_count", 0)
-        iss.coder_model = d.get("coder_model")
-        iss.coder_backend = d.get("coder_backend")
-        return iss
-
-    def set_agent_status(self, status: str) -> None:
-        """Set agent_status and record ISO 8601 UTC timestamp on status_changed_at."""
-        self.agent_status      = status
-        self.status_changed_at = _utcnow()
+    Git emits one line per conflict:
+        CONFLICT (content): Merge conflict in path/to/file.py
+    Returns a deduplicated list in order of first occurrence.
+    """
+    import re as _re
+    seen: dict[str, None] = {}
+    for line in output.splitlines():
+        m = _re.search(r"CONFLICT \([^)]+\): Merge conflict in (.+)$", line)
+        if m:
+            seen[m.group(1).strip()] = None
+    return list(seen)
 
 
-@dataclass
-class SprintState:
-    sprint_label:       str
-    sprint_number:      Optional[int]
-    project:            str              = ""
-    issues:             list[IssueState]  = field(default_factory=list)
-    start_timestamp:    str              = ""
-    total_tokens_in:    int              = 0
-    total_tokens_out:   int              = 0
-    wall_clock_secs:    float            = 0.0
-    token_budget:       int              = 0
-    rate_limit_events:  list[dict]       = field(default_factory=list)
-    # Reviewer fields (issue #159)
-    reviewer_status:      Optional[str]  = None   # "skipped" | "succeeded" | "failed"
-    reviewer_comment_url: Optional[str]  = None
-    reviewer_findings:    Optional[dict] = None   # {blockers, suggestions, nits, follow_up_tickets}
-    # Documenter fields (issue #165)
-    documenter_status:       Optional[str]       = None   # "skipped" | "succeeded" | "failed"
-    documenter_files_touched: list               = field(default_factory=list)
-    documenter_commit_sha:   Optional[str]       = None
-    # Estimator fields (issue #166)
-    estimator_status:        Optional[str]       = None   # "succeeded" | "failed" | "skipped"
-    estimator_total_minutes: Optional[int]       = None
-    estimates:               dict                = field(default_factory=dict)   # keyed by issue number (int)
-    # Concurrent pipeline mode flag (issue #739) — surfaced to the dashboard so
-    # the board can render dual active-agent cards + waiting-level state.
-    pipeline_mode:           bool                = False
-    # Post-sprint reconciliation result (issue #856) — {all_clear, checks[], ...}
-    reconciliation:          Optional[dict]      = None
-    summary_issue_url:         Optional[str]       = None
+# ── alert channels (extracted to alerts.py, issue #1271) ─────────────────────
 
-    def to_dict(self) -> dict:
-        return {
-            "project":              self.project,
-            "sprint_label":         self.sprint_label,
-            "sprint_number":        self.sprint_number,
-            "issues":               [i.to_dict() for i in self.issues],
-            "start_timestamp":      self.start_timestamp,
-            "total_tokens_in":      self.total_tokens_in,
-            "total_tokens_out":     self.total_tokens_out,
-            "wall_clock_secs":      self.wall_clock_secs,
-            "token_budget":         self.token_budget,
-            "rate_limit_events":    self.rate_limit_events,
-            "reviewer_status":      self.reviewer_status,
-            "reviewer_comment_url": self.reviewer_comment_url,
-            "reviewer_findings":    self.reviewer_findings,
-            "documenter_status":         self.documenter_status,
-            "documenter_files_touched":  self.documenter_files_touched,
-            "documenter_commit_sha":     self.documenter_commit_sha,
-            "estimator_status":          self.estimator_status,
-            "estimator_total_minutes":   self.estimator_total_minutes,
-            "estimates":                 self.estimates,
-            "pipeline_mode":             self.pipeline_mode,
-            "reconciliation":            self.reconciliation,
-            "summary_issue_url":           self.summary_issue_url,
-        }
-
-    @staticmethod
-    def from_dict(d: dict) -> "SprintState":
-        s = SprintState(
-            sprint_label     = d["sprint_label"],
-            sprint_number    = d.get("sprint_number"),
-            project          = d.get("project", ""),
-            start_timestamp  = d.get("start_timestamp", ""),
-            total_tokens_in  = d.get("total_tokens_in", 0),
-            total_tokens_out = d.get("total_tokens_out", 0),
-            wall_clock_secs  = d.get("wall_clock_secs", 0.0),
-            token_budget     = d.get("token_budget", 0),
-        )
-        s.issues              = [IssueState.from_dict(i) for i in d.get("issues", [])]
-        s.rate_limit_events   = d.get("rate_limit_events", [])
-        s.reviewer_status     = d.get("reviewer_status")
-        s.reviewer_comment_url = d.get("reviewer_comment_url")
-        s.reviewer_findings   = d.get("reviewer_findings")
-        s.documenter_status        = d.get("documenter_status")
-        s.documenter_files_touched = d.get("documenter_files_touched", [])
-        s.documenter_commit_sha    = d.get("documenter_commit_sha")
-        s.estimator_status         = d.get("estimator_status")
-        s.estimator_total_minutes  = d.get("estimator_total_minutes")
-        s.estimates                = d.get("estimates", {})
-        s.pipeline_mode            = bool(d.get("pipeline_mode", False))
-        s.reconciliation           = d.get("reconciliation")
-        s.summary_issue_url        = d.get("summary_issue_url")
-        return s
-
-    def save(self, path: Path) -> None:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self.to_dict(), indent=2))
-        except OSError as _e:
-            structured_log.error("sprint_state_write_error", f"could not write state JSON: {_e}", path=str(path), exc=str(_e))
-
-
-@dataclass
-class GateResult:
-    gate:    str
-    passed:  bool
-    skipped: bool = False
-    output:  str  = ""
-
-    @property
-    def symbol(self) -> str:
-        if self.skipped:
-            return "skipped"
-        return "PASS" if self.passed else "FAIL"
-
-
-@dataclass
-class SprintSummary:
-    processed: list[str] = field(default_factory=list)
-    merged: list[str] = field(default_factory=list)
-    gate_failures: list[str] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
-
+from services.sprint_manager.alerts import (  # noqa: E402
+    AlertMode,
+    dispatch_alerts,
+    HangDetector,
+)
 
 # ── subprocess helpers ────────────────────────────────────────────────────────
 
@@ -1912,231 +1405,6 @@ def _post_sprint_status(
         urllib.request.urlopen(req, timeout=2)
     except Exception:
         pass
-
-
-# ── alert dispatch ────────────────────────────────────────────────────────────
-
-def dispatch_alerts(
-    alert_modes: list[str],
-    title: str,
-    body: str,
-    issue_num: Optional[int] = None,
-    category: Optional[str] = None,
-    cfg: Optional["SprintConfig"] = None,
-    repo: Optional[str] = None,
-    sprint_label: Optional[str] = None,
-) -> None:
-    """Dispatch an alert through all configured channels."""
-    api_url    = cfg.api_url    if cfg is not None else None
-    alerts_dir = cfg.alerts_dir if cfg is not None else None
-    eff_sprint_label = sprint_label
-    for mode in alert_modes:
-        if mode == AlertMode.NONE:
-            continue
-        try:
-            if mode == AlertMode.DASHBOARD_BANNER:
-                _alert_dashboard_banner(title, body, issue_num, category, api_url=api_url, repo=repo)
-            elif mode == AlertMode.EMAIL:
-                _alert_email(title, body)
-            elif mode == AlertMode.DISCORD:
-                _alert_discord(title, body)
-            elif mode == AlertMode.FILE:
-                _alert_file(title, body, alerts_dir=alerts_dir)
-            elif mode == AlertMode.NTFY:
-                _alert_ntfy(title, body, category, sprint_label=eff_sprint_label)
-        except Exception as e:
-            structured_log.error("alert_dispatch_error", f"[alert:{mode}] error: {e}", mode=mode, exc=str(e))
-
-
-def _alert_dashboard_banner(
-    title: str,
-    body: str,
-    issue_num: Optional[int],
-    category: Optional[str],
-    api_url: Optional[str] = None,
-    repo: Optional[str] = None,
-) -> None:
-    base = api_url or DASHBOARD_API_URL
-    payload = json.dumps({
-        "title":      title,
-        "body":       body,
-        "issue_num":  issue_num,
-        "category":   category,
-        "repo":       repo,
-        "timestamp":  _utcnow(),
-    }).encode()
-    req = urllib.request.Request(
-        f"{base}/api/alerts",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    urllib.request.urlopen(req, timeout=3)
-
-
-def _alert_email(title: str, body: str) -> None:
-    host  = os.environ.get("SMTP_HOST", "")
-    port  = os.environ.get("SMTP_PORT", "")
-    user  = os.environ.get("SMTP_USER", "")
-    pw    = os.environ.get("SMTP_PASS", "")
-    to    = os.environ.get("ALERT_EMAIL_TO", "")
-    if not all([host, port, user, pw, to]):
-        return  # silently skip if any var missing
-    msg = email.mime.text.MIMEText(body, "plain")
-    msg["Subject"] = f"[Sprint Manager] {title}"
-    msg["From"]    = user
-    msg["To"]      = to
-    with smtplib.SMTP(host, int(port)) as srv:
-        srv.starttls()
-        srv.login(user, pw)
-        srv.sendmail(user, [to], msg.as_string())
-
-
-def _alert_discord(title: str, body: str) -> None:
-    webhook = os.environ.get("DISCORD_WEBHOOK_URL", "")
-    if not webhook:
-        return  # silently skip
-    content = f"**{title}**\n{body}"
-    payload = json.dumps({"content": content[:2000]}).encode()
-    req = urllib.request.Request(
-        webhook,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    urllib.request.urlopen(req, timeout=5)
-
-
-def _alert_ntfy(
-    title: str,
-    body: str,
-    category: Optional[str] = None,
-    sprint_label: Optional[str] = None,
-) -> None:
-    topic_url = os.environ.get("NTFY_TOPIC_URL", "")
-    if not topic_url:
-        return
-    priority = "4" if category in ("failure", "needs-rework") else "3"
-    payload  = body.encode()
-    headers: dict = {
-        "Title":    title,
-        "Priority": priority,
-        "Tags":     category or "sprint",
-    }
-    # Deep-link into Run Browser when DASHBOARD_URL is configured (issue #783).
-    dashboard_url = os.environ.get("DASHBOARD_URL", "").rstrip("/")
-    if dashboard_url and sprint_label:
-        headers["Click"] = f"{dashboard_url}/run-browser?sprint={sprint_label}"
-    req = urllib.request.Request(
-        topic_url,
-        data=payload,
-        headers=headers,
-        method="POST",
-    )
-    urllib.request.urlopen(req, timeout=5)
-
-
-def _alert_file(title: str, body: str, alerts_dir: Optional[Path] = None) -> None:
-    d = alerts_dir if alerts_dir is not None else ALERTS_DIR
-    d.mkdir(parents=True, exist_ok=True)
-    today    = datetime.now().strftime("%Y-%m-%d")
-    log_path = d / f"{today}.log"
-    ts       = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    entry    = f"[{ts}] {title}\n{body}\n{'─' * 60}\n"
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(entry)
-
-
-# ── hang detection ────────────────────────────────────────────────────────────
-
-@dataclass
-class HangDetector:
-    issue_num: int
-    log_path:  Optional[Path]
-    proc:      subprocess.Popen
-    max_total_secs: Optional[int] = None  # hard wall-clock cap (None = disabled)
-    agent_role: Optional[str] = None      # for dispatch_killed logging (coder/tester)
-    attempt:    Optional[int] = None      # dispatch attempt number, for logging
-
-    _start_time:   float = field(default_factory=time.monotonic, init=False)
-    _last_size:    int   = field(default=0, init=False)
-    _last_change:  float = field(default_factory=time.monotonic, init=False)
-    _warned:       bool  = field(default=False, init=False)
-    _stop_event:   threading.Event = field(default_factory=threading.Event, init=False)
-    _thread:       Optional[threading.Thread] = field(default=None, init=False)
-    _killed:       bool  = field(default=False, init=False)
-
-    def start(self) -> None:
-        self._start_time  = time.monotonic()
-        self._last_change = time.monotonic()
-        self._last_size   = self._log_size()
-        self._thread      = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=2)
-
-    @property
-    def killed(self) -> bool:
-        return self._killed
-
-    def _log_size(self) -> int:
-        if self.log_path and self.log_path.exists():
-            return self.log_path.stat().st_size
-        return 0
-
-    def _loop(self) -> None:
-        while not self._stop_event.is_set():
-            self._stop_event.wait(timeout=HANG_CHECK_SECS)
-            if self._stop_event.is_set():
-                break
-
-            # Hard wall-clock timeout (used by documenter for ≤5 min budget)
-            if self.max_total_secs is not None:
-                total_elapsed = time.monotonic() - self._start_time
-                if total_elapsed >= self.max_total_secs:
-                    structured_log.error("subprocess_timeout", f"subprocess exceeded {self.max_total_secs}s wall-clock limit — KILLING", issue_num=self.issue_num, timeout_secs=self.max_total_secs)
-                    structured_log.error(
-                        "dispatch_killed", f"#{self.issue_num} killed (timeout)",
-                        issue_num=self.issue_num, agent_role=self.agent_role,
-                        attempt=self.attempt, reason="timeout",
-                        timeout_secs=self.max_total_secs,
-                    )
-                    try:
-                        self.proc.kill()
-                    except ProcessLookupError:
-                        pass
-                    self._killed = True
-                    self._stop_event.set()
-                    return
-
-            size = self._log_size()
-            if size != self._last_size:
-                self._last_size   = size
-                self._last_change = time.monotonic()
-                self._warned      = False
-                continue
-
-            idle = time.monotonic() - self._last_change
-            if idle >= HANG_KILL_SECS:
-                structured_log.error("subprocess_killed", f"no log activity for {idle/60:.0f} min — KILLING subprocess", issue_num=self.issue_num, idle_minutes=round(idle / 60))
-                structured_log.error(
-                    "dispatch_killed", f"#{self.issue_num} killed (idle-silence)",
-                    issue_num=self.issue_num, agent_role=self.agent_role,
-                    attempt=self.attempt, reason="idle-silence",
-                    idle_minutes=round(idle / 60),
-                )
-                try:
-                    self.proc.kill()
-                except ProcessLookupError:
-                    pass
-                self._killed = True
-                self._stop_event.set()
-            elif idle >= HANG_WARN_SECS and not self._warned:
-                structured_log.warn("hang_detected", f"no log activity for {idle/60:.0f} min", issue_num=self.issue_num, idle_minutes=round(idle / 60))
-                self._warned = True
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
@@ -3785,8 +3053,14 @@ def _call_finish_feature(
     repo_name: Optional[str] = None,
     cfg: Optional["SprintConfig"] = None,
     sprint_label: Optional[str] = None,
-) -> None:
-    """Call finish_feature.py as a subprocess from the worktester root."""
+) -> tuple[bool, list[str]]:
+    """Call finish_feature.py as a subprocess from the worktester root.
+
+    Returns (success, conflict_files).
+    On a rebase conflict after an automated one-shot rebase attempt (issue #1414),
+    conflict_files lists the paths that could not be reconciled automatically.
+    On success or any other failure, conflict_files is empty.
+    """
     if cfg is not None:
         finish_script = cfg.finish_feature_script
         # Prefer the dedicated agents clone for the documentor (falls back to the
@@ -3816,11 +3090,90 @@ def _call_finish_feature(
         result = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
     if result.stdout:
         sys.stdout.write(str(result.stdout.rstrip()) + "\n")
-    if result.returncode != 0:
-        structured_log.error("subprocess_nonzero_exit", f"finish_feature.py exited {result.returncode}", issue_num=issue_num, subprocess="finish_feature.py", exit_code=result.returncode, subprocess_stderr=result.stderr.rstrip() if result.stderr else "")
-    else:
+    if result.returncode == 0:
         sys.stdout.write(str("  finish_feature.py completed successfully") + "\n")
-    return result.returncode == 0
+        return True, []
+
+    structured_log.error(
+        "subprocess_nonzero_exit",
+        f"finish_feature.py exited {result.returncode}",
+        issue_num=issue_num,
+        subprocess="finish_feature.py",
+        exit_code=result.returncode,
+        subprocess_stderr=result.stderr.rstrip() if result.stderr else "",
+    )
+
+    # ── Automated one-shot rebase (issue #1414 AC2) ───────────────────────────
+    # finish_feature.py failing here typically means a concurrent merge landed on
+    # the target branch first, causing a divergence.  Attempt a single automated
+    # rebase to reconcile the feature branch before giving up.
+    sys.stdout.write(str(
+        f"  [rebase] finish_feature.py failed — attempting one-shot rebase of "
+        f"feature/{issue_num}-* onto origin/{target_branch}"
+    ) + "\n")
+
+    # Locate the remote feature branch.
+    ok, br_out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*", cwd=wt_root)
+    if not ok or not br_out.strip():
+        sys.stdout.write(str(
+            f"  [rebase] no remote feature branch found for #{issue_num} — skipping rebase"
+        ) + "\n")
+        return False, []
+
+    feature_branch = br_out.strip().splitlines()[0].strip().removeprefix("origin/")
+
+    # Ensure we have the latest refs.
+    _try("git", "fetch", "origin", cwd=wt_root)
+
+    # Checkout the feature branch in the tester worktree (separate full clone —
+    # not a linked worktree, so this never conflicts with pool-slot worktrees).
+    ok_co, _, co_err = _try(
+        "git", "checkout", "-B", feature_branch, f"origin/{feature_branch}", cwd=wt_root,
+    )
+    if not ok_co:
+        sys.stdout.write(str(f"  [rebase] could not checkout {feature_branch}: {co_err}") + "\n")
+        return False, []
+
+    # Attempt a single rebase onto the current target (AC8: only one attempt).
+    ok_rb, rb_out, rb_err = _try(
+        "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
+    )
+    rebase_combined = rb_out + "\n" + rb_err
+
+    if not ok_rb:
+        conflict_files = _extract_rebase_conflict_files(rebase_combined)
+        sys.stdout.write(str(
+            f"  [rebase] rebase conflict for #{issue_num} in "
+            f"{len(conflict_files)} file(s): {conflict_files}"
+        ) + "\n")
+        _try("git", "rebase", "--abort", cwd=wt_root)
+        return False, conflict_files
+
+    # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
+    sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
+    ok_push, _, push_err = _try(
+        "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
+    )
+    if not ok_push:
+        sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+        return False, []
+
+    # Retry the merge exactly once after the successful rebase (AC8).
+    sys.stdout.write(str(
+        f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
+    ) + "\n")
+    with _develop_merge_guard():
+        result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+    if result2.stdout:
+        sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
+    if result2.returncode == 0:
+        sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
+        return True, []
+
+    sys.stdout.write(str(
+        f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
+    ) + "\n")
+    return False, []
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -3992,7 +3345,29 @@ def handle_post_tester(
     if skip_gates:
         sys.stdout.write(str("  --skip-gates active -- skipping all quality gates, proceeding to merge") + "\n")
         if needs_merge:
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok and conflict_files:
+                # Rebase conflict even under skip-gates — label needs-rework (issue #1414 AC4).
+                _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                conflict_body = (
+                    f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                    f"`{target_branch}` failed.\n\n**Conflicting files:**\n"
+                    + "\n".join(f"- `{f}`" for f in conflict_files)
+                    + "\n\nResolve the conflict manually and re-push the feature branch."
+                )
+                try:
+                    github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                except Exception as exc:
+                    structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                return (
+                    False,
+                    f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                    + ", ".join(conflict_files[:3]),
+                    FailureCategory.REBASE_CONFLICT,
+                )
         _post_agent_event("gate:merging", api_url=api_url)
         all_skipped = [
             GateResult(gate="typecheck",     passed=True, skipped=True),
@@ -4035,7 +3410,38 @@ def handle_post_tester(
         _post_agent_event("gate:merging", api_url=api_url)
         if needs_merge:
             sys.stdout.write(str(f"  All gates passed -- calling finish_feature.py for issue #{issue_num}") + "\n")
-            _call_finish_feature(issue_num, wt_root, target_branch=target_branch, repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label)
+            merge_ok, conflict_files = _call_finish_feature(
+                issue_num, wt_root, target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, sprint_label=sprint_label,
+            )
+            if not merge_ok:
+                if conflict_files:
+                    # Automated rebase failed — label needs-rework with exact conflict paths
+                    # (issue #1414 AC4/AC7).  This does not halt the sprint (AC5).
+                    _transition_safe(issue_num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
+                    conflict_body = (
+                        f"❌ **Rebase conflict** — automated rebase of `feature/{issue_num}` onto "
+                        f"`{target_branch}` failed after all quality gates passed.\n\n"
+                        f"**Conflicting files:**\n"
+                        + "\n".join(f"- `{f}`" for f in conflict_files)
+                        + "\n\nResolve the conflict manually and re-push the feature branch."
+                    )
+                    try:
+                        github_client.add_comment(issue_num, conflict_body, repo_name=eff_repo)
+                    except Exception as exc:
+                        structured_log.warn("rebase_conflict_comment_failed", str(exc), issue_num=issue_num)
+                    return (
+                        False,
+                        f"Issue #{issue_num}: rebase conflict in {len(conflict_files)} file(s): "
+                        + ", ".join(conflict_files[:3]),
+                        FailureCategory.REBASE_CONFLICT,
+                    )
+                # finish_feature.py failed for a non-rebase reason (e.g. push failed)
+                return (
+                    False,
+                    f"Issue #{issue_num}: merge failed after all gates passed",
+                    FailureCategory.MERGE_CONFLICT,
+                )
         else:
             sys.stdout.write(str("  All gates passed -- merge already done, skipping re-merge") + "\n")
         _transition_safe(issue_num, _TicketState.UAT, actor="sprint_manager", repo_name=eff_repo)
@@ -4561,6 +3967,60 @@ def _agent_identity_env(role: str, issue_num: Optional[int]) -> dict[str, str]:
 
 # ── Coder model routing by ticket size (issue #789) ───────────────────────────
 
+# Extensions that mark a path as docs/config (issue #1403).
+_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".json"})
+# Extensions that mark a path as code — their presence disqualifies docs-only routing.
+_CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
+
+
+def _build_estimate_paths_block(estimate: Optional[dict]) -> str:
+    """Return a 'Start here' paths block from an estimate dict, or '' if none.
+
+    Prefers files_touched over files_likely_affected (issue #1402).
+    """
+    if not estimate:
+        return ""
+    paths = estimate.get("files_touched") or estimate.get("files_likely_affected") or []
+    if not paths:
+        return ""
+    header = "Start here — do not broad-search the repo unless these paths are insufficient."
+    path_lines = "\n".join(f"  {p}" for p in paths)
+    return f"{header}\n\n{path_lines}"
+
+
+def _is_docs_only(estimate: Optional[dict]) -> tuple[bool, str]:
+    """Determine whether a ticket qualifies for docs-only Haiku routing (issue #1403).
+
+    Returns (True, reason) when the ticket is docs/config-only; (False, "") otherwise.
+    reason is one of "docs-only:flag" or "docs-only:paths".
+    """
+    if not estimate:
+        return False, ""
+
+    risk_flags = estimate.get("risk_flags") or []
+    if "docs-only" in risk_flags:
+        return True, "docs-only:flag"
+
+    paths = estimate.get("files_likely_affected") or []
+    if not paths:
+        return False, ""
+
+    from pathlib import PurePosixPath
+
+    def _is_doc_path(p: str) -> bool:
+        suffix = PurePosixPath(p).suffix.lower()
+        return suffix in _DOCS_PATH_EXTENSIONS or p.startswith("docs/")
+
+    has_code = any(PurePosixPath(p).suffix.lower() in _CODE_PATH_EXTENSIONS for p in paths)
+    if has_code:
+        return False, ""
+
+    if all(_is_doc_path(p) for p in paths):
+        return True, "docs-only:paths"
+
+    return False, ""
+
+
 def _resolve_coder_model(
     issue_num: int,
     cfg: Optional["SprintConfig"],
@@ -4569,18 +4029,29 @@ def _resolve_coder_model(
     """Return (model, routing_reason) for a coder dispatch.
 
     Routing precedence:
+      0. docs-only (flag or paths heuristic) + non-XL → Haiku via _is_docs_only
       1. If estimate has a known size (S/M/L/XL) → look up cfg.coder_by_size
       2. Otherwise → cfg.coder_model flat default (or hardcoded sonnet fallback)
 
-    routing_reason is e.g. "size=S" or "unestimated:default".
+    routing_reason examples: "docs-only:flag", "docs-only:paths", "size=S",
+    "unestimated:default".
     """
     flat_default = cfg.coder_model if cfg is not None else "claude-sonnet-4-6"
+    by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
+
     if estimate:
         size = str(estimate.get("size") or "").upper().strip()
+
+        if size != "XL":
+            docs_only, docs_reason = _is_docs_only(estimate)
+            if docs_only:
+                haiku_model = by_size.get("S") or _DEFAULT_CODER_BY_SIZE["S"]
+                return haiku_model, docs_reason
+
         if size in ("S", "M", "L", "XL"):
-            by_size = (cfg.coder_by_size if cfg is not None else None) or _DEFAULT_CODER_BY_SIZE
             model = by_size.get(size) or flat_default
             return model, f"size={size}"
+
     return flat_default, "unestimated:default"
 
 
@@ -4962,6 +4433,23 @@ def _select_coder_backend(
     return "cline"
 
 
+def _pool_acquire() -> Optional[Path]:
+    """Acquire one worktree slot from the active pool (issue #1411).
+
+    Returns the slot path, or None when no pool is active.  Blocks until a
+    free slot is available.
+    """
+    if _ACTIVE_WORKTREE_POOL is not None:
+        return _ACTIVE_WORKTREE_POOL.acquire()
+    return None
+
+
+def _pool_release(slot: Optional[Path]) -> None:
+    """Return a pool slot acquired by _pool_acquire (issue #1411)."""
+    if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
+        _ACTIVE_WORKTREE_POOL.release(slot)
+
+
 def _dispatch_coder(
     issue_num: int,
     alert_modes: list[str],
@@ -4976,6 +4464,7 @@ def _dispatch_coder(
     hang_continuation: Optional[dict] = None,
     attempt_kind: Optional[str] = None,
     coder_backend_override: Optional[str] = None,
+    worktree_override: Optional[Path] = None,
 ) -> tuple[bool, Optional[str]]:
     """Dispatch a coder agent for the issue.  Returns (ok, failure_category).
 
@@ -4992,10 +4481,16 @@ def _dispatch_coder(
     prior_failures: accumulated failure records from the fix-loop (issue #618).
     When provided, an accumulated context suffix is built from these records
     instead of reading the single-failure sidecar.
+
+    worktree_override: when set, use this path as the working directory instead
+    of cfg.worktree_coder.  Used by the worktree pool (issue #1411) to assign
+    an isolated worktree slot to each concurrent coder dispatch.
     """
     eff_repo = repo_name or (cfg.repo_name if cfg else None)
     api_url  = cfg.api_url if cfg else None
-    if cfg:
+    if worktree_override is not None:
+        cwd_path = worktree_override
+    elif cfg:
         cwd_path = cfg.worktree_coder
     else:
         # No sprint.yaml: cwd is the coder clone when dispatched from the dashboard.
@@ -5014,7 +4509,16 @@ def _dispatch_coder(
         record_failure(issue_num, "dispatch-blocked", detail=doctor_err)
         return False, "dispatch-blocked"
 
-    guard_err = _design_docs_guard(cwd_path)
+    # Check design docs in the STABLE coder clone, not the ephemeral worktree
+    # slot. The slot is reset to its (docs-committed) base branch by worktree
+    # hygiene AFTER this guard, so checking it pre-hygiene saw a transient state:
+    # once a sibling ticket left the pooled slot dirty and `git clean -fdx` ran on
+    # release, the next ticket's guard found no PRODUCT.md/DESIGN.md and
+    # false-failed `design_docs_missing` (observed: #1460/#1461 in sprint-94.1
+    # after #1462 dirtied slot-0). The docs are committed on every branch, so the
+    # coder clone is the reliable place to assert their presence.
+    _docs_check_path = cfg.worktree_coder if cfg is not None else cwd_path
+    guard_err = _design_docs_guard(_docs_check_path)
     if guard_err:
         structured_log.error(
             "design_docs_missing",
@@ -5063,6 +4567,10 @@ def _dispatch_coder(
 
     log_path = _issue_log_path(issue_num, cfg=cfg)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load estimate early for paths injection (issue #1402) and model routing below.
+    _coder_estimate = _load_estimate(issue_num)
+    _paths_block = _build_estimate_paths_block(_coder_estimate)
 
     # Build prompt
     if cfg and cfg.coder_prompt_template:
@@ -5175,7 +4683,6 @@ def _dispatch_coder(
     # `cmd[-1] += sprint_hint` (below) works for both backends.
     # coder_backend_override takes precedence when supplied by the caller (issue #920:
     # the fix-loop pre-computes the backend and escalates from cline to claude-code on failure).
-    _coder_estimate = _load_estimate(issue_num)
     coder_model, coder_routing_reason = _resolve_coder_model(issue_num, cfg, estimate=_coder_estimate)
     coder_backend = coder_backend_override if coder_backend_override is not None else _effective_coder_backend(sprint_label, cfg, prior_failures)
     if coder_backend == "cline":
@@ -5185,6 +4692,10 @@ def _dispatch_coder(
     sys.stdout.write(str(
         f"  [size-routing] issue #{issue_num}: model={dispatch_model}, reason={dispatch_routing_reason}, backend={coder_backend}"
     ) + "\n")
+    if _paths_block:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: injecting paths into coder prompt\n{_paths_block}\n")
+    else:
+        sys.stdout.write(f"  [estimate-paths] #{issue_num}: no estimate file — prompt unchanged\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
@@ -5213,7 +4724,14 @@ def _dispatch_coder(
                 worktree=str(cwd_path),
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
-        full_prompt = (coder_persona + "\n\n" + prompt) if coder_persona else prompt
+        if _paths_block and coder_persona:
+            full_prompt = _paths_block + "\n\n" + coder_persona + "\n\n" + prompt
+        elif _paths_block:
+            full_prompt = _paths_block + "\n\n" + prompt
+        elif coder_persona:
+            full_prompt = coder_persona + "\n\n" + prompt
+        else:
+            full_prompt = prompt
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
@@ -5226,7 +4744,8 @@ def _dispatch_coder(
         coder_persona = _load_agent_persona("coder", cwd_path)
         if coder_persona:
             cmd += ["--append-system-prompt", coder_persona]
-        cmd += ["-p", prompt]
+        _p_prompt = (_paths_block + "\n\n" + prompt) if _paths_block else prompt
+        cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)
 
@@ -6909,7 +6428,10 @@ def _create_sprint_pr(
         f"_Merge via Merge Sprint when UAT is complete._"
     )
 
-    title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
+    # Title reflects the CHILD label and its immediate-parent target (e.g.
+    # "Sprint 94.2 → 94.1 — 2 ticket(s) shipped"), not the base sprint number, so
+    # a rerun child's PR is unambiguous in the lineage.
+    title = f"Sprint {sprint_label} → {pr_base.split('/')[-1]} — {len(shipped)} ticket(s) shipped"
 
     sys.stdout.write(str(f"  Creating PR: {sprint_branch} → {pr_base} ...") + "\n")
     try:
@@ -8456,6 +7978,7 @@ def _run_pipeline_dispatch(
         # the selection at dispatch time, mirroring the tester risk-tier pattern.
         _coder_model_sel, _coder_route_reason = _resolve_coder_model(num, cfg, estimate=_est)
         ist.coder_model = _coder_model_sel  # surface size-routed model on the live running pane (bug: coder badge had no model)
+        ist.coder_routing_reason = _coder_route_reason  # tooltip/sub-label on running pane badge (issue #1403)
         ist.coder_backend = _effective_coder_backend(label, cfg, ctx["fix_history"] if ctx["fix_history"] else None)
         # Determine attempt_kind for this dispatch (issue #787).
         _pipe_attempt_kind = ctx.get("attempt_kind", "initial")
@@ -8482,14 +8005,19 @@ def _run_pipeline_dispatch(
         _stage_coder_t0 = time.monotonic()
         _stage_coder_utc0 = _token_window_utc_now()
         _pipe_hang_continuation = ctx.get("hang_continuation")
-        coder_ok, coder_category = _dispatch_coder(
-            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-            on_running=_on_coder_running, sprint_label=label,
-            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-            hang_continuation=_pipe_hang_continuation,
-            attempt_kind=_pipe_attempt_kind,
-        )
+        _pipe_pool_slot = _pool_acquire()
+        try:
+            coder_ok, coder_category = _dispatch_coder(
+                num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                on_running=_on_coder_running, sprint_label=label,
+                prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                hang_continuation=_pipe_hang_continuation,
+                attempt_kind=_pipe_attempt_kind,
+                worktree_override=_pipe_pool_slot,
+            )
+        finally:
+            _pool_release(_pipe_pool_slot)
         _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
         state.total_tokens_in += _ctin
         state.total_tokens_out += _ctout
@@ -8558,14 +8086,19 @@ def _run_pipeline_dispatch(
                         attempt_kind="hang_continue",
                         log_path=str(_issue_log_path(num, cfg=cfg)),
                     )
-                    coder_ok, coder_category = _dispatch_coder(
-                        num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-                        chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
-                        on_running=_on_coder_running, sprint_label=label,
-                        prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-                        hang_continuation=ctx["hang_continuation"],
-                        attempt_kind="hang_continue",
-                    )
+                    _hc_pool_slot = _pool_acquire()
+                    try:
+                        coder_ok, coder_category = _dispatch_coder(
+                            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                            chosen_port=chosen_port, rate_limit_events=state.rate_limit_events,
+                            on_running=_on_coder_running, sprint_label=label,
+                            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+                            hang_continuation=ctx["hang_continuation"],
+                            attempt_kind="hang_continue",
+                            worktree_override=_hc_pool_slot,
+                        )
+                    finally:
+                        _pool_release(_hc_pool_slot)
                     _db_agent_finish_sm(
                         num, label, "coder",
                         duration_seconds=time.monotonic() - _stage_hc_t0,
@@ -8689,6 +8222,27 @@ def _run_pipeline_dispatch(
         if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
             record_failure(num, category, detail=summary_line)
             ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
+            _sig = f"{category}:{summary_line[:80]}"
+            _last = ctx.get("last_failure_sig")
+            ctx["last_failure_sig"] = _sig
+            if _sig == _last:
+                sys.stdout.write(
+                    f"  [pipeline] consecutive identical failure ({category}): aborting early\n"
+                )
+                sys.stdout.flush()
+                try:
+                    structured_log.error(
+                        "fix_loop_exhausted",
+                        f"consecutive identical gate failure ({category}): aborting early",
+                        issue_num=num,
+                        fix_history=ctx["fix_history"],
+                        reason="consecutive_identical",
+                        failure_sig=_sig,
+                        failure_class=str(category),
+                    )
+                except Exception:
+                    pass
+                return _StageResult.EXHAUST
             return _StageResult.REJECT  # scheduler re-queues to front of coder queue
 
         # Non-logic gate failure or rerun-tester-direct path: terminal drop.
@@ -8776,11 +8330,43 @@ def _run_pipeline_dispatch(
         if not level_nums:
             continue
 
-        # Hard level barrier: run_level does not return until the level drains.
-        _run_pipeline_level(
-            level_nums, _coder_stage, _tester_stage, pipeline=True,
-            on_merged=_on_merged, on_needs_rework=_on_needs_rework,
-        )
+        # Use resolved slot count from state (set at run start, issue #1415).
+        _max_coder_slots = state.max_coder_slots
+
+        if _max_coder_slots > 1:
+            # Build file_map for conflict-aware concurrent dispatch.
+            _file_map: dict = {}
+            for _fnum in level_nums:
+                _est = _load_estimate(_fnum)
+                if _est:
+                    _files = (
+                        _est.get("files_touched")
+                        or _est.get("files_likely_affected")
+                        or []
+                    )
+                    _file_map[_fnum] = set(_files)
+
+            def _on_slot_change(_count: int) -> None:
+                state.active_coder_slots = _count
+                state.save(state_path)
+                _post_sprint_status(state, api_url=api_url, project=eff_repo)
+
+            from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415
+                run_concurrent_level as _run_concurrent_level,
+            )
+            _run_concurrent_level(
+                level_nums, _coder_stage, _tester_stage,
+                max_coder_slots=_max_coder_slots,
+                file_map=_file_map,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+                on_active_slots_change=_on_slot_change,
+            )
+        else:
+            # Hard level barrier: run_level does not return until the level drains.
+            _run_pipeline_level(
+                level_nums, _coder_stage, _tester_stage, pipeline=True,
+                on_merged=_on_merged, on_needs_rework=_on_needs_rework,
+            )
 
     if prev_level_idx >= 0:
         try:
@@ -8818,6 +8404,8 @@ def run_sprint(
     skip_estimator: bool = True,
     rerun_manifest: Optional[dict] = None,
     pipeline_mode: Optional[bool] = None,
+    max_coder_slots: Optional[int] = None,
+    max_tester_slots: Optional[int] = None,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -8964,6 +8552,20 @@ def run_sprint(
             ],
         )
 
+    # ── Slot capacity resolution (issue #1415) ────────────────────────────────
+    # Resolve max_coder_slots / max_tester_slots at run start so the running-pane
+    # status payload reflects the correct lane capacity from the very first post.
+    # Precedence: sprint-level param > project settings (cfg) > serial default (1).
+    state.max_coder_slots = (
+        max_coder_slots if max_coder_slots is not None
+        else (cfg.max_coder_slots if cfg is not None and cfg.max_coder_slots is not None else 1)
+    )
+    state.max_tester_slots = (
+        max_tester_slots if max_tester_slots is not None
+        else (cfg.max_tester_slots if cfg is not None and cfg.max_tester_slots is not None else 1)
+    )
+    _post_sprint_status(state, api_url=api_url)
+
     sys.stdout.write(str(f"\n=== Sprint Manager: label={label} ===") + "\n")
     sys.stdout.write(str(f"Target branch: {target_branch}") + "\n")
     sys.stdout.write(str(f"Found {len(state.issues)} issue(s): {[i.number for i in state.issues]}") + "\n")
@@ -9080,6 +8682,41 @@ def run_sprint(
     _sweep_stale_in_progress(label, eff_repo)
     _sweep_stale_status("SIT", label, eff_repo)
 
+    # ── Worktree pool setup (issue #1411) ──────────────────────────────────────
+    # Reconcile any orphaned worktrees from a prior crash, then create a fresh
+    # pool of K isolated worktrees for concurrent coder dispatch.
+    if not dry_run:
+        global _ACTIVE_WORKTREE_POOL
+        # The worktree pool runs `git worktree add` with cwd=repo_root, so it MUST
+        # be the coder clone (a real git repo that has the sprint branch). Using
+        # its .parent pointed at the project root — not a git repo in the nested
+        # layout (~/dev/<project>/coder) — so worktree creation failed with
+        # "invalid reference: <sprint-branch>", leaving an empty slot whose missing
+        # PRODUCT.md/DESIGN.md then surfaced as a bogus design_docs_missing failure.
+        _pool_repo_root = Path(cfg.worktree_coder) if cfg is not None else REPO_ROOT
+        _pool_commander = (
+            discover_commander_dir(cfg.worktree_coder if cfg is not None else None)
+        )
+        _pool_dir = _pool_commander / "runtime" / "worktree-pool"
+        _WorktreePool.reconcile_orphans(_pool_dir, _pool_repo_root)
+        _pool_slots = state.max_coder_slots
+        _pool_req = (cfg.worktree_coder / "requirements.txt") if cfg is not None else None
+        if _pool_req is not None and not Path(_pool_req).exists():
+            _pool_req = None
+        _pool = _WorktreePool(
+            pool_dir=_pool_dir,
+            repo_root=_pool_repo_root,
+            base_branch=sprint_branch,
+            slots=_pool_slots,
+            requirements_file=Path(_pool_req) if _pool_req else None,
+        )
+        _pool.create()
+        _ACTIVE_WORKTREE_POOL = _pool
+        sys.stdout.write(str(
+            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f" (max_coder_slots={_pool_slots})\n"
+        ))
+
     total_issues = len(state.issues)
     _emit_sprint_lifecycle_event(
         type="sprint_started",
@@ -9111,6 +8748,7 @@ def run_sprint(
         _pipeline_on = False
     # Persist on state so the dashboard /live snapshot can gate dual-agent UI (issue #739).
     state.pipeline_mode = _pipeline_on
+    # Slot capacity was resolved at run start (issue #1415) — no re-assignment needed.
     sys.stdout.write(str("  Dispatch mode: "
         + ("pipeline (1 coder + 1 tester concurrent)" if _pipeline_on else "serial")) + "\n")
     try:
@@ -9435,6 +9073,7 @@ def run_sprint(
 
                 _coder_t0 = time.monotonic()
                 _coder_utc0 = _token_window_utc_now()
+                _serial_pool_slot = _pool_acquire()
                 try:
                     coder_ok, coder_category = _dispatch_coder(
                         num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
@@ -9444,6 +9083,7 @@ def run_sprint(
                         hang_continuation=_hang_continuation,
                         attempt_kind=_next_attempt_kind,
                         coder_backend_override=_next_coder_backend,
+                        worktree_override=_serial_pool_slot,
                     )
                 except SystemExit:
                     _remaining = [i for i in state.issues if i.status not in ("done", "skipped")]
@@ -9459,6 +9099,8 @@ def run_sprint(
                         action_id=_run_id,
                     )
                     raise
+                finally:
+                    _pool_release(_serial_pool_slot)
                 _coder_elapsed = time.monotonic() - _coder_t0
                 _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
                 state.total_tokens_in += _ctin
@@ -10053,6 +9695,16 @@ def run_sprint(
         if _merged_issue_nums:
             _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
 
+    # ── Worktree pool teardown (issue #1411) ───────────────────────────────────
+    # Tear down the pool at sprint end so no stray worktrees remain.
+    if _ACTIVE_WORKTREE_POOL is not None:
+        try:
+            _ACTIVE_WORKTREE_POOL.teardown()
+        except Exception as _pool_ex:
+            sys.stdout.write(str(f"  [worktree-pool] WARNING: teardown error: {_pool_ex}\n"))
+        finally:
+            _ACTIVE_WORKTREE_POOL = None  # type: ignore[assignment]
+
     return summary, state
 
 
@@ -10236,6 +9888,22 @@ def main() -> None:
         help="Skip the estimator run (on by default; pass --no-skip-estimator to enable).",
     )
 
+    # Sprint-level slot overrides (issue #1415) — take precedence over project settings.
+    p.add_argument(
+        "--max-coder-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent coder slots for this run (overrides sprint.yaml setting).",
+    )
+    p.add_argument(
+        "--max-tester-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override max concurrent tester slots for this run (overrides sprint.yaml setting).",
+    )
+
     # Rerun manifest (issue #332) — written by the server rerun endpoint
     p.add_argument(
         "--rerun-manifest",
@@ -10378,6 +10046,8 @@ def main() -> None:
             token_budget         = args.budget,
             skip_estimator       = args.skip_estimator,
             rerun_manifest       = _rerun_manifest,
+            max_coder_slots      = args.max_coder_slots,
+            max_tester_slots     = args.max_tester_slots,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)
@@ -10576,7 +10246,7 @@ def main() -> None:
             sprint_number  = _sprint_number(args.label),
             state          = state,
             repo_name      = eff_repo,
-            pr_base        = _base_sprint_branch(args.label),
+            pr_base        = _immediate_parent_branch(args.label, cfg),
             merge_target   = effective_target,
         )
 

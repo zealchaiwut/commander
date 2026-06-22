@@ -78,3 +78,4 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-11-4-sprint-planner-signoff.md](2026-06-11-4-sprint-planner-signoff.md) — phase 2: planner from active milestone, pending-signoff + approve, scheduled night queue (off by default)
 - [2026-06-11-5-advisor.md](2026-06-11-5-advisor.md) — phase 3: daily advisor suggestions, accept→BA flow, 2–5 sprint look-ahead, brief hook
 - [2026-06-11-6-test-suite-rehab.md](2026-06-11-6-test-suite-rehab.md) — pytest-timeout + hang fix, schema-drift fixtures, failure burn-down, per-sprint suite-health gate
+- [2026-06-20-1-sprint-speed-phases.md](2026-06-20-1-sprint-speed-phases.md) — Phase 1 runner quick wins, Phase 2 concurrent engine, Phase 3 preview-dag plan order + XL split

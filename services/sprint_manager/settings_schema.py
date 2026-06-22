@@ -36,6 +36,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Concurrent pipeline mode (issue #737) — on by default (1 coder + 1 tester
     # concurrent); projects can still opt out to serial dispatch.
     "pipeline_mode": {"secret": False, "default": True},
+    # Warm worktree pool size (issue #1411) — number of isolated worktrees
+    # pre-warmed at sprint start for concurrent coder dispatch (default 2, cap 4).
+    "max_coder_slots": {"secret": False, "default": 2},
     # Estimation defaults (size → minutes table + buffer)
     "estimation_s_minutes": {"secret": False, "default": 5},
     "estimation_m_minutes": {"secret": False, "default": 15},
@@ -65,6 +68,11 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},
+    # XL split suggestions (issue #1424) — surfaced in Run Sprint preflight modal
+    # Tickets at or above this minute threshold (or sized XL) trigger a "Consider splitting" nudge.
+    "xl_minute_threshold": {"secret": False, "default": 90},
+    # When True, Run Sprint is blocked until all flagged tickets are split or dismissed.
+    "strict_xl_gate": {"secret": False, "default": False},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

@@ -54,7 +54,12 @@ os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
 
 import db as _db_module  # noqa: E402
 
-_SERVER_SRC = (_DASHBOARD_ROOT / "server.py").read_text(encoding="utf-8")
+# server.py was split into routers/ (issue #1267); the kill/run sprint route
+# handlers now live in routers/sprint_run.py. Read both as the "server source".
+_SERVER_SRC = "\n".join(
+    (_DASHBOARD_ROOT / p).read_text(encoding="utf-8")
+    for p in ("server.py", "routers/sprint_run.py")
+)
 _SM_SRC = (
     _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 ).read_text(encoding="utf-8")

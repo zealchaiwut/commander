@@ -6,7 +6,7 @@
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
-   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog, _smgmtBoardHalt,
    _bcLabel:writable, _bcPreview:writable, renderProgressActivity */
 
 function _bcShowPreviewLoading(current) {
@@ -75,33 +75,48 @@ export async function smgmtBulkCompleteSprint(label) {
 
     const listEl = document.getElementById('bc-ticket-list');
     const allTickets = preview.all_tickets || [];
-    if (allTickets.length === 0) {
-      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
-    } else {
-      listEl.innerHTML = allTickets.map(t => {
-        const catClass = _bcCatClass(t.category);
-        const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
-        return `<label class="rr-ticket-row">
+    // Group the close-list by the sprint that owns each ticket (point 2) so it
+    // reads "94.4: #1460 #1464 · 94.2: #1461 …" instead of one flat list.
+    const groups = (preview.tickets_by_sprint && preview.tickets_by_sprint.length)
+      ? preview.tickets_by_sprint
+      : (allTickets.length ? [{ label: preview.base_label, tickets: allTickets }] : []);
+    const _ticketRow = (t) => {
+      const catClass = _bcCatClass(t.category);
+      const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
+      return `<label class="rr-ticket-row">
           <input type="checkbox" checked data-issue="${t.number}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
           <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
           <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
         </label>`;
-      }).join('');
+    };
+    if (groups.length === 0) {
+      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
+    } else {
+      listEl.innerHTML = groups.map(g => (
+        `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">`
+        + `${escHtml(sprintLabelDisplay(g.label))} · ${g.tickets.length}</div>`
+        + g.tickets.map(_ticketRow).join('')
+      )).join('');
     }
 
-    const memberCount = (preview.member_labels || []).length;
-    const mergeSteps = preview.merge_steps || [];
+    // Full chain (deepest → base) with per-step status (point 1): done steps show
+    // ✓ merged/completed, the rest ○ pending — so you see what already happened.
+    const members = preview.members || [];
     const actionsEl = document.getElementById('bc-actions');
-    const actionRows = [];
-    for (const step of mergeSteps) {
-      actionRows.push(
-        `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge `
-        + `<code>${escHtml(step.head)}</code> → <code>${escHtml(step.base)}</code></div>`,
-      );
-    }
+    const actionRows = members.map(m => {
+      const target = m.is_base ? 'develop' : sprintLabelDisplay(m.parent);
+      let icon, color, note;
+      if (m.completed) { icon = 'ti-circle-check-filled'; color = 'var(--green)'; note = 'completed'; }
+      else if (m.merged) { icon = 'ti-git-merge'; color = 'var(--green)'; note = 'merged → will mark completed'; }
+      else { icon = 'ti-circle'; color = 'var(--text-sub)'; note = 'pending'; }
+      return `<div class="fs-action-row"><i class="ti ${icon}" style="color:${color}"></i> `
+        + `${escHtml(sprintLabelDisplay(m.label))} → ${escHtml(target)} `
+        + `<span style="color:var(--text-muted);font-size:11px">· ${note}</span></div>`;
+    });
+    const memberCount = members.length || (preview.member_labels || []).length;
     actionRows.push(
-      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (UAT + summary included)</div>`,
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (grouped above; UAT + summary)</div>`,
       `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? 's' : ''} completed</div>`,
     );
     actionsEl.innerHTML = actionRows.join('');
@@ -171,107 +186,68 @@ export async function _bcConfirm() {
   const owner = parts[0];
   const repoName = parts.slice(1).join('/');
   const label = _bcLabel;
-  const allTickets = _bcPreview.all_tickets || [];
-  let mergeSteps = _bcPreview.merge_steps || [];
-  const settleSteps = 2; // mark sprints completed + refresh board
+  // Per-step complete: walk the lineage deepest child → base, finalising each
+  // sprint (merge → close summary → mark completed; base also closes tickets +
+  // merges to develop) via the idempotent complete-step endpoint. A conflict at
+  // any step stops here with a clear message; resolve it and re-run to resume
+  // (merged/closed steps are skipped).
+  const order = (_bcPreview.complete_order || []).slice();
 
   const confirmBtn = document.getElementById('bc-confirm-btn');
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Completing…'; }
 
   _bcClose();
 
-  const refreshLabel = 'Refreshing board…';
+  if (order.length === 0) { _smgmtShowToast('Nothing to complete.'); return; }
+
   let doneSteps = 0;
+  const totalSteps = order.length + 1; // members + board refresh
 
-  const _bcRecalcTotal = (pendingMerges) =>
-    doneSteps + pendingMerges.length + allTickets.length + settleSteps;
-
-  let totalSteps = _bcRecalcTotal(mergeSteps);
-
-  _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}…`, {
+  _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}…`, {
     progress: true,
     total: totalSteps,
     clearLog: true,
   });
-  _smgmtBoardLog('Starting bulk complete…', 'step');
+  _smgmtBoardLog('Starting per-step complete (deepest child first)…', 'step');
 
   try {
-    while (mergeSteps.length > 0) {
-      for (const step of mergeSteps) {
-        const stepLabel = step.label || `${step.head} → ${step.base}`;
-        _smgmtBoardLog(stepLabel, 'step');
-        await _bcMergeStep(owner, repoName, step);
-        doneSteps += 1;
-        _smgmtBoardProgress(doneSteps, totalSteps);
-        _smgmtBoardLog(`✓ ${stepLabel}`, 'ok');
-      }
-      mergeSteps = await _bcRemainingMergeSteps(owner, repoName, label);
-      if (mergeSteps.length > 0) {
-        totalSteps = _bcRecalcTotal(mergeSteps);
-        _smgmtBoardLog(
-          `Re-checking merge chain (${mergeSteps.length} step${mergeSteps.length !== 1 ? 's' : ''} remaining)…`,
-          'step',
-        );
-        _smgmtBoardProgress(doneSteps, totalSteps);
-      }
-    }
-
-    for (const t of allTickets) {
-      const closeLabel = `Closing #${t.number} — ${t.title || ''}`.trim();
-      _smgmtBoardLog(closeLabel, 'step');
-      const closeRes = await fetch(
-        `/api/issues/${t.number}/close?repo=${encodeURIComponent(repo)}`,
-        { method: 'POST' },
+    for (const sLabel of order) {
+      _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmed: true }),
+        },
       );
-      if (!closeRes.ok) {
-        const err = await closeRes.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed to close #${t.number}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
       }
+      const sd = await res.json();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog(`✓ Closed #${t.number}`, 'ok');
+      const into = sd.merged ? ` → merged into ${sd.merged_into}` : '';
+      _smgmtBoardLog(`✓ ${sprintLabelDisplay(sLabel)} completed${into}`, 'ok');
     }
 
-    _smgmtBoardLog('Marking sprints completed…', 'step');
-    const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          confirmed: true,
-          skip_issue_close: true,
-        }),
-      },
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    doneSteps += 1;
-    _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog('✓ Sprints marked completed', 'ok');
-
-    _smgmtBoardLog(refreshLabel, 'step');
+    _smgmtBoardLog('Refreshing board…', 'step');
     await loadSprintMgmt();
     doneSteps += 1;
     _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog('✓ Bulk complete finished', 'ok');
+    _smgmtBoardLog('✓ Complete finished', 'ok');
 
-    const closedCount = allTickets.length;
-    if (data.errors && data.errors.length > 0) {
-      _smgmtShowToast(`Bulk complete finished with errors — ${closedCount} closed.`);
-    } else {
-      _smgmtShowToast(
-        `${sprintLabelDisplay(label)} bulk completed — ${closedCount} closed, ${data.completed} marked completed.`,
-      );
-    }
-  } catch (e) {
-    _smgmtBoardLog(`✗ ${e.message}`, 'err');
-    _smgmtShowToast('Bulk complete failed: ' + e.message);
-    try { await loadSprintMgmt(); } catch (_) { /* ignore */ }
-  } finally {
     _smgmtBoardUnlock();
+    _smgmtShowToast(`${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`);
+  } catch (e) {
+    // Keep the overlay open with the error + a Done button so the operator can
+    // read what failed (e.g. a merge conflict) before the board refreshes —
+    // previously the message flashed past. Done unlocks + refreshes.
+    _smgmtBoardLog(`✗ ${e.message}`, 'err');
+    _smgmtBoardHalt(
+      'Stopped: ' + e.message + '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).',
+      () => { loadSprintMgmt().catch(() => {}); },
+    );
   }
 }

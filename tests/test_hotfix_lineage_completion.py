@@ -94,8 +94,11 @@ def test_b1_backfill_heals_legacy_null_rows(fresh_db):
 @pytest.fixture
 def reconcile(fresh_db, monkeypatch):
     """Import the reconcile service against the isolated DB."""
-    sys.path.insert(0, str(DASHBOARD_DIR / "routers"))
-    from routers import sprint_reconcile_service as rc
+    # Append (don't prepend) the routers dir so importing the reconcile module
+    # directly does not shadow apps/dashboard modules — e.g. `import projects`
+    # inside startup must resolve to the real projects module, not routers/projects.py.
+    sys.path.append(str(DASHBOARD_DIR / "routers"))
+    import sprint_reconcile_service as rc
     monkeypatch.setattr(rc, "_db", lambda: fresh_db)
     return rc
 

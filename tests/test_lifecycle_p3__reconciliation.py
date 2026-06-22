@@ -26,7 +26,13 @@ import db as _db_module  # noqa: E402
 _SM_SRC = (
     _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 ).read_text(encoding="utf-8")
-_SERVER_SRC = (_DASHBOARD_ROOT / "server.py").read_text(encoding="utf-8")
+# server.py was split into a thin app factory + startup.py helpers + routers/
+# (issue #1267). The lifecycle helpers this contract checks now live in those
+# extracted modules, so read them together as the logical "server source".
+_SERVER_SRC = "\n".join(
+    (_DASHBOARD_ROOT / p).read_text(encoding="utf-8")
+    for p in ("server.py", "startup.py", "routers/estimates.py")
+)
 _HISTORY_SRC = (
     _DASHBOARD_ROOT / "routers" / "sprint_history_service.py"
 ).read_text(encoding="utf-8")
@@ -185,7 +191,11 @@ class TestHistoryDbEnrichment:
 class TestSourceContracts:
     def test_sprint_manager_ingest_hook(self):
         assert "_sprint_db_ingest_run_sm" in _SM_SRC
-        assert 'f"{sprint_label}-state.json"' in _SM_SRC
+        # The ingest hook now delegates disk→DB persistence to
+        # db.ingest_sprint_run_artifact (state.json discovery moved into
+        # sprint_artifact_service.find_summary_path) rather than formatting the
+        # state-file name inline.
+        assert "ingest_sprint_run_artifact" in _SM_SRC
 
     def test_outcome_db_first(self):
         assert "_outcome_from_ingested_row" in _SERVER_SRC

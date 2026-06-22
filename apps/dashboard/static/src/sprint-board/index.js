@@ -62,8 +62,9 @@ import {
   _smgmtDropOnSprint, _smgmtTicketReorderDragOver, 
   _smgmtTicketReorderDragLeave, _smgmtTicketReorderDrop, 
   _smgmtBacklogTicketDragStart, _smgmtBacklogDragOver, 
-  _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock, 
+  _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock,
   _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+  _smgmtBoardFinish, _smgmtBoardHalt,
 } from './drag-drop.js';
 import {
   loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender,
@@ -189,6 +190,8 @@ globalThis._smgmtBoardLock = _smgmtBoardLock;
 globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
 globalThis._smgmtBoardProgress = _smgmtBoardProgress;
 globalThis._smgmtBoardLog = _smgmtBoardLog;
+globalThis._smgmtBoardFinish = _smgmtBoardFinish;
+globalThis._smgmtBoardHalt = _smgmtBoardHalt;
 
 // Board render pipeline (issue #797)
 globalThis.loadSprintMgmt = loadSprintMgmt;

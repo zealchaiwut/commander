@@ -1090,8 +1090,9 @@ Replace the existing draft (${data.existing_label})?`
   var _histFoldExpanded = /* @__PURE__ */ new Set();
   var _histLedgerCacheRepo = "";
   var _histLedgerCacheAt = 0;
-  var _HIST_LEDGER_TTL_MS = 45e3;
+  var _HIST_LEDGER_TTL_MS = 3e5;
   var _histLedgerInflight = null;
+  var _histShowClosed = false;
   function _histResetLedgerCache() {
     _histLedgerData = [];
     globalThis._histLedgerData = _histLedgerData;
@@ -2636,7 +2637,8 @@ Replace the existing draft (${data.existing_label})?`
     const loadPromise = (async () => {
       try {
         const settingsUrl = `/api/projects/${encodeURIComponent(_slug)}/settings`;
-        const historyUrl = "/api/sprints/history?limit=50&project=" + encodeURIComponent(repo || "");
+        const activeParam = _histShowClosed ? "" : "&active_only=1";
+        const historyUrl = "/api/sprints/history?limit=50" + activeParam + "&project=" + encodeURIComponent(repo || "");
         const [sresp, resp] = await Promise.all([
           fetch(settingsUrl).catch(() => null),
           fetch(historyUrl)
@@ -2647,6 +2649,9 @@ Replace the existing draft (${data.existing_label})?`
             const fs = parseInt(settings.history_fold_size, 10);
             if (!isNaN(fs) && fs > 0)
               _histFoldSize = fs;
+            const ttlMin = parseFloat(settings.history_cache_ttl_min);
+            if (!isNaN(ttlMin) && ttlMin > 0)
+              _HIST_LEDGER_TTL_MS = ttlMin * 6e4;
           } catch (_) {
           }
         }
@@ -2678,6 +2683,34 @@ Replace the existing draft (${data.existing_label})?`
     })();
     _histLedgerInflight = loadPromise;
     await loadPromise;
+  }
+  function _histSyncShowClosedBtn() {
+    const btn = document.getElementById("hist-show-closed-btn");
+    if (!btn)
+      return;
+    btn.innerHTML = _histShowClosed ? '<i class="ti ti-eye-off"></i> Active only' : '<i class="ti ti-history"></i> Show completed';
+    btn.title = _histShowClosed ? "Show only actionable sprints + a few recent completed" : "Load the full closed-sprint history";
+  }
+  function _histToggleShowClosed() {
+    _histShowClosed = !_histShowClosed;
+    _histSyncShowClosedBtn();
+    const repo = _cachedFullRepo[_slug];
+    if (repo)
+      _histLoadLedger2(repo, { force: true });
+  }
+  function _histSetTtlMin(min) {
+    const m = parseFloat(min);
+    if (!isNaN(m) && m > 0)
+      _HIST_LEDGER_TTL_MS = m * 6e4;
+  }
+  function _histForceRefresh() {
+    _histResetLedgerCache();
+    for (const k of Object.keys(_histRunStats))
+      delete _histRunStats[k];
+    _histStaleBySprint = {};
+    const repo = _cachedFullRepo[_slug];
+    if (repo)
+      _histLoadLedger2(repo, { force: true });
   }
   function _histNextChildLabel(parentLabel) {
     return _nextSprintSublabel(parentLabel);
@@ -3448,6 +3481,8 @@ Replace the existing draft (${data.existing_label})?`
         ok: true,
         message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
         onDone: () => {
+          if (typeof globalThis._histResetLedgerCache === "function")
+            globalThis._histResetLedgerCache();
           loadSprintMgmt().catch(() => {
           });
         }
@@ -3458,6 +3493,8 @@ Replace the existing draft (${data.existing_label})?`
         ok: false,
         message: "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
         onDone: () => {
+          if (typeof globalThis._histResetLedgerCache === "function")
+            globalThis._histResetLedgerCache();
           loadSprintMgmt().catch(() => {
           });
         }
@@ -7854,6 +7891,9 @@ ${data.errors.join("\n")}`);
   globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
   globalThis._histResetLedgerCache = _histResetLedgerCache;
+  globalThis._histToggleShowClosed = _histToggleShowClosed;
+  globalThis._histForceRefresh = _histForceRefresh;
+  globalThis._histSetTtlMin = _histSetTtlMin;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
   // apps/dashboard/static/src/index.js

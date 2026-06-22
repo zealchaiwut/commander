@@ -1219,7 +1219,23 @@ from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     DEPLOY_CONFIG_KEY,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
+    # Re-exported for routers/system_misc.py's GET /api/deploy/overview, which
+    # calls srv._deploy_known_slugs / srv._deploy_overview_entries_for. The
+    # #1267 server.py slim-down dropped these two aliases — restore them. They
+    # reach the router via server's globals().update(vars(startup)); unused here.
+    known_deploy_slugs as _deploy_known_slugs,  # noqa: F401
+    overview_entries_for as _deploy_overview_entries_for,  # noqa: F401
 )
+
+# Re-exported for routers/system_misc.py's POST /api/issues/{id}/estimate, which
+# calls srv._ei_* and srv._minutes_from_letter. Same #1267 slim-down drop.
+from services.sprint_manager.estimate_issue import (  # noqa: E402
+    fetch_issue as _ei_fetch_issue,  # noqa: F401
+    run_estimator as _ei_run_estimator,  # noqa: F401
+    apply_label as _ei_apply_label,  # noqa: F401
+    apply_estimated_status as _ei_apply_estimated_status,  # noqa: F401
+)
+from sizing import minutes_from_letter as _minutes_from_letter  # noqa: E402,F401
 
 
 def _resolve_project_slug(slug: str) -> str:

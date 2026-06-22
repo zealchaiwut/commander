@@ -22,9 +22,15 @@ from typing import TYPE_CHECKING, Optional
 REPO_ROOT     = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 
-# Make github_client importable (it lives in apps/dashboard).
-if str(DASHBOARD_DIR) not in sys.path:
-    sys.path.insert(0, str(DASHBOARD_DIR))
+# Make github_client (in apps/dashboard) importable AND ensure dashboard wins the
+# `config` name over services/sprint_manager/config.py: github_client does
+# `from config import ...`, and a test that prepends the package dir to sys.path
+# otherwise shadows dashboard's config and breaks collection. Keep DASHBOARD_DIR
+# at the front. (Live runs already resolve config to dashboard's, so this is a
+# no-op there.)
+while str(DASHBOARD_DIR) in sys.path:
+    sys.path.remove(str(DASHBOARD_DIR))
+sys.path.insert(0, str(DASHBOARD_DIR))
 
 import github_client  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402

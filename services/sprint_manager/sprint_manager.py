@@ -229,6 +229,7 @@ except ImportError:
 from services.sprint_manager.events import (  # noqa: E402
     _emit_sprint_lifecycle_event,
     _emit_ticket_failed,
+    _failure_event_detail,  # noqa: F401  (re-exported for callers/tests)
     _post_agent_event,
     _post_sprint_status,
 )

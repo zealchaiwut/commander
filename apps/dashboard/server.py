@@ -219,7 +219,6 @@ from routers import (  # noqa: E402
     reports_router,
     roadmap_router,
     runs_router,
-    scheduler_router,
     settings_router,
     settings_sync_router,
     signoff_router,
@@ -272,7 +271,8 @@ app.include_router(projects_router)
 app.include_router(reports_router)
 app.include_router(roadmap_router)
 app.include_router(runs_router)
-app.include_router(scheduler_router)
+# scheduler_router is mounted via routers/sprints.py (rides the already-mounted
+# sprints router by design); this app-level include was a duplicate — removed.
 app.include_router(settings_router)
 app.include_router(settings_sync_router)
 app.include_router(signoff_router)

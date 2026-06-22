@@ -4567,11 +4567,20 @@ def _prepare_sprint_branch_for_develop_merge(repo: str, head_branch: str) -> tup
         if fetch.returncode != 0:
             return False, fetch.stderr.strip() or "git fetch failed"
 
-        co = _run("git", "checkout", head_branch)
+        # Hard-sync the local sprint branch to its remote tip before merging.
+        # This clone is the coder clone, whose sprint branch can be STALE/diverged
+        # from earlier dispatch hygiene; a plain `checkout <branch>` left it behind
+        # origin, so develop merged onto the old tip and the post-merge push was
+        # rejected as non-fast-forward ("tip is behind its remote counterpart").
+        # Discard any dirty working state, then point the branch at origin/<branch>
+        # so the merge lands on the true tip and the push fast-forwards. The coder
+        # clone's working tree is transient (reset on every dispatch), so this is
+        # safe.
+        _run("git", "reset", "--hard")
+        _run("git", "clean", "-fd")
+        co = _run("git", "checkout", "-B", head_branch, f"origin/{head_branch}")
         if co.returncode != 0:
-            track = _run("git", "checkout", "-B", head_branch, f"origin/{head_branch}")
-            if track.returncode != 0:
-                return False, co.stderr.strip() or "git checkout failed"
+            return False, co.stderr.strip() or "git checkout failed"
 
         merge = _run(
             "git", "merge", "origin/develop",

@@ -22832,7 +22832,13 @@ async function _bcLoadSprints(repo) {
     const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    const sprints = (data.sprints || []).slice().sort((a, b) => a - b);
+    // Only DRAFT sprints can accept new tickets — drop finished sprints and any
+    // that already ran (running / needs_rework / completed). Targeting a done or
+    // in-flight sprint just orphans the ticket. (User: exclude finished + running.)
+    const finished = new Set(data.finished_sprints || []);
+    const hasRun = data.sprint_has_run || {};
+    const sprints = (data.sprints || []).slice().sort((a, b) => a - b)
+      .filter(n => !finished.has(`sprint-${n}`) && hasRun[`sprint-${n}`] !== true);
     const counts = {};
     (data.issues || []).forEach(i => {
       if (i.sprint != null) counts[i.sprint] = (counts[i.sprint] || 0) + 1;

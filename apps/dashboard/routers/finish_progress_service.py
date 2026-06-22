@@ -266,7 +266,7 @@ async def run_finish_sprint(
             if merge_pr_number:
                 try:
                     import db as _db  # noqa: PLC0415
-                    _db.update_sprint_pr_number(base_label, merge_pr_number)
+                    _db.update_sprint_pr_number(base_label, merge_pr_number, repo)
                 except Exception:
                     pass
         except Exception as exc:

@@ -92,7 +92,7 @@ def get_sprint_finish_card(sprint_label: str, project: str):
             "started_at":      started_at_str,
         }
 
-    if not srv._sprint_has_own_run_outcome(project_root, sprint_label):
+    if not srv._sprint_has_own_run_outcome(project_root, sprint_label, project):
         return {
             "sprint_label":  sprint_label,
             "sprint_number": sprint_number,
@@ -134,7 +134,7 @@ def get_sprint_finish_card(sprint_label: str, project: str):
     # read so DB-backed readers (outcome, history) converge regardless of which
     # endpoint the UI hits first. UPDATE-only (never mints a draft row);
     # best-effort — an ingest hiccup must never break the finish card.
-    _fc_db_row = db.get_sprint(sprint_label)
+    _fc_db_row = db.get_sprint(sprint_label, project=project or None)
     if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
         try:
             db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)

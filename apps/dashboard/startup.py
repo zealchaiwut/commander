@@ -3536,7 +3536,7 @@ def _derive_outcome_lifecycle(
     parent_state = db.canonical_lifecycle(row["state"])
     if parent_state not in _OUTCOME_TERMINAL_STATES:
         return parent_state
-    children = db.get_sprint_children(sprint_label)
+    children = db.get_sprint_children(sprint_label, project=project or None)
     if not children:
         return parent_state
     unsettled = [
@@ -4304,19 +4304,26 @@ def _sprint_branch_name(label: str) -> str:
     return f"sprint/{label}"
 
 
-def children_of(parent_label: str, project_root: Path | None = None) -> list[str]:
+def children_of(parent_label: str, project_root: Path | None = None, project: str | None = None) -> list[str]:
     """Return child sprint labels whose parent is parent_label, sorted by sub-index.
 
     Primary: queries sprints DB WHERE parent_label matches.
+    When project is provided, scoped to that project (issue #1464).
     Fallback (rows predating parent-linkage tracking): plan.json disk glob.
     """
     try:
         with db.get_conn() as conn:
             db._create_sprint_lifecycle_tables(conn)
-            rows = conn.execute(
-                "SELECT label FROM sprints WHERE parent_label = ?",
-                (parent_label,),
-            ).fetchall()
+            if project:
+                rows = conn.execute(
+                    "SELECT label FROM sprints WHERE parent_label = ? AND project = ?",
+                    (parent_label, project),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT label FROM sprints WHERE parent_label = ?",
+                    (parent_label,),
+                ).fetchall()
         if rows:
             return sorted([r["label"] for r in rows], key=_sprint_label_sub_index)
     except Exception:
@@ -4390,17 +4397,17 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
     return False
 
 
-def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
+def _bulk_complete_unsettled_children(project_root: Path, base_label: str, project: str | None = None) -> list[str]:
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
-    for child_label in children_of(base_label, project_root):
+    for child_label in children_of(base_label, project_root, project=project):
         if not _bulk_complete_lineage_settled(project_root, child_label):
             unsettled.append(child_label)
     return unsettled
 
 
-def _bulk_complete_assert_children_completed(project_root: Path, base_label: str) -> None:
-    unsettled = _bulk_complete_unsettled_children(project_root, base_label)
+def _bulk_complete_assert_children_completed(project_root: Path, base_label: str, project: str | None = None) -> None:
+    unsettled = _bulk_complete_unsettled_children(project_root, base_label, project=project)
     if unsettled:
         raise HTTPException(
             409,
@@ -4718,7 +4725,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    children = children_of(base_label, project_root)
+    children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -4758,7 +4765,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    children = children_of(base_label, project_root)
+    children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)

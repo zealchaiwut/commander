@@ -658,19 +658,27 @@ def _union_planned_roster(rec: dict, sprints_dirs: Path | list[Path]) -> None:
             })
 
 
-def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> None:
-    """Attach rerun-child flags and derive lifecycle adjustments in-place.
+# Actionable lifecycle states for the active_only History view (issue: History
+# pane slow). Everything else is "closed" — shown lazily / a few most-recent.
+_ACTIONABLE_STATES = frozenset({
+    "running", "ready_to_merge", "needs_rework", "partial_finished", "draft", "planned",
+})
 
-    The pre-redesign failed-state heuristics (_infer_failed_lifecycle) are
-    retired: needs_rework is now written at the source (sprint manager, cancel
-    endpoint, orphan-PID sweeps) and legacy rows render through the display
-    mapping. The one promotion kept is a fact, not a guess: a row whose run
-    recorded failed tickets is needs_rework regardless of its stored state.
 
-    `partial_finished` is derived here, never stored (sprint-lifecycle.md): a
-    terminal sprint whose re-run children are not all completed shows
-    partial_finished; when the last child completes the parent flips to
-    completed automatically.
+def _finalize_lineage(records: list[dict]) -> None:
+    """Cross-record lifecycle rollup (in-place): rerun-child flags + derived
+    partial_finished/completed states.
+
+    Needs the WHOLE lineage (a parent's state depends on its children), so it
+    runs on the full record set BEFORE any windowing. Deliberately uses ONLY
+    labels + lifecycle_state + failed_tickets + plan_status — never agent_runs or
+    the per-record issue list — so the expensive issue enrichment can be deferred
+    to the visible window (_finalize_issues).
+
+    The pre-redesign failed-state heuristics are retired: needs_rework is written
+    at the source and legacy rows render through the display mapping. The one
+    promotion kept is a fact, not a guess: a row whose run recorded failed
+    tickets is needs_rework. `partial_finished` is derived here, never stored.
     """
     children_by_base: dict[str, list[str]] = {}
     for rec in records:
@@ -680,23 +688,8 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
             children_by_base.setdefault(base, []).append(label)
 
     state_by_label: dict[str, str] = {}
-
     for rec in records:
         label = rec.get("label") or ""
-        if not rec.get("issues"):
-            run_issues = _issues_from_agent_runs(label)
-            if run_issues:
-                rec["issues"] = run_issues
-
-        # A running sprint's History list is rebuilt from agent_runs, which only
-        # covers tickets that have already been dispatched — so a still-queued
-        # ticket (e.g. #1460 "waiting") was dropped, leaving History showing 2
-        # while the live Running view shows the full planned roster of 3. Union
-        # in the plan.json planned tickets as queued placeholders so the two
-        # panes agree while the sprint is in flight.
-        if (rec.get("lifecycle_state") or "") == "running":
-            _union_planned_roster(rec, sprints_dirs)
-
         base = _label_base(label)
         siblings = sorted(children_by_base.get(base, []), key=_label_sub_index)
         sub = _label_sub_index(label)
@@ -756,9 +749,65 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path]) -> N
                 rec["lifecycle_state"] = "completed"
                 state_by_label[label] = "completed"
 
+
+def _finalize_issues(records: list[dict], sprints_dirs: Path | list[Path],
+                     title_map: dict | None = None) -> None:
+    """Per-record issue enrichment (in-place). None of this is cross-record, so
+    it is safe to run on the visible WINDOW only — which is the whole point: the
+    agent_runs queries here were the dominant History cost when run for every
+    sprint.
+
+    Steps: fill the issue list from agent_runs when empty, union the running
+    roster, fill missing PR/summary links, attribute tickets to the sprint that
+    actually ran them, drop cross-project leakage, then backfill blank titles
+    from `title_map` ({issue_number: title}, sourced from the local issues mirror
+    — no GitHub call) so completed sprints whose rows are synthesized from
+    agent_runs still show ticket text.
+    """
+    for rec in records:
+        label = rec.get("label") or ""
+        if not rec.get("issues"):
+            run_issues = _issues_from_agent_runs(label)
+            if run_issues:
+                rec["issues"] = run_issues
+        # A running sprint's list is rebuilt from agent_runs (dispatched tickets
+        # only); union plan.json's planned roster as queued placeholders so
+        # History matches the live Running view.
+        if (rec.get("lifecycle_state") or "") == "running":
+            _union_planned_roster(rec, sprints_dirs)
+
     _fill_missing_links(records, sprints_dirs)
     _attribute_issues_to_runs(records)
     _drop_cross_project_issues(records)
+
+    if title_map:
+        for rec in records:
+            for iss in rec.get("issues") or []:
+                if not iss.get("title"):
+                    t = title_map.get(iss.get("ticket_id"))
+                    if t:
+                        iss["title"] = t
+
+
+def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path],
+                      title_map: dict | None = None) -> None:
+    """Back-compat full finalize: lineage rollup + per-record issue enrichment on
+    the SAME records. get_sprint_history splits these so the issue pass runs on
+    the window only; this wrapper keeps existing callers/tests working.
+    """
+    _finalize_lineage(records)
+    _finalize_issues(records, sprints_dirs, title_map=title_map)
+
+
+def _filter_active_records(records: list[dict], keep_completed: int = 3) -> list[dict]:
+    """active_only History view: actionable sprints + the most recent N closed
+    ones for context. Runs AFTER _finalize_lineage so derived
+    partial_finished/completed states are respected.
+    """
+    active = [r for r in records if (r.get("lifecycle_state") or "") in _ACTIONABLE_STATES]
+    closed = [r for r in records if (r.get("lifecycle_state") or "") not in _ACTIONABLE_STATES]
+    closed.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
+    return active + closed[:keep_completed]
 
 
 def _attribute_issues_to_runs(records: list[dict]) -> None:
@@ -1024,11 +1073,15 @@ def _resolve_sprint_project(
 # ── public API ────────────────────────────────────────────────────────────────
 
 def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | None = None,
-                       project: str | None = None) -> dict:
+                       project: str | None = None, active_only: bool = False) -> dict:
     """Return paginated, enriched sprint-history rows. No GitHub calls (AC5).
 
     ``project`` (owner/repo) scopes the ledger to one project — without it the
     board showed every project's sprints plus project-less junk rows.
+
+    ``active_only`` returns just actionable sprints (running / ready_to_merge /
+    needs_rework / partial_finished / draft / planned) plus the few most-recent
+    closed ones — the default fast view for the History pane.
     """
     search_dirs = _as_sprints_dirs(sprints_dir, project)
     offset = max(0, int(offset))
@@ -1084,11 +1137,33 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
                 )
         records = [r for r in records if r.get("project") == project]
 
-    _finalize_records(records, search_dirs)
+    # Lineage rollup needs every record (a parent's state depends on its
+    # children), so run it on the full set. The expensive per-record issue
+    # enrichment (agent_runs queries + disk) is deferred to the visible window
+    # below — that was the dominant History cost when run for every sprint.
+    _finalize_lineage(records)
+
+    if active_only:
+        records = _filter_active_records(records)
 
     records.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
     total = len(records)
     window = records[offset:offset + limit] if limit else records[offset:]
+
+    # Titles for synthesized (agent_runs) issue rows come from the local issues
+    # mirror — one query, no GitHub call — so completed sprints still show text.
+    title_map: dict[int, str] = {}
+    if project:
+        try:
+            for mi in db.get_mirrored_issues(project):
+                n = mi.get("number")
+                if n is not None and mi.get("title"):
+                    title_map[int(n)] = mi["title"]
+        except Exception:
+            pass
+
+    _finalize_issues(window, search_dirs, title_map=title_map)
+
     for r in window:
         r.pop("_sort_key", None)
 

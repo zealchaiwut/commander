@@ -4830,9 +4830,24 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
 
 
 def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]:
-    """Merge steps for Merge Sprint on one label — child merges into its parent; base runs full chain."""
+    """Merge steps for Merge Sprint on one label.
+
+    Base label → full child→parent→develop chain. A child label normally merges
+    just into its parent; but when the rest of the lineage is already settled (no
+    OTHER child still in flight), run the full base chain so the work continues up
+    to develop instead of stranding on the parent branch. The chain is idempotent
+    — `_branch_has_unmerged_commits` skips branches that already merged.
+    """
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
+        others_unsettled = [
+            c for c in _bulk_complete_unsettled_children(project_root, base_label, project=repo)
+            if c != label
+        ]
+        if not others_unsettled:
+            # Lineage otherwise settled — settle the whole chain to develop.
+            return _merge_steps_for_sprint_chain(project_root, repo, base_label)
+        # Other children still in flight — only fold this child up to its parent.
         steps: list[dict] = []
         parent_label = _sprint_merge_parent_label(project_root, label)
         child_branch = _sprint_branch_name(label)

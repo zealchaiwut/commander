@@ -13,14 +13,12 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 
-from services.sprint_manager.definition_of_ready import check_ticket_readiness
+from services.sprint_manager.definition_of_ready import check_ticket_readiness  # noqa: E402
 
 
 _FULL_SPEC = {

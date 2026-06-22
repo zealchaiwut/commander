@@ -1141,11 +1141,15 @@ function _histCardShowsDoneSummary(s) {
   if (state === "needs_rework" || state === "partial_finished") {
     const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
     if (unfinished.length) return false;
+    // Every ticket merged — the work landed; the needs_rework / partial_finished
+    // flag is only about fix-rounds or lineage, not unfinished work. Show the done
+    // summary + per-ticket rows (previously these fell through to a final return
+    // that excluded needs_rework, so a fully-merged sprint showed no issue list).
+    return issues.length > 0;
   }
   return (
     state === "ready_to_merge"
     || state === "completed"
-    || state === "partial_finished"
     || state === "running"
   );
 }

@@ -161,7 +161,7 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
     # Mirror the rename into the durable SQLite sprints table (issue #758 removed
     # the Neon mirror; best-effort — GitHub is the source of truth for labels).
     try:
-        db.rename_sprint(sprint_label, new_label)
+        db.rename_sprint(sprint_label, new_label, body.project)
     except Exception:
         pass
 

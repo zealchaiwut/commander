@@ -206,13 +206,16 @@ def _state_data_is_dry_run_only(state_data: dict) -> bool:
     return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
 
 
-def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
+def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str, project: str = "") -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
     if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
-    row = db.get_sprint(sprint_label)
+    # Scope by project: sprint labels are unique only per repo, so an unscoped
+    # lookup leaks another project's same-numbered sprint (e.g. crux sprint-9
+    # picking up commander's sprint-9 row).
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("run_ingested_at"):
         return True
 
@@ -279,7 +282,7 @@ def _derive_outcome_lifecycle(
     Reads parent canonical state and child rows exclusively from the sprints DB
     table (issue #1093). No GitHub label lookups, no disk globs.
     """
-    row = db.get_sprint(sprint_label)
+    row = db.get_sprint(sprint_label, project=project or None)
     if row is None:
         return db.canonical_lifecycle(pane_state)
     parent_state = db.canonical_lifecycle(row["state"])
@@ -706,10 +709,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if _is_sprint_running(project_root, sprint_label):
         return {"sprint_label": sprint_label, "state": "running", "lifecycle": "running"}
 
-    if not _sprint_has_own_run_outcome(project_root, sprint_label):
+    if not _sprint_has_own_run_outcome(project_root, sprint_label, project):
         raise HTTPException(404, detail=f"Outcome not found for {sprint_label!r} (not run yet)")
 
-    ingested = db.get_sprint(sprint_label)
+    ingested = db.get_sprint(sprint_label, project=project or None)
     if ingested and ingested.get("run_ingested_at"):
         return _outcome_from_ingested_row(ingested, sprint_label, project)
 

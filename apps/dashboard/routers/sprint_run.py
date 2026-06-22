@@ -272,12 +272,22 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     coder_path = srv._coder_clone_path(project_root)
     commander = srv._commander_dir(project_root)
 
-    srv._reject_terminal_label_redispatch(project_root, body.sprint_label)
+    srv._reject_terminal_label_redispatch(project_root, body.sprint_label, body.project)
     srv._assert_sprint_signed_off(project_root, body.sprint_label)
 
     # Block empty runs before spawn
     from services.sprint_manager import sprint_manager as _sm_run
     backlog = _sm_run.list_backlog_issues(body.sprint_label, body.project)
+    if not backlog:
+        # GitHub's label-search index lags briefly right after a re-run relabels
+        # tickets onto the child sprint, so list_backlog_issues can return empty
+        # even though the tickets exist — and the run subprocess would pick them up
+        # via its plan.json fallback. Don't block if the sprint's plan still lists
+        # tickets; let the run proceed (the subprocess resets cleanly if it's truly
+        # empty once gh propagates).
+        _plan = srv._read_plan_json(project_root, body.sprint_label) or {}
+        _plan_tickets = [n for n in (_plan.get("tickets") or []) if isinstance(n, int)]
+        backlog = bool(_plan_tickets)
     if not backlog:
         child = srv._sprint_rerun_into_map(project_root).get(body.sprint_label)
         if child:
@@ -563,7 +573,7 @@ def kill_sprint(sprint_label: str, project: str):
                              end_reason=_cancel_reason)
 
     try:
-        _summary_url = srv._read_sprint_summary_url(project_root, sprint_label)
+        _summary_url = srv._read_sprint_summary_url(project_root, sprint_label, project)
         _summary_num = None
         if _summary_url:
             import re as _re

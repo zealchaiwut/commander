@@ -327,13 +327,13 @@ def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
         "fixed": True,
         "settled_done": settled_done,
         "failure_count": failure_count,
-    })
+    }, _proj)
     return True
 
 
 def reconcile_sprint_label(label: str, project: str) -> bool:
     """Reconcile one sprint row against GitHub. Returns True if DB was updated."""
-    row = _db().get_sprint(label)
+    row = _db().get_sprint(label, project=project or None)
     if not row:
         return False
     if project and row.get("project") and row.get("project") != project:
@@ -442,7 +442,7 @@ def _pr_url_for_reconciliation(repo: str, state: dict | None, row: dict, recon: 
 
 def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
     """Re-run GitHub post-sprint reconciliation when loose ends may have cleared."""
-    row = _db().get_sprint(label)
+    row = _db().get_sprint(label, project=project or None)
     if not row:
         return False
     if project and row.get("project") and row.get("project") != project:
@@ -507,7 +507,7 @@ def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
         except Exception:
             pass
     try:
-        _db().update_sprint_reconciliation(label, result)
+        _db().update_sprint_reconciliation(label, result, project)
     except Exception:
         pass
     return True

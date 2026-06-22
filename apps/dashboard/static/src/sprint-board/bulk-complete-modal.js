@@ -6,7 +6,7 @@
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
-   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog, _smgmtBoardHalt,
    _bcLabel:writable, _bcPreview:writable, renderProgressActivity */
 
 function _bcShowPreviewLoading(current) {
@@ -238,12 +238,16 @@ export async function _bcConfirm() {
     _smgmtBoardProgress(doneSteps, totalSteps);
     _smgmtBoardLog('✓ Complete finished', 'ok');
 
+    _smgmtBoardUnlock();
     _smgmtShowToast(`${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`);
   } catch (e) {
+    // Keep the overlay open with the error + a Done button so the operator can
+    // read what failed (e.g. a merge conflict) before the board refreshes —
+    // previously the message flashed past. Done unlocks + refreshes.
     _smgmtBoardLog(`✗ ${e.message}`, 'err');
-    _smgmtShowToast('Stopped: ' + e.message + ' — resolve the conflict, then re-run to resume.');
-    try { await loadSprintMgmt(); } catch (_) { /* ignore */ }
-  } finally {
-    _smgmtBoardUnlock();
+    _smgmtBoardHalt(
+      'Stopped: ' + e.message + '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).',
+      () => { loadSprintMgmt().catch(() => {}); },
+    );
   }
 }

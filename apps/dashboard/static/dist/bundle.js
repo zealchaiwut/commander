@@ -3442,16 +3442,17 @@ Replace the existing draft (${data.existing_label})?`
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
       _smgmtBoardLog("\u2713 Complete finished", "ok");
+      _smgmtBoardUnlock();
       _smgmtShowToast(`${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`);
     } catch (e) {
       _smgmtBoardLog(`\u2717 ${e.message}`, "err");
-      _smgmtShowToast("Stopped: " + e.message + " \u2014 resolve the conflict, then re-run to resume.");
-      try {
-        await loadSprintMgmt();
-      } catch (_) {
-      }
-    } finally {
-      _smgmtBoardUnlock();
+      _smgmtBoardHalt(
+        "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
+        () => {
+          loadSprintMgmt().catch(() => {
+          });
+        }
+      );
     }
   }
 
@@ -5334,6 +5335,19 @@ ${data.errors.join("\n")}`);
       logEl.hidden = true;
       logEl.innerHTML = "";
     }
+    const doneEl = document.getElementById("smgmt-op-done");
+    if (doneEl) {
+      doneEl.hidden = true;
+      doneEl.innerHTML = "";
+    }
+    const errEl = document.getElementById("smgmt-op-error");
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = "";
+    }
+    const spinner = document.getElementById("smgmt-move-spinner");
+    if (spinner)
+      spinner.style.display = "";
     _smgmtBoardProgress2(0, 1);
     if (_arInterval > 0)
       _smgmtArStartTicker();

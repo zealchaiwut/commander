@@ -929,7 +929,49 @@ export function _smgmtBoardUnlock() {
   const logEl = document.getElementById('smgmt-op-log');
   if (progWrap) progWrap.hidden = true;
   if (logEl) { logEl.hidden = true; logEl.innerHTML = ''; }
+  const doneEl = document.getElementById('smgmt-op-done');
+  if (doneEl) { doneEl.hidden = true; doneEl.innerHTML = ''; }
+  const errEl = document.getElementById('smgmt-op-error');
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  const spinner = document.getElementById('smgmt-move-spinner');
+  if (spinner) spinner.style.display = '';
   _smgmtBoardProgress(0, 1);
   // Resume auto-refresh if an interval is selected
   if (_arInterval > 0) _smgmtArStartTicker();
+}
+
+/**
+ * Halt an operation with an error the operator must acknowledge: keep the
+ * overlay open, show the message, and render a "Done" button. The overlay is NOT
+ * auto-dismissed (the error used to flash past) — Done unlocks the board and runs
+ * the optional onDone callback (e.g. refresh).
+ */
+export function _smgmtBoardHalt(message, onDone) {
+  _smgmtArStopTicker();
+  const spinner = document.getElementById('smgmt-move-spinner');
+  if (spinner) spinner.style.display = 'none';
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.setAttribute('aria-busy', 'false');
+  if (_smgmtBoardOverlayHasProgress) {
+    patchProgressActivity('smgmt-op-pa-host', { status: 'failed', current: message }, { id: BOARD_OVERLAY_PA_ID });
+  }
+  const errEl = document.getElementById('smgmt-op-error');
+  if (errEl) {
+    errEl.textContent = message;
+    errEl.hidden = false;
+    errEl.style.cssText = 'color:var(--red,#e5484d);font-size:13px;margin-top:10px;text-align:left;white-space:pre-wrap;max-height:160px;overflow:auto';
+  }
+  const doneEl = document.getElementById('smgmt-op-done');
+  if (doneEl) {
+    doneEl.hidden = false;
+    doneEl.style.cssText = 'margin-top:12px;text-align:center';
+    doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn">Done</button>';
+    const btn = document.getElementById('smgmt-op-done-btn');
+    if (btn) {
+      btn.onclick = () => {
+        _smgmtBoardUnlock();
+        if (typeof onDone === 'function') { try { onDone(); } catch (_) { /* ignore */ } }
+      };
+    }
+  }
 }

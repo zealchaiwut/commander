@@ -487,6 +487,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 lbl, repo, "completed",
                 ended_at=now,
                 end_reason="bulk_complete",
+                actor="reconcile",
             )
             completed += 1
         except Exception as exc:
@@ -611,13 +612,24 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         except Exception:
             pass
 
-    # 4) Mark this sprint completed.
+    # 4) Mark this sprint completed. actor="reconcile" so a superseded ancestor
+    # still in needs_rework (whose lineage merged) can complete via the B2 edge.
+    # _sprint_db_set_state returns False on a silent state-machine rejection —
+    # surface it instead of reporting a false success.
     now = datetime.now(timezone.utc).isoformat()
     try:
         srv._plan_json_set_state(project_root, label, "completed", ended_at=now, end_reason="merge_sprint")
-        srv._sprint_db_set_state(label, repo, "completed", ended_at=now, end_reason="merge_sprint")
+        db_ok = srv._sprint_db_set_state(
+            label, repo, "completed", ended_at=now, end_reason="merge_sprint", actor="reconcile",
+        )
     except Exception as exc:
         raise HTTPException(500, detail=f"merged {label} but failed to mark completed: {exc}")
+    if db_ok is False:
+        raise HTTPException(
+            500,
+            detail=f"merged {label} but the DB transition to completed was rejected by the "
+                   f"state machine (illegal edge) — lifecycle left unchanged",
+        )
 
     for _k in ("open_issues_body:", "open_issues:", "issues:", "recent_closed:", "summary_issues:"):
         try:

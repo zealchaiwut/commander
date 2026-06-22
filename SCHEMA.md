@@ -187,12 +187,16 @@ Index: `(repo, state)`.
 
 `sprints.state` is constrained to `planning` / `running` / `completed` / `cancelled` / `failed` (`failed` reserved for a future watchdog recovery sprint — no writer yet). The `{label}-plan.json` / `{label}-pid` files continue to be written as a deprecated cache until a later sprint removes them.
 
-`sprints` columns: `label`, `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label` — **composite PK `(label, project)`** (issue #1462). Migrated from the single-column `label` PK by `_migrate_sprints_to_composite_pk()`, gated on the `_sprint_schema_migrations` version table (version 1, runs exactly once); rows are deduplicated on `(label, project)` keeping the highest-rowid row. The composite key lets the same sprint label coexist across projects without collision. All lifecycle writes (`transition_sprint_state`, `_set_sprint_terminal`) upsert on `ON CONFLICT(label, project)` and reads/deletes are scoped by `(label, project)` (issues #1463, #1464); `get_sprint_children` / `children_of` take an optional `project` and warn on the label-only fallback.
+`sprints` columns: `label`, `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
+
+**Composite-key invariant — `(label, project)` (issues #1464, #1465).** Sprint `label` is unique only *within* a `project` — two projects may both own e.g. `sprint-66`. Every lifecycle read, write, and bulk-complete must scope to both `label` **and** `project`. `get_sprint_children(parent_label, project)` and `children_of(parent_label, ..., project)` filter by project so a lineage never pulls children from another project sharing the base label; the label-only path is a fallback that logs a warning when it fires. The target schema enforces `PRIMARY KEY (label, project)`; until that migration lands `project` acts as a soft scope on reads. **Historical incident (sprint-66):** before the key was enforced, `ON CONFLICT(label) DO UPDATE` let perf-coach's `sprint-66` overwrite commander's row and orphan its `66.x` children — repaired by `scripts/repair_sprint_collisions.py --apply` (restores the base row from plan.json / state.json / agent_runs without touching the surviving row); regression-guarded by `tests/test_sprint_collision_regression.py`. See `docs/architecture/sprint-lifecycle.md` § Composite-Key Invariant.
+
+**Legacy-row backfill (issue #1460).** `_backfill_sprint_project()` (run inside `_create_sprint_lifecycle_tables`) fills empty `sprints.project` / `sprint_history.project` rows. Per label it resolves project via (1) `agent_runs.project` for a matching `sprint_label`, else (2) a disk walk for `.commander/sprints/<label>-plan.json` / `<label>-state.json` under each project root in `projects.json`, else (3) leaves it empty and logs a warning. Idempotent — only touches rows where `project = '' OR project IS NULL`. Also runnable as `scripts/backfill_sprint_project.py`.
 
 **Run-artifact columns (issue #1160).** `sprints` also carries the ingested run artifact, written by `ingest_sprint_run_artifact()` at end-of-run and on lazy ingest: `issues_json`, `tokens`, `wall_clock_secs`, `reconciliation_json`, `summary_issue_url`, `summary_path`, `pr_number`, `post_sprint_json`, `estimate_accuracy`, `run_ingested_at`. The Sprint History / summary read path reads these from SQLite only — no disk fallback (issue #1161); on a cache miss it triggers a lazy ingest and returns the ingested row rather than reading raw disk (issue #1160).
 
-**Denormalized summary counts (issues #1162, #1163).** `summary_settled_done`, `summary_uat_count`, `summary_failure_count` — all `INTEGER NOT NULL DEFAULT 0`. Materialized on run finish so the finish-card / history panes render counts without recomputation. The reconcile job repairs stale counts via `update_sprint_run_counts(label, issues_json, settled_done, uat_count, failure_count, project=...)`, which overwrites `issues_json` plus the three count columns in one write scoped to `(label, project)`; it is a no-op when `project` is blank (issue #1463).
+**Denormalized summary counts (issues #1162, #1163).** `summary_settled_done`, `summary_uat_count`, `summary_failure_count` — all `INTEGER NOT NULL DEFAULT 0`. Materialized on run finish so the finish-card / history panes render counts without recomputation. The reconcile job repairs stale counts via `update_sprint_run_counts(label, issues_json, settled_done, uat_count, failure_count)`, which overwrites `issues_json` plus the three count columns in one write.
 
 **DB is the sole source of truth for lifecycle state (sprint 74.2).** plan.json / labels / PID files are no longer read as state.
 
@@ -601,3 +605,33 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
+
+### Sprint label collision audit (issues #1461, #1464, #1465)
+
+The `sprints` table keys rows by `label` alone (`label TEXT PRIMARY KEY`), so two
+projects that reuse a sprint label compete for the same row — an `ON
+CONFLICT(label) DO UPDATE` write from one project clobbers the other's row. This
+sprint adds an audit/repair tool-chain plus project-scoped read paths to contain
+that until a composite `(project, label)` key migration lands.
+
+**Read-path scoping (#1464).** `db.get_sprint_children(parent_label, project=None)`
+and `startup.children_of(parent_label, project_root=None, project=None)` now take an
+optional `project` argument; when provided, child-sprint lookups add `AND project =
+?` so they never match another project's rows. Callers in `startup.py`
+(`_derive_outcome_lifecycle`, `_bulk_complete_unsettled_children`,
+`_bulk_complete_assert_children_completed`, `_merge_steps_for_sprint_chain`,
+`_sprint_merge_chain_pending`) thread the project through. The unscoped fallback
+still works but logs a warning.
+
+**Audit + repair scripts.**
+`scripts/audit_sprint_collisions.py` is read-only: it cross-references `sprints`,
+`sprint_history`, `agent_runs`, and per-clone `plan.json`/`state.json`, prints a
+markdown collision table, and writes the `.commander/runtime/sprint-collisions.json`
+manifest. `scripts/repair_sprint_collisions.py` (`--dry-run` / `--apply`) is a
+surgical fix for the `sprint-66` incident — it restores commander's clobbered base
+row from `plan.json → state.json → agent_runs` without touching perf-coach's row,
+and asserts no stale running row survives.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/debug/sprint-collisions` | Return the `.commander/runtime/sprint-collisions.json` manifest written by `audit_sprint_collisions.py`. Returns `[]` when the manifest has not been generated yet (or is unreadable). Read-only; reads from disk, no DB query |

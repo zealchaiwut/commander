@@ -106,18 +106,18 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _select_coder_backend,
 )
 
-from services.sprint_manager.failures import (  # noqa: E402
+from services.sprint_manager.failures import (  # noqa: E402,F401
     FailureCategory,
-    _build_failure_suffix,
     record_failure,
-    _generate_gate_failure_analysis,
+    _build_failure_suffix,  # re-exported for backward compat
+    _generate_gate_failure_analysis,  # re-exported for backward compat
     _publish_gate_failure_analyses,
-    _gate_failures_log_path,
-    _read_gate_failure_records,
+    _gate_failures_log_path,  # re-exported for backward compat
+    _read_gate_failure_records,  # re-exported for backward compat
     _clear_gate_failure_records,
-    _extract_analysis_json,
-    _post_gate_failure_analysis_comment,
-    _append_gate_failure_to_sprint_log,
+    _extract_analysis_json,  # re-exported for backward compat
+    _post_gate_failure_analysis_comment,  # re-exported for backward compat
+    _append_gate_failure_to_sprint_log,  # re-exported for backward compat
 )
 
 try:

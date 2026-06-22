@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from services.sprint_manager import fill_acceptance_criteria as _fill_ac
 from services.sprint_manager.ticket_spec import parse_ticket_spec as _parse_ticket_spec
 from services.sprint_manager.sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
+from services.sprint_manager.definition_of_ready import check_ticket_readiness as _check_dor
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY as _APP_CONFIG_KEY,
@@ -540,12 +541,14 @@ def get_sprint_preflight(sprint_label: str, project: str):
     xl_suggestions: list[dict] = []
     xl_minutes_saved: int = 0
     strict_xl_gate: bool = False
+    dor_mode: str = "warn"
     try:
         project_root = srv._project_root_path(project)
         _stored = _settings_repo.get_setting(_APP_CONFIG_KEY, project=project)
         _eff = _build_effective_response(_stored)
         xl_threshold: int = int(_eff.get("xl_minute_threshold", 90))
         strict_xl_gate = bool(_eff.get("strict_xl_gate", False))
+        dor_mode = str(_eff.get("definition_of_ready_mode", "warn"))
         dismissed = _xl_svc.load_xl_dismissed(project_root, sprint_label)
         _xl_mins: list[int] = []
         _pf_non_work = getattr(
@@ -578,7 +581,38 @@ def get_sprint_preflight(sprint_label: str, project: str):
     except Exception:
         pass  # XL suggestions are advisory — don't fail the preflight
 
-    return {
+    # ── Definition of Ready readiness check (issue #1486) ────────────────────
+    readiness: dict | None = None
+    if dor_mode != "off":
+        try:
+            ready_nums: list[int] = []
+            not_ready_entries: list[dict] = []
+            _pf_non_work = getattr(
+                srv,
+                "_PF_NON_WORK",
+                {"sprint-summary", "docs", "documentation"},
+            )
+            for iss in sprint_issues:
+                label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+                if label_names & _pf_non_work:
+                    continue
+                spec = _parse_ticket_spec(iss.get("body") or "")
+                _dor_proj_root = srv._project_root_path(project)
+                _dor_est_dir = srv._commander_dir(_dor_proj_root) / "estimates"
+                resolved = srv._resolve_issue_estimate(iss, _dor_est_dir)
+                is_ready_flag, missing_reasons = _check_dor(spec, resolved)
+                if is_ready_flag:
+                    ready_nums.append(iss["number"])
+                else:
+                    not_ready_entries.append({
+                        "number": iss["number"],
+                        "missing": missing_reasons,
+                    })
+            readiness = {"ready": ready_nums, "not_ready": not_ready_entries}
+        except Exception:
+            pass  # DoR is advisory — don't fail preflight
+
+    response: dict = {
         "ok": True,
         "sprint_label": sprint_label,
         "project": project,
@@ -591,4 +625,8 @@ def get_sprint_preflight(sprint_label: str, project: str):
         "xl_suggestions": xl_suggestions,
         "xl_minutes_saved": xl_minutes_saved,
         "strict_xl_gate": strict_xl_gate,
+        "dor_mode": dor_mode,
     }
+    if readiness is not None:
+        response["readiness"] = readiness
+    return response

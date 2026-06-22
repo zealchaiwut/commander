@@ -7,7 +7,6 @@ logic lives in the sibling ``system_service`` module.
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from services.logging import log as _slog
 

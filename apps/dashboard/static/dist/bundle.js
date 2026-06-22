@@ -3413,7 +3413,9 @@ Replace the existing draft (${data.existing_label})?`
     _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
-      clearLog: true
+      clearLog: true,
+      showDone: true
+      // Done button stays disabled until the run settles
     });
     _smgmtBoardLog("Starting per-step complete (deepest child first)\u2026", "step");
     try {
@@ -3442,17 +3444,24 @@ Replace the existing draft (${data.existing_label})?`
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
       _smgmtBoardLog("\u2713 Complete finished", "ok");
-      _smgmtBoardUnlock();
-      _smgmtShowToast(`${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`);
-    } catch (e) {
-      _smgmtBoardLog(`\u2717 ${e.message}`, "err");
-      _smgmtBoardHalt(
-        "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
-        () => {
+      _smgmtBoardFinish({
+        ok: true,
+        message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
+        onDone: () => {
           loadSprintMgmt().catch(() => {
           });
         }
-      );
+      });
+    } catch (e) {
+      _smgmtBoardLog(`\u2717 ${e.message}`, "err");
+      _smgmtBoardFinish({
+        ok: false,
+        message: "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
+        onDone: () => {
+          loadSprintMgmt().catch(() => {
+          });
+        }
+      });
     }
   }
 
@@ -4680,7 +4689,7 @@ This will close the issue on GitHub. This cannot be undone.`))
       alert("Failed to delete issue: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock2();
+      _smgmtBoardUnlock();
     }
   }
   async function _smgmtMoveSelectedTo(targetLabel) {
@@ -4723,7 +4732,7 @@ ${data.errors.join("\n")}`);
       _smgmtShowToast("Failed to move tickets: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock2();
+      _smgmtBoardUnlock();
     }
   }
   function _smgmtTicketDragStart(event, issueNum, fromSprint) {
@@ -5015,7 +5024,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -5048,7 +5057,7 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number}: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     }
   }
@@ -5199,7 +5208,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets to backlog: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -5229,7 +5238,7 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     }
   }
@@ -5279,6 +5288,14 @@ ${data.errors.join("\n")}`);
     } else if (!showProgress) {
       _smgmtBoardProgress2(0, 1);
     }
+    if (opts && opts.showDone) {
+      const doneEl = document.getElementById("smgmt-op-done");
+      if (doneEl) {
+        doneEl.hidden = false;
+        doneEl.style.cssText = "margin-top:12px;text-align:center";
+        doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn" disabled>Done</button>';
+      }
+    }
   }
   function _smgmtBoardProgress2(done, total) {
     if (_smgmtBoardOverlayHasProgress) {
@@ -5316,7 +5333,7 @@ ${data.errors.join("\n")}`);
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   }
-  function _smgmtBoardUnlock2() {
+  function _smgmtBoardUnlock() {
     _smgmtMoveLock = false;
     _smgmtBoardOverlayHasProgress = false;
     const overlay = document.getElementById("smgmt-move-overlay");
@@ -5351,6 +5368,67 @@ ${data.errors.join("\n")}`);
     _smgmtBoardProgress2(0, 1);
     if (_arInterval > 0)
       _smgmtArStartTicker();
+  }
+  function _smgmtBoardFinish2(opts) {
+    opts = opts || {};
+    const ok = opts.ok !== false;
+    const message = opts.message || (ok ? "Done." : "Stopped.");
+    const onDone = opts.onDone;
+    _smgmtArStopTicker();
+    const spinner = document.getElementById("smgmt-move-spinner");
+    if (spinner)
+      spinner.style.display = "none";
+    const overlay = document.getElementById("smgmt-move-overlay");
+    if (overlay)
+      overlay.setAttribute("aria-busy", "false");
+    if (_smgmtBoardOverlayHasProgress) {
+      patchProgressActivity(
+        "smgmt-op-pa-host",
+        { status: ok ? "done" : "failed", current: message },
+        { id: BOARD_OVERLAY_PA_ID }
+      );
+    }
+    const msgEl = document.getElementById("smgmt-move-overlay-msg");
+    const errEl = document.getElementById("smgmt-op-error");
+    if (ok) {
+      if (msgEl)
+        msgEl.textContent = message;
+      if (errEl) {
+        errEl.hidden = true;
+        errEl.textContent = "";
+      }
+    } else {
+      if (errEl) {
+        errEl.textContent = message;
+        errEl.hidden = false;
+        errEl.style.cssText = "color:var(--red,#e5484d);font-size:13px;margin-top:10px;text-align:left;white-space:pre-wrap;max-height:160px;overflow:auto";
+      }
+    }
+    const doneEl = document.getElementById("smgmt-op-done");
+    if (doneEl) {
+      doneEl.hidden = false;
+      doneEl.style.cssText = "margin-top:12px;text-align:center";
+      let btn = document.getElementById("smgmt-op-done-btn");
+      if (!btn) {
+        doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn">Done</button>';
+        btn = document.getElementById("smgmt-op-done-btn");
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.onclick = () => {
+          _smgmtBoardUnlock();
+          if (typeof onDone === "function") {
+            try {
+              onDone();
+            } catch (_) {
+            }
+          }
+        };
+      }
+    }
+  }
+  function _smgmtBoardHalt(message, onDone) {
+    _smgmtBoardFinish2({ ok: false, message, onDone });
   }
 
   // apps/dashboard/static/src/sprint-board/board-render.js
@@ -7711,9 +7789,11 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
   globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
   globalThis._smgmtBoardLock = _smgmtBoardLock2;
-  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock2;
+  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
   globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
   globalThis._smgmtBoardLog = _smgmtBoardLog2;
+  globalThis._smgmtBoardFinish = _smgmtBoardFinish2;
+  globalThis._smgmtBoardHalt = _smgmtBoardHalt;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
   globalThis._smgmtRender = _smgmtRender2;

@@ -755,6 +755,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
     _backfill_child_parent_labels(conn)
+    _backfill_sprint_project(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -822,6 +823,98 @@ def _backfill_child_parent_labels(conn: sqlite3.Connection) -> None:
            AND label GLOB 'sprint-[0-9]*.[0-9]*'
         """
     )
+
+
+def _backfill_sprint_project(
+    conn: sqlite3.Connection,
+    *,
+    projects_file: "Path | None" = None,
+    projects_base: "Path | None" = None,
+) -> None:
+    """Backfill empty sprints.project (and sprint_history.project) rows (issue #1460).
+
+    Resolution order per label:
+      1. agent_runs.project WHERE sprint_label matches — fastest, most reliable.
+      2. Walk project roots derived from projects.json; look for
+         .commander/sprints/<label>-plan.json or <label>-state.json.
+      3. Leave empty and emit logging.warning with the label.
+
+    Idempotent: only touches rows where project = '' or IS NULL.
+    """
+    _tables = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "sprints" not in _tables:
+        return
+
+    # Resolve projects_file / projects_base defaults.
+    if projects_file is None:
+        projects_file = Path(__file__).parent / "projects.json"
+    if projects_base is None:
+        projects_base = Path.home() / "dev"
+
+    # Load project list for disk-walk strategy.
+    repos: list[str] = []
+    try:
+        if projects_file.exists():
+            for p in json.loads(projects_file.read_text()):
+                repo = p.get("repo", "")
+                if repo:
+                    repos.append(repo)
+    except Exception:
+        pass
+
+    def _resolve_label(label: str) -> tuple[str, str]:
+        """Return (project, source) for one label, or ('', 'UNRESOLVED')."""
+        # Strategy 1: agent_runs
+        if "agent_runs" in _tables:
+            row = conn.execute(
+                "SELECT project FROM agent_runs "
+                "WHERE sprint_label = ? AND project IS NOT NULL AND project != '' "
+                "LIMIT 1",
+                (label,),
+            ).fetchone()
+            if row and row[0]:
+                return row[0], "agent_runs"
+
+        # Strategy 2: disk walk
+        for repo in repos:
+            slug = repo.split("/")[-1] if "/" in repo else repo
+            sprint_dir = projects_base / slug / ".commander" / "sprints"
+            if (sprint_dir / f"{label}-plan.json").exists():
+                return repo, "disk"
+            if (sprint_dir / f"{label}-state.json").exists():
+                return repo, "disk"
+
+        return "", "UNRESOLVED"
+
+    def _backfill_table(table: str) -> None:
+        if table not in _tables:
+            return
+        empty_rows = conn.execute(
+            f"SELECT label FROM {table} WHERE project = '' OR project IS NULL"
+        ).fetchall()
+        for row in empty_rows:
+            label = row[0]
+            project, source = _resolve_label(label)
+            if project:
+                conn.execute(
+                    f"UPDATE {table} SET project = ? "
+                    f"WHERE label = ? AND (project = '' OR project IS NULL)",
+                    (project, label),
+                )
+            else:
+                logging.warning(
+                    "backfill_sprint_project: label=%r is UNRESOLVED — "
+                    "no agent_runs row and no disk file found; leaving project empty",
+                    label,
+                )
+
+    _backfill_table("sprints")
+    _backfill_table("sprint_history")
 
 
 def ingest_sprint_run_artifact(

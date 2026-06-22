@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,7 +19,7 @@ _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "services" / "sprint_manager"))
 
-from services.sprint_manager.sprint_manager import (
+from services.sprint_manager.sprint_manager import (  # noqa: E402
     _build_sprint_dag_layers,
     _compute_dispatch_levels,
     _load_sprint_plan,
@@ -193,7 +191,7 @@ def test_build_sprint_dag_layers_missing_estimates(monkeypatch):
 def test_build_sprint_dag_layers_unavailable(monkeypatch):
     """If dag_builder unavailable, return None."""
     monkeypatch.setattr(
-        "services.sprint_manager.sprint_manager._DAG_BUILDER_AVAILABLE",
+        "services.sprint_manager.pipeline._DAG_BUILDER_AVAILABLE",
         False,
     )
     issues = _issues(1, 2)

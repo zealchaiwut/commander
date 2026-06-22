@@ -2128,7 +2128,7 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
-      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
+      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed" title="Actual time spent">${Math.round(elapsedSecs / 60)}m</span>` : ""}
       ${_smgmtTicketEstHtml(ticket)}
       ${planningAgentHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>

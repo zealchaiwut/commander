@@ -357,6 +357,14 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
+def _build_design_block(*args, **kwargs):
+    """Proxy to sprint_manager._build_design_block (issue #1488)."""
+    _f = _lookup_in_sm("_build_design_block", _build_design_block)
+    if _f is not None:
+        return _f(*args, **kwargs)
+    return ""
+
+
 def _build_failure_suffix(*args, **kwargs):
     """Proxy to sprint_manager._build_failure_suffix."""
     _f = _lookup_in_sm("_build_failure_suffix", _build_failure_suffix)
@@ -607,6 +615,7 @@ def _dispatch_coder(
     # Load estimate early for paths injection (issue #1402) and model routing below.
     _coder_estimate = _load_estimate(issue_num)
     _paths_block = _build_estimate_paths_block(_coder_estimate)
+    _design_block = _build_design_block(issue_num, eff_repo, cwd_path)
 
     # Build prompt
     if cfg and cfg.coder_prompt_template:
@@ -732,6 +741,10 @@ def _dispatch_coder(
         sys.stdout.write(f"  [estimate-paths] #{issue_num}: injecting paths into coder prompt\n{_paths_block}\n")
     else:
         sys.stdout.write(f"  [estimate-paths] #{issue_num}: no estimate file — prompt unchanged\n")
+    if _design_block:
+        sys.stdout.write(f"  [design-context] #{issue_num}: injecting design block ({len(_design_block)} chars)\n")
+    else:
+        sys.stdout.write(f"  [design-context] #{issue_num}: no design block injected\n")
     sys.stdout.flush()
 
     # Build subprocess environment first so ANTHROPIC_API_KEY handling is backend-aware.
@@ -760,14 +773,15 @@ def _dispatch_coder(
                 worktree=str(cwd_path),
             )
         coder_persona = _load_agent_persona("coder", cwd_path)
+        _cline_base = (_design_block + "\n\n" + prompt) if _design_block else prompt
         if _paths_block and coder_persona:
-            full_prompt = _paths_block + "\n\n" + coder_persona + "\n\n" + prompt
+            full_prompt = _paths_block + "\n\n" + coder_persona + "\n\n" + _cline_base
         elif _paths_block:
-            full_prompt = _paths_block + "\n\n" + prompt
+            full_prompt = _paths_block + "\n\n" + _cline_base
         elif coder_persona:
-            full_prompt = coder_persona + "\n\n" + prompt
+            full_prompt = coder_persona + "\n\n" + _cline_base
         else:
-            full_prompt = prompt
+            full_prompt = _cline_base
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
     else:
@@ -780,7 +794,8 @@ def _dispatch_coder(
         coder_persona = _load_agent_persona("coder", cwd_path)
         if coder_persona:
             cmd += ["--append-system-prompt", coder_persona]
-        _p_prompt = (_paths_block + "\n\n" + prompt) if _paths_block else prompt
+        _cc_base = (_design_block + "\n\n" + prompt) if _design_block else prompt
+        _p_prompt = (_paths_block + "\n\n" + _cc_base) if _paths_block else _cc_base
         cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)

@@ -786,7 +786,7 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
     )
 
 
-@router.get("/api/sprints/{sprint_label}/state")
+@router.get("/api/sprints/{sprint_label}/state-timing")
 def get_sprint_state_timing(sprint_label: str, project: str):
     """Return timing data from sprint-N-state.json for duration display (issue #212).
 

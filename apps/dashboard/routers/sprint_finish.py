@@ -80,7 +80,7 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
         else:
             sprint_issues = srv._get_sprint_issues(repo, base_label)
             seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-            for child_label in srv.children_of(base_label, project_root):
+            for child_label in srv.children_of(base_label, project_root, project=repo):
                 try:
                     for iss in srv._get_sprint_issues(repo, child_label):
                         if iss["number"] not in seen_nums:
@@ -167,7 +167,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 
-    unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label)
+    unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label, project=repo)
     children_all_completed = not unsettled_children
     if not children_all_completed:
         raise HTTPException(
@@ -180,12 +180,74 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     merge_steps = srv._bulk_complete_merge_steps(project_root, repo, base_label)
 
+    # Per-step Complete order: deepest child first, base last. The modal loops
+    # complete-step over this (idempotent), so already-merged-but-not-completed
+    # members still get finalised — not just the ones with unmerged commits.
+    complete_order = sorted(
+        (lbl for lbl in all_labels if lbl != base_label),
+        key=srv._sprint_label_sub_index,
+        reverse=True,
+    ) + [base_label]
+
+    ticket_rows = srv._bulk_complete_ticket_rows(sprint_issues)
+
+    # Per-member status for the modal's chain view: which steps are already done
+    # (merged ✓ / completed ✓) vs pending ○. merged = branch is NOT a pending
+    # merge step; completed = lifecycle DB says so.
+    pending_heads = {s.get("head") for s in merge_steps}
+    members = []
+    for lbl in complete_order:
+        is_base = lbl == base_label
+        parent = "develop" if is_base else srv._sprint_merge_parent_label(project_root, lbl)
+        branch = srv._sprint_branch_name(lbl)
+        completed = False
+        try:
+            row = srv.db.get_sprint(lbl, project=repo)
+            completed = bool(row) and srv.db.canonical_lifecycle(row.get("state") or "") == "completed"
+        except Exception:
+            pass
+        members.append({
+            "label": lbl,
+            "parent": parent,
+            "is_base": is_base,
+            "merged": branch not in pending_heads,
+            "completed": completed,
+        })
+
+    # Tickets grouped by the sprint that ran them (deepest child wins on reruns;
+    # leftovers fall to the base). Lets the modal break the close-list down by
+    # child sprint instead of one flat "close all N".
+    by_num = {t["number"]: t for t in ticket_rows}
+    assigned: set[int] = set()
+    tickets_by_sprint: list[dict] = []
+    for lbl in complete_order:
+        nums: list[int] = []
+        try:
+            for r in srv.db.agent_runs_for_sprint(lbl, project=repo):
+                n = r.get("issue_number")
+                if n is None:
+                    continue
+                n = int(n)
+                if n in by_num and n not in assigned:
+                    nums.append(n)
+                    assigned.add(n)
+        except Exception:
+            pass
+        if nums:
+            tickets_by_sprint.append({"label": lbl, "tickets": [by_num[n] for n in nums]})
+    leftover = [t for t in ticket_rows if t["number"] not in assigned]
+    if leftover:
+        tickets_by_sprint.append({"label": base_label, "tickets": leftover})
+
     return {
-        "all_tickets": srv._bulk_complete_ticket_rows(sprint_issues),
+        "all_tickets": ticket_rows,
         "member_labels": all_labels,
         "base_label": base_label,
         "child_count": len(all_labels) - 1,
         "merge_steps": merge_steps,
+        "complete_order": complete_order,
+        "members": members,
+        "tickets_by_sprint": tickets_by_sprint,
     }
 
 
@@ -226,7 +288,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     repo = f"{owner}/{repo_name}"
     project_root = srv._project_root_path(repo)
     base_label = srv._sprint_label_base(label)
-    child_labels = srv.children_of(base_label, project_root)
+    child_labels = srv.children_of(base_label, project_root, project=repo)
     is_child = srv._is_child_sprint_label(label)
     all_labels = [base_label, *child_labels]
     finish_labels = [label] if is_child else all_labels
@@ -372,7 +434,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     # Cheap local child-state gate first — a 409 here avoids N+1 GitHub calls
     # in _bulk_complete_collect_issues. Silently passes when no children exist,
     # so collect_issues still raises its own 400 for the "no child sprints" case.
-    srv._bulk_complete_assert_children_completed(project_root, base_label)
+    srv._bulk_complete_assert_children_completed(project_root, base_label, project=repo)
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 
@@ -425,6 +487,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 lbl, repo, "completed",
                 ended_at=now,
                 end_reason="bulk_complete",
+                actor="reconcile",
             )
             completed += 1
         except Exception as exc:
@@ -466,3 +529,119 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     }
     status_code = 207 if errors else 200
     return JSONResponse(content=result, status_code=status_code)
+
+
+class CompleteStepBody(BaseModel):
+    confirmed: bool = True
+
+
+@router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/complete-step")
+def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteStepBody):
+    """Complete ONE lineage step and finalise that sprint.
+
+    Merges this sprint into its IMMEDIATE parent (or develop for the base),
+    closes this sprint's summary issue, and marks it completed. Single "Complete"
+    calls this once (e.g. 94.4 → 94.3); Bulk complete loops it deepest-first, then
+    runs the base (94 → develop). The base step also closes the lineage's work
+    tickets (they ship to develop here).
+
+    Idempotent — an already-merged step skips the merge; an already-completed
+    sprint is a no-op. On a merge conflict returns 409 so the caller STOPS;
+    resolve the conflict and re-run (merged/closed steps are skipped on resume).
+    """
+    if not body.confirmed:
+        raise HTTPException(400, detail="Request must have confirmed=true")
+    srv = _server()
+    if not srv._SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    project_root = srv._project_root_path(repo)
+
+    if srv._is_sprint_running(project_root, label):
+        raise HTTPException(409, detail=f"Sprint {label} is currently running — complete after it finishes")
+
+    is_base = not srv._is_child_sprint_label(label)
+    head = srv._sprint_branch_name(label)
+    if is_base:
+        base = "develop"
+        target_name = "develop"
+    else:
+        parent_label = srv._sprint_merge_parent_label(project_root, label)
+        base = srv._sprint_branch_name(parent_label)
+        target_name = parent_label
+
+    # 1) Merge this step (skip if already merged). Conflict → 409, stop & resume.
+    merged = False
+    if srv._branch_has_unmerged_commits(repo, head, base):
+        ok, detail, _pr = srv._gh_merge_branch_via_pr(
+            repo, head, base,
+            f"Merge Sprint: {label} → {target_name}",
+            delete_branch=not is_base,
+        )
+        if not ok:
+            raise HTTPException(
+                409,
+                detail=f"Merge {label} → {target_name} failed — resolve the conflict and re-run: {detail}",
+            )
+        merged = True
+
+    # 2) Close this sprint's summary issue(s).
+    closed_summary: list[int] = []
+    try:
+        for iss in srv._open_summary_issues_for_labels(repo, [label]):
+            try:
+                srv.github_client.close_issue(iss["number"], repo_name=repo, reason="completed")
+                closed_summary.append(iss["number"])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3) Base step ships to develop → close the lineage's work tickets too.
+    closed_tickets: list[int] = []
+    if is_base:
+        try:
+            _labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, label)
+            for iss in sprint_issues:
+                try:
+                    srv.github_client.close_issue(iss["number"], repo_name=repo, reason="completed")
+                    closed_tickets.append(iss["number"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # 4) Mark this sprint completed. actor="reconcile" so a superseded ancestor
+    # still in needs_rework (whose lineage merged) can complete via the B2 edge.
+    # _sprint_db_set_state returns False on a silent state-machine rejection —
+    # surface it instead of reporting a false success.
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        srv._plan_json_set_state(project_root, label, "completed", ended_at=now, end_reason="merge_sprint")
+        db_ok = srv._sprint_db_set_state(
+            label, repo, "completed", ended_at=now, end_reason="merge_sprint", actor="reconcile",
+        )
+    except Exception as exc:
+        raise HTTPException(500, detail=f"merged {label} but failed to mark completed: {exc}")
+    if db_ok is False:
+        raise HTTPException(
+            500,
+            detail=f"merged {label} but the DB transition to completed was rejected by the "
+                   f"state machine (illegal edge) — lifecycle left unchanged",
+        )
+
+    for _k in ("open_issues_body:", "open_issues:", "issues:", "recent_closed:", "summary_issues:"):
+        try:
+            srv.github_client.invalidate(_k)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "label": label,
+        "merged_into": target_name,
+        "merged": merged,
+        "closed_summary": closed_summary,
+        "closed_tickets": closed_tickets,
+    }

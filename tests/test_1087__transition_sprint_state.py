@@ -47,14 +47,14 @@ def fresh_db(tmp_path):
     _db.DB_PATH = original
 
 
-def _set_state_direct(db, label: str, state: str) -> None:
+def _set_state_direct(db, label: str, state: str, project: str = "") -> None:
     """Bypass the guard and write state directly — only for test setup."""
     with db.get_conn() as conn:
         db._create_sprint_lifecycle_tables(conn)
         conn.execute(
-            "INSERT INTO sprints (label, state) VALUES (?, ?) "
-            "ON CONFLICT(label) DO UPDATE SET state = excluded.state",
-            (label, state),
+            "INSERT INTO sprints (label, project, state) VALUES (?, ?, ?) "
+            "ON CONFLICT(label, project) DO UPDATE SET state = excluded.state",
+            (label, project, state),
         )
         conn.commit()
 
@@ -338,5 +338,7 @@ def test_ac8_no_new_columns_in_sprints(fresh_db):
         "summary_path", "pr_number", "reconciliation_json", "tokens",
         "issues_json", "summary_issue_url", "post_sprint_json",
         "estimate_accuracy", "wall_clock_secs", "run_ingested_at",
+        # Run-artifact denormalized counts added later by lifecycle P3:
+        "summary_settled_done", "summary_uat_count", "summary_failure_count",
     }
     assert not issue_new_cols, f"new columns added by this issue: {issue_new_cols}"

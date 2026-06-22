@@ -21,6 +21,50 @@ def _stack(patches):
             p.stop()
 
 
+class _MultiPatch:
+    """Start/stop several unittest.mock patches as one (compatible with _stack)."""
+
+    def __init__(self, patches):
+        self._patches = patches
+
+    def start(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def stop(self):
+        for p in self._patches:
+            p.stop()
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
+        return False
+
+
+def _dual(name, **kw):
+    """Patch a helper on BOTH the server and startup namespaces.
+
+    server.py re-exports startup.py's extracted helpers (issue #1267) as separate
+    name bindings. A route reads ``server.<name>`` while an internal startup call
+    reads ``startup.<name>`` — different bindings, so patching only one is
+    ignored on the other code path. Patch whichever modules define the name.
+    """
+    import importlib
+
+    patches = []
+    for mod_name in ("server", "startup"):
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            continue
+        if hasattr(mod, name):
+            patches.append(patch(f"{mod_name}.{name}", **kw))
+    return _MultiPatch(patches)
+
+
 def _import_server():
     import sys
 
@@ -61,13 +105,13 @@ def _bulk_complete(srv, tmp_path, owner="owner", repo_name="proj-bc", label="spr
         return [summary_issue]
 
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._is_sprint_running", return_value=False),
-        patch("server._bulk_complete_merge_pending", return_value=[]),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch("server._get_sprint_issues", side_effect=fake_get_issues),
-        patch("server._open_summary_issues_for_labels", side_effect=fake_summary),
-        patch("server._plan_json_set_state", return_value=None),
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_is_sprint_running", return_value=False),
+        _dual("_bulk_complete_merge_pending", return_value=[]),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual("_get_sprint_issues", side_effect=fake_get_issues),
+        _dual("_open_summary_issues_for_labels", side_effect=fake_summary),
+        _dual("_plan_json_set_state", return_value=None),
         patch.object(srv.github_client, "close_issue", return_value=None),
         patch.object(srv.github_client, "invalidate", return_value=None),
     ]
@@ -90,7 +134,7 @@ def test_bulk_complete_preview_requires_children(srv, tmp_path):
     project_root = tmp_path / "empty"
     (project_root / ".commander" / "sprints").mkdir(parents=True)
 
-    with patch("server._project_root_path", return_value=project_root):
+    with _dual("_project_root_path", return_value=project_root):
         client = TestClient(srv.app)
         resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
     assert resp.status_code == 400
@@ -120,14 +164,14 @@ def test_bulk_complete_mirrors_completed_into_lifecycle_db(srv, tmp_path):
         db_calls.append((label, project, state, extra))
 
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._is_sprint_running", return_value=False),
-        patch("server._bulk_complete_merge_pending", return_value=[]),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._open_summary_issues_for_labels", return_value=[]),
-        patch("server._plan_json_set_state", return_value=None),
-        patch("server._sprint_db_set_state", side_effect=capture_db),
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_is_sprint_running", return_value=False),
+        _dual("_bulk_complete_merge_pending", return_value=[]),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_open_summary_issues_for_labels", return_value=[]),
+        _dual("_plan_json_set_state", return_value=None),
+        _dual("_sprint_db_set_state", side_effect=capture_db),
         patch.object(srv.github_client, "close_issue", return_value=None),
         patch.object(srv.github_client, "invalidate", return_value=None),
     ]
@@ -154,12 +198,12 @@ def test_bulk_complete_preview_lists_summary_category(srv, tmp_path):
     (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "completed"}))
 
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
-        patch(
-            "server._open_summary_issues_for_labels",
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual("_check_branch_merge_conflict", return_value=(False, "", [])),
+        _dual(
+            "_open_summary_issues_for_labels",
             return_value=[{
                 "number": 99,
                 "title": "Sprint 68 Executive Summary",
@@ -203,12 +247,12 @@ def test_bulk_complete_preview_includes_merge_steps(srv, tmp_path):
     ]
 
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
-        patch("server._open_summary_issues_for_labels", return_value=[]),
-        patch("server._bulk_complete_merge_steps", return_value=fake_steps),
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual("_check_branch_merge_conflict", return_value=(False, "", [])),
+        _dual("_open_summary_issues_for_labels", return_value=[]),
+        _dual("_bulk_complete_merge_steps", return_value=fake_steps),
     ]
     with _stack(patches):
         client = TestClient(srv.app)
@@ -228,15 +272,15 @@ def test_bulk_complete_blocks_when_merge_chain_pending(srv, tmp_path):
 
     close_mock = MagicMock(return_value=None)
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._is_sprint_running", return_value=False),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch(
-            "server._bulk_complete_merge_pending",
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_is_sprint_running", return_value=False),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual(
+            "_bulk_complete_merge_pending",
             return_value=["sprint/sprint-68.1 → sprint/sprint-68", "sprint/sprint-68 → develop"],
         ),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._open_summary_issues_for_labels", return_value=[]),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_open_summary_issues_for_labels", return_value=[]),
         patch.object(srv.github_client, "close_issue", close_mock),
     ]
     with _stack(patches):
@@ -261,11 +305,11 @@ def test_bulk_complete_blocks_when_children_not_completed(srv, tmp_path):
 
     close_mock = MagicMock(return_value=None)
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._is_sprint_running", return_value=False),
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_is_sprint_running", return_value=False),
         patch("server.db.get_sprint", return_value=None),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._open_summary_issues_for_labels", return_value=[]),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_open_summary_issues_for_labels", return_value=[]),
         patch.object(srv.github_client, "close_issue", close_mock),
     ]
     with _stack(patches):
@@ -288,7 +332,7 @@ def test_bulk_complete_preview_blocks_when_children_not_completed(srv, tmp_path)
     sprints_dir.mkdir(parents=True)
     (sprints_dir / "sprint-68.1-plan.json").write_text(json.dumps({"state": "running"}))
 
-    with patch("server._project_root_path", return_value=project_root), \
+    with _dual("_project_root_path", return_value=project_root), \
          patch("server.db.get_sprint", return_value=None):
         client = TestClient(srv.app)
         resp = client.get("/api/projects/owner/proj/sprints/sprint-68/bulk-complete-preview")
@@ -318,7 +362,7 @@ def test_outcome_404_for_dry_run_state_only(srv, tmp_path):
         json.dumps({"state": "needs_rework", "end_reason": "process lost"})
     )
 
-    with patch("server._project_root_path", return_value=project_root):
+    with _dual("_project_root_path", return_value=project_root):
         client = TestClient(srv.app)
         resp = client.get(
             "/api/sprints/sprint-68.2/outcome?project=owner/proj",
@@ -342,12 +386,12 @@ def test_bulk_complete_preview_allows_ready_to_merge_child_chain(srv, tmp_path):
     )
 
     patches = [
-        patch("server._project_root_path", return_value=project_root),
-        patch("server._get_sprint_issues", return_value=[]),
-        patch("server._bulk_complete_unsettled_children", return_value=[]),
-        patch("server._check_branch_merge_conflict", return_value=(False, "", [])),
-        patch("server._open_summary_issues_for_labels", return_value=[]),
-        patch("server._merge_steps_for_sprint_chain", return_value=[]),
+        _dual("_project_root_path", return_value=project_root),
+        _dual("_get_sprint_issues", return_value=[]),
+        _dual("_bulk_complete_unsettled_children", return_value=[]),
+        _dual("_check_branch_merge_conflict", return_value=(False, "", [])),
+        _dual("_open_summary_issues_for_labels", return_value=[]),
+        _dual("_merge_steps_for_sprint_chain", return_value=[]),
         patch(
             "server.db.get_sprint",
             side_effect=lambda lbl: (
@@ -379,7 +423,7 @@ def test_merge_steps_use_plan_parent_for_nested_child(srv, tmp_path):
             ("sprint/sprint-58", "develop"),
         }
 
-    with patch("server._branch_has_unmerged_commits", side_effect=fake_unmerged):
+    with _dual("_branch_has_unmerged_commits", side_effect=fake_unmerged):
         steps = srv._merge_steps_for_sprint_chain(project_root, "owner/repo", "sprint-58")
 
     assert [s["label"] for s in steps] == [
@@ -397,7 +441,7 @@ def test_finish_merge_steps_child_targets_plan_parent(srv, tmp_path):
         json.dumps({"state": "ready_to_merge", "parent": "sprint-58.1"})
     )
 
-    with patch("server._branch_has_unmerged_commits", return_value=True):
+    with _dual("_branch_has_unmerged_commits", return_value=True):
         steps = srv._finish_merge_steps(project_root, "owner/repo", "sprint-58.2")
 
     assert len(steps) == 1

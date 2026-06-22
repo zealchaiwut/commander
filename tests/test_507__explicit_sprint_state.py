@@ -29,7 +29,9 @@ sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 
 from fastapi.testclient import TestClient
 
-from apps.dashboard import server
+# Import the bare `server` module (not apps.dashboard.server) so monkeypatches
+# reach the same module the routers' _server() returns at request time.
+import server  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

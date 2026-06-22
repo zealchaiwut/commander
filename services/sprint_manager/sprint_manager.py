@@ -473,6 +473,24 @@ def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
         return False
 
 
+def _immediate_parent_branch(label: str, cfg: Optional["SprintConfig"] = None) -> str:
+    """Branch a child sprint promotes into at run-end: its plan.json ``parent``
+    (the immediate parent in the rerun chain, e.g. 94.2 → 94.1), falling back to
+    the base sprint branch when no parent is recorded. This keeps the run-end PR
+    on the SAME immediate-parent chain that Complete / Bulk complete merge, so
+    they reuse one PR instead of creating a conflicting child→base fan-in PR.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        parent = (raw.get("parent") or "").strip() if isinstance(raw, dict) else ""
+        if parent and re.match(r"^sprint-\d+(\.\d+)*$", parent):
+            return f"sprint/{parent}"
+    except Exception:
+        pass
+    return _base_sprint_branch(label)
+
+
 def _plan_json_set_state_sm(
     label: str,
     state: str,
@@ -2672,7 +2690,13 @@ def run_sprint_preflight(
     # pool of K isolated worktrees for concurrent coder dispatch.
     if not dry_run:
         global _ACTIVE_WORKTREE_POOL
-        _pool_repo_root = Path(cfg.worktree_coder).parent if cfg is not None else REPO_ROOT
+        # The worktree pool runs `git worktree add` with cwd=repo_root, so it MUST
+        # be the coder clone (a real git repo that has the sprint branch). Using
+        # its .parent pointed at the project root — not a git repo in the nested
+        # layout (~/dev/<project>/coder) — so worktree creation failed with
+        # "invalid reference: <sprint-branch>", leaving an empty slot whose missing
+        # PRODUCT.md/DESIGN.md then surfaced as a bogus design_docs_missing failure.
+        _pool_repo_root = Path(cfg.worktree_coder) if cfg is not None else REPO_ROOT
         _pool_commander = (
             discover_commander_dir(cfg.worktree_coder if cfg is not None else None)
         )
@@ -4395,7 +4419,7 @@ def main() -> None:
             sprint_number  = _sprint_number(args.label),
             state          = state,
             repo_name      = eff_repo,
-            pr_base        = _base_sprint_branch(args.label),
+            pr_base        = _immediate_parent_branch(args.label, cfg),
             merge_target   = effective_target,
         )
 

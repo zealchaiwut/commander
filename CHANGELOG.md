@@ -19,6 +19,33 @@ Continuation of the strangler-fig decomposition of the monolithic `services/spri
 - [#1288](https://github.com/zealchaiwut/commander/issues/1288) Extract post-sprint agents to post_sprint.py — 2026-06-21
 - [#1290](https://github.com/zealchaiwut/commander/issues/1290) Extract run_sprint preflight/branch-setup into helper — 2026-06-22
 - [#1291](https://github.com/zealchaiwut/commander/issues/1291) Extract per-ticket loop from run_sprint into helper — 2026-06-22
+## Sprint 94.4
+
+Cross-project sprint isolation. Sprint `label` values are unique only *within* a `project`, so two projects (e.g. `commander` and `perf-coach`) can each own a `sprint-66`; this sprint enforces that `(label, project)` composite-key invariant end to end. All sprint-children reads now scope to project — `get_sprint_children(parent_label, project)` and `children_of(parent_label, …, project)` filter by project (label-only paths kept as a warning-logged fallback), and the outcome, bulk-complete, and merge-chain callers in `startup.py` pass project through, eliminating cross-project lineage leakage. A new `_backfill_sprint_project()` migration (run in `_create_sprint_lifecycle_tables`, also exposed as `scripts/backfill_sprint_project.py`) fills empty `sprints.project` / `sprint_history.project` rows by resolving each label through `agent_runs` → disk plan/state files → warn-and-skip; it is idempotent and only touches empty rows. The historical sprint-66 collision (perf-coach's row overwrote commander's via `ON CONFLICT(label)`, orphaning the `66.x` children) is repaired by `scripts/repair_sprint_collisions.py --apply` and guarded by `tests/test_sprint_collision_regression.py`, with the full invariant documented in `docs/architecture/sprint-lifecycle.md`.
+
+- [#1460](https://github.com/zealchaiwut/commander/issues/1460) Backfill sprints.project for legacy unattributed rows — 2026-06-21
+## Sprint 94.2
+
+Sprint label collision hardening. The `sprints` table keys rows by `label` alone, so two projects that reuse a sprint label (e.g. `sprint-66`) compete for the same row — one project's row clobbers the other via `ON CONFLICT(label) DO UPDATE`. This sprint adds the audit, fix, and read-path scoping to stop that. A read-only auditor (`scripts/audit_sprint_collisions.py`) cross-references `sprints`, `sprint_history`, `agent_runs`, and per-clone `plan.json`/`state.json` to surface every label claimed by more than one project, naming the survivor and each losing project; it prints a markdown table and writes a `.commander/runtime/sprint-collisions.json` manifest, surfaced over `GET /api/debug/sprint-collisions`. All cross-project leakage in the sprint read path is closed by threading a `project` argument through `db.get_sprint_children` and `startup.children_of` (and their callers) so child-sprint lookups scope to one project instead of matching `parent_label` globally; the unscoped path now logs a warning. A surgical repair (`scripts/repair_sprint_collisions.py`, `--dry-run`/`--apply`) restores commander's clobbered `sprint-66` base row from `plan.json → state.json → agent_runs` without touching perf-coach's row, and asserts no stale running row survives.
+
+- [#1461](https://github.com/zealchaiwut/commander/issues/1461) Audit and report sprint label collisions before key migration — 2026-06-21
+## Sprint 94.1
+
+Sprint label collisions across projects are eliminated by migrating the SQLite `sprints` table from a single-column `label` primary key to a **composite `(label, project)` primary key**. A new one-shot migration (`_migrate_sprints_to_composite_pk`), gated on a `_sprint_schema_migrations` version table, rebuilds the table and deduplicates existing rows on `(label, project)` (highest-rowid wins). All sprint DB writes — `transition_sprint_state`, `_set_sprint_terminal`, `update_sprint_run_counts`, `ingest_sprint_run_artifact`, and the `record_sprint_*` helpers — now scope on `(label, project)` (upserting `ON CONFLICT(label, project)`), and all sprint-children reads (`get_sprint_children`, `children_of`, plus the reconcile/finish/merge-chain callers) take an explicit `project` and warn on the label-only fallback, so a running sprint in one project can no longer leak into another's lifecycle. A repair script (`scripts/repair_sprint_collisions.py`) audits and fixes pre-migration `sprint-66` collisions and guards the composite-key invariant.
+
+- [#1462](https://github.com/zealchaiwut/commander/issues/1462) Migrate sprints table to composite (label, project) primary key — 2026-06-21
+- [#1463](https://github.com/zealchaiwut/commander/issues/1463) Scope all sprint DB writes to (label, project) — 2026-06-21
+- [#1464](https://github.com/zealchaiwut/commander/issues/1464) Scope all sprint reads to project, eliminate cross-project leakage — 2026-06-21
+- [#1465](https://github.com/zealchaiwut/commander/issues/1465) Repair sprint-66 collisions and guard composite-key invariant — 2026-06-21
+
+## Sprint 93
+
+Sprint-planning board gains DAG-aware ordering tools. An **Apply DAG Order** button on each planned/draft sprint card (shown only when a DAG preview with levels and no cycles is cached) reorders tickets to follow the dispatch DAG — lower topological levels first, within-level order preserved, unlevelled tickets appended last. The reorder is computed by a new read-only `GET /api/sprints/{sprint_label}/dag-order-preview` endpoint (`compute_dag_order`) that returns the proposed order, a human-readable diff with dependency-edge hints, an `is_noop` flag, and the `partial` flag from `preview-dag`; it returns HTTP 409 on circular dependencies and adds zero GitHub calls. The preview-dag rail surfaces inline fix chips for file conflicts and dependency cycles, and the board now warns when a manual ticket order violates DAG levels (a downstream ticket placed before its upstream dependency) with a one-click auto-fix (`compute_order_violations` / `compute_fix_order_slot`) that slots the offending ticket to the earliest valid position after all its dependencies. Partial preview-dag runs (some tickets unestimated) now display a pre-run checklist on the mini-rail.
+
+- [#1420](https://github.com/zealchaiwut/commander/issues/1420) Add Apply DAG Order button to sprint planning board — 2026-06-20
+- [#1421](https://github.com/zealchaiwut/commander/issues/1421) Add inline conflict/cycle fix chips to preview-dag — 2026-06-20
+- [#1422](https://github.com/zealchaiwut/commander/issues/1422) Warn and auto-fix manual order violating DAG levels — 2026-06-20
+- [#1425](https://github.com/zealchaiwut/commander/issues/1425) Show pre-run checklist on partial preview-dag runs — 2026-06-20
 
 ## Sprint 92
 

@@ -130,3 +130,16 @@ def get_sprint_preview_dag(sprint_label: str, project: str):
     Uses cached data only — adds zero GitHub API calls.
     """
     return sprints_service.preview_dag(sprint_label, project)
+
+
+@router.get("/api/sprints/{sprint_label}/dag-order-preview")
+def get_dag_order_preview(sprint_label: str, project: str):
+    """Compute DAG-ordered ticket sequence without persisting (issue #1420).
+
+    Returns:
+      new_order — proposed ticket order following DAG topological levels
+      diff      — human-readable lines describing each position change
+      is_noop   — true when current plan already matches DAG order
+      partial   — true when preview-dag has unestimated tickets
+    """
+    return sprints_service.dag_order_preview(sprint_label, project)

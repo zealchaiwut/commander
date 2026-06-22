@@ -3201,6 +3201,14 @@
     }
     .smgmt-delete-btn:hover { color: var(--text); background: var(--surface-2); }
     .smgmt-delete-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .smgmt-dag-order-btn {
+      padding: 4px 10px; font-size: 11px; font-weight: 600;
+      background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
+      border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .smgmt-dag-order-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+    .smgmt-dag-order-btn:disabled { opacity: .45; cursor: not-allowed; }
     .smgmt-finish-btn {
       padding: 4px 10px; font-size: 11px; font-weight: 600;
       background: var(--surface); color: var(--text-muted); border: 1px solid var(--border);
@@ -6141,6 +6149,99 @@
       border: 1px solid color-mix(in srgb, var(--amber, #d97706) 35%, transparent);
     }
     [data-theme="dark"] .mr-chip { background: rgba(96,165,250,.14); }
+    /* Conflict/cycle fix chips (issue #1421) */
+    .mr-fix-section {
+      margin-top: 8px; padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    .mr-fix-section-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 6px; display: block;
+    }
+    .mr-conflict-row {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      padding: 4px 6px; border-radius: 6px; margin-bottom: 4px;
+      background: color-mix(in srgb, var(--red, #dc2626) 6%, transparent);
+      font-size: 11px;
+    }
+    .mr-conflict-row:last-child { margin-bottom: 0; }
+    .mr-conflict-ids { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .mr-conflict-ids .mr-chip { border-color: color-mix(in srgb, var(--red, #dc2626) 30%, var(--border)); }
+    .mr-conflict-note { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+    .mr-cycle-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .mr-cycle-row {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      padding: 4px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--red, #dc2626) 8%, transparent);
+      font-size: 11px;
+    }
+    .mr-fix-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 9px; border-radius: 999px;
+      cursor: pointer; border: 1px solid; line-height: 1.5;
+      transition: opacity .15s;
+    }
+    .mr-fix-chip.is-move {
+      color: var(--blue, #3b82f6);
+      background: var(--blue-bg, rgba(59,130,246,.1));
+      border-color: color-mix(in srgb, var(--blue, #3b82f6) 30%, transparent);
+    }
+    .mr-fix-chip.is-remove {
+      color: var(--red, #dc2626);
+      background: color-mix(in srgb, var(--red, #dc2626) 10%, transparent);
+      border-color: color-mix(in srgb, var(--red, #dc2626) 30%, transparent);
+    }
+    .mr-fix-chip.is-backlog {
+      color: var(--text-muted); background: var(--surface-2, var(--surface));
+      border-color: var(--border);
+    }
+    .mr-fix-chip:disabled { opacity: .5; cursor: not-allowed; }
+    .mr-fix-chip-error { font-size: 11px; color: var(--red, #dc2626); }
+    /* Order violation warning chips (issue #1422) */
+    .smgmt-order-warn-chip {
+      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .smgmt-order-warn-chip .ti-alert-triangle {
+      font-size: 13px; color: var(--amber, #d97706); cursor: help;
+    }
+    .smgmt-order-fix-btn {
+      display: inline-flex; align-items: center;
+      font-size: 11px; font-weight: 600;
+      padding: 1px 8px; border-radius: 999px;
+      background: var(--amber-bg, #fef3c7); color: var(--amber, #d97706);
+      border: 1px solid color-mix(in srgb, var(--amber, #d97706) 30%, transparent);
+      cursor: pointer; transition: opacity .15s; white-space: nowrap;
+    }
+    .smgmt-order-fix-btn:hover { opacity: .8; }
+    .smgmt-order-fix-btn:disabled { opacity: .5; cursor: not-allowed; }
+    [data-theme="dark"] .smgmt-order-fix-btn {
+      background: rgba(234,179,8,.13); color: var(--amber, #eab308);
+    }
+    /* ── Pre-run checklist (issue #1425) ── */
+    .mr-checklist {
+      list-style: none; margin: 0 0 10px; padding: 0;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .mr-checklist-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text);
+    }
+    .mr-cl-icon { font-size: 11px; color: var(--text-muted); }
+    .mr-cl-link {
+      background: none; border: none; padding: 0;
+      font-size: 12px; font-family: inherit; cursor: pointer;
+      color: var(--blue); text-decoration: underline; text-underline-offset: 2px;
+    }
+    .mr-cl-link:hover { color: var(--text); }
+    .mr-ready {
+      margin-left: auto;
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      color: var(--green); background: var(--green-bg);
+      border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+    }
     /* Scheduling dependency inline badge (issue #597) */
     .smgmt-sched-dep-badge {
       flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px;
@@ -7412,6 +7513,58 @@
     .pf-flag-resolved-note {
       font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
     }
+
+    /* ── XL split suggestions section (issue #1424) ── */
+    .pf-xl-section { margin-top: 16px; }
+    .pf-xl-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: #b45309; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pf-xl-strict-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 99px;
+      background: rgba(234, 88, 12, .12); color: #c2410c;
+      border: 1px solid rgba(234, 88, 12, .35); text-transform: none; letter-spacing: 0;
+    }
+    .pf-xl-saved {
+      font-size: 12px; color: var(--green, #16a34a); margin-bottom: 8px;
+    }
+    .pf-xl-item {
+      margin-bottom: 8px; padding: 9px 12px;
+      background: rgba(234, 179, 8, .06); border: 1px solid rgba(234, 179, 8, .3);
+      border-radius: 6px;
+    }
+    .pf-xl-item-header {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+    }
+    .pf-xl-item-num {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-xl-item-title {
+      font-size: 13px; font-weight: 500; color: var(--text); flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-xl-consider-label {
+      font-size: 11px; padding: 2px 7px; border-radius: 99px; flex-shrink: 0;
+      background: rgba(234, 179, 8, .15); color: #92400e;
+      border: 1px solid rgba(234, 179, 8, .4);
+    }
+    .pf-xl-estimate {
+      font-size: 12px; color: var(--text-muted); flex-shrink: 0;
+    }
+    .pf-xl-item-actions { display: flex; gap: 6px; }
+    .pf-xl-split-btn, .pf-xl-dismiss-btn {
+      font-size: 12px; padding: 3px 10px; border-radius: 5px;
+      border: 1px solid var(--border); background: none;
+      color: var(--text); font-family: inherit; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center;
+      transition: background .1s, border-color .1s;
+    }
+    .pf-xl-split-btn { border-color: rgba(59, 130, 246, .5); color: #1d4ed8; }
+    .pf-xl-split-btn:hover { background: rgba(59, 130, 246, .08); }
+    .pf-xl-dismiss-btn { color: var(--text-muted); }
+    .pf-xl-dismiss-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); }
 
     /* ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ── */
     .pf-stepper { display: flex; flex-direction: column; gap: 0; padding: 4px 0; }
@@ -9838,6 +9991,11 @@
                carries its own Summary link pill now. -->
           <!-- Sprints-table CSV export/import (PRD→UAT data sync for testing) -->
           <div class="hist-csv-toolbar">
+            <button type="button" class="btn-ghost" id="hist-refresh-btn" onclick="_histForceRefresh()" title="Reload sprint history now (clears cache)">
+              <i class="ti ti-refresh"></i> Refresh all</button>
+            <button type="button" class="btn-ghost" id="hist-show-closed-btn" onclick="_histToggleShowClosed()" title="Load the full closed-sprint history">
+              <i class="ti ti-history"></i> Show completed</button>
+            <span style="flex:1"></span>
             <button type="button" class="btn-ghost" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
               <i class="ti ti-download"></i> Export CSV</button>
             <button type="button" class="btn-ghost" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
@@ -10716,6 +10874,16 @@
                 </div>
                 <span class="settings-hint">Controls the Sprint Mgmt board refresh rate</span>
               </div>
+              <div class="settings-row">
+                <label class="settings-label">History cache TTL</label>
+                <div class="settings-btn-group" id="settings-histttl-btns">
+                  <button class="settings-btn" data-value="1"  onclick="settingsSetHistoryTtl(1)">1m</button>
+                  <button class="settings-btn" data-value="5"  onclick="settingsSetHistoryTtl(5)">5m</button>
+                  <button class="settings-btn" data-value="15" onclick="settingsSetHistoryTtl(15)">15m</button>
+                  <button class="settings-btn" data-value="30" onclick="settingsSetHistoryTtl(30)">30m</button>
+                </div>
+                <span class="settings-hint">How long the History pane serves from cache before a reload; "Refresh all" always forces one</span>
+              </div>
             </div>
 
             <div class="settings-section">
@@ -11257,6 +11425,27 @@ function settingsSetAutoRefresh(value) {
   } else {
     _smgmtArSelect(n);
   }
+}
+
+function settingsUpdateHistTtlBtns(value) {
+  const v = String(value);
+  document.querySelectorAll('#settings-histttl-btns .settings-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.value === v);
+  });
+}
+
+// Persist the History cache TTL globally (minutes) and apply it live.
+async function settingsSetHistoryTtl(min) {
+  const n = Number(min);
+  settingsUpdateHistTtlBtns(n);
+  if (typeof _histSetTtlMin === 'function') _histSetTtlMin(n);
+  try {
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history_cache_ttl_min: n }),
+    });
+  } catch (_) { /* applied locally regardless */ }
 }
 
 function settingsSaveDefaultLabels(value) {
@@ -13589,17 +13778,24 @@ function _smgmtPreflightHints(tickets) {
   ).length;
   const unsized = _preflightCheckEstimates(tickets || []).size;
   const conflicts = syncItems.filter(i => i.type === 'Conflicting labels').length;
-  return { missingAC, unsized, conflicts };
+  const xlCount = (tickets || []).filter(t => _smgmtTicketSize(t) === 'XL').length;
+  return { missingAC, unsized, conflicts, xlCount };
 }
 
 /** Cache + generation counter so async preview-dag fetches don't race full re-renders. */
 const _smgmtMiniRailCache = {}; // label → { sig, html }
 let _smgmtMiniRailGen = 0;
 
+/** Raw preview-dag response per sprint label — drives Apply DAG Order button state (issue #1420). */
+const _smgmtDagDataCache = {}; // label → raw preview-dag payload
+
+/** Labels that showed a pre-run checklist at least once — drives "Ready to run" state (issue #1425). */
+const _smgmtChecklistPrimed = new Set();
+
 function _smgmtMiniRailSig(tickets, pfHints) {
   const nums = (tickets || []).map(t => t.number).sort((a, b) => a - b).join(',');
   const pf = pfHints
-    ? `${pfHints.missingAC}:${pfHints.unsized}:${pfHints.conflicts}`
+    ? `${pfHints.missingAC}:${pfHints.unsized}:${pfHints.conflicts}:${pfHints.xlCount || 0}`
     : '';
   return `${nums}|${pf}`;
 }
@@ -13623,6 +13819,7 @@ function _smgmtInjectMiniRailHtml(label, html) {
   const slot = document.getElementById(`sc-preview-${label}`);
   if (slot) {
     slot.innerHTML = html;
+    _smgmtUpdateOrderViolations(label);
     return;
   }
   const card = document.getElementById(`smgmt-card-${label}`);
@@ -13630,18 +13827,55 @@ function _smgmtInjectMiniRailHtml(label, html) {
   const existing = card.querySelector('.mini-rail');
   if (existing) {
     existing.outerHTML = html;
+    _smgmtUpdateOrderViolations(label);
     return;
   }
   const anchor = card.querySelector('.sc-budget-section') || card.querySelector('.smgmt-sprint-header');
-  if (anchor) anchor.insertAdjacentHTML('afterend', html);
+  if (anchor) {
+    anchor.insertAdjacentHTML('afterend', html);
+    _smgmtUpdateOrderViolations(label);
+  }
 }
 
 /** Build the mini-rail markup from a /preview-dag payload + optional pre-flight hints. */
 function _smgmtMiniRailHtml(label, data, pfHints) {
   const safeLabel = escHtml(label);
+  const jsLabel = JSON.stringify(label);
   const cycles = data.cycles || [];
   if (cycles.length > 0) {
     const path = (cycles[0] || []).join(' → ');
+    // Collect all unique ticket IDs across all cycle paths for chip rendering (AC5, AC6).
+    const allCycleTids = [...new Set(cycles.flat())];
+    const cycleRows = allCycleTids.map((tid, i) => {
+      const num = parseInt(tid.slice(1), 10);
+      if (isNaN(num)) return '';
+      // Suggest moving this ticket after the next in the cycle to break it (AC6).
+      const allInCycle = cycles[0] || [];
+      const myIdx = allInCycle.indexOf(tid);
+      const prevIdx = (myIdx - 1 + allInCycle.length) % allInCycle.length;
+      const prevTid = allInCycle[prevIdx] || allInCycle[0] || tid;
+      const prevNum = parseInt(prevTid.slice(1), 10);
+      const safeNum = JSON.stringify(num);
+      const safePrevNum = JSON.stringify(prevNum);
+      return `<div class="mr-cycle-row">
+          <span class="mr-chip">${escHtml(tid)}</span>
+          <button class="mr-fix-chip is-move"
+            title="Move ${escHtml(tid)} after ${escHtml(prevTid)} to break the cycle"
+            onclick="_smgmtChipMoveAfter(${jsLabel}, ${safePrevNum}, ${safeNum}, this)">
+            Move ${escHtml(tid)} after ${escHtml(prevTid)}
+          </button>
+          <button class="mr-fix-chip is-remove"
+            title="Remove ticket ${escHtml(tid)} from this sprint"
+            onclick="_smgmtChipRemoveFromSprint(${jsLabel}, ${safeNum}, this)">
+            Remove from sprint
+          </button>
+          <button class="mr-fix-chip is-backlog"
+            title="Move ticket ${escHtml(tid)} to backlog"
+            onclick="_smgmtChipMoveToBacklog(${jsLabel}, ${safeNum}, this)">
+            Move to backlog
+          </button>
+        </div>`;
+    }).join('');
     return `<div class="mini-rail mr-cycle" id="mini-rail-${safeLabel}" role="group"
          aria-label="Run preview — circular dependency">
       <div class="mr-head">
@@ -13651,6 +13885,7 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
         <i class="ti ti-alert-triangle"></i>
         Circular dependency — no run order (${escHtml(path)})
       </div>
+      <div class="mr-cycle-rows">${cycleRows}</div>
     </div>`;
   }
 
@@ -13667,16 +13902,65 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   });
 
   const unestimated = data.unestimated || [];
+  const conflicts = data.conflicts || [];
+
+  // ── Pre-run checklist (issue #1425) ──────────────────────────────────────
+  const unestimatedCount = data.partial ? unestimated.length : 0;
+  const conflictsCount = conflicts.length;
+  const xlCount = pfHints ? (pfHints.xlCount || 0) : 0;
+
+  const checklistItems = [];
+  if (unestimatedCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="_smgmtBulkEstimate(${jsLabel}, null)">
+          Estimate ${unestimatedCount} ticket${unestimatedCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+  if (conflictsCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="smgmtApplyDagOrder(${jsLabel})">
+          Resolve ${conflictsCount} file conflict${conflictsCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+  if (xlCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="smgmtRunSprint(${jsLabel})">
+          Split ${xlCount} XL ticket${xlCount !== 1 ? 's' : ''}
+        </button>
+      </li>`);
+  }
+
+  const hasChecklist = checklistItems.length > 0;
+  if (hasChecklist) _smgmtChecklistPrimed.add(label);
+
+  const checklistSection = hasChecklist
+    ? `<ul class="mr-checklist" aria-label="Pre-run checklist">${checklistItems.join('')}</ul>`
+    : '';
+
+  // ── Status indicator in mr-head ───────────────────────────────────────────
   const hintParts = [];
   if (pfHints && pfHints.missingAC > 0) hintParts.push(`${pfHints.missingAC} missing AC`);
   if (pfHints && pfHints.unsized > 0) hintParts.push(`${pfHints.unsized} unsized`);
-  if (data.partial && unestimated.length > 0) hintParts.push(`${unestimated.length} unestimated`);
-  const warn = hintParts.length > 0
-    ? `<span class="mr-warn" role="status">
+  if (unestimatedCount > 0) hintParts.push(`${unestimatedCount} unestimated`);
+  if (conflictsCount > 0) hintParts.push(`${conflictsCount} file conflict${conflictsCount > 1 ? 's' : ''}`);
+
+  let warn;
+  if (hintParts.length > 0) {
+    warn = `<span class="mr-warn" role="status">
         <i class="ti ti-alert-circle"></i>
         ${escHtml(hintParts.join(' · '))} — preview partial
-      </span>`
-    : `<span class="mr-status-ok" role="status">no cycles · no conflicts</span>`;
+      </span>`;
+  } else if (_smgmtChecklistPrimed.has(label)) {
+    // All checklist items resolved — transition to "Ready to run" (AC7)
+    warn = `<span class="mr-ready" role="status"><i class="ti ti-circle-check"></i> Ready to run</span>`;
+  } else {
+    warn = `<span class="mr-status-ok" role="status">no cycles · no conflicts</span>`;
+  }
 
   const accuracyBanner = data.accuracy_warning
     ? `<div class="mr-accuracy-warn" role="alert">
@@ -13685,6 +13969,49 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       </div>`
     : '';
 
+  // Conflict fix chips: one row per file-overlap pair (AC1, AC2, AC3).
+  let conflictSection = '';
+  if (conflicts.length > 0) {
+    const rows = conflicts.map(c => {
+      const a = c.ticket1_id, b = c.ticket2_id;
+      if (!a || !b) return '';
+      const files = c.shared_files || [];
+      const fileNote = files.length === 1
+        ? escHtml(files[0].split('/').pop() || files[0])
+        : `${files.length} shared files`;
+      const fullTip = escHtml(files.join(', '));
+      return `<div class="mr-conflict-row">
+          <span class="mr-conflict-ids">
+            <span class="mr-chip">#${a}</span>
+            <span style="font-size:10px;color:var(--text-muted)">∥</span>
+            <span class="mr-chip">#${b}</span>
+          </span>
+          <span class="mr-conflict-note" title="${fullTip}">${fileNote}</span>
+          <button class="mr-fix-chip is-move"
+            title="Move #${b} after #${a} in plan order"
+            onclick="_smgmtChipMoveAfter(${jsLabel}, ${JSON.stringify(a)}, ${JSON.stringify(b)}, this)">
+            Move #${b} after #${a}
+          </button>
+          <button class="mr-fix-chip is-remove"
+            title="Remove #${b} from this sprint"
+            onclick="_smgmtChipRemoveFromSprint(${jsLabel}, ${JSON.stringify(b)}, this)">
+            Remove #${b}
+          </button>
+          <button class="mr-fix-chip is-backlog"
+            title="Move #${b} to backlog"
+            onclick="_smgmtChipMoveToBacklog(${jsLabel}, ${JSON.stringify(b)}, this)">
+            Move #${b} to backlog
+          </button>
+        </div>`;
+    }).filter(Boolean).join('');
+    if (rows) {
+      conflictSection = `<div class="mr-fix-section" role="group" aria-label="Conflict fixes">
+        <span class="mr-fix-section-label">Fix conflicts</span>
+        ${rows}
+      </div>`;
+    }
+  }
+
   return `<div class="mini-rail" id="mini-rail-${safeLabel}" role="group"
        aria-label="Run preview">
     ${accuracyBanner}
@@ -13692,7 +14019,9 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       <span class="mr-title">Run preview</span>
       ${warn}
     </div>
+    ${checklistSection}
     <div class="mr-levels"><div class="mr-level"><div class="mr-chips">${chips.join('')}</div></div></div>
+    ${conflictSection}
   </div>`;
 }
 
@@ -13703,7 +14032,137 @@ function _smgmtInjectMiniRail(label, data, pfHints, tickets) {
   if (tickets) {
     _smgmtMiniRailCache[label] = { sig: _smgmtMiniRailSig(tickets, pfHints), html };
   }
+  // Update DAG data cache BEFORE injecting HTML so _smgmtUpdateOrderViolations
+  // (called from _smgmtInjectMiniRailHtml) can read the fresh data (issue #1422).
+  if (data && typeof data.levels !== 'undefined') {
+    _smgmtDagDataCache[label] = data;
+    _smgmtUpdateDagOrderBtn(label, data);
+  }
   _smgmtInjectMiniRailHtml(label, html);
+}
+
+/** Update the Apply DAG Order button enabled state for a sprint (issue #1420). */
+function _smgmtUpdateDagOrderBtn(label, dagData) {
+  const btn = document.getElementById('dag-order-btn-' + label);
+  if (!btn) return;
+  const hasCycles = dagData && (dagData.cycles || []).length > 0;
+  const hasLevels = dagData && (dagData.levels || []).length > 0;
+  btn.disabled = !hasLevels || hasCycles;
+  if (hasCycles) {
+    btn.title = 'Apply DAG Order — disabled: sprint has circular dependencies';
+  } else if (!hasLevels) {
+    btn.title = 'Apply DAG Order — disabled: no DAG preview available';
+  } else {
+    btn.title = dagData.partial
+      ? 'Apply DAG Order (preview is partial — some tickets unestimated)'
+      : 'Apply DAG Order';
+  }
+}
+
+// ── Order violation warnings (issue #1422) ────────────────────────────────────
+
+/**
+ * Compute order violations for a sprint from the cached DAG data and the
+ * current DOM ticket order. Returns {ticketNum: [{upstream_num, reason}]}.
+ */
+function _smgmtGetOrderViolations(sprintLabel) {
+  const dagData = _smgmtDagDataCache[sprintLabel];
+  if (!dagData) return {};
+  const conflicts = dagData.conflicts || [];
+  if (!conflicts.length) return {};
+
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  const currentOrder = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  if (currentOrder.length < 2) return {};
+
+  const pos = {};
+  currentOrder.forEach((num, i) => { pos[num] = i; });
+
+  const violations = {};
+  for (const c of conflicts) {
+    const upstream = parseInt(c.ticket1_id, 10);
+    const downstream = parseInt(c.ticket2_id, 10);
+    if (isNaN(upstream) || isNaN(downstream)) continue;
+    if (!(upstream in pos) || !(downstream in pos)) continue;
+    if (pos[downstream] < pos[upstream]) {
+      const shared = c.shared_files || [];
+      const fileHint = shared[0] || 'shared file';
+      const reason = `#${downstream} must come after #${upstream} (shares ${fileHint})`;
+      if (!violations[downstream]) violations[downstream] = [];
+      violations[downstream].push({ upstream_num: upstream, reason });
+    }
+  }
+  return violations;
+}
+
+/**
+ * Inject or clear order violation warning chips on each ticket row.
+ * Called after mini-rail injection so the DAG cache is populated.
+ */
+function _smgmtUpdateOrderViolations(sprintLabel) {
+  const violations = _smgmtGetOrderViolations(sprintLabel);
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  for (const row of rows) {
+    const num = parseInt(row.dataset.issue, 10);
+    if (isNaN(num)) continue;
+    const existing = row.querySelector('.smgmt-order-warn-chip');
+    if (existing) existing.remove();
+
+    const viols = violations[num];
+    if (!viols || viols.length === 0) continue;
+
+    const tip = viols.map(v => v.reason).join('\n');
+    const chip = document.createElement('span');
+    chip.className = 'smgmt-order-warn-chip';
+    chip.innerHTML =
+      `<i class="ti ti-alert-triangle" title="${escHtml(tip)}"></i>` +
+      `<button class="smgmt-order-fix-btn" title="${escHtml(tip)}"` +
+      ` onclick="event.stopPropagation();smgmtFixOrderViolation(${JSON.stringify(sprintLabel)},${num},this)">Fix order</button>`;
+
+    const statusEl = row.querySelector('.smgmt-ticket-status');
+    if (statusEl) row.insertBefore(chip, statusEl);
+    else row.appendChild(chip);
+  }
+}
+
+/**
+ * Fix a single ticket's order violation: compute new order, POST to plan API,
+ * then reload the sprint board.
+ */
+async function smgmtFixOrderViolation(sprintLabel, ticketNum, btnEl) {
+  const violations = _smgmtGetOrderViolations(sprintLabel);
+  const viols = violations[ticketNum];
+  if (!viols || viols.length === 0) return;
+
+  const rows = [...document.querySelectorAll(
+    `.smgmt-ticket[data-sprint="${CSS.escape(sprintLabel)}"]`
+  )];
+  const currentOrder = rows.map(r => parseInt(r.dataset.issue, 10)).filter(n => !isNaN(n));
+  const upstreamNums = new Set(viols.map(v => v.upstream_num));
+  const remaining = currentOrder.filter(n => n !== ticketNum);
+  let latestIdx = -1;
+  remaining.forEach((n, i) => { if (upstreamNums.has(n)) latestIdx = i; });
+  const insertAt = latestIdx + 1;
+  const newOrder = [...remaining.slice(0, insertAt), ticketNum, ...remaining.slice(insertAt)];
+
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Fixing…'; }
+  try {
+    const repo = _smgmtRepo();
+    const qs = repo ? `?project=${encodeURIComponent(repo)}` : '';
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan${qs}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newOrder) }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    loadSprintMgmt();
+  } catch (err) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix order'; }
+    console.error('smgmtFixOrderViolation:', err);
+  }
 }
 
 /** Fetch preview-dag and render the mini-rail for each planned / has-rework sprint. */
@@ -13749,6 +14208,329 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   }
 }
 
+
+// ── Conflict / cycle fix chip actions (issue #1421) ──────────────────────────
+
+/** In-flight guard set: prevents duplicate concurrent chip requests. Key = "label:action:num". */
+const _smgmtChipInFlight = new Set();
+
+/** Re-fetch preview-dag for a sprint and update the mini-rail in place (AC4, AC8). */
+async function _smgmtRefreshPreviewDag(sprintLabel) {
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  if (!repo || !sprintLabel) return;
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/preview-dag?project=${encodeURIComponent(repo)}`
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Invalidate cached html so the fresh data is always rendered.
+    delete _smgmtMiniRailCache[sprintLabel];
+    _smgmtInjectMiniRail(sprintLabel, data, null, null);
+  } catch (_) { /* fail silently — stale mini-rail beats no mini-rail */ }
+}
+
+/**
+ * Chip action: Move ticket #bNum to come right after #aNum in the sprint plan (AC3).
+ * Reads the current DOM ticket order, performs the move locally, then POSTs to
+ * /api/sprints/{label}/plan and re-fetches preview-dag on success (AC4).
+ * Idempotent: a second click while the first is in-flight is a no-op (AC9).
+ */
+async function _smgmtChipMoveAfter(sprintLabel, aNum, bNum, chipEl) {
+  const key = `${sprintLabel}:move:${aNum}:${bNum}`;
+  if (_smgmtChipInFlight.has(key)) return; // AC9: skip duplicate
+  _smgmtChipInFlight.add(key);
+
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  const errEl = _smgmtChipErrEl(chipEl);
+  _smgmtChipSetBusy(chipEl, true);
+
+  try {
+    // Derive current plan order from the rendered ticket rows.
+    const containerId = `smgmt-tickets-${sprintLabel}`;
+    const container = document.getElementById(containerId);
+    if (!container) throw new Error('Sprint container not found');
+    const rows = container.querySelectorAll('.smgmt-ticket[data-issue]');
+    const currentOrder = Array.from(rows)
+      .map(r => parseInt(r.dataset.issue, 10))
+      .filter(n => !isNaN(n));
+
+    const aIdx = currentOrder.indexOf(aNum);
+    const bIdx = currentOrder.indexOf(bNum);
+    if (aIdx === -1 || bIdx === -1) throw new Error(`Tickets #${aNum} or #${bNum} not found in sprint`);
+
+    // Already in correct order — treat as no-op (AC9).
+    if (aIdx < bIdx) {
+      _smgmtChipSetBusy(chipEl, false);
+      _smgmtChipInFlight.delete(key);
+      return;
+    }
+
+    // Remove B, insert it right after A.
+    const newOrder = [...currentOrder];
+    newOrder.splice(bIdx, 1);
+    const newAIdx = newOrder.indexOf(aNum);
+    newOrder.splice(newAIdx + 1, 0, bNum);
+
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+      }
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    _smgmtChipSetBusy(chipEl, false);
+    await _smgmtRefreshPreviewDag(sprintLabel); // AC4: re-fetch
+  } catch (err) {
+    _smgmtChipSetBusy(chipEl, false);
+    _smgmtChipShowError(errEl, err.message); // AC10: inline error
+  } finally {
+    _smgmtChipInFlight.delete(key);
+  }
+}
+
+/**
+ * Chip action: Remove ticket from the sprint (removes sprint-N label) (AC7).
+ * Calls /api/sprint-planning/assign with sprint: null then re-fetches preview-dag.
+ */
+async function _smgmtChipRemoveFromSprint(sprintLabel, issueNum, chipEl) {
+  const key = `${sprintLabel}:remove:${issueNum}`;
+  if (_smgmtChipInFlight.has(key)) return; // AC9
+  _smgmtChipInFlight.add(key);
+
+  const errEl = _smgmtChipErrEl(chipEl);
+  _smgmtChipSetBusy(chipEl, true);
+
+  try {
+    const resp = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: null }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    _smgmtChipSetBusy(chipEl, false);
+    await _smgmtRefreshPreviewDag(sprintLabel);
+    // Reload board so ticket disappears from the sprint column.
+    if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
+  } catch (err) {
+    _smgmtChipSetBusy(chipEl, false);
+    _smgmtChipShowError(errEl, err.message); // AC10
+  } finally {
+    _smgmtChipInFlight.delete(key);
+  }
+}
+
+/**
+ * Chip action: Move ticket to backlog (same API as remove-from-sprint) (AC8).
+ * Removes sprint-N label, then re-fetches preview-dag.
+ */
+async function _smgmtChipMoveToBacklog(sprintLabel, issueNum, chipEl) {
+  const key = `${sprintLabel}:backlog:${issueNum}`;
+  if (_smgmtChipInFlight.has(key)) return; // AC9
+  _smgmtChipInFlight.add(key);
+
+  const errEl = _smgmtChipErrEl(chipEl);
+  _smgmtChipSetBusy(chipEl, true);
+
+  try {
+    const resp = await fetch('/api/sprint-planning/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issue: issueNum, sprint: null }),
+    });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    _smgmtChipSetBusy(chipEl, false);
+    await _smgmtRefreshPreviewDag(sprintLabel);
+    if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
+  } catch (err) {
+    _smgmtChipSetBusy(chipEl, false);
+    _smgmtChipShowError(errEl, err.message); // AC10
+  } finally {
+    _smgmtChipInFlight.delete(key);
+  }
+}
+
+/** Disable/enable a chip button and show a loading indicator. */
+function _smgmtChipSetBusy(chipEl, busy) {
+  if (!chipEl) return;
+  chipEl.disabled = busy;
+  if (busy) {
+    chipEl.dataset.idleText = chipEl.dataset.idleText || chipEl.textContent;
+    chipEl.textContent = chipEl.dataset.idleText + '…';
+  } else {
+    if (chipEl.dataset.idleText) chipEl.textContent = chipEl.dataset.idleText;
+    delete chipEl.dataset.idleText;
+  }
+}
+
+/** Return (or create) the inline error span that lives right after chipEl. */
+function _smgmtChipErrEl(chipEl) {
+  if (!chipEl) return null;
+  const next = chipEl.nextElementSibling;
+  if (next && next.classList.contains('mr-fix-chip-error')) return next;
+  const span = document.createElement('span');
+  span.className = 'mr-fix-chip-error';
+  chipEl.insertAdjacentElement('afterend', span);
+  return span;
+}
+
+/** Show an inline error on a chip's sibling error element (AC10). */
+function _smgmtChipShowError(errEl, message) {
+  if (!errEl) return;
+  errEl.textContent = `⚠ ${message}`;
+  errEl.style.display = '';
+}
+
+// ── Apply DAG Order (issue #1420) ─────────────────────────────────────────────
+
+let _smgmtDagOrderTargetLabel = null;
+
+/** Open the Apply DAG Order confirmation dialog for a sprint. */
+async function smgmtApplyDagOrder(label) {
+  _smgmtDagOrderTargetLabel = label;
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  if (!repo) return;
+
+  const backdrop = document.getElementById('dao-backdrop');
+  const modal = document.getElementById('dao-modal');
+  const title = document.getElementById('dao-modal-title');
+  const body = document.getElementById('dao-body');
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const errorEl = document.getElementById('dao-error');
+
+  if (!modal) return;
+
+  title.textContent = 'Apply DAG Order';
+  body.innerHTML = '<div class="loading-msg" style="padding:8px 0">Computing order…</div>';
+  errorEl.classList.add('hidden');
+  confirmBtn.disabled = true;
+  backdrop.classList.remove('hidden');
+  modal.classList.remove('hidden');
+
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/dag-order-preview?project=${encodeURIComponent(repo)}`
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    const data = await resp.json();
+    _smgmtDagOrderRenderDialog(data);
+  } catch (err) {
+    body.innerHTML = '';
+    errorEl.textContent = `Failed to compute DAG order: ${err.message}`;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+function _smgmtDagOrderRenderDialog(data) {
+  const body = document.getElementById('dao-body');
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const title = document.getElementById('dao-modal-title');
+
+  const partial = data.partial;
+  const isNoop = data.is_noop;
+  const diff = data.diff || [];
+
+  // Store new_order on the confirm button for use on click
+  confirmBtn.dataset.newOrder = JSON.stringify(data.new_order || []);
+  confirmBtn.dataset.isNoop = isNoop ? '1' : '0';
+
+  if (partial) {
+    title.textContent = 'Apply DAG Order — Partial Preview';
+    const warn = `<div class="gc-note" style="color:var(--amber);margin-bottom:8px">
+      <strong>Warning:</strong> The DAG preview is incomplete — some tickets are unestimated,
+      so their file dependencies are unknown. The order below is based on available data only.
+    </div>`;
+    body.innerHTML = warn + _smgmtDagOrderDiffHtml(diff, isNoop);
+  } else {
+    title.textContent = 'Apply DAG Order';
+    body.innerHTML = _smgmtDagOrderDiffHtml(diff, isNoop);
+  }
+
+  confirmBtn.disabled = false;
+}
+
+function _smgmtDagOrderDiffHtml(diff, isNoop) {
+  if (isNoop || diff.length === 0) {
+    return '<p style="color:var(--text-muted);margin:0">Order is already up to date — no changes needed.</p>';
+  }
+  const lines = diff.map(line =>
+    `<li style="font-family:var(--mono);font-size:12px;margin:2px 0;color:var(--text)">${escHtml(line)}</li>`
+  ).join('');
+  return `<p style="margin:0 0 8px;color:var(--text-muted)">The following tickets will change position:</p>
+    <ul style="list-style:none;padding:0;margin:0">${lines}</ul>`;
+}
+
+function _smgmtDagOrderModalClose() {
+  document.getElementById('dao-backdrop').classList.add('hidden');
+  document.getElementById('dao-modal').classList.add('hidden');
+  _smgmtDagOrderTargetLabel = null;
+}
+
+async function _smgmtDagOrderConfirm() {
+  const confirmBtn = document.getElementById('dao-confirm-btn');
+  const errorEl = document.getElementById('dao-error');
+  const label = _smgmtDagOrderTargetLabel;
+  if (!label) return;
+
+  const isNoop = confirmBtn.dataset.isNoop === '1';
+  if (isNoop) {
+    _smgmtDagOrderModalClose();
+    return; // AC10: no write when already in DAG order
+  }
+
+  let newOrder;
+  try {
+    newOrder = JSON.parse(confirmBtn.dataset.newOrder || '[]');
+  } catch (_) {
+    newOrder = [];
+  }
+  if (!newOrder.length) {
+    _smgmtDagOrderModalClose();
+    return;
+  }
+
+  const repo = _smgmtRepo ? _smgmtRepo() : null;
+  if (!repo) return;
+
+  confirmBtn.disabled = true;
+  errorEl.classList.add('hidden');
+
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/plan?project=${encodeURIComponent(repo)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+      }
+    );
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      throw new Error(d.detail || `Server error ${resp.status}`);
+    }
+    _smgmtDagOrderModalClose();
+    // Reload the board so the new order is reflected
+    if (typeof loadSprintMgmt === 'function') await loadSprintMgmt(true);
+  } catch (err) {
+    errorEl.textContent = `Failed to apply order: ${err.message}`;
+    errorEl.classList.remove('hidden');
+    confirmBtn.disabled = false;
+  }
+}
 
 function _smgmtUpdateEstimateBadge(issueNum) {
   const row = document.getElementById(`smgmt-ticket-${issueNum}`);
@@ -18015,6 +18797,8 @@ async function _smgmtBulkEstimate(sprintLabel, btnEl) {
 
   if (succeeded > 0) {
     _smgmtShowToast(`Estimated ${succeeded} of ${total} ticket${total !== 1 ? 's' : ''}`);
+    // Auto-refresh preview-dag so the checklist Estimate item checks off (AC6, issue #1425).
+    await _smgmtRefreshPreviewDag(sprintLabel);
   }
 
   // Fade out progress after 3s
@@ -24211,6 +24995,9 @@ async function globalSettingsLoad() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     _gssRender(data);
+    const ttl = Number(data.history_cache_ttl_min) || 5;
+    settingsUpdateHistTtlBtns(ttl);
+    if (typeof _histSetTtlMin === 'function') _histSetTtlMin(ttl);
   } catch (err) {
     bodyEl.innerHTML =
       `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;
@@ -27743,6 +28530,22 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer">
     <button class="btn-ghost" type="button" onclick="_smgmtCloseIssueCancel()">Cancel</button>
     <button class="btn-danger" id="ci-confirm-btn" type="button" onclick="_smgmtCloseIssueConfirm()">Close issue</button>
+  </div>
+</div>
+
+<!-- ── Apply DAG Order confirm modal (issue #1420) ── -->
+<div class="modal-backdrop hidden" id="dao-backdrop" onclick="_smgmtDagOrderModalClose()"></div>
+<div class="modal hidden" id="dao-modal"
+     role="dialog" aria-modal="true" aria-labelledby="dao-modal-title">
+  <div class="modal-header">
+    <span class="modal-title" id="dao-modal-title">Apply DAG Order</span>
+    <button class="modal-close" aria-label="Close" onclick="_smgmtDagOrderModalClose()">&times;</button>
+  </div>
+  <div class="modal-body" id="dao-body"></div>
+  <div class="gc-error hidden" id="dao-error"></div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" onclick="_smgmtDagOrderModalClose()">Cancel</button>
+    <button class="btn-blue" type="button" id="dao-confirm-btn" onclick="_smgmtDagOrderConfirm()" disabled>Apply</button>
   </div>
 </div>
 

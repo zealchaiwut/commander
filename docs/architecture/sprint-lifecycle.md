@@ -239,6 +239,61 @@ Sequencing to be agreed; each theme is independently shippable.
 | 3 | Reconciliation service — GitHub-state reconcile on refresh (stale-while-revalidate); end-of-run disk→DB ingest; remove render-time disk reads from outcome/history endpoints | new router service, `routers/sprint_history_service.py`, outcome endpoint in `server.py` |
 | 4 | UI — board: unified badges, no cancelled/run-stats, re-run confirmation modal with ticket-move list; History: `partial_finished`, DB-only duration, auto-refresh, state-gated verbs; run-stats ✕ only on `needs_rework` | `static/src/sprint-board/board-render.js`, `rerun-modal.js`, `project.html` History section |
 
+## Composite-Key Invariant — (label, project) scope (issue #1465)
+
+Sprint `label` values are **unique only within a `project`**.  Two projects
+(e.g. `zealchaiwut/commander` and `zealchaiwut/perf-coach`) may legitimately
+both own a sprint labelled `sprint-66`.
+
+### Invariant
+
+> Every lifecycle read, write, and bulk-complete operation **must** be scoped
+> to both `label` **and** `project`.
+
+### Schema
+
+The `sprints` table target schema is `PRIMARY KEY (label, project)`.  Before
+that migration lands, the `project` column acts as a soft scope and reads
+already filter on it (see `get_sprint(label, project=...)`).  The migration
+in `_create_sprint_lifecycle_tables` (issue #1462) rebuilds the table to
+enforce the composite key at the DB level.
+
+### Read rules
+
+- `get_sprint(label, project)` — always pass `project`; the label-only
+  fallback is kept for genuinely project-agnostic callers and emits a warning
+  when it fires (visible in production logs).
+- `get_sprint_children(parent_label, project)` — must filter by `project` so
+  a lineage never pulls children from another project with the same base label.
+- Board, history, and reconcile service endpoints all receive `project` from
+  the caller and pass it through to every DB read.
+
+### Write rules
+
+- `transition_sprint_state` — `ON CONFLICT` target is `(label, project)`;
+  every `INSERT` must supply a non-null `project`.
+- `_set_sprint_terminal`, `record_sprint_start/finish/needs_rework`,
+  `ingest_sprint_run_artifact`, and `set_sprint_summary_*` all scope their
+  `WHERE` / `ON CONFLICT` to `(label, project)`.
+- A write where `project` is empty must **not** update any existing row
+  owned by a named project.
+- `DELETE FROM sprints WHERE label = ?` is forbidden; use
+  `WHERE label = ? AND project = ?`.
+
+### Historical incident (sprint-66)
+
+Before the composite key was enforced, `ON CONFLICT(label) DO UPDATE`
+overwrote commander's `sprint-66` row when perf-coach wrote its own
+`sprint-66`, orphaning all `66.x` child sprints.
+
+Repair: `scripts/repair_sprint_collisions.py --apply` restores commander's
+base row from plan.json / state.json / agent_runs without touching the
+surviving row.
+
+Regression guard: `tests/test_sprint_collision_regression.py` replays the
+historical overwrite sequence against a composite-key test DB and asserts both
+projects' rows survive.
+
 ## Out of Scope / Later
 
 - Rewriting pre-redesign history rows (forward-only migration).

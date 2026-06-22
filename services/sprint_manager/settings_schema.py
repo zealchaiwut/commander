@@ -24,6 +24,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # History tab fold size (issue #807) — number of most-recent sprints shown
     # expanded; older sprints collapse into aggregate folds of this same size.
     "history_fold_size": {"secret": False, "default": 10},
+    # History ledger client cache TTL in minutes — how long the pane serves from
+    # cache before a reload is needed; a manual "Refresh all" always forces one.
+    "history_cache_ttl_min": {"secret": False, "default": 5},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
     # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
@@ -68,6 +71,11 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}
     # Null default means "not configured" — Cost tab hides $ column when absent.
     "price_map": {"secret": False, "default": None},
+    # XL split suggestions (issue #1424) — surfaced in Run Sprint preflight modal
+    # Tickets at or above this minute threshold (or sized XL) trigger a "Consider splitting" nudge.
+    "xl_minute_threshold": {"secret": False, "default": 90},
+    # When True, Run Sprint is blocked until all flagged tickets are split or dismissed.
+    "strict_xl_gate": {"secret": False, "default": False},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

@@ -1,5 +1,5 @@
 (() => {
-  // static/src/logpanel.js
+  // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
     "tester",
@@ -37,7 +37,7 @@
     });
   }
 
-  // static/src/progress-activity.js
+  // apps/dashboard/static/src/progress-activity.js
   function _e(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -493,7 +493,7 @@
     document.head.appendChild(style);
   }
 
-  // static/src/progress-host.js
+  // apps/dashboard/static/src/progress-host.js
   var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
   var _payloadById = /* @__PURE__ */ new Map();
   var _MAX_LOG_LINES = 200;
@@ -648,7 +648,7 @@
     _payloadById.delete(paId);
   }
 
-  // static/src/shell/tabs.js
+  // apps/dashboard/static/src/shell/tabs.js
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -834,7 +834,7 @@
     switchTab(effTab, false);
   });
 
-  // static/src/shell/features.js
+  // apps/dashboard/static/src/shell/features.js
   var _features = null;
   function commanderFeatures() {
     return _features || {};
@@ -888,7 +888,7 @@
     }
   }
 
-  // static/src/sprint-board/state.js
+  // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
@@ -905,10 +905,13 @@
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
   globalThis._pfUseClineFollowups ??= false;
+  globalThis._pfXLSuggestions ??= [];
+  globalThis._pfStrictXLGate ??= false;
+  globalThis._pfXLMinutesSaved ??= 0;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
-  // static/src/sprint-board/plan-next.js
+  // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
     try {
@@ -1012,7 +1015,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/scheduled-run.js
+  // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
     const on = !!_schedMap[label];
@@ -1070,7 +1073,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/history.js
+  // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
@@ -1087,8 +1090,9 @@ Replace the existing draft (${data.existing_label})?`
   var _histFoldExpanded = /* @__PURE__ */ new Set();
   var _histLedgerCacheRepo = "";
   var _histLedgerCacheAt = 0;
-  var _HIST_LEDGER_TTL_MS = 45e3;
+  var _HIST_LEDGER_TTL_MS = 3e5;
   var _histLedgerInflight = null;
+  var _histShowClosed = false;
   function _histResetLedgerCache() {
     _histLedgerData = [];
     globalThis._histLedgerData = _histLedgerData;
@@ -2633,7 +2637,8 @@ Replace the existing draft (${data.existing_label})?`
     const loadPromise = (async () => {
       try {
         const settingsUrl = `/api/projects/${encodeURIComponent(_slug)}/settings`;
-        const historyUrl = "/api/sprints/history?limit=50&project=" + encodeURIComponent(repo || "");
+        const activeParam = _histShowClosed ? "" : "&active_only=1";
+        const historyUrl = "/api/sprints/history?limit=50" + activeParam + "&project=" + encodeURIComponent(repo || "");
         const [sresp, resp] = await Promise.all([
           fetch(settingsUrl).catch(() => null),
           fetch(historyUrl)
@@ -2644,6 +2649,9 @@ Replace the existing draft (${data.existing_label})?`
             const fs = parseInt(settings.history_fold_size, 10);
             if (!isNaN(fs) && fs > 0)
               _histFoldSize = fs;
+            const ttlMin = parseFloat(settings.history_cache_ttl_min);
+            if (!isNaN(ttlMin) && ttlMin > 0)
+              _HIST_LEDGER_TTL_MS = ttlMin * 6e4;
           } catch (_) {
           }
         }
@@ -2676,11 +2684,39 @@ Replace the existing draft (${data.existing_label})?`
     _histLedgerInflight = loadPromise;
     await loadPromise;
   }
+  function _histSyncShowClosedBtn() {
+    const btn = document.getElementById("hist-show-closed-btn");
+    if (!btn)
+      return;
+    btn.innerHTML = _histShowClosed ? '<i class="ti ti-eye-off"></i> Active only' : '<i class="ti ti-history"></i> Show completed';
+    btn.title = _histShowClosed ? "Show only actionable sprints + a few recent completed" : "Load the full closed-sprint history";
+  }
+  function _histToggleShowClosed() {
+    _histShowClosed = !_histShowClosed;
+    _histSyncShowClosedBtn();
+    const repo = _cachedFullRepo[_slug];
+    if (repo)
+      _histLoadLedger2(repo, { force: true });
+  }
+  function _histSetTtlMin(min) {
+    const m = parseFloat(min);
+    if (!isNaN(m) && m > 0)
+      _HIST_LEDGER_TTL_MS = m * 6e4;
+  }
+  function _histForceRefresh() {
+    _histResetLedgerCache();
+    for (const k of Object.keys(_histRunStats))
+      delete _histRunStats[k];
+    _histStaleBySprint = {};
+    const repo = _cachedFullRepo[_slug];
+    if (repo)
+      _histLoadLedger2(repo, { force: true });
+  }
   function _histNextChildLabel(parentLabel) {
     return _nextSprintSublabel(parentLabel);
   }
 
-  // static/src/sprint-board/rerun-modal.js
+  // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrShowPreviewLoading(current) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
@@ -2879,7 +2915,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/finish-modal.js
+  // apps/dashboard/static/src/sprint-board/finish-modal.js
   function _fsOpen() {
     _setBodyInert(["fs-backdrop", "fs-modal"]);
     document.getElementById("fs-backdrop").classList.remove("hidden");
@@ -3248,7 +3284,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/bulk-complete-modal.js
+  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
   function _bcShowPreviewLoading(current) {
     const loading = document.getElementById("bc-loading");
     if (!loading)
@@ -3319,31 +3355,45 @@ Replace the existing draft (${data.existing_label})?`
       }
       const listEl = document.getElementById("bc-ticket-list");
       const allTickets = preview.all_tickets || [];
-      if (allTickets.length === 0) {
-        listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
-      } else {
-        listEl.innerHTML = allTickets.map((t) => {
-          const catClass = _bcCatClass(t.category);
-          const catLabel = t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
-          return `<label class="rr-ticket-row">
+      const groups = preview.tickets_by_sprint && preview.tickets_by_sprint.length ? preview.tickets_by_sprint : allTickets.length ? [{ label: preview.base_label, tickets: allTickets }] : [];
+      const _ticketRow = (t) => {
+        const catClass = _bcCatClass(t.category);
+        const catLabel = t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
+        return `<label class="rr-ticket-row">
           <input type="checkbox" checked data-issue="${t.number}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
           <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
           <span class="rr-ticket-cat ${catClass}">${escHtml(catLabel)}</span>
         </label>`;
-        }).join("");
+      };
+      if (groups.length === 0) {
+        listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
+      } else {
+        listEl.innerHTML = groups.map((g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")).join("");
       }
-      const memberCount = (preview.member_labels || []).length;
-      const mergeSteps = preview.merge_steps || [];
+      const members = preview.members || [];
       const actionsEl = document.getElementById("bc-actions");
-      const actionRows = [];
-      for (const step of mergeSteps) {
-        actionRows.push(
-          `<div class="fs-action-row"><i class="ti ti-git-merge"></i> Merge <code>${escHtml(step.head)}</code> \u2192 <code>${escHtml(step.base)}</code></div>`
-        );
-      }
+      const actionRows = members.map((m) => {
+        const target = m.is_base ? "develop" : sprintLabelDisplay(m.parent);
+        let icon, color, note;
+        if (m.completed) {
+          icon = "ti-circle-check-filled";
+          color = "var(--green)";
+          note = "completed";
+        } else if (m.merged) {
+          icon = "ti-git-merge";
+          color = "var(--green)";
+          note = "merged \u2192 will mark completed";
+        } else {
+          icon = "ti-circle";
+          color = "var(--text-sub)";
+          note = "pending";
+        }
+        return `<div class="fs-action-row"><i class="ti ${icon}" style="color:${color}"></i> ${escHtml(sprintLabelDisplay(m.label))} \u2192 ${escHtml(target)} <span style="color:var(--text-muted);font-size:11px">\xB7 ${note}</span></div>`;
+      });
+      const memberCount = members.length || (preview.member_labels || []).length;
       actionRows.push(
-        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} ticket${allTickets.length !== 1 ? "s" : ""} (UAT + summary included)</div>`,
+        `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close ${allTickets.length} ticket${allTickets.length !== 1 ? "s" : ""} (grouped above; UAT + summary)</div>`,
         `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? "s" : ""} completed</div>`
       );
       actionsEl.innerHTML = actionRows.join("");
@@ -3372,35 +3422,6 @@ Replace the existing draft (${data.existing_label})?`
     }
     return res.json();
   }
-  async function _bcRemainingMergeSteps(owner, repoName, label) {
-    const preview = await _bcFetchPreview(owner, repoName, label);
-    return preview.merge_steps || [];
-  }
-  async function _bcMergeStep(owner, repoName, step) {
-    const res = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprint-branch-merge`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          confirmed: true,
-          head: step.head,
-          base: step.base,
-          title: step.title || "",
-          delete_branch: step.delete_branch !== false
-        })
-      }
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      const detail = err.detail || `HTTP ${res.status}`;
-      if (res.status === 409 && /merge conflict/i.test(detail)) {
-        throw new Error(`Merge conflict \u2014 bulk complete stopped: ${detail}`);
-      }
-      throw new Error(detail);
-    }
-    return res.json();
-  }
   async function _bcConfirm() {
     const repo = _smgmtRepo();
     if (!_bcLabel || !repo || !_bcPreview)
@@ -3409,106 +3430,79 @@ Replace the existing draft (${data.existing_label})?`
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
     const label = _bcLabel;
-    const allTickets = _bcPreview.all_tickets || [];
-    let mergeSteps = _bcPreview.merge_steps || [];
-    const settleSteps = 2;
+    const order = (_bcPreview.complete_order || []).slice();
     const confirmBtn = document.getElementById("bc-confirm-btn");
     if (confirmBtn) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = "Completing\u2026";
     }
     _bcClose();
-    const refreshLabel = "Refreshing board\u2026";
+    if (order.length === 0) {
+      _smgmtShowToast("Nothing to complete.");
+      return;
+    }
     let doneSteps = 0;
-    const _bcRecalcTotal = (pendingMerges) => doneSteps + pendingMerges.length + allTickets.length + settleSteps;
-    let totalSteps = _bcRecalcTotal(mergeSteps);
-    _smgmtBoardLock(`Bulk completing ${sprintLabelDisplay(label)}\u2026`, {
+    const totalSteps = order.length + 1;
+    _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
-      clearLog: true
+      clearLog: true,
+      showDone: true
+      // Done button stays disabled until the run settles
     });
-    _smgmtBoardLog("Starting bulk complete\u2026", "step");
+    _smgmtBoardLog("Starting per-step complete (deepest child first)\u2026", "step");
     try {
-      while (mergeSteps.length > 0) {
-        for (const step of mergeSteps) {
-          const stepLabel = step.label || `${step.head} \u2192 ${step.base}`;
-          _smgmtBoardLog(stepLabel, "step");
-          await _bcMergeStep(owner, repoName, step);
-          doneSteps += 1;
-          _smgmtBoardProgress(doneSteps, totalSteps);
-          _smgmtBoardLog(`\u2713 ${stepLabel}`, "ok");
-        }
-        mergeSteps = await _bcRemainingMergeSteps(owner, repoName, label);
-        if (mergeSteps.length > 0) {
-          totalSteps = _bcRecalcTotal(mergeSteps);
-          _smgmtBoardLog(
-            `Re-checking merge chain (${mergeSteps.length} step${mergeSteps.length !== 1 ? "s" : ""} remaining)\u2026`,
-            "step"
-          );
-          _smgmtBoardProgress(doneSteps, totalSteps);
-        }
-      }
-      for (const t of allTickets) {
-        const closeLabel = `Closing #${t.number} \u2014 ${t.title || ""}`.trim();
-        _smgmtBoardLog(closeLabel, "step");
-        const closeRes = await fetch(
-          `/api/issues/${t.number}/close?repo=${encodeURIComponent(repo)}`,
-          { method: "POST" }
+      for (const sLabel of order) {
+        _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmed: true })
+          }
         );
-        if (!closeRes.ok) {
-          const err = await closeRes.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed to close #${t.number}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
         }
+        const sd = await res.json();
         doneSteps += 1;
         _smgmtBoardProgress(doneSteps, totalSteps);
-        _smgmtBoardLog(`\u2713 Closed #${t.number}`, "ok");
+        const into = sd.merged ? ` \u2192 merged into ${sd.merged_into}` : "";
+        _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(sLabel)} completed${into}`, "ok");
       }
-      _smgmtBoardLog("Marking sprints completed\u2026", "step");
-      const res = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/bulk-complete`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirmed: true,
-            skip_issue_close: true
-          })
-        }
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      doneSteps += 1;
-      _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog("\u2713 Sprints marked completed", "ok");
-      _smgmtBoardLog(refreshLabel, "step");
+      _smgmtBoardLog("Refreshing board\u2026", "step");
       await loadSprintMgmt();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog("\u2713 Bulk complete finished", "ok");
-      const closedCount = allTickets.length;
-      if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`Bulk complete finished with errors \u2014 ${closedCount} closed.`);
-      } else {
-        _smgmtShowToast(
-          `${sprintLabelDisplay(label)} bulk completed \u2014 ${closedCount} closed, ${data.completed} marked completed.`
-        );
-      }
+      _smgmtBoardLog("\u2713 Complete finished", "ok");
+      _smgmtBoardFinish({
+        ok: true,
+        message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
+        onDone: () => {
+          if (typeof globalThis._histResetLedgerCache === "function")
+            globalThis._histResetLedgerCache();
+          loadSprintMgmt().catch(() => {
+          });
+        }
+      });
     } catch (e) {
       _smgmtBoardLog(`\u2717 ${e.message}`, "err");
-      _smgmtShowToast("Bulk complete failed: " + e.message);
-      try {
-        await loadSprintMgmt();
-      } catch (_) {
-      }
-    } finally {
-      _smgmtBoardUnlock();
+      _smgmtBoardFinish({
+        ok: false,
+        message: "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
+        onDone: () => {
+          if (typeof globalThis._histResetLedgerCache === "function")
+            globalThis._histResetLedgerCache();
+          loadSprintMgmt().catch(() => {
+          });
+        }
+      });
     }
   }
 
-  // static/src/sprint-board/run-controls.js
+  // apps/dashboard/static/src/sprint-board/run-controls.js
   var PF_STEPS = [
     { key: "ac", label: "Acceptance criteria", autoFixable: true },
     { key: "estimates", label: "Estimate coverage", autoFixable: true },
@@ -3650,6 +3644,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfShowLoadingActivity("Loading pre-flight checks\u2026");
   }
   function _pfClose() {
@@ -3665,6 +3662,9 @@ Replace the existing draft (${data.existing_label})?`
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfXLSuggestions = [];
+    _pfStrictXLGate = false;
+    _pfXLMinutesSaved = 0;
     _pfStepFails = 0;
     _pfAutofixPending = false;
   }
@@ -3687,6 +3687,9 @@ Replace the existing draft (${data.existing_label})?`
       _pfCycle = data.cycle || null;
       _pfFlags = data.mis_sizing_flags || null;
       _pfModels = data.models || null;
+      _pfXLSuggestions = data.xl_suggestions || [];
+      _pfStrictXLGate = data.strict_xl_gate || false;
+      _pfXLMinutesSaved = data.xl_minutes_saved || 0;
       if (_pfDagData) {
         for (const t of _pfDagData.tickets || [])
           _pfSelectedIds.add(t.id);
@@ -3709,6 +3712,7 @@ Replace the existing draft (${data.existing_label})?`
     const warningsHtml = _pfBuildWarningsHtml();
     const cycleHtml = _pfBuildCycleHtml();
     const flagsHtml = _pfBuildFlagsHtml();
+    const xlHtml = _pfBuildXLSuggestionsHtml();
     const conflictsHtml = _pfBuildConflictsHtml();
     const orderHtml = _pfBuildOrderHtml();
     const modelsHtml = _pfBuildModelsHtml();
@@ -3724,6 +3728,7 @@ Replace the existing draft (${data.existing_label})?`
      ${modelsHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
+     ${xlHtml}
      ${cycleHtml}
      ${flagsHtml}
      ${dagHtml}
@@ -3748,16 +3753,21 @@ Replace the existing draft (${data.existing_label})?`
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
     const hasPending = pendingFlags.length > 0;
     const hasFail = _pfStepFails > 0;
+    const hasBlockingXL = _pfStrictXLGate && _pfXLSuggestions && _pfXLSuggestions.length > 0;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     if (!confirmBtn)
       return;
-    confirmBtn.disabled = hasCycle || hasPending || hasFail;
+    confirmBtn.disabled = hasCycle || hasPending || hasFail || hasBlockingXL;
     if (hasCycle) {
       confirmBtn.title = "Cannot run: dependency cycle detected. Resolve the cycle first.";
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: dependency cycle detected");
     } else if (hasPending) {
       confirmBtn.title = `Cannot run: ${pendingFlags.length} mis-sizing flag${pendingFlags.length > 1 ? "s" : ""} need review.`;
       confirmBtn.setAttribute("aria-label", "Run Sprint \u2014 disabled: mis-sizing flags need review");
+    } else if (hasBlockingXL) {
+      const n = _pfXLSuggestions.length;
+      confirmBtn.title = `Cannot run: ${n} XL ticket${n > 1 ? "s" : ""} must be split or dismissed (Strict XL gate is on).`;
+      confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: strict XL gate blocks ${n} ticket(s)`);
     } else if (hasFail) {
       confirmBtn.title = `Cannot run: ${_pfStepFails} blocking issue${_pfStepFails > 1 ? "s" : ""} detected.`;
       confirmBtn.setAttribute("aria-label", `Run Sprint \u2014 disabled: ${_pfStepFails} blocking issue(s)`);
@@ -3787,6 +3797,37 @@ Replace the existing draft (${data.existing_label})?`
     return `<div class="pf-warnings-section">
     <div class="pf-warnings-label">Warnings</div>
     <div class="pf-warning-chips">${chips.join("")}</div>
+  </div>`;
+  }
+  function _pfBuildXLSuggestionsHtml() {
+    const suggestions = _pfXLSuggestions || [];
+    if (!suggestions.length)
+      return "";
+    const label = _pfCurrentLabel;
+    const strictNote = _pfStrictXLGate ? '<span class="pf-xl-strict-badge">Strict gate on \u2014 split or dismiss to proceed</span>' : "";
+    const savedNote = _pfXLMinutesSaved > 0 ? `<div class="pf-xl-saved">~${_pfXLMinutesSaved} minutes saved if split</div>` : "";
+    const rows = suggestions.map((s) => {
+      const sizeLabel = s.size ? escHtml(s.size) : "?";
+      const minsLabel = s.estimated_minutes ? `${s.estimated_minutes} min` : "";
+      const estimate = [sizeLabel, minsLabel].filter(Boolean).join(" \xB7 ");
+      const splitBtn = typeof smgmtSplitOpen === "function" ? `<button class="pf-xl-split-btn" onclick="smgmtSplitOpen(${s.issue_number}, '${escHtml(label || "")}')" title="Open Split flow for #${s.issue_number}">Split</button>` : `<a class="pf-xl-split-btn" href="https://github.com/${_smgmtRepo()}/issues/${s.issue_number}" target="_blank" rel="noopener">Split</a>`;
+      return `<div class="pf-xl-item" id="pf-xl-item-${s.issue_number}">
+      <div class="pf-xl-item-header">
+        <span class="pf-xl-item-num">#${s.issue_number}</span>
+        <span class="pf-xl-item-title" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
+        <span class="pf-xl-consider-label">Consider splitting</span>
+        <span class="pf-xl-estimate">${escHtml(estimate)}</span>
+      </div>
+      <div class="pf-xl-item-actions">
+        ${splitBtn}
+        <button class="pf-xl-dismiss-btn" onclick="_pfDismissXLSuggestion(${s.issue_number})">Dismiss</button>
+      </div>
+    </div>`;
+    });
+    return `<div class="pf-xl-section" id="pf-xl-section">
+    <div class="pf-xl-section-label">XL tickets \u2014 consider splitting ${strictNote}</div>
+    ${savedNote}
+    ${rows.join("")}
   </div>`;
   }
   function _pfPatchWarnings() {
@@ -4505,7 +4546,7 @@ Replace the existing draft (${data.existing_label})?`
     await _ksFinish(label);
   }
 
-  // static/src/sprint-board/drag-drop.js
+  // apps/dashboard/static/src/sprint-board/drag-drop.js
   var _smgmtBoardOverlayHasProgress = false;
   function isDragBlocked(state) {
     return !!(state && state.moveLock);
@@ -4685,7 +4726,7 @@ This will close the issue on GitHub. This cannot be undone.`))
       alert("Failed to delete issue: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock2();
+      _smgmtBoardUnlock();
     }
   }
   async function _smgmtMoveSelectedTo(targetLabel) {
@@ -4728,7 +4769,7 @@ ${data.errors.join("\n")}`);
       _smgmtShowToast("Failed to move tickets: " + e.message);
       await loadSprintMgmt();
     } finally {
-      _smgmtBoardUnlock2();
+      _smgmtBoardUnlock();
     }
   }
   function _smgmtTicketDragStart(event, issueNum, fromSprint) {
@@ -5020,7 +5061,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -5053,7 +5094,7 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number}: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     }
   }
@@ -5204,7 +5245,7 @@ ${data.errors.join("\n")}`);
         alert(`Failed to move tickets to backlog: ${e.message}`);
         await loadSprintMgmt();
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     } else {
       const { number, fromSprint } = dragInfo;
@@ -5234,7 +5275,7 @@ ${data.errors.join("\n")}`);
         }
         alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
       } finally {
-        _smgmtBoardUnlock2();
+        _smgmtBoardUnlock();
       }
     }
   }
@@ -5284,6 +5325,14 @@ ${data.errors.join("\n")}`);
     } else if (!showProgress) {
       _smgmtBoardProgress2(0, 1);
     }
+    if (opts && opts.showDone) {
+      const doneEl = document.getElementById("smgmt-op-done");
+      if (doneEl) {
+        doneEl.hidden = false;
+        doneEl.style.cssText = "margin-top:12px;text-align:center";
+        doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn" disabled>Done</button>';
+      }
+    }
   }
   function _smgmtBoardProgress2(done, total) {
     if (_smgmtBoardOverlayHasProgress) {
@@ -5321,7 +5370,7 @@ ${data.errors.join("\n")}`);
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   }
-  function _smgmtBoardUnlock2() {
+  function _smgmtBoardUnlock() {
     _smgmtMoveLock = false;
     _smgmtBoardOverlayHasProgress = false;
     const overlay = document.getElementById("smgmt-move-overlay");
@@ -5340,12 +5389,86 @@ ${data.errors.join("\n")}`);
       logEl.hidden = true;
       logEl.innerHTML = "";
     }
+    const doneEl = document.getElementById("smgmt-op-done");
+    if (doneEl) {
+      doneEl.hidden = true;
+      doneEl.innerHTML = "";
+    }
+    const errEl = document.getElementById("smgmt-op-error");
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = "";
+    }
+    const spinner = document.getElementById("smgmt-move-spinner");
+    if (spinner)
+      spinner.style.display = "";
     _smgmtBoardProgress2(0, 1);
     if (_arInterval > 0)
       _smgmtArStartTicker();
   }
+  function _smgmtBoardFinish2(opts) {
+    opts = opts || {};
+    const ok = opts.ok !== false;
+    const message = opts.message || (ok ? "Done." : "Stopped.");
+    const onDone = opts.onDone;
+    _smgmtArStopTicker();
+    const spinner = document.getElementById("smgmt-move-spinner");
+    if (spinner)
+      spinner.style.display = "none";
+    const overlay = document.getElementById("smgmt-move-overlay");
+    if (overlay)
+      overlay.setAttribute("aria-busy", "false");
+    if (_smgmtBoardOverlayHasProgress) {
+      patchProgressActivity(
+        "smgmt-op-pa-host",
+        { status: ok ? "done" : "failed", current: message },
+        { id: BOARD_OVERLAY_PA_ID }
+      );
+    }
+    const msgEl = document.getElementById("smgmt-move-overlay-msg");
+    const errEl = document.getElementById("smgmt-op-error");
+    if (ok) {
+      if (msgEl)
+        msgEl.textContent = message;
+      if (errEl) {
+        errEl.hidden = true;
+        errEl.textContent = "";
+      }
+    } else {
+      if (errEl) {
+        errEl.textContent = message;
+        errEl.hidden = false;
+        errEl.style.cssText = "color:var(--red,#e5484d);font-size:13px;margin-top:10px;text-align:left;white-space:pre-wrap;max-height:160px;overflow:auto";
+      }
+    }
+    const doneEl = document.getElementById("smgmt-op-done");
+    if (doneEl) {
+      doneEl.hidden = false;
+      doneEl.style.cssText = "margin-top:12px;text-align:center";
+      let btn = document.getElementById("smgmt-op-done-btn");
+      if (!btn) {
+        doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn">Done</button>';
+        btn = document.getElementById("smgmt-op-done-btn");
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.onclick = () => {
+          _smgmtBoardUnlock();
+          if (typeof onDone === "function") {
+            try {
+              onDone();
+            } catch (_) {
+            }
+          }
+        };
+      }
+    }
+  }
+  function _smgmtBoardHalt(message, onDone) {
+    _smgmtBoardFinish2({ ok: false, message, onDone });
+  }
 
-  // static/src/sprint-board/board-render.js
+  // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
@@ -6482,6 +6605,17 @@ ${data.errors.join("\n")}`);
     const runningClass = isRunning ? " smgmt-running" : isLinger && !isAwaitingMerge ? " smgmt-linger" : "";
     const collapsedClass = isCollapsed ? " smgmt-collapsed" : "";
     const collapseLabel = (isCollapsed ? "Expand " : "Collapse ") + escHtml(sprintLabelDisplay(label));
+    const showDagOrderBtn = !isRunningView && !isPostRun && !finished && ["planned", "draft", "planning"].includes(planState);
+    const cachedDagData = showDagOrderBtn ? typeof _smgmtDagDataCache !== "undefined" ? _smgmtDagDataCache[label] : null : null;
+    const dagHasLevels = cachedDagData && (cachedDagData.levels || []).length > 0;
+    const dagHasCycles = cachedDagData && (cachedDagData.cycles || []).length > 0;
+    const dagOrderBtnDisabled = !dagHasLevels || dagHasCycles ? "disabled" : "";
+    const dagOrderBtnTitle = dagHasCycles ? "Apply DAG Order \u2014 disabled: circular dependencies detected" : !dagHasLevels ? "Apply DAG Order \u2014 loading DAG preview\u2026" : cachedDagData && cachedDagData.partial ? "Apply DAG Order (partial preview \u2014 some tickets unestimated)" : "Apply DAG Order";
+    const dagOrderBtn = showDagOrderBtn ? `<button class="smgmt-dag-order-btn" id="dag-order-btn-${escHtml(label)}"
+               ${dagOrderBtnDisabled}
+               title="${escHtml(dagOrderBtnTitle)}"
+               onclick="smgmtApplyDagOrder('${escHtml(label)}')">
+         <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
          ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
@@ -6512,6 +6646,7 @@ ${data.errors.join("\n")}`);
                   title="Delete sprint"
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
+          ${dagOrderBtn}
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
@@ -7600,7 +7735,7 @@ ${data.errors.join("\n")}`);
     }
   }
 
-  // static/src/sprint-board/index.js
+  // apps/dashboard/static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
   globalThis._rrCatClass = _rrCatClass;
@@ -7691,9 +7826,11 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
   globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
   globalThis._smgmtBoardLock = _smgmtBoardLock2;
-  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock2;
+  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
   globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
   globalThis._smgmtBoardLog = _smgmtBoardLog2;
+  globalThis._smgmtBoardFinish = _smgmtBoardFinish2;
+  globalThis._smgmtBoardHalt = _smgmtBoardHalt;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
   globalThis._smgmtRender = _smgmtRender2;
@@ -7754,9 +7891,12 @@ ${data.errors.join("\n")}`);
   globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
   globalThis._histResetLedgerCache = _histResetLedgerCache;
+  globalThis._histToggleShowClosed = _histToggleShowClosed;
+  globalThis._histForceRefresh = _histForceRefresh;
+  globalThis._histSetTtlMin = _histSetTtlMin;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
-  // static/src/index.js
+  // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;

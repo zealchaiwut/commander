@@ -732,6 +732,64 @@ def _validate_github_repos() -> None:
         )
 
 
+def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
+    """Reconcile DB rows stuck at state='running' with no live local sprint.
+
+    ``_all_sprints_running`` only sees sprints that still have a local
+    ``*-plan.json`` with state=running. A ``sprints`` row left at 'running' with
+    no such plan.json — a row copied from another machine, a deleted plan, or a
+    crash before the terminal write — is otherwise never cleared and lingers on
+    the board / pill forever (e.g. a perf-coach sprint showing 'running' for days).
+
+    Sweep such rows to needs_rework when ALL hold:
+      * the (project, label) is not reported live by _all_sprints_running, and
+      * the row's started_at is older than ``max_age_minutes`` (so a sprint
+        mid-startup, before its plan.json lands, is never killed).
+
+    Returns the labels swept. Best-effort; never raises.
+    """
+    swept: list[str] = []
+    try:
+        rows = db.list_sprints_lifecycle()
+    except Exception:
+        return swept
+    try:
+        live = {(r.get("project"), r.get("sprint_label")) for r in _all_sprints_running()}
+    except Exception:
+        live = set()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        if (row.get("state") or "") != "running":
+            continue
+        label = row.get("label") or ""
+        project = row.get("project") or ""
+        if not label or (project, label) in live:
+            continue
+        started = (row.get("started_at") or "").strip()
+        ts = None
+        if started:
+            try:
+                ts = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            except ValueError:
+                ts = None
+            if ts is not None and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        # Skip rows that are too fresh (a real sprint may not have written its
+        # plan.json yet). A row with no/garbled started_at is treated as stale.
+        if ts is not None and (now - ts).total_seconds() < max_age_minutes * 60:
+            continue
+        try:
+            db.record_sprint_needs_rework(
+                label, end_reason="orphaned (no live process)", project=project,
+            )
+            swept.append(label)
+        except Exception:
+            continue
+    if swept:
+        logger.info("[orphan-db-sweep] reconciled stale running rows: %s", swept)
+    return swept
+
+
 async def _periodic_orphan_sweep_loop() -> None:
     """Sweep orphan PID files every 5 minutes while the dashboard is running."""
     while True:
@@ -740,6 +798,10 @@ async def _periodic_orphan_sweep_loop() -> None:
             _sweep_orphan_pid_files()
         except Exception as exc:
             print(f"[periodic-sweep] unexpected error: {exc}")
+        try:
+            _sweep_orphan_db_running_rows()
+        except Exception as exc:
+            print(f"[periodic-sweep] db-running sweep error: {exc}")
 
 
 _STATUS_SYNC_INTERVAL = 30  # seconds
@@ -2339,7 +2401,14 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
 # the extracted routers and the sprint_manager-facing run/finish endpoints share
 # one implementation (issue #795). Re-exported under the original private name so
 # existing callers and tests (which patch server._build_sprint_subprocess_env)
-# keep working unchanged.
+# keep working unchanged. The actual re-export was dropped in the refactor, which
+# broke run/finish-sprint with AttributeError at dispatch time — restored here.
+def _build_sprint_subprocess_env() -> dict:
+    # Lazy import: routers.dispatch_service resolves server/startup at request
+    # time, so importing it at module load would be circular.
+    from routers.dispatch_service import build_sprint_subprocess_env
+    return build_sprint_subprocess_env()
+
 
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -2604,12 +2673,18 @@ def _sprint_db_set_state(
     project: str,
     state: str,
     **extra_fields,
-) -> None:
+) -> bool:
     """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
 
-    Best-effort: any DB failure is swallowed so it never breaks the request —
-    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    Best-effort on DB *errors*: any exception is swallowed so it never breaks the
+    request — plan.json dual-write remains the cache and the sweep paths reconcile
+    drift. But a state-machine *rejection* (illegal edge → accepted=False) is NOT
+    an exception — it returns False here so callers can surface a silent no-op
+    instead of assuming success. Pass actor="reconcile" via extra_fields to
+    complete a `needs_rework` lineage that has merged (the B2 edge is
+    reconcile-only). Returns True on success, False on rejection/error.
     """
+    actor = extra_fields.get("actor", "manager")
     try:
         if state == "running":
             db.record_sprint_start(
@@ -2617,12 +2692,14 @@ def _sprint_db_set_state(
                 started_at=extra_fields.get("started_at"),
             )
         elif state == "completed":
-            db.record_sprint_finish(
+            res = db.record_sprint_finish(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
                 project=project or "",
+                actor=actor,
             )
+            return bool(getattr(res, "accepted", True))
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
@@ -2640,7 +2717,8 @@ def _sprint_db_set_state(
                 project=project or "",
             )
     except Exception:
-        pass
+        return False
+    return True
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
@@ -3467,7 +3545,7 @@ def _derive_outcome_lifecycle(
     parent_state = db.canonical_lifecycle(row["state"])
     if parent_state not in _OUTCOME_TERMINAL_STATES:
         return parent_state
-    children = db.get_sprint_children(sprint_label)
+    children = db.get_sprint_children(sprint_label, project=project or None)
     if not children:
         return parent_state
     unsettled = [
@@ -4235,19 +4313,26 @@ def _sprint_branch_name(label: str) -> str:
     return f"sprint/{label}"
 
 
-def children_of(parent_label: str, project_root: Path | None = None) -> list[str]:
+def children_of(parent_label: str, project_root: Path | None = None, project: str | None = None) -> list[str]:
     """Return child sprint labels whose parent is parent_label, sorted by sub-index.
 
     Primary: queries sprints DB WHERE parent_label matches.
+    When project is provided, scoped to that project (issue #1464).
     Fallback (rows predating parent-linkage tracking): plan.json disk glob.
     """
     try:
         with db.get_conn() as conn:
             db._create_sprint_lifecycle_tables(conn)
-            rows = conn.execute(
-                "SELECT label FROM sprints WHERE parent_label = ?",
-                (parent_label,),
-            ).fetchall()
+            if project:
+                rows = conn.execute(
+                    "SELECT label FROM sprints WHERE parent_label = ? AND project = ?",
+                    (parent_label, project),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT label FROM sprints WHERE parent_label = ?",
+                    (parent_label,),
+                ).fetchall()
         if rows:
             return sorted([r["label"] for r in rows], key=_sprint_label_sub_index)
     except Exception:
@@ -4321,17 +4406,17 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
     return False
 
 
-def _bulk_complete_unsettled_children(project_root: Path, base_label: str) -> list[str]:
+def _bulk_complete_unsettled_children(project_root: Path, base_label: str, project: str | None = None) -> list[str]:
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
-    for child_label in children_of(base_label, project_root):
+    for child_label in children_of(base_label, project_root, project=project):
         if not _bulk_complete_lineage_settled(project_root, child_label):
             unsettled.append(child_label)
     return unsettled
 
 
-def _bulk_complete_assert_children_completed(project_root: Path, base_label: str) -> None:
-    unsettled = _bulk_complete_unsettled_children(project_root, base_label)
+def _bulk_complete_assert_children_completed(project_root: Path, base_label: str, project: str | None = None) -> None:
+    unsettled = _bulk_complete_unsettled_children(project_root, base_label, project=project)
     if unsettled:
         raise HTTPException(
             409,
@@ -4624,6 +4709,13 @@ def _branch_has_unmerged_commits(repo: str, head: str, base: str) -> bool:
     """True when head has commits not reachable from base."""
     if not _gh_branch_exists(repo, head):
         return False
+    # A deleted base branch means there is nothing to merge into — the chain
+    # already settled (base merged up and was pruned). Without this guard the
+    # compare below 404s, falls through to `return True`, and bulk-complete then
+    # tries `gh pr create --base <deleted>`, which fails and breaks the whole
+    # merge run. Treat a missing base as "no unmerged commits".
+    if not _gh_branch_exists(repo, base):
+        return False
     try:
         from urllib.parse import quote
         ref = quote(f"{base}...{head}", safe="")
@@ -4642,7 +4734,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     """Ordered merge steps: each child → its parent (deepest first), then base → develop."""
     steps: list[dict] = []
     base_branch = _sprint_branch_name(base_label)
-    children = children_of(base_label, project_root)
+    children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)
@@ -4682,7 +4774,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     """Branches that still need merging before base-sprint finish (full child → parent → develop chain)."""
     pending: list[str] = []
     base_branch = _sprint_branch_name(base_label)
-    children = children_of(base_label, project_root)
+    children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
         parent_label = _sprint_merge_parent_label(project_root, child_label)
         child_branch = _sprint_branch_name(child_label)

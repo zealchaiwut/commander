@@ -690,7 +690,10 @@ def _create_sprint_pr(
         f"_Merge via Merge Sprint when UAT is complete._"
     )
 
-    title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
+    # Title reflects the CHILD label and its immediate-parent target (e.g.
+    # "Sprint 94.2 → 94.1 — 2 ticket(s) shipped"), not the base sprint number, so
+    # a rerun child's PR is unambiguous in the lineage.
+    title = f"Sprint {sprint_label} → {pr_base.split('/')[-1]} — {len(shipped)} ticket(s) shipped"
 
     sys.stdout.write(str(f"  Creating PR: {sprint_branch} → {pr_base} ...") + "\n")
     try:

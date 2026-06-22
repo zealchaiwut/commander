@@ -103,6 +103,7 @@ from startup import (  # noqa: E402
     _periodic_orphan_sweep_loop,
     _restore_sprint_statuses_on_startup,
     _status_md_sync_loop,
+    _sweep_orphan_db_running_rows,
     _sweep_orphan_pid_files,
     _validate_github_repos,
 )
@@ -151,6 +152,7 @@ async def lifespan(app: FastAPI):
     _check_gh_auth()
     _validate_github_repos()
     _sweep_orphan_pid_files()
+    _sweep_orphan_db_running_rows()
     _restore_sprint_statuses_on_startup()
     await _mark_inflight_jobs_failed()
     if _BACKUP_AVAILABLE:
@@ -209,6 +211,8 @@ from routers import (  # noqa: E402
     metrics_router,
     milestones_router,
     mis_sizing_router,
+    xl_suggestions_router,
+    sprint_collisions_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -262,6 +266,8 @@ app.include_router(maintenance_router)
 app.include_router(metrics_router)
 app.include_router(milestones_router)
 app.include_router(mis_sizing_router)
+app.include_router(xl_suggestions_router)
+app.include_router(sprint_collisions_router)
 app.include_router(projects_router)
 app.include_router(reports_router)
 app.include_router(roadmap_router)

@@ -36,7 +36,12 @@ _BOARD_RENDER_SRC = (
 _BUNDLE_SRC = (
     _DASHBOARD_ROOT / "static" / "dist" / "bundle.js"
 ).read_text(encoding="utf-8")
-_SERVER_SRC = (_DASHBOARD_ROOT / "server.py").read_text(encoding="utf-8")
+# server.py was split into routers/ (issue #1267); the run-sprint route handler
+# now lives in routers/sprint_run.py. Read both as the "server source".
+_SERVER_SRC = "\n".join(
+    (_DASHBOARD_ROOT / p).read_text(encoding="utf-8")
+    for p in ("server.py", "routers/sprint_run.py")
+)
 
 
 def _write_plan(tmp: Path, label: str, state: str | None) -> Path:

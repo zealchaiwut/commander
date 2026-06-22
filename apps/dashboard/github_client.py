@@ -547,6 +547,28 @@ def list_sprints(repo_name: str | None = None) -> list[int]:
     return sorted({int(m.group(1)) for n in names if (m := SPRINT_RE.match(n))})
 
 
+def list_merged_sprint_branches(repo_name: str | None = None) -> set[str]:
+    """Head ref names of merged PRs (e.g. ``sprint/sprint-9``).
+
+    A sprint whose branch appears here AND whose tickets are all closed is
+    shipped, so the board can drop it even without an Executive Summary issue or
+    a local sign-off. One cached gh call per board load (not per sprint).
+    Returns an empty set on any error.
+    """
+    r = _r(repo_name)
+    key = f"merged_branches:{r}"
+
+    def fetch():
+        try:
+            out = _json("pr", "list", "--repo", r, "--state", "merged",
+                        "--json", "headRefName", "--limit", "200")
+        except Exception:
+            return set()
+        return {p.get("headRefName") for p in (out or []) if p.get("headRefName")}
+
+    return _cached(key, fetch)
+
+
 def list_milestones(repo_name: str | None = None) -> list[dict]:
     """List repository milestones (issue #861, Plan next sprint).
 

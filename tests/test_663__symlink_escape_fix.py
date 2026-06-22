@@ -26,13 +26,8 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 @pytest.fixture()
 def client_ctx(tmp_path):
     projects_file = tmp_path / "projects.json"
-    projects_file.write_text(json.dumps([
-        {"repo": "owner/test-proj", "name": "Test Proj", "environments": {}}
-    ]))
-
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    projects_data = [{"repo": "owner/test-proj", "name": "Test Proj", "environments": {}}]
+    projects_file.write_text(json.dumps(projects_data))
 
     import server as srv
     import projects as projects_module
@@ -41,7 +36,10 @@ def client_ctx(tmp_path):
     projects_module.PROJECTS_FILE = projects_file
 
     from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module):
+    # Patch load_projects on the shared projects module rather than popping
+    # server/projects from sys.modules — the pop reimported fresh modules while
+    # the already-registered routers kept the old ones, corrupting later tests.
+    with patch.object(projects_module, "load_projects", return_value=list(projects_data)):
         client = TestClient(srv.app, raise_server_exceptions=False)
         yield client, srv, projects_module, projects_file, settings_service
 

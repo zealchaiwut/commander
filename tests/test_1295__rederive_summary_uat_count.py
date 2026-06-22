@@ -24,6 +24,8 @@ os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
 
 import db as _db_module  # noqa: E402
 
+_TEST_PROJECT = "zealchaiwut/test-project"
+
 
 @pytest.fixture
 def fresh_db(tmp_path):
@@ -46,7 +48,7 @@ class TestRederiveSummaryUatCount:
         After reconcile, summary_uat_count must be 0 (re-derived), not 2 (stale).
         """
         label = "sprint-1295-stale"
-        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural")
+        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural", project=_TEST_PROJECT)
         # Seed with normalized issues (no status field) and a stale uat count of 2.
         fresh_db.update_sprint_run_counts(
             label,
@@ -54,6 +56,7 @@ class TestRederiveSummaryUatCount:
             summary_settled_done=1,
             summary_uat_count=2,    # stale — tickets approved since sprint ended
             summary_failure_count=0,
+            project=_TEST_PROJECT,
         )
 
         # A new agent_run for an issue not in issues_json → triggers drift
@@ -61,10 +64,10 @@ class TestRederiveSummaryUatCount:
         fresh_db.record_agent_finish(11, label, "coder", outcome="completed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_TEST_PROJECT), project=_TEST_PROJECT)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_TEST_PROJECT)
         # Normalized entries have no status field → uat_count derived as 0, not 2.
         assert row["summary_uat_count"] == 0
 
@@ -76,7 +79,7 @@ class TestRederiveSummaryUatCount:
         summary_uat_count must be 1 (derived from that entry), not 0.
         """
         label = "sprint-1295-raw-uat"
-        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural")
+        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural", project=_TEST_PROJECT)
         # Seed issues_json with a raw entry that retains status='uat'.
         fresh_db.update_sprint_run_counts(
             label,
@@ -87,6 +90,7 @@ class TestRederiveSummaryUatCount:
             summary_settled_done=1,
             summary_uat_count=0,   # will be re-derived to 1
             summary_failure_count=0,
+            project=_TEST_PROJECT,
         )
 
         # New agent_run to trigger drift detection
@@ -94,10 +98,10 @@ class TestRederiveSummaryUatCount:
         fresh_db.record_agent_finish(21, label, "coder", outcome="completed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_TEST_PROJECT), project=_TEST_PROJECT)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_TEST_PROJECT)
         # Entry #20 has status='uat' → uat_count = 1
         assert row["summary_uat_count"] == 1
 
@@ -110,13 +114,14 @@ class TestRederiveSummaryUatCount:
         by status='uat' entries in the merged list must be overwritten to 0.
         """
         label = "sprint-1295-noforward"
-        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural")
+        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural", project=_TEST_PROJECT)
         fresh_db.update_sprint_run_counts(
             label,
             json.dumps([{"ticket_id": 30, "number": 30, "state": "merged"}]),
             summary_settled_done=1,
             summary_uat_count=7,   # arbitrary stale value with no backing entries
             summary_failure_count=0,
+            project=_TEST_PROJECT,
         )
 
         # Drift: new issue in agent_runs
@@ -124,10 +129,10 @@ class TestRederiveSummaryUatCount:
         fresh_db.record_agent_finish(31, label, "coder", outcome="completed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_TEST_PROJECT), project=_TEST_PROJECT)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_TEST_PROJECT)
         # Must not equal the stale stored value; must be re-derived to 0
         assert row["summary_uat_count"] != 7
         assert row["summary_uat_count"] == 0
@@ -135,7 +140,7 @@ class TestRederiveSummaryUatCount:
     def test_multiple_uat_entries_counted_correctly(self, fresh_db):
         """When multiple merged-list entries have status='uat', all are counted."""
         label = "sprint-1295-multi-uat"
-        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural")
+        fresh_db.record_sprint_ready_to_merge(label, end_reason="natural", project=_TEST_PROJECT)
         fresh_db.update_sprint_run_counts(
             label,
             json.dumps([
@@ -146,6 +151,7 @@ class TestRederiveSummaryUatCount:
             summary_settled_done=3,
             summary_uat_count=0,
             summary_failure_count=0,
+            project=_TEST_PROJECT,
         )
 
         # Drift: extra issue
@@ -153,8 +159,8 @@ class TestRederiveSummaryUatCount:
         fresh_db.record_agent_finish(43, label, "coder", outcome="completed")
 
         from routers import sprint_reconcile_service as svc
-        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label))
+        updated = svc._reconcile_counts(label, fresh_db.get_sprint(label, project=_TEST_PROJECT), project=_TEST_PROJECT)
         assert updated is True
 
-        row = fresh_db.get_sprint(label)
+        row = fresh_db.get_sprint(label, project=_TEST_PROJECT)
         assert row["summary_uat_count"] == 2  # entries #40 and #41 have status='uat'

@@ -187,8 +187,12 @@ Index: `(repo, state)`.
 
 `sprints.state` is constrained to `planning` / `running` / `completed` / `cancelled` / `failed` (`failed` reserved for a future watchdog recovery sprint — no writer yet). The `{label}-plan.json` / `{label}-pid` files continue to be written as a deprecated cache until a later sprint removes them.
 
-`sprints` columns: `label` (PK), `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
+`sprints` columns: `label`, `project`, `state`, `created_at`, `started_at`, `ended_at`, `end_reason`, `parent_label`.
 `sprint_ticket_order` columns: `label`, `issue`, `position` — PK `(label, issue)`, index `(label, position)`.
+
+**Composite-key invariant — `(label, project)` (issues #1464, #1465).** Sprint `label` is unique only *within* a `project` — two projects may both own e.g. `sprint-66`. Every lifecycle read, write, and bulk-complete must scope to both `label` **and** `project`. `get_sprint_children(parent_label, project)` and `children_of(parent_label, ..., project)` filter by project so a lineage never pulls children from another project sharing the base label; the label-only path is a fallback that logs a warning when it fires. The target schema enforces `PRIMARY KEY (label, project)`; until that migration lands `project` acts as a soft scope on reads. **Historical incident (sprint-66):** before the key was enforced, `ON CONFLICT(label) DO UPDATE` let perf-coach's `sprint-66` overwrite commander's row and orphan its `66.x` children — repaired by `scripts/repair_sprint_collisions.py --apply` (restores the base row from plan.json / state.json / agent_runs without touching the surviving row); regression-guarded by `tests/test_sprint_collision_regression.py`. See `docs/architecture/sprint-lifecycle.md` § Composite-Key Invariant.
+
+**Legacy-row backfill (issue #1460).** `_backfill_sprint_project()` (run inside `_create_sprint_lifecycle_tables`) fills empty `sprints.project` / `sprint_history.project` rows. Per label it resolves project via (1) `agent_runs.project` for a matching `sprint_label`, else (2) a disk walk for `.commander/sprints/<label>-plan.json` / `<label>-state.json` under each project root in `projects.json`, else (3) leaves it empty and logs a warning. Idempotent — only touches rows where `project = '' OR project IS NULL`. Also runnable as `scripts/backfill_sprint_project.py`.
 
 **Run-artifact columns (issue #1160).** `sprints` also carries the ingested run artifact, written by `ingest_sprint_run_artifact()` at end-of-run and on lazy ingest: `issues_json`, `tokens`, `wall_clock_secs`, `reconciliation_json`, `summary_issue_url`, `summary_path`, `pr_number`, `post_sprint_json`, `estimate_accuracy`, `run_ingested_at`. The Sprint History / summary read path reads these from SQLite only — no disk fallback (issue #1161); on a cache miss it triggers a lazy ingest and returns the ingested row rather than reading raw disk (issue #1160).
 
@@ -478,6 +482,7 @@ add zero GitHub API calls.
 | `GET` | `/api/sprints/history` | Paginated, enriched sprint-history feed for the History ledger (issue #805). Query params: `offset` (default 0), `limit` (default 20). Returns `{sprints: [...], offset, limit, total}`; each item carries `label`, `project`, `lifecycle_state`, `duration`, `tokens`, `estimate_accuracy`, `pr_number`, `summary_path`, `reconciliation`, and an `issues` list. Sources both lifecycle rows and `sprint_history` ledger rows; makes no GitHub calls. The `reconciliation` field (issue #856) carries the post-sprint loose-ends result `{all_clear, checks[], ...}` read verbatim from `<label>-state.json`, or `null` for sprints that closed before the feature was deployed |
 | `GET` | `/api/sprints/{label}/run-stats` | Per-sprint `agent_runs` aggregation for the expanded History run-stats block — stat chips, coder/tester split bar, and gantt timeline segments (issue #810). Optional `project` query param |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Read-only execution preview for a planned sprint (issue #809): predicted dispatch levels, file conflicts, cycles, and the unestimated-ticket list, computed by `dag_builder` over the sprint's cached tickets. Requires `project` query param; cached data only. Edges honour explicit ticket dependencies declared in issue bodies (issue #1404). Also returns `accuracy_warning` (issue #1417): set when the rolling estimator file-prediction accuracy under `.commander/estimates/accuracy/` is unreliable, so the preview can caution that the predicted file-conflict edges may be off |
+| `GET` | `/api/sprints/{sprint_label}/dag-order-preview` | Compute a DAG-topological ticket order for a planned sprint without persisting it (issue #1420). Requires `project` query param; reuses `preview-dag` (cached data only, zero GitHub calls). Returns `new_order` (proposed ticket sequence — lower DAG levels first, within-level order preserved), `diff` (human-readable lines describing each ticket that moves earlier, with dep-edge hints), `is_noop` (true when the current plan already matches DAG order), and `partial` (true when the preview has unestimated tickets). Returns HTTP 409 when the sprint has circular dependencies |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, and flag merged vs unmerged (issue #808). Query params: `repo` (required), `target` (optional base branch). Returns branches plus a `by_sprint` grouping |
 | `POST` | `/cleanup-stale-branches` | Dry-run, then (with `confirm: true`) delete only merged stale branches — never unmerged (issue #808). Body `{repo, branches, target?, confirm}`; returns `{dry_run, target_branch, to_delete, deleted, skipped_unmerged, failed}` |
 | `GET` | `/logs/tail` | Per-issue log tail for the Running-view node inspector (issue #804). Query params: `sprint`, `issue` (int), `project`, `tail_lines` (default, 1–2000). Keyed by sprint + issue (no agent segment); returns `{found, path, tail, mtime}` or `{found: false, candidate_paths, tail}` |
@@ -600,3 +605,33 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
+
+### Sprint label collision audit (issues #1461, #1464, #1465)
+
+The `sprints` table keys rows by `label` alone (`label TEXT PRIMARY KEY`), so two
+projects that reuse a sprint label compete for the same row — an `ON
+CONFLICT(label) DO UPDATE` write from one project clobbers the other's row. This
+sprint adds an audit/repair tool-chain plus project-scoped read paths to contain
+that until a composite `(project, label)` key migration lands.
+
+**Read-path scoping (#1464).** `db.get_sprint_children(parent_label, project=None)`
+and `startup.children_of(parent_label, project_root=None, project=None)` now take an
+optional `project` argument; when provided, child-sprint lookups add `AND project =
+?` so they never match another project's rows. Callers in `startup.py`
+(`_derive_outcome_lifecycle`, `_bulk_complete_unsettled_children`,
+`_bulk_complete_assert_children_completed`, `_merge_steps_for_sprint_chain`,
+`_sprint_merge_chain_pending`) thread the project through. The unscoped fallback
+still works but logs a warning.
+
+**Audit + repair scripts.**
+`scripts/audit_sprint_collisions.py` is read-only: it cross-references `sprints`,
+`sprint_history`, `agent_runs`, and per-clone `plan.json`/`state.json`, prints a
+markdown collision table, and writes the `.commander/runtime/sprint-collisions.json`
+manifest. `scripts/repair_sprint_collisions.py` (`--dry-run` / `--apply`) is a
+surgical fix for the `sprint-66` incident — it restores commander's clobbered base
+row from `plan.json → state.json → agent_runs` without touching perf-coach's row,
+and asserts no stale running row survives.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/debug/sprint-collisions` | Return the `.commander/runtime/sprint-collisions.json` manifest written by `audit_sprint_collisions.py`. Returns `[]` when the manifest has not been generated yet (or is unreadable). Read-only; reads from disk, no DB query |

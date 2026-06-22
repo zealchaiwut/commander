@@ -875,6 +875,17 @@ export function _smgmtBoardLock(message, opts) {
   } else if (!showProgress) {
     _smgmtBoardProgress(0, 1);
   }
+  // Render a disabled Done button up front so the operator sees the overlay will
+  // wait for an explicit acknowledge — _smgmtBoardFinish() enables it on
+  // success/failure. The overlay never auto-dismisses when showDone is set.
+  if (opts && opts.showDone) {
+    const doneEl = document.getElementById('smgmt-op-done');
+    if (doneEl) {
+      doneEl.hidden = false;
+      doneEl.style.cssText = 'margin-top:12px;text-align:center';
+      doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn" disabled>Done</button>';
+    }
+  }
 }
 
 export function _smgmtBoardProgress(done, total) {
@@ -929,7 +940,79 @@ export function _smgmtBoardUnlock() {
   const logEl = document.getElementById('smgmt-op-log');
   if (progWrap) progWrap.hidden = true;
   if (logEl) { logEl.hidden = true; logEl.innerHTML = ''; }
+  const doneEl = document.getElementById('smgmt-op-done');
+  if (doneEl) { doneEl.hidden = true; doneEl.innerHTML = ''; }
+  const errEl = document.getElementById('smgmt-op-error');
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  const spinner = document.getElementById('smgmt-move-spinner');
+  if (spinner) spinner.style.display = '';
   _smgmtBoardProgress(0, 1);
   // Resume auto-refresh if an interval is selected
   if (_arInterval > 0) _smgmtArStartTicker();
+}
+
+/**
+ * Settle an operation and WAIT for the operator to acknowledge: keep the overlay
+ * open, stop the spinner, show a success or error message, and enable a "Done"
+ * button. The overlay never auto-dismisses — the operator reads the log, then
+ * Done unlocks the board and runs the optional onDone callback (e.g. refresh).
+ *
+ * opts = { ok?: boolean (default true), message?: string, onDone?: fn }
+ */
+export function _smgmtBoardFinish(opts) {
+  opts = opts || {};
+  const ok = opts.ok !== false;
+  const message = opts.message || (ok ? 'Done.' : 'Stopped.');
+  const onDone = opts.onDone;
+
+  _smgmtArStopTicker();
+  const spinner = document.getElementById('smgmt-move-spinner');
+  if (spinner) spinner.style.display = 'none';
+  const overlay = document.getElementById('smgmt-move-overlay');
+  if (overlay) overlay.setAttribute('aria-busy', 'false');
+  if (_smgmtBoardOverlayHasProgress) {
+    patchProgressActivity('smgmt-op-pa-host',
+      { status: ok ? 'done' : 'failed', current: message },
+      { id: BOARD_OVERLAY_PA_ID });
+  }
+
+  const msgEl = document.getElementById('smgmt-move-overlay-msg');
+  const errEl = document.getElementById('smgmt-op-error');
+  if (ok) {
+    if (msgEl) msgEl.textContent = message;
+    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  } else {
+    if (errEl) {
+      errEl.textContent = message;
+      errEl.hidden = false;
+      errEl.style.cssText = 'color:var(--red,#e5484d);font-size:13px;margin-top:10px;text-align:left;white-space:pre-wrap;max-height:160px;overflow:auto';
+    }
+  }
+
+  const doneEl = document.getElementById('smgmt-op-done');
+  if (doneEl) {
+    doneEl.hidden = false;
+    doneEl.style.cssText = 'margin-top:12px;text-align:center';
+    // Reuse a pre-rendered (disabled) Done button if _smgmtBoardLock placed one;
+    // otherwise create it. Either way, enable it now.
+    let btn = document.getElementById('smgmt-op-done-btn');
+    if (!btn) {
+      doneEl.innerHTML = '<button type="button" class="btn-primary" id="smgmt-op-done-btn">Done</button>';
+      btn = document.getElementById('smgmt-op-done-btn');
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.onclick = () => {
+        _smgmtBoardUnlock();
+        if (typeof onDone === 'function') { try { onDone(); } catch (_) { /* ignore */ } }
+      };
+    }
+  }
+}
+
+/**
+ * Back-compat error wrapper around _smgmtBoardFinish (kept for existing callers).
+ */
+export function _smgmtBoardHalt(message, onDone) {
+  _smgmtBoardFinish({ ok: false, message, onDone });
 }

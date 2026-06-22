@@ -4284,8 +4284,29 @@ def main() -> None:
     if not args.dry_run:
         _ended_at = datetime.now(timezone.utc).isoformat()
         if not state or not state.issues:
-            _terminal_state = "needs_rework"
-            _terminal_reason = "no-dispatchable-tickets"
+            # No dispatchable tickets → the run did no work (nothing was queued).
+            # main() set the sprint to 'running' before the run, so reset it back
+            # to a fresh, runnable DRAFT — drop the lifecycle row and set plan
+            # state to draft — instead of marking needs_rework, which implies
+            # failed work and offers a pointless "Re-run → N.1". The operator just
+            # fixes the ticket labels and Runs the same sprint again. (Mirrors the
+            # manual recovery for a no-dispatch misfire, e.g. sprint-95.)
+            try:
+                import db  # apps/dashboard on sys.path (line 142)
+                db.transition_sprint_state(
+                    args.label, "deleted", actor="reconcile",
+                    project=eff_repo or "",
+                )
+            except Exception:
+                pass
+            _plan_json_set_state_sm(
+                args.label, "draft", cfg=cfg,
+                end_reason="no-dispatchable-tickets",
+            )
+            sys.stdout.write(str(
+                "No dispatchable tickets — sprint left as a runnable draft "
+                "(not marked needs_rework). Check ticket labels and Run again."
+            ) + "\n")
         else:
             # A sprint is a clean (ready_to_merge) finish only when every ticket
             # landed. Besides an explicit agent failure, a ticket left SKIPPED by a
@@ -4308,15 +4329,15 @@ def main() -> None:
             else:
                 _terminal_state = "ready_to_merge"
                 _terminal_reason = "natural"
-        _plan_json_set_state_sm(
-            args.label, _terminal_state, cfg=cfg,
-            ended_at=_ended_at,
-            end_reason=_terminal_reason,
-        )
-        _sprint_db_set_state_sm(
-            args.label, _terminal_state, project=eff_repo or "",
-            ended_at=_ended_at, end_reason=_terminal_reason,
-        )
+            _plan_json_set_state_sm(
+                args.label, _terminal_state, cfg=cfg,
+                ended_at=_ended_at,
+                end_reason=_terminal_reason,
+            )
+            _sprint_db_set_state_sm(
+                args.label, _terminal_state, project=eff_repo or "",
+                ended_at=_ended_at, end_reason=_terminal_reason,
+            )
 
     # Regenerate STATUS.md after sprint closes (#584)
     _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)

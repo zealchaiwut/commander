@@ -1113,13 +1113,22 @@ async function _ksStep2Branch() {
   _ksSetStep('branch', 'checking', '');
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1000));
+    // 2s (was 1s) — matches step 3 and halves the running-all polling burst
+    // while the process is starting.
+    await new Promise(r => setTimeout(r, 2000));
     if (await _ksIsRunning(_ksLabel)) {
       _ksSetStep('branch', 'pass', '');
       return true;
     }
   }
-  _ksShowError('branch', 'Timed out waiting for sprint process to start');
+  // The process never entered the running state. The usual cause is NOT a slow
+  // start — it exited almost immediately, most often because no tickets were
+  // dispatchable (wrong/missing sprint label or status labels on the tickets),
+  // or it finished/crashed. Surface that instead of a bare "waiting" timeout.
+  _ksShowError('branch',
+    'Sprint didn’t start running — it likely exited immediately. Most often no '
+    + 'dispatchable tickets (check the sprint label + status labels on the '
+    + 'tickets), or it finished/crashed. Check the run log, then Retry.');
   _ksFailedStep = 1;
   return false;
 }

@@ -4449,13 +4449,16 @@ Replace the existing draft (${data.existing_label})?`
     _ksSetStep("branch", "checking", "");
     const deadline = Date.now() + 3e4;
     while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1e3));
+      await new Promise((r) => setTimeout(r, 2e3));
       if (await _ksIsRunning(_ksLabel)) {
         _ksSetStep("branch", "pass", "");
         return true;
       }
     }
-    _ksShowError("branch", "Timed out waiting for sprint process to start");
+    _ksShowError(
+      "branch",
+      "Sprint didn\u2019t start running \u2014 it likely exited immediately. Most often no dispatchable tickets (check the sprint label + status labels on the tickets), or it finished/crashed. Check the run log, then Retry."
+    );
     _ksFailedStep = 1;
     return false;
   }

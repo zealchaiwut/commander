@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from services.sprint_manager import fill_acceptance_criteria as _fill_ac
+from services.sprint_manager.ticket_spec import parse_ticket_spec as _parse_ticket_spec
 from services.sprint_manager.sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
@@ -477,7 +478,7 @@ def get_sprint_preflight(sprint_label: str, project: str):
                         pass
 
                 body = iss.get("body") or ""
-                has_ac = "## Acceptance Criteria" in body
+                has_ac = bool(_parse_ticket_spec(body)["acceptance_criteria"])
 
                 tid = f"#{num}"
                 ticket_map[tid] = {

@@ -111,7 +111,8 @@
 
     /* active-milestone progress indicator (issue #880) — compact, never dominant */
     .pb-milestone{display:none;margin-left:auto;align-items:center;gap:8px;text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-muted);font-size:12px;max-width:48%;transition:border-color .12s,color .12s}
-    .pb-milestone.show{display:inline-flex}
+    /* Milestones hidden for now (operator request) — remove .show override to restore */
+    .pb-milestone.show{display:none}
     .pb-milestone .ti{font-size:13px;flex-shrink:0}
     .pb-ms-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .pb-milestone:hover{border-color:var(--blue);color:var(--blue)}

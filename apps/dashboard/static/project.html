@@ -178,6 +178,9 @@
       transition: border-color .12s, color .12s;
     }
     .hnav-milestone.hidden { display: none; }
+    /* Milestones / Roadmap hidden for now (operator request). Remove this rule to
+       restore the Roadmap tab + active-milestone header pill. */
+    #stab-roadmap, .hnav-milestone { display: none !important; }
     .hnav-milestone:hover { border-color: var(--blue); color: var(--blue); }
     .hnav-milestone .ti { font-size: var(--font-size-base); flex-shrink: 0; }
     .hnav-ms-name {

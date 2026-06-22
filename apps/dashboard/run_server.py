@@ -9,7 +9,6 @@ This is a convenience launcher so the server can be started from apps/dashboard/
 without remembering the uvicorn invocation.
 """
 import os
-import subprocess
 import sys
 from pathlib import Path
 

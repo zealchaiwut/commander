@@ -345,6 +345,8 @@ from services.sprint_manager.summary import (  # noqa: E402, F401
 
 # Post-sprint agent helpers extracted to post_sprint.py (issue #1288); re-exported
 # here so all existing call sites within this module remain unmodified.
+from services.sprint_manager.ticket_spec import parse_ticket_spec  # noqa: E402
+
 from services.sprint_manager.post_sprint import (  # noqa: E402, F401
     DEFAULT_REVIEWER_PROMPT,
     DEFAULT_DOCUMENTER_PROMPT,
@@ -1943,6 +1945,113 @@ def _build_estimate_paths_block(estimate: Optional[dict]) -> str:
     header = "Start here — do not broad-search the repo unless these paths are insufficient."
     path_lines = "\n".join(f"  {p}" for p in paths)
     return f"{header}\n\n{path_lines}"
+
+
+_DESIGN_BLOCK_CAP = 6000  # max characters injected from DESIGN.md
+
+
+def _slugify_heading(text: str) -> str:
+    """Convert a heading text to a GitHub-style slug."""
+    slug = text.lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug.strip())
+    slug = re.sub(r"-+", "-", slug)
+    return slug
+
+
+def _resolve_design_section(content: str, slug: str) -> Optional[str]:
+    """Return the full text of the heading matching slug, or None if not found."""
+    headings = list(re.finditer(r"^(#{1,6})\s+(.+)$", content, re.MULTILINE))
+    for i, m in enumerate(headings):
+        if _slugify_heading(m.group(2).strip()) == slug:
+            start = m.end()
+            end = headings[i + 1].start() if i + 1 < len(headings) else len(content)
+            return (m.group(0) + content[start:end]).strip()
+    return None
+
+
+def _extract_design_headings(content: str) -> list:
+    """Return a list of heading lines from a markdown document."""
+    return [m.group(0) for m in re.finditer(r"^#{1,6} .+$", content, re.MULTILINE)]
+
+
+def _cap_design_block(text: str) -> str:
+    """Cap the design block at _DESIGN_BLOCK_CAP chars with a truncation notice."""
+    if len(text) <= _DESIGN_BLOCK_CAP:
+        return text
+    return text[:_DESIGN_BLOCK_CAP] + "\n\n[Design context truncated — see DESIGN.md for full text]"
+
+
+def _build_design_block(
+    issue_num: int,
+    eff_repo: Optional[str],
+    cwd_path: "Path",
+) -> str:
+    """Build a design context block for the coder prompt (issue #1488).
+
+    Reads DESIGN.md from cwd_path and injects:
+    - Resolved section text when ## Design Refs lists DESIGN.md#slug entries.
+    - A compact heading index when no ## Design Refs section exists.
+
+    Returns '' when DESIGN.md is absent (guard handled by _design_docs_guard).
+    Total output is capped at _DESIGN_BLOCK_CAP characters.
+    """
+    design_doc_path = Path(cwd_path) / "DESIGN.md"
+    if not design_doc_path.exists():
+        return ""
+
+    design_content = design_doc_path.read_text(encoding="utf-8")
+
+    # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
+    issue_body = ""
+    if eff_repo:
+        try:
+            result = subprocess.run(
+                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                issue_body = data.get("body", "") or ""
+        except Exception:
+            pass
+
+    spec = parse_ticket_spec(issue_body)
+    design_refs = spec.get("design_refs", [])
+
+    if not design_refs:
+        # AC-3: no ## Design Refs — inject compact heading index.
+        headings = _extract_design_headings(design_content)
+        if not headings:
+            return ""
+        index_lines = "\n".join(f"- {h}" for h in headings)
+        return _cap_design_block(f"Available DESIGN.md sections:\n{index_lines}")
+
+    # AC-1 / AC-2: resolve each ref; warn on missing slugs.
+    resolved_parts = []
+    for ref in design_refs:
+        if "#" not in ref:
+            continue
+        doc_name, slug = ref.split("#", 1)
+        doc_name = doc_name.strip()
+        slug = slug.strip().lower()
+
+        if doc_name.strip().lower() != "design.md":
+            # Only DESIGN.md is in scope (PRODUCT.md support deferred).
+            continue
+
+        section_text = _resolve_design_section(design_content, slug)
+        if section_text is None:
+            sys.stdout.write(f"WARNING: heading '{slug}' not found in DESIGN.md\n")
+            sys.stdout.flush()
+        else:
+            resolved_parts.append(section_text)
+
+    if not resolved_parts:
+        return ""
+
+    combined = "\n\n".join(resolved_parts)
+    return _cap_design_block(f"Design context from DESIGN.md:\n\n{combined}")
 
 
 def _pool_acquire() -> Optional[Path]:

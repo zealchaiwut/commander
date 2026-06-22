@@ -5931,6 +5931,18 @@
     .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
     .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
     .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Definition of Ready per-ticket badge (issue #1487) */
+    .smgmt-dor-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; border-radius: 3px; padding: 1px 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .smgmt-dor-badge--ready { color: var(--green); }
+    .smgmt-dor-badge--notready { color: var(--red); background: var(--red-bg); }
+    .smgmt-dor-reasons {
+      font-size: 10px; opacity: 0.85;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     /* Size legend (issue #562) */
     .smgmt-size-legend {
       display: flex; align-items: center; gap: 14px; flex-wrap: wrap;

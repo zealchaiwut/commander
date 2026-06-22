@@ -76,6 +76,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "xl_minute_threshold": {"secret": False, "default": 90},
     # When True, Run Sprint is blocked until all flagged tickets are split or dismissed.
     "strict_xl_gate": {"secret": False, "default": False},
+    # Definition-of-Ready mode (issue #1486): off skips the check, warn surfaces gaps,
+    # block enforces them. Returned in preflight metadata as dor_mode.
+    "definition_of_ready_mode": {"secret": False, "default": "warn"},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

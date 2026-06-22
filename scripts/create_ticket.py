@@ -12,6 +12,7 @@ Usage:
 
 Prints:  #<number> <url>
 """
+
 import argparse
 import os
 import shutil
@@ -21,7 +22,39 @@ from pathlib import Path
 
 _DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
 sys.path.insert(0, str(_DASHBOARD_DIR))
-import github_client
+import github_client  # noqa: E402
+
+# Definition-of-Ready template — all four canonical sections scaffolded.
+# Manual tickets should start from this body so they are DoR-compliant on
+# creation. BA-generated tickets populate Design Refs from the project's
+# DESIGN.md; manual authors should fill each section before filing.
+TEMPLATE_BODY = """\
+## What & Why
+
+<!-- What are we building and why does it matter? -->
+
+## Acceptance Criteria
+
+- [ ] <criterion 1 — independently testable, phrased as "System does X">
+- [ ] <criterion 2>
+
+## Design Refs
+
+- Architecture Overview
+- Sprint Lifecycle — Composite Key Invariant
+
+## UAT Test Steps
+
+1. <action step>
+   **Expected:** <observable outcome>
+
+2. <action step>
+   **Expected:** <observable outcome>
+
+## Out of Scope
+
+- <explicit exclusion to prevent scope creep>
+"""
 
 
 def _load_env():
@@ -76,7 +109,7 @@ def main():
     if args.sprint is not None:
         labels.append(f"sprint-{args.sprint}")
     if args.labels:
-        labels += [l.strip() for l in args.labels.split(",") if l.strip()]
+        labels += [lbl.strip() for lbl in args.labels.split(",") if lbl.strip()]
 
     result = subprocess.run(
         ["gh", "issue", "create",

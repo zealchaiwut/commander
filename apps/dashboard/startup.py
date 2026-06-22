@@ -5730,7 +5730,11 @@ def _get_bulk_estimator_semaphore() -> asyncio.Semaphore:
     """Return (or create) the global semaphore for bulk estimation tasks."""
     global _bulk_estimator_semaphore
     if _bulk_estimator_semaphore is None:
-        _bulk_estimator_semaphore = asyncio.Semaphore(3)
+        # Bulk-create fires one estimate-draft task per ticket; the cap bounds how
+        # many estimator subprocesses (cheap Haiku) run at once. 3 made a batch
+        # fill in slow waves (felt one-by-one); 8 lets a typical batch estimate in
+        # parallel while staying well within subprocess/rate-limit headroom.
+        _bulk_estimator_semaphore = asyncio.Semaphore(8)
     return _bulk_estimator_semaphore
 
 

@@ -200,41 +200,59 @@ def _gate_pytest(
     # worktester_dashboard so the logic degrades gracefully on flat layouts.
     wt_root = worktester_root or worktester_dashboard
 
-    # Detect pytest binary
-    ok, pytest_path, _ = _try("which", "pytest")
-    if not ok:
-        # Try inside the tester worktree venv (root-level, not apps/dashboard)
-        venv_pytest = wt_root / "venv" / "bin" / "pytest"
-        if venv_pytest.exists():
-            pytest_bin = str(venv_pytest.resolve())
-        else:
-            output = "pytest binary not found on PATH and no venv/bin/pytest found."
-            structured_log.error("gate_failed", f"[gate:pytest] FAIL: {output}", gate="pytest", issue_num=issue_num)
-            return GateResult(gate="pytest", passed=False, output=output)
-    else:
-        pytest_bin = pytest_path
-
-    # Determine which test files to run based on gate_scope
+    # Determine scope / what to run FIRST — before requiring a pytest binary.
+    # A changed-scope ticket that touches no test files has nothing to run, so it
+    # must skip cleanly rather than hard-fail on a missing binary (a frontend-only
+    # ticket would otherwise fail the pytest gate even though it has no tests).
     if gate_scope == "full":
-        sys.stdout.write(str("  [gate:pytest] running pytest -x (full scope) ...") + "\n")
-        rc, stdout, stderr = _run_timed(pytest_bin, "-x", cwd=worktester_dashboard)
+        run_args: tuple[str, ...] = ("-x",)
+        pytest_cwd = worktester_dashboard
+        scope_msg = "running pytest -x (full scope) ..."
     else:
         # changed scope: only run test files changed relative to base_branch
-        # git diff paths are relative to repo root; run pytest from root so
-        # the paths resolve correctly (root-level tests/ is not under apps/dashboard).
         changed = _changed_py_files(base_branch, cwd=worktester_dashboard)
         test_files = [f for f in changed if f.startswith("tests/")]
         if not test_files:
             sys.stdout.write(str("  [gate:pytest] no test files changed — skipped") + "\n")
             return GateResult(gate="pytest", passed=True, output="no test files changed")
-        sys.stdout.write(str(f"  [gate:pytest] checking {len(test_files)} file(s): {', '.join(test_files)}") + "\n")
         # Paths from git diff are relative to the git root, not worktester_dashboard.
         # Run pytest from the git root so tests/ paths resolve correctly.
         rc_root, git_root_out, _ = _run_timed(
             "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard,
         )
         pytest_cwd = Path(git_root_out.strip()) if rc_root == 0 else worktester_dashboard
-        rc, stdout, stderr = _run_timed(pytest_bin, "-x", *test_files, cwd=pytest_cwd)
+        run_args = ("-x", *test_files)
+        scope_msg = f"checking {len(test_files)} file(s): {', '.join(test_files)}"
+
+    # Now resolve the pytest binary — only reached when there is something to run.
+    ok, pytest_path, _ = _try("which", "pytest")
+    if ok:
+        pytest_bin = pytest_path
+    else:
+        # Try inside the tester worktree venv (root-level, not apps/dashboard)
+        venv_pytest = wt_root / "venv" / "bin" / "pytest"
+        if venv_pytest.exists():
+            pytest_bin = str(venv_pytest.resolve())
+        else:
+            # Tests exist to run but pytest is unavailable — this is an ENVIRONMENT
+            # problem (no venv with pytest in this worktree / fresh clone), not a
+            # code defect. Classify as ENV_ERROR so the dispatch layer does NOT send
+            # the ticket back to the coder (a missing binary can't be fixed by
+            # editing code) and does NOT apply needs-rework. (See _LOGIC_FAILURE_
+            # CATEGORIES — ENV_ERROR is intentionally excluded.)
+            output = (
+                "pytest binary not found on PATH and no venv/bin/pytest found — "
+                "test infrastructure missing in this worktree (no venv with pytest). "
+                "Environment problem, not a code defect."
+            )
+            structured_log.error(
+                "gate_failed", f"[gate:pytest] ENV_ERROR: {output}",
+                gate="pytest", issue_num=issue_num,
+            )
+            return GateResult(gate="pytest", passed=False, output=output, category="ENV_ERROR")
+
+    sys.stdout.write(str(f"  [gate:pytest] {scope_msg}") + "\n")
+    rc, stdout, stderr = _run_timed(pytest_bin, *run_args, cwd=pytest_cwd)
 
     combined = stdout + stderr
     if rc == 0:

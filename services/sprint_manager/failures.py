@@ -54,6 +54,10 @@ class FailureCategory:
     PYTEST_FAIL      = "PYTEST_FAIL"
     # Merge sequencing issue — not a code quality problem, no coder requeue (issue #1414)
     REBASE_CONFLICT  = "REBASE_CONFLICT"
+    # Environment / infra failure (e.g. pytest binary missing in the worktree) — not
+    # a code defect, so intentionally kept OUT of _LOGIC_FAILURE_CATEGORIES (no coder
+    # requeue, no needs-rework).
+    ENV_ERROR        = "ENV_ERROR"
 
 
 def _build_failure_suffix(issue_num: int, repo_root: Optional[Path] = None) -> str:

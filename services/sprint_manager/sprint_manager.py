@@ -1787,10 +1787,19 @@ def handle_post_tester(
             "merge-preview": FailureCategory.MERGE_CONFLICT,
             "monolith":      FailureCategory.GATE_FAIL,
         }
-        gate_category = gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
-        return (False,
-                f"Issue #{issue_num}: gate failed ({gate_name})",
-                gate_category)
+        # A gate may override the category for a failure that isn't a code defect
+        # (e.g. pytest reports ENV_ERROR when its binary is missing) — honor that
+        # so infra failures skip the coder fix-loop + needs-rework.
+        gate_category = (
+            getattr(failed, "category", None)
+            or gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
+        )
+        _gate_msg = (
+            f"Issue #{issue_num}: gate {gate_name} environment error (test infra missing)"
+            if gate_category == FailureCategory.ENV_ERROR
+            else f"Issue #{issue_num}: gate failed ({gate_name})"
+        )
+        return (False, _gate_msg, gate_category)
 
 
 # ── agent dispatch helpers ────────────────────────────────────────────────────

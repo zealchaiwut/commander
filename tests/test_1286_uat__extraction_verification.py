@@ -122,11 +122,11 @@ class TestAC7NoNewImports:
         content = DISPATCH_MODULE.read_text()
         lines = content.split("\n")
 
-        import_lines = [l for l in lines[:100] if l.startswith("import ") or l.startswith("from ")]
+        import_lines = [ln for ln in lines[:100] if ln.startswith("import ") or ln.startswith("from ")]
 
         # Verify imports are present and reasonable
-        assert any("import json" in l for l in import_lines), "json should be imported"
-        assert any("import subprocess" in l for l in import_lines), "subprocess should be imported"
+        assert any("import json" in ln for ln in import_lines), "json should be imported"
+        assert any("import subprocess" in ln for ln in import_lines), "subprocess should be imported"
 
         # Count total imports — should not be excessive
         assert len(import_lines) < 50, f"Too many imports in dispatch.py: {len(import_lines)}"

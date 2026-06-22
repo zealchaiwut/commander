@@ -16,6 +16,15 @@ assignees: ''
 
 - [ ] 
 
+## Design Refs
+
+<!-- List the relevant headings from the target project's DESIGN.md, one per
+     line, as bullet items (e.g. "- Architecture Overview"). The BA agent
+     populates this from real DESIGN.md headings. For manual tickets, copy the
+     applicable headings from DESIGN.md — do not invent or leave as placeholder. -->
+
+- 
+
 ## UAT Test Steps
 
 <!-- Numbered steps a human can walk through. Include the Expected outcome for each step.

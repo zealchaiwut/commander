@@ -19,7 +19,21 @@ Evaluate the input immediately. An input is **specific** if it contains ALL THRE
 
 Never spread questions across multiple messages. Never ask questions you already have answers to.
 
-## Step 2 — Draft the ticket
+## Step 2 — Read DESIGN.md and populate Design Refs
+
+Before drafting the ticket, read the target project's `DESIGN.md` (repo root).
+Extract its `##` headings. Select only the subset **relevant to the feature** —
+typically 1–4 headings that describe the area the ticket touches.
+
+Rules:
+- Use only headings that actually exist in `DESIGN.md`. No invented or placeholder headings.
+- If `DESIGN.md` is absent, log a warning and skip the `## Design Refs` section
+  (leave it out of the ticket rather than failing or inserting placeholder text).
+- Relevant means: the ticket's implementation will read, extend, or interact with
+  that part of the design.
+- Use the heading text verbatim (e.g. `- Architecture Overview` not a paraphrase).
+
+## Step 3 — Draft the ticket
 
 Once you have enough information, produce a proposal block that contains ALL of the following:
 
@@ -40,6 +54,11 @@ Once you have enough information, produce a proposal block that contains ALL of 
 - [ ] <criterion 1>
 - [ ] <criterion 2>
 - [ ] <criterion 3>
+
+## Design Refs
+
+- <relevant DESIGN.md heading — must actually exist in the project's DESIGN.md>
+- <second relevant heading if applicable>
 
 ## UAT Test Steps
 
@@ -217,7 +236,7 @@ Examples:
    **Expected:** You land back on the dashboard, logged in (external auth — MANUAL).
 ```
 
-## Step 3 — Approval loop
+## Step 4 — Approval loop
 
 After showing the proposal, ask exactly this question (no other text on that line):
 
@@ -227,7 +246,7 @@ After showing the proposal, ask exactly this question (no other text on that lin
 
 **If the user provides feedback**: incorporate the feedback, show the complete updated ticket body exactly once, then ask the approval prompt again. Do not re-ask any clarifying questions. Do not create the issue until approved.
 
-## Step 4 — Create the issue
+## Step 5 — Create the issue
 
 On approval, run:
 
@@ -255,7 +274,7 @@ Each attached file is copied to `references/issue-<N>/`, committed to the curren
 
 The script prints `#<number> <url>` on success.
 
-## Step 5 — Report back
+## Step 6 — Report back
 
 Report: issue number, URL, slug (for branch creation), and a one-line summary of the acceptance criteria count.
 
@@ -264,7 +283,7 @@ Example:
 > Slug: `fix-approve-auto-close`
 > 5 acceptance criteria defined.
 
-## Step 6 — Optional: Estimate the issue
+## Step 7 — Optional: Estimate the issue
 
 This step is **off by default**. Only run it if the user explicitly asked (e.g. passed `--estimate`, said "and estimate it", or "estimate after creating").
 

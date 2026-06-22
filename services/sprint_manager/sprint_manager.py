@@ -54,6 +54,20 @@ _early_repo_root = str(Path(__file__).parent.parent.parent)
 if _early_repo_root not in sys.path:
     sys.path.insert(0, _early_repo_root)
 
+# CLI entry-point self-registration (issue #1289 regression fix). When this file
+# is run directly (the dashboard launches `python3 sprint_manager.py <label> …`),
+# it lives in sys.modules as '__main__' — NOT 'sprint_manager'. But the extracted
+# helper modules (pipeline, post_sprint, summary, gates, …) resolve this module's
+# internals lazily via sys.modules['sprint_manager'] /
+# 'services.sprint_manager.sprint_manager' (the _lookup_in_sm proxy). Without
+# these aliases the proxy returns None and proxied calls fall back to empty — e.g.
+# list_backlog_issues → _list_labeled_open_issues returns [], so EVERY sprint
+# reports "No dispatchable issues found" when launched as a subprocess. Alias the
+# running module under both canonical names so the proxies resolve to us.
+if __name__ == "__main__":
+    sys.modules.setdefault("sprint_manager", sys.modules["__main__"])
+    sys.modules.setdefault("services.sprint_manager.sprint_manager", sys.modules["__main__"])
+
 try:
     import yaml  # PyYAML — already in requirements.txt
 except ImportError:  # pragma: no cover

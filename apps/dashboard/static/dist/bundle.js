@@ -1899,8 +1899,9 @@ Replace the existing draft (${data.existing_label})?`
       const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
       if (unfinished.length)
         return false;
+      return issues.length > 0;
     }
-    return state === "ready_to_merge" || state === "completed" || state === "partial_finished" || state === "running";
+    return state === "ready_to_merge" || state === "completed" || state === "running";
   }
   function _histCardOutcomeHtml(s) {
     if (!_histCardShowsDoneSummary(s))

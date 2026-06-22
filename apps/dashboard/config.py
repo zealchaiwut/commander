@@ -74,11 +74,25 @@ def sprint_goal_required_disabled() -> bool:
     )
 
 
-def commander_features() -> dict[str, bool]:
+def definition_of_ready_mode() -> str:
+    """Return the DOR gate mode: 'block', 'warn', or 'off' (default 'off').
+
+    Precedence: COMMANDER_DOR_MODE env var → global settings store → 'off'.
+    """
+    raw_env = os.environ.get("COMMANDER_DOR_MODE", "").strip().lower()
+    if raw_env in ("block", "warn", "off"):
+        return raw_env
+    stored = _read_global_app_config()
+    val = str(stored.get("definition_of_ready_mode", "off")).strip().lower()
+    return val if val in ("block", "warn", "off") else "off"
+
+
+def commander_features() -> dict:
     """Feature flags exposed to the dashboard UI (/api/environment)."""
     return {
         "signoff": not sprint_signoff_disabled(),
         "advisor": not advisor_disabled(),
         "planning": not sprint_planning_disabled(),
         "goal_required": not sprint_goal_required_disabled(),
+        "definition_of_ready_mode": definition_of_ready_mode(),
     }

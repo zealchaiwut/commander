@@ -172,9 +172,10 @@ async def check_health() -> "JSONResponse":
 
 
 def get_environment() -> dict:
-    """Return the current runtime environment (prd or uat)."""
+    """Return the current runtime environment (prd or uat) and feature flags."""
+    import config  # noqa: PLC0415
     srv = _server()
-    return {"environment": srv.ENVIRONMENT}
+    return {"environment": srv.ENVIRONMENT, "features": config.commander_features()}
 
 
 def get_repo_config():

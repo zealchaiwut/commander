@@ -28,7 +28,6 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 import db  # noqa: E402
 import projects as projects_module  # noqa: E402
 
-from services.logging import log as _slog  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pydantic models (moved from server.py)

@@ -26,7 +26,6 @@ if str(_DASHBOARD_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_DASHBOARD_ROOT))
 
 import db  # noqa: E402
-import github_client as gh  # noqa: E402
 import github_milestones  # noqa: E402
 import projects as projects_module  # noqa: E402
 import settings_repo as _settings  # noqa: E402

@@ -6,19 +6,23 @@
  * seeded on `window` by ./state.js.
  */
 
+/* eslint-disable no-unused-vars */
 /* global _smgmtRepo, _smgmtShowToast, escHtml, sprintLabelDisplay, loadSprintMgmt,
-   _smgmtShowSubView, _smgmtRunningLabels, _smgmtAnySprintRunning, _smgmtLivePollRestart,
+   _smgmtShowSubView, _smgmtRunningLabels, _smgmtAnySprintRunning:writable, _smgmtLivePollRestart,
    _smgmtLingerStart, _smgmtLingerLive, _smgmtRunningViewUpdate,
    _pfCurrentLabel, _pfCurrentRepo, _pfState,
    _pfDagData, _pfWarnings, _pfCycle,
    _pfFlags, _pfSelectedIds, _pfUseClineFollowups,
-   _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved */
+   _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved,
+   _smgmtBySprint */
+/* eslint-enable no-unused-vars */
 
 import {
   mountProgressActivity,
   patchProgressActivityStep,
   unmountProgressActivity,
 } from "../progress-host.js";
+import { _smgmtDorMode, _smgmtDorNotReadyTickets } from "./board-render.js";
 
 // ── Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) ─
 
@@ -76,6 +80,19 @@ export function smgmtRunBlockedToast() {
 }
 
 export function smgmtRunSprint(label) {
+  const mode = _smgmtDorMode();
+  if (mode === "warn") {
+    const tickets = (typeof _smgmtBySprint !== "undefined" && _smgmtBySprint && _smgmtBySprint[label]) || [];
+    const notReady = _smgmtDorNotReadyTickets(tickets);
+    if (notReady.length > 0) {
+      const summary = notReady
+        .map((t) => `#${t.number} — ${t.reasons.join(", ")}`)
+        .join("\n");
+      if (!confirm(`${notReady.length} ticket(s) are not ready:\n\n${summary}\n\nProceed anyway?`)) {
+        return;
+      }
+    }
+  }
   _pfOpen(label);
 }
 
@@ -360,7 +377,7 @@ export function _pfBuildXLSuggestionsHtml() {
     const sizeLabel = s.size ? escHtml(s.size) : '?';
     const minsLabel = s.estimated_minutes ? `${s.estimated_minutes} min` : '';
     const estimate = [sizeLabel, minsLabel].filter(Boolean).join(' · ');
-    const splitBtn = typeof smgmtSplitOpen === 'function'  // eslint-disable-line no-undef
+    const splitBtn = typeof smgmtSplitOpen === 'function'
       ? `<button class="pf-xl-split-btn" onclick="smgmtSplitOpen(${s.issue_number}, '${escHtml(label || '')}')" title="Open Split flow for #${s.issue_number}">Split</button>`
       : `<a class="pf-xl-split-btn" href="https://github.com/${_smgmtRepo()}/issues/${s.issue_number}" target="_blank" rel="noopener">Split</a>`;
 
@@ -439,7 +456,7 @@ function _pfPatchWarnings() {
   if (anchor) anchor.insertAdjacentHTML('afterend', html);
 }
 
-function _pfShrinkWarnings(fix, missingAc, unestimated) {
+function _pfShrinkWarnings(fix, _missingAc, _unestimated) {
   if (!_pfWarnings || (fix.errors && fix.errors.length)) return;
   if (fix.filled > 0 && _pfWarnings.missing_ac?.length) {
     _pfWarnings.missing_ac = _pfWarnings.missing_ac.slice(fix.filled);

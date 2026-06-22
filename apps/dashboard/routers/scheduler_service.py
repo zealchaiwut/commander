@@ -20,7 +20,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from typing import Optional
 
 from services.sprint_manager import sprint_scheduler as _sched
 

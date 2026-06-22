@@ -272,7 +272,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     coder_path = srv._coder_clone_path(project_root)
     commander = srv._commander_dir(project_root)
 
-    srv._reject_terminal_label_redispatch(project_root, body.sprint_label)
+    srv._reject_terminal_label_redispatch(project_root, body.sprint_label, body.project)
     srv._assert_sprint_signed_off(project_root, body.sprint_label)
 
     # Block empty runs before spawn
@@ -573,7 +573,7 @@ def kill_sprint(sprint_label: str, project: str):
                              end_reason=_cancel_reason)
 
     try:
-        _summary_url = srv._read_sprint_summary_url(project_root, sprint_label)
+        _summary_url = srv._read_sprint_summary_url(project_root, sprint_label, project)
         _summary_num = None
         if _summary_url:
             import re as _re

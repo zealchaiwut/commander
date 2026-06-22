@@ -525,7 +525,7 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     if duration is None:
         duration = enrich["duration"]
     from . import sprint_state  # noqa: PLC0415
-    lifecycle_state = sprint_state.current(label) or _normalize_state(row.get("state"))
+    lifecycle_state = sprint_state.current(label, row.get("project")) or _normalize_state(row.get("state"))
     end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
     issues = enrich["issues"]
     lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)
@@ -1035,7 +1035,7 @@ def _discover_file_labels(sprints_dirs: Path | list[Path]) -> set[str]:
             if p.name.endswith("-state.json") or p.name.endswith("-plan.json"):
                 continue
             labels.add(p.stem)
-    return {l for l in labels if _LABEL_RE.match(l)}
+    return {lbl for lbl in labels if _LABEL_RE.match(lbl)}
 
 
 def _resolve_sprint_project(

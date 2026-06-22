@@ -393,7 +393,7 @@ def _sweep_plan_json_states(projects: list) -> None:
                 if _live_manager_pid(project_root, label) is not None:
                     continue
                 # Condition 3: grace window must have elapsed
-                row = db.get_sprint(label)
+                row = db.get_sprint(label, project=proj["repo"])
                 raw_ts = (row or {}).get("started_at") or data.get("started_at")
                 if not raw_ts:
                     print(f"[startup-sweep] {label}: no started_at — grace assumed, skip")
@@ -2144,9 +2144,9 @@ def _emit_dashboard_event(
         pass
 
 
-def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
+def _read_sprint_summary_url(project_root: Path, sprint_label: str, project: str = "") -> Optional[str]:
     """Return the summary-issue URL from the ingested DB row or state file."""
-    row = db.get_sprint(sprint_label)
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("summary_issue_url"):
         return row["summary_issue_url"]
 
@@ -2456,7 +2456,7 @@ _NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
 })
 
 
-def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
+def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, project: str = "") -> None:
     """Raise 409 when the label *actually ran* and reached a terminal state.
 
     Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
@@ -2475,7 +2475,9 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> 
     # 1. Durable lifecycle table — authoritative when a row exists.
     durable_state = None
     try:
-        row = db.get_sprint(sprint_label)
+        # Scope by project — labels are unique only per repo, so an unscoped lookup
+        # blocks (e.g.) crux sprint-9 on commander's completed sprint-9 row.
+        row = db.get_sprint(sprint_label, project=project or None)
         if row:
             durable_state = row.get("state")
     except Exception:
@@ -3556,7 +3558,7 @@ def _derive_outcome_lifecycle(
     Reads parent canonical state and child rows exclusively from the sprints DB
     table (issue #1093). No GitHub label lookups, no disk globs.
     """
-    row = db.get_sprint(sprint_label)
+    row = db.get_sprint(sprint_label, project=project or None)
     if row is None:
         return db.canonical_lifecycle(pane_state)
     parent_state = db.canonical_lifecycle(row["state"])
@@ -4396,14 +4398,14 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
 })
 
 
-def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
+def _bulk_complete_child_state(project_root: Path, sprint_label: str, project: str | None = None) -> str:
     """Lifecycle state for bulk-complete gating (canonical accessor only)."""
-    return sprint_state.current(sprint_label)
+    return sprint_state.current(sprint_label, project)
 
 
-def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:
+def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str, project: str | None = None) -> bool:
     """True when this label or a rerun child under it finished its run."""
-    if _bulk_complete_child_state(project_root, sprint_label) in _BULK_COMPLETE_CHILD_READY_STATES:
+    if _bulk_complete_child_state(project_root, sprint_label, project) in _BULK_COMPLETE_CHILD_READY_STATES:
         return True
     sprints_dir = _commander_dir(project_root) / "sprints"
     if not sprints_dir.is_dir():
@@ -4418,7 +4420,7 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
             continue
         if (data.get("parent") or "") != sprint_label:
             continue
-        if _bulk_complete_lineage_settled(project_root, lbl):
+        if _bulk_complete_lineage_settled(project_root, lbl, project):
             return True
     return False
 
@@ -4427,7 +4429,7 @@ def _bulk_complete_unsettled_children(project_root: Path, base_label: str, proje
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
     for child_label in children_of(base_label, project_root, project=project):
-        if not _bulk_complete_lineage_settled(project_root, child_label):
+        if not _bulk_complete_lineage_settled(project_root, child_label, project):
             unsettled.append(child_label)
     return unsettled
 

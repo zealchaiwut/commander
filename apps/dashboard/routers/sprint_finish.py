@@ -371,7 +371,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
 
     if merge_pr_number:
         try:
-            srv.db.update_sprint_pr_number(base_label, merge_pr_number)
+            srv.db.update_sprint_pr_number(base_label, merge_pr_number, repo)
         except Exception:
             pass
 
@@ -395,7 +395,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         target=base_label,
         detail={
             "sprint_id": base_label,
-            "summary_issue_url": srv._read_sprint_summary_url(project_root, base_label),
+            "summary_issue_url": srv._read_sprint_summary_url(project_root, base_label, repo),
         },
         action_id=str(uuid.uuid4()),
     )

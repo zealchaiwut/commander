@@ -244,7 +244,12 @@ export async function _bcConfirm() {
     _smgmtBoardFinish({
       ok: true,
       message: `✓ ${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`,
-      onDone: () => { loadSprintMgmt().catch(() => {}); },
+      onDone: () => {
+        // Drop the History ledger cache so the pane reflects the new completed
+        // states on next open instead of serving stale rows.
+        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
+        loadSprintMgmt().catch(() => {});
+      },
     });
   } catch (e) {
     // Keep the overlay open with the error + a Done button so the operator can
@@ -254,7 +259,12 @@ export async function _bcConfirm() {
     _smgmtBoardFinish({
       ok: false,
       message: 'Stopped: ' + e.message + '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).',
-      onDone: () => { loadSprintMgmt().catch(() => {}); },
+      onDone: () => {
+        // Drop the History ledger cache so the pane reflects the new completed
+        // states on next open instead of serving stale rows.
+        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
+        loadSprintMgmt().catch(() => {});
+      },
     });
   }
 }

@@ -22,7 +22,7 @@ import {
   _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
-  _histResetLedgerCache,
+  _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
 } from './history.js';
 
 import {
@@ -264,4 +264,7 @@ globalThis._histRerunSprint = _histRerunSprint;
 globalThis._histToggleAgentTime = _histToggleAgentTime;
 globalThis._histToggleMetrics = _histToggleMetrics;
 globalThis._histResetLedgerCache = _histResetLedgerCache;
+globalThis._histToggleShowClosed = _histToggleShowClosed;
+globalThis._histForceRefresh = _histForceRefresh;
+globalThis._histSetTtlMin = _histSetTtlMin;
 globalThis._histClearStaleLabels = _histClearStaleLabels;

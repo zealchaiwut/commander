@@ -9991,6 +9991,11 @@
                carries its own Summary link pill now. -->
           <!-- Sprints-table CSV export/import (PRD→UAT data sync for testing) -->
           <div class="hist-csv-toolbar">
+            <button type="button" class="btn-ghost" id="hist-refresh-btn" onclick="_histForceRefresh()" title="Reload sprint history now (clears cache)">
+              <i class="ti ti-refresh"></i> Refresh all</button>
+            <button type="button" class="btn-ghost" id="hist-show-closed-btn" onclick="_histToggleShowClosed()" title="Load the full closed-sprint history">
+              <i class="ti ti-history"></i> Show completed</button>
+            <span style="flex:1"></span>
             <button type="button" class="btn-ghost" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
               <i class="ti ti-download"></i> Export CSV</button>
             <button type="button" class="btn-ghost" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
@@ -10869,6 +10874,16 @@
                 </div>
                 <span class="settings-hint">Controls the Sprint Mgmt board refresh rate</span>
               </div>
+              <div class="settings-row">
+                <label class="settings-label">History cache TTL</label>
+                <div class="settings-btn-group" id="settings-histttl-btns">
+                  <button class="settings-btn" data-value="1"  onclick="settingsSetHistoryTtl(1)">1m</button>
+                  <button class="settings-btn" data-value="5"  onclick="settingsSetHistoryTtl(5)">5m</button>
+                  <button class="settings-btn" data-value="15" onclick="settingsSetHistoryTtl(15)">15m</button>
+                  <button class="settings-btn" data-value="30" onclick="settingsSetHistoryTtl(30)">30m</button>
+                </div>
+                <span class="settings-hint">How long the History pane serves from cache before a reload; "Refresh all" always forces one</span>
+              </div>
             </div>
 
             <div class="settings-section">
@@ -11410,6 +11425,27 @@ function settingsSetAutoRefresh(value) {
   } else {
     _smgmtArSelect(n);
   }
+}
+
+function settingsUpdateHistTtlBtns(value) {
+  const v = String(value);
+  document.querySelectorAll('#settings-histttl-btns .settings-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.value === v);
+  });
+}
+
+// Persist the History cache TTL globally (minutes) and apply it live.
+async function settingsSetHistoryTtl(min) {
+  const n = Number(min);
+  settingsUpdateHistTtlBtns(n);
+  if (typeof _histSetTtlMin === 'function') _histSetTtlMin(n);
+  try {
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history_cache_ttl_min: n }),
+    });
+  } catch (_) { /* applied locally regardless */ }
 }
 
 function settingsSaveDefaultLabels(value) {
@@ -24959,6 +24995,9 @@ async function globalSettingsLoad() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     _gssRender(data);
+    const ttl = Number(data.history_cache_ttl_min) || 5;
+    settingsUpdateHistTtlBtns(ttl);
+    if (typeof _histSetTtlMin === 'function') _histSetTtlMin(ttl);
   } catch (err) {
     bodyEl.innerHTML =
       `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;

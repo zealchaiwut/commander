@@ -629,6 +629,24 @@ def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
         return False
 
 
+def _immediate_parent_branch(label: str, cfg: Optional["SprintConfig"] = None) -> str:
+    """Branch a child sprint promotes into at run-end: its plan.json ``parent``
+    (the immediate parent in the rerun chain, e.g. 94.2 → 94.1), falling back to
+    the base sprint branch when no parent is recorded. This keeps the run-end PR
+    on the SAME immediate-parent chain that Complete / Bulk complete merge, so
+    they reuse one PR instead of creating a conflicting child→base fan-in PR.
+    """
+    path = _plan_json_path(label, cfg)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        parent = (raw.get("parent") or "").strip() if isinstance(raw, dict) else ""
+        if parent and re.match(r"^sprint-\d+(\.\d+)*$", parent):
+            return f"sprint/{parent}"
+    except Exception:
+        pass
+    return _base_sprint_branch(label)
+
+
 def _plan_json_set_state_sm(
     label: str,
     state: str,
@@ -6410,7 +6428,10 @@ def _create_sprint_pr(
         f"_Merge via Merge Sprint when UAT is complete._"
     )
 
-    title = f"Sprint {n} — {len(shipped)} ticket(s) shipped"
+    # Title reflects the CHILD label and its immediate-parent target (e.g.
+    # "Sprint 94.2 → 94.1 — 2 ticket(s) shipped"), not the base sprint number, so
+    # a rerun child's PR is unambiguous in the lineage.
+    title = f"Sprint {sprint_label} → {pr_base.split('/')[-1]} — {len(shipped)} ticket(s) shipped"
 
     sys.stdout.write(str(f"  Creating PR: {sprint_branch} → {pr_base} ...") + "\n")
     try:
@@ -10225,7 +10246,7 @@ def main() -> None:
             sprint_number  = _sprint_number(args.label),
             state          = state,
             repo_name      = eff_repo,
-            pr_base        = _base_sprint_branch(args.label),
+            pr_base        = _immediate_parent_branch(args.label, cfg),
             merge_target   = effective_target,
         )
 

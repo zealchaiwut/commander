@@ -12,6 +12,38 @@ Usage:
 
 Prints:  #<number> <url>
 """
+
+# Definition-of-Ready template — all four canonical sections scaffolded.
+# Manual tickets should start from this body so they are DoR-compliant on
+# creation. BA-generated tickets populate Design Refs from the project's
+# DESIGN.md; manual authors should fill each section before filing.
+TEMPLATE_BODY = """\
+## What & Why
+
+<!-- What are we building and why does it matter? -->
+
+## Acceptance Criteria
+
+- [ ] <criterion 1 — independently testable, phrased as "System does X">
+- [ ] <criterion 2>
+
+## Design Refs
+
+- Architecture Overview
+- Sprint Lifecycle — Composite Key Invariant
+
+## UAT Test Steps
+
+1. <action step>
+   **Expected:** <observable outcome>
+
+2. <action step>
+   **Expected:** <observable outcome>
+
+## Out of Scope
+
+- <explicit exclusion to prevent scope creep>
+"""
 import argparse
 import os
 import shutil

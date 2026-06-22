@@ -3357,13 +3357,14 @@ def _state_data_is_dry_run_only(state_data: dict) -> bool:
     return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
 
 
-def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
+def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str, project: str = "") -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
     if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
-    row = db.get_sprint(sprint_label)
+    # Scope by project — sprint labels are unique only per repo (cross-project leak).
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("run_ingested_at"):
         return True
 

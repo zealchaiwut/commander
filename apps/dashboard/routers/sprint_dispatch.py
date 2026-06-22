@@ -260,13 +260,14 @@ def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str
 
 # ── Sprint has-run helper ─────────────────────────────────────────────────────
 
-def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
+def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str, project: str = "") -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
     if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
-    row = db.get_sprint(sprint_label)
+    # Scope by project — sprint labels are unique only per repo (cross-project leak).
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("run_ingested_at"):
         return True
 
@@ -596,7 +597,7 @@ def get_sprint_management_issues(repo: str):
     # Ledger-backed "this label actually ran" — board re-run / merge affordances
     # use this instead of ticket labels (needs-rework/SIT from a prior sprint move).
     sprint_has_run: dict[str, bool] = {
-        lbl: _sprint_has_own_run_outcome(project_root, lbl)
+        lbl: _sprint_has_own_run_outcome(project_root, lbl, repo)
         for lbl in renderable_sprint_labels
     }
 

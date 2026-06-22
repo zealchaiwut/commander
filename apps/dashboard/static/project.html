@@ -107,7 +107,14 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 14px;
-      min-height: 100dvh;
+      /* Fixed-height non-scrolling shell so .main-area is the real scroll
+         container — that's what the sticky project chrome (top nav stays put, the
+         project header + sub-tabs pin below it) and the main-area scroll-shadow
+         rely on. With min-height the page scrolled on <body>, making .main-area's
+         scrollport move and the sticky chrome scroll away. Mobile reverts to body
+         scroll (see the max-width:699px block). */
+      height: 100dvh;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -1932,6 +1939,8 @@
 
     /* ── Mobile ── */
     @media (max-width: 699px) {
+      /* Mobile scrolls on <body> (chrome is static here, not sticky). */
+      body { height: auto; min-height: 100dvh; overflow: visible; }
       .sidebar { display: none; }
       .proj-header-name { display: none; }
       .proj-mobile-switcher { display: block; }

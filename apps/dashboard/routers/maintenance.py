@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from . import maintenance_service, sprints_csv_service
+from . import sprints_csv_service
 
 # ── Path setup ───────────────────────────────────────────────────────────────
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent  # apps/dashboard/
@@ -148,13 +148,7 @@ async def import_sprints(project: str, request: Request, mode: str = "merge"):
     return sprints_csv_service.import_sprints_csv(project, csv_text, mode=mode)
 
 
-@router.post("/api/maintenance/calibration/rebuild")
-def post_rebuild_calibration(project: str):
-    """POST /api/maintenance/calibration/rebuild?project=<slug>.
-
-    Clears and rebuilds the calibration cache by rescanning all sprint-*-state.json
-    files under .commander/sprints/ and .commander/sprints/archive/.
-
-    Returns {"total": N, "by_size": {"S": x, "M": y, "L": z, "XL": w}}.
-    """
-    return maintenance_service.do_rebuild(project, dry_run=False)
+# NOTE: POST /api/maintenance/calibration/rebuild is served by
+# routers/analytics.py::rebuild_calibration_cache (registered first, so it wins).
+# A duplicate handler here was dead code with a different response shape — removed
+# to keep a single source of truth (the frontend consumes analytics' shape).

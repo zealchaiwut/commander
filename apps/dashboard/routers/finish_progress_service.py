@@ -246,7 +246,7 @@ async def run_finish_sprint(
             else:
                 finish_labels = [
                     base_label,
-                    *srv.children_of(base_label, project_root),
+                    *srv.children_of(base_label, project_root, project=repo),
                 ]
             for lbl in finish_labels:
                 try:

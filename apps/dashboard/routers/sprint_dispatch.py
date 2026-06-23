@@ -455,14 +455,25 @@ def get_sprint_management_issues(repo: str):
 
     # Finished sprints = those with a posted "Sprint N Executive Summary" issue,
     # plus locally signed-off merges (merge_sprint / bulk_complete).
+    #
+    # We track two sets that differ only for a finished sprint that still has an
+    # open ticket (typically awaiting UAT sign-off):
+    #   - merged_set:  truly shipped — locally signed-off, lifecycle-completed,
+    #                  or merged-branch. Belongs in History; the board drops it
+    #                  even with an open UAT ticket so it stops double-showing as
+    #                  a Ready-to-merge card while History lists it Completed.
+    #   - finished_set: merged_set PLUS bare run-end summaries. A summary is
+    #                  posted at run end, BEFORE the human merges, so a
+    #                  summary-only sprint may still need its merge card — it
+    #                  stays on the board while it has open tickets.
     finished_map = _finished_sprint_summaries(repo)
-    finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
-    # Also treat any sprint the lifecycle DB marks completed as finished, so the
-    # board honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
+    merged_set: set[str] = set(_locally_signed_off_sprint_labels(project_root))
+    # Treat any sprint the lifecycle DB marks completed as merged, so the board
+    # honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
     # auto-complete, manual repair) even when plan.json wasn't dual-written. The
     # sprints table is the single source of truth for lifecycle state.
     try:
-        finished_set |= {
+        merged_set |= {
             r.get("label")
             for r in db.list_sprints_lifecycle()
             if r.get("label")
@@ -476,8 +487,7 @@ def get_sprint_management_issues(repo: str):
     # PR exists for sprint/<label>) AND whose tickets are all closed (0 open) is
     # shipped — drop it from the board even without an Executive Summary issue or
     # a local sign-off, so a sprint completed on another clone stops lingering
-    # here. One cached gh call per load (not per sprint). A sprint with open
-    # tickets (e.g. awaiting UAT sign-off) is intentionally NOT hidden.
+    # here. One cached gh call per load (not per sprint).
     try:
         merged_heads = github_client.list_merged_sprint_branches(repo_name=repo)
         if merged_heads:
@@ -487,9 +497,11 @@ def get_sprint_management_issues(repo: str):
                     and sprint_ticket_counts.get(lbl, 0) == 0
                     and f"sprint/{lbl}" in merged_heads
                 ):
-                    finished_set.add(lbl)
+                    merged_set.add(lbl)
     except Exception:
         pass
+
+    finished_set = set(finished_map.keys()) | merged_set
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
@@ -610,6 +622,7 @@ def get_sprint_management_issues(repo: str):
         "sprint_parents": sprint_parents,
         "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
+        "merged_sprints": sorted(merged_set),
         "sprint_rerun_into": sprint_rerun_into,
         "sprint_signoff": sprint_signoff,
         "sprint_has_run": sprint_has_run,

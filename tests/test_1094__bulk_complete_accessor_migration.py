@@ -41,7 +41,7 @@ def test_bulk_complete_child_state_uses_accessor(srv):
         result = srv._bulk_complete_child_state(Path("/tmp"), "sprint-68.1")
 
     assert result == "completed"
-    mock_accessor.assert_called_once_with("sprint-68.1")
+    mock_accessor.assert_called_once_with("sprint-68.1", None)
 
 
 def test_bulk_complete_child_state_ready_states_check_uses_accessor_result(srv):

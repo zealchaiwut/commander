@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys as _sys
 from pathlib import Path
 from typing import Optional
@@ -61,16 +60,6 @@ except ImportError:
     SCAFFOLD_AVAILABLE = False
 
 try:
-    from services.sprint_manager.settings_sync import (  # noqa: E402
-        load_local_snapshot as _ss_load_local,
-        load_neon_snapshot as _ss_load_neon,
-        compute_diff as _ss_compute_diff,
-        is_already_in_sync as _ss_already_in_sync,
-        apply_upload as _ss_apply_upload,
-        apply_fetch as _ss_apply_fetch,
-        get_sync_status as _ss_get_status,
-        save_sync_status as _ss_save_status,
-    )
     SYNC_SETTINGS_AVAILABLE = True
 except Exception:
     SYNC_SETTINGS_AVAILABLE = False

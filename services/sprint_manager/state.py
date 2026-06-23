@@ -207,6 +207,10 @@ class GateResult:
     passed:  bool
     skipped: bool = False
     output:  str  = ""
+    # Optional failure-category override. When set on a failed gate, the dispatch
+    # layer uses it instead of the default gate→category map — e.g. a missing
+    # pytest binary is an ENV_ERROR (infra), not a PYTEST_FAIL (code defect).
+    category: Optional[str] = None
 
     @property
     def symbol(self) -> str:

@@ -38,10 +38,17 @@ let _histFoldSize = 10;
 const _histFoldExpanded = new Set();   // ids of currently-expanded fold groups
 
 // Stale-while-revalidate cache for the ledger feed (Tier 1/2 load perf).
+// TTL is 5 min by default (was 45s) so the pane serves from cache and does not
+// auto-revalidate on every open — a manual "Refresh all" forces a reload.
+// Overridable via the global `history_cache_ttl_min` setting.
 let _histLedgerCacheRepo = '';
 let _histLedgerCacheAt = 0;
-const _HIST_LEDGER_TTL_MS = 45000;
+let _HIST_LEDGER_TTL_MS = 300000;
 let _histLedgerInflight = null;
+// Default to the fast active-only feed (running/ready_to_merge/needs_rework/
+// partial_finished + 3 recent completed). "Show completed" flips this to load
+// the full closed history on demand.
+let _histShowClosed = false;
 
 export function _histResetLedgerCache() {
   _histLedgerData = [];
@@ -1134,11 +1141,15 @@ function _histCardShowsDoneSummary(s) {
   if (state === "needs_rework" || state === "partial_finished") {
     const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
     if (unfinished.length) return false;
+    // Every ticket merged — the work landed; the needs_rework / partial_finished
+    // flag is only about fix-rounds or lineage, not unfinished work. Show the done
+    // summary + per-ticket rows (previously these fell through to a final return
+    // that excluded needs_rework, so a fully-merged sprint showed no issue list).
+    return issues.length > 0;
   }
   return (
     state === "ready_to_merge"
     || state === "completed"
-    || state === "partial_finished"
     || state === "running"
   );
 }
@@ -2034,7 +2045,10 @@ export async function _histLoadLedger(repo, opts) {
   const loadPromise = (async () => {
     try {
       const settingsUrl = `/api/projects/${encodeURIComponent(_slug)}/settings`;
-      const historyUrl = '/api/sprints/history?limit=50&project=' + encodeURIComponent(repo || '');
+      // active_only is the default fast feed; "Show completed" loads the full set.
+      const activeParam = _histShowClosed ? '' : '&active_only=1';
+      const historyUrl = '/api/sprints/history?limit=50' + activeParam
+        + '&project=' + encodeURIComponent(repo || '');
       const [sresp, resp] = await Promise.all([
         fetch(settingsUrl).catch(() => null),
         fetch(historyUrl),
@@ -2044,7 +2058,9 @@ export async function _histLoadLedger(repo, opts) {
           const settings = await sresp.json();
           const fs = parseInt(settings.history_fold_size, 10);
           if (!isNaN(fs) && fs > 0) _histFoldSize = fs;
-        } catch (_) { /* keep current fold size */ }
+          const ttlMin = parseFloat(settings.history_cache_ttl_min);
+          if (!isNaN(ttlMin) && ttlMin > 0) _HIST_LEDGER_TTL_MS = ttlMin * 60000;
+        } catch (_) { /* keep current fold size / ttl */ }
       }
       if (!resp.ok) {
         if (!hasCache && el && !background) {
@@ -2075,6 +2091,42 @@ export async function _histLoadLedger(repo, opts) {
   _histLedgerInflight = loadPromise;
   await loadPromise;
 }
+
+// Reflect the current view mode on the toolbar's "Show completed" button.
+function _histSyncShowClosedBtn() {
+  const btn = document.getElementById('hist-show-closed-btn');
+  if (!btn) return;
+  btn.innerHTML = _histShowClosed
+    ? '<i class="ti ti-eye-off"></i> Active only'
+    : '<i class="ti ti-history"></i> Show completed';
+  btn.title = _histShowClosed
+    ? 'Show only actionable sprints + a few recent completed'
+    : 'Load the full closed-sprint history';
+}
+
+// Toggle between the fast active-only feed and the full closed history.
+export function _histToggleShowClosed() {
+  _histShowClosed = !_histShowClosed;
+  _histSyncShowClosedBtn();
+  const repo = _cachedFullRepo[_slug];
+  if (repo) _histLoadLedger(repo, { force: true });
+}
+
+// Set the ledger cache TTL (minutes) from the global settings control.
+export function _histSetTtlMin(min) {
+  const m = parseFloat(min);
+  if (!isNaN(m) && m > 0) _HIST_LEDGER_TTL_MS = m * 60000;
+}
+
+// Manual "Refresh all" — drop every cache and refetch the current view.
+export function _histForceRefresh() {
+  _histResetLedgerCache();
+  for (const k of Object.keys(_histRunStats)) delete _histRunStats[k];
+  _histStaleBySprint = {};
+  const repo = _cachedFullRepo[_slug];
+  if (repo) _histLoadLedger(repo, { force: true });
+}
+
 function _histNextChildLabel(parentLabel) {
   return _nextSprintSublabel(parentLabel);
 }

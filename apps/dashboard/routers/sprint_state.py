@@ -12,14 +12,17 @@ Contract:
 from __future__ import annotations
 
 
-def current(label: str) -> str | None:
+def current(label: str, project: str | None = None) -> str | None:
     """Return canonical lifecycle state for sprint *label* from DB only.
 
     Performs zero disk reads and zero GitHub lookups.
     Returns None if the sprint is not in the sprints table.
+
+    Pass *project* (owner/repo) to scope the lookup — sprint labels are unique
+    only per repo, so an unscoped read can return another project's sprint.
     """
     import db  # noqa: PLC0415 — deferred to respect patched DB_PATH at call time
-    row = db.get_sprint(label)
+    row = db.get_sprint(label, project=project or None)
     if row is None:
         return None
     return db.canonical_lifecycle(row.get("state"))

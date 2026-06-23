@@ -82,10 +82,11 @@ def _get_settings(project: str) -> dict:
         return {k: v["default"] for k, v in KNOWN_FIELDS.items() if not v.get("secret")}
 
 
-def _get_sprint_row(sprint_label: str) -> Optional[dict]:
-    """Return the sprints lifecycle row for a label."""
+def _get_sprint_row(sprint_label: str, project: str | None = None) -> Optional[dict]:
+    """Return the sprints lifecycle row for a label (scope by project — labels
+    are unique only per repo)."""
     try:
-        return _db.get_sprint(sprint_label)
+        return _db.get_sprint(sprint_label, project=project or None)
     except Exception:
         return None
 
@@ -314,7 +315,7 @@ def get_timeline(sprint_label: str, project: str) -> dict:
     reviewer_enabled = bool(settings.get("reviewer_enabled", False))
 
     # Sprint lifecycle row for sprint_started_at
-    sprint_row = _get_sprint_row(sprint_label)
+    sprint_row = _get_sprint_row(sprint_label, project)
     sprint_started_at = sprint_row.get("started_at") if sprint_row else None
 
     # GitHub issues (status truth)

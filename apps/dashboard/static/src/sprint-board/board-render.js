@@ -56,6 +56,73 @@ function _smgmtGoalRequired() {
   return f.goal_required === true;
 }
 
+/** Return the Definition of Ready gate mode: 'block', 'warn', or 'off'. */
+export function _smgmtDorMode() {
+  const f = typeof globalThis !== "undefined" && globalThis._commanderFeatures;
+  if (!f) return "off";
+  const m = f.definition_of_ready_mode;
+  return (m === "block" || m === "warn" || m === "off") ? m : "off";
+}
+
+/**
+ * Evaluate a single ticket's readiness against the Definition of Ready rules.
+ * Returns {ready: boolean, reasons: string[]}.
+ * Checks: missing AC, missing test plan, missing estimate, XL-split required.
+ * Runs purely on ticket data already in the board — no fetch calls.
+ */
+export function _smgmtReadinessCheck(ticket) {
+  if (!ticket) return { ready: false, reasons: ["invalid ticket"] };
+  const reasons = [];
+  const body = (ticket.body || "").trim();
+
+  if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
+    reasons.push("missing AC");
+  }
+  if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
+    reasons.push("missing test plan");
+  }
+
+  const size = _smgmtTicketSize(ticket);
+  if (!size) {
+    reasons.push("missing estimate");
+  } else if (size === "XL") {
+    reasons.push("XL-split required");
+  }
+
+  return { ready: reasons.length === 0, reasons };
+}
+
+/**
+ * Return HTML for the per-ticket ✓/✗ readiness badge.
+ * Uses the existing checklist icon style (ti-circle-check / ti-circle-x).
+ */
+export function _smgmtReadinessBadgeHtml(ticket) {
+  const { ready, reasons } = _smgmtReadinessCheck(ticket);
+  if (ready) {
+    return `<span class="smgmt-dor-badge smgmt-dor-badge--ready" title="Ready"><i class="ti ti-circle-check"></i></span>`;
+  }
+  const reasonText = escHtml(reasons.join(" · "));
+  const titleText = escHtml("Not ready: " + reasons.join(", "));
+  return (
+    `<span class="smgmt-dor-badge smgmt-dor-badge--notready" title="${titleText}">` +
+    `<i class="ti ti-circle-x"></i>` +
+    `<span class="smgmt-dor-reasons">${reasonText}</span>` +
+    `</span>`
+  );
+}
+
+/**
+ * Return not-ready tickets as [{number, title, reasons}] for DOR gating.
+ */
+export function _smgmtDorNotReadyTickets(tickets) {
+  const result = [];
+  for (const t of tickets || []) {
+    const { ready, reasons } = _smgmtReadinessCheck(t);
+    if (!ready) result.push({ number: t.number, title: t.title || "", reasons });
+  }
+  return result;
+}
+
 export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   const listEl = document.getElementById("smgmt-sprint-list");
   if (!listEl) return;
@@ -327,7 +394,7 @@ export function _smgmtRender(data) {
   _smgmtFinishedLabels = _finishedSet;
 
   // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
-  let _smgmtNextUpLabel = null;
+  _smgmtNextUpLabel = null;
   const sortedForNext = [...orderedLabels].sort((a, b) => {
     const ka = _smgmtSprintLabelSortKey(a);
     const kb = _smgmtSprintLabelSortKey(b);
@@ -2128,7 +2195,7 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
       ${sizePillHtml}${staleBadgeHtml}${estimateBadgeHtml}${riskFlagIconsHtml}${schedDepHtml}${reEstBtnHtml}
       ${hasRework ? '<span class="smgmt-lbl-rejected">TESTER REJECTED</span>' : ""}
-      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed">${_fmtRunningTime(elapsedSecs)}</span>` : ""}
+      ${elapsedSecs != null ? `<span class="smgmt-ticket-elapsed" title="Actual time spent">${Math.round(elapsedSecs / 60)}m</span>` : ""}
       ${_smgmtTicketEstHtml(ticket)}
       ${planningAgentHtml}
       <span class="smgmt-ticket-status ${statusClass}">${escHtml(statusLabel)}</span>
@@ -2740,6 +2807,7 @@ export function _smgmtDraftCardHtml(label, tickets) {
       const sizeValue = _smgmtTicketSize(t) || "";
       const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
       const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
+      const readinessBadge = _smgmtReadinessBadgeHtml(t);
       return (
         `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}"` +
         ` data-issue="${t.number}" data-sprint="${escHtml(label)}"` +
@@ -2750,6 +2818,7 @@ export function _smgmtDraftCardHtml(label, tickets) {
         `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` +
         sizePill +
         estMins +
+        readinessBadge +
         `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0"` +
         ` title="Ticket actions" aria-haspopup="true"` +
         ` onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')">` +
@@ -2766,6 +2835,8 @@ export function _smgmtDraftCardHtml(label, tickets) {
   const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
   const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
   const goalRequired = _smgmtGoalRequired();
+  const dorMode = _smgmtDorMode();
+  const notReady = dorMode === "block" ? _smgmtDorNotReadyTickets(tickets || []) : [];
   let runDisabled = "";
   let runTitle = "";
   if (signoffPending) {
@@ -2777,6 +2848,12 @@ export function _smgmtDraftCardHtml(label, tickets) {
   } else if (goalRequired) {
     runDisabled = "disabled";
     runTitle = 'title="Enter a sprint goal to enable Run"';
+  } else if (dorMode === "block" && notReady.length > 0) {
+    runDisabled = "disabled";
+    const dorTooltip = notReady
+      .map((t) => `#${t.number} (${t.reasons.join(", ")})`)
+      .join("; ");
+    runTitle = `title="Not ready: ${dorTooltip.replace(/"/g, "&quot;")}"`;
   }
   const goalPlaceholder = goalRequired
     ? "Set a sprint goal to run — e.g. 'Milestone burndown + activity cleanup'"
@@ -2872,7 +2949,7 @@ export function smgmtPlanningRemove(issueNum, label) {
 }
 
 /** Reorder a ticket within the planning section using keyboard-accessible prompts. */
-export function smgmtPlanningReorder(issueNum, label) {
+export function smgmtPlanningReorder(issueNum, _label) {
   const menu = document.getElementById("smgmt-plan-row-menu");
   if (menu) menu.remove();
   // Reorder: move ticket up/down using the existing drag-drop order API

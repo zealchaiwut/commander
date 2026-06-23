@@ -393,7 +393,7 @@ def _sweep_plan_json_states(projects: list) -> None:
                 if _live_manager_pid(project_root, label) is not None:
                     continue
                 # Condition 3: grace window must have elapsed
-                row = db.get_sprint(label)
+                row = db.get_sprint(label, project=proj["repo"])
                 raw_ts = (row or {}).get("started_at") or data.get("started_at")
                 if not raw_ts:
                     print(f"[startup-sweep] {label}: no started_at — grace assumed, skip")
@@ -1219,7 +1219,23 @@ from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     DEPLOY_CONFIG_KEY,
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
+    # Re-exported for routers/system_misc.py's GET /api/deploy/overview, which
+    # calls srv._deploy_known_slugs / srv._deploy_overview_entries_for. The
+    # #1267 server.py slim-down dropped these two aliases — restore them. They
+    # reach the router via server's globals().update(vars(startup)); unused here.
+    known_deploy_slugs as _deploy_known_slugs,  # noqa: F401
+    overview_entries_for as _deploy_overview_entries_for,  # noqa: F401
 )
+
+# Re-exported for routers/system_misc.py's POST /api/issues/{id}/estimate, which
+# calls srv._ei_* and srv._minutes_from_letter. Same #1267 slim-down drop.
+from services.sprint_manager.estimate_issue import (  # noqa: E402
+    fetch_issue as _ei_fetch_issue,  # noqa: F401
+    run_estimator as _ei_run_estimator,  # noqa: F401
+    apply_label as _ei_apply_label,  # noqa: F401
+    apply_estimated_status as _ei_apply_estimated_status,  # noqa: F401
+)
+from sizing import minutes_from_letter as _minutes_from_letter  # noqa: E402,F401
 
 
 def _resolve_project_slug(slug: str) -> str:
@@ -2128,9 +2144,9 @@ def _emit_dashboard_event(
         pass
 
 
-def _read_sprint_summary_url(project_root: Path, sprint_label: str) -> Optional[str]:
+def _read_sprint_summary_url(project_root: Path, sprint_label: str, project: str = "") -> Optional[str]:
     """Return the summary-issue URL from the ingested DB row or state file."""
-    row = db.get_sprint(sprint_label)
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("summary_issue_url"):
         return row["summary_issue_url"]
 
@@ -2440,7 +2456,7 @@ _NOT_RUNNING_PLAN_STATES: frozenset[str] = _TERMINAL_PLAN_STATES | frozenset({
 })
 
 
-def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> None:
+def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, project: str = "") -> None:
     """Raise 409 when the label *actually ran* and reached a terminal state.
 
     Re-runs must create a child sub-sprint (POST /api/sprints/{label}/rerun)
@@ -2459,7 +2475,9 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str) -> 
     # 1. Durable lifecycle table — authoritative when a row exists.
     durable_state = None
     try:
-        row = db.get_sprint(sprint_label)
+        # Scope by project — labels are unique only per repo, so an unscoped lookup
+        # blocks (e.g.) crux sprint-9 on commander's completed sprint-9 row.
+        row = db.get_sprint(sprint_label, project=project or None)
         if row:
             durable_state = row.get("state")
     except Exception:
@@ -2673,12 +2691,18 @@ def _sprint_db_set_state(
     project: str,
     state: str,
     **extra_fields,
-) -> None:
+) -> bool:
     """Mirror a sprint lifecycle transition into the `sprints` table (issue #757).
 
-    Best-effort: any DB failure is swallowed so it never breaks the request —
-    plan.json dual-write remains the cache and the sweep paths reconcile drift.
+    Best-effort on DB *errors*: any exception is swallowed so it never breaks the
+    request — plan.json dual-write remains the cache and the sweep paths reconcile
+    drift. But a state-machine *rejection* (illegal edge → accepted=False) is NOT
+    an exception — it returns False here so callers can surface a silent no-op
+    instead of assuming success. Pass actor="reconcile" via extra_fields to
+    complete a `needs_rework` lineage that has merged (the B2 edge is
+    reconcile-only). Returns True on success, False on rejection/error.
     """
+    actor = extra_fields.get("actor", "manager")
     try:
         if state == "running":
             db.record_sprint_start(
@@ -2686,12 +2710,14 @@ def _sprint_db_set_state(
                 started_at=extra_fields.get("started_at"),
             )
         elif state == "completed":
-            db.record_sprint_finish(
+            res = db.record_sprint_finish(
                 sprint_label,
                 ended_at=extra_fields.get("ended_at"),
                 end_reason=extra_fields.get("end_reason"),
                 project=project or "",
+                actor=actor,
             )
+            return bool(getattr(res, "accepted", True))
         elif state == "ready_to_merge":
             db.record_sprint_ready_to_merge(
                 sprint_label,
@@ -2709,7 +2735,8 @@ def _sprint_db_set_state(
                 project=project or "",
             )
     except Exception:
-        pass
+        return False
+    return True
 
 
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
@@ -3332,13 +3359,14 @@ def _state_data_is_dry_run_only(state_data: dict) -> bool:
     return any((i.get("skip_reason") or "").lower() == "dry-run" for i in issues)
 
 
-def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str) -> bool:
+def _sprint_has_own_run_outcome(project_root: Path, sprint_label: str, project: str = "") -> bool:
     """True when outcome data for *this* label exists (not a sibling/base run)."""
     plan = _read_plan_json(project_root, sprint_label)
     if plan and plan.get("state") in ("planning", "draft", "planned"):
         return False
 
-    row = db.get_sprint(sprint_label)
+    # Scope by project — sprint labels are unique only per repo (cross-project leak).
+    row = db.get_sprint(sprint_label, project=project or None)
     if row and row.get("run_ingested_at"):
         return True
 
@@ -3530,7 +3558,7 @@ def _derive_outcome_lifecycle(
     Reads parent canonical state and child rows exclusively from the sprints DB
     table (issue #1093). No GitHub label lookups, no disk globs.
     """
-    row = db.get_sprint(sprint_label)
+    row = db.get_sprint(sprint_label, project=project or None)
     if row is None:
         return db.canonical_lifecycle(pane_state)
     parent_state = db.canonical_lifecycle(row["state"])
@@ -4370,14 +4398,14 @@ _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
 })
 
 
-def _bulk_complete_child_state(project_root: Path, sprint_label: str) -> str:
+def _bulk_complete_child_state(project_root: Path, sprint_label: str, project: str | None = None) -> str:
     """Lifecycle state for bulk-complete gating (canonical accessor only)."""
-    return sprint_state.current(sprint_label)
+    return sprint_state.current(sprint_label, project)
 
 
-def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> bool:
+def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str, project: str | None = None) -> bool:
     """True when this label or a rerun child under it finished its run."""
-    if _bulk_complete_child_state(project_root, sprint_label) in _BULK_COMPLETE_CHILD_READY_STATES:
+    if _bulk_complete_child_state(project_root, sprint_label, project) in _BULK_COMPLETE_CHILD_READY_STATES:
         return True
     sprints_dir = _commander_dir(project_root) / "sprints"
     if not sprints_dir.is_dir():
@@ -4392,7 +4420,7 @@ def _bulk_complete_lineage_settled(project_root: Path, sprint_label: str) -> boo
             continue
         if (data.get("parent") or "") != sprint_label:
             continue
-        if _bulk_complete_lineage_settled(project_root, lbl):
+        if _bulk_complete_lineage_settled(project_root, lbl, project):
             return True
     return False
 
@@ -4401,7 +4429,7 @@ def _bulk_complete_unsettled_children(project_root: Path, base_label: str, proje
     """Child sprint labels whose run (or rerun chain) is not yet settled."""
     unsettled: list[str] = []
     for child_label in children_of(base_label, project_root, project=project):
-        if not _bulk_complete_lineage_settled(project_root, child_label):
+        if not _bulk_complete_lineage_settled(project_root, child_label, project):
             unsettled.append(child_label)
     return unsettled
 
@@ -4542,11 +4570,20 @@ def _prepare_sprint_branch_for_develop_merge(repo: str, head_branch: str) -> tup
         if fetch.returncode != 0:
             return False, fetch.stderr.strip() or "git fetch failed"
 
-        co = _run("git", "checkout", head_branch)
+        # Hard-sync the local sprint branch to its remote tip before merging.
+        # This clone is the coder clone, whose sprint branch can be STALE/diverged
+        # from earlier dispatch hygiene; a plain `checkout <branch>` left it behind
+        # origin, so develop merged onto the old tip and the post-merge push was
+        # rejected as non-fast-forward ("tip is behind its remote counterpart").
+        # Discard any dirty working state, then point the branch at origin/<branch>
+        # so the merge lands on the true tip and the push fast-forwards. The coder
+        # clone's working tree is transient (reset on every dispatch), so this is
+        # safe.
+        _run("git", "reset", "--hard")
+        _run("git", "clean", "-fd")
+        co = _run("git", "checkout", "-B", head_branch, f"origin/{head_branch}")
         if co.returncode != 0:
-            track = _run("git", "checkout", "-B", head_branch, f"origin/{head_branch}")
-            if track.returncode != 0:
-                return False, co.stderr.strip() or "git checkout failed"
+            return False, co.stderr.strip() or "git checkout failed"
 
         merge = _run(
             "git", "merge", "origin/develop",
@@ -4793,9 +4830,24 @@ def _merge_sprint_branch_chain(repo: str, base_label: str) -> list[str]:
 
 
 def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]:
-    """Merge steps for Merge Sprint on one label — child merges into its parent; base runs full chain."""
+    """Merge steps for Merge Sprint on one label.
+
+    Base label → full child→parent→develop chain. A child label normally merges
+    just into its parent; but when the rest of the lineage is already settled (no
+    OTHER child still in flight), run the full base chain so the work continues up
+    to develop instead of stranding on the parent branch. The chain is idempotent
+    — `_branch_has_unmerged_commits` skips branches that already merged.
+    """
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
+        others_unsettled = [
+            c for c in _bulk_complete_unsettled_children(project_root, base_label, project=repo)
+            if c != label
+        ]
+        if not others_unsettled:
+            # Lineage otherwise settled — settle the whole chain to develop.
+            return _merge_steps_for_sprint_chain(project_root, repo, base_label)
+        # Other children still in flight — only fold this child up to its parent.
         steps: list[dict] = []
         parent_label = _sprint_merge_parent_label(project_root, label)
         child_branch = _sprint_branch_name(label)
@@ -5695,7 +5747,11 @@ def _get_bulk_estimator_semaphore() -> asyncio.Semaphore:
     """Return (or create) the global semaphore for bulk estimation tasks."""
     global _bulk_estimator_semaphore
     if _bulk_estimator_semaphore is None:
-        _bulk_estimator_semaphore = asyncio.Semaphore(3)
+        # Bulk-create fires one estimate-draft task per ticket; the cap bounds how
+        # many estimator subprocesses (cheap Haiku) run at once. 3 made a batch
+        # fill in slow waves (felt one-by-one); 8 lets a typical batch estimate in
+        # parallel while staying well within subprocess/rate-limit headroom.
+        _bulk_estimator_semaphore = asyncio.Semaphore(8)
     return _bulk_estimator_semaphore
 
 

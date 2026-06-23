@@ -107,7 +107,14 @@
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 14px;
-      min-height: 100dvh;
+      /* Fixed-height non-scrolling shell so .main-area is the real scroll
+         container — that's what the sticky project chrome (top nav stays put, the
+         project header + sub-tabs pin below it) and the main-area scroll-shadow
+         rely on. With min-height the page scrolled on <body>, making .main-area's
+         scrollport move and the sticky chrome scroll away. Mobile reverts to body
+         scroll (see the max-width:699px block). */
+      height: 100dvh;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
@@ -171,6 +178,9 @@
       transition: border-color .12s, color .12s;
     }
     .hnav-milestone.hidden { display: none; }
+    /* Milestones / Roadmap hidden for now (operator request). Remove this rule to
+       restore the Roadmap tab + active-milestone header pill. */
+    #stab-roadmap, .hnav-milestone { display: none !important; }
     .hnav-milestone:hover { border-color: var(--blue); color: var(--blue); }
     .hnav-milestone .ti { font-size: var(--font-size-base); flex-shrink: 0; }
     .hnav-ms-name {
@@ -1932,6 +1942,8 @@
 
     /* ── Mobile ── */
     @media (max-width: 699px) {
+      /* Mobile scrolls on <body> (chrome is static here, not sticky). */
+      body { height: auto; min-height: 100dvh; overflow: visible; }
       .sidebar { display: none; }
       .proj-header-name { display: none; }
       .proj-mobile-switcher { display: block; }
@@ -5919,6 +5931,18 @@
     .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
     .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
     .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Definition of Ready per-ticket badge (issue #1487) */
+    .smgmt-dor-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; border-radius: 3px; padding: 1px 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .smgmt-dor-badge--ready { color: var(--green); }
+    .smgmt-dor-badge--notready { color: var(--red); background: var(--red-bg); }
+    .smgmt-dor-reasons {
+      font-size: 10px; opacity: 0.85;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     /* Size legend (issue #562) */
     .smgmt-size-legend {
       display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -8852,17 +8876,25 @@
       box-shadow: 0 0 4px color-mix(in srgb, var(--green, #16a34a) 50%, transparent);
     }
     .rp-tl-axis-wrap {
-      position: relative; min-height: 34px; padding: 6px 0 2px;
+      position: relative; min-height: 44px; padding: 6px 0 2px;
       border-bottom: 1px solid var(--border); background: var(--surface);
       overflow: visible; z-index: 2;
     }
     .rp-tl-started {
-      position: absolute; left: 10px; top: 8px; z-index: 3;
+      position: absolute; left: 10px; top: 6px; z-index: 3;
       max-width: calc(var(--rp-tl-gutter-left) - 14px);
       font-size: 11px; font-family: var(--mono); color: var(--text-sub); white-space: nowrap;
-      display: inline-flex; align-items: center; gap: 5px;
+      display: inline-flex; align-items: flex-start; gap: 5px;
       overflow: hidden; text-overflow: ellipsis;
     }
+    /* Two-line end-cap labels (caption over wall-clock time) at the bar ends. */
+    .rp-tl-endcap { display: inline-flex; flex-direction: column; line-height: 1.25; }
+    .rp-tl-endcap--end { align-items: flex-end; }
+    .rp-tl-endcap-cap {
+      font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--text-muted); font-weight: 600; font-family: var(--font, inherit);
+    }
+    .rp-tl-endcap-time { font-size: 12px; font-weight: 700; color: var(--text-sub); }
     .rp-tl-grid {
       position: absolute;
       top: 26px; right: var(--rp-tl-chart-end-inset); bottom: 2px;
@@ -8879,9 +8911,9 @@
       transform: translateY(-100%); margin-top: -1px;
     }
     .rp-tl-finish-label {
-      position: absolute; right: calc(var(--rp-tl-gutter-right) - 4px); top: 8px; z-index: 3;
+      position: absolute; right: calc(var(--rp-tl-gutter-right) - 4px); top: 6px; z-index: 3;
       font-size: 11px; font-family: var(--mono); color: var(--text-sub);
-      white-space: nowrap; font-weight: 700; text-align: right;
+      white-space: nowrap; text-align: right;
     }
 
     /* Per-issue row — compact (~30% shorter than original 44px track) */
@@ -9735,15 +9767,8 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
-      <!-- Issues tab bulk-close bar (project-level, under tab nav) -->
-      <div class="bulk-action-bar hidden" id="bulk-action-bar" role="status" aria-live="polite">
-        <span class="bab-label" id="bab-label">0 issues selected</span>
-        <div class="bab-results hidden" id="bab-result-list"></div>
-        <div class="bab-spacer"></div>
-        <button class="bab-close-btn" id="bab-close-btn" onclick="openBulkCloseModal()">Close issues</button>
-        <button class="bab-dismiss-btn" id="bab-dismiss-btn" onclick="_bulkDeselectAll()">✕ Clear</button>
-      </div>
-      <!-- Sprint board multi-select bar (Sprint tab / Board subview only) -->
+      <!-- Sprint board multi-select bar — its own full-width row beneath the nav
+           tabs (was inline in .sub-tabs-row, which crowded the tabs). -->
       <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
         <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
           <i class="ti ti-x"></i> Deselect all
@@ -9766,7 +9791,7 @@
             <i class="ti ti-send"></i> Move to Sprint
           </button>
         </div>
-      </div>
+      </div><!-- /proj-selection-bar -->
     </header>
 
     </div><!-- /proj-sticky-chrome -->
@@ -9991,6 +10016,11 @@
                carries its own Summary link pill now. -->
           <!-- Sprints-table CSV export/import (PRD→UAT data sync for testing) -->
           <div class="hist-csv-toolbar">
+            <button type="button" class="btn-ghost" id="hist-refresh-btn" onclick="_histForceRefresh()" title="Reload sprint history now (clears cache)">
+              <i class="ti ti-refresh"></i> Refresh all</button>
+            <button type="button" class="btn-ghost" id="hist-show-closed-btn" onclick="_histToggleShowClosed()" title="Load the full closed-sprint history">
+              <i class="ti ti-history"></i> Show completed</button>
+            <span style="flex:1"></span>
             <button type="button" class="btn-ghost" onclick="_histCsvExport()" title="Download this project's sprints table as CSV">
               <i class="ti ti-download"></i> Export CSV</button>
             <button type="button" class="btn-ghost" onclick="document.getElementById('hist-csv-file').click()" title="Load a sprints CSV into this project">
@@ -10869,6 +10899,16 @@
                 </div>
                 <span class="settings-hint">Controls the Sprint Mgmt board refresh rate</span>
               </div>
+              <div class="settings-row">
+                <label class="settings-label">History cache TTL</label>
+                <div class="settings-btn-group" id="settings-histttl-btns">
+                  <button class="settings-btn" data-value="1"  onclick="settingsSetHistoryTtl(1)">1m</button>
+                  <button class="settings-btn" data-value="5"  onclick="settingsSetHistoryTtl(5)">5m</button>
+                  <button class="settings-btn" data-value="15" onclick="settingsSetHistoryTtl(15)">15m</button>
+                  <button class="settings-btn" data-value="30" onclick="settingsSetHistoryTtl(30)">30m</button>
+                </div>
+                <span class="settings-hint">How long the History pane serves from cache before a reload; "Refresh all" always forces one</span>
+              </div>
             </div>
 
             <div class="settings-section">
@@ -11410,6 +11450,27 @@ function settingsSetAutoRefresh(value) {
   } else {
     _smgmtArSelect(n);
   }
+}
+
+function settingsUpdateHistTtlBtns(value) {
+  const v = String(value);
+  document.querySelectorAll('#settings-histttl-btns .settings-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.value === v);
+  });
+}
+
+// Persist the History cache TTL globally (minutes) and apply it live.
+async function settingsSetHistoryTtl(min) {
+  const n = Number(min);
+  settingsUpdateHistTtlBtns(n);
+  if (typeof _histSetTtlMin === 'function') _histSetTtlMin(n);
+  try {
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history_cache_ttl_min: n }),
+    });
+  } catch (_) { /* applied locally regardless */ }
 }
 
 function settingsSaveDefaultLabels(value) {
@@ -14223,9 +14284,11 @@ async function _smgmtChipMoveAfter(sprintLabel, aNum, bNum, chipEl) {
     const bIdx = currentOrder.indexOf(bNum);
     if (aIdx === -1 || bIdx === -1) throw new Error(`Tickets #${aNum} or #${bNum} not found in sprint`);
 
-    // Already in correct order — treat as no-op (AC9).
+    // Already in correct order — give feedback instead of dying silently, so the
+    // chip doesn't feel unclickable (the conflict is already resolved by order).
     if (aIdx < bIdx) {
       _smgmtChipSetBusy(chipEl, false);
+      _smgmtChipShowError(errEl, `#${bNum} already runs after #${aNum} — nothing to change`);
       _smgmtChipInFlight.delete(key);
       return;
     }
@@ -16755,7 +16818,12 @@ function _smgmtRpTimelineHeaderMeta(data, live) {
   }
   function fmtHHMM(isoStr) {
     // Bangkok wall-clock (UTC+7) — host may run UTC, so never use getHours().
-    return new Date(isoStr).toLocaleTimeString('en-GB',
+    // Treat a tz-less timestamp as UTC (the server sometimes emits UTC without a
+    // 'Z'); otherwise the browser parses it as local and the time is off by the
+    // offset (e.g. "now" showed 10:56 instead of 17:56).
+    let s = String(isoStr || '');
+    if (s && !/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
+    return new Date(s).toLocaleTimeString('en-GB',
       { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
   }
   const startedHHMM = fmtHHMM(data.sprint_started_at);
@@ -16839,7 +16907,12 @@ function _smgmtRpTimelineHtml(data, live) {
   }
   function fmtHHMM(isoStr) {
     // Bangkok wall-clock (UTC+7) — host may run UTC, so never use getHours().
-    return new Date(isoStr).toLocaleTimeString('en-GB',
+    // Treat a tz-less timestamp as UTC (the server sometimes emits UTC without a
+    // 'Z'); otherwise the browser parses it as local and the time is off by the
+    // offset (e.g. "now" showed 10:56 instead of 17:56).
+    let s = String(isoStr || '');
+    if (s && !/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
+    return new Date(s).toLocaleTimeString('en-GB',
       { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
   }
 
@@ -17049,21 +17122,23 @@ function _smgmtRpTimelineHtml(data, live) {
   }
 
   const finishHHMM = fmtHHMM(new Date(axisEndMs).toISOString());
-  const nowHHMM = fmtHHMM(data.server_now);
-  const _startMs = parseIsoMs(data.sprint_started_at);
-  const nowBadgeLabel = _startMs
-    ? 'now ' + nowHHMM + ' (' + _fmtElapsedClock((nowMs - _startMs) / 1000) + ')'
-    : 'now ' + nowHHMM;
+  // Two-line end-cap labels: caption on top, wall-clock time below — anchored at
+  // the start point and the est-finish point of the bar.
   const axisHtml = '<div class="rp-tl-axis-wrap">'
     + '<span class="rp-tl-started"><i class="ti ti-player-play-filled" aria-hidden="true"></i>'
-    + 'started ' + escHtml(startedHHMM) + '</span>'
+    + '<span class="rp-tl-endcap"><span class="rp-tl-endcap-cap">start</span>'
+    + '<span class="rp-tl-endcap-time">' + escHtml(startedHHMM) + '</span></span></span>'
     + '<div class="rp-tl-grid">' + gridLines + '</div>'
-    + '<div class="rp-tl-finish-label">est. finish ' + escHtml(finishHHMM) + '</div>'
+    + '<div class="rp-tl-finish-label"><span class="rp-tl-endcap rp-tl-endcap--end">'
+    + '<span class="rp-tl-endcap-cap">est. finish</span>'
+    + '<span class="rp-tl-endcap-time">' + escHtml(finishHHMM) + '</span></span></div>'
     + '</div>';
 
+  // Keep the "now" position line, but drop the floating "now HH:MM (elapsed)"
+  // badge — the start/finish end-caps are the clear time references, and elapsed
+  // is in the card meta.
   const nowRailHtml = '<div class="rp-tl-now-rail rp-tl-now" aria-hidden="true">'
     + '<div class="rp-tl-now-marker">'
-    + '<span class="rp-tl-now-badge">' + escHtml(nowBadgeLabel) + '</span>'
     + '<div class="rp-tl-now-line-full rp-tl-now-line"></div>'
     + '</div></div>';
 
@@ -22772,7 +22847,13 @@ async function _bcLoadSprints(repo) {
     const resp = await fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    const sprints = (data.sprints || []).slice().sort((a, b) => a - b);
+    // Only DRAFT sprints can accept new tickets — drop finished sprints and any
+    // that already ran (running / needs_rework / completed). Targeting a done or
+    // in-flight sprint just orphans the ticket. (User: exclude finished + running.)
+    const finished = new Set(data.finished_sprints || []);
+    const hasRun = data.sprint_has_run || {};
+    const sprints = (data.sprints || []).slice().sort((a, b) => a - b)
+      .filter(n => !finished.has(`sprint-${n}`) && hasRun[`sprint-${n}`] !== true);
     const counts = {};
     (data.issues || []).forEach(i => {
       if (i.sprint != null) counts[i.sprint] = (counts[i.sprint] || 0) + 1;
@@ -24959,6 +25040,9 @@ async function globalSettingsLoad() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     _gssRender(data);
+    const ttl = Number(data.history_cache_ttl_min) || 5;
+    settingsUpdateHistTtlBtns(ttl);
+    if (typeof _histSetTtlMin === 'function') _histSetTtlMin(ttl);
   } catch (err) {
     bodyEl.innerHTML =
       `<div class="gss-error-banner"><i class="ti ti-alert-circle"></i> Failed to load settings: ${err.message}</div>`;

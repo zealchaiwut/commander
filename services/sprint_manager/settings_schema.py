@@ -24,6 +24,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # History tab fold size (issue #807) — number of most-recent sprints shown
     # expanded; older sprints collapse into aggregate folds of this same size.
     "history_fold_size": {"secret": False, "default": 10},
+    # History ledger client cache TTL in minutes — how long the pane serves from
+    # cache before a reload is needed; a manual "Refresh all" always forces one.
+    "history_cache_ttl_min": {"secret": False, "default": 5},
     # Sprint / workflow defaults
     "sprint_duration_days": {"secret": False, "default": 14},
     # Sprint capacity budget in minutes — drives the capacity bar (issue #801)
@@ -73,6 +76,9 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     "xl_minute_threshold": {"secret": False, "default": 90},
     # When True, Run Sprint is blocked until all flagged tickets are split or dismissed.
     "strict_xl_gate": {"secret": False, "default": False},
+    # Definition-of-Ready mode (issue #1486): off skips the check, warn surfaces gaps,
+    # block enforces them. Returned in preflight metadata as dor_mode.
+    "definition_of_ready_mode": {"secret": False, "default": "warn"},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

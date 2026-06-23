@@ -1115,26 +1115,45 @@ def ingest_sprint_run_artifact(
 
 
 
-def update_sprint_pr_number(label: str, pr_number: int | None) -> None:
-    """Persist the sprint merge PR number after Merge Sprint (History links)."""
+def update_sprint_pr_number(label: str, pr_number: int | None, project: str | None = None) -> None:
+    """Persist the sprint merge PR number after Merge Sprint (History links).
+
+    Scope by project: sprint labels are unique only per repo, so an unscoped
+    UPDATE ... WHERE label=? would clobber another project's same-numbered sprint.
+    """
     if pr_number is None:
         return
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        conn.execute(
-            "UPDATE sprints SET pr_number = ? WHERE label = ?",
-            (int(pr_number), label),
-        )
+        if project:
+            conn.execute(
+                "UPDATE sprints SET pr_number = ? WHERE label = ? AND project = ?",
+                (int(pr_number), label, project),
+            )
+        else:
+            conn.execute(
+                "UPDATE sprints SET pr_number = ? WHERE label = ?",
+                (int(pr_number), label),
+            )
         conn.commit()
 
-def update_sprint_reconciliation(label: str, reconciliation: dict) -> None:
-    """Refresh the ingested reconciliation block after a background reconcile."""
+def update_sprint_reconciliation(label: str, reconciliation: dict, project: str | None = None) -> None:
+    """Refresh the ingested reconciliation block after a background reconcile.
+
+    Scope by project (see update_sprint_pr_number) to avoid a cross-project clobber.
+    """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        conn.execute(
-            "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
-            (json.dumps(reconciliation), label),
-        )
+        if project:
+            conn.execute(
+                "UPDATE sprints SET reconciliation_json = ? WHERE label = ? AND project = ?",
+                (json.dumps(reconciliation), label, project),
+            )
+        else:
+            conn.execute(
+                "UPDATE sprints SET reconciliation_json = ? WHERE label = ?",
+                (json.dumps(reconciliation), label),
+            )
         conn.commit()
 
 
@@ -1598,10 +1617,17 @@ def record_sprint_start(
 
 def record_sprint_finish(label: str, ended_at: str | None = None,
                          end_reason: str | None = None,
-                         project: str = "") -> None:
-    """Move a sprints row to `completed` (issue #757)."""
-    transition_sprint_state(
-        label, "completed", actor="manager",
+                         project: str = "",
+                         actor: str = "manager") -> "TransitionResult":
+    """Move a sprints row to `completed` (issue #757).
+
+    actor defaults to "manager"; pass "reconcile" to complete a superseded
+    ancestor still in `needs_rework` whose whole lineage has merged to develop
+    (the B2 edge is reconcile-only). Returns the TransitionResult so callers can
+    detect a silent rejection instead of assuming success.
+    """
+    return transition_sprint_state(
+        label, "completed", actor=actor,
         end_reason=end_reason, ended_at=ended_at, project=project,
     )
 
@@ -1664,18 +1690,28 @@ def _set_sprint_terminal(label: str, state: str, end_reason: str | None,
         conn.commit()
 
 
-def rename_sprint(old_label: str, new_label: str) -> None:
+def rename_sprint(old_label: str, new_label: str, project: str | None = None) -> None:
     """Rename a sprint and its ticket-order rows (issue #758).
 
     No-op if no row exists for `old_label`. Best-effort: GitHub labels remain the
     source of truth, so a missing DB row must not fail a rename.
+
+    Scope the sprints row by project so a rename in one repo doesn't rename another
+    repo's same-numbered sprint. (sprint_ticket_order has no project column yet —
+    a separate schema migration is needed to scope it.)
     """
     with get_conn() as conn:
         _create_sprint_lifecycle_tables(conn)
-        conn.execute(
-            "UPDATE sprints SET label = ? WHERE label = ?",
-            (new_label, old_label),
-        )
+        if project:
+            conn.execute(
+                "UPDATE sprints SET label = ? WHERE label = ? AND project = ?",
+                (new_label, old_label, project),
+            )
+        else:
+            conn.execute(
+                "UPDATE sprints SET label = ? WHERE label = ?",
+                (new_label, old_label),
+            )
         conn.execute(
             "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
             (new_label, old_label),

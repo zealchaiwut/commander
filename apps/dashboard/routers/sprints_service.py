@@ -565,7 +565,29 @@ def preview_dag(sprint_label: str, project: str):
         sorted(layer, key=lambda tid: int(tid.lstrip("#")))
         for layer in result.layers
     ]
-    return {**result_base, "levels": levels, "cycles": []}
+    # A shared-file conflict only matters when both tickets land in the SAME
+    # dispatch level (they'd run in parallel). If the DAG already sequenced them
+    # into different levels, there is no parallel risk — drop the conflict so the
+    # run preview doesn't show a phantom "#a ∥ #b" with a fix chip that no-ops
+    # because the tickets are already ordered. Same-level (and degraded
+    # single-level) conflicts are the real ones and stay.
+    _level_of: dict[str, int] = {}
+    for _li, _layer in enumerate(levels):
+        for _tid in _layer:
+            _level_of[_tid] = _li
+    same_level_conflicts = [
+        c for c in result_base["conflicts"]
+        if (
+            _level_of.get(f"#{c['ticket1_id']}") is not None
+            and _level_of.get(f"#{c['ticket1_id']}") == _level_of.get(f"#{c['ticket2_id']}")
+        )
+    ]
+    return {
+        **result_base,
+        "conflicts": same_level_conflicts,
+        "levels": levels,
+        "cycles": [],
+    }
 
 
 def compute_dag_order(

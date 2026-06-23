@@ -346,6 +346,12 @@ export function _smgmtRender(data) {
   // Finished sprints (executive summary posted) — hide empty columns so stale
   // GitHub labels do not resurrect as READY TO MERGE zombies when order is [].
   const _finishedSet = new Set(data.finished_sprints || []);
+  // Merged/shipped sprints (sign-off / lifecycle-completed / merged-branch) —
+  // a subset of _finishedSet. These belong to History only and are dropped from
+  // the board even with an open UAT ticket, so a merged sprint stops showing as
+  // a Ready-to-merge card while History already lists it Completed. A bare
+  // run-end summary (in _finishedSet but NOT here) still needs its merge card.
+  const _mergedSet = new Set(data.merged_sprints || []);
 
   // Use order list if available (includes sub-labels), else build from integer sprints ascending
   const orderedLabelsRaw =
@@ -377,6 +383,12 @@ export function _smgmtRender(data) {
       _smgmtResolvedAncestors.add(label);
       return true;
     }
+    // A merged/shipped sprint belongs to History only — drop it before the
+    // open-ticket check so an open UAT sign-off ticket can't keep it on the
+    // board as a Ready-to-merge zombie (its sign-off ticket still lives in the
+    // UAT column). Summary-only finished sprints are NOT in _mergedSet, so they
+    // fall through and keep their merge card while tickets remain.
+    if (_mergedSet.has(label)) return false;
     const tickets = bySprint[label] || [];
     const ticketCount = tickets.length;
     if (ticketCount > 0) return true;

@@ -3740,6 +3740,7 @@ Replace the existing draft (${data.existing_label})?`
       return;
     }
     const _finishedSet = new Set(data.finished_sprints || []);
+    const _mergedSet = new Set(data.merged_sprints || []);
     const orderedLabelsRaw = order.length > 0 ? order.filter((l) => /^sprint-\d+(\.\d+)*$/.test(l)) : [...sprints].sort((a, b) => a - b).map((n) => `sprint-${n}`);
     const _sprintParents = data.sprint_parents || {};
     const _rerunInto = data.sprint_rerun_into || {};
@@ -3757,6 +3758,8 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtResolvedAncestors.add(label);
         return true;
       }
+      if (_mergedSet.has(label))
+        return false;
       const tickets = bySprint[label] || [];
       const ticketCount = tickets.length;
       if (ticketCount > 0)

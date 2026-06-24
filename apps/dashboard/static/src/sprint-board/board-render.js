@@ -67,7 +67,7 @@ export function _smgmtDorMode() {
 /**
  * Evaluate a single ticket's readiness against the Definition of Ready rules.
  * Returns {ready: boolean, reasons: string[]}.
- * Checks: missing AC, missing test plan, missing estimate, XL-split required.
+ * Checks: missing AC, missing design ref, missing test plan, missing estimate, XL-split required.
  * Runs purely on ticket data already in the board — no fetch calls.
  */
 export function _smgmtReadinessCheck(ticket) {
@@ -77,6 +77,9 @@ export function _smgmtReadinessCheck(ticket) {
 
   if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
     reasons.push("missing AC");
+  }
+  if (!/^##\s+design refs/im.test(body)) {
+    reasons.push("missing design ref");
   }
   if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
     reasons.push("missing test plan");

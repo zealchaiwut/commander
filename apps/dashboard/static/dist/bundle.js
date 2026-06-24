@@ -3720,6 +3720,9 @@ Replace the existing draft (${data.existing_label})?`
     if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
       reasons.push("missing AC");
     }
+    if (!/^##\s+design refs/im.test(body)) {
+      reasons.push("missing design ref");
+    }
     if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
       reasons.push("missing test plan");
     }

@@ -13803,8 +13803,22 @@ function _smgmtPreflightHints(tickets) {
   ).length;
   const unsized = _preflightCheckEstimates(tickets || []).size;
   const conflicts = syncItems.filter(i => i.type === 'Conflicting labels').length;
-  const xlCount = (tickets || []).filter(t => _smgmtTicketSize(t) === 'XL').length;
-  return { missingAC, unsized, conflicts, xlCount };
+  const xlTickets = (tickets || []).filter(t => _smgmtTicketSize(t) === 'XL');
+  const xlCount = xlTickets.length;
+  const xlNumbers = xlTickets.map(t => t.number).filter(n => n != null);
+  return { missingAC, unsized, conflicts, xlCount, xlNumbers };
+}
+
+// "Split N XL ticket" is a manual action — there is no automated split flow
+// (issue #1424 only *suggests* XL splits + lets you dismiss them). Open each XL
+// ticket on GitHub so the operator can break it into smaller tickets. Capped to
+// avoid a popup storm. Was previously mis-wired to smgmtRunSprint (dead button).
+function _smgmtOpenXlTickets(nums) {
+  const repo = (typeof _smgmtRepo === 'function') ? _smgmtRepo() : null;
+  if (!repo || !Array.isArray(nums) || !nums.length) return;
+  nums.slice(0, 5).forEach(n => {
+    if (n != null) window.open(`https://github.com/${repo}/issues/${n}`, '_blank', 'noopener');
+  });
 }
 
 /** Cache + generation counter so async preview-dag fetches don't race full re-renders. */
@@ -13934,7 +13948,21 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   const conflictsCount = conflicts.length;
   const xlCount = pfHints ? (pfHints.xlCount || 0) : 0;
 
+  const missingAcCount = pfHints ? (pfHints.missingAC || 0) : 0;
   const checklistItems = [];
+  // The "Fix pre-flight issues" wand used to live in a banner that is no longer
+  // injected (_preflightInjectBanner is dead code); its auto-fix handler
+  // (_smgmtPreflightFix → preflight-fix SSE: generate AC + estimate) still works,
+  // so surface it here. Without this, tickets missing AC had no fix button.
+  if (missingAcCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="_smgmtPreflightFix(${jsLabel}, this)"
+                title="Auto-generate acceptance criteria (and size) for tickets missing them">
+          <i class="ti ti-wand"></i> Fix ${missingAcCount} missing AC
+        </button>
+      </li>`);
+  }
   if (unestimatedCount > 0) {
     checklistItems.push(`<li class="mr-checklist-item">
         <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
@@ -13952,10 +13980,12 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       </li>`);
   }
   if (xlCount > 0) {
+    const xlNums = (pfHints && pfHints.xlNumbers) || [];
     checklistItems.push(`<li class="mr-checklist-item">
         <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
-        <button class="mr-cl-link" onclick="smgmtRunSprint(${jsLabel})">
-          Split ${xlCount} XL ticket${xlCount !== 1 ? 's' : ''}
+        <button class="mr-cl-link" onclick="_smgmtOpenXlTickets([${xlNums.join(',')}])"
+                title="Open the XL ticket${xlCount !== 1 ? 's' : ''} on GitHub to split into smaller tickets">
+          Split ${xlCount} XL ticket${xlCount !== 1 ? 's' : ''} — open on GitHub
         </button>
       </li>`);
   }

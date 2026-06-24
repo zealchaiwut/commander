@@ -2022,7 +2022,7 @@ def _build_design_block(
             continue
         doc_name, slug = ref.split("#", 1)
         doc_name = doc_name.strip()
-        slug = slug.strip().lower()
+        slug = _slugify_heading(slug)
 
         if doc_name.strip().lower() != "design.md":
             # Only DESIGN.md is in scope (PRODUCT.md support deferred).

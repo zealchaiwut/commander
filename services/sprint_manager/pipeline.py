@@ -35,6 +35,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+from services.sprint_manager.failures import FailureCategory  # noqa: E402
+
 if TYPE_CHECKING:
     from services.sprint_manager.state import IssueState
 
@@ -371,26 +373,6 @@ except (ImportError, ModuleNotFoundError):
 # the moved functions use those names, so we alias them here.
 _StageResult = StageResult
 _run_pipeline_level = run_level
-
-# ── FailureCategory (mirrors sprint_manager.FailureCategory) ─────────────────
-
-
-class FailureCategory:
-    """String constants for dispatch failure categories — mirrors sprint_manager.FailureCategory."""
-
-    HANG             = "HANG"
-    CRASH            = "CRASH"
-    GATE_FAIL        = "GATE_FAIL"
-    TESTER_REJECTED  = "TESTER_REJECTED"
-    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
-    CODER_NO_WORK    = "CODER_NO_WORK"
-    MERGE_CONFLICT   = "MERGE_CONFLICT"
-    LINT_FAIL        = "LINT_FAIL"
-    PYTEST_FAIL      = "PYTEST_FAIL"
-    REBASE_CONFLICT  = "REBASE_CONFLICT"
-    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
-    ENV_ERROR        = "ENV_ERROR"
-
 
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,

@@ -35,6 +35,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _resolve_cline_model,
     _effective_coder_backend,
 )
+from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
 from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # noqa: E402
@@ -57,23 +58,6 @@ _DOCTOR_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_CLINE_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
 DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
-
-
-class FailureCategory:
-    """String constants for dispatch failure categories — mirrors sprint_manager.FailureCategory."""
-
-    HANG             = "HANG"
-    CRASH            = "CRASH"
-    GATE_FAIL        = "GATE_FAIL"
-    TESTER_REJECTED  = "TESTER_REJECTED"
-    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
-    CODER_NO_WORK    = "CODER_NO_WORK"
-    MERGE_CONFLICT   = "MERGE_CONFLICT"
-    LINT_FAIL        = "LINT_FAIL"
-    PYTEST_FAIL      = "PYTEST_FAIL"
-    REBASE_CONFLICT  = "REBASE_CONFLICT"
-    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
-    ENV_ERROR        = "ENV_ERROR"
 
 
 # ── sys.modules proxy helper ──────────────────────────────────────────────────

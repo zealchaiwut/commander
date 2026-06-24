@@ -56,7 +56,7 @@ def test_no_ss_aliases_in_settings_service():
         line for line in src.splitlines() if "_ss_" in line
     ]
     assert not lines_with_ss, (
-        f"Unexpected _ss_* references in settings_service.py:\n"
+        "Unexpected _ss_* references in settings_service.py:\n"
         + "\n".join(lines_with_ss)
     )
 

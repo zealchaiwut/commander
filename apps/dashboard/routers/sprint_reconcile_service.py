@@ -193,15 +193,17 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
     return None
 
 
-def _issues_from_agent_runs(label: str) -> list[dict]:
-    """Derive per-issue states from agent_runs records for a sprint.
+def _issues_from_agent_runs(label: str, project: str = "") -> list[dict]:
+    """Derive per-issue states from agent_runs records for a sprint, scoped by project.
 
     Mirrors the logic in sprint_history_service._issues_from_agent_runs to avoid
     a circular import. Any outcome in _AGENT_RUN_DONE marks the issue done (merged);
-    otherwise it is failed or open (unknown).
+    otherwise it is failed or open (unknown). Scoping by project stops a
+    same-numbered sprint in another repo from being merged into this sprint's
+    issues_json on reconcile.
     """
     try:
-        rows = _db().agent_runs_for_sprint(label)
+        rows = _db().agent_runs_for_sprint(label, project=project or None)
     except Exception:
         return []
     agg: dict[int, dict] = {}
@@ -254,7 +256,7 @@ def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
     if state not in _TERMINAL_STATES:
         return False
 
-    ar_issues = _issues_from_agent_runs(label)
+    ar_issues = _issues_from_agent_runs(label, project or row.get("project") or "")
     if not ar_issues:
         return False
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Lint a GitHub issue body against the canonical ticket-spec format (issue #1485).
+"""Lint a GitHub issue body against the canonical ticket-spec
+format (issue #1485).
 
 Fetches issue N and prints a per-section present/missing summary to stdout.
 
@@ -22,7 +23,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from services.sprint_manager.ticket_spec import parse_ticket_spec
+from services.sprint_manager.ticket_spec import parse_ticket_spec  # noqa: E402
 
 _ENV_FILE = _REPO_ROOT / "apps" / "dashboard" / ".env"
 
@@ -53,7 +54,10 @@ def _fetch_issue(issue_num: int, repo: str) -> dict:
             check=True,
         )
     except subprocess.CalledProcessError as e:
-        print(f"error: gh API call failed for issue #{issue_num} in {repo}", file=sys.stderr)
+        print(
+            f"error: gh API call failed for issue #{issue_num} in {repo}",
+            file=sys.stderr,
+        )
         if e.stderr:
             print(e.stderr.rstrip(), file=sys.stderr)
         sys.exit(1)
@@ -68,7 +72,11 @@ def _fetch_issue(issue_num: int, repo: str) -> dict:
 def _detect_repo() -> str:
     try:
         result = subprocess.run(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            [
+                "gh", "repo", "view",
+                "--json", "nameWithOwner",
+                "-q", ".nameWithOwner",
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -107,10 +115,16 @@ def lint(issue_num: int, repo: str) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Lint a GitHub issue against the canonical ticket-spec format."
+        description=(
+            "Lint a GitHub issue against the canonical ticket-spec format."
+        ),
     )
-    parser.add_argument("--issue", type=int, required=True, help="Issue number to lint")
-    parser.add_argument("--repo", default=None, help="owner/repo (default: auto-detect)")
+    parser.add_argument(
+        "--issue", type=int, required=True, help="Issue number to lint"
+    )
+    parser.add_argument(
+        "--repo", default=None, help="owner/repo (default: auto-detect)"
+    )
     args = parser.parse_args()
 
     _load_env()

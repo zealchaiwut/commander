@@ -13948,7 +13948,21 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   const conflictsCount = conflicts.length;
   const xlCount = pfHints ? (pfHints.xlCount || 0) : 0;
 
+  const missingAcCount = pfHints ? (pfHints.missingAC || 0) : 0;
   const checklistItems = [];
+  // The "Fix pre-flight issues" wand used to live in a banner that is no longer
+  // injected (_preflightInjectBanner is dead code); its auto-fix handler
+  // (_smgmtPreflightFix → preflight-fix SSE: generate AC + estimate) still works,
+  // so surface it here. Without this, tickets missing AC had no fix button.
+  if (missingAcCount > 0) {
+    checklistItems.push(`<li class="mr-checklist-item">
+        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
+        <button class="mr-cl-link" onclick="_smgmtPreflightFix(${jsLabel}, this)"
+                title="Auto-generate acceptance criteria (and size) for tickets missing them">
+          <i class="ti ti-wand"></i> Fix ${missingAcCount} missing AC
+        </button>
+      </li>`);
+  }
   if (unestimatedCount > 0) {
     checklistItems.push(`<li class="mr-checklist-item">
         <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>

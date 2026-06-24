@@ -631,14 +631,17 @@ def _check_gh_auth() -> None:
                 "ok": False,
                 "event": "gh_auth_check_failed",
                 "message": "GitHub CLI is not authenticated",
-                "remediation": "Run: gh auth login",
+                # Plain `gh auth login` doesn't propagate the new token to the
+                # headless dashboard (.env + launchd plist). The helper does all
+                # three; pass a long-lived PAT to stop the recurring expiry.
+                "remediation": "Run: scripts/gh_reauth.sh --token <long-lived PAT>",
             }
             _slog.warn(
                 "gh_auth_check_failed",
                 "gh CLI not authenticated",
                 scope_required="repo",
                 scope_present=False,
-                remediation="gh auth login",
+                remediation="scripts/gh_reauth.sh --token <PAT>",
             )
             return
 
@@ -655,14 +658,14 @@ def _check_gh_auth() -> None:
                 "ok": False,
                 "event": "gh_auth_check_failed",
                 "message": "GitHub CLI token is missing the 'repo' scope",
-                "remediation": "Run: gh auth refresh -s repo",
+                "remediation": "Run: scripts/gh_reauth.sh --token <PAT with repo scope>",
             }
             _slog.warn(
                 "gh_auth_check_failed",
                 "gh CLI token missing 'repo' scope",
                 scope_required="repo",
                 scope_present=False,
-                remediation="gh auth refresh -s repo",
+                remediation="scripts/gh_reauth.sh --token <PAT with repo scope>",
             )
             return
 

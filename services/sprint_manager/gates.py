@@ -91,12 +91,33 @@ def _lookup_in_sm(attr: str, local_fn):
     keys so that monkeypatches applied via either import path are found.
     Returns None when the attribute matches local_fn in every reachable module
     (i.e. no patch is active and the caller should use its own implementation).
+
+    After importlib.reload(gates) the module's __dict__ is updated in-place, so
+    OLD function objects (still held by sprint_manager via from-imports) see NEW
+    function names via __globals__.  Object identity alone then wrongly flags the
+    OLD sprint_manager copy as an active patch, causing infinite recursion.  The
+    fix: treat two callables as "same function" when they share the same code
+    origin (co_qualname + co_filename + co_firstlineno), regardless of whether
+    they are the same object.  A genuine monkeypatch always has a different
+    qualname (MagicMock, lambda, nested helper), so this check stays tight.
     """
+    import types as _types  # local import avoids adding to module-level namespace
+    _local_code = local_fn.__code__ if isinstance(local_fn, _types.FunctionType) else None
     for _key in ("sprint_manager", "services.sprint_manager.sprint_manager"):
         _sm = sys.modules.get(_key)
         if _sm is not None:
             _f = getattr(_sm, attr, None)
             if _f is not None and _f is not local_fn:
+                # Skip if this is a stale pre-reload copy of the same function
+                # (same source definition, different object identity).
+                if _local_code is not None and isinstance(_f, _types.FunctionType):
+                    _f_code = _f.__code__
+                    if (
+                        _f_code.co_qualname == _local_code.co_qualname
+                        and _f_code.co_filename == _local_code.co_filename
+                        and _f_code.co_firstlineno == _local_code.co_firstlineno
+                    ):
+                        continue  # same definition, not an active patch
                 return _f
     return None
 
@@ -259,7 +280,10 @@ def _gate_pytest(
         sys.stdout.write(str("  [gate:pytest] PASS") + "\n")
         return GateResult(gate="pytest", passed=True, output=combined)
     else:
-        structured_log.error("gate_failed", f"[gate:pytest] FAIL (exit {rc})", gate="pytest", issue_num=issue_num, exit_code=rc)
+        structured_log.error(
+            "gate_failed", f"[gate:pytest] FAIL (exit {rc})",
+            gate="pytest", issue_num=issue_num, exit_code=rc,
+        )
         _revert_to_sit(issue_num, "pytest", combined, repo_name=repo_name)
         return GateResult(gate="pytest", passed=False, output=combined)
 
@@ -402,7 +426,9 @@ def _gate_lint(
         else:
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
-                sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                sys.stdout.write(
+                    str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n"
+                )
                 # Paths from git diff are relative to the repo root, not worktester_dashboard.
                 _rc_root, _root_out, _ = _run_timed(
                     "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
@@ -828,7 +854,7 @@ def _gate_typecheck(
     if gate_scope == "full":
         ts_files: list[str] = []
         ok_ts, ts_out, _ = _try("find", ".", "-name", "tsconfig.json", "-maxdepth", "3",
-                                 cwd=worktester_dashboard)
+                                cwd=worktester_dashboard)
         if ok_ts and ts_out.strip():
             ts_files = ["_has_tsconfig_"]  # sentinel — just triggers tsc check
     else:
@@ -1049,7 +1075,9 @@ def _gate_monolith(
         _revert_to_sit(issue_num, "monolith", msg, repo_name=repo_name)
         return GateResult(gate="monolith", passed=False, output=msg)
 
-    sys.stdout.write(str(f"  [gate:monolith] PASS — {guarded_file} {base_count} → {head_count} lines (no growth)") + "\n")
+    sys.stdout.write(
+        str(f"  [gate:monolith] PASS — {guarded_file} {base_count} → {head_count} lines (no growth)") + "\n"
+    )
     return GateResult(
         gate="monolith", passed=True,
         output=f"{guarded_file} {base_count} → {head_count} lines (no growth)",

@@ -62,10 +62,10 @@ def _get_sprint_issues(sprint_label: str, project: str) -> list[dict]:
         return []
 
 
-def _get_agent_runs(sprint_label: str) -> list[dict]:
-    """Return agent_runs rows for a sprint from DB (metrics truth)."""
+def _get_agent_runs(sprint_label: str, project: str | None = None) -> list[dict]:
+    """Return agent_runs rows for a sprint from DB (metrics truth), scoped by project."""
     try:
-        return _db.agent_runs_for_sprint(sprint_label)
+        return _db.agent_runs_for_sprint(sprint_label, project=project)
     except Exception:
         return []
 
@@ -322,7 +322,7 @@ def get_timeline(sprint_label: str, project: str) -> dict:
     github_issues = _get_sprint_issues(sprint_label, project)
 
     # DB agent_runs (metrics truth), grouped by issue number
-    all_runs = _get_agent_runs(sprint_label)
+    all_runs = _get_agent_runs(sprint_label, project)
     runs_by_issue: dict[int, list[dict]] = {}
     for run in all_runs:
         num = run.get("issue_number")

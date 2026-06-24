@@ -9,7 +9,6 @@ AC6  All existing quality gate tests pass (checked implicitly by the full suite)
 AC7  _run_quality_gates orchestration order unchanged
 """
 import ast
-import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +42,6 @@ class TestGatesModuleContent:
     def test_symbol_defined_in_gates(self, symbol):
         """Each of the five symbols must be defined (as a function) in gates.py."""
         from services.sprint_manager import gates
-        importlib.reload(gates)
         assert hasattr(gates, symbol), f"gates.py missing {symbol}"
         assert callable(getattr(gates, symbol)), f"{symbol} in gates.py is not callable"
 

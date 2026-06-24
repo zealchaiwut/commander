@@ -91,12 +91,33 @@ def _lookup_in_sm(attr: str, local_fn):
     keys so that monkeypatches applied via either import path are found.
     Returns None when the attribute matches local_fn in every reachable module
     (i.e. no patch is active and the caller should use its own implementation).
+
+    After importlib.reload(gates) the module's __dict__ is updated in-place, so
+    OLD function objects (still held by sprint_manager via from-imports) see NEW
+    function names via __globals__.  Object identity alone then wrongly flags the
+    OLD sprint_manager copy as an active patch, causing infinite recursion.  The
+    fix: treat two callables as "same function" when they share the same code
+    origin (co_qualname + co_filename + co_firstlineno), regardless of whether
+    they are the same object.  A genuine monkeypatch always has a different
+    qualname (MagicMock, lambda, nested helper), so this check stays tight.
     """
+    import types as _types  # local import avoids adding to module-level namespace
+    _local_code = local_fn.__code__ if isinstance(local_fn, _types.FunctionType) else None
     for _key in ("sprint_manager", "services.sprint_manager.sprint_manager"):
         _sm = sys.modules.get(_key)
         if _sm is not None:
             _f = getattr(_sm, attr, None)
             if _f is not None and _f is not local_fn:
+                # Skip if this is a stale pre-reload copy of the same function
+                # (same source definition, different object identity).
+                if _local_code is not None and isinstance(_f, _types.FunctionType):
+                    _f_code = _f.__code__
+                    if (
+                        _f_code.co_qualname == _local_code.co_qualname
+                        and _f_code.co_filename == _local_code.co_filename
+                        and _f_code.co_firstlineno == _local_code.co_firstlineno
+                    ):
+                        continue  # same definition, not an active patch
                 return _f
     return None
 

@@ -2,15 +2,12 @@
 import os
 import sys
 import io
-import subprocess
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-import pytest
 
 # Add services to path for import
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services', 'sprint_manager'))
 
-from sprint_manager import _build_design_block
+from sprint_manager import _build_design_block  # noqa: E402
 
 
 class TestBuildDesignBlockErrorLogging:
@@ -162,7 +159,7 @@ UI components and layout.
 
             captured = io.StringIO()
             with patch('sprint_manager.sys.stdout', captured):
-                result = _build_design_block(
+                _build_design_block(
                     issue_num=1540,
                     eff_repo="zealchaiwut/commander",
                     cwd_path=tmp_path

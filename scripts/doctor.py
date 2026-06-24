@@ -362,6 +362,108 @@ def check_headless_tokens(*, plist_path=None) -> CheckResult:
     )
 
 
+def _plist_working_dir(plist_path: Path) -> str:
+    """Return the launchd plist WorkingDirectory (or '')."""
+    import plistlib
+
+    try:
+        with open(plist_path, "rb") as fh:
+            data = plistlib.load(fh)
+    except OSError:
+        return ""
+    wd = data.get("WorkingDirectory", "")
+    return wd if isinstance(wd, str) else ""
+
+
+def _read_env_token(env_file: Path) -> str:
+    """Return the GH_TOKEN value from an agent .env (or '')."""
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("GH_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def _resolve_headless_gh_token(plist_path: Path) -> tuple:
+    """Return (token, source) the launchd dashboard would use for headless gh.
+
+    Mirrors the runtime resolution order: a plist EnvironmentVariables token is
+    set at exec by launchd and wins; otherwise the running clone's
+    apps/dashboard/.env is loaded via dotenv at startup. ('', '') when neither
+    carries a token.
+    """
+    env = _parse_plist_env(plist_path)
+    for k in GH_TOKEN_KEYS:
+        v = (env.get(k) or "").strip()
+        if v:
+            return v, f"plist {k}"
+    wd = _plist_working_dir(plist_path)
+    if wd:
+        # WorkingDirectory is usually the apps/dashboard dir itself (so .env sits
+        # beside it); fall back to the clone-root layout for older installs.
+        for env_file in (Path(wd) / ".env", Path(wd) / "apps" / "dashboard" / ".env"):
+            tok = _read_env_token(env_file)
+            if tok:
+                return tok, str(env_file)
+    return "", ""
+
+
+def _gh_token_is_valid(token: str) -> bool:
+    """True when `gh api user` succeeds with this token (validity probe)."""
+    env = {**os.environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "user", "-q", ".login"],
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_TIMEOUT,
+            env=env,
+        )
+        return proc.returncode == 0 and bool(proc.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def check_headless_gh_token_valid(
+    *, plist_path=None, validator=_gh_token_is_valid
+) -> CheckResult:
+    """The stored headless GH_TOKEN actually authenticates (not stale/revoked).
+
+    ``check_headless_tokens`` proves a token is *present*; this proves it still
+    *works*. The recurring "gh CLI token gone again" failure is a present-but-
+    revoked `gho_` device token that drifted from the keychain — caught here.
+
+    Skipped (PASS) when the service is not installed, or when no headless token
+    is configured (that absence is owned by ``check_headless_tokens``).
+    """
+    name = "headless GH_TOKEN valid"
+    plist = Path(plist_path) if plist_path is not None else DEFAULT_PLIST
+    if not plist.exists():
+        return _result(name, True, detail="launchd service not installed — skipped")
+    token, source = _resolve_headless_gh_token(plist)
+    if not token:
+        return _result(
+            name,
+            True,
+            detail="no headless GH_TOKEN configured — see 'headless auth tokens in plist'",
+        )
+    if validator(token):
+        return _result(name, True, detail=f"valid — source: {source}")
+    return _result(
+        name,
+        False,
+        fix=(
+            "Stored headless GH_TOKEN is invalid/revoked (`gh api user` failed). "
+            "Mint a long-lived PAT and reinstall: "
+            "`bash scripts/install_launchd.sh --gh-token <PAT>`, then restart the "
+            "launchd dashboard."
+        ),
+        detail=f"source: {source}",
+    )
+
+
 # ── Orchestration ────────────────────────────────────────────────────────────
 
 # Checks run in the exact order specified by the acceptance criteria.
@@ -373,6 +475,7 @@ CHECKS = [
     check_db_path_writable,
     check_plist_path,
     check_headless_tokens,
+    check_headless_gh_token_valid,
 ]
 
 

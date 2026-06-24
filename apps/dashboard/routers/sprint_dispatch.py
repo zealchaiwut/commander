@@ -246,7 +246,21 @@ def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
 # ── Sign-off gate helpers ─────────────────────────────────────────────────────
 
 def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str]:
-    """Return 'pending', 'approved', or None for a sprint's sign-off gate."""
+    """Return 'pending', 'approved', or None for a sprint's sign-off gate.
+
+    When sign-off is disabled globally (COMMANDER_DISABLE_SIGNOFF / the
+    disable_sprint_signoff setting), the gate does not apply — return None so a
+    draft stamped with a stale ``signoff: pending`` (sprints always stamp it at
+    creation) neither blocks the run path (_assert_sprint_signed_off) nor shows
+    a board badge. Without this, disabling sign-off left a dead-end: the Approve
+    UI + approve API are off, but the run still refused on the stale gate.
+    """
+    try:
+        import config  # noqa: PLC0415 — lazy, matches sibling modules
+        if config.sprint_signoff_disabled():
+            return None
+    except Exception:
+        pass
     plan = _read_plan_json(project_root, sprint_label)
     if not plan:
         return None

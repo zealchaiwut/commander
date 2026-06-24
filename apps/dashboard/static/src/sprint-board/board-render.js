@@ -69,19 +69,20 @@ export function _smgmtDorMode() {
  * Returns {ready: boolean, reasons: string[]}.
  * Checks: missing AC, missing design ref, missing test plan, missing estimate, XL-split required.
  * Runs purely on ticket data already in the board — no fetch calls.
+ * Heading patterns align with ticket_spec._SECTION_PATTERNS (issue #1539).
  */
 export function _smgmtReadinessCheck(ticket) {
   if (!ticket) return { ready: false, reasons: ["invalid ticket"] };
   const reasons = [];
   const body = (ticket.body || "").trim();
 
-  if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
+  if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\s*$/im.test(body)) {
     reasons.push("missing AC");
   }
-  if (!/^##\s+design refs/im.test(body)) {
+  if (!/^#{1,6}\s+(design\s+references?|design\s+refs?)\s*$/im.test(body)) {
     reasons.push("missing design ref");
   }
-  if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
+  if (!/^#{1,6}\s+(uat\s+test\s+steps|test\s+plan)\s*$/im.test(body)) {
     reasons.push("missing test plan");
   }
 

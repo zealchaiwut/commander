@@ -440,6 +440,82 @@ def _pr_url_for_reconciliation(repo: str, state: dict | None, row: dict, recon: 
     return None
 
 
+def _pr_number_from_url(pr_url: str | None) -> int | None:
+    """Parse the PR number out of a GitHub pull URL, or None."""
+    if not pr_url:
+        return None
+    import re  # noqa: PLC0415
+    m = re.search(r"/pull/(\d+)", pr_url)
+    return int(m.group(1)) if m else None
+
+
+def _gather_reconcile_inputs_mirror(
+    label: str,
+    repo: str,
+    pr_url: str | None,
+    ticket_numbers: list[int] | None = None,
+) -> dict:
+    """Mirror-backed equivalent of ``gather_inputs_via_gh`` (zero GitHub quota).
+
+    Builds the same ``{summary_issues, pr_info, tickets}`` dict that
+    ``run_reconciliation`` consumes, sourced from the local ``issues`` mirror
+    (kept fresh by the 304-conditional background sync) and the per-repo cached
+    merged-branches list — instead of a live ``gh issue list`` + ``gh pr view``
+    per sprint. The mirror is a fresh GitHub replica, so GitHub stays the source
+    of truth while the read costs ~0 quota.
+
+    PR merge status is inferred from ``list_merged_sprint_branches`` (one cached
+    call per repo, shared across all sprints in a sweep). This matches how the
+    board already decides a sprint is shipped; it cannot see merged PRs older
+    than that list's window, in which case ``sprint_pr`` reports unmerged — a
+    report-only check that never affects the sprint's lifecycle state.
+    """
+    summary_issues: list[dict] = []
+    tickets: list[dict] = []
+    pr_info: dict | None = None
+
+    def _names(iss: dict) -> list[str]:
+        return [l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)]
+
+    try:
+        import github_client as gh  # noqa: PLC0415
+    except Exception:
+        return {"summary_issues": [], "pr_info": None, "tickets": []}
+
+    mirror = []
+    try:
+        mirror = gh._mirror_issues(repo) or []
+    except Exception:
+        mirror = []
+
+    tnums = {int(n) for n in (ticket_numbers or [])}
+    for iss in mirror:
+        names = _names(iss)
+        if label in names:
+            summary_issues.append({
+                "number": iss.get("number"),
+                "title": iss.get("title") or "",
+                "labels": iss.get("labels") or [],
+            })
+        num = iss.get("number")
+        if num is not None and int(num) in tnums:
+            tickets.append({"number": num, "labels": iss.get("labels") or []})
+
+    pr_number = _pr_number_from_url(pr_url)
+    try:
+        merged_branches = gh.list_merged_sprint_branches(repo_name=repo)
+    except Exception:
+        merged_branches = set()
+    if f"sprint/{label}" in (merged_branches or set()):
+        pr_info = {"number": pr_number, "merged": True}
+    elif pr_number is not None:
+        # A PR exists but its branch isn't in the recent merged set — report
+        # unmerged. Report-only; does not drive lifecycle state.
+        pr_info = {"number": pr_number, "merged": False, "reason": "unmerged"}
+
+    return {"summary_issues": summary_issues, "pr_info": pr_info, "tickets": tickets}
+
+
 def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
     """Re-run GitHub post-sprint reconciliation when loose ends may have cleared."""
     row = _db().get_sprint(label, project=project or None)
@@ -455,7 +531,6 @@ def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
         import server as srv  # noqa: PLC0415
         from . import sprint_artifact_service  # noqa: PLC0415
         from services.sprint_manager.reconciliation import (  # noqa: PLC0415
-            gather_inputs_via_gh,
             run_reconciliation,
         )
     except Exception:
@@ -481,7 +556,7 @@ def refresh_post_sprint_reconciliation(label: str, project: str) -> bool:
     pr_url = _pr_url_for_reconciliation(repo, state_data, row, recon)
     ticket_numbers = _ticket_numbers_for_reconciliation(row, state_data)
     try:
-        rec_inputs = gather_inputs_via_gh(label, repo, pr_url, ticket_numbers)
+        rec_inputs = _gather_reconcile_inputs_mirror(label, repo, pr_url, ticket_numbers)
         result = run_reconciliation(
             sprint_label=label,
             project=repo,
@@ -535,11 +610,91 @@ def refresh_post_sprint_reconciliations(project: str, limit: int = 40) -> list[s
     return updated
 
 
+def reconcile_preview(label: str, project: str) -> dict:
+    """Dry-run reconcile for ONE sprint — compute GitHub-vs-DB diff, write nothing.
+
+    Drives the per-sprint "Reconcile against GitHub" preview: returns the current
+    DB lifecycle state, the state GitHub truth implies, whether applying would
+    change it, and the read-only post-sprint checks (summary issue / sprint PR /
+    stale labels). All inputs come from the mirror — zero GitHub quota.
+    """
+    db = _db()
+    row = db.get_sprint(label, project=project or None)
+    if not row:
+        return {"label": label, "exists": False}
+    if project and row.get("project") and row.get("project") != project:
+        return {"label": label, "exists": False, "wrong_project": True}
+
+    eff_project = project or row.get("project") or ""
+    db_state = db.canonical_lifecycle(row.get("state") or "")
+    patch = _github_reconcile_row(label, eff_project, row)  # no write
+    proposed_state = patch["state"] if patch else db_state
+
+    checks: list[dict] = []
+    all_clear: bool | None = None
+    try:
+        from services.sprint_manager.reconciliation import run_reconciliation  # noqa: PLC0415
+        recon = _stored_reconciliation(row, None)
+        pr_url = _pr_url_for_reconciliation(eff_project, None, row, recon)
+        ticket_numbers = _ticket_numbers_for_reconciliation(row, None)
+        rec_inputs = _gather_reconcile_inputs_mirror(label, eff_project, pr_url, ticket_numbers)
+        result = run_reconciliation(
+            sprint_label=label,
+            project=eff_project,
+            state_path=None,  # None → run_reconciliation persists nothing
+            summary_issues=rec_inputs["summary_issues"],
+            pr_info=rec_inputs["pr_info"],
+            tickets=rec_inputs["tickets"],
+            emit_event=None,
+        )
+        checks = result.get("checks", [])
+        all_clear = result.get("all_clear")
+    except Exception as exc:
+        _log.warning("reconcile preview checks failed for %s: %s", label, exc)
+
+    return {
+        "label": label,
+        "exists": True,
+        "project": eff_project,
+        "db_state": db_state,
+        "github_state": proposed_state,
+        "would_change": bool(patch),
+        "reason": (patch or {}).get("end_reason"),
+        "checks": checks,
+        "all_clear": all_clear,
+    }
+
+
+def reconcile_apply(label: str, project: str) -> dict:
+    """Apply reconcile for ONE sprint: write DB lifecycle + local state, never GitHub."""
+    db = _db()
+    row = db.get_sprint(label, project=project or None)
+    if not row:
+        return {"label": label, "exists": False, "updated": False}
+    eff_project = project or row.get("project") or ""
+    before = db.canonical_lifecycle(row.get("state") or "")
+    lifecycle_updated = reconcile_sprint_label(label, eff_project)
+    recon_updated = refresh_post_sprint_reconciliation(label, eff_project)
+    after_row = db.get_sprint(label, project=eff_project or None) or row
+    return {
+        "label": label,
+        "exists": True,
+        "project": eff_project,
+        "updated": bool(lifecycle_updated or recon_updated),
+        "db_state_before": before,
+        "db_state_after": db.canonical_lifecycle(after_row.get("state") or ""),
+    }
+
+
 async def reconcile_project_background(
     project: str,
     broadcast: Callable[[dict], Awaitable[None]] | None = None,
 ) -> None:
     """Background task: reconcile lifecycle + post-sprint loose ends, then notify."""
+    # Opt-out for non-primary clones (e.g. UAT) so only one dashboard self-heals
+    # against the shared GitHub token. Backfill/board reads stay unaffected.
+    if os.environ.get("COMMANDER_DISABLE_AUTO_RECONCILE") == "1":
+        return
     now = time.monotonic()
     last = _last_reconcile_at.get(project)
     if last is not None and (now - last) < _RECONCILE_TTL_SECONDS:

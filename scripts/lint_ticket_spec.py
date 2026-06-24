@@ -45,12 +45,18 @@ def _load_env() -> None:
 
 
 def _fetch_issue(issue_num: int, repo: str) -> dict:
-    result = subprocess.run(
-        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"error: gh API call failed for issue #{issue_num} in {repo}", file=sys.stderr)
+        if e.stderr:
+            print(e.stderr.rstrip(), file=sys.stderr)
+        sys.exit(1)
     raw = json.loads(result.stdout)
     return {
         "number": raw.get("number"),

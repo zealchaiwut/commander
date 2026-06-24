@@ -3955,7 +3955,7 @@ Replace the existing draft (${data.existing_label})?`
     });
     _smgmtOrderedLabels = orderedLabels;
     _smgmtFinishedLabels = _finishedSet;
-    _smgmtNextUpLabel = null;
+    let _smgmtNextUpLabel = null;
     const sortedForNext = [...orderedLabels].sort((a, b) => {
       const ka = _smgmtSprintLabelSortKey(a);
       const kb = _smgmtSprintLabelSortKey(b);
@@ -5895,7 +5895,7 @@ Replace the existing draft (${data.existing_label})?`
       _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
     }
   }
-  function smgmtPlanningReorder(issueNum, _label) {
+  function smgmtPlanningReorder(issueNum, label) {
     const menu = document.getElementById("smgmt-plan-row-menu");
     if (menu)
       menu.remove();

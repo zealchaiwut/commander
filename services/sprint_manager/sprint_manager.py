@@ -1985,8 +1985,18 @@ def _build_design_block(
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 issue_body = data.get("body", "") or ""
-        except Exception:
-            pass
+            else:
+                sys.stdout.write(
+                    f"WARNING: gh fetch failed for issue #{issue_num}"
+                    f" (exit {result.returncode}); falling back to heading index\n"
+                )
+                sys.stdout.flush()
+        except Exception as _exc:
+            sys.stdout.write(
+                f"WARNING: gh fetch error for issue #{issue_num}"
+                f" ({_exc!r}); falling back to heading index\n"
+            )
+            sys.stdout.flush()
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])

@@ -38,6 +38,9 @@ import {
   smgmtBulkCompleteSprint, _bcConfirm,
 } from './bulk-complete-modal.js';
 import {
+  smgmtReconcileSprint, _recApply, _recClose,
+} from './reconcile-modal.js';
+import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
   smgmtApproveSprint, smgmtRejectSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
@@ -109,6 +112,10 @@ globalThis._bcCatClass = _bcCatClass;
 globalThis._bcSelectAll = _bcSelectAll;
 globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
 globalThis._bcConfirm = _bcConfirm;
+
+globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
+globalThis._recApply = _recApply;
+globalThis._recClose = _recClose;
 
 // Run controls + preflight modal (issue #448)
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;

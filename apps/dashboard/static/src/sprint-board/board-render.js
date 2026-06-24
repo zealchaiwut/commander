@@ -1635,6 +1635,10 @@ export function _smgmtCardHtml(
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
+          ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
+                  title="Reconcile this sprint's DB state against GitHub truth"
+                  onclick="event.stopPropagation();smgmtReconcileSprint('${escHtml(label)}')">
+            <i class="ti ti-refresh"></i> Reconcile</button>`}
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">

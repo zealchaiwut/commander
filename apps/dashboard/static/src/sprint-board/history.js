@@ -444,6 +444,10 @@ function _histHeadActionsHtml(s) {
     const state = (s.lifecycle_state || '').toLowerCase();
     const lbl = escHtml(s.label || '');
     const rawLabel = s.label || '';
+    html += `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
+      onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
+      title="Reconcile this sprint's DB state against GitHub truth">
+      <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
       const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
       const rerunTitle = _smgmtAnySprintRunning

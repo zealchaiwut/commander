@@ -1,7 +1,7 @@
 """Tests for issue #1545 — Preflight AC-detection regex diverges from canonical parser.
 
 The _preflightCheckTickets function in project.html was using
-  /^##\s+(acceptance criteria|ac)/im
+  /^##\\s+(acceptance criteria|ac)/im
 which incorrectly accepts bare '## AC' as a valid AC heading. The canonical
 Python parser (ticket_spec.py) only accepts 'acceptance criteria' or
 'acceptance' — not bare 'ac'.

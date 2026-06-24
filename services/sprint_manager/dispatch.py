@@ -601,7 +601,22 @@ def _dispatch_coder(
     # Load estimate early for paths injection (issue #1402) and model routing below.
     _coder_estimate = _load_estimate(issue_num)
     _paths_block = _build_estimate_paths_block(_coder_estimate)
-    _design_block = _build_design_block(issue_num, eff_repo, cwd_path)
+
+    # Fetch issue body once here and pass it to _build_design_block so it can
+    # skip the redundant per-dispatch gh api subprocess call (issue #1541).
+    _fetched_issue_body: Optional[str] = None
+    if eff_repo:
+        try:
+            _gh_result = subprocess.run(
+                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if _gh_result.returncode == 0:
+                _fetched_issue_body = json.loads(_gh_result.stdout).get("body", "") or ""
+        except Exception:
+            pass  # _build_design_block will fall back to heading index
+
+    _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 
     # Build prompt
     if cfg and cfg.coder_prompt_template:

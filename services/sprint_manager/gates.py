@@ -280,7 +280,10 @@ def _gate_pytest(
         sys.stdout.write(str("  [gate:pytest] PASS") + "\n")
         return GateResult(gate="pytest", passed=True, output=combined)
     else:
-        structured_log.error("gate_failed", f"[gate:pytest] FAIL (exit {rc})", gate="pytest", issue_num=issue_num, exit_code=rc)
+        structured_log.error(
+            "gate_failed", f"[gate:pytest] FAIL (exit {rc})",
+            gate="pytest", issue_num=issue_num, exit_code=rc,
+        )
         _revert_to_sit(issue_num, "pytest", combined, repo_name=repo_name)
         return GateResult(gate="pytest", passed=False, output=combined)
 
@@ -423,7 +426,9 @@ def _gate_lint(
         else:
             py_files = _changed_py_files(base_branch, cwd=worktester_dashboard)
             if py_files:
-                sys.stdout.write(str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n")
+                sys.stdout.write(
+                    str(f"  [gate:lint] ruff checking {len(py_files)} file(s): {', '.join(py_files)}") + "\n"
+                )
                 # Paths from git diff are relative to the repo root, not worktester_dashboard.
                 _rc_root, _root_out, _ = _run_timed(
                     "git", "rev-parse", "--show-toplevel", cwd=worktester_dashboard
@@ -849,7 +854,7 @@ def _gate_typecheck(
     if gate_scope == "full":
         ts_files: list[str] = []
         ok_ts, ts_out, _ = _try("find", ".", "-name", "tsconfig.json", "-maxdepth", "3",
-                                 cwd=worktester_dashboard)
+                                cwd=worktester_dashboard)
         if ok_ts and ts_out.strip():
             ts_files = ["_has_tsconfig_"]  # sentinel — just triggers tsc check
     else:
@@ -1070,7 +1075,9 @@ def _gate_monolith(
         _revert_to_sit(issue_num, "monolith", msg, repo_name=repo_name)
         return GateResult(gate="monolith", passed=False, output=msg)
 
-    sys.stdout.write(str(f"  [gate:monolith] PASS — {guarded_file} {base_count} → {head_count} lines (no growth)") + "\n")
+    sys.stdout.write(
+        str(f"  [gate:monolith] PASS — {guarded_file} {base_count} → {head_count} lines (no growth)") + "\n"
+    )
     return GateResult(
         gate="monolith", passed=True,
         output=f"{guarded_file} {base_count} → {head_count} lines (no growth)",

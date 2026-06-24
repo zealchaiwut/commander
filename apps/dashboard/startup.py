@@ -4351,6 +4351,10 @@ def children_of(parent_label: str, project_root: Path | None = None, project: st
                     (parent_label, project),
                 ).fetchall()
             else:
+                logger.warning(
+                    "children_of called without project for parent %r — label-only fallback",
+                    parent_label,
+                )
                 rows = conn.execute(
                     "SELECT label FROM sprints WHERE parent_label = ?",
                     (parent_label,),

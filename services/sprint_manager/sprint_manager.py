@@ -1958,6 +1958,7 @@ def _build_design_block(
     issue_num: int,
     eff_repo: Optional[str],
     cwd_path: "Path",
+    issue_body: Optional[str] = None,
 ) -> str:
     """Build a design context block for the coder prompt (issue #1488).
 
@@ -1967,6 +1968,9 @@ def _build_design_block(
 
     Returns '' when DESIGN.md is absent (guard handled by _design_docs_guard).
     Total output is capped at _DESIGN_BLOCK_CAP characters.
+
+    issue_body: when provided, used directly — skips the gh api subprocess call
+    (issue #1541).  Pass None to fall back to the legacy gh fetch.
     """
     design_doc_path = Path(cwd_path) / "DESIGN.md"
     if not design_doc_path.exists():
@@ -1975,28 +1979,30 @@ def _build_design_block(
     design_content = design_doc_path.read_text(encoding="utf-8")
 
     # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
-    issue_body = ""
-    if eff_repo:
-        try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                issue_body = data.get("body", "") or ""
-            else:
+    # When caller already has the body (issue #1541), skip the subprocess call.
+    if issue_body is None:
+        issue_body = ""
+        if eff_repo:
+            try:
+                result = subprocess.run(
+                    ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    issue_body = data.get("body", "") or ""
+                else:
+                    sys.stdout.write(
+                        f"WARNING: gh fetch failed for issue #{issue_num}"
+                        f" (exit {result.returncode}); falling back to heading index\n"
+                    )
+                    sys.stdout.flush()
+            except Exception as _exc:
                 sys.stdout.write(
-                    f"WARNING: gh fetch failed for issue #{issue_num}"
-                    f" (exit {result.returncode}); falling back to heading index\n"
+                    f"WARNING: gh fetch error for issue #{issue_num}"
+                    f" ({_exc!r}); falling back to heading index\n"
                 )
                 sys.stdout.flush()
-        except Exception as _exc:
-            sys.stdout.write(
-                f"WARNING: gh fetch error for issue #{issue_num}"
-                f" ({_exc!r}); falling back to heading index\n"
-            )
-            sys.stdout.flush()
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])

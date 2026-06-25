@@ -4,10 +4,12 @@
  * Step 2: close UAT/summary issues and mark every member sprint completed.
  */
 
+/* eslint-disable no-unused-vars */
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
    _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog, _smgmtBoardFinish,
    _bcLabel:writable, _bcPreview:writable, renderProgressActivity */
+/* eslint-enable no-unused-vars */
 
 function _bcShowPreviewLoading(current) {
   const loading = document.getElementById('bc-loading');

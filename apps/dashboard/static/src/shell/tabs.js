@@ -3,6 +3,7 @@
  * switchTab, dropdown helpers, keyboard nav, and popstate deep-link handler.
  * Cross-module globals live on window from project.html inline scripts.
  */
+/* eslint-disable no-unused-vars */
 /* global _slug, _activeTab, _cachedFullRepo, _ticketsLoaded, _sprintMgmtLoaded,
           loadSprintMgmt, loadTickets, _smgmtArStopTicker, _smgmtArInit, _smgmtArStartTicker,
           _smgmtLivePollId, _smgmtLogPollId, _statusRefreshId, logsDestroy, deployTabDestroy,
@@ -12,6 +13,7 @@
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
           _globalSettingsLinkActive, _ticketsRepo, _deepLinkView, _deepLinkFilter,
           _evlState, parseUrl, _arTickerId, _arInterval */
+/* eslint-enable no-unused-vars */
 
 export function switchTab(tab, pushHistory) {
   let _statusDeepLink = false;

@@ -11,8 +11,10 @@
  * exercises; `isDragBlocked` is wired into the live drop guards.
  */
 
+/* eslint-disable no-unused-vars */
 /* global _activeTab, _blUpdateActions, _arInterval, _smgmtArStartTicker, _smgmtArStopTicker, _smgmtBySprint, _smgmtData, _smgmtFinishedLabels, _smgmtMoveToModalOpen, _smgmtOrderedLabels, _smgmtRender, _smgmtRepo, _smgmtRunningLabels, _smgmtSelectedIssues, _smgmtShowInlineError, _smgmtShowToast, _smgmtSubView, _smgmtUpdateToolbarTop, loadSprintMgmt, sprintLabelDisplay,
    _smgmtDragTicket:writable, _smgmtGhostNextNum:writable, _smgmtLastSelectedNum:writable, _smgmtMoveLock:writable */
+/* eslint-enable no-unused-vars */
 
 import {
   BOARD_OVERLAY_PA_ID,

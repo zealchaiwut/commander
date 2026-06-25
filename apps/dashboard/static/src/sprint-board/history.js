@@ -3,9 +3,11 @@
  * Lifecycle chips, verb-gated cards, fold groups, stale-branch scan, and
  * run-stats — fed by GET /api/sprints/history (local-only).
  */
+/* eslint-disable no-unused-vars */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
           _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
           smgmtDeleteSprint, _nextSprintSublabel, CSS */
+/* eslint-enable no-unused-vars */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
@@ -266,7 +268,6 @@ function _histSprintFailed(s) {
 
 function _histFailedBlockHtml(s) {
   if (!_histSprintFailed(s)) return '';
-  const state = (s.lifecycle_state || '').toLowerCase();
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   const sprintReason = s.failure_reason || s.end_reason;
   if (!failed.length && !sprintReason) return '';

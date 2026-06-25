@@ -2972,6 +2972,7 @@ export function smgmtPlanningRemove(issueNum, label) {
 }
 
 /** Reorder a ticket within the planning section using keyboard-accessible prompts. */
+// eslint-disable-next-line no-unused-vars
 export function smgmtPlanningReorder(issueNum, label) {
   const menu = document.getElementById("smgmt-plan-row-menu");
   if (menu) menu.remove();

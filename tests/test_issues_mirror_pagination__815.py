@@ -2,7 +2,7 @@
 import os
 import pytest
 import httpx
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.
@@ -26,7 +26,7 @@ def test_issues_mirror_pagination__follows_link_pagination():
     # Import the function and helper
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'dashboard'))
-    from github_events_sync import _fetch_issues_conditional, _parse_next_link
+    from github_events_sync import _fetch_issues_conditional
 
     # Mock httpx.get to simulate paginated responses
     with patch('github_events_sync.httpx.get') as mock_get:
@@ -195,7 +195,10 @@ def test_issues_mirror_pagination__parse_next_link_extracts_url():
     from github_events_sync import _parse_next_link
 
     # Standard GitHub Link header format
-    link_header = '<https://api.github.com/repos/o/r/issues?page=2>; rel="next", <https://api.github.com/repos/o/r/issues?page=5>; rel="last"'
+    link_header = (
+        '<https://api.github.com/repos/o/r/issues?page=2>; rel="next",'
+        ' <https://api.github.com/repos/o/r/issues?page=5>; rel="last"'
+    )
     result = _parse_next_link(link_header)
 
     assert result == 'https://api.github.com/repos/o/r/issues?page=2'

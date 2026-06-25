@@ -12,9 +12,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 # Ensure repo root is on path
 _REPO_ROOT = Path(__file__).parent.parent
@@ -81,7 +80,8 @@ class TestAssertRunMutable:
 
     def test_log_message_format(self, capsys=None):
         from services.sprint_manager.sprint_manager import _assert_run_mutable
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
             try:
@@ -295,14 +295,14 @@ class TestFinishFeatureUATFlow:
         """STATUS_MAP['uat']['add'] contains only RUN_MUTABLE_LABELS entries."""
         sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
         # Import update_ticket constants directly without executing main()
-        import importlib, types
+        import importlib
+        import types
         spec = importlib.util.spec_from_file_location(
             "update_ticket_mod",
             str(_REPO_ROOT / "scripts" / "update_ticket.py"),
         )
         mod = importlib.util.module_from_spec(spec)
         # Stub heavy deps so we can read STATUS_MAP without side effects
-        stub = types.ModuleType
         sys.modules.setdefault("github_client", types.ModuleType("github_client"))
         try:
             spec.loader.exec_module(mod)

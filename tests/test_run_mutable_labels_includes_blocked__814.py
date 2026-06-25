@@ -1,6 +1,4 @@
 """Tests for issue #814: sprint_manager RUN_MUTABLE_LABELS omits "blocked" (runs against UAT)"""
-import sys
-from pathlib import Path
 
 
 def test_814__sprint_manager_run_mutable_labels_includes_blocked():
@@ -66,7 +64,6 @@ def test_814__label_guard_allows_mutable_labels_only():
         RUN_MUTABLE_LABELS,
         _guard_sprint_labels,
     )
-    from services.sprint_manager.state_machine import STATUS_LABELS
 
     # All RUN_MUTABLE_LABELS should include all status labels (for active runs)
     # or at least the BLOCKED state label

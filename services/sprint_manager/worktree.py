@@ -58,10 +58,8 @@ def _lookup_in_sm(attr: str, local_fn):
     return None
 
 
-# ── private helpers used by the five extracted functions ─────────────────────
-# These are local copies of small pure helpers from sprint_manager.py.
-# sprint_manager.py keeps its own copy for functions that use them outside the
-# five extracted functions (e.g. _load_agent_persona uses _git_worktree_root).
+# ── private helpers (single source of truth for the whole sprint_manager pkg) ─
+# sprint_manager.py re-imports these from here (issue #1502) — do not duplicate.
 
 def _git_worktree_root(start: "Path") -> "Path | None":
     """Return the git toplevel for ``start``, or None if not inside a worktree."""

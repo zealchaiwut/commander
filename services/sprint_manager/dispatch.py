@@ -35,6 +35,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _resolve_cline_model,
     _effective_coder_backend,
 )
+from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
 from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # noqa: E402
@@ -57,23 +58,6 @@ _DOCTOR_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_CLINE_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
 DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
-
-
-class FailureCategory:
-    """String constants for dispatch failure categories — mirrors sprint_manager.FailureCategory."""
-
-    HANG             = "HANG"
-    CRASH            = "CRASH"
-    GATE_FAIL        = "GATE_FAIL"
-    TESTER_REJECTED  = "TESTER_REJECTED"
-    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
-    CODER_NO_WORK    = "CODER_NO_WORK"
-    MERGE_CONFLICT   = "MERGE_CONFLICT"
-    LINT_FAIL        = "LINT_FAIL"
-    PYTEST_FAIL      = "PYTEST_FAIL"
-    REBASE_CONFLICT  = "REBASE_CONFLICT"
-    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
-    ENV_ERROR        = "ENV_ERROR"
 
 
 # ── sys.modules proxy helper ──────────────────────────────────────────────────
@@ -617,7 +601,22 @@ def _dispatch_coder(
     # Load estimate early for paths injection (issue #1402) and model routing below.
     _coder_estimate = _load_estimate(issue_num)
     _paths_block = _build_estimate_paths_block(_coder_estimate)
-    _design_block = _build_design_block(issue_num, eff_repo, cwd_path)
+
+    # Fetch issue body once here and pass it to _build_design_block so it can
+    # skip the redundant per-dispatch gh api subprocess call (issue #1541).
+    _fetched_issue_body: Optional[str] = None
+    if eff_repo:
+        try:
+            _gh_result = subprocess.run(
+                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if _gh_result.returncode == 0:
+                _fetched_issue_body = json.loads(_gh_result.stdout).get("body", "") or ""
+        except Exception:
+            pass  # _build_design_block will fall back to heading index
+
+    _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 
     # Build prompt
     if cfg and cfg.coder_prompt_template:

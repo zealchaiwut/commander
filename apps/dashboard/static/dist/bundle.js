@@ -2157,21 +2157,25 @@ Replace the existing draft (${data.existing_label})?`
     const state = (s.lifecycle_state || "").toLowerCase();
     const lbl = escHtml(s.label || "");
     const rawLabel = s.label || "";
+    const reconcileBtn = `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
+      onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
+      title="Reconcile this sprint's DB state against GitHub truth">
+      <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
       const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
       const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
-      return `<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
     if (state === "ready_to_merge") {
-      return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
       onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')"
       title="Complete sprint \u2014 merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
     }
-    return "";
+    return reconcileBtn;
   }
   function _histDeleteBtnHtml(s) {
     if (_histIsLocked(s.lifecycle_state))

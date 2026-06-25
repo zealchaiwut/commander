@@ -79,19 +79,23 @@ def transition_sprint_state(
     end_reason: str | None = None,
     project: str = "",
 ) -> bool:
-    """Route a reconciler state transition through the DB write layer.
+    """Route a reconciler state transition through the DB state machine.
 
-    All reconciler writes must go through this function so that a future
-    foundation guard can intercept non-owner running→terminal transitions.
-    Returns True when the transition was applied.
+    Delegates to db.transition_sprint_state with the given ``actor`` and returns
+    whether the state machine ACCEPTED the edge.
+
+    The previous version called the record_* helpers, which hardcode
+    actor="manager" and return None — so reconcile-only edges
+    (needs_rework→ready_to_merge / →completed) were silently rejected while this
+    wrapper still returned True. That made reconcile-apply report
+    ``updated=true`` with the state unchanged (e.g. an orphaned-but-merged sprint
+    stuck in needs_rework). Passing the real actor through fixes the promotion,
+    and returning ``accepted`` stops the false-success report.
     """
-    if state == "needs_rework":
-        _db().record_sprint_needs_rework(label, end_reason=end_reason, project=project)
-    elif state == "ready_to_merge":
-        _db().record_sprint_ready_to_merge(label, end_reason=end_reason, project=project)
-    else:
-        _db().record_sprint_finish(label, end_reason=end_reason, project=project)
-    return True
+    res = _db().transition_sprint_state(
+        label, state, actor=actor, end_reason=end_reason, project=project,
+    )
+    return bool(getattr(res, "accepted", False))
 
 
 def _lineage_fully_in_develop(label: str, project: str) -> bool:

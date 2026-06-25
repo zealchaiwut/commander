@@ -66,8 +66,8 @@ def test_818__lock_acquired_and_released(logging_mod, tmp_path, monkeypatch):
 
     today = datetime.date.today().isoformat()
     lines = _collect_lines(tmp_path, today)
-    assert any("first line" in l for l in lines), "first line missing"
-    assert any("second line" in l for l in lines), "second line missing"
+    assert any("first line" in ln for ln in lines), "first line missing"
+    assert any("second line" in ln for ln in lines), "second line missing"
 
 
 def test_818__lock_file_created_when_fcntl_available(logging_mod, tmp_path, monkeypatch):
@@ -112,8 +112,8 @@ def test_818__no_data_loss_concurrent_emit(logging_mod, tmp_path, monkeypatch):
     assert not errors, f"Exceptions during concurrent emit: {errors}"
 
     lines = _collect_lines(tmp_path, today)
-    assert any("line-thread-1" in l for l in lines), "Thread 1 line was dropped"
-    assert any("line-thread-2" in l for l in lines), "Thread 2 line was dropped"
+    assert any("line-thread-1" in ln for ln in lines), "Thread 1 line was dropped"
+    assert any("line-thread-2" in ln for ln in lines), "Thread 2 line was dropped"
 
 
 def test_818__rotation_at_most_once(logging_mod, tmp_path, monkeypatch):
@@ -153,7 +153,7 @@ def test_818__fcntl_unavailable_fallback(logging_mod, tmp_path, monkeypatch):
 
     today = datetime.date.today().isoformat()
     lines = _collect_lines(tmp_path, today)
-    assert any("fallback line" in l for l in lines), "fallback line missing"
+    assert any("fallback line" in ln for ln in lines), "fallback line missing"
 
 
 # --- AC5: existing rotation naming and archive retention preserved ---

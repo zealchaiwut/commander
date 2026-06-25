@@ -3717,10 +3717,13 @@ Replace the existing draft (${data.existing_label})?`
       return { ready: false, reasons: ["invalid ticket"] };
     const reasons = [];
     const body = (ticket.body || "").trim();
-    if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
+    if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\s*$/im.test(body)) {
       reasons.push("missing AC");
     }
-    if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
+    if (!/^#{1,6}\s+(design\s+references?|design\s+refs?)\s*$/im.test(body)) {
+      reasons.push("missing design ref");
+    }
+    if (!/^#{1,6}\s+(uat\s+test\s+steps|test\s+plan)\s*$/im.test(body)) {
       reasons.push("missing test plan");
     }
     const size = _smgmtTicketSize(ticket);
@@ -3952,7 +3955,7 @@ Replace the existing draft (${data.existing_label})?`
     });
     _smgmtOrderedLabels = orderedLabels;
     _smgmtFinishedLabels = _finishedSet;
-    _smgmtNextUpLabel = null;
+    let _smgmtNextUpLabel = null;
     const sortedForNext = [...orderedLabels].sort((a, b) => {
       const ka = _smgmtSprintLabelSortKey(a);
       const kb = _smgmtSprintLabelSortKey(b);
@@ -5892,7 +5895,7 @@ Replace the existing draft (${data.existing_label})?`
       _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
     }
   }
-  function smgmtPlanningReorder(issueNum, _label) {
+  function smgmtPlanningReorder(issueNum, label) {
     const menu = document.getElementById("smgmt-plan-row-menu");
     if (menu)
       menu.remove();

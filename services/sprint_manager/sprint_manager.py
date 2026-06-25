@@ -37,7 +37,6 @@ import dataclasses
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -173,29 +172,6 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
 
-def _git_worktree_root(start: "Path") -> "Path | None":
-    """Return the git toplevel for ``start``, or None if not inside a worktree."""
-    d = start.resolve()
-    for _ in range(25):
-        if (d / ".git").exists():
-            return d
-        if d.parent == d:
-            break
-        d = d.parent
-    return None
-
-
-def _parse_dotenv_value(text: str, key: str) -> Optional[str]:
-    """Return the value for ``key=`` from a dotenv file body, or None."""
-    prefix = f"{key}="
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or not line.startswith(prefix):
-            continue
-        val = line[len(prefix):].strip().strip('"').strip("'")
-        return val or None
-    return None
-
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv  # noqa: E402
@@ -310,12 +286,17 @@ from services.sprint_manager.label_transitions import (  # noqa: E402, F401
 
 # Worktree/env helpers extracted to worktree.py (issue #1283); re-exported here
 # so all existing call sites within this module remain unmodified.
+# _git_worktree_root, _parse_dotenv_value, _find_crg_bin deduplicated from
+# sprint_manager.py into worktree.py as sole source of truth (issue #1502).
 from services.sprint_manager.worktree import (  # noqa: E402, F401
     _resolve_uat_env_for_tester,
     _worktree_hygiene,
     _crg_update_worktree,
     _stash_to_quarantine,
     _detect_port,
+    _git_worktree_root,
+    _parse_dotenv_value,
+    _find_crg_bin,
 )
 
 # Coder/tester/doctor dispatch helpers extracted to dispatch.py (issues #1285, #1286);
@@ -859,24 +840,6 @@ def _run(*cmd, cwd: Optional[Path] = None, check: bool = True) -> str:
 
 
 _CRG_UPDATE_TIMEOUT_SECS = 120
-
-
-def _find_crg_bin(near: Optional[Path] = None) -> Optional[str]:
-    """Return path to code-review-graph CLI if installed, else None."""
-    candidates: list[Path] = []
-    if near is not None:
-        candidates.append(near / "venv" / "bin" / "code-review-graph")
-        for parent in near.parents:
-            if parent.name in ("commander", "dev") or len(candidates) > 6:
-                break
-            candidates.append(parent / "uat" / "venv" / "bin" / "code-review-graph")
-    candidates.append(Path.home() / "dev" / "commander" / "uat" / "venv" / "bin" / "code-review-graph")
-    candidates.append(Path.home() / "dev" / "commander" / "prd" / "venv" / "bin" / "code-review-graph")
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path)
-    found = shutil.which("code-review-graph")
-    return found
 
 
 def _write_runtime_port(worktree_coder: Path, port: int) -> None:
@@ -2014,6 +1977,7 @@ def _build_design_block(
     issue_num: int,
     eff_repo: Optional[str],
     cwd_path: "Path",
+    issue_body: Optional[str] = None,
 ) -> str:
     """Build a design context block for the coder prompt (issue #1488).
 
@@ -2023,6 +1987,9 @@ def _build_design_block(
 
     Returns '' when DESIGN.md is absent (guard handled by _design_docs_guard).
     Total output is capped at _DESIGN_BLOCK_CAP characters.
+
+    issue_body: when provided, used directly — skips the gh api subprocess call
+    (issue #1541).  Pass None to fall back to the legacy gh fetch.
     """
     design_doc_path = Path(cwd_path) / "DESIGN.md"
     if not design_doc_path.exists():
@@ -2031,18 +1998,30 @@ def _build_design_block(
     design_content = design_doc_path.read_text(encoding="utf-8")
 
     # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
-    issue_body = ""
-    if eff_repo:
-        try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                issue_body = data.get("body", "") or ""
-        except Exception:
-            pass
+    # When caller already has the body (issue #1541), skip the subprocess call.
+    if issue_body is None:
+        issue_body = ""
+        if eff_repo:
+            try:
+                result = subprocess.run(
+                    ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    issue_body = data.get("body", "") or ""
+                else:
+                    sys.stdout.write(
+                        f"WARNING: gh fetch failed for issue #{issue_num}"
+                        f" (exit {result.returncode}); falling back to heading index\n"
+                    )
+                    sys.stdout.flush()
+            except Exception as _exc:
+                sys.stdout.write(
+                    f"WARNING: gh fetch error for issue #{issue_num}"
+                    f" ({_exc!r}); falling back to heading index\n"
+                )
+                sys.stdout.flush()
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])
@@ -2062,7 +2041,7 @@ def _build_design_block(
             continue
         doc_name, slug = ref.split("#", 1)
         doc_name = doc_name.strip()
-        slug = slug.strip().lower()
+        slug = _slugify_heading(slug)
 
         if doc_name.strip().lower() != "design.md":
             # Only DESIGN.md is in scope (PRODUCT.md support deferred).

@@ -10,15 +10,16 @@ AC items verified:
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import services.sprint_manager.sprint_manager as sm  # noqa: E402
+import services.sprint_manager.sprint_manager as sm
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +514,7 @@ class TestFinishFeatureUsesRemoteRef:
     def test_finish_feature_merges_origin_ref(self, tmp_path):
         """finish_feature.py subprocess call must use `origin/<branch>` not `<branch>`."""
         import importlib.util
-        import subprocess
+        import types
 
         ff_path = REPO_ROOT / "scripts" / "finish_feature.py"
         assert ff_path.exists(), f"finish_feature.py not found at {ff_path}"

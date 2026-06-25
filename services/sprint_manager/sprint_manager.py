@@ -1468,6 +1468,37 @@ def _call_finish_feature(
     return False, []
 
 
+def _apply_in_progress_label(
+    issue_num: int,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply in-progress label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "in-progress"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
+
+
+def _apply_needs_rework_label(
+    issue_num: int,
+    category: str,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply needs-rework label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "needs-rework"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
+
+
 # ── documentor integration (issue #103) ──────────────────────────────────────
 
 def _run_documentor(

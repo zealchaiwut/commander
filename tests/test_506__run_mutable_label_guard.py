@@ -276,12 +276,11 @@ class TestUpdateTicketGuard:
         assert "Refused to" not in stderr
 
     def test_guard_logs_blocked_label_for_uat(self):
-        """With COMMANDER_SPRINT_RUNNING, 'blocked' label removal is refused."""
+        """After issue #814, 'blocked' is in RUN_MUTABLE_LABELS so removal is allowed."""
         env = {"COMMANDER_SPRINT_RUNNING": "sprint-37"}
         stdout, stderr, _ = self._run_update_ticket("uat", env)
-        # 'blocked' is in STATUS_MAP["uat"]["remove"] but outside RUN_MUTABLE_LABELS
-        assert 'Refused to remove label "blocked"' in stderr
-        assert "RUN_MUTABLE_LABELS" in stderr
+        # After issue #814, "blocked" is in RUN_MUTABLE_LABELS — its removal must not be refused.
+        assert 'Refused to remove label "blocked"' not in stderr
 
     def test_guard_does_not_block_uat_add(self):
         """With COMMANDER_SPRINT_RUNNING, UAT is added (it's in RUN_MUTABLE_LABELS)."""

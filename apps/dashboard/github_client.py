@@ -532,13 +532,26 @@ def _live_sprint_label_names(repo_name: str) -> list[str]:
 
 def _all_sprint_label_names(repo_name: str) -> set[str]:
     """Union of mirror-derived sprint labels (zero-cost, fresh for active labels)
-    and the TTL-cached live label list (catches empty/orphan labels)."""
-    names = set(_live_sprint_label_names(repo_name))
+    and the TTL-cached live label list (catches empty/orphan labels).
+
+    Mirror labels absent from the live registry are filtered out to prevent
+    deleted labels from resurrecting as zombie sprints (issue #1355): a deleted
+    label persists in stale raw.labels of closed mirror rows but is absent from
+    the live gh label list, so intersecting the mirror contribution against live
+    blocks it. When live returns empty (gh failure or genuinely no sprints) the
+    mirror is used unfiltered as fallback so the board stays usable offline."""
+    live = set(_live_sprint_label_names(repo_name))
     mirror = _mirror_labels(repo_name)
-    if mirror is not None:
-        names.update(lbl["name"] for lbl in mirror
-                     if SPRINT_LABEL_RE_ALL.match(lbl["name"]))
-    return names
+    if mirror is None:
+        return live
+    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
+    if live:
+        # Live succeeded — only admit mirror labels that also exist live.
+        # Deleted labels linger in stale mirror rows but are absent from live,
+        # so the intersection prevents them from surfacing as zombie sprints.
+        return live | (mirror_sprint & live)
+    # Live is empty (gh down or no sprint labels yet) — fall back to mirror.
+    return mirror_sprint
 
 
 def list_sprints(repo_name: str | None = None) -> list[int]:

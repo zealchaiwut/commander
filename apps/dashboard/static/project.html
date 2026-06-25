@@ -2552,8 +2552,11 @@
       border: 1px solid var(--border);
     }
     .recon-passed-item i { font-size: 10px; color: var(--text-sub); }
+    /* Failed checks in Details: amber X badge (#1154) */
+    .recon-failed-item { background: color-mix(in srgb, var(--amber) 10%, var(--surface-2)); border-color: color-mix(in srgb, var(--amber) 30%, var(--border)); }
+    .recon-failed-item i { color: var(--amber); }
 
-    /* Loose-end amber band: exactly ONE per card (AC4) */
+    /* Loose-end amber band: one per failing recon check + stale branches (#1041, #1154) */
     .hist-loose-end-band {
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       margin: 0; padding: 8px 12px;
@@ -19822,6 +19825,20 @@ function _smgmtGetCapacity(label) {
   } catch (_) { return 0; }
 }
 
+/** HTML for the sprint budget section containing the cap container (AC2 — issue #801). */
+function _smgmtCapBudgetSectionHtml(label) {
+  const sl = escHtml(label);
+  return `<div class="sc-budget-section">
+    <div class="sc-budget-head">
+      <span class="sc-budget-eyebrow">SPRINT BUDGET</span>
+      <span class="sc-budget-forecast" id="sc-budget-forecast-${sl}"></span>
+    </div>
+    <div class="cap" id="smgmt-cap-${sl}"></div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${sl}" style="display:none"></div>
+  </div>
+  <div class="sc-preview-slot" id="sc-preview-${sl}"></div>`;
+}
+
 function _smgmtCapacityInputHtml(label) {
   const cap = _smgmtGetCapacity(label);
   const val = cap > 0 ? String(cap) : '';
@@ -19954,7 +19971,7 @@ function _smgmtUpdateCapBar(label) {
 
     let hintClass = 'cap-hint', hintText;
     if (total > budget) {
-      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ${escHtml(fmtDur(total - budget))}</strong>`;
+      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ~${escHtml(fmtDur(total - budget))}</strong>`;
       hintClass = 'cap-hint cap-hint--over';
     } else {
       const headroom = budget - total;
@@ -19963,7 +19980,7 @@ function _smgmtUpdateCapBar(label) {
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
-      hintText += ` · ${unestimated} unestimated`;
+      hintText += ` · ${unestimated} unestimated excluded`;
     }
 
     let forecastHtml = '';

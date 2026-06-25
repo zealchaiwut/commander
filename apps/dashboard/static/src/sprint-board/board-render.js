@@ -425,6 +425,7 @@ export function _smgmtRender(data) {
     if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl)) continue;
     if (_smgmtFinishedLabels.has(lbl)) continue;
     if ((bySprint[lbl] || []).length >= 1) {
+      // eslint-disable-next-line no-unused-vars
       _smgmtNextUpLabel = lbl;
       break;
     }
@@ -2501,6 +2502,9 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
   const safeLabel = escHtml(label);
   const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
 
+  let savedExpanded = false;
+  try { savedExpanded = localStorage.getItem(`slp_ancestor_${label}`) === "1"; } catch (_) {}
+
   let statusIcon, statusText, statusCls;
   if (mergeState === "merged") {
     statusIcon = "ti-circle-check";
@@ -2563,10 +2567,10 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
                onclick="smgmtToggleAncestor('${safeLabel}')">
     <div class="slp-ancestor-header">
       <button class="smgmt-collapse-btn slp-ancestor-toggle"
-              aria-label="Expand ${escHtml(sprintLabelDisplay(label))}"
-              title="Expand ${escHtml(sprintLabelDisplay(label))}"
+              aria-label="${savedExpanded ? "Collapse" : "Expand"} ${escHtml(sprintLabelDisplay(label))}"
+              title="${savedExpanded ? "Collapse" : "Expand"} ${escHtml(sprintLabelDisplay(label))}"
               onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
-        <i class="ti ti-chevron-right"></i>
+        <i class="ti ${savedExpanded ? "ti-chevron-down" : "ti-chevron-right"}"></i>
       </button>
       <span class="slp-merge-mark ${statusCls}">
         <i class="ti ${statusIcon}"></i>
@@ -2582,7 +2586,7 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
         <i class="ti ti-menu-2"></i>
       </button>
     </div>
-    <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
+    <div class="slp-ancestor-body" id="slp-body-${safeLabel}"${savedExpanded ? "" : " hidden"}>
       <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
         ${ticketsHtml}
       </div>
@@ -2969,7 +2973,7 @@ export function smgmtPlanningRemove(issueNum, label) {
 }
 
 /** Reorder a ticket within the planning section using keyboard-accessible prompts. */
-export function smgmtPlanningReorder(issueNum, label) {
+export function smgmtPlanningReorder(issueNum, _label) {
   const menu = document.getElementById("smgmt-plan-row-menu");
   if (menu) menu.remove();
   // Reorder: move ticket up/down using the existing drag-drop order API

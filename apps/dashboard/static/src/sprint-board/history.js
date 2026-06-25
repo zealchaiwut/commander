@@ -4,8 +4,7 @@
  * run-stats — fed by GET /api/sprints/history (local-only).
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
-          _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel, CSS */
+          _smgmtBySprint, _smgmtUpdateSubnav, _nextSprintSublabel, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
@@ -194,7 +193,7 @@ function _histFailReasonParts(ft, s) {
   return { title: title, accent: accent, time: meta.time };
 }
 
-function _histEstBarMini(s) {
+export function _histEstBarMini(s) {
   const acc = s.estimate_accuracy;
   if (acc == null || isNaN(acc)) return '';
   const accPct = acc <= 1
@@ -266,7 +265,6 @@ function _histSprintFailed(s) {
 
 function _histFailedBlockHtml(s) {
   if (!_histSprintFailed(s)) return '';
-  const state = (s.lifecycle_state || '').toLowerCase();
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   const sprintReason = s.failure_reason || s.end_reason;
   if (!failed.length && !sprintReason) return '';
@@ -325,7 +323,7 @@ function _histIssueListHtml(s) {
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
 // only; locked (finished/deleted) sprints render no verbs at all (links only).
-function _histVerbsHtml(s) {
+export function _histVerbsHtml(s) {
   // Verbs gated by the unified lifecycle (sprint-lifecycle.md):
   //   needs_rework     → Re-run (creates a child sub-sprint)
   //   ready_to_merge   → Finish (merge sign-off) + Delete
@@ -404,7 +402,7 @@ function _histLinksHtml(s) {
 }
 
 // Compact PR / summary pills on the card head — visible without expanding.
-function _histHeadLinksHtml(s) {
+export function _histHeadLinksHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -421,7 +419,7 @@ function _histHeadLinksHtml(s) {
 }
 
 // Compact header actions: PR / Summary / Logs + lifecycle verbs in one row.
-function _histHeadActionsHtml(s) {
+export function _histHeadActionsHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -471,7 +469,7 @@ function _histHeadActionsHtml(s) {
 
 // Metrics row: an estimate-accuracy bar (actual ÷ estimated) plus duration and
 // token badges, per mock v5.
-function _histMetricsHtml(s) {
+export function _histMetricsHtml(s) {
   const acc = s.estimate_accuracy;
   let bar = '';
   if (acc != null && !isNaN(acc)) {
@@ -632,7 +630,7 @@ function _histMergeGanttTickets(s, stats) {
 // Coder segments are purple, tester amber — fix rounds use the same solid colors.
 // A red ✕ crash marker is painted at the crash ticket's end offset, but only
 // for a sprint that actually failed (AC4).
-function _histGanttHtml(s, stats) {
+export function _histGanttHtml(s, stats) {
   const tickets = _histMergeGanttTickets(s, stats);
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
@@ -914,7 +912,7 @@ function _histReconcileChipHtml(s) {
 }
 
 // Header hint chips (kept for backward-compat; no longer used by _histCardHtml).
-function _histHeadHintsHtml(s, expanded) {
+export function _histHeadHintsHtml(s, expanded) {
   if (expanded) {
     return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
   }
@@ -1270,29 +1268,31 @@ function _histChildCardHtml(s) {
   </div>`;
 }
 
-// ── Loose-end amber band (issue #1041) ─────────────────────────────────────
-// Exactly ONE amber band per card showing the single highest-priority actionable
-// loose end. Priority: unresolved stale-labels recon check > stale branches.
-// Returns '' when no loose end exists (no band rendered — AC4 / AC7).
+// ── Loose-end amber band (issue #1041, extended by #1154) ──────────────────
+// One amber band per failing reconciliation check, plus one for stale branches.
+// sprint_pr and stale_labels checks have rich CTAs; any other failed check type
+// gets a generic band via _histReconcileLabel so future checks are not silently dropped.
+// Returns '' when no loose ends exist (no band rendered — AC4 / AC7).
 function _histLooseEndBandHtml(s) {
   const r = s.reconciliation;
+  const bands = [];
   if (r && Array.isArray(r.checks)) {
-    const prCheck = r.checks.find((c) => !c.ok && c.name === "sprint_pr");
+    const prCheck = r.checks.find((c) => !c.ok && c.name === 'sprint_pr');
     if (prCheck) {
       const looseN = r.checks.filter((c) => !c.ok).length || 1;
       const prNum = s.pr_number;
       const prUrl = _histPrUrl(s);
-      const prRef = prNum ? `#${prNum}` : "PR";
+      const prRef = prNum ? `#${prNum}` : 'PR';
       const msg = `${looseN} loose end — Sprint PR ${prRef} is not yet merged`;
       const cta = prUrl
         ? `<a class="hist-band-cta" href="${escHtml(prUrl)}" target="_blank" rel="noopener"
             onclick="event.stopPropagation()">Merge PR</a>`
-        : "";
-      return `<div class="hist-loose-end-band">
+        : '';
+      bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         ${cta}
-      </div>`;
+      </div>`);
     }
     const staleCheck = r.checks.find(c => !c.ok && c.name === 'stale_labels');
     if (staleCheck) {
@@ -1306,28 +1306,38 @@ function _histLooseEndBandHtml(s) {
         ? (looseN + ' loose end — ' + offenderCount + ' stale status labels to clear: ' + labelParts)
         : (looseN + ' loose end — ' + labelParts);
       const lbl = escHtml(s.label || '');
-      return `<div class="hist-loose-end-band">
+      bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         <button type="button" class="hist-band-cta hist-band-cta--clear"
           onclick="event.stopPropagation();_histClearStaleLabels('${lbl}')">Clear labels</button>
-      </div>`;
+      </div>`);
     }
+    // Generic fallback: any other failed check type gets its own amber band (#1154).
+    const knownChecks = new Set(['sprint_pr', 'stale_labels']);
+    r.checks.filter(c => !c.ok && !knownChecks.has(c.name)).forEach(c => {
+      const label = _histReconcileLabel(c.name);
+      const detail = c.detail || 'Check failed';
+      bands.push(`<div class="hist-loose-end-band">
+        <i class="ti ti-alert-triangle"></i>
+        <span class="hist-band-msg">${escHtml(label + ': ' + detail)}</span>
+      </div>`);
+    });
   }
-  // Priority 2: stale feature branches
+  // Stale feature branches
   const g = _histStaleBySprint[s.label];
   if (g && g.count) {
     const n = g.count;
     const word = n === 1 ? 'stale branch' : 'stale branches';
     const lbl = escHtml(s.label || '');
-    return `<div class="hist-loose-end-band">
+    bands.push(`<div class="hist-loose-end-band">
       <i class="ti ti-git-branch"></i>
       <span class="hist-band-msg">${n} ${word}</span>
       <button type="button" class="hist-band-cta"
         onclick="event.stopPropagation();_histCleanupStale('${lbl}')">Clean up</button>
-    </div>`;
+    </div>`);
   }
-  return '';
+  return bands.join('');
 }
 
 // ── What-list (issue #1041) ─────────────────────────────────────────────────
@@ -1398,20 +1408,27 @@ function _histWhatListHtml(s) {
   return '';
 }
 
-// Passed reconciliation checks rendered as small grey checkmarks inside Details
-// only — never as green boxes outside Details (AC9).
+// Reconciliation checks rendered inside Details only — passed as grey checkmarks,
+// failed as amber X items (#1154 AC3). Never rendered as boxes outside Details (AC9).
 function _histReconPassedHtml(s) {
   const r = s.reconciliation;
   if (!r || !Array.isArray(r.checks) || !r.checks.length) return '';
   const passed = r.checks.filter(c => !!c.ok);
-  if (!passed.length) return '';
-  const items = passed.map(c => {
+  const failed = r.checks.filter(c => !c.ok);
+  if (!passed.length && !failed.length) return '';
+  const failedItems = failed.map(c => {
+    const detail = c.detail || 'Failed';
+    return `<span class="recon-passed-item recon-failed-item"
+      title="${escHtml(_histReconcileLabel(c.name) + ': ' + detail)}">
+      <i class="ti ti-x"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
+  }).join('');
+  const passedItems = passed.map(c => {
     const detail = c.detail || 'OK';
     return `<span class="recon-passed-item"
       title="${escHtml(_histReconcileLabel(c.name) + ': ' + detail)}">
       <i class="ti ti-check"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
   }).join('');
-  return `<div class="hist-recon-passed">${items}</div>`;
+  return `<div class="hist-recon-passed">${failedItems}${passedItems}</div>`;
 }
 
 // Metrics / reconciliation — collapsed by default at the bottom of an expanded card.
@@ -1744,7 +1761,7 @@ function _histTicketsDone(s) {
 // (rendered expanded) plus a list of older folds, each holding exactly
 // `foldSize` sprints. Both the recent slice and every fold are sized by the
 // same `history_fold_size` setting (AC2/AC8).
-function _histPartition(sprints, foldSize) {
+export function _histPartition(sprints, foldSize) {
   foldSize = Math.max(1, foldSize | 0);
   const recent = sprints.slice(0, foldSize);
   const older = sprints.slice(foldSize);

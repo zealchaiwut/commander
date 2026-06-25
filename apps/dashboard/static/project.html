@@ -13795,15 +13795,24 @@ function _smgmtShowDepOrderPopover(ev, issueNum) {
 // tickets, a red cycle state, and an amber "preview partial" warning when some
 // tickets are unestimated. Refreshed from _smgmtRender on every board rebuild.
 
-/** Build pre-flight hint counts for the run-preview strip (replaces the old banner). */
+/** Statuses for tickets that are already done — a re-run never re-touches them. */
+const _SMGMT_DONE_STATUSES = new Set(['UAT', 'UAT-approved', 'released', 'done']);
+
+/** Build pre-flight hint counts for the run-preview strip (replaces the old banner).
+ *
+ * A needs-rework / has-rework sprint keeps its passed tickets in the list, but a
+ * re-run only re-runs the unfinished ones — so estimate/split/AC counts must
+ * ignore tickets that already passed (UAT/released/done). Otherwise the strip
+ * offers to re-estimate or re-split work that is already shipped. */
 function _smgmtPreflightHints(tickets) {
-  const syncItems = _preflightCheckTickets(tickets || []);
+  const actionable = (tickets || []).filter(t => !_SMGMT_DONE_STATUSES.has(t && t.status));
+  const syncItems = _preflightCheckTickets(actionable);
   const missingAC = syncItems.filter(i =>
     i.type === 'Missing body' || i.type === 'Missing acceptance criteria'
   ).length;
-  const unsized = _preflightCheckEstimates(tickets || []).size;
+  const unsized = _preflightCheckEstimates(actionable).size;
   const conflicts = syncItems.filter(i => i.type === 'Conflicting labels').length;
-  const xlTickets = (tickets || []).filter(t => _smgmtTicketSize(t) === 'XL');
+  const xlTickets = actionable.filter(t => _smgmtTicketSize(t) === 'XL');
   const xlCount = xlTickets.length;
   const xlNumbers = xlTickets.map(t => t.number).filter(n => n != null);
   return { missingAC, unsized, conflicts, xlCount, xlNumbers };
@@ -13958,7 +13967,10 @@ function _smgmtInjectMiniRailHtml(label, html) {
 /** Build the mini-rail markup from a /preview-dag payload + optional pre-flight hints. */
 function _smgmtMiniRailHtml(label, data, pfHints) {
   const safeLabel = escHtml(label);
-  const jsLabel = JSON.stringify(label);
+  // jsLabel is embedded in double-quoted onclick="..." attributes, so it must be
+  // a single-quoted JS string literal — JSON.stringify produces double quotes
+  // that close the attribute early and silently break every action link.
+  const jsLabel = "'" + String(label).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
   const cycles = data.cycles || [];
   if (cycles.length > 0) {
     const path = (cycles[0] || []).join(' → ');
@@ -14045,7 +14057,7 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   if (unestimatedCount > 0) {
     checklistItems.push(`<li class="mr-checklist-item">
         <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
-        <button class="mr-cl-link" onclick="_smgmtBulkEstimate(${jsLabel}, null)">
+        <button class="mr-cl-link" onclick="_smgmtBulkEstimate(${jsLabel}, this)">
           Estimate ${unestimatedCount} ticket${unestimatedCount !== 1 ? 's' : ''}
         </button>
       </li>`);

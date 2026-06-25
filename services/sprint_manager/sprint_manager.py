@@ -1558,11 +1558,30 @@ def handle_post_tester(
         api_url      = None
 
     if tester_exit_code != 0:
-        sys.stdout.write(str(f"  Tester for issue #{issue_num} exited {tester_exit_code} — status: failed") + "\n")
+        sys.stdout.write(str(f"  Tester for issue #{issue_num} exited {tester_exit_code}") + "\n")
         sys.stdout.flush()
-        return (False,
-                f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
-                FailureCategory.CRASH)
+        # Defensive (flaky `claude -p` exit): the tester sometimes completes the
+        # work — tests pass, feature branch pushed — yet the CLI returns non-zero,
+        # which used to false-CRASH a finished ticket (whole sprints went to
+        # needs_rework on a spurious exit code). Re-check whether the work actually
+        # landed: a `feature/<N>-*` branch on origin, or a merge commit already in
+        # target. Only CRASH when nothing landed; otherwise fall through to the
+        # normal gate+merge flow so the exit code alone can't nuke completed work.
+        # Quality is still enforced — the gates below run regardless.
+        _try("git", "fetch", "--prune", "origin")
+        _exit_fb = _find_feature_branch(issue_num)
+        _work_landed = bool(_exit_fb) or _was_feature_merged_via_log(issue_num, target_branch)
+        if not _work_landed:
+            sys.stdout.write(str(f"  Issue #{issue_num}: tester exited {tester_exit_code} and no feature "
+                f"branch / merge commit found — genuine crash, skipping gates") + "\n")
+            sys.stdout.flush()
+            return (False,
+                    f"Issue #{issue_num}: tester exited {tester_exit_code}, no work landed — skipping gates",
+                    FailureCategory.CRASH)
+        sys.stdout.write(str(f"  Issue #{issue_num}: tester exited {tester_exit_code} BUT feature work is "
+            f"present (branch={_exit_fb or 'merged-in-target'}) — not crashing; running gates") + "\n")
+        sys.stdout.flush()
+        # fall through to the normal post-tester flow (re-fetch + gates + merge below)
 
     # Fetch latest remote state before checking branch presence.  Without this,
     # sprint_manager sees stale remote-tracking refs where the feature branch

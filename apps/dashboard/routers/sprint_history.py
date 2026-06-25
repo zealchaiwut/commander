@@ -157,6 +157,44 @@ async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
     return result
 
 
+# ── Split an XL ticket into smaller tickets (BA agent) ───────────────────────
+
+
+@router.post("/api/sprints/{label}/split-xl/{issue}/preview")
+async def split_xl_preview(label: str, issue: int, project: str):
+    """Run the BA split agent on an XL ticket; return proposed children. No writes."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    from . import split_xl_service  # noqa: PLC0415
+    return await split_xl_service.split_preview(project, label, issue)
+
+
+class SplitXlApplyBody(BaseModel):
+    project: str
+    children: list[dict]
+
+
+@router.post("/api/sprints/{label}/split-xl/{issue}/apply")
+async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
+    """Create the child tickets in the sprint + close the XL as not-planned."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    from . import split_xl_service  # noqa: PLC0415
+    result = split_xl_service.split_apply(body.project, label, issue, body.children)
+    if result.get("ok"):
+        try:
+            import server as srv  # noqa: PLC0415
+            await srv.broadcast({
+                "type": "update",
+                "event": {"event_type": "sprint_split", "project": body.project, "label": label},
+            })
+        except Exception:
+            pass
+    return result
+
+
 # ── Stale-branch scan + cleanup (issue #808) ─────────────────────────────────
 # These live on the History router (already mounted) rather than a new router so
 # no route is added to server.py (COMMANDER_GATE_MONOLITH). Logic lives in the

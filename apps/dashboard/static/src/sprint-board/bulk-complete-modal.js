@@ -12,40 +12,47 @@
 /* eslint-enable no-unused-vars */
 
 function _bcShowPreviewLoading(current) {
-  const loading = document.getElementById('bc-loading');
+  const loading = document.getElementById("bc-loading");
   if (!loading) return;
-  loading.innerHTML = renderProgressActivity({
-    status: 'running',
-    mode: 'indeterminate',
-    current: current || 'Loading preview…',
-  }, {
-    id: 'bc-preview-pa',
-    hideLog: true,
-  });
-  loading.classList.remove('hidden');
+  loading.innerHTML = renderProgressActivity(
+    {
+      status: "running",
+      mode: "indeterminate",
+      current: current || "Loading preview…",
+    },
+    {
+      id: "bc-preview-pa",
+      hideLog: true,
+    },
+  );
+  loading.classList.remove("hidden");
 }
 
 export function _bcOpen() {
-  _setBodyInert(['bc-backdrop', 'bc-modal']);
-  document.getElementById('bc-backdrop').classList.remove('hidden');
-  document.getElementById('bc-modal').classList.remove('hidden');
+  _setBodyInert(["bc-backdrop", "bc-modal"]);
+  document.getElementById("bc-backdrop").classList.remove("hidden");
+  document.getElementById("bc-modal").classList.remove("hidden");
 }
 export function _bcClose() {
-  document.getElementById('bc-backdrop').classList.add('hidden');
-  document.getElementById('bc-modal').classList.add('hidden');
+  document.getElementById("bc-backdrop").classList.add("hidden");
+  document.getElementById("bc-modal").classList.add("hidden");
   _clearBodyInert();
   _bcLabel = null;
   _bcPreview = null;
 }
 export function _bcCatClass(cat) {
-  if (cat === 'UAT')            return 'rr-cat-uat';
-  if (cat === 'SIT')            return 'rr-cat-sit';
-  if (cat === 'needs-rework')   return 'rr-cat-rework';
-  if (cat === 'sprint-summary') return 'rr-cat-summary';
-  return 'rr-cat-queued';
+  if (cat === "UAT") return "rr-cat-uat";
+  if (cat === "SIT") return "rr-cat-sit";
+  if (cat === "needs-rework") return "rr-cat-rework";
+  if (cat === "sprint-summary") return "rr-cat-summary";
+  return "rr-cat-queued";
 }
 export function _bcSelectAll(checked) {
-  document.querySelectorAll('#bc-ticket-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  document
+    .querySelectorAll("#bc-ticket-list input[type=checkbox]")
+    .forEach((cb) => {
+      cb.checked = checked;
+    });
 }
 
 export async function smgmtBulkCompleteSprint(label) {
@@ -53,18 +60,21 @@ export async function smgmtBulkCompleteSprint(label) {
   if (!repo) return;
   _bcLabel = label;
   _bcPreview = null;
-  const parts = repo.split('/');
+  const parts = repo.split("/");
   const owner = parts[0];
-  const repoName = parts.slice(1).join('/');
+  const repoName = parts.slice(1).join("/");
 
-  document.getElementById('bc-modal-title').textContent =
+  document.getElementById("bc-modal-title").textContent =
     `Bulk complete ${sprintLabelDisplay(label)}?`;
-  _bcShowPreviewLoading('Loading preview…');
-  document.getElementById('bc-content').classList.add('hidden');
-  document.getElementById('bc-error').classList.add('hidden');
-  document.getElementById('bc-error').textContent = '';
-  const confirmBtn = document.getElementById('bc-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Bulk complete'; }
+  _bcShowPreviewLoading("Loading preview…");
+  document.getElementById("bc-content").classList.add("hidden");
+  document.getElementById("bc-error").classList.add("hidden");
+  document.getElementById("bc-error").textContent = "";
+  const confirmBtn = document.getElementById("bc-confirm-btn");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Bulk complete";
+  }
   _bcOpen();
 
   try {
@@ -75,16 +85,20 @@ export async function smgmtBulkCompleteSprint(label) {
       throw new Error(preview.conflict_error);
     }
 
-    const listEl = document.getElementById('bc-ticket-list');
+    const listEl = document.getElementById("bc-ticket-list");
     const allTickets = preview.all_tickets || [];
     // Group the close-list by the sprint that owns each ticket (point 2) so it
     // reads "94.4: #1460 #1464 · 94.2: #1461 …" instead of one flat list.
-    const groups = (preview.tickets_by_sprint && preview.tickets_by_sprint.length)
-      ? preview.tickets_by_sprint
-      : (allTickets.length ? [{ label: preview.base_label, tickets: allTickets }] : []);
+    const groups =
+      preview.tickets_by_sprint && preview.tickets_by_sprint.length
+        ? preview.tickets_by_sprint
+        : allTickets.length
+          ? [{ label: preview.base_label, tickets: allTickets }]
+          : [];
     const _ticketRow = (t) => {
       const catClass = _bcCatClass(t.category);
-      const catLabel = t.category === 'sprint-summary' ? 'SUMMARY' : t.category.toUpperCase();
+      const catLabel =
+        t.category === "sprint-summary" ? "SUMMARY" : t.category.toUpperCase();
       return `<label class="rr-ticket-row">
           <input type="checkbox" checked data-issue="${t.number}" onchange="">
           <span class="rr-ticket-num">#${t.number}</span>
@@ -93,44 +107,60 @@ export async function smgmtBulkCompleteSprint(label) {
         </label>`;
     };
     if (groups.length === 0) {
-      listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
+      listEl.innerHTML =
+        '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
     } else {
-      listEl.innerHTML = groups.map(g => (
-        `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">`
-        + `${escHtml(sprintLabelDisplay(g.label))} · ${g.tickets.length}</div>`
-        + g.tickets.map(_ticketRow).join('')
-      )).join('');
+      listEl.innerHTML = groups
+        .map(
+          (g) =>
+            `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">` +
+            `${escHtml(sprintLabelDisplay(g.label))} · ${g.tickets.length}</div>` +
+            g.tickets.map(_ticketRow).join(""),
+        )
+        .join("");
     }
 
     // Full chain (deepest → base) with per-step status (point 1): done steps show
     // ✓ merged/completed, the rest ○ pending — so you see what already happened.
     const members = preview.members || [];
-    const actionsEl = document.getElementById('bc-actions');
-    const actionRows = members.map(m => {
-      const target = m.is_base ? 'develop' : sprintLabelDisplay(m.parent);
+    const actionsEl = document.getElementById("bc-actions");
+    const actionRows = members.map((m) => {
+      const target = m.is_base ? "develop" : sprintLabelDisplay(m.parent);
       let icon, color, note;
-      if (m.completed) { icon = 'ti-circle-check-filled'; color = 'var(--green)'; note = 'completed'; }
-      else if (m.merged) { icon = 'ti-git-merge'; color = 'var(--green)'; note = 'merged → will mark completed'; }
-      else { icon = 'ti-circle'; color = 'var(--text-sub)'; note = 'pending'; }
-      return `<div class="fs-action-row"><i class="ti ${icon}" style="color:${color}"></i> `
-        + `${escHtml(sprintLabelDisplay(m.label))} → ${escHtml(target)} `
-        + `<span style="color:var(--text-muted);font-size:11px">· ${note}</span></div>`;
+      if (m.completed) {
+        icon = "ti-circle-check-filled";
+        color = "var(--green)";
+        note = "completed";
+      } else if (m.merged) {
+        icon = "ti-git-merge";
+        color = "var(--green)";
+        note = "merged → will mark completed";
+      } else {
+        icon = "ti-circle";
+        color = "var(--text-sub)";
+        note = "pending";
+      }
+      return (
+        `<div class="fs-action-row"><i class="ti ${icon}" style="color:${color}"></i> ` +
+        `${escHtml(sprintLabelDisplay(m.label))} → ${escHtml(target)} ` +
+        `<span style="color:var(--text-muted);font-size:11px">· ${note}</span></div>`
+      );
     });
     const memberCount = members.length || (preview.member_labels || []).length;
     actionRows.push(
-      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close ${allTickets.length} ticket${allTickets.length !== 1 ? 's' : ''} (grouped above; UAT + summary)</div>`,
-      `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? 's' : ''} completed</div>`,
+      `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close ${allTickets.length} ticket${allTickets.length !== 1 ? "s" : ""} (grouped above; UAT + summary)</div>`,
+      `<div class="fs-action-row"><i class="ti ti-flag-check"></i> Mark ${memberCount} sprint${memberCount !== 1 ? "s" : ""} completed</div>`,
     );
-    actionsEl.innerHTML = actionRows.join('');
+    actionsEl.innerHTML = actionRows.join("");
 
-    document.getElementById('bc-loading').classList.add('hidden');
-    document.getElementById('bc-content').classList.remove('hidden');
+    document.getElementById("bc-loading").classList.add("hidden");
+    document.getElementById("bc-content").classList.remove("hidden");
     if (confirmBtn) confirmBtn.disabled = false;
   } catch (e) {
-    document.getElementById('bc-loading').classList.add('hidden');
-    const errEl = document.getElementById('bc-error');
-    errEl.textContent = 'Failed to load preview: ' + e.message;
-    errEl.classList.remove('hidden');
+    document.getElementById("bc-loading").classList.add("hidden");
+    const errEl = document.getElementById("bc-error");
+    errEl.textContent = "Failed to load preview: " + e.message;
+    errEl.classList.remove("hidden");
   }
 }
 
@@ -159,13 +189,13 @@ async function _bcMergeStep(owner, repoName, step) {
   const res = await fetch(
     `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprint-branch-merge`,
     {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         confirmed: true,
         head: step.head,
         base: step.base,
-        title: step.title || '',
+        title: step.title || "",
         delete_branch: step.delete_branch !== false,
       }),
     },
@@ -184,9 +214,9 @@ async function _bcMergeStep(owner, repoName, step) {
 export async function _bcConfirm() {
   const repo = _smgmtRepo();
   if (!_bcLabel || !repo || !_bcPreview) return;
-  const parts = repo.split('/');
+  const parts = repo.split("/");
   const owner = parts[0];
-  const repoName = parts.slice(1).join('/');
+  const repoName = parts.slice(1).join("/");
   const label = _bcLabel;
   // Per-step complete: walk the lineage deepest child → base, finalising each
   // sprint (merge → close summary → mark completed; base also closes tickets +
@@ -195,12 +225,18 @@ export async function _bcConfirm() {
   // (merged/closed steps are skipped).
   const order = (_bcPreview.complete_order || []).slice();
 
-  const confirmBtn = document.getElementById('bc-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Completing…'; }
+  const confirmBtn = document.getElementById("bc-confirm-btn");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Completing…";
+  }
 
   _bcClose();
 
-  if (order.length === 0) { _smgmtShowToast('Nothing to complete.'); return; }
+  if (order.length === 0) {
+    _smgmtShowToast("Nothing to complete.");
+    return;
+  }
 
   let doneSteps = 0;
   const totalSteps = order.length + 1; // members + board refresh
@@ -209,37 +245,39 @@ export async function _bcConfirm() {
     progress: true,
     total: totalSteps,
     clearLog: true,
-    showDone: true,   // Done button stays disabled until the run settles
+    showDone: true, // Done button stays disabled until the run settles
   });
-  _smgmtBoardLog('Starting per-step complete (deepest child first)…', 'step');
+  _smgmtBoardLog("Starting per-step complete (deepest child first)…", "step");
 
   try {
     for (const sLabel of order) {
-      _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
+      _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, "step");
       const res = await fetch(
         `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ confirmed: true }),
         },
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+        throw new Error(
+          err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`,
+        );
       }
       const sd = await res.json();
       doneSteps += 1;
       _smgmtBoardProgress(doneSteps, totalSteps);
-      const into = sd.merged ? ` → merged into ${sd.merged_into}` : '';
-      _smgmtBoardLog(`✓ ${sprintLabelDisplay(sLabel)} completed${into}`, 'ok');
+      const into = sd.merged ? ` → merged into ${sd.merged_into}` : "";
+      _smgmtBoardLog(`✓ ${sprintLabelDisplay(sLabel)} completed${into}`, "ok");
     }
 
-    _smgmtBoardLog('Refreshing board…', 'step');
+    _smgmtBoardLog("Refreshing board…", "step");
     await loadSprintMgmt();
     doneSteps += 1;
     _smgmtBoardProgress(doneSteps, totalSteps);
-    _smgmtBoardLog('✓ Complete finished', 'ok');
+    _smgmtBoardLog("✓ Complete finished", "ok");
 
     // Stay open with an enabled Done button — the operator reads the log, then
     // Done closes + refreshes. No auto-dismiss on success.
@@ -249,7 +287,8 @@ export async function _bcConfirm() {
       onDone: () => {
         // Drop the History ledger cache so the pane reflects the new completed
         // states on next open instead of serving stale rows.
-        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
+        if (typeof globalThis._histResetLedgerCache === "function")
+          globalThis._histResetLedgerCache();
         loadSprintMgmt().catch(() => {});
       },
     });
@@ -257,14 +296,18 @@ export async function _bcConfirm() {
     // Keep the overlay open with the error + a Done button so the operator can
     // read what failed (e.g. a merge conflict) before the board refreshes —
     // previously the message flashed past. Done unlocks + refreshes.
-    _smgmtBoardLog(`✗ ${e.message}`, 'err');
+    _smgmtBoardLog(`✗ ${e.message}`, "err");
     _smgmtBoardFinish({
       ok: false,
-      message: 'Stopped: ' + e.message + '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).',
+      message:
+        "Stopped: " +
+        e.message +
+        "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
       onDone: () => {
         // Drop the History ledger cache so the pane reflects the new completed
         // states on next open instead of serving stale rows.
-        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
+        if (typeof globalThis._histResetLedgerCache === "function")
+          globalThis._histResetLedgerCache();
         loadSprintMgmt().catch(() => {});
       },
     });

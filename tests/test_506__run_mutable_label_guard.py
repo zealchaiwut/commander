@@ -23,11 +23,14 @@ sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 
 
 class TestRunMutableLabelsConstant:
-    """AC-1: RUN_MUTABLE_LABELS = {"in-progress", "SIT", "UAT", "needs-rework"}."""
+    """AC-1: RUN_MUTABLE_LABELS contains all status labels (issue #814 added "blocked")."""
 
     def test_constant_value(self):
+        # After issue #814 the constant is aliased from state_machine.RUN_MUTABLE_LABELS
+        # which equals STATUS_LABELS — all status labels including "blocked".
         from services.sprint_manager.sprint_manager import RUN_MUTABLE_LABELS
-        assert RUN_MUTABLE_LABELS == frozenset({"in-progress", "SIT", "UAT", "needs-rework"})
+        from services.sprint_manager.state_machine import STATUS_LABELS
+        assert RUN_MUTABLE_LABELS == STATUS_LABELS
 
     def test_case_correct(self):
         from services.sprint_manager.sprint_manager import RUN_MUTABLE_LABELS
@@ -63,13 +66,10 @@ class TestAssertRunMutable:
         except ValueError as e:
             assert "sprint-25" in str(e) or "outside RUN_MUTABLE_LABELS" in str(e)
 
-    def test_blocked_label_raises(self):
+    def test_blocked_label_no_longer_raises(self):
+        # After issue #814, "blocked" is in RUN_MUTABLE_LABELS — it must not raise.
         from services.sprint_manager.sprint_manager import _assert_run_mutable
-        try:
-            _assert_run_mutable(["blocked"], "add")
-            raise AssertionError("Should have raised ValueError")
-        except ValueError:
-            pass
+        _assert_run_mutable(["blocked"], "add")  # must not raise
 
     def test_mixed_labels_raises_for_invalid(self):
         from services.sprint_manager.sprint_manager import _assert_run_mutable
@@ -98,6 +98,8 @@ class TestGuardSprintLabelsUsesMutableSet:
     """AC-3: _guard_sprint_labels uses RUN_MUTABLE_LABELS, not a separate constant."""
 
     def test_blocks_non_mutable_add_during_run(self):
+        # After issue #814 "blocked" is in RUN_MUTABLE_LABELS and is allowed through.
+        # Non-status labels (e.g. sprint-5) are still stripped.
         from services.sprint_manager.sprint_manager import _guard_sprint_labels
         safe_add, safe_remove = _guard_sprint_labels(
             add=["SIT", "blocked", "sprint-5"],
@@ -105,7 +107,7 @@ class TestGuardSprintLabelsUsesMutableSet:
             sprint_label="sprint-37",
         )
         assert "SIT" in safe_add
-        assert "blocked" not in safe_add
+        assert "blocked" in safe_add
         assert "sprint-5" not in safe_add
 
     def test_blocks_sprint_label_remove_always(self):

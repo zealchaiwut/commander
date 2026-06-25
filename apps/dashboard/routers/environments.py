@@ -23,6 +23,7 @@ _PROJECTS_BASE = Path.home() / "dev"
 
 router = APIRouter()
 
+
 def _server():
     import server
     return server

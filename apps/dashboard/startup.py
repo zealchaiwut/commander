@@ -113,11 +113,6 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
-try:
-    _SYNC_SETTINGS_AVAILABLE = True
-except Exception:
-    _SYNC_SETTINGS_AVAILABLE = False
-
 # Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
 # (and only live) store. Neon is now an optional export target reached solely via
 # scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to

@@ -59,11 +59,6 @@ except ImportError:
     _scaffold_data = None  # type: ignore[assignment]
     SCAFFOLD_AVAILABLE = False
 
-try:
-    SYNC_SETTINGS_AVAILABLE = True
-except Exception:
-    SYNC_SETTINGS_AVAILABLE = False
-
 # ── Module-level constants ────────────────────────────────────────────────────
 
 _PROJECTS_BASE = Path.home() / "dev"

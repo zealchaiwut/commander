@@ -40,6 +40,9 @@ def startup(fresh_db, monkeypatch):
     import startup as st
     # Isolate from real projects/plan.json scanning: no sprint is "live".
     monkeypatch.setattr(st, "_all_sprints_running", lambda: [])
+    # No merged sprint branches by default (no network gh call); the merged-branch
+    # promotion path is exercised explicitly in test_sweep_completes_merged_orphan.
+    monkeypatch.setattr(st.github_client, "list_merged_sprint_branches", lambda *a, **k: set())
     return st
 
 
@@ -55,6 +58,28 @@ def test_sweep_expires_stale_running_row(fresh_db, startup):
     swept = startup._sweep_orphan_db_running_rows()
     assert "sprint-66" in swept
     assert fresh_db.get_sprint("sprint-66")["state"] == "needs_rework"
+
+
+def test_sweep_completes_merged_orphan(fresh_db, startup, monkeypatch):
+    """An orphaned running sprint whose branch already merged settles to
+    `completed`, not `needs_rework` — a mid-run restart must not false-fail a
+    sprint whose work shipped (perf-coach sprint-83 regression)."""
+    _running(fresh_db, "sprint-83", "zealchaiwut/perf-coach", _OLD)
+    monkeypatch.setattr(
+        startup.github_client, "list_merged_sprint_branches",
+        lambda *a, **k: {"sprint/sprint-83"},
+    )
+    swept = startup._sweep_orphan_db_running_rows()
+    assert "sprint-83" in swept
+    assert fresh_db.get_sprint("sprint-83")["state"] == "completed"
+
+
+def test_sweep_needs_rework_when_branch_unmerged(fresh_db, startup):
+    """Orphan with no merged branch stays conservative: needs_rework."""
+    _running(fresh_db, "sprint-84", "zealchaiwut/perf-coach", _OLD)
+    swept = startup._sweep_orphan_db_running_rows()
+    assert "sprint-84" in swept
+    assert fresh_db.get_sprint("sprint-84")["state"] == "needs_rework"
 
 
 def test_sweep_skips_fresh_running_row(fresh_db, startup):

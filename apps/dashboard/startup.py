@@ -776,10 +776,28 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
         # plan.json yet). A row with no/garbled started_at is treated as stale.
         if ts is not None and (now - ts).total_seconds() < max_age_minutes * 60:
             continue
+        # Reconcile-aware settle: a sprint whose process died is NOT automatically
+        # a failure. If its sprint branch already merged, the work shipped — settle
+        # it `completed` rather than `needs_rework`, so a mid-run dashboard restart
+        # can't false-fail a finished sprint (e.g. perf-coach sprint-83: 5/5 passed
+        # + PR merged, orphaned by a restart). A merged branch is the one
+        # unambiguous positive signal; for everything else stay conservative
+        # (needs_rework), and the reconcile sweep promotes to ready_to_merge if the
+        # tickets actually settled (a reconcile-only edge, never guarded).
+        merged = False
         try:
-            db.record_sprint_needs_rework(
-                label, end_reason="orphaned (no live process)", project=project,
-            )
+            merged = f"sprint/{label}" in github_client.list_merged_sprint_branches(project)
+        except Exception:
+            merged = False
+        try:
+            if merged:
+                db.record_sprint_finish(
+                    label, end_reason="orphaned (work merged)", project=project,
+                )
+            else:
+                db.record_sprint_needs_rework(
+                    label, end_reason="orphaned (no live process)", project=project,
+                )
             swept.append(label)
         except Exception:
             continue

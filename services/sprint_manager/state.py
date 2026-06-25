@@ -6,6 +6,8 @@ All other sprint_manager modules may import from here without creating cycles.
 from __future__ import annotations
 
 import json
+import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,6 +135,11 @@ class SprintState:
     max_tester_slots:        int                 = 1
     active_coder_slots:      int                 = 0
 
+    def __post_init__(self) -> None:
+        # Not a dataclass field — excluded from to_dict/from_dict and serialization.
+        # Issue #776: serialize save() calls across concurrent pipeline threads.
+        self._save_lock: threading.Lock = threading.Lock()
+
     def to_dict(self) -> dict:
         return {
             "project":              self.project,
@@ -196,7 +203,14 @@ class SprintState:
     def save(self, path: Path) -> None:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self.to_dict(), indent=2))
+            with self._save_lock:
+                # Serialize to_dict() inside the lock so a concurrent thread
+                # mutating self.issues cannot corrupt the snapshot (issue #776).
+                payload = json.dumps(self.to_dict(), indent=2)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(payload, encoding="utf-8")
+                # os.replace() is atomic on POSIX — readers never see a partial file.
+                os.replace(tmp, path)
         except OSError as _e:
             structured_log.error("sprint_state_write_error", f"could not write state JSON: {_e}", path=str(path), exc=str(_e))
 

@@ -36,10 +36,6 @@ def test_consolidate_design_tokens__tokens_css_only_source(client):
     assert root_match, "No :root block found in project.html"
 
     root_content = root_match.group(1)
-    # Count how many tokens are defined (exclude comments and sidebar-width which is page-specific)
-    token_defs = re.findall(r'--[a-z-]+:\s*', root_content)
-    # Should only have --sidebar-width and maybe --color-* aliases, all others moved to tokens.css
-    # The actual requirement: no duplicates with tokens.css
 
     with open(tokens_css, "r") as f:
         css_content = f.read()

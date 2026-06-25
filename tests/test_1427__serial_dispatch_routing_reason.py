@@ -12,8 +12,6 @@ AC items verified:
 """
 from __future__ import annotations
 
-import ast
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -68,7 +66,8 @@ def test_serial_dispatch_routing_reason_adjacent_to_coder_model():
 
 def test_issue_state_to_dict_reflects_routing_reason_after_assignment():
     """AC2: after assigning coder_routing_reason, to_dict() includes the non-empty value."""
-    import os, sys
+    import os
+    import sys
     sys.path.insert(0, str(REPO_ROOT))
     os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
     import services.sprint_manager.state as state_mod
@@ -84,7 +83,8 @@ def test_issue_state_to_dict_reflects_routing_reason_after_assignment():
 
 def test_issue_state_to_dict_routing_reason_non_empty_when_set():
     """AC2: coder_routing_reason in the state dict is non-empty when a reason is assigned."""
-    import os, sys
+    import os
+    import sys
     sys.path.insert(0, str(REPO_ROOT))
     os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
     import services.sprint_manager.state as state_mod
@@ -101,7 +101,8 @@ def test_issue_state_to_dict_routing_reason_non_empty_when_set():
 
 def test_issue_state_to_dict_includes_coder_routing_reason_key():
     """AC3: to_dict() must include the 'coder_routing_reason' key for the frontend badge."""
-    import os, sys
+    import os
+    import sys
     sys.path.insert(0, str(REPO_ROOT))
     os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
     import services.sprint_manager.state as state_mod
@@ -115,7 +116,8 @@ def test_issue_state_to_dict_includes_coder_routing_reason_key():
 
 def test_issue_state_to_dict_routing_reason_none_by_default():
     """AC3: coder_routing_reason defaults to None (no tooltip when no override occurred)."""
-    import os, sys
+    import os
+    import sys
     sys.path.insert(0, str(REPO_ROOT))
     os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
     import services.sprint_manager.state as state_mod

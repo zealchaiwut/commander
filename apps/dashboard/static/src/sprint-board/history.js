@@ -336,6 +336,13 @@ function _histVerbsHtml(s) {
   const lbl = escHtml(s.label || '');
   const rawLabel = s.label || '';
   let html = '';
+  // Reconcile against GitHub truth — available on every actionable terminal
+  // state so a zombie (e.g. needs_rework after a mid-run restart orphaned a
+  // finished sprint) can be corrected from the History card instead of curling
+  // the reconcile API. Preview-then-apply modal; writes DB/local only.
+  html += `<button class="hist-verb hist-verb--reconcile" onclick="smgmtReconcileSprint('${lbl}')"
+             title="Reconcile this sprint's DB state against GitHub truth">
+             <i class="ti ti-git-compare"></i> Reconcile</button>`;
   if (state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
     const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
     const rerunTitle = _smgmtAnySprintRunning

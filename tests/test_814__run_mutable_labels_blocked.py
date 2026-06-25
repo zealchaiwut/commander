@@ -41,7 +41,7 @@ class TestAC1BlockedInRunMutableLabels:
 
 
 class TestAC2NoDriftBetweenConstants:
-    """AC-2: sprint_manager.RUN_MUTABLE_LABELS equals state_machine.RUN_MUTABLE_LABELS."""
+    """AC-2: sprint_manager and state_machine RUN_MUTABLE_LABELS are equal."""
 
     def test_identical_sets(self):
         from services.sprint_manager.sprint_manager import (
@@ -83,7 +83,7 @@ class TestAC2NoDriftBetweenConstants:
 
 
 class TestAC3GuardAllowsBlockedDuringRun:
-    """AC-3: _guard_sprint_labels no longer strips 'blocked' during active sprint run."""
+    """AC-3: _guard_sprint_labels allows 'blocked' during active sprint run."""
 
     def test_blocked_not_stripped_when_sprint_label_provided(self):
         from services.sprint_manager.sprint_manager import _guard_sprint_labels
@@ -185,8 +185,12 @@ class TestAC4AddBlockedReachesTransition:
             if "deferred" in body:
                 deferral_comments.append(body)
 
-        with patch.object(lt, "_transition_safe", return_value=None), \
-             patch.object(sm.github_client, "add_comment", side_effect=fake_add_comment):
+        with (
+            patch.object(lt, "_transition_safe", return_value=None),
+            patch.object(
+                sm.github_client, "add_comment", side_effect=fake_add_comment
+            ),
+        ):
             sm._add_blocked_label(
                 issue_num=42,
                 reason="hang timeout",
@@ -201,10 +205,10 @@ class TestAC4AddBlockedReachesTransition:
 
 
 class TestAC5TicketEndsInBlockedState:
-    """AC-5: A ticket receiving a HANG ends up in BLOCKED state, not just a deferral comment."""
+    """AC-5: A ticket receiving HANG ends up in BLOCKED state, not deferral comment."""
 
     def test_blocked_state_not_just_comment(self):
-        """After _add_blocked_label with sprint_label, BLOCKED transition is exercised."""
+        """_add_blocked_label with sprint_label exercises BLOCKED transition."""
         sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
         import services.sprint_manager.sprint_manager as sm
         import services.sprint_manager.label_transitions as lt

@@ -22,7 +22,7 @@ sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 
 
 class TestRunMutableLabelsConstant:
-    """AC-1: RUN_MUTABLE_LABELS contains all status labels (issue #814 added "blocked")."""
+    """AC-1: RUN_MUTABLE_LABELS contains all status labels (#814 added "blocked")."""
 
     def test_constant_value(self):
         # After issue #814 the constant is aliased from state_machine.RUN_MUTABLE_LABELS
@@ -125,13 +125,13 @@ class TestGuardSprintLabelsUsesMutableSet:
             add=["blocked", "estimated"],
             remove=["in-progress"],
         )
-        # Without sprint_label, add-list is unrestricted (only sprint-N removes are blocked)
+        # Without sprint_label, add-list is unrestricted (only sprint-N removes blocked)
         assert "blocked" in safe_add
         assert "estimated" in safe_add
 
 
 class TestCommanderSprintRunningInjection:
-    """AC-4: COMMANDER_SPRINT_RUNNING=<sprint-label> set before every child subprocess."""
+    """AC-4: COMMANDER_SPRINT_RUNNING=<sprint-label> set in each child subprocess."""
 
     def test_dispatch_coder_injects_env(self):
         from services.sprint_manager import sprint_manager as sm
@@ -162,8 +162,9 @@ class TestCommanderSprintRunningInjection:
 
         if captured_envs:
             env = captured_envs[0]
-            assert env.get("COMMANDER_SPRINT_RUNNING") == "sprint-37", (
-                f"Expected COMMANDER_SPRINT_RUNNING=sprint-37, got {env.get('COMMANDER_SPRINT_RUNNING')}"
+            val = env.get("COMMANDER_SPRINT_RUNNING")
+            assert val == "sprint-37", (
+                f"Expected COMMANDER_SPRINT_RUNNING=sprint-37, got {val}"
             )
 
     def test_dispatch_tester_injects_env(self):
@@ -254,9 +255,11 @@ class TestCommanderSprintRunningInjection:
 
 
 class TestUpdateTicketGuard:
-    """AC-5: update_ticket.py applies RUN_MUTABLE_LABELS guard when COMMANDER_SPRINT_RUNNING set."""
+    """AC-5: update_ticket.py applies RUN_MUTABLE_LABELS guard during sprint runs."""
 
-    def _run_update_ticket(self, status: str, env: dict) -> tuple[list[str], list[str], str]:
+    def _run_update_ticket(
+        self, status: str, env: dict
+    ) -> tuple[list[str], list[str], str]:
         """Run update_ticket main() in a subprocess and capture stdout/stderr."""
         result = subprocess.run(
             [sys.executable, str(_REPO_ROOT / "scripts" / "update_ticket.py"),
@@ -281,7 +284,7 @@ class TestUpdateTicketGuard:
         assert "RUN_MUTABLE_LABELS" in stderr
 
     def test_guard_does_not_block_uat_add(self):
-        """With COMMANDER_SPRINT_RUNNING, UAT label is still added (it's in RUN_MUTABLE_LABELS)."""
+        """With COMMANDER_SPRINT_RUNNING, UAT is added (it's in RUN_MUTABLE_LABELS)."""
         env = {"COMMANDER_SPRINT_RUNNING": "sprint-37"}
         stdout, stderr, _ = self._run_update_ticket("uat", env)
         # UAT is mutable — no refusal for adding it
@@ -289,7 +292,7 @@ class TestUpdateTicketGuard:
 
 
 class TestFinishFeatureUATFlow:
-    """AC-6: finish_feature.py only adds UAT and removes only mutable labels under guard."""
+    """AC-6: finish_feature.py adds UAT and removes only mutable labels under guard."""
 
     def test_uat_status_map_compliance(self):
         """STATUS_MAP['uat']['add'] contains only RUN_MUTABLE_LABELS entries."""

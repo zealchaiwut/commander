@@ -10,6 +10,7 @@ No render-time disk reads — all segment data comes from the agent_runs table.
 from __future__ import annotations
 
 import json
+import logging
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db as _db  # noqa: E402
 import settings_repo as _settings_repo  # noqa: E402
 from settings_schema import APP_CONFIG_KEY  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 # Minimum analytics samples required to override settings value with calibrated median.
 _MIN_CALIBRATION_SAMPLES = 3
@@ -59,6 +62,7 @@ def _get_sprint_issues(sprint_label: str, project: str) -> list[dict]:
         issues = srv.github_client.list_open_issues_with_body(repo_name=project, limit=300)
         return [i for i in issues if _primary_sprint_label(i) == sprint_label]
     except Exception:
+        _log.warning("_get_sprint_issues failed for %s/%s", sprint_label, project, exc_info=True)
         return []
 
 
@@ -67,6 +71,7 @@ def _get_agent_runs(sprint_label: str, project: str | None = None) -> list[dict]
     try:
         return _db.agent_runs_for_sprint(sprint_label, project=project)
     except Exception:
+        _log.warning("_get_agent_runs failed for %s", sprint_label, exc_info=True)
         return []
 
 
@@ -78,6 +83,7 @@ def _get_settings(project: str) -> dict:
         defaults = {k: v["default"] for k, v in KNOWN_FIELDS.items() if not v.get("secret")}
         return {**defaults, **stored}
     except Exception:
+        _log.warning("_get_settings failed for %s; returning defaults", project, exc_info=True)
         from settings_schema import KNOWN_FIELDS
         return {k: v["default"] for k, v in KNOWN_FIELDS.items() if not v.get("secret")}
 
@@ -88,6 +94,7 @@ def _get_sprint_row(sprint_label: str, project: str | None = None) -> Optional[d
     try:
         return _db.get_sprint(sprint_label, project=project or None)
     except Exception:
+        _log.warning("_get_sprint_row failed for %s", sprint_label, exc_info=True)
         return None
 
 
@@ -97,6 +104,7 @@ def _get_calibration_records() -> list:
         from calibration import sqlite_calibration_records
         return sqlite_calibration_records()
     except Exception:
+        _log.warning("_get_calibration_records failed", exc_info=True)
         return []
 
 
@@ -133,6 +141,7 @@ def _get_launch_issue_order(sprint_label: str, project: str) -> list[int]:
                 order.append(int(num))
         return order
     except Exception:
+        _log.warning("_get_launch_issue_order failed for %s/%s", sprint_label, project, exc_info=True)
         return []
 
 

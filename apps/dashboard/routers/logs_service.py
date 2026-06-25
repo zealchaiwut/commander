@@ -145,6 +145,23 @@ def _parse_agent_identity(agent_name: str | None) -> tuple[str | None, int | Non
     return role, issue_num
 
 
+def _parse_sprint_label_from_name(agent_name: str | None) -> str | None:
+    """Return sprint_label extracted from the branch component of an agent name.
+
+    Agent name format: 'role·repo·branch·#short[·issue-N]'.
+    Returns the label portion of a 'sprint/<label>' branch, else None.
+    """
+    if not agent_name:
+        return None
+    parts = agent_name.split("·")
+    if len(parts) < 3:
+        return None
+    branch = parts[2]
+    if branch.startswith("sprint/"):
+        return branch[len("sprint/"):]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Service functions
 # ---------------------------------------------------------------------------
@@ -159,6 +176,7 @@ def receive_agent_event(event: AgentEvent, request_id: Optional[str] = None) -> 
     project = _agent_project_from_name(event.name)
     actor = event.name or session_id
     role, issue_num = _parse_agent_identity(event.name)
+    sprint_label = _parse_sprint_label_from_name(event.name)
 
     if project:
         if event.event_type == "tool_use" and session_id not in _seen_agent_sessions:
@@ -174,13 +192,16 @@ def receive_agent_event(event: AgentEvent, request_id: Optional[str] = None) -> 
             )
         if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
             _seen_agent_sessions.discard(session_id)
+            finished_detail: dict = {"status": event.status, "role": role, "issue_num": issue_num}
+            if sprint_label is not None:
+                finished_detail["sprint_label"] = sprint_label
             db.record_event(
                 project=project,
                 source="agent",
                 actor=actor,
                 type="agent_finished",
                 target=session_id,
-                detail={"status": event.status, "role": role, "issue_num": issue_num},
+                detail=finished_detail,
                 action_id=session_id,
             )
 

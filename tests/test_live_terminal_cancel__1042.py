@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "apps" / "dashboard"))
-from server import _live_freeze_terminal_fields  # noqa: E402
+from routers.sprint_live import _live_freeze_terminal_fields  # noqa: E402
 
 
 def test_live_freeze_terminal_clears_active_agents():

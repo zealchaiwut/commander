@@ -127,6 +127,7 @@
       lb.className = 'todo-lightbox hidden';
       lb.innerHTML =
         '<button type="button" class="todo-lightbox-close" aria-label="Close">&times;</button>' +
+        // impeccable-disable-next-line broken-image -- src is set dynamically via JS (pre-existing, issue #1205)
         '<img id="todo-lightbox-img" alt="Attachment preview" />';
       document.body.appendChild(lb);
       lb.querySelector('.todo-lightbox-close').onclick = function () {

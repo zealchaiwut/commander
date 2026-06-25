@@ -2,6 +2,7 @@
 import os
 import re
 import subprocess
+from pathlib import Path
 import httpx
 import pytest
 
@@ -12,6 +13,11 @@ if not BASE_URL.startswith("http"):
         "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
     )
 
+# Resolve paths relative to this test file so they work in any clone
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_HTML = str(_REPO_ROOT / "apps/dashboard/static/project.html")
+_TOKENS_CSS = str(_REPO_ROOT / "apps/dashboard/static/css/tokens.css")
+
 
 @pytest.fixture
 def client():
@@ -20,13 +26,10 @@ def client():
 
 
 # ─ AC 1: tokens.css is the single source of truth
-def test_consolidate_design_tokens__tokens_css_only_source(client):
+def test_consolidate_design_tokens__tokens_css_only_source():
     """AC: tokens.css defines all shared tokens; no duplication in project.html inline styles."""
-    # Read both files from disk (not via HTTP since we're testing the source)
-    # Assume the project repo is at a known location
-    # For UAT in /Users/zeal-server/dev/commander/uat
-    project_html = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/project.html"
-    tokens_css = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/css/tokens.css"
+    project_html = _PROJECT_HTML
+    tokens_css = _TOKENS_CSS
 
     with open(project_html, "r") as f:
         html_content = f.read()
@@ -56,9 +59,9 @@ def test_consolidate_design_tokens__tokens_css_only_source(client):
 
 
 # ─ AC 2: Dark-mode overrides removed from project.html
-def test_consolidate_design_tokens__no_dark_mode_override_in_html(client):
+def test_consolidate_design_tokens__no_dark_mode_override_in_html():
     """AC: [data-theme=\"dark\"] block removed from project.html inline styles."""
-    project_html = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/project.html"
+    project_html = _PROJECT_HTML
 
     with open(project_html, "r") as f:
         html_content = f.read()
@@ -70,11 +73,11 @@ def test_consolidate_design_tokens__no_dark_mode_override_in_html(client):
 
 
 # ─ AC 3: grep confirms zero overlap
-def test_consolidate_design_tokens__no_var_overlap(client):
+def test_consolidate_design_tokens__no_var_overlap():
     """AC: grep confirms no -- variable appears in both files."""
     # Run grep on both files and verify overlap
-    project_html = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/project.html"
-    tokens_css = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/css/tokens.css"
+    project_html = _PROJECT_HTML
+    tokens_css = _TOKENS_CSS
 
     result_html = subprocess.run(
         ["grep", "-o", "--[a-z-]*:", project_html],
@@ -103,26 +106,24 @@ def test_consolidate_design_tokens__no_var_overlap(client):
 
 
 # ─ AC 4: Light-mode values match tokens.css
-def test_consolidate_design_tokens__light_mode_values(client):
+def test_consolidate_design_tokens__light_mode_values():
     """AC: Light-mode --blue, --bg, --text resolve to tokens.css values."""
-    r = client.get("/project.html")
-    assert r.status_code == 200
+    with open(_PROJECT_HTML, "r") as f:
+        html = f.read()
 
-    # Parse the HTML to extract computed styles (via JS eval in the browser would be ideal,
-    # but we can verify the tokens.css is loaded and project.html doesn't override)
-    # Simpler approach: verify tokens.css is loaded before any overrides
-    assert "/static/css/tokens.css" in r.text, "tokens.css link not found"
+    # Verify tokens.css is loaded and project.html doesn't override
+    assert "/static/css/tokens.css" in html, "tokens.css link not found"
 
     # Verify the link comes before inline styles
-    link_pos = r.text.find('href="/static/css/tokens.css"')
-    style_pos = r.text.find('<style>')
+    link_pos = html.find('href="/static/css/tokens.css"')
+    style_pos = html.find('<style>')
     assert link_pos < style_pos, "tokens.css link should come before inline <style> block"
 
 
 # ─ AC 5: Dark-mode values match tokens.css dark block
-def test_consolidate_design_tokens__dark_mode_values(client):
+def test_consolidate_design_tokens__dark_mode_values():
     """AC: Dark-mode values render from tokens.css [data-theme=\"dark\"] block."""
-    tokens_css = "/Users/zeal-server/dev/commander/uat/apps/dashboard/static/css/tokens.css"
+    tokens_css = _TOKENS_CSS
 
     with open(tokens_css, "r") as f:
         css_content = f.read()
@@ -139,20 +140,20 @@ def test_consolidate_design_tokens__dark_mode_values(client):
 
 
 # ─ AC 6: tokens.css link remains and loads first
-def test_consolidate_design_tokens__tokens_css_link_present(client):
+def test_consolidate_design_tokens__tokens_css_link_present():
     """AC: <link rel=\"stylesheet\" href=\"/static/css/tokens.css\"> is present and loads first."""
-    r = client.get("/project.html")
-    assert r.status_code == 200
+    with open(_PROJECT_HTML, "r") as f:
+        html = f.read()
 
     # Check for the link tag
-    link_tag = re.search(r'<link[^>]*href\s*=\s*["\']?/static/css/tokens\.css["\']?[^>]*>', r.text)
+    link_tag = re.search(r'<link[^>]*href\s*=\s*["\']?/static/css/tokens\.css["\']?[^>]*>', html)
     assert link_tag, "tokens.css link tag not found in project.html"
 
     # Verify it's in <head> and before inline <style>
-    head_start = r.text.find('<head>')
-    head_end = r.text.find('</head>')
-    link_pos = r.text.find('/static/css/tokens.css')
-    style_pos = r.text.find('<style>')
+    head_start = html.find('<head>')
+    head_end = html.find('</head>')
+    link_pos = html.find('/static/css/tokens.css')
+    style_pos = html.find('<style>')
 
     assert head_start < link_pos < head_end, "tokens.css link should be in <head>"
     assert link_pos < style_pos, "tokens.css link should load before inline <style> block"

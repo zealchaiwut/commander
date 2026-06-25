@@ -2673,7 +2673,15 @@ def _assert_sprint_signed_off(project_root: Path, sprint_label: str) -> None:
 
     Called from the run path so a pending sprint cannot be dispatched — the
     same gate that mutes the Run Sprint button on the board.
+
+    No-op when sign-off is disabled globally (COMMANDER_DISABLE_SIGNOFF /
+    disable_sprint_signoff): every sprint must be runnable without approval.
+    This mirrors the guard in routers/sprint_dispatch._sprint_signoff_state;
+    the run gate uses this (startup) copy, so it needs its own check.
     """
+    import config  # noqa: PLC0415
+    if config.sprint_signoff_disabled():
+        return
     if _sprint_signoff_state(project_root, sprint_label) == "pending":
         raise HTTPException(
             409,

@@ -3249,10 +3249,12 @@ def run_sprint_loop(
                 _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
                 def _on_coder_running(
+                    pid=None,
                     _is=issue_state, _st=state, _sp=state_path, _api=api_url,
                     _lbl=label, _n=num, _sd=_eff_sprints_dir,
                 ) -> None:
                     _is.set_agent_status("coder_running")
+                    _is.coder_pid = pid
                     _neon_ticket_status(_lbl, _n, "running", _sd)
                     _st.save(_sp)
                     _post_sprint_status(_st, api_url=_api)
@@ -3545,9 +3547,11 @@ def run_sprint_loop(
             _post_sprint_status(state, api_url=api_url)
 
             def _on_tester_running(
+                pid=None,
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url
             ) -> None:
                 _is.set_agent_status("tester_running")
+                _is.tester_pid = pid
                 _st.save(_sp)
                 _post_sprint_status(_st, api_url=_api)
 

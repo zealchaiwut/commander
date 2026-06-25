@@ -44,6 +44,8 @@ class IssueState:
     coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
     coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
     coder_routing_reason: Optional[str] = None  # routing reason for coder badge tooltip (issue #1403)
+    coder_pid:            Optional[int] = None  # OS PID of the coder subprocess (issue #777)
+    tester_pid:           Optional[int] = None  # OS PID of the tester subprocess (issue #777)
 
     def to_dict(self) -> dict:
         return {
@@ -66,6 +68,8 @@ class IssueState:
             "coder_model":        self.coder_model,
             "coder_backend":      self.coder_backend,
             "coder_routing_reason": self.coder_routing_reason,
+            "coder_pid":          self.coder_pid,
+            "tester_pid":         self.tester_pid,
         }
 
     @staticmethod
@@ -91,6 +95,8 @@ class IssueState:
         iss.coder_model = d.get("coder_model")
         iss.coder_backend = d.get("coder_backend")
         iss.coder_routing_reason = d.get("coder_routing_reason")
+        iss.coder_pid = d.get("coder_pid")
+        iss.tester_pid = d.get("tester_pid")
         return iss
 
     def set_agent_status(self, status: str) -> None:

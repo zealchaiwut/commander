@@ -743,8 +743,9 @@ def _run_pipeline_dispatch(
         _post_sprint_status(state, api_url=api_url)
         _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
-        def _on_coder_running(_ist=ist):
+        def _on_coder_running(pid=None, _ist=ist):
             _ist.set_agent_status("coder_running")
+            _ist.coder_pid = pid
             _neon_ticket_status(label, num, "running", eff_sprints_dir)
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
@@ -910,8 +911,9 @@ def _run_pipeline_dispatch(
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
-        def _on_tester_running(_ist=ist):
+        def _on_tester_running(pid=None, _ist=ist):
             _ist.set_agent_status("tester_running")
+            _ist.tester_pid = pid
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url)
 

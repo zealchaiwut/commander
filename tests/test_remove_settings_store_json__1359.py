@@ -1,7 +1,6 @@
 """Tests for issue #1359: Remove accidentally committed .commander/settings_store.json"""
 import json
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest

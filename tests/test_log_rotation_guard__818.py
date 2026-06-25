@@ -10,7 +10,6 @@ AC6: Unit tests cover concurrent-write scenario (two threads simulating processe
 import datetime
 import importlib
 import logging
-import os
 import sys
 import threading
 from pathlib import Path
@@ -87,8 +86,8 @@ def test_818__ac1_lock_acquired_around_rotate_and_append(logging_mod, tmp_path, 
     # If lock is not held during rotate, one process would see the renamed file
     # and fail to append. Both messages should be present.
     lines = _collect_lines(tmp_path, today)
-    assert any("msg-0" in l for l in lines), "msg-0 missing — lock may not cover rotate"
-    assert any("msg-1" in l for l in lines), "msg-1 missing — lock may not cover rotate"
+    assert any("msg-0" in ln for ln in lines), "msg-0 missing — lock may not cover rotate"
+    assert any("msg-1" in ln for ln in lines), "msg-1 missing — lock may not cover rotate"
 
 
 # --- AC2: No lines dropped during concurrent rotate+append ---
@@ -120,8 +119,8 @@ def test_818__ac2_no_data_loss_concurrent_writes(logging_mod, tmp_path, monkeypa
     assert not errors, f"Exceptions during concurrent emit: {errors}"
 
     lines = _collect_lines(tmp_path, today)
-    assert any("line-thread-1" in l for l in lines), "Thread 1 line was dropped"
-    assert any("line-thread-2" in l for l in lines), "Thread 2 line was dropped"
+    assert any("line-thread-1" in ln for ln in lines), "Thread 1 line was dropped"
+    assert any("line-thread-2" in ln for ln in lines), "Thread 2 line was dropped"
 
 
 # --- AC3: Lock released immediately after write (not held during unrelated I/O) ---
@@ -138,8 +137,8 @@ def test_818__ac3_lock_released_after_write(logging_mod, tmp_path, monkeypatch):
 
     today = datetime.date.today().isoformat()
     lines = _collect_lines(tmp_path, today)
-    assert any("first line" in l for l in lines), "first line missing"
-    assert any("second line" in l for l in lines), "second line missing"
+    assert any("first line" in ln for ln in lines), "first line missing"
+    assert any("second line" in ln for ln in lines), "second line missing"
 
 
 # --- AC4: Graceful fallback when fcntl unavailable ---
@@ -154,7 +153,7 @@ def test_818__ac4_graceful_fallback_no_fcntl(logging_mod, tmp_path, monkeypatch)
 
     today = datetime.date.today().isoformat()
     lines = _collect_lines(tmp_path, today)
-    assert any("fallback line" in l for l in lines), "fallback line missing"
+    assert any("fallback line" in ln for ln in lines), "fallback line missing"
 
 
 # --- AC5: Existing rotation behavior preserved ---

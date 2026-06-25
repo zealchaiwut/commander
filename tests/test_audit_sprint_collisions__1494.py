@@ -4,7 +4,6 @@ This tests the fix that replaced bare `except Exception: pass` with narrower
 `except sqlite3.OperationalError: pass` to allow genuine DB errors to surface
 while still gracefully handling missing tables.
 """
-import os
 import sqlite3
 import tempfile
 from pathlib import Path

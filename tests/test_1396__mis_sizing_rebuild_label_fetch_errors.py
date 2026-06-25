@@ -22,8 +22,10 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 
 
-def _make_project_tree(tmp_path: Path, issue_num: int = 42, estimated_size: str = "M") -> tuple[Path, Path]:
-    """Create minimal sprint-state + estimate files so rebuild finds one completed ticket."""
+def _make_project_tree(
+    tmp_path: Path, issue_num: int = 42, estimated_size: str = "M"
+) -> tuple[Path, Path]:
+    """Create minimal sprint-state + estimate files for rebuild."""
     commander = tmp_path / ".commander"
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
@@ -42,7 +44,8 @@ def _make_project_tree(tmp_path: Path, issue_num: int = 42, estimated_size: str 
         ]
     }
     (sprints_dir / "sprint-1-state.json").write_text(json.dumps(state))
-    (estimates_dir / f"issue-{issue_num}.json").write_text(json.dumps({"size": estimated_size}))
+    est_file = estimates_dir / f"issue-{issue_num}.json"
+    est_file.write_text(json.dumps({"size": estimated_size}))
 
     return tmp_path, commander
 
@@ -84,18 +87,24 @@ def test_ac1_nonzero_returncode_logs_warning(tmp_path, caplog):
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
     with caplog.at_level(logging.WARNING, logger="routers.mis_sizing"):
-        _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+        _call_rebuild(
+            tmp_path,
+            subprocess_mock=subprocess_mock,
+            github_client_mock=github_client_mock,
+        )
 
-    warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    warning_messages = [
+        r.message for r in caplog.records if r.levelno >= logging.WARNING
+    ]
     assert any("authentication required" in m for m in warning_messages), (
-        f"Expected stderr text in WARNING log, got: {warning_messages}"
+        f"Expected stderr in WARNING log, got: {warning_messages}"
     )
 
 
 # ── AC2: exception during label fetch is logged, not silently passed ───────────
 
 def test_ac2_exception_during_fetch_is_logged(tmp_path, caplog):
-    """When an exception is raised during the gh subprocess call, it is logged (not silently swallowed)."""
+    """Exceptions during gh call are logged (not silently swallowed)."""
     _make_project_tree(tmp_path)
 
     subprocess_mock = MagicMock()
@@ -105,12 +114,20 @@ def test_ac2_exception_during_fetch_is_logged(tmp_path, caplog):
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
     with caplog.at_level(logging.WARNING, logger="routers.mis_sizing"):
-        result = _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+        result = _call_rebuild(
+            tmp_path,
+            subprocess_mock=subprocess_mock,
+            github_client_mock=github_client_mock,
+        )
 
-    warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-    assert any("gh timed out after 60s" in m or "TimeoutError" in m for m in warning_messages), (
-        f"Expected exception info in WARNING log, got: {warning_messages}"
+    warning_messages = [
+        r.message for r in caplog.records if r.levelno >= logging.WARNING
+    ]
+    has_timeout = any(
+        "gh timed out after 60s" in m or "TimeoutError" in m
+        for m in warning_messages
     )
+    assert has_timeout, f"Expected timeout in WARNING log, got: {warning_messages}"
     # Must continue and return a result (not crash)
     assert "message" in result
 
@@ -118,7 +135,7 @@ def test_ac2_exception_during_fetch_is_logged(tmp_path, caplog):
 # ── AC3: response includes labels_fetched boolean field ───────────────────────
 
 def test_ac3_response_includes_labels_fetched_false_on_failure(tmp_path):
-    """When label fetch fails (non-zero returncode), response has labels_fetched=false."""
+    """On fetch failure (non-zero returncode), response has labels_fetched=false."""
     _make_project_tree(tmp_path)
 
     proc_result = MagicMock()
@@ -132,11 +149,17 @@ def test_ac3_response_includes_labels_fetched_false_on_failure(tmp_path):
     github_client_mock = MagicMock()
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
-    result = _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+    result = _call_rebuild(
+        tmp_path,
+        subprocess_mock=subprocess_mock,
+        github_client_mock=github_client_mock,
+    )
 
-    assert "labels_fetched" in result, f"Response missing 'labels_fetched' key: {result}"
+    assert "labels_fetched" in result, (
+        f"Response missing 'labels_fetched' key: {result}"
+    )
     assert result["labels_fetched"] is False, (
-        f"Expected labels_fetched=False on fetch failure, got: {result['labels_fetched']}"
+        f"Expected labels_fetched=False on failure: {result['labels_fetched']}"
     )
 
 
@@ -150,16 +173,22 @@ def test_ac3_response_includes_labels_fetched_false_on_exception(tmp_path):
     github_client_mock = MagicMock()
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
-    result = _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+    result = _call_rebuild(
+        tmp_path,
+        subprocess_mock=subprocess_mock,
+        github_client_mock=github_client_mock,
+    )
 
-    assert "labels_fetched" in result, f"Response missing 'labels_fetched' key: {result}"
+    assert "labels_fetched" in result, (
+        f"Response missing 'labels_fetched' key: {result}"
+    )
     assert result["labels_fetched"] is False
 
 
 # ── AC4: HTTP 200 and message intact when labels_fetched=false ─────────────────
 
 def test_ac4_http200_and_message_intact_when_labels_fetch_fails(tmp_path):
-    """HTTP 200 is returned with the 'History rebuilt:' message when label fetch fails."""
+    """HTTP 200 with 'History rebuilt:' message when label fetch fails."""
     _make_project_tree(tmp_path)
 
     proc_result = MagicMock()
@@ -173,9 +202,12 @@ def test_ac4_http200_and_message_intact_when_labels_fetch_fails(tmp_path):
     github_client_mock = MagicMock()
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
-    result = _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+    result = _call_rebuild(
+        tmp_path,
+        subprocess_mock=subprocess_mock,
+        github_client_mock=github_client_mock,
+    )
 
-    # Route returns a dict (FastAPI wraps it as 200); check message is intact
     assert "message" in result
     assert result["message"].startswith("History rebuilt:"), (
         f"Expected 'History rebuilt:' message, got: {result['message']}"
@@ -186,7 +218,7 @@ def test_ac4_http200_and_message_intact_when_labels_fetch_fails(tmp_path):
 # ── AC5: labels_fetched=true when fetch succeeds and labels_by_num is populated ─
 
 def test_ac5_labels_fetched_true_on_success(tmp_path):
-    """When gh returns exit 0 and labels are populated, response has labels_fetched=true."""
+    """On success (exit 0 + labels), response has labels_fetched=true."""
     issue_num = 42
     _make_project_tree(tmp_path, issue_num=issue_num)
 
@@ -205,9 +237,15 @@ def test_ac5_labels_fetched_true_on_success(tmp_path):
     github_client_mock = MagicMock()
     github_client_mock.get_repo_for_operation.return_value = "owner/repo"
 
-    result = _call_rebuild(tmp_path, subprocess_mock=subprocess_mock, github_client_mock=github_client_mock)
+    result = _call_rebuild(
+        tmp_path,
+        subprocess_mock=subprocess_mock,
+        github_client_mock=github_client_mock,
+    )
 
-    assert "labels_fetched" in result, f"Response missing 'labels_fetched' key: {result}"
+    assert "labels_fetched" in result, (
+        f"Response missing 'labels_fetched' key: {result}"
+    )
     assert result["labels_fetched"] is True, (
-        f"Expected labels_fetched=True on successful fetch, got: {result['labels_fetched']}"
+        f"Expected labels_fetched=True on success: {result['labels_fetched']}"
     )

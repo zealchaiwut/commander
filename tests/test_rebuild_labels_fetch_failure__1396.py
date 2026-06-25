@@ -1,12 +1,14 @@
-"""Tests for issue #1396: Surface GitHub fetch failures in mis-sizing history rebuild (runs against UAT)"""
+"""Tests for issue #1396: GitHub fetch failures in mis-sizing rebuild."""
 import os
 import pytest
 import httpx
 
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
+_base_url_env = os.environ.get("UAT_BASE_URL")
+_port_env = os.environ.get("UAT_PORT", "")
+BASE_URL = _base_url_env or ("http://localhost:" + _port_env)
 if not BASE_URL.startswith("http"):
     raise RuntimeError(
-        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+        "UAT_BASE_URL / UAT_PORT not set. Run tester skill Step 0 to resolve UAT."
     )
 
 
@@ -17,7 +19,7 @@ def client():
 
 
 def test_rebuild_labels_fetch_failure__labels_fetched_field_in_response(client):
-    """AC: POST /api/mis-sizing/rebuild response includes 'labels_fetched' boolean field."""
+    """AC: POST /api/mis-sizing/rebuild includes 'labels_fetched' field."""
     r = client.post("/api/mis-sizing/rebuild?project=zealchaiwut/commander")
     assert r.status_code == 200
     data = r.json()
@@ -26,7 +28,7 @@ def test_rebuild_labels_fetch_failure__labels_fetched_field_in_response(client):
 
 
 def test_rebuild_labels_fetch_failure__labels_fetched_true_on_success(client):
-    """AC: When label fetch succeeds and labels_by_num is populated, 'labels_fetched': true."""
+    """AC: On success, labels_by_num is populated, 'labels_fetched': true."""
     r = client.post("/api/mis-sizing/rebuild?project=zealchaiwut/commander")
     assert r.status_code == 200
     data = r.json()
@@ -36,8 +38,10 @@ def test_rebuild_labels_fetch_failure__labels_fetched_true_on_success(client):
     assert isinstance(data["labels_fetched"], bool)
 
 
-def test_rebuild_labels_fetch_failure__http_200_with_rebuild_message_on_any_outcome(client):
-    """AC: Response is HTTP 200 with message intact, regardless of label fetch result."""
+def test_rebuild_labels_fetch_failure__http_200_with_rebuild_message_on_any_outcome(
+    client,
+):
+    """AC: Response is HTTP 200 with message, regardless of label fetch result."""
     r = client.post("/api/mis-sizing/rebuild?project=zealchaiwut/commander")
     assert r.status_code == 200
     data = r.json()

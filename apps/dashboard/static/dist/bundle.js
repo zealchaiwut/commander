@@ -5595,6 +5595,11 @@ Replace the existing draft (${data.existing_label})?`
     const mergeState = _smgmtAncestorMergeState(label, outcome || null);
     const safeLabel = escHtml(label);
     const rerunInto = childLabel || (_smgmtData?.sprint_rerun_into || {})[label];
+    let savedExpanded = false;
+    try {
+      savedExpanded = localStorage.getItem(`slp_ancestor_${label}`) === "1";
+    } catch (_) {
+    }
     let statusIcon, statusText, statusCls;
     if (mergeState === "merged") {
       statusIcon = "ti-circle-check";
@@ -5640,10 +5645,10 @@ Replace the existing draft (${data.existing_label})?`
                onclick="smgmtToggleAncestor('${safeLabel}')">
     <div class="slp-ancestor-header">
       <button class="smgmt-collapse-btn slp-ancestor-toggle"
-              aria-label="Expand ${escHtml(sprintLabelDisplay(label))}"
-              title="Expand ${escHtml(sprintLabelDisplay(label))}"
+              aria-label="${savedExpanded ? "Collapse" : "Expand"} ${escHtml(sprintLabelDisplay(label))}"
+              title="${savedExpanded ? "Collapse" : "Expand"} ${escHtml(sprintLabelDisplay(label))}"
               onclick="event.stopPropagation();smgmtToggleAncestor('${safeLabel}')">
-        <i class="ti ti-chevron-right"></i>
+        <i class="ti ${savedExpanded ? "ti-chevron-down" : "ti-chevron-right"}"></i>
       </button>
       <span class="slp-merge-mark ${statusCls}">
         <i class="ti ${statusIcon}"></i>
@@ -5659,7 +5664,7 @@ Replace the existing draft (${data.existing_label})?`
         <i class="ti ti-menu-2"></i>
       </button>
     </div>
-    <div class="slp-ancestor-body" id="slp-body-${safeLabel}" hidden>
+    <div class="slp-ancestor-body" id="slp-body-${safeLabel}"${savedExpanded ? "" : " hidden"}>
       <div class="slp-ancestor-tickets" id="slp-tickets-${safeLabel}">
         ${ticketsHtml}
       </div>

@@ -8,8 +8,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from routers import stale_branches_service
 
 

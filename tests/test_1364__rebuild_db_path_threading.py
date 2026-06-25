@@ -78,7 +78,9 @@ def _write_sprint_state(
     )
 
 
-def _done_issue_no_labels(num: int, coder_min: float = 10.0, tester_min: float = 5.0) -> dict:
+def _done_issue_no_labels(
+    num: int, coder_min: float = 10.0, tester_min: float = 5.0
+) -> dict:
     """Done issue dict with NO labels key — simulates state files without label data."""
     return {
         "number": num,
@@ -129,8 +131,8 @@ class TestAC1DbPathResolvedFromEnv:
 
         result = rebuild_calibration_cache(project_root, _DEFAULT_MINUTES)
         assert result["by_size"]["L"] == 1, (
-            f"Expected L=1 from archive state file via DB fallback, got {result['by_size']}. "
-            "DB_PATH must be threaded into the archive absorb call."
+            "Expected L=1 from archive state file via DB fallback, "
+            f"got {result['by_size']}. DB_PATH must be threaded into archive."
         )
 
 
@@ -150,7 +152,11 @@ class TestAC2BothCallSitesReceiveDbPath:
         # Ticket in archive sprint
         archive_issue = _done_issue_no_labels(301)
         _write_sprint_state(
-            project_root, "sprint-1", [archive_issue], archive=True, project="owner/repo"
+            project_root,
+            "sprint-1",
+            [archive_issue],
+            archive=True,
+            project="owner/repo",
         )
 
         # Ticket in live sprint
@@ -185,7 +191,7 @@ class TestAC3DbOnlyTicketCountedByRebuild:
     """AC3: ticket with size only in SQLite issues mirror appears in rebuild output."""
 
     def test_db_only_ticket_counted(self, tmp_path, monkeypatch):
-        """No estimate file, no state.estimates, no state labels — size from SQLite only."""
+        """No estimate file, no state.estimates, no labels — size from SQLite only."""
         from maintenance_service import rebuild_calibration_cache
 
         project_root = tmp_path / "project"
@@ -226,7 +232,7 @@ class TestAC4RebuildMatchesAutoRefresh:
     """AC4: rebuild and auto-refresh produce identical counts for the same data."""
 
     def test_rebuild_matches_refresh_single_ticket(self, tmp_path, monkeypatch):
-        """rebuild_calibration_cache and _refresh_calibration_cache agree on one ticket."""
+        """rebuild and _refresh_calibration_cache agree on one ticket."""
         from maintenance_service import rebuild_calibration_cache
         from calibration_cache_service import _refresh_calibration_cache
 
@@ -237,8 +243,12 @@ class TestAC4RebuildMatchesAutoRefresh:
         db_path = _make_db(tmp_path, [("owner/repo", 501, [{"name": "size-S"}])])
         monkeypatch.setenv("DB_PATH", str(db_path))
 
-        rebuild_result = rebuild_calibration_cache(project_root, _DEFAULT_MINUTES, dry_run=True)
-        refresh_cache = _refresh_calibration_cache(project_root, _DEFAULT_MINUTES, db_path=db_path)
+        rebuild_result = rebuild_calibration_cache(
+            project_root, _DEFAULT_MINUTES, dry_run=True
+        )
+        refresh_cache = _refresh_calibration_cache(
+            project_root, _DEFAULT_MINUTES, db_path=db_path
+        )
 
         refresh_result = {
             "total": sum(
@@ -277,8 +287,12 @@ class TestAC4RebuildMatchesAutoRefresh:
         db_path = _make_db(tmp_path, db_rows)
         monkeypatch.setenv("DB_PATH", str(db_path))
 
-        rebuild_result = rebuild_calibration_cache(project_root, _DEFAULT_MINUTES, dry_run=True)
-        refresh_cache = _refresh_calibration_cache(project_root, _DEFAULT_MINUTES, db_path=db_path)
+        rebuild_result = rebuild_calibration_cache(
+            project_root, _DEFAULT_MINUTES, dry_run=True
+        )
+        refresh_cache = _refresh_calibration_cache(
+            project_root, _DEFAULT_MINUTES, db_path=db_path
+        )
 
         refresh_result = {
             "total": sum(
@@ -336,7 +350,7 @@ class TestAC5NoCrashWithoutDbPath:
         assert result["total"] >= 0
 
     def test_no_crash_when_no_sprints_dir(self, tmp_path, monkeypatch):
-        """Empty project root with no sprints dir → rebuild returns zeros without crash."""
+        """Empty project → rebuild returns zeros without crash."""
         from maintenance_service import rebuild_calibration_cache
 
         monkeypatch.delenv("DB_PATH", raising=False)
@@ -347,7 +361,7 @@ class TestAC5NoCrashWithoutDbPath:
         assert result["total"] == 0
 
     def test_db_fallback_not_used_when_db_path_unset(self, tmp_path, monkeypatch):
-        """With DB_PATH unset, ticket sized only in DB is NOT counted (fallback skipped)."""
+        """With DB_PATH unset, DB-sized tickets NOT counted (fallback skipped)."""
         from maintenance_service import rebuild_calibration_cache
 
         monkeypatch.delenv("DB_PATH", raising=False)
@@ -361,5 +375,6 @@ class TestAC5NoCrashWithoutDbPath:
 
         result = rebuild_calibration_cache(project_root, _DEFAULT_MINUTES)
         assert result["total"] == 0, (
-            f"Expected 0 when DB_PATH is unset (DB fallback must be skipped), got {result['total']}"
+            "Expected 0 when DB_PATH is unset (fallback skipped), "
+            f"got {result['total']}"
         )

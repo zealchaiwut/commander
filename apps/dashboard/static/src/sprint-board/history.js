@@ -1270,29 +1270,31 @@ function _histChildCardHtml(s) {
   </div>`;
 }
 
-// ── Loose-end amber band (issue #1041) ─────────────────────────────────────
-// Exactly ONE amber band per card showing the single highest-priority actionable
-// loose end. Priority: unresolved stale-labels recon check > stale branches.
-// Returns '' when no loose end exists (no band rendered — AC4 / AC7).
+// ── Loose-end amber band (issue #1041, extended by #1154) ──────────────────
+// One amber band per failing reconciliation check, plus one for stale branches.
+// sprint_pr and stale_labels checks have rich CTAs; any other failed check type
+// gets a generic band via _histReconcileLabel so future checks are not silently dropped.
+// Returns '' when no loose ends exist (no band rendered — AC4 / AC7).
 function _histLooseEndBandHtml(s) {
   const r = s.reconciliation;
+  const bands = [];
   if (r && Array.isArray(r.checks)) {
-    const prCheck = r.checks.find((c) => !c.ok && c.name === "sprint_pr");
+    const prCheck = r.checks.find((c) => !c.ok && c.name === 'sprint_pr');
     if (prCheck) {
       const looseN = r.checks.filter((c) => !c.ok).length || 1;
       const prNum = s.pr_number;
       const prUrl = _histPrUrl(s);
-      const prRef = prNum ? `#${prNum}` : "PR";
+      const prRef = prNum ? `#${prNum}` : 'PR';
       const msg = `${looseN} loose end — Sprint PR ${prRef} is not yet merged`;
       const cta = prUrl
         ? `<a class="hist-band-cta" href="${escHtml(prUrl)}" target="_blank" rel="noopener"
             onclick="event.stopPropagation()">Merge PR</a>`
-        : "";
-      return `<div class="hist-loose-end-band">
+        : '';
+      bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         ${cta}
-      </div>`;
+      </div>`);
     }
     const staleCheck = r.checks.find(c => !c.ok && c.name === 'stale_labels');
     if (staleCheck) {
@@ -1306,28 +1308,38 @@ function _histLooseEndBandHtml(s) {
         ? (looseN + ' loose end — ' + offenderCount + ' stale status labels to clear: ' + labelParts)
         : (looseN + ' loose end — ' + labelParts);
       const lbl = escHtml(s.label || '');
-      return `<div class="hist-loose-end-band">
+      bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         <button type="button" class="hist-band-cta hist-band-cta--clear"
           onclick="event.stopPropagation();_histClearStaleLabels('${lbl}')">Clear labels</button>
-      </div>`;
+      </div>`);
     }
+    // Generic fallback: any other failed check type gets its own amber band (#1154).
+    const knownChecks = new Set(['sprint_pr', 'stale_labels']);
+    r.checks.filter(c => !c.ok && !knownChecks.has(c.name)).forEach(c => {
+      const label = _histReconcileLabel(c.name);
+      const detail = c.detail || 'Check failed';
+      bands.push(`<div class="hist-loose-end-band">
+        <i class="ti ti-alert-triangle"></i>
+        <span class="hist-band-msg">${escHtml(label + ': ' + detail)}</span>
+      </div>`);
+    });
   }
-  // Priority 2: stale feature branches
+  // Stale feature branches
   const g = _histStaleBySprint[s.label];
   if (g && g.count) {
     const n = g.count;
     const word = n === 1 ? 'stale branch' : 'stale branches';
     const lbl = escHtml(s.label || '');
-    return `<div class="hist-loose-end-band">
+    bands.push(`<div class="hist-loose-end-band">
       <i class="ti ti-git-branch"></i>
       <span class="hist-band-msg">${n} ${word}</span>
       <button type="button" class="hist-band-cta"
         onclick="event.stopPropagation();_histCleanupStale('${lbl}')">Clean up</button>
-    </div>`;
+    </div>`);
   }
-  return '';
+  return bands.join('');
 }
 
 // ── What-list (issue #1041) ─────────────────────────────────────────────────
@@ -1398,20 +1410,27 @@ function _histWhatListHtml(s) {
   return '';
 }
 
-// Passed reconciliation checks rendered as small grey checkmarks inside Details
-// only — never as green boxes outside Details (AC9).
+// Reconciliation checks rendered inside Details only — passed as grey checkmarks,
+// failed as amber X items (#1154 AC3). Never rendered as boxes outside Details (AC9).
 function _histReconPassedHtml(s) {
   const r = s.reconciliation;
   if (!r || !Array.isArray(r.checks) || !r.checks.length) return '';
   const passed = r.checks.filter(c => !!c.ok);
-  if (!passed.length) return '';
-  const items = passed.map(c => {
+  const failed = r.checks.filter(c => !c.ok);
+  if (!passed.length && !failed.length) return '';
+  const failedItems = failed.map(c => {
+    const detail = c.detail || 'Failed';
+    return `<span class="recon-passed-item recon-failed-item"
+      title="${escHtml(_histReconcileLabel(c.name) + ': ' + detail)}">
+      <i class="ti ti-x"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
+  }).join('');
+  const passedItems = passed.map(c => {
     const detail = c.detail || 'OK';
     return `<span class="recon-passed-item"
       title="${escHtml(_histReconcileLabel(c.name) + ': ' + detail)}">
       <i class="ti ti-check"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
   }).join('');
-  return `<div class="hist-recon-passed">${items}</div>`;
+  return `<div class="hist-recon-passed">${failedItems}${passedItems}</div>`;
 }
 
 // Metrics / reconciliation — collapsed by default at the bottom of an expanded card.

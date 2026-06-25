@@ -2001,6 +2001,7 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _histLooseEndBandHtml(s) {
     const r = s.reconciliation;
+    const bands = [];
     if (r && Array.isArray(r.checks)) {
       const prCheck = r.checks.find((c) => !c.ok && c.name === "sprint_pr");
       if (prCheck) {
@@ -2011,11 +2012,11 @@ Replace the existing draft (${data.existing_label})?`
         const msg = `${looseN} loose end \u2014 Sprint PR ${prRef} is not yet merged`;
         const cta = prUrl ? `<a class="hist-band-cta" href="${escHtml(prUrl)}" target="_blank" rel="noopener"
             onclick="event.stopPropagation()">Merge PR</a>` : "";
-        return `<div class="hist-loose-end-band">
+        bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         ${cta}
-      </div>`;
+      </div>`);
       }
       const staleCheck = r.checks.find((c) => !c.ok && c.name === "stale_labels");
       if (staleCheck) {
@@ -2025,27 +2026,36 @@ Replace the existing draft (${data.existing_label})?`
         const labelParts = offenderCount ? offenders.map((o) => "#" + o.issue + " " + (o.labels || []).join(", ")).join(" \xB7 ") : staleCheck.detail || "Clear stale status labels";
         const msg = offenderCount ? looseN + " loose end \u2014 " + offenderCount + " stale status labels to clear: " + labelParts : looseN + " loose end \u2014 " + labelParts;
         const lbl = escHtml(s.label || "");
-        return `<div class="hist-loose-end-band">
+        bands.push(`<div class="hist-loose-end-band">
         <i class="ti ti-alert-triangle"></i>
         <span class="hist-band-msg">${escHtml(msg)}</span>
         <button type="button" class="hist-band-cta hist-band-cta--clear"
           onclick="event.stopPropagation();_histClearStaleLabels('${lbl}')">Clear labels</button>
-      </div>`;
+      </div>`);
       }
+      const knownChecks = /* @__PURE__ */ new Set(["sprint_pr", "stale_labels"]);
+      r.checks.filter((c) => !c.ok && !knownChecks.has(c.name)).forEach((c) => {
+        const label = _histReconcileLabel(c.name);
+        const detail = c.detail || "Check failed";
+        bands.push(`<div class="hist-loose-end-band">
+        <i class="ti ti-alert-triangle"></i>
+        <span class="hist-band-msg">${escHtml(label + ": " + detail)}</span>
+      </div>`);
+      });
     }
     const g = _histStaleBySprint[s.label];
     if (g && g.count) {
       const n = g.count;
       const word = n === 1 ? "stale branch" : "stale branches";
       const lbl = escHtml(s.label || "");
-      return `<div class="hist-loose-end-band">
+      bands.push(`<div class="hist-loose-end-band">
       <i class="ti ti-git-branch"></i>
       <span class="hist-band-msg">${n} ${word}</span>
       <button type="button" class="hist-band-cta"
         onclick="event.stopPropagation();_histCleanupStale('${lbl}')">Clean up</button>
-    </div>`;
+    </div>`);
     }
-    return "";
+    return bands.join("");
   }
   function _histWhatListHtml(s) {
     if (_histIsLocked(s.lifecycle_state))
@@ -2106,15 +2116,22 @@ Replace the existing draft (${data.existing_label})?`
     if (!r || !Array.isArray(r.checks) || !r.checks.length)
       return "";
     const passed = r.checks.filter((c) => !!c.ok);
-    if (!passed.length)
+    const failed = r.checks.filter((c) => !c.ok);
+    if (!passed.length && !failed.length)
       return "";
-    const items = passed.map((c) => {
+    const failedItems = failed.map((c) => {
+      const detail = c.detail || "Failed";
+      return `<span class="recon-passed-item recon-failed-item"
+      title="${escHtml(_histReconcileLabel(c.name) + ": " + detail)}">
+      <i class="ti ti-x"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
+    }).join("");
+    const passedItems = passed.map((c) => {
       const detail = c.detail || "OK";
       return `<span class="recon-passed-item"
       title="${escHtml(_histReconcileLabel(c.name) + ": " + detail)}">
       <i class="ti ti-check"></i> ${escHtml(_histReconcileLabel(c.name))}</span>`;
     }).join("");
-    return `<div class="hist-recon-passed">${items}</div>`;
+    return `<div class="hist-recon-passed">${failedItems}${passedItems}</div>`;
   }
   function _histDetailsHtml(s) {
     const expanded = _histMetricsDetailsExpanded.has(s.label);
@@ -4842,7 +4859,7 @@ Replace the existing draft (${data.existing_label})?`
         outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">READY TO MERGE</span>`;
       }
     }
-    const summaryHtml = `<div class="sc-budget-section">
+    const summaryHtml = typeof _smgmtCapBudgetSectionHtml === "function" ? _smgmtCapBudgetSectionHtml(label) : `<div class="sc-budget-section">
     <div class="sc-budget-head">
       <span class="sc-budget-eyebrow">SPRINT BUDGET</span>
       <span class="sc-budget-forecast" id="sc-budget-forecast-${escHtml(label)}"></span>

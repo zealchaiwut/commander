@@ -104,6 +104,19 @@ def split_apply(repo: str, sprint_label: str, issue_num: int, children: list[dic
     if not children:
         return {"ok": False, "error": "no children to create"}
 
+    # `gh issue create --label` hard-fails on a label the repo doesn't have, so
+    # ensure both exist first (create_label is idempotent — ignores "already
+    # exists"). The sprint label may not exist yet on a fresh repo, and
+    # "split-child" is unique to this flow.
+    try:
+        gh.create_label(sprint_label, "ededed", "Sprint", repo_name=repo)
+    except Exception:
+        pass
+    try:
+        gh.create_label("split-child", "c5def5", "Created by XL ticket split", repo_name=repo)
+    except Exception:
+        pass
+
     created: list[dict] = []
     for c in children:
         title = c["title"].strip()[:240]

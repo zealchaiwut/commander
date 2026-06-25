@@ -1273,7 +1273,6 @@ Replace the existing draft (${data.existing_label})?`
   function _histFailedBlockHtml(s) {
     if (!_histSprintFailed(s))
       return "";
-    const state = (s.lifecycle_state || "").toLowerCase();
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
     const sprintReason = s.failure_reason || s.end_reason;
     if (!failed.length && !sprintReason)

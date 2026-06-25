@@ -18,8 +18,6 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 ROUTERS_DIR = DASHBOARD_DIR / "routers"

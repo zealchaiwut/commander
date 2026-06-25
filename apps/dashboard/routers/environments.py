@@ -220,7 +220,10 @@ def _restart_environment(entry: dict) -> dict:
 
     if label:
         cmd = _deploy_actions.build_kickstart_command(label)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="launchctl kickstart timed out after 30s")
         if result.returncode != 0:
             raise HTTPException(
                 status_code=500,
@@ -263,10 +266,14 @@ def _restart_environment(entry: dict) -> dict:
             "capture_output": True,
             "text": True,
             "env": restart_env,
+            "timeout": 30,
         }
         if script_cwd:
             run_kw["cwd"] = script_cwd
-        result = subprocess.run(["sh", "-c", script], **run_kw)
+        try:
+            result = subprocess.run(["sh", "-c", script], **run_kw)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail=f"{phase} script timed out after 30s")
         steps.append({
             "phase": phase,
             "script": script,
@@ -433,20 +440,28 @@ def deploy_environment(slug: str, env: str):
             ),
         )
 
-    fetch = subprocess.run(
-        _deploy_actions.build_fetch_command(branch),
-        capture_output=True, text=True, cwd=working_dir,
-    )
+    try:
+        fetch = subprocess.run(
+            _deploy_actions.build_fetch_command(branch),
+            capture_output=True, text=True, cwd=working_dir,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="git fetch timed out after 30s")
     if fetch.returncode != 0:
         raise HTTPException(
             status_code=500,
             detail=fetch.stderr.strip() or fetch.stdout.strip() or "git fetch failed",
         )
 
-    reset = subprocess.run(
-        _deploy_actions.build_reset_hard_command(branch),
-        capture_output=True, text=True, cwd=working_dir,
-    )
+    try:
+        reset = subprocess.run(
+            _deploy_actions.build_reset_hard_command(branch),
+            capture_output=True, text=True, cwd=working_dir,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="git reset timed out after 30s")
     if reset.returncode != 0:
         raise HTTPException(
             status_code=500,
@@ -455,10 +470,14 @@ def deploy_environment(slug: str, env: str):
 
     pull_output = (fetch.stdout or "") + (reset.stdout or "")
 
-    head = subprocess.run(
-        _deploy_actions.build_head_sha_command(),
-        capture_output=True, text=True, cwd=working_dir,
-    )
+    try:
+        head = subprocess.run(
+            _deploy_actions.build_head_sha_command(),
+            capture_output=True, text=True, cwd=working_dir,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="git rev-parse HEAD timed out after 10s")
     head_sha = head.stdout.strip()
 
     # AC: after a successful sync, auto-trigger restart for the same env.

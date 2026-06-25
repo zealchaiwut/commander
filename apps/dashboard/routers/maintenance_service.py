@@ -15,6 +15,8 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import os  # noqa: E402
+
 import projects as _projects_module  # noqa: E402
 import settings_repo as _settings_repo  # noqa: E402
 
@@ -87,6 +89,11 @@ def rebuild_calibration_cache(
     sprints_dir = commander / "sprints"
     estimates_dir = commander / "estimates"
 
+    db_path = None
+    env_db = os.environ.get("DB_PATH")
+    if env_db:
+        db_path = Path(env_db)
+
     # Start completely fresh — no stale keys survive.
     cache = _ccs._calibration_empty_cache()
     processed: set[str] = set()
@@ -98,11 +105,13 @@ def rebuild_calibration_cache(
                 _ccs._calibration_absorb_state_file(
                     cache, state_file, sprints_dir, estimates_dir,
                     configured_minutes, processed,
+                    db_path=db_path,
                 )
         for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
             _ccs._calibration_absorb_state_file(
                 cache, state_file, sprints_dir, estimates_dir,
                 configured_minutes, processed,
+                db_path=db_path,
             )
 
     cache["archive_bootstrap_done"] = True

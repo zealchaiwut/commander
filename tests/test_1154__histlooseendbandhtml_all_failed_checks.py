@@ -12,8 +12,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 HISTORY_JS = (REPO_ROOT / "apps" / "dashboard" / "static" / "src" / "sprint-board" / "history.js").read_text(encoding="utf-8")
 PROJECT_HTML = (REPO_ROOT / "apps" / "dashboard" / "static" / "project.html").read_text(encoding="utf-8")

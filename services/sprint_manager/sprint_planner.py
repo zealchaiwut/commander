@@ -129,9 +129,10 @@ def dag_order(tickets: list[PlanTicket]) -> list[PlanTicket]:
 
     Wraps ``services.sprint_manager.dag_builder.build_dag`` over the tickets'
     ``files`` so no ticket appears before a dependency. Within a topological
-    layer the original input order is preserved as the tiebreak, so carry-over
-    tickets (placed first by the selector) stay ahead of newly selected work
-    when no dependency forces otherwise.
+    layer tickets dispatch in ascending issue-number order (smaller/foundational
+    first) — the operator-expected order, and the same order the preview-dag UI
+    shows, so the live run matches the preview instead of running newest-first
+    (GitHub's default selection order).
 
     On a dependency cycle or when the DAG builder is unavailable it degrades to
     the input order unchanged rather than failing the plan.
@@ -144,16 +145,23 @@ def dag_order(tickets: list[PlanTicket]) -> list[PlanTicket]:
         return list(tickets)
 
     by_id = {f"#{t.number}": t for t in tickets}
-    input_index = {f"#{t.number}": i for i, t in enumerate(tickets)}
-    dag_input = [{"id": f"#{t.number}", "files_touched": list(t.files)} for t in tickets]
+    # Order key: carry-over tickets first (AC4 — unfinished work from the prior
+    # sprint keeps priority), then ascending issue number (smaller/foundational
+    # first) — the operator-expected order and what the preview-dag shows for
+    # fresh sprints. Feeding the builder in this order also makes the lower number
+    # own a shared file (dispatch first) instead of GitHub's newest-first default.
+    def _order_key(t) -> tuple:
+        return (not getattr(t, "carry_over", False), t.number)
+    dag_tickets = sorted(tickets, key=_order_key)
+    dag_input = [{"id": f"#{t.number}", "files_touched": list(t.files)} for t in dag_tickets]
     result = build_dag(dag_input)
     if isinstance(result, CycleError):
         return list(tickets)
 
     ordered: list[PlanTicket] = []
     for layer in result.layers:
-        # Stable within-layer order = original selection order (carry-over first).
-        for tid in sorted(layer, key=lambda x: input_index.get(x, 0)):
+        # Within a parallel-safe layer: carry-over first, then ascending number.
+        for tid in sorted(layer, key=lambda x: _order_key(by_id[x])):
             t = by_id.get(tid)
             if t is not None:
                 ordered.append(t)

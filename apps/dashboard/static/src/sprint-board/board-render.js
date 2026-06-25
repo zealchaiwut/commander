@@ -425,6 +425,7 @@ export function _smgmtRender(data) {
     if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl)) continue;
     if (_smgmtFinishedLabels.has(lbl)) continue;
     if ((bySprint[lbl] || []).length >= 1) {
+      // eslint-disable-next-line no-unused-vars
       _smgmtNextUpLabel = lbl;
       break;
     }
@@ -2972,7 +2973,7 @@ export function smgmtPlanningRemove(issueNum, label) {
 }
 
 /** Reorder a ticket within the planning section using keyboard-accessible prompts. */
-export function smgmtPlanningReorder(issueNum, label) {
+export function smgmtPlanningReorder(issueNum, _label) {
   const menu = document.getElementById("smgmt-plan-row-menu");
   if (menu) menu.remove();
   // Reorder: move ticket up/down using the existing drag-drop order API

@@ -190,17 +190,20 @@ def test_ac4_loose_end_band_function_exists():
     assert _fn_exists("_histLooseEndBandHtml"), "_histLooseEndBandHtml function must exist"
 
 
-def test_ac4_loose_end_band_returns_early_after_first_match():
-    """_histLooseEndBandHtml must return after finding the first loose end (not accumulate)."""
+def test_ac4_loose_end_band_handles_sprint_pr_and_stale_labels():
+    """_histLooseEndBandHtml must handle sprint_pr and stale_labels checks.
+
+    Note: issue #1154 changed the single-band design to multi-band; the old
+    early-return / band_count <= 3 assertion no longer applies.
+    """
     body = _fn_body("_histLooseEndBandHtml")
-    # Must have at least one early return so only ONE band is emitted
-    # (not two appended band strings)
-    assert "return" in body, "_histLooseEndBandHtml must return after first match"
+    assert "return" in body, "_histLooseEndBandHtml must have a return statement"
     assert "sprint_pr" in body, "sprint PR unmerged must be a loose-end priority"
-    # The function must not concatenate two separate band HTML strings
+    assert "stale_labels" in body, "stale_labels check must be explicitly handled"
+    # Function must emit at least one hist-loose-end-band template (sprint PR, stale labels, etc.)
     band_count = body.count("hist-loose-end-band")
-    assert band_count <= 3, \
-        f"Should define the band class at most three times (sprint PR, stale labels, branches), got {band_count}"
+    assert band_count >= 3, \
+        f"Should define at least three band templates (sprint PR, stale labels, generic/branches), got {band_count}"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -333,11 +336,20 @@ def test_ac6_partial_list_filters_unmerged():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_ac7_loose_end_band_returns_empty_for_no_loose_end():
-    """_histLooseEndBandHtml must return '' when no loose end exists."""
+    """_histLooseEndBandHtml must return '' when no loose end exists.
+
+    Note: issue #1154 changed the implementation to use an accumulator pattern
+    (bands.join('')); an empty array join produces '' without a literal 'return ""'.
+    """
     body = _fn_body("_histLooseEndBandHtml")
-    # Must have a terminal empty-string return (no loose end → no band)
-    assert "return ''" in body or 'return ""' in body, \
-        "_histLooseEndBandHtml must return '' when no loose end is found"
+    # Either an explicit return '' or a join on an empty array (bands.join('') === '')
+    has_empty_path = (
+        "return ''" in body
+        or 'return ""' in body
+        or ".join(" in body
+    )
+    assert has_empty_path, \
+        "_histLooseEndBandHtml must return '' when no loose end is found (via return '' or empty join)"
 
 
 def test_ac7_what_list_returns_empty_for_locked():

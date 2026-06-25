@@ -40,11 +40,13 @@ def _run_gh(args: list[str]) -> str:
     """Run a ``gh`` command, returning stdout (empty string on any failure)."""
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False
+            ["gh", *args], capture_output=True, text=True, check=False, timeout=30
         )
         if result.returncode != 0:
             return ""
         return result.stdout or ""
+    except subprocess.TimeoutExpired:
+        return ""
     except Exception:
         return ""
 
@@ -62,13 +64,16 @@ def _list_remote_feature_branches(repo: str) -> list[str]:
 
 def _is_merged(repo: str, branch: str, target: str) -> bool:
     """True when ``branch`` is fully contained in ``target`` (0 commits ahead)."""
-    out = _run_gh(["api", f"repos/{repo}/compare/{target}...{branch}", "--jq", ".ahead_by"])
-    out = out.strip()
-    if not out:
-        return False
     try:
-        return int(out) == 0
-    except (TypeError, ValueError):
+        out = _run_gh(["api", f"repos/{repo}/compare/{target}...{branch}", "--jq", ".ahead_by"])
+        out = out.strip()
+        if not out:
+            return False
+        try:
+            return int(out) == 0
+        except (TypeError, ValueError):
+            return False
+    except subprocess.TimeoutExpired:
         return False
 
 
@@ -79,9 +84,11 @@ def _delete_branch(repo: str, branch: str) -> bool:
     try:
         result = subprocess.run(
             ["gh", "api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{branch}"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=30,
         )
         return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
     except Exception:
         return False
 

@@ -337,13 +337,16 @@ def test_ac4_link_in_head_section(page_name: str, page_path: Path):
 
 
 def test_ac5_existing_style_blocks_preserved():
-    """Existing <style> blocks in project.html must still be present after linking tokens.css."""
+    """Inline <style> blocks in project.html must still be present after linking tokens.css.
+
+    Updated by issue #1200: duplicate token declarations were removed from the inline
+    block so tokens.css is the single source of truth. The <style> block still exists
+    (page-specific vars like --sidebar-width remain), but --bg: has moved to tokens.css.
+    """
     html = (STATIC_DIR / "project.html").read_text(encoding="utf-8")
-    # The dark theme :root block has --bg: #0d0d0d — must still exist inline
-    # (tokens.css is additive, not a replacement)
-    assert "--bg:" in html or "--color-bg:" in html, (
-        "project.html must retain its existing inline <style> block — "
-        "linking tokens.css must not remove or replace existing styles"
+    assert "<style>" in html or "<style " in html, (
+        "project.html must retain its inline <style> block — "
+        "it holds page-specific vars and component rules not in tokens.css"
     )
 
 

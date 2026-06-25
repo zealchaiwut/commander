@@ -2,9 +2,6 @@
 import os
 import pytest
 import httpx
-import json
-from pathlib import Path
-
 
 BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
 if not BASE_URL.startswith("http"):

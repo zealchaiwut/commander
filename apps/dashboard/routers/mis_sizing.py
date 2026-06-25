@@ -15,10 +15,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent

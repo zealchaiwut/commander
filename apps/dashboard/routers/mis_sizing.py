@@ -7,12 +7,15 @@ logic is duplicated or rewritten here.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -259,6 +262,7 @@ def rebuild_mis_sizing_history(project: str):
 
     issue_numbers = {c["number"] for c in raw_completed}
     labels_by_num: dict[int, list[str]] = {}
+    labels_fetched = False
     try:
         repo = github_client.get_repo_for_operation(project)
         result = subprocess.run(
@@ -273,8 +277,16 @@ def rebuild_mis_sizing_history(project: str):
                     labels_by_num[n] = [
                         lbl["name"] for lbl in iss.get("labels", [])
                     ]
-    except Exception:
-        pass
+            if labels_by_num:
+                labels_fetched = True
+        else:
+            logger.warning(
+                "gh issue list exited with code %d: %s",
+                result.returncode,
+                result.stderr.strip(),
+            )
+    except Exception as exc:
+        logger.warning("GitHub label fetch failed: %s", exc)
 
     for rec in raw_completed:
         rec["labels"] = labels_by_num.get(rec["number"], [])
@@ -289,6 +301,7 @@ def rebuild_mis_sizing_history(project: str):
         "labels_with_history": labels_count,
         "total_events": total_events,
         "last_rebuilt": history.get("last_rebuilt"),
+        "labels_fetched": labels_fetched,
     }
 
 

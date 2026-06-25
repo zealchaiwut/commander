@@ -6328,7 +6328,7 @@ Proceed anyway?`)) {
       const sizeLabel = s.size ? escHtml(s.size) : "?";
       const minsLabel = s.estimated_minutes ? `${s.estimated_minutes} min` : "";
       const estimate = [sizeLabel, minsLabel].filter(Boolean).join(" \xB7 ");
-      const splitBtn = typeof smgmtSplitOpen === "function" ? `<button class="pf-xl-split-btn" onclick="smgmtSplitOpen(${s.issue_number}, '${escHtml(label || "")}')" title="Open Split flow for #${s.issue_number}">Split</button>` : `<a class="pf-xl-split-btn" href="https://github.com/${_smgmtRepo()}/issues/${s.issue_number}" target="_blank" rel="noopener">Split</a>`;
+      const splitBtn = `<button class="pf-xl-split-btn" onclick="_smgmtSplitXlOpen('${escHtml(label || "")}', [${s.issue_number}])" title="Split #${s.issue_number} into smaller tickets (BA proposes, you confirm)">Split</button>`;
       return `<div class="pf-xl-item" id="pf-xl-item-${s.issue_number}">
       <div class="pf-xl-item-header">
         <span class="pf-xl-item-num">#${s.issue_number}</span>

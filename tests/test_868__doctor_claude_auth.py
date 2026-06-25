@@ -9,11 +9,8 @@ Acceptance criteria:
 6. Unauthenticated install (binary present, no token) causes FAIL
 """
 import subprocess
-import sys
 from pathlib import Path
 from importlib.util import spec_from_file_location, module_from_spec
-
-import pytest
 
 
 # Resolve repo root for import access to scripts.

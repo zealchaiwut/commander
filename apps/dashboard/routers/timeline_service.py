@@ -331,7 +331,9 @@ def get_timeline(sprint_label: str, project: str) -> dict:
 
     # Build per-issue data
     issue_list = []
-    running_remaining_min: Optional[float] = None
+    # Serial: sum of all running issues' remaining (conservative — both must finish).
+    # Pipeline: max of all running issues' remaining (they overlap).
+    running_remaining: float = 0.0
     queued_estimates: list[float] = []
 
     for gh_iss in github_issues:
@@ -358,10 +360,10 @@ def get_timeline(sprint_label: str, project: str) -> dict:
             elapsed = _elapsed_for_issue(issue_runs, now)
             remaining = max(0.0, est - elapsed)
             entry["estimated_remaining"] = remaining
-            if running_remaining_min is None:
-                running_remaining_min = remaining
+            if pipeline_mode:
+                running_remaining = max(running_remaining, remaining)
             else:
-                running_remaining_min = max(running_remaining_min, remaining)
+                running_remaining += remaining
         elif status == "queued":
             queued_estimates.append(est)
 
@@ -377,7 +379,7 @@ def get_timeline(sprint_label: str, project: str) -> dict:
     wrap_up["total"] = doc_min + rev_min
 
     # Projected finish
-    remaining_running = running_remaining_min or 0.0
+    remaining_running = running_remaining
 
     if pipeline_mode:
         queue_time = _pipeline_queue_time(queued_estimates)

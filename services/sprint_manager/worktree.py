@@ -334,8 +334,16 @@ def _worktree_hygiene(
     just-built branch.
     """
     effective_root = repo_root or REPO_ROOT
+    worktree = Path(worktree)
     sys.stdout.write(str(f"  [hygiene] Pre-dispatch hygiene for ticket #{ticket_id} in {worktree}") + "\n")
     sys.stdout.flush()
+
+    if not worktree.is_dir():
+        sys.stdout.write(str(
+            f"  [hygiene] ERROR: worktree path missing ({worktree}) — cannot run hygiene"
+        ) + "\n")
+        sys.stdout.flush()
+        return None, None, "worktree-missing"
 
     # 1 — fetch
     sys.stdout.write(str("  [hygiene] git fetch origin ...") + "\n")

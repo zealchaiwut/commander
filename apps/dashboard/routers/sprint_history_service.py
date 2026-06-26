@@ -1274,15 +1274,25 @@ def _resolve_sprint_project(
     """Infer owner/repo when the sprints row was ingested without project (child reruns)."""
     declared_clean = (declared or "").strip()
     scope = (scope_project or "").strip()
+    # Never reassign a row already owned by another project (perf-coach sprint-77
+    # must not appear in commander History because commander has a同名 plan file).
+    if declared_clean and scope and declared_clean != scope:
+        return ""
     if declared_clean and (not scope or declared_clean == scope):
         return declared_clean
+
+    def _project_in_scope(proj: str) -> bool:
+        if not proj:
+            return False
+        return not scope or proj == scope
+
     plan = _read_plan_file(sprints_dirs, label) or {}
     proj = (plan.get("project") or "").strip()
-    if proj:
+    if _project_in_scope(proj):
         return proj
     state = _read_state_file(sprints_dirs, label) or {}
     proj = (state.get("project") or "").strip()
-    if proj:
+    if _project_in_scope(proj):
         return proj
     parent = (plan.get("parent") or "").strip()
     if parent:
@@ -1342,9 +1352,12 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         candidates.append(_record_from_files(label, search_dirs))
 
     if project:
+        scoped: list[dict] = []
         for rec in candidates:
             cur = (rec.get("project") or "").strip()
-            if not cur or cur != project:
+            if cur and cur != project:
+                continue  # hard exclude — never resolve across projects
+            if not cur:
                 resolved = _resolve_sprint_project(
                     rec.get("label") or "",
                     cur,
@@ -1354,7 +1367,9 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
                 )
                 if resolved:
                     rec["project"] = resolved
-        candidates = [r for r in candidates if r.get("project") == project]
+            if rec.get("project") == project:
+                scoped.append(rec)
+        candidates = scoped
 
     by_key: dict[tuple[str, str], dict] = {}
     for rec in candidates:

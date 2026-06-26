@@ -54,3 +54,39 @@ def test_closed_tail_never_includes_running():
     labels = {r["label"] for r in h._filter_active_records(recs, keep_completed=2)}
     assert "sprint-1" not in labels
     assert {"sprint-2", "sprint-3"} <= labels
+
+
+def test_resolve_sprint_project_never_cross_assigns():
+    scope = "zealchaiwut/commander"
+    resolved = h._resolve_sprint_project(
+        "sprint-77",
+        "zealchaiwut/perf-coach",
+        [],
+        h._db(),
+        scope_project=scope,
+    )
+    assert resolved == ""
+
+
+def test_get_sprint_history_excludes_other_project_rows(tmp_path, monkeypatch):
+    import db as db_mod  # noqa: E402
+
+    db_mod.init_db()
+    with db_mod.get_conn() as conn:
+        db_mod._create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            "INSERT INTO sprints (label, project, state, created_at) VALUES (?, ?, ?, ?)",
+            ("sprint-77", "zealchaiwut/perf-coach", "needs_rework", "2026-06-01T00:00:00Z"),
+        )
+        conn.commit()
+
+    sprint_dir = tmp_path / "sprints"
+    sprint_dir.mkdir()
+    (sprint_dir / "sprint-77-plan.json").write_text(
+        '{"project": "zealchaiwut/commander", "state": "needs_rework"}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(h, "_resolve_sprints_search_dirs", lambda _p: [sprint_dir])
+    result = h.get_sprint_history(project="zealchaiwut/commander", active_only=True)
+    assert "sprint-77" not in {r["label"] for r in result["sprints"]}

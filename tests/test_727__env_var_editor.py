@@ -150,7 +150,8 @@ def client_ctx(tmp_path):
 
     for mod in list(sys.modules.keys()):
         in_scope = ("server", "projects", "env_file", "routers")
-        if mod in in_scope or mod.startswith("services.") or mod.startswith("routers."):
+        if (mod in in_scope or mod.startswith("services.")
+                or mod.startswith("routers.")):
             sys.modules.pop(mod, None)
 
     import server as srv

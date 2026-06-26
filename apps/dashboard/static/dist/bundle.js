@@ -649,6 +649,26 @@
   }
 
   // apps/dashboard/static/src/shell/tabs.js
+  var _GROUP_CHILDREN = {
+    manage: ["logs", "deploy", "metrics", "bulk-create"],
+    planning: [
+      "timeline",
+      "compare",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor"
+    ]
+  };
+  function computeRovingTabindex(tab, onGlobalSettings) {
+    return Object.fromEntries(
+      ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+        const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
+        return [t, ownsTab ? 0 : -1];
+      })
+    );
+  }
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -686,8 +706,29 @@
     const subTabsRow = document.querySelector(".sub-tabs-row");
     if (subTabsRow)
       subTabsRow.classList.toggle("hidden", onGlobalSettings);
-    const _topLevelTabs = ["sprint-mgmt", "tickets", "manage", "planning", "settings"];
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings"].forEach((t) => {
+    const _topLevelTabs = [
+      "sprint-mgmt",
+      "tickets",
+      "manage",
+      "planning",
+      "settings"
+    ];
+    [
+      "sprint-mgmt",
+      "tickets",
+      "logs",
+      "deploy",
+      "bulk-create",
+      "timeline",
+      "compare",
+      "metrics",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor",
+      "settings"
+    ].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
       if (!btn)
         return;
@@ -695,13 +736,13 @@
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-selected", String(isActive));
     });
+    const _rovingMap = computeRovingTabindex(tab, onGlobalSettings);
     _topLevelTabs.forEach((t) => {
       const suffix = t === "manage" ? "manage-trigger" : t === "planning" ? "planning-trigger" : t;
       const btn = document.getElementById("stab-" + suffix);
       if (!btn)
         return;
-      const isTopActive = !onGlobalSettings && (t === tab || btn.classList.contains("active"));
-      btn.tabIndex = isTopActive ? 0 : -1;
+      btn.tabIndex = _rovingMap[t];
     });
     closeAllStabDropdowns();
     ["analytics", "more", "planning", "manage"].forEach((groupName) => {
@@ -712,7 +753,23 @@
       if (trigger)
         trigger.classList.toggle("active", !!group.querySelector(".stab.active"));
     });
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings", "global-settings"].forEach((t) => {
+    [
+      "sprint-mgmt",
+      "tickets",
+      "logs",
+      "deploy",
+      "bulk-create",
+      "timeline",
+      "compare",
+      "metrics",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor",
+      "settings",
+      "global-settings"
+    ].forEach((t) => {
       const pane = document.getElementById("pane-" + t);
       if (pane)
         pane.classList.toggle("active", t === tab);
@@ -796,7 +853,18 @@
   var _subTabsEl = document.getElementById("sub-tabs");
   if (_subTabsEl) {
     _subTabsEl.addEventListener("keydown", function(e) {
-      const enabledTabs = ["sprint-mgmt", "tickets", "manage", "logs", "deploy", "metrics", "planning", "roadmap", "advisor", "settings"];
+      const enabledTabs = [
+        "sprint-mgmt",
+        "tickets",
+        "manage",
+        "logs",
+        "deploy",
+        "metrics",
+        "planning",
+        "roadmap",
+        "advisor",
+        "settings"
+      ];
       const focused = document.activeElement;
       const currentId = focused ? focused.id.replace("stab-", "") : null;
       const currentIdx = enabledTabs.indexOf(currentId);

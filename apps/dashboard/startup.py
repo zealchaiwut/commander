@@ -6677,25 +6677,91 @@ def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> st
         return ""
 
 
+def _sprint_base_number(label: str) -> int | None:
+    """Parse the integer N from ``sprint-N`` or ``sprint-N.M``."""
+    if not _SPRINT_LABEL_RE.match(label or ""):
+        return None
+    try:
+        return int((label or "").split("-", 1)[1].split(".")[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def _sprint_row_matches_project(row_project: str | None, repo: str | None) -> bool:
+    """True when a DB/history row belongs to ``repo`` (or is legacy unscoped)."""
+    proj = (row_project or "").strip()
+    want = (repo or "").strip()
+    if not want:
+        return True
+    return not proj or proj == want
+
+
+def _used_sprint_numbers(repo: str | None) -> set[int]:
+    """Base sprint numbers already recorded for this project.
+
+    GitHub labels alone are insufficient: finished sprints often drop their
+    ``sprint-N`` label, and an old sprint-99 ledger row must block reusing 99
+    even when the label is gone (issue: History showed ancient #1/#11 tickets
+    beside a new sprint-99 board card).
+    """
+    used: set[int] = set()
+    for n in github_client.list_sprints(repo_name=repo) or []:
+        try:
+            used.add(int(n))
+        except (TypeError, ValueError):
+            pass
+    for lbl in _finished_sprint_summaries(repo):
+        base = _sprint_base_number(lbl)
+        if base is not None:
+            used.add(base)
+    try:
+        for row in db.list_sprints_lifecycle():
+            if not _sprint_row_matches_project(row.get("project"), repo):
+                continue
+            base = _sprint_base_number(row.get("label") or "")
+            if base is not None:
+                used.add(base)
+        for rec in db.list_sprint_history():
+            if not _sprint_row_matches_project(rec.get("project"), repo):
+                continue
+            base = _sprint_base_number(rec.get("label") or "")
+            if base is not None:
+                used.add(base)
+    except Exception:
+        pass
+    if repo:
+        try:
+            project_root = _project_root_path(repo)
+            sprints_dir = _commander_dir(project_root) / "sprints"
+            if sprints_dir.is_dir():
+                from routers import sprint_history_service as shs  # noqa: PLC0415
+                for lbl in shs._discover_file_labels(sprints_dir):
+                    base = _sprint_base_number(lbl)
+                    if base is not None:
+                        used.add(base)
+        except Exception:
+            pass
+    return used
+
+
 def _next_new_sprint_number(repo: str | None) -> int:
     """Next sprint number for a brand-new sprint — the SAME value the board's
     "New sprint (Sprint N)" option shows.
 
-    Must take the max over BOTH live sprint labels AND finished-sprint summary
-    numbers: a sprint's `sprint-N` label is often deleted once it finishes, so
-    counting labels alone resets the next number back to 1 (issue: bulk-create
-    "NEW" said 54 but created sprint-1). The finished-summary issues preserve
-    the real high-water mark cross-machine.
+    High-water mark over live labels, finished summaries, lifecycle DB,
+    sprint_history snapshots, and on-disk sprint artifacts for the project.
     """
-    nums: list[int] = list(github_client.list_sprints(repo_name=repo) or [])
-    for lbl in _finished_sprint_summaries(repo):
-        if _SPRINT_LABEL_RE.match(lbl):
-            try:
-                # lbl is "sprint-N" or "sprint-N.X" — take the base number N.
-                nums.append(int(lbl.split("-", 1)[1].split(".")[0]))
-            except (IndexError, ValueError):
-                pass
-    return (max(nums) if nums else 0) + 1
+    used = _used_sprint_numbers(repo)
+    return (max(used) if used else 0) + 1
+
+
+def _sprint_number_reserved(repo: str | None, sprint_number: int) -> bool:
+    """Return True when sprint_number is already recorded for this project."""
+    try:
+        n = int(sprint_number)
+    except (TypeError, ValueError):
+        return True
+    return n in _used_sprint_numbers(repo)
 
 
 def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:

@@ -485,13 +485,13 @@ export async function _gcConfirm() {
   errEl.classList.add('hidden');
 
   try {
-    // Step 1: create the sprint label (409 = already exists, safe to continue)
+    // Step 1: create the sprint label
     const createRes = await fetch('/api/sprints/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project: repo, sprint_number: sprintNum }),
     });
-    if (!createRes.ok && createRes.status !== 409) {
+    if (!createRes.ok) {
       const d = await createRes.json().catch(() => ({}));
       throw new Error(d.detail || 'HTTP ' + createRes.status);
     }

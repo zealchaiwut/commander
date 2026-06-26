@@ -21,7 +21,7 @@ from routers import sprint_history_service as h  # noqa: E402
 
 def test_filter_active_keeps_actionable_plus_recent_completed():
     recs = [
-        {"label": "sprint-1", "lifecycle_state": "running", "_sort_key": "2026-06-01"},
+        {"label": "sprint-1", "lifecycle_state": "draft", "_sort_key": "2026-06-01"},
         {"label": "sprint-2", "lifecycle_state": "needs_rework", "_sort_key": "2026-06-02"},
         {"label": "sprint-3", "lifecycle_state": "completed", "_sort_key": "2026-06-03"},
         {"label": "sprint-4", "lifecycle_state": "completed", "_sort_key": "2026-06-04"},
@@ -50,6 +50,24 @@ def test_title_backfill_fills_blanks_only(tmp_path):
     by = {i["ticket_id"]: i for i in rec["issues"]}
     assert by[1247].get("title") == "Backfilled"   # blank filled from mirror
     assert by[1248].get("title") == "keep me"       # existing title preserved
+
+
+def test_title_backfill_uses_per_ticket_mirror_lookup(tmp_path, monkeypatch):
+    rec = {
+        "label": "sprint-83", "project": "zealchaiwut/perf-coach",
+        "lifecycle_state": "ready_to_merge",
+        "issues": [{"ticket_id": 910, "state": "merged", "title": ""}],
+    }
+
+    class FakeDb:
+        def get_mirrored_issue(self, repo, num):
+            assert repo == "zealchaiwut/perf-coach"
+            assert num == 910
+            return {"number": 910, "title": "Mirror title for 910"}
+
+    monkeypatch.setattr(h, "_db", lambda: FakeDb())
+    h._finalize_issues([rec], tmp_path, title_map={})
+    assert rec["issues"][0]["title"] == "Mirror title for 910"
 
 
 def test_finalize_records_wrapper_still_runs_both_passes(tmp_path):

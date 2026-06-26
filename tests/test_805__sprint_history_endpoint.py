@@ -531,5 +531,6 @@ def test_child_sprint_with_empty_project_inferred_from_parent(fresh_db, tmp_path
     labels = [s["label"] for s in result["sprints"]]
     assert "sprint-72.2" in labels
     child = _by_label(result, "sprint-72.2")
-    assert child["lifecycle_state"] == "needs_rework"
+    # Single merged ticket clears stale needs_rework → ready_to_merge (false-failure promotion)
+    assert child["lifecycle_state"] == "ready_to_merge"
     assert len(child.get("issues") or []) >= 1

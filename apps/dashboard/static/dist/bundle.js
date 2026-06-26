@@ -7528,7 +7528,7 @@ ${data.errors.join("\n")}`);
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: repo, sprint_number: sprintNum })
       });
-      if (!createRes.ok && createRes.status !== 409) {
+      if (!createRes.ok) {
         const d = await createRes.json().catch(() => ({}));
         throw new Error(d.detail || "HTTP " + createRes.status);
       }

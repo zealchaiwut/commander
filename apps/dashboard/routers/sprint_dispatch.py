@@ -569,21 +569,10 @@ def get_sprint_management_issues(repo: str):
     # the nav pill uses (cross-machine).
     finished_sprints = sorted(finished_set)
 
-    # Placeholder/next sprint = max existing + 1 (not the lowest free number — a
-    # deleted early label must not reset the next sprint back to 1). The max is
-    # taken over both sprint labels AND finished-summary numbers, so it stays
-    # correct even if a finished sprint's label was later removed.
-    _max_num = 0
-    for n in sprints:
-        try:
-            _max_num = max(_max_num, int(n))
-        except (TypeError, ValueError):
-            pass
-    for lbl in finished_map:
-        m = sprint_label_re.match(lbl)
-        if m:
-            _max_num = max(_max_num, int(m.group(1).split(".")[0]))
-    placeholder_sprint = _max_num + 1
+    # Placeholder/next sprint = high-water mark + 1 over labels, finished
+    # summaries, lifecycle DB, sprint_history, and local artifacts — not GitHub
+    # labels alone (a deleted sprint-99 ledger row must not allow reusing 99).
+    placeholder_sprint = _server()._next_new_sprint_number(repo)
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
 

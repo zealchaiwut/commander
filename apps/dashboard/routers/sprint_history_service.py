@@ -1077,10 +1077,13 @@ def _resolve_sprint_project(
     declared: str,
     sprints_dirs: Path | list[Path],
     db_module,
+    scope_project: str | None = None,
 ) -> str:
     """Infer owner/repo when the sprints row was ingested without project (child reruns)."""
-    if (declared or "").strip():
-        return declared.strip()
+    declared_clean = (declared or "").strip()
+    scope = (scope_project or "").strip()
+    if declared_clean and (not scope or declared_clean == scope):
+        return declared_clean
     plan = _read_plan_file(sprints_dirs, label) or {}
     proj = (plan.get("project") or "").strip()
     if proj:
@@ -1091,14 +1094,14 @@ def _resolve_sprint_project(
         return proj
     parent = (plan.get("parent") or "").strip()
     if parent:
-        prow = db_module.get_sprint(parent)
+        prow = db_module.get_sprint(parent, project=scope_project)
         if prow and (prow.get("project") or "").strip():
             return prow["project"].strip()
-    row = db_module.get_sprint(label)
+    row = db_module.get_sprint(label, project=scope_project)
     if row:
         parent = (row.get("parent_label") or "").strip()
         if parent:
-            prow = db_module.get_sprint(parent)
+            prow = db_module.get_sprint(parent, project=scope_project)
             if prow and (prow.get("project") or "").strip():
                 return prow["project"].strip()
     return ""
@@ -1123,53 +1126,63 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     db = _db()
 
     records: list[dict] = []
-    # Dedup by (label, project), NOT label alone: sprint labels are unique only
-    # per repo, so a label-only key let one project's snapshot shadow another's
-    # sprint. E.g. commander's deleted `sprint-66` snapshot claimed the label and
-    # skipped perf-coach's live `sprint-66` lifecycle row, which then got dropped
-    # by the project filter — making perf-coach's sprint invisible in History.
-    seen: set[tuple[str, str]] = set()
+    candidates: list[dict] = []
+    db_backed_labels: set[str] = set()
 
     def _key(label, proj) -> tuple[str, str]:
         return (label or "", (proj or "").strip())
 
-    # 1) sprint_history snapshots (deleted etc.) — authoritative, take first.
+    def _record_recency(rec: dict) -> str:
+        for field in ("_sort_key", "ended_at", "started_at", "created_at"):
+            val = rec.get(field)
+            if val:
+                return str(val)
+        return ""
+
+    def _merge_history_record(existing: dict | None, new: dict) -> dict:
+        if existing is None:
+            return new
+        if _record_recency(new) >= _record_recency(existing):
+            return new
+        return existing
+
     for rec in db.list_sprint_history():
-        key = _key(rec.get("label"), rec.get("project"))
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_record_from_history(rec))
+        lbl = rec.get("label") or ""
+        if lbl:
+            db_backed_labels.add(lbl)
+        candidates.append(_record_from_history(rec))
 
-    # 2) sprints lifecycle rows not already represented by a snapshot.
     for row in db.list_sprints_lifecycle():
-        key = _key(row.get("label"), row.get("project"))
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_record_from_lifecycle(row, search_dirs))
+        lbl = row.get("label") or ""
+        if lbl:
+            db_backed_labels.add(lbl)
+        candidates.append(_record_from_lifecycle(row, search_dirs))
 
-    # 3) file-only sprints with no DB row at all. search_dirs are scoped to
-    # `project`, so attribute file labels to it; in the all-projects view (no
-    # project) skip a label already represented for any project.
-    _seen_any_label = {k[0] for k in seen}
     for label in _discover_file_labels(search_dirs):
-        key = _key(label, project)
-        if key in seen or (not project and label in _seen_any_label):
+        if label in db_backed_labels:
             continue
-        seen.add(key)
-        records.append(_record_from_files(label, search_dirs))
+        candidates.append(_record_from_files(label, search_dirs))
 
     if project:
-        for rec in records:
-            if not (rec.get("project") or "").strip():
-                rec["project"] = _resolve_sprint_project(
+        for rec in candidates:
+            cur = (rec.get("project") or "").strip()
+            if not cur or cur != project:
+                resolved = _resolve_sprint_project(
                     rec.get("label") or "",
-                    rec.get("project") or "",
+                    cur,
                     search_dirs,
                     db,
+                    scope_project=project,
                 )
-        records = [r for r in records if r.get("project") == project]
+                if resolved:
+                    rec["project"] = resolved
+        candidates = [r for r in candidates if r.get("project") == project]
+
+    by_key: dict[tuple[str, str], dict] = {}
+    for rec in candidates:
+        key = _key(rec.get("label"), rec.get("project"))
+        by_key[key] = _merge_history_record(by_key.get(key), rec)
+    records = list(by_key.values())
 
     # Lineage rollup needs every record (a parent's state depends on its
     # children), so run it on the full set. The expensive per-record issue

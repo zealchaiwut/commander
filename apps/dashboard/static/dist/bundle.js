@@ -2383,18 +2383,33 @@ Replace the existing draft (${data.existing_label})?`
       return st !== "completed" && st !== "deleted";
     });
   }
+  function _histChildRunFinished(s) {
+    const st = (s.lifecycle_state || "").toLowerCase();
+    return [
+      "completed",
+      "deleted",
+      "ready_to_merge",
+      "needs_rework",
+      "failed",
+      "cancelled",
+      "partial_finished"
+    ].includes(st);
+  }
   function _histChildSprintsAllCompleted(group) {
     const children = group.children || [];
     if (!children.length)
       return false;
-    const settled = /* @__PURE__ */ new Set(["completed", "deleted", "ready_to_merge"]);
     return children.every((s, i) => {
-      if (settled.has((s.lifecycle_state || "").toLowerCase()))
+      if (_histChildRunFinished(s))
         return true;
-      return children.slice(i + 1).some(
-        (later) => settled.has((later.lifecycle_state || "").toLowerCase())
-      );
+      return children.slice(i + 1).some((later) => _histChildRunFinished(later));
     });
+  }
+  function _histChildSprintsStillRunning(group) {
+    const active = /* @__PURE__ */ new Set(["running", "draft", "planned"]);
+    return (group.children || []).some(
+      (s) => active.has((s.lifecycle_state || "").toLowerCase())
+    );
   }
   function _histBulkCompleteBtnHtml(group) {
     if (!group.children?.length || !group.baseSprint)
@@ -2402,8 +2417,13 @@ Replace the existing draft (${data.existing_label})?`
     if (!_histGroupNeedsBulkComplete(group))
       return "";
     const lbl = escHtml(group.baseLabel || "");
-    const childrenReady = _histChildSprintsAllCompleted(group);
-    if (!childrenReady) {
+    if (_histChildSprintsStillRunning(group)) {
+      return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Wait for child sprint runs to finish before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+    }
+    if (!_histChildSprintsAllCompleted(group)) {
       return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
             title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete

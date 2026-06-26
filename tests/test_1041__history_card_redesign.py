@@ -321,19 +321,16 @@ def test_ac5_issue_list_html_not_called_in_card_body():
 # AC6 — Partial "Unfinished N of M" list
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_ac6_what_list_for_partial_uses_unfinished_text():
-    """_histWhatListHtml must emit 'Unfinished' heading for partial sprints."""
-    body = _fn_body("_histWhatListHtml")
-    assert "Unfinished" in body or "unfinished" in body.lower(), \
-        "_histWhatListHtml must include 'Unfinished N of M' for partial sprints"
-
-
-def test_ac6_partial_list_filters_unmerged():
-    """The partial branch in _histWhatListHtml must filter issues to unmerged ones."""
-    body = _fn_body("_histWhatListHtml")
-    # Must filter by state !== 'merged'
-    assert "merged" in body.lower(), \
-        "_histWhatListHtml partial branch must filter out merged tickets"
+def test_partial_sprint_shows_hist_irow_not_iss_list():
+    """needs_rework/partial_finished cards must use hist-irow outcome, not iss-list."""
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "_histIssuesForDisplay" in shows, \
+        "done summary must not hide when lineage tickets are unfinished"
+    what = _fn_body("_histWhatListHtml")
+    assert "iss-list" not in what, "what-list must not emit legacy iss-list rows"
+    assert "Unfinished" in what, "partial branch keeps the unfinished heading"
+    assert "_histIssuesForDisplay" in what, \
+        "partial branch must count lineage-owned tickets only"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

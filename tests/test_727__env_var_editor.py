@@ -59,14 +59,22 @@ def test_parse_returns_pairs_in_file_order():
 
 
 def test_read_env_vars_strips_inline_comments(tmp_path):
-    """AC-GET: values are returned clean (inline comments stripped)."""
+    """AC-GET: values are returned clean.
+
+    Behaviour after issue #750:
+    - Quoted values have their surrounding quotes stripped; inner
+      content is returned.
+    - Unquoted values are returned verbatim (the full raw value, including any
+      trailing ' # ...' sequence, is preserved so legitimate values such as
+      'secret #1' are not silently truncated).
+    """
     ef = _env_file_module()
     env = tmp_path / ".env"
     env.write_text("FOO=bar  # inline note\nQUOTED=\"a b\" # c\n")
     got = ef.read_env_vars(env)
     assert got == [
-        {"key": "FOO", "value": "bar"},
-        {"key": "QUOTED", "value": '"a b"'},
+        {"key": "FOO", "value": "bar  # inline note"},  # full value
+        {"key": "QUOTED", "value": "a b"},  # outer quotes stripped
     ]
 
 
@@ -89,12 +97,15 @@ def test_write_preserves_order_and_inline_comment_when_unchanged(tmp_path):
         "THIRD=three\n"
     )
     # FIRST unchanged, SECOND changed, THIRD unchanged.
-    ef.write_env_vars(env, [("FIRST", "one"), ("SECOND", "TWO"), ("THIRD", "three")])
+    ef.write_env_vars(
+        env,
+        [("FIRST", "one"), ("SECOND", "TWO"), ("THIRD", "three")],
+    )
     out = env.read_text()
     lines = out.splitlines()
     assert lines[0] == "# header comment"          # standalone comment kept
-    assert lines[1] == "FIRST=one  # keep me"       # unchanged → verbatim w/ comment
-    assert lines[2] == "SECOND=TWO"                  # changed → rewritten in place
+    assert lines[1] == "FIRST=one  # keep me"   # unchanged: verbatim
+    assert lines[2] == "SECOND=TWO"              # changed: rewritten
     assert lines[3] == ""                            # blank line preserved
     assert lines[4] == "THIRD=three"                 # position preserved
 
@@ -124,10 +135,12 @@ def test_write_deletes_removed_keys(tmp_path):
 
 @pytest.fixture()
 def client_ctx(tmp_path):
-    """Yield (client, srv, projects_module, env_dir) with a real .env on disk."""
+    """Yield (client, srv, projects_module, env_dir) with .env on disk."""
     env_dir = tmp_path / "prd"
     env_dir.mkdir()
-    (env_dir / ".env").write_text("DB_HOST=localhost\nDB_PORT=5432  # default\n")
+    (env_dir / ".env").write_text(
+        "DB_HOST=localhost\nDB_PORT=5432  # default\n"
+    )
 
     projects_file = tmp_path / "projects.json"
     projects_file.write_text(json.dumps([
@@ -136,7 +149,8 @@ def client_ctx(tmp_path):
     ]))
 
     for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects", "env_file") or mod.startswith("services."):
+        in_scope = ("server", "projects", "env_file", "routers")
+        if mod in in_scope or mod.startswith("services.") or mod.startswith("routers."):
             sys.modules.pop(mod, None)
 
     import server as srv
@@ -150,14 +164,20 @@ def client_ctx(tmp_path):
 
 
 def test_get_env_vars_returns_pairs_in_order(client_ctx):
-    """AC-GET: GET endpoint reads the .env and returns pairs in file order."""
+    """AC-GET: GET endpoint reads the .env and returns pairs in file order.
+
+    After issue #750: unquoted values are returned verbatim so
+    'DB_PORT=5432  # default' yields '5432  # default', not '5432'.
+    The editor's change-detection still treats
+    them as equal when the user submits '5432' (see _comparison_value).
+    """
     client, _, _, _ = client_ctx
     resp = client.get("/api/projects/test-proj/environments/prd/env-vars")
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["vars"] == [
         {"key": "DB_HOST", "value": "localhost"},
-        {"key": "DB_PORT", "value": "5432"},
+        {"key": "DB_PORT", "value": "5432  # default"},  # full value
     ]
 
 
@@ -253,7 +273,7 @@ def _html():
 
 
 def test_env_vars_section_present():
-    """AC-SECTION: an Environment Variables section exists in project settings."""
+    """AC-SECTION: an Environment Variables section exists in settings."""
     html = _html()
     assert "Environment Variables" in html
     assert "ps-envvars-card" in html or "ps-env-vars-card" in html
@@ -313,6 +333,6 @@ def test_cancel_button_present():
 
 
 def test_client_empty_key_validation_present():
-    """AC-VALIDATE: client blocks Save on an empty KEY with a validation hint."""
+    """AC-VALIDATE: client blocks Save on empty KEY (validation hint)."""
     html = _html()
     assert "envvar-key-error" in html or "ps-envvar-error" in html

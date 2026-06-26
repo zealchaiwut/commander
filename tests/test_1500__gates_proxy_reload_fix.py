@@ -6,9 +6,8 @@ The primary test suite is in test_1500__gates_proxy_reload_safety.py.
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -42,7 +41,8 @@ class TestLookupInSmRobustness:
         from services.sprint_manager import gates
         import sprint_manager as sm
 
-        lambda_patch = lambda: None  # different qualname than _run_timed
+        def lambda_patch():  # different qualname than _run_timed
+            return None
         original = sm._run_timed
         sm._run_timed = lambda_patch
         try:

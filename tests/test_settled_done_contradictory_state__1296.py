@@ -12,7 +12,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 _SERVICE = _REPO / "apps" / "dashboard" / "routers" / "sprint_artifact_service.py"
-_SERVER = _REPO / "apps" / "dashboard" / "server.py"
+_SERVER = _REPO / "apps" / "dashboard" / "startup.py"
 
 
 def _load_compute_summary_counts():

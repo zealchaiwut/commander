@@ -17,12 +17,11 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
 
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from services.sprint_manager.state import IssueState, SprintState
+from services.sprint_manager.state import IssueState, SprintState  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

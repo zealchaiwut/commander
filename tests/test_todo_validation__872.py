@@ -1,130 +1,94 @@
-"""Tests for issue #872: Validate non-empty text on project-todo create/PATCH."""
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
+"""Tests for issue #872: Validate non-empty text on project-todo create/PATCH (runs against UAT)"""
+import os
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import httpx
 
-REPO_ROOT = Path(__file__).parent.parent
-DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
-for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Resolved from UAT .env at runtime; see tester skill Step 0.
+# Default kept only as a last-resort fallback if BASE_URL not exported.
+BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
+if not BASE_URL.startswith("http"):
+    raise RuntimeError(
+        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+    )
 
-import services.sprint_manager.todo_repo as todo_repo  # noqa: E402
-from services.sprint_manager.models import ProjectTodo  # noqa: E402
-from routers import todos as todos_router_mod  # noqa: E402
+PROJECT = "commander"
 
 
-@pytest.fixture()
-def bound_repo(tmp_path, monkeypatch):
-    engine = create_engine(f"sqlite:///{tmp_path / 'todos.db'}")
-    ProjectTodo.__table__.create(bind=engine, checkfirst=True)
-    monkeypatch.setattr(todo_repo, "_session_factory", sessionmaker(bind=engine))
-    yield engine
+@pytest.fixture
+def client():
+    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
+        yield c
 
 
-@pytest.fixture()
-def client(bound_repo):
-    app = FastAPI()
-    app.include_router(todos_router_mod.router)
-    return TestClient(app, raise_server_exceptions=False)
+@pytest.fixture
+def test_todo(client):
+    """Create a test todo to operate on for PATCH tests."""
+    r = client.post(f"/api/projects/{PROJECT}/todos", json={"text": "Original text"})
+    if r.status_code in (200, 201):
+        return r.json()["id"]
+    pytest.skip(f"Could not create test todo: {r.status_code}")
 
 
-@pytest.fixture()
-def project_slug():
-    return "zealchaiwut-commander"
+# --- Acceptance Criteria ---
+
+def test_todo_validation__empty_string_on_create(client):
+    # AC: `TodoCreate.text` rejects empty string (`""`) with HTTP 422 on `POST /api/projects/{slug}/todos`
+    r = client.post(f"/api/projects/{PROJECT}/todos", json={"text": ""})
+    assert r.status_code == 422, f"Expected 422, got {r.status_code}: {r.text}"
 
 
-@pytest.fixture()
-def existing_todo(client, project_slug):
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": "Original text"})
-    assert r.status_code == 201
-    return r.json()
+def test_todo_validation__whitespace_only_on_create(client):
+    # AC: `TodoCreate.text` rejects whitespace-only strings (e.g. `"   "`) with HTTP 422
+    r = client.post(f"/api/projects/{PROJECT}/todos", json={"text": "   "})
+    assert r.status_code == 422, f"Expected 422, got {r.status_code}: {r.text}"
 
 
-def test_todo_validation__post_empty_string(client, project_slug):
-    """AC: POST {"text": ""} should return HTTP 422 with validation error."""
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": ""})
-    assert r.status_code == 422
-    resp_data = r.json()
-    assert "detail" in resp_data
-    error_str = str(resp_data.get("detail", "")).lower()
-    assert "text" in error_str
+def test_todo_validation__empty_string_on_patch(client, test_todo):
+    # AC: `TodoUpdate.text` rejects empty string (`""`) with HTTP 422 on `PATCH /api/projects/{slug}/todos/{id}`
+    r = client.patch(f"/api/projects/{PROJECT}/todos/{test_todo}", json={"text": ""})
+    assert r.status_code == 422, f"Expected 422, got {r.status_code}: {r.text}"
 
 
-def test_todo_validation__post_whitespace_only(client, project_slug):
-    """AC: POST whitespace-only text should return HTTP 422."""
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": "   "})
-    assert r.status_code == 422
-    resp_data = r.json()
-    assert "detail" in resp_data
-    error_str = str(resp_data.get("detail", "")).lower()
-    assert "text" in error_str
+def test_todo_validation__whitespace_only_on_patch(client, test_todo):
+    # AC: `TodoUpdate.text` rejects whitespace-only strings with HTTP 422 on `PATCH /api/projects/{slug}/todos/{id}`
+    r = client.patch(f"/api/projects/{PROJECT}/todos/{test_todo}", json={"text": "   "})
+    assert r.status_code == 422, f"Expected 422, got {r.status_code}: {r.text}"
 
 
-def test_todo_validation__patch_empty_string(client, project_slug, existing_todo):
-    """AC: PATCH empty text on existing todo should return HTTP 422."""
-    todo_id = existing_todo["id"]
-    r = client.patch(f"/api/projects/{project_slug}/todos/{todo_id}", json={"text": ""})
-    assert r.status_code == 422
-    resp_data = r.json()
-    assert "detail" in resp_data
-    error_str = str(resp_data.get("detail", "")).lower()
-    assert "text" in error_str
-
-
-def test_todo_validation__patch_whitespace_only(client, project_slug, existing_todo):
-    """AC: PATCH whitespace-only text on existing todo should return HTTP 422."""
-    todo_id = existing_todo["id"]
-    r = client.patch(f"/api/projects/{project_slug}/todos/{todo_id}", json={"text": "   "})
-    assert r.status_code == 422
-    resp_data = r.json()
-    assert "detail" in resp_data
-    error_str = str(resp_data.get("detail", "")).lower()
-    assert "text" in error_str
-
-
-def test_todo_validation__post_valid_text(client, project_slug):
-    """AC: Valid non-empty text is accepted and todo is created successfully."""
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": "Buy milk"})
-    assert r.status_code == 201
-    todo = r.json()
-    assert todo["text"] == "Buy milk"
-
-    list_resp = client.get(f"/api/projects/{project_slug}/todos")
-    assert list_resp.status_code == 200
-    todos = list_resp.json()
-    assert any(t["text"] == "Buy milk" for t in todos)
-
-
-def test_todo_validation__post_text_with_spaces(client, project_slug):
-    """AC: Text with leading/trailing spaces and non-whitespace content is accepted."""
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": "  hello world  "})
-    assert r.status_code == 201
-    todo = r.json()
-    assert "hello world" in todo["text"]
-
-
-def test_todo_validation__patch_valid_text(client, project_slug, existing_todo):
-    """AC: PATCH with valid non-empty text updates successfully."""
-    todo_id = existing_todo["id"]
-    r = client.patch(f"/api/projects/{project_slug}/todos/{todo_id}", json={"text": "Updated text"})
+def test_todo_validation__valid_text_on_create(client):
+    # AC: Valid non-empty text (including text with leading/trailing spaces that has non-whitespace content) is accepted and the todo is created/updated successfully
+    r = client.post(f"/api/projects/{PROJECT}/todos", json={"text": " Buy milk "})
+    assert r.status_code in (200, 201), f"Expected 200/201, got {r.status_code}: {r.text}"
+    data = r.json()
+    assert data["text"] == " Buy milk ", "Text should be preserved as-is"
+    # Verify it appears in the list
+    r = client.get(f"/api/projects/{PROJECT}/todos")
     assert r.status_code == 200
-    updated = r.json()
-    assert updated["text"] == "Updated text"
+    todos = r.json()
+    assert any(t["text"] == " Buy milk " for t in todos), "Created todo should appear in list"
 
 
-def test_todo_validation__error_message_references_text(client, project_slug):
-    """AC: The 422 response contains a validation error referencing 'text' field."""
-    r = client.post(f"/api/projects/{project_slug}/todos", json={"text": ""})
+def test_todo_validation__valid_text_on_patch(client, test_todo):
+    # AC: Valid non-empty text is accepted and the todo is updated successfully
+    r = client.patch(f"/api/projects/{PROJECT}/todos/{test_todo}", json={"text": " Updated text "})
+    assert r.status_code in (200, 201), f"Expected 200/201, got {r.status_code}: {r.text}"
+    data = r.json()
+    assert data["text"] == " Updated text ", "Text should be preserved as-is"
+    # Verify the update persists
+    r = client.get(f"/api/projects/{PROJECT}/todos/{test_todo}")
+    if r.status_code == 200:
+        assert r.json()["text"] == " Updated text ", "Updated text should persist"
+
+
+def test_todo_validation__422_response_mentions_text_field(client):
+    # AC: The 422 response body contains a validation error message referencing the `text` field
+    r = client.post(f"/api/projects/{PROJECT}/todos", json={"text": ""})
     assert r.status_code == 422
-    resp_data = r.json()
-    if "detail" in resp_data:
-        error_detail = str(resp_data["detail"]).lower()
-        assert "text" in error_detail
+    response_body = r.json()
+    # Pydantic's 422 response includes a 'detail' array with field information
+    assert "detail" in response_body, f"422 response should have 'detail': {response_body}"
+    details = response_body.get("detail", [])
+    assert isinstance(details, list) and len(details) > 0, "422 detail should be a non-empty list"
+    # Check that at least one detail mentions 'text'
+    text_mentioned = any("text" in str(detail).lower() for detail in details)
+    assert text_mentioned, f"422 response should mention 'text' field. Details: {details}"

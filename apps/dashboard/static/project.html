@@ -2156,6 +2156,7 @@
     .hist-card.child { margin-left: 0; padding-left: 2px; }
     /* Re-run sub-sprints (.1, .2, …) nest under their base sprint row. */
     .hist-sprint-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     /* Agent legend — shared across all history sprint rows */
     .hist-legend-top {
       display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -2195,7 +2196,6 @@
     }
     .hist-parent-row.settled:not(.expanded):hover { opacity: 1; }
     .hist-parent-row.settled:not(.expanded) .hist-parent-name { color: var(--text-muted); }
-    .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     .hist-parent-body { padding: 4px 14px 8px; }
     .hist-parent-name { font-weight: 700; font-size: 14px; color: var(--text); }

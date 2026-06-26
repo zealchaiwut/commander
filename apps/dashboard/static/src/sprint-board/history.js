@@ -28,7 +28,7 @@ export function _histNeedsActionCount() {
 let _histLedgerData = [];
 globalThis._histLedgerData = _histLedgerData;
 const _histExpanded = new Set();   // labels of currently-expanded cards
-const _histGroupCollapsed = new Set(); // base labels whose child wrap is hidden
+const _histGroupCollapsed = new Set(); // base labels whose parent ticket block is hidden
 let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 // Folding (issue #807): the N most-recent sprints render expanded; older ones
 // collapse into aggregate folds of the same size. _histFoldSize mirrors the
@@ -211,14 +211,69 @@ function _histEstBarMini(s) {
 // Resolve an issue title from the ledger row, falling back to the board's
 // per-sprint ticket cache so History rows show titles even when the ledger
 // (e.g. agent_runs-synthesized rows) carries only the number (hotfix #1).
-function _histIssueTitle(iss, s) {
+function _histIssueTitle(iss, s, titleMap) {
   if (iss.title) return String(iss.title);
+  const tid = iss.ticket_id;
+  if (titleMap && tid != null) {
+    const hit = titleMap.get(tid) || titleMap.get(String(tid));
+    if (hit) return String(hit);
+  }
   try {
     const tickets = (s && s.label && _smgmtBySprint[s.label]) || [];
-    const hit = tickets.find(t => String(t.number) === String(iss.ticket_id));
+    const hit = tickets.find(t => String(t.number) === String(tid));
     if (hit && hit.title) return String(hit.title);
   } catch (_) {}
+  // Lineage fallback: any sibling sprint in the ledger may have the title.
+  try {
+    for (const row of (_histLedgerData || [])) {
+      const hit = (row.issues || []).find(
+        (i) => String(i.ticket_id) === String(tid) && i.title,
+      );
+      if (hit) return String(hit.title);
+    }
+  } catch (_) {}
   return '';
+}
+
+/** Collect issue titles across a lineage group (parent + children). */
+function _histBuildLineageTitleMap(group) {
+  const map = new Map();
+  if (!group) return map;
+  for (const s of _histGroupMembers(group)) {
+    for (const iss of (s.issues || [])) {
+      if (iss.ticket_id != null && iss.title) {
+        map.set(iss.ticket_id, String(iss.title));
+      }
+    }
+  }
+  return map;
+}
+
+/** Ticket ids that appear in any later child sprint (rerun picked them up). */
+function _histLaterSiblingTicketIds(s, group) {
+  if (!group || !s || !_histIsChild(s.label)) return new Set();
+  const sub = _histLabelParts(s.label).sub;
+  const ids = new Set();
+  for (const c of (group.children || [])) {
+    if (_histLabelParts(c.label).sub <= sub) continue;
+    for (const iss of (c.issues || [])) {
+      if (iss.ticket_id != null) ids.add(String(iss.ticket_id));
+    }
+  }
+  return ids;
+}
+
+/** Per-sprint issue rows: hide failures superseded by a later rerun child. */
+export function _histIssuesForDisplay(s, group) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  if (!group) return issues;
+  const laterIds = _histLaterSiblingTicketIds(s, group);
+  if (!laterIds.size) return issues;
+  return issues.filter((iss) => {
+    if (iss.ticket_id == null) return true;
+    if (!laterIds.has(String(iss.ticket_id))) return true;
+    return _histIssueChip(iss).cls === 'merged';
+  });
 }
 
 function _histIssueRowHtml(iss, isChild, s) {
@@ -569,8 +624,10 @@ function _histShouldAutoExpand(s) {
   if (!s || !s.label) return false;
   const st = (s.lifecycle_state || '').toLowerCase();
   if (_histIsLocked(st)) return false;
-  // Completed/partial rows stay collapsed; only actionable states open by default.
-  return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge' || st === 'running';
+  // Actionable + draft lineage children stay open so reruns are reachable.
+  return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge'
+    || st === 'running' || st === 'draft' || st === 'planned'
+    || st === 'partial_finished';
 }
 
 // Base labels whose default group-collapse has already been applied, so a user
@@ -592,14 +649,24 @@ function _histAutoExpandRecent(groups) {
     const baseLbl = g.baseLabel || (g.baseSprint && g.baseSprint.label) || '';
     if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
       _histCollapseDefaultsApplied.add(baseLbl);
-      const st = ((g.baseSprint && g.baseSprint.lifecycle_state) || '').toLowerCase();
-      if (st === 'completed') _histGroupCollapsed.add(baseLbl);
+      const parentSt = ((g.baseSprint && g.baseSprint.lifecycle_state) || '').toLowerCase();
+      const anyChildOpen = children.some((c) => {
+        const cst = (c.lifecycle_state || '').toLowerCase();
+        return cst !== 'completed' && cst !== 'deleted';
+      });
+      // Collapse only the parent's own ticket block when the whole lineage settled.
+      if (parentSt === 'completed' && !anyChildOpen) {
+        _histGroupCollapsed.add(baseLbl);
+      }
     }
     if (i >= _histFoldSize) continue;
     if (children.length) {
-      // Re-run chain: collapse the parent and older children; expand only the
-      // latest child (children are sub-ascending, so the last one) by default.
-      _expand(children[children.length - 1]);
+      // Expand every child that still needs attention (not only the latest).
+      for (const c of children) {
+        if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
+          _expand(c);
+        }
+      }
     } else {
       _expand(g.baseSprint);
     }
@@ -1096,10 +1163,10 @@ function _histFixCountForIssue(issueNum, stats) {
   return (hit.segments || []).filter((seg) => seg.fix_round).length;
 }
 
-function _histDoneIssueRowHtml(iss, s, stats) {
+function _histDoneIssueRowHtml(iss, s, stats, titleMap) {
   const num = iss.ticket_id;
   const id = num != null ? "#" + num : "#?";
-  const titleText = _histIssueTitle(iss, s);
+  const titleText = _histIssueTitle(iss, s, titleMap);
   const repo = _histRepo(s);
   const chip = _histIssueChip(iss);
   const crashed = chip.cls === "crashed";
@@ -1130,11 +1197,12 @@ function _histDoneIssueRowHtml(iss, s, stats) {
   </div>`;
 }
 
-function _histDoneIssuesHtml(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histDoneIssuesHtml(s, group) {
+  const titleMap = group ? _histBuildLineageTitleMap(group) : new Map();
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (!issues.length) return "";
   const stats = _histRunStats[s.label];
-  return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
+  return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats, titleMap)).join("")}</div>`;
 }
 
 /** Agent bar + ticket rows when the sprint has a per-issue run snapshot. */
@@ -1158,9 +1226,11 @@ function _histCardShowsDoneSummary(s) {
   );
 }
 
-function _histCardOutcomeHtml(s) {
-  if (!_histCardShowsDoneSummary(s)) return "";
-  return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+function _histCardOutcomeHtml(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
+  const show = _histCardShowsDoneSummary(s) || issues.length > 0;
+  if (!show) return "";
+  return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
 }
 
 const _histAgentTimeExpanded = new Set();
@@ -1203,16 +1273,16 @@ function _histParentFromLabel(label) {
   return `← from ${display}`;
 }
 
-function _histParentRowHtml(s, bulkBtn, groupExpanded) {
+function _histParentRowHtml(s, bulkBtn, parentBodyExpanded) {
   const display = sprintLabelDisplay(s.label);
   const lbl = escHtml(s.label || "");
-  const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
+  const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
   // Recede a completed group when collapsed, like standalone cards — a group
   // parent (sprint with a rerun child) used a different class and never got the
   // settled grey, so a done group looked active next to greyed siblings.
   const cls = ["hist-parent-row"];
   if ((String(s.lifecycle_state || "").toLowerCase()) === "completed") cls.push("settled");
-  if (groupExpanded) cls.push("expanded");
+  if (parentBodyExpanded) cls.push("expanded");
   return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
     onclick="_histToggleGroup('${lbl}')"
     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
@@ -1224,7 +1294,7 @@ function _histParentRowHtml(s, bulkBtn, groupExpanded) {
   </div>`;
 }
 
-function _histChildCardHtml(s) {
+function _histChildCardHtml(s, group) {
   const expanded = _histExpanded.has(s.label);
   const lbl = escHtml(s.label || "");
   const state = (s.lifecycle_state || "").toLowerCase();
@@ -1250,7 +1320,8 @@ function _histChildCardHtml(s) {
   const body = expanded
     ? `<div class="hist-child-body">
         ${_histLooseEndBandHtml(s)}
-        ${_histCardOutcomeHtml(s)}
+        ${_histWhatListHtml(s)}
+        ${_histCardOutcomeHtml(s, group)}
       </div>`
     : "";
 
@@ -1562,7 +1633,7 @@ function _histCardHtml(s, opts) {
   const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
-      ${_histCardOutcomeHtml(s)}
+      ${_histCardOutcomeHtml(s, null)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ''}
     </div>` : '';
@@ -1711,25 +1782,20 @@ function _histGroupHtml(group) {
   const children = group.children || [];
   if (children.length) {
     const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
-    const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
-    const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
+    const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
+    const groupCls = "hist-sprint-group";
     const parentRow = group.baseSprint
-      ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded)
+      ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded)
       : "";
-    // Render the parent's OWN tickets (the ones it still owns after re-runs
-    // moved some to children) under its row when the group is expanded — a
-    // parent used to show no issue list at all, hiding its completed tickets.
-    const parentOwnIssues = (group.baseSprint && Array.isArray(group.baseSprint.issues))
-      ? group.baseSprint.issues : [];
-    const parentBody = (groupExpanded && parentOwnIssues.length)
-      ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>`
+    const parentBody = parentBodyExpanded && group.baseSprint
+      ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>`
       : "";
-    const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
+    const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
     return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
   if (group.baseSprint) {
     return _histIsChild(group.baseSprint.label)
-      ? _histChildCardHtml(group.baseSprint)
+      ? _histChildCardHtml(group.baseSprint, group)
       : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
   }
   return "";

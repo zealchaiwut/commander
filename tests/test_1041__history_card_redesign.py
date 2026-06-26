@@ -227,7 +227,9 @@ def test_child_group_uses_parent_row_and_child_wrap():
     assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
     assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
     assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
-    assert "hist-sprint-group collapsed" in body, "collapsed groups hide child wrap via CSS"
+    assert "hist-sprint-group collapsed" not in body or "hist-parent-body" in body, (
+        "group collapse must hide parent ticket block only, not child sprints"
+    )
     parent = _fn_body("_histParentRowHtml")
     assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
 
@@ -585,6 +587,27 @@ def test_ac14_what_list_and_issue_list_not_both_called():
     assert has_what, "_histCardHtml must call _histWhatListHtml"
     assert not has_iss, \
         "_histCardHtml must not also call _histIssueListHtml alongside _histWhatListHtml"
+
+
+def test_lineage_superseded_failures_filtered():
+    """Failed tickets retried in a later child must not repeat in earlier runs."""
+    body = _fn_body("_histIssuesForDisplay")
+    assert "_histLaterSiblingTicketIds" in body
+    assert "chip.cls === 'merged'" in body or "cls === 'merged'" in body
+
+
+def test_parent_body_uses_same_outcome_renderer_as_children():
+    """Parent ticket block must use _histCardOutcomeHtml like child cards."""
+    body = _fn_body("_histGroupHtml")
+    assert "_histCardOutcomeHtml(group.baseSprint, group)" in body
+    assert "_histIssueListHtml(group.baseSprint)" not in body
+
+
+def test_lineage_title_map_helper_exists():
+    """Titles must backfill from sibling sprints in the same lineage group."""
+    assert _fn_exists("_histBuildLineageTitleMap")
+    title_fn = _fn_body("_histIssueTitle")
+    assert "_histLedgerData" in title_fn or "titleMap" in title_fn
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -138,6 +138,11 @@ def main():
     else:
         _run("git", "checkout", "--track", f"origin/{target}")
 
+    # Clear staged generated binary files (e.g. codedb.snapshot staged by the
+    # indexer during test runs) — git refuses to merge if staged files would be
+    # overwritten by the merge, even when neither branch tracks the file.
+    _try("git", "reset", "HEAD", "--", "codedb.snapshot")
+
     merge_msg = f"Merge {branch} into {target} (issue #{args.issue})"
     result = subprocess.run(
         ["git", "merge", "--no-ff", f"origin/{branch}", "-m", merge_msg],

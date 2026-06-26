@@ -232,7 +232,16 @@ def test_child_group_uses_parent_row_and_child_wrap():
     assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
 
 
-def test_parent_group_toggle_helper_exists():
+def test_parent_row_includes_reconcile_and_recovery():
+    """Lineage parent rows must expose Reconcile/Complete like child cards."""
+    parent = _fn_body("_histParentRowHtml")
+    assert "_histRecoveryBtnHtml" in parent, \
+        "parent row must include recovery actions (Reconcile / Complete)"
+    recovery = _fn_body("_histRecoveryBtnHtml")
+    assert "smgmtReconcileSprint" in recovery, \
+        "recovery helper must wire the Reconcile button"
+
+
     assert _fn_exists("_histToggleGroup"), "_histToggleGroup must exist for parent collapse"
     parent = _fn_body("_histParentRowHtml")
     assert "_histToggleGroup" in parent

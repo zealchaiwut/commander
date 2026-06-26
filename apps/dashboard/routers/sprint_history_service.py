@@ -304,6 +304,32 @@ def _issues_from_agent_runs(label: str, project: str | None = None) -> list[dict
     return issues
 
 
+def _reconcile_issue_outcomes_with_agent_runs(records: list[dict]) -> None:
+    """Promote per-ticket state from agent_runs when the state file lags GitHub.
+
+    A ticket that finished coder+tester (agent_runs outcome merged) but still
+    shows OPEN·UAT in the ingested roster must read as merged on History cards
+    (e.g. #818 on sprint-97.5 before the sprint crashed on the next ticket).
+    """
+    for rec in records:
+        label = rec.get("label") or ""
+        project = rec.get("project") or None
+        by_tid = {i["ticket_id"]: i for i in _issues_from_agent_runs(label, project)}
+        if not by_tid:
+            continue
+        for iss in rec.get("issues") or []:
+            tid = iss.get("ticket_id")
+            syn = by_tid.get(tid)
+            if not syn:
+                continue
+            syn_st = (syn.get("state") or "").lower()
+            cur_st = (iss.get("state") or "").lower()
+            if syn_st == "merged" and cur_st != "merged":
+                iss["state"] = "merged"
+            elif syn_st == "closed" and cur_st == "open":
+                iss.setdefault("agent_status", "failed")
+
+
 def _find_summary_path(sprints_dirs: Path | list[Path], label: str) -> str | None:
     """Most recent ``<label>-summary-*.md`` path for a sprint, or None."""
     dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
@@ -782,6 +808,7 @@ def _finalize_issues(
             _union_planned_roster(rec, sprints_dirs)
 
     _fill_missing_links(records, sprints_dirs)
+    _reconcile_issue_outcomes_with_agent_runs(records)
     _attribute_issues_to_runs(records, ran_by_label)
     _drop_cross_project_issues(records)
 

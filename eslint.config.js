@@ -60,6 +60,10 @@ export default [
         _smgmtHotswapAvailableFor: "readonly",
         _smgmtHotswapModalOpen: "readonly",
         _smgmtPlanNextBtn: "readonly",
+        // Shell globals written by tabs.js and read by other modules (issue #1175).
+        _ticketsRepo: "writable",
+        _deepLinkView: "writable",
+        _deepLinkFilter: "writable",
       },
     },
     rules: {

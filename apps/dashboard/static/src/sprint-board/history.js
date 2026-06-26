@@ -44,9 +44,9 @@ let _histLedgerCacheRepo = '';
 let _histLedgerCacheAt = 0;
 let _HIST_LEDGER_TTL_MS = 300000;
 let _histLedgerInflight = null;
-// Default to the fast active-only feed (running/ready_to_merge/needs_rework/
-// partial_finished + 3 recent completed). "Show completed" flips this to load
-// the full closed history on demand.
+// Default to the fast active-only feed (ready_to_merge/needs_rework/failed/
+// draft/planned + 3 recent completed). Running sprints use the Running tab.
+// "Show completed" flips this to load the full closed history on demand.
 let _histShowClosed = false;
 
 export function _histResetLedgerCache() {

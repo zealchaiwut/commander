@@ -1130,21 +1130,43 @@ Replace the existing draft (${data.existing_label})?`
       return (n / 1e3).toFixed(1) + "k";
     return String(n);
   }
-  function _histIssueChip(iss) {
+  function _histIssueChip(iss, opts) {
+    opts = opts || {};
     const st = (iss.state || "").toLowerCase();
-    if (iss.failure_reason || (iss.agent_status || "").toLowerCase() === "failed") {
+    const agent = (iss.agent_status || "").toLowerCase();
+    if (iss.failure_reason || agent === "failed") {
       return { cls: "crashed", label: "CRASHED \xB7 in-progress" };
     }
-    if (st === "merged")
+    if (st === "merged" || agent === "completed" || agent === "done") {
       return { cls: "merged", label: "MERGED" };
+    }
+    if (opts.binary) {
+      return { cls: "crashed", label: "NOT DONE" };
+    }
     if (st === "closed")
       return { cls: "crashed", label: "CRASHED" };
     if (iss.time_spent != null)
       return { cls: "uat", label: "OPEN \xB7 UAT" };
     return { cls: "notrun", label: "NOT RUN" };
   }
-  function _histIssueIcon(iss) {
-    const chip = _histIssueChip(iss);
+  function _histSprintShowsBinaryIssues(s) {
+    if (!s)
+      return false;
+    if (_histSprintFailed(s))
+      return true;
+    const st = (s.lifecycle_state || "").toLowerCase();
+    return [
+      "partial_finished",
+      "needs_rework",
+      "ready_to_merge",
+      "completed",
+      "failed",
+      "cancelled"
+    ].includes(st);
+  }
+  function _histIssueIcon(iss, sprint) {
+    const binary = _histSprintShowsBinaryIssues(sprint);
+    const chip = _histIssueChip(iss, { binary });
     if (chip.cls === "merged") {
       return '<span class="iss-icon ok"><i class="ti ti-check"></i></span>';
     }
@@ -1153,15 +1175,18 @@ Replace the existing draft (${data.existing_label})?`
     }
     return '<span class="iss-icon idle"></span>';
   }
-  function _histIssueSucceeded(iss) {
-    return _histIssueChip(iss).cls === "merged";
+  function _histIssueSucceeded(iss, sprint) {
+    return _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(sprint) }).cls === "merged";
   }
   function _histProgressText(s, group) {
     const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (!issues.length)
       return "";
-    const done = issues.filter(_histIssueSucceeded).length;
-    const failed = issues.filter((i) => _histIssueChip(i).cls === "crashed").length;
+    const done = issues.filter((i) => _histIssueSucceeded(i, s)).length;
+    const failed = issues.filter((i) => {
+      const chip = _histIssueChip(i, { binary: _histSprintShowsBinaryIssues(s) });
+      return chip.cls === "crashed";
+    }).length;
     if (failed) {
       return `${done}/${issues.length} done \xB7 ${failed} failed`;
     }
@@ -1893,10 +1918,10 @@ Replace the existing draft (${data.existing_label})?`
     const id = num != null ? "#" + num : "#?";
     const titleText = _histIssueTitle(iss, s, titleMap);
     const repo = _histRepo(s);
-    const chip = _histIssueChip(iss);
+    const chip = _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(s) });
     const crashed = chip.cls === "crashed";
     const clickable = num != null && repo ? ` role="link" tabindex="0" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
-    const icon = _histIssueIcon(iss);
+    const icon = _histIssueIcon(iss, s);
     let dur = _histFmtSecs(iss.time_spent);
     const fixN = _histFixCountForIssue(num, stats);
     if (fixN)

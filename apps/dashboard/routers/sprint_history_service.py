@@ -798,12 +798,15 @@ def _union_planned_roster(rec: dict, sprints_dirs: Path | list[Path]) -> None:
             })
 
 
-# Actionable lifecycle states for the active_only History view (issue: History
-# pane slow). ``running`` lives on the Running tab; ``partial_finished`` parents
-# are lineage wrappers — children carry the actionable state.
+# Actionable lifecycle states for the active_only History inbox (sprint-lifecycle
+# redesign). Finished work awaiting sign-off, failures, and partial_finished
+# lineage parents. ``running`` uses the Running tab; ``draft``/``planned`` are
+# pre-run board states — never History inbox rows.
 _ACTIONABLE_STATES = frozenset({
-    "ready_to_merge", "needs_rework", "failed", "draft", "planned",
+    "ready_to_merge", "needs_rework", "failed", "partial_finished",
 })
+# Optional context tail on active_only — completed/deleted only (never running).
+_CLOSED_TAIL_STATES = frozenset({"completed", "deleted"})
 
 
 def _finalize_lineage(records: list[dict]) -> None:
@@ -967,15 +970,41 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path],
     _finalize_issues(records, sprints_dirs, title_map=title_map)
 
 
-def _filter_active_records(records: list[dict], keep_completed: int = 3) -> list[dict]:
-    """active_only History view: actionable sprints + the most recent N closed
-    ones for context. Runs AFTER _finalize_lineage so derived
-    partial_finished/completed states are respected.
+def _filter_active_records(records: list[dict], keep_completed: int = 0) -> list[dict]:
+    """Action inbox: actionable sprints only (+ optional recent completed tail).
+
+    Runs AFTER _finalize_lineage. When any lineage member is actionable, every
+    row sharing that base label is kept so the UI renders one parent group
+    (sprint-97 + 97.5) instead of orphan child cards beside unrelated sprints.
     """
-    active = [r for r in records if (r.get("lifecycle_state") or "") in _ACTIONABLE_STATES]
-    closed = [r for r in records if (r.get("lifecycle_state") or "") not in _ACTIONABLE_STATES]
+    by_label = {r.get("label"): r for r in records if r.get("label")}
+    actionable_bases: set[str] = set()
+    for rec in records:
+        st = (rec.get("lifecycle_state") or "").lower()
+        if st in _ACTIONABLE_STATES:
+            actionable_bases.add(_label_base(rec.get("label") or ""))
+
+    include_labels: set[str] = set()
+    for lbl, rec in by_label.items():
+        st = (rec.get("lifecycle_state") or "").lower()
+        if st in _ACTIONABLE_STATES:
+            include_labels.add(lbl)
+    for base in actionable_bases:
+        for lbl in by_label:
+            if _label_base(lbl) == base:
+                include_labels.add(lbl)
+
+    inbox = [r for r in records if r.get("label") in include_labels]
+    if keep_completed <= 0:
+        return inbox
+
+    closed = [
+        r for r in records
+        if (r.get("lifecycle_state") or "").lower() in _CLOSED_TAIL_STATES
+        and r.get("label") not in include_labels
+    ]
     closed.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
-    return active + closed[:keep_completed]
+    return inbox + closed[:keep_completed]
 
 
 def _build_ran_by_label(records: list[dict]) -> dict[str, set[int]]:
@@ -1279,9 +1308,9 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     ``project`` (owner/repo) scopes the ledger to one project — without it the
     board showed every project's sprints plus project-less junk rows.
 
-    ``active_only`` returns actionable sprints (ready_to_merge / needs_rework /
-    failed / draft / planned) plus the few most-recent closed ones — the default
-    fast view for the History pane. Running sprints use the Running tab.
+    ``active_only`` returns the action inbox: ready_to_merge / needs_rework /
+    failed / partial_finished lineage groups (plus optional recent completed
+    tail when keep_completed > 0). Running, draft, and planned are excluded.
     """
     search_dirs = _as_sprints_dirs(sprints_dir, project)
     offset = max(0, int(offset))

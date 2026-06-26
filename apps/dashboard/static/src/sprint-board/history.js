@@ -5,15 +5,21 @@
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
           _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel, CSS */
+          smgmtDeleteSprint, _nextSprintSublabel, finishSprintAndWait,
+          bulkCompleteLineageAndWait,
+          _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+          _smgmtBoardFinish, loadSprintMgmt, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
 //   needs_rework   → review + Re-run
 //   failed         → investigate / Resume
-// completed / deleted / cancelled / running are excluded (no action needed;
-// running has its own pulsing dot on the Running tab).
-const _HIST_ACTION_STATES = new Set(['ready_to_merge', 'needs_rework', 'failed']);
+//   partial_finished → lineage parent (children need action)
+// completed / deleted / running / draft / planned are excluded from the inbox.
+const _HIST_ACTION_STATES = new Set([
+  'ready_to_merge', 'needs_rework', 'failed', 'partial_finished',
+]);
+const _HIST_INBOX_STATES = _HIST_ACTION_STATES;
 
 export function _histNeedsActionCount() {
   return (_histLedgerData || []).reduce(
@@ -44,9 +50,9 @@ let _histLedgerCacheRepo = '';
 let _histLedgerCacheAt = 0;
 let _HIST_LEDGER_TTL_MS = 300000;
 let _histLedgerInflight = null;
-// Default to the fast active-only feed (ready_to_merge/needs_rework/failed/
-// draft/planned + 3 recent completed). Running sprints use the Running tab.
-// "Show completed" flips this to load the full closed history on demand.
+// Default to the action inbox (ready_to_merge / needs_rework / failed /
+// partial_finished lineage groups). Running uses the Running tab. "Show completed"
+// loads the full archive with fold groups.
 let _histShowClosed = false;
 
 export function _histResetLedgerCache() {
@@ -1815,18 +1821,34 @@ function _histBulkCompleteBtnHtml(group) {
   </button>`;
 }
 
+function _histGroupHasActionable(group) {
+  return _histGroupMembers(group).some((s) => {
+    const st = (s && s.lifecycle_state || '').toLowerCase();
+    return _HIST_INBOX_STATES.has(st);
+  });
+}
+
+function _histSynthParent(baseLabel, group) {
+  const children = group.children || [];
+  return {
+    label: baseLabel,
+    lifecycle_state: 'partial_finished',
+    partial_children: children.map((c) => c.label).filter(Boolean),
+    issues: [],
+  };
+}
+
 function _histGroupHtml(group) {
   const bulkBtn = _histBulkCompleteBtnHtml(group);
   const children = group.children || [];
   if (children.length) {
     const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
     const groupCls = "hist-sprint-group";
-    const parentCard = group.baseSprint
-      ? _histChildCardHtml(group.baseSprint, group, {
-        isLineageParent: true,
-        bulkCompleteBtn: bulkBtn,
-      })
-      : "";
+    const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
+    const parentCard = _histChildCardHtml(parentSprint, group, {
+      isLineageParent: true,
+      bulkCompleteBtn: bulkBtn,
+    });
     const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
     return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
@@ -1961,12 +1983,15 @@ export function _histToggleFold(id) {
 
 // Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
 function _histToolbarHtml() {
-  return `<div class="hist-toolbar">
-    <span class="hist-toolbar-note">
-      <i class="ti ti-stack-2"></i>
-      Latest ${_histFoldSize} sprint groups expanded below — older groups collapse to sprint numbers; click to open details.
-    </span>
-  </div>`;
+  const note = _histShowClosed
+    ? `<span class="hist-toolbar-note"><i class="ti ti-history"></i> Full archive — older sprint groups collapse into numbered folds; click to expand.</span>`
+    : `<span class="hist-toolbar-note"><i class="ti ti-inbox"></i> Action inbox — sprints needing Complete, Re-run, or Bulk complete. Lineage groups stay together (e.g. Sprint 98 with 98.1).</span>`;
+  const signOffBtn = _histShowClosed ? '' : (
+    `<button type="button" class="btn-ghost hist-bulk-signoff-btn" id="hist-bulk-signoff-btn"`
+    + ` onclick="_histBulkSignOff()" title="Complete every ready-to-merge sprint in this inbox">`
+    + `<i class="ti ti-circle-check"></i> Sign off all ready</button>`
+  );
+  return `<div class="hist-toolbar">${note}${signOffBtn}</div>`;
 }
 
 // ── Stale-branch scan + cleanup (issue #808) ────────────────────────────────
@@ -2094,20 +2119,32 @@ export function _histRenderLedger(sprints) {
   const el = document.getElementById('hist-ledger');
   if (!el) return;
   if (!sprints || !sprints.length) {
-    el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet — finished and deleted sprints appear here.</div>`;
+    const emptyMsg = _histShowClosed
+      ? 'No sprint history yet — finished and deleted sprints appear here.'
+      : 'Inbox clear — no sprints need action. Toggle Show completed for the archive.';
+    el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
     return;
   }
-  // Group re-run sub-sprints under their base sprint, then partition by fold
-  // size on base groups (AC2/AC3) — sub-sprints (.1, .2) are not top-level rows.
-  const groups = _histGroupSprints(sprints);
+  let groups = _histGroupSprints(sprints);
+  if (!_histShowClosed) {
+    groups = groups.filter(_histGroupHasActionable);
+    if (!groups.length) {
+      el.innerHTML = `<div class="hist-ledger-empty">Inbox clear — no sprints need action. Toggle Show completed for the archive.</div>`;
+      return;
+    }
+  }
   if (!_histDidAutoExpand && groups.length) {
     _histAutoExpandRecent(groups);
     _histDidAutoExpand = true;
   }
-  const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
-  const recentHtml = recent.map(_histGroupHtml).join('');
-  const foldsHtml = folds.map(_histFoldHtml).join('');
-  el.innerHTML = _histLegendHtml() + _histToolbarHtml() + recentHtml + foldsHtml;
+  let bodyHtml;
+  if (!_histShowClosed) {
+    bodyHtml = groups.map(_histGroupHtml).join('');
+  } else {
+    const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
+    bodyHtml = recent.map(_histGroupHtml).join('') + folds.map(_histFoldHtml).join('');
+  }
+  el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
 }
 
 // Re-run from History uses the shared re-run modal (ticket pick) then pre-run
@@ -2215,8 +2252,8 @@ function _histSyncShowClosedBtn() {
     ? '<i class="ti ti-eye-off"></i> Active only'
     : '<i class="ti ti-history"></i> Show completed';
   btn.title = _histShowClosed
-    ? 'Show only actionable sprints + a few recent completed'
-    : 'Load the full closed-sprint history';
+    ? 'Show only the action inbox (sprints needing you)'
+    : 'Load the full closed-sprint archive';
 }
 
 // Toggle between the fast active-only feed and the full closed history.
@@ -2244,4 +2281,116 @@ export function _histForceRefresh() {
 
 function _histNextChildLabel(parentLabel) {
   return _nextSprintSublabel(parentLabel);
+}
+
+/** Collect ready_to_merge targets for bulk sign-off (inbox rows only). */
+function _histBulkSignOffTargets(sprints) {
+  const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+  const targets = [];
+  const skipLabels = new Set();
+  for (const g of groups) {
+    const members = _histGroupMembers(g);
+    const rtm = members.filter(
+      (s) => (s.lifecycle_state || '').toLowerCase() === 'ready_to_merge',
+    );
+    if (!rtm.length) continue;
+    const useBulk = (g.children || []).length && g.baseLabel
+      && _histGroupNeedsBulkComplete(g)
+      && _histChildSprintsAllCompleted(g)
+      && !_histChildSprintsStillRunning(g);
+    if (useBulk) {
+      targets.push({ kind: 'bulk', label: g.baseLabel });
+      for (const s of members) skipLabels.add(s.label);
+      continue;
+    }
+    for (const s of rtm) {
+      if (!skipLabels.has(s.label)) {
+        targets.push({ kind: 'finish', label: s.label });
+      }
+    }
+  }
+  return targets.sort((a, b) => {
+    const pa = _histLabelParts(a.label);
+    const pb = _histLabelParts(b.label);
+    if (pa.baseNum !== pb.baseNum) return pa.baseNum - pb.baseNum;
+    return pa.sub - pb.sub;
+  });
+}
+
+/** Complete every ready_to_merge sprint in the current inbox (batch sign-off). */
+export async function _histBulkSignOff() {
+  if (_histShowClosed) {
+    alert('Switch to the action inbox first (toggle off Show completed).');
+    return;
+  }
+  const targets = _histBulkSignOffTargets(_histLedgerData);
+  if (!targets.length) {
+    alert('No ready-to-merge sprints in the inbox.');
+    return;
+  }
+  const listing = targets.map((t) => {
+    const disp = sprintLabelDisplay(t.label);
+    return t.kind === 'bulk' ? `${disp} (bulk complete lineage)` : disp;
+  }).join('\n');
+  if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).\n\n${listing}`)) {
+    return;
+  }
+  if (typeof finishSprintAndWait !== 'function') {
+    alert('Finish helper unavailable — refresh the page.');
+    return;
+  }
+  const total = targets.length;
+  if (typeof _smgmtBoardLock === 'function') {
+    _smgmtBoardLock('Signing off ready sprints…', {
+      progress: true, total, clearLog: true, showDone: true,
+    });
+  }
+  let done = 0;
+  let failed = null;
+  for (const target of targets) {
+    const { label, kind } = target;
+    const action = kind === 'bulk' ? 'Bulk completing' : 'Completing';
+    if (typeof _smgmtBoardLog === 'function') {
+      _smgmtBoardLog(`${action} ${sprintLabelDisplay(label)}…`, 'step');
+    }
+    try {
+      if (kind === 'bulk') {
+        if (typeof bulkCompleteLineageAndWait !== 'function') {
+          throw new Error('Bulk complete helper unavailable — refresh the page.');
+        }
+        await bulkCompleteLineageAndWait(label);
+      } else {
+        await finishSprintAndWait(label);
+      }
+      done += 1;
+      if (typeof _smgmtBoardProgress === 'function') _smgmtBoardProgress(done, total);
+      if (typeof _smgmtBoardLog === 'function') {
+        _smgmtBoardLog(`✓ ${sprintLabelDisplay(label)} completed`, 'ok');
+      }
+    } catch (e) {
+      failed = { label, message: e.message || String(e) };
+      if (typeof _smgmtBoardLog === 'function') {
+        _smgmtBoardLog(`✗ ${sprintLabelDisplay(label)}: ${failed.message}`, 'err');
+      }
+      break;
+    }
+  }
+  const finishMsg = failed
+    ? `Stopped at ${sprintLabelDisplay(failed.label)}: ${failed.message}`
+    : `Signed off ${done} sprint(s).`;
+  if (typeof _smgmtBoardFinish === 'function') {
+    _smgmtBoardFinish({
+      ok: !failed,
+      message: finishMsg,
+      onDone: () => {
+        _histResetLedgerCache();
+        const repo = _cachedFullRepo[_slug];
+        if (repo) _histLoadLedger(repo, { force: true });
+        if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true).catch(() => {});
+      },
+    });
+  } else {
+    alert(finishMsg);
+    _histForceRefresh();
+  }
 }

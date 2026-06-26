@@ -28,7 +28,6 @@ export function _histNeedsActionCount() {
 let _histLedgerData = [];
 globalThis._histLedgerData = _histLedgerData;
 const _histExpanded = new Set();   // labels of currently-expanded cards
-const _histGroupCollapsed = new Set(); // base labels whose parent ticket block is hidden
 let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 // Folding (issue #807): the N most-recent sprints render expanded; older ones
 // collapse into aggregate folds of the same size. _histFoldSize mirrors the
@@ -672,13 +671,19 @@ function _histAutoExpandRecent(groups) {
         const cst = (c.lifecycle_state || '').toLowerCase();
         return cst !== 'completed' && cst !== 'deleted';
       });
-      // Collapse only the parent's own ticket block when the whole lineage settled.
-      if (parentSt === 'completed' && !anyChildOpen) {
-        _histGroupCollapsed.add(baseLbl);
+      // Settled lineage parents start collapsed like completed child cards.
+      if (g.baseSprint && parentSt === 'completed' && !anyChildOpen) {
+        _histExpanded.delete(g.baseSprint.label);
       }
     }
     if (i >= _histFoldSize) continue;
     if (children.length) {
+      if (g.baseSprint && (
+        _histShouldAutoExpand(g.baseSprint)
+        || _histIssuesForDisplay(g.baseSprint, g).length
+      )) {
+        _expand(g.baseSprint);
+      }
       // Expand every child that still needs attention (not only the latest).
       for (const c of children) {
         if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
@@ -1291,28 +1296,9 @@ function _histParentFromLabel(label) {
   return `← from ${display}`;
 }
 
-function _histParentRowHtml(s, bulkBtn, parentBodyExpanded, group) {
-  const display = sprintLabelDisplay(s.label);
-  const lbl = escHtml(s.label || "");
-  const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
-  // Recede a completed group when collapsed, like standalone cards — a group
-  // parent (sprint with a rerun child) used a different class and never got the
-  // settled grey, so a done group looked active next to greyed siblings.
-  const cls = ["hist-parent-row"];
-  if ((String(s.lifecycle_state || "").toLowerCase()) === "completed") cls.push("settled");
-  if (parentBodyExpanded) cls.push("expanded");
-  return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
-    onclick="_histToggleGroup('${lbl}')"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
-    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
-    <span class="hist-parent-name">${escHtml(display)}</span>
-    ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s, group)}
-    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histRecoveryBtnHtml(s)}${_histDeleteBtnHtml(s)}${_histSecondaryLinksHtml(s)}</span>
-  </div>`;
-}
-
-function _histChildCardHtml(s, group) {
+function _histChildCardHtml(s, group, opts) {
+  opts = opts || {};
+  const isLineageParent = !!opts.isLineageParent;
   const expanded = _histExpanded.has(s.label);
   const lbl = escHtml(s.label || "");
   const state = (s.lifecycle_state || "").toLowerCase();
@@ -1322,21 +1308,26 @@ function _histChildCardHtml(s, group) {
     ? "ready_to_merge"
     : state;
   const cls = ["hist-child-card"];
+  if (isLineageParent) cls.push("hist-lineage-parent");
   if (displayState === "ready_to_merge") cls.push("ready");
   if (displayState === "completed") cls.push("settled");
   if (expanded) cls.push("expanded");
   const display = sprintLabelDisplay(s.label);
-  const fromLine = _histParentFromLabel(s.label);
+  const fromLine = !isLineageParent && _histIsChild(s.label)
+    ? _histParentFromLabel(s.label)
+    : "";
   const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
   const recoveryBtn = _histRecoveryBtnHtml(s);
   const deleteBtn = _histDeleteBtnHtml(s);
   const secondaryLinks = _histSecondaryLinksHtml(s);
-  const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}</span>`;
+  const bulkBtn = opts.bulkCompleteBtn || "";
+  const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>`;
 
   if (expanded && !(s.label in _histRunStats)) _histLoadRunStats(s.label);
 
   const body = expanded
     ? `<div class="hist-child-body">
+        ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
         ${_histWhatListHtml(s)}
         ${_histCardOutcomeHtml(s, group)}
@@ -1683,15 +1674,9 @@ export function _histToggleCard(label) {
   _histRenderLedger(_histLedgerData);
 }
 
-/** Collapse/expand a parent sprint group — hides all child sprint cards. */
+/** @deprecated Use _histToggleCard — parent lineage cards share the child card shell. */
 export function _histToggleGroup(baseLabel) {
-  if (!baseLabel) return;
-  if (_histGroupCollapsed.has(baseLabel)) {
-    _histGroupCollapsed.delete(baseLabel);
-  } else {
-    _histGroupCollapsed.add(baseLabel);
-  }
-  _histRenderLedger(_histLedgerData);
+  _histToggleCard(baseLabel);
 }
 
 // ── Sub-sprint grouping ─────────────────────────────────────────────────────
@@ -1800,16 +1785,15 @@ function _histGroupHtml(group) {
   const children = group.children || [];
   if (children.length) {
     const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
-    const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
     const groupCls = "hist-sprint-group";
-    const parentRow = group.baseSprint
-      ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded, group)
-      : "";
-    const parentBody = parentBodyExpanded && group.baseSprint
-      ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>`
+    const parentCard = group.baseSprint
+      ? _histChildCardHtml(group.baseSprint, group, {
+        isLineageParent: true,
+        bulkCompleteBtn: bulkBtn,
+      })
       : "";
     const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
-    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
+    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
   if (group.baseSprint) {
     return _histIsChild(group.baseSprint.label)

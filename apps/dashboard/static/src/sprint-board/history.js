@@ -1738,29 +1738,49 @@ function _histGroupNeedsBulkComplete(group) {
   });
 }
 
+function _histChildRunFinished(s) {
+  const st = (s.lifecycle_state || '').toLowerCase();
+  // Any terminal run outcome — bulk complete settles the lineage after the run
+  // ended, including needs_rework/failed (e.g. perf-coach sprint-83: work
+  // shipped + branches merged but DB never got a row).
+  return [
+    'completed', 'deleted', 'ready_to_merge', 'needs_rework', 'failed',
+    'cancelled', 'partial_finished',
+  ].includes(st);
+}
+
 function _histChildSprintsAllCompleted(group) {
   const children = group.children || [];
   if (!children.length) return false;
-  const settled = new Set(['completed', 'deleted', 'ready_to_merge']);
   // A child counts as ready when its own run settled, OR a later sibling (higher
   // sub-index — children are sorted ascending) has. The latter means this run was
   // superseded by a rerun that itself settled, so the middle ancestor staying
   // needs_rework must not dead-end the button. Mirrors the server's recursive
   // _bulk_complete_lineage_settled gate, which already accepts this case.
   return children.every((s, i) => {
-    if (settled.has((s.lifecycle_state || '').toLowerCase())) return true;
-    return children.slice(i + 1).some(
-      later => settled.has((later.lifecycle_state || '').toLowerCase()),
-    );
+    if (_histChildRunFinished(s)) return true;
+    return children.slice(i + 1).some(later => _histChildRunFinished(later));
   });
+}
+
+function _histChildSprintsStillRunning(group) {
+  const active = new Set(['running', 'draft', 'planned']);
+  return (group.children || []).some(
+    s => active.has((s.lifecycle_state || '').toLowerCase()),
+  );
 }
 
 function _histBulkCompleteBtnHtml(group) {
   if (!group.children?.length || !group.baseSprint) return '';
   if (!_histGroupNeedsBulkComplete(group)) return '';
   const lbl = escHtml(group.baseLabel || '');
-  const childrenReady = _histChildSprintsAllCompleted(group);
-  if (!childrenReady) {
+  if (_histChildSprintsStillRunning(group)) {
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Wait for child sprint runs to finish before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+  }
+  if (!_histChildSprintsAllCompleted(group)) {
     return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
             title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete

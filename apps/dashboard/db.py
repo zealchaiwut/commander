@@ -563,6 +563,9 @@ _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
     "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
     "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
+    # Derived-only in normal flow; if a legacy row stored this value, allow
+    # settlement after Merge Sprint / bulk complete (same as ready_to_merge).
+    "partial_finished": frozenset({"ready_to_merge", "completed", "needs_rework", "deleted"}),
     "needs_rework":   frozenset({"running", "deleted"}),
     "completed":      frozenset({"deleted"}),
     "deleted":        frozenset(),

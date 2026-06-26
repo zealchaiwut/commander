@@ -358,6 +358,16 @@ def test_bulk_complete_button_on_parent_with_children():
     assert "completed" in needs and "deleted" in needs
     assert "_histChildSprintsAllCompleted" in _fn_body("_histBulkCompleteBtnHtml")
     assert "Complete all child sprints before bulk completing" in btn
+    run_finished = _fn_body("_histChildRunFinished")
+    assert "needs_rework" in run_finished and "failed" in run_finished
+
+
+def test_bulk_complete_enabled_when_child_failed_not_running():
+    """Failed/needs_rework children are finished runs — bulk complete must not stay disabled."""
+    hist_js = (DASHBOARD_DIR / "static/src/sprint-board/history.js").read_text(encoding="utf-8")
+    assert "_histChildRunFinished" in hist_js
+    assert "_histChildSprintsStillRunning" in _fn_body("_histBulkCompleteBtnHtml")
+    assert "Wait for child sprint runs to finish" in _fn_body("_histBulkCompleteBtnHtml")
 
 
 def test_bulk_complete_modal_mounts():

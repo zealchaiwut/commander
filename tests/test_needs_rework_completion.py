@@ -108,6 +108,20 @@ def test_mark_merged_completed_uses_reconcile_for_needs_rework(fresh_db):
     assert db.canonical_lifecycle(row["state"]) == "completed"
 
 
+def test_mark_merged_completed_bootstraps_draft_row(fresh_db):
+    """perf-coach-style sprints with no DB row must still settle after git merge."""
+    import startup
+
+    db = fresh_db
+    proj = "zealchaiwut/perf-coach"
+    assert db.get_sprint("sprint-85.5", project=proj) is None
+    assert startup._sprint_db_mark_merged_completed("sprint-85.5", proj) is True
+    row = db.get_sprint("sprint-85.5", project=proj)
+    assert row is not None
+    assert row["project"] == proj
+    assert db.canonical_lifecycle(row["state"]) == "completed"
+
+
 def test_complete_step_surfaces_silent_db_rejection():
     """If the DB transition is rejected (returns False), complete-step must 500 —
     not report success while the lifecycle stays unchanged."""

@@ -90,11 +90,12 @@ class WorktreePool:
         for i in range(self.slots):
             wt_path = self.pool_dir / f"{SLOT_PREFIX}{i}"
             self._create_slot(wt_path)
-            created.append(wt_path)
+            if wt_path.is_dir():
+                created.append(wt_path)
         with self._cond:
             self._free = created[:]
         sys.stdout.write(
-            f"  [worktree-pool] Pool ready: {self.slots} slot(s) under {self.pool_dir}\n"
+            f"  [worktree-pool] Pool ready: {len(created)} slot(s) under {self.pool_dir}\n"
         )
 
     def teardown(self) -> None:
@@ -123,15 +124,24 @@ class WorktreePool:
                 self._cond.wait()
             wt = self._free.pop(0)
             self._in_use.add(wt)
+        self._ensure_slot_ready(wt)
         return wt
 
     def release(self, worktree: Path) -> None:
         """Reset worktree to clean base state and return it to the free pool."""
-        _run(["git", "clean", "-fdx"], cwd=worktree)
-        _run(["git", "checkout", self.base_branch], cwd=worktree)
+        if worktree.is_dir():
+            _run(["git", "clean", "-fdx"], cwd=worktree)
+            _run(["git", "checkout", self.base_branch], cwd=worktree)
+        else:
+            sys.stdout.write(
+                f"  [worktree-pool] WARNING: slot {worktree.name} missing on release"
+                f" — recreating\n"
+            )
+            self._ensure_slot_ready(worktree)
         with self._cond:
             self._in_use.discard(worktree)
-            self._free.append(worktree)
+            if worktree not in self._free:
+                self._free.append(worktree)
             self._cond.notify_all()
 
     # ------------------------------------------------------------------
@@ -173,6 +183,30 @@ class WorktreePool:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _slot_healthy(self, wt_path: Path) -> bool:
+        """True when the slot directory looks like a usable git worktree."""
+        return wt_path.is_dir() and (wt_path / ".git").exists()
+
+    def _ensure_slot_ready(self, wt_path: Path) -> bool:
+        """Recreate a pool slot when its directory was removed mid-sprint.
+
+        Fix-loop retries reuse the same slot path; a coder agent (or a failed
+        ``git worktree remove``) can delete the directory between release and
+        the next acquire. Without recreation, hygiene crashes on ``git fetch``.
+        """
+        if self._slot_healthy(wt_path):
+            return True
+        sys.stdout.write(
+            f"  [worktree-pool] Recreating missing slot {wt_path.name}...\n"
+        )
+        self._create_slot(wt_path)
+        if not self._slot_healthy(wt_path):
+            sys.stdout.write(
+                f"  [worktree-pool] ERROR: could not recreate slot {wt_path.name}\n"
+            )
+            return False
+        return True
 
     def _create_slot(self, wt_path: Path) -> None:
         """Create one worktree slot with a fresh virtualenv."""

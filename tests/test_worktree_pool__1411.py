@@ -20,6 +20,7 @@ AC items verified:
 """
 from __future__ import annotations
 
+import shutil
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -554,3 +555,48 @@ class TestWorktreeIsolation:
         # All 3 slots acquired without duplicates
         assert len(acquired) == 3
         assert len(set(acquired)) == 3  # All unique
+
+
+class TestWorktreePoolMissingSlot:
+    """Fix-loop retries must survive a slot directory disappearing mid-sprint."""
+
+    def test_acquire_recreates_missing_slot(self, tmp_path):
+        pool_dir = tmp_path / ".commander" / "runtime" / "worktree-pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        pool = WorktreePool(
+            pool_dir=pool_dir,
+            repo_root=repo_root,
+            base_branch="sprint/sprint-97.4",
+            slots=1,
+        )
+
+        def _mk_slot(path: Path) -> None:
+            path.mkdir(parents=True, exist_ok=True)
+            (path / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+
+        with patch.object(pool, "_create_slot", side_effect=lambda p: _mk_slot(p)):
+            pool.create()
+
+        wt = pool.acquire()
+        shutil.rmtree(wt)
+
+        with patch.object(pool, "_create_slot", side_effect=lambda p: _mk_slot(p)):
+            pool.release(wt)
+            wt2 = pool.acquire()
+
+        assert wt2.is_dir()
+        assert (wt2 / ".git").exists()
+
+    def test_create_skips_failed_slots(self, tmp_path, capsys):
+        pool_dir = tmp_path / "pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        pool = WorktreePool(pool_dir, repo_root, "main", slots=2)
+
+        with patch.object(pool, "_create_slot") as mock_create:
+            pool.create()
+
+        assert mock_create.call_count == 2
+        assert pool._free == []
+        assert "0 slot(s)" in capsys.readouterr().out

@@ -38,7 +38,11 @@ def _run_timed(*cmd, cwd: Optional[Path] = None) -> tuple[int, str, str]:
     _f = _lookup_in_sm("_run_timed", _run_timed)
     if _f is not None:
         return _f(*cmd, cwd=cwd)
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    cwd_arg = str(cwd) if cwd is not None else None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_arg)
+    except FileNotFoundError as exc:
+        return 1, "", str(exc)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -46,7 +50,11 @@ def _try(*cmd, cwd: Optional[Path] = None) -> tuple[bool, str, str]:
     _f = _lookup_in_sm("_try", _try)
     if _f is not None:
         return _f(*cmd, cwd=cwd)
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    cwd_arg = str(cwd) if cwd is not None else None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd_arg)
+    except FileNotFoundError as exc:
+        return False, "", str(exc)
     return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
 
 

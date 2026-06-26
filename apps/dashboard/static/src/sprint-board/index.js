@@ -23,6 +23,7 @@ import {
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
+  _histBulkSignOff,
 } from './history.js';
 
 import {
@@ -31,11 +32,11 @@ import {
 } from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
-  smgmtFinishSprint, _fsConfirm, _fsRetry,
+  smgmtFinishSprint, _fsConfirm, _fsRetry, finishSprintAndWait,
 } from './finish-modal.js';
 import {
   _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
-  smgmtBulkCompleteSprint, _bcConfirm,
+  smgmtBulkCompleteSprint, _bcConfirm, bulkCompleteLineageAndWait,
 } from './bulk-complete-modal.js';
 import {
   smgmtReconcileSprint, _recApply, _recClose,
@@ -105,6 +106,7 @@ globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
 globalThis._fsRetry = _fsRetry;
+globalThis.finishSprintAndWait = finishSprintAndWait;
 
 // Bulk Complete modal (parent + child lineage)
 globalThis._bcOpen = _bcOpen;
@@ -113,6 +115,7 @@ globalThis._bcCatClass = _bcCatClass;
 globalThis._bcSelectAll = _bcSelectAll;
 globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
 globalThis._bcConfirm = _bcConfirm;
+globalThis.bulkCompleteLineageAndWait = bulkCompleteLineageAndWait;
 
 globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
 globalThis._recApply = _recApply;
@@ -276,4 +279,5 @@ globalThis._histResetLedgerCache = _histResetLedgerCache;
 globalThis._histToggleShowClosed = _histToggleShowClosed;
 globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
+globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;

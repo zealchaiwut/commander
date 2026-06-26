@@ -19,9 +19,20 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
 from routers import sprint_history_service as h  # noqa: E402
 
 
-def test_filter_active_keeps_actionable_plus_recent_completed():
+def test_filter_active_keeps_actionable_only_by_default():
     recs = [
         {"label": "sprint-1", "lifecycle_state": "draft", "_sort_key": "2026-06-01"},
+        {"label": "sprint-2", "lifecycle_state": "needs_rework", "_sort_key": "2026-06-02"},
+        {"label": "sprint-3", "lifecycle_state": "completed", "_sort_key": "2026-06-03"},
+        {"label": "sprint-4", "lifecycle_state": "completed", "_sort_key": "2026-06-04"},
+    ]
+    out = h._filter_active_records(recs)
+    labels = {r["label"] for r in out}
+    assert labels == {"sprint-2"}
+
+
+def test_filter_active_optional_completed_tail():
+    recs = [
         {"label": "sprint-2", "lifecycle_state": "needs_rework", "_sort_key": "2026-06-02"},
         {"label": "sprint-3", "lifecycle_state": "completed", "_sort_key": "2026-06-03"},
         {"label": "sprint-4", "lifecycle_state": "completed", "_sort_key": "2026-06-04"},
@@ -30,15 +41,13 @@ def test_filter_active_keeps_actionable_plus_recent_completed():
     ]
     out = h._filter_active_records(recs, keep_completed=3)
     labels = {r["label"] for r in out}
-    # actionable always kept
-    assert {"sprint-1", "sprint-2"} <= labels
-    # only the 3 most-recent closed: sprint-6, sprint-5, sprint-4
+    assert "sprint-2" in labels
     assert {"sprint-6", "sprint-5", "sprint-4"} <= labels
-    assert "sprint-3" not in labels  # 4th-oldest closed dropped
-    assert len(out) == 5
+    assert "sprint-3" not in labels
+    assert len(out) == 4
 
 
-def test_title_backfill_fills_blanks_only(tmp_path):
+def test_title_backfill_fills_blanks_only(tmp_path, monkeypatch):
     rec = {
         "label": "sprint-9", "project": "p", "lifecycle_state": "completed",
         "issues": [
@@ -46,6 +55,15 @@ def test_title_backfill_fills_blanks_only(tmp_path):
             {"ticket_id": 1248, "state": "merged", "title": "keep me"},  # already titled
         ],
     }
+
+    class FakeDb:
+        def get_mirrored_issues(self, repo):
+            return []
+
+        def get_mirrored_issue(self, repo, num):
+            return None
+
+    monkeypatch.setattr(h, "_db", lambda: FakeDb())
     h._finalize_issues([rec], tmp_path, title_map={1247: "Backfilled", 1248: "OVERWRITE?"})
     by = {i["ticket_id"]: i for i in rec["issues"]}
     assert by[1247].get("title") == "Backfilled"   # blank filled from mirror

@@ -1074,7 +1074,13 @@ Replace the existing draft (${data.existing_label})?`
   }
 
   // apps/dashboard/static/src/sprint-board/history.js
-  var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
+  var _HIST_ACTION_STATES = /* @__PURE__ */ new Set([
+    "ready_to_merge",
+    "needs_rework",
+    "failed",
+    "partial_finished"
+  ]);
+  var _HIST_INBOX_STATES = _HIST_ACTION_STATES;
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
       (acc, s) => acc + (_HIST_ACTION_STATES.has(s && s.lifecycle_state) ? 1 : 0),
@@ -2436,16 +2442,32 @@ Replace the existing draft (${data.existing_label})?`
     <i class="ti ti-circle-check"></i> Bulk complete
   </button>`;
   }
+  function _histGroupHasActionable(group) {
+    return _histGroupMembers(group).some((s) => {
+      const st = (s && s.lifecycle_state || "").toLowerCase();
+      return _HIST_INBOX_STATES.has(st);
+    });
+  }
+  function _histSynthParent(baseLabel, group) {
+    const children = group.children || [];
+    return {
+      label: baseLabel,
+      lifecycle_state: "partial_finished",
+      partial_children: children.map((c) => c.label).filter(Boolean),
+      issues: []
+    };
+  }
   function _histGroupHtml(group) {
     const bulkBtn = _histBulkCompleteBtnHtml(group);
     const children = group.children || [];
     if (children.length) {
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
       const groupCls = "hist-sprint-group";
-      const parentCard = group.baseSprint ? _histChildCardHtml(group.baseSprint, group, {
+      const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
+      const parentCard = _histChildCardHtml(parentSprint, group, {
         isLineageParent: true,
         bulkCompleteBtn: bulkBtn
-      }) : "";
+      });
       const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
       return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
@@ -2528,12 +2550,9 @@ Replace the existing draft (${data.existing_label})?`
     _histRenderLedger(_histLedgerData);
   }
   function _histToolbarHtml() {
-    return `<div class="hist-toolbar">
-    <span class="hist-toolbar-note">
-      <i class="ti ti-stack-2"></i>
-      Latest ${_histFoldSize} sprint groups expanded below \u2014 older groups collapse to sprint numbers; click to open details.
-    </span>
-  </div>`;
+    const note = _histShowClosed ? `<span class="hist-toolbar-note"><i class="ti ti-history"></i> Full archive \u2014 older sprint groups collapse into numbered folds; click to expand.</span>` : `<span class="hist-toolbar-note"><i class="ti ti-inbox"></i> Action inbox \u2014 sprints needing Complete, Re-run, or Bulk complete. Lineage groups stay together (e.g. Sprint 98 with 98.1).</span>`;
+    const signOffBtn = _histShowClosed ? "" : `<button type="button" class="btn-ghost hist-bulk-signoff-btn" id="hist-bulk-signoff-btn" onclick="_histBulkSignOff()" title="Complete every ready-to-merge sprint in this inbox"><i class="ti ti-circle-check"></i> Sign off all ready</button>`;
+    return `<div class="hist-toolbar">${note}${signOffBtn}</div>`;
   }
   async function _histScanStale() {
     const repo = _cachedFullRepo[_slug];
@@ -2642,18 +2661,30 @@ Replace the existing draft (${data.existing_label})?`
     if (!el)
       return;
     if (!sprints || !sprints.length) {
-      el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet \u2014 finished and deleted sprints appear here.</div>`;
+      const emptyMsg = _histShowClosed ? "No sprint history yet \u2014 finished and deleted sprints appear here." : "Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.";
+      el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
       return;
     }
-    const groups = _histGroupSprints(sprints);
+    let groups = _histGroupSprints(sprints);
+    if (!_histShowClosed) {
+      groups = groups.filter(_histGroupHasActionable);
+      if (!groups.length) {
+        el.innerHTML = `<div class="hist-ledger-empty">Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.</div>`;
+        return;
+      }
+    }
     if (!_histDidAutoExpand && groups.length) {
       _histAutoExpandRecent(groups);
       _histDidAutoExpand = true;
     }
-    const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
-    const recentHtml = recent.map(_histGroupHtml).join("");
-    const foldsHtml = folds.map(_histFoldHtml).join("");
-    el.innerHTML = _histLegendHtml() + _histToolbarHtml() + recentHtml + foldsHtml;
+    let bodyHtml;
+    if (!_histShowClosed) {
+      bodyHtml = groups.map(_histGroupHtml).join("");
+    } else {
+      const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
+      bodyHtml = recent.map(_histGroupHtml).join("") + folds.map(_histFoldHtml).join("");
+    }
+    el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
   }
   function _histRerunSprint(label) {
     if (typeof globalThis.smgmtRerunSprint === "function") {
@@ -2751,7 +2782,7 @@ Replace the existing draft (${data.existing_label})?`
     if (!btn)
       return;
     btn.innerHTML = _histShowClosed ? '<i class="ti ti-eye-off"></i> Active only' : '<i class="ti ti-history"></i> Show completed';
-    btn.title = _histShowClosed ? "Show only actionable sprints + a few recent completed" : "Load the full closed-sprint history";
+    btn.title = _histShowClosed ? "Show only the action inbox (sprints needing you)" : "Load the full closed-sprint archive";
   }
   function _histToggleShowClosed() {
     _histShowClosed = !_histShowClosed;
@@ -2776,6 +2807,121 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _histNextChildLabel(parentLabel) {
     return _nextSprintSublabel(parentLabel);
+  }
+  function _histBulkSignOffTargets(sprints) {
+    const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+    const targets = [];
+    const skipLabels = /* @__PURE__ */ new Set();
+    for (const g of groups) {
+      const members = _histGroupMembers(g);
+      const rtm = members.filter(
+        (s) => (s.lifecycle_state || "").toLowerCase() === "ready_to_merge"
+      );
+      if (!rtm.length)
+        continue;
+      const useBulk = (g.children || []).length && g.baseLabel && _histGroupNeedsBulkComplete(g) && _histChildSprintsAllCompleted(g) && !_histChildSprintsStillRunning(g);
+      if (useBulk) {
+        targets.push({ kind: "bulk", label: g.baseLabel });
+        for (const s of members)
+          skipLabels.add(s.label);
+        continue;
+      }
+      for (const s of rtm) {
+        if (!skipLabels.has(s.label)) {
+          targets.push({ kind: "finish", label: s.label });
+        }
+      }
+    }
+    return targets.sort((a, b) => {
+      const pa = _histLabelParts(a.label);
+      const pb = _histLabelParts(b.label);
+      if (pa.baseNum !== pb.baseNum)
+        return pa.baseNum - pb.baseNum;
+      return pa.sub - pb.sub;
+    });
+  }
+  async function _histBulkSignOff() {
+    if (_histShowClosed) {
+      alert("Switch to the action inbox first (toggle off Show completed).");
+      return;
+    }
+    const targets = _histBulkSignOffTargets(_histLedgerData);
+    if (!targets.length) {
+      alert("No ready-to-merge sprints in the inbox.");
+      return;
+    }
+    const listing = targets.map((t) => {
+      const disp = sprintLabelDisplay(t.label);
+      return t.kind === "bulk" ? `${disp} (bulk complete lineage)` : disp;
+    }).join("\n");
+    if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
+
+${listing}`)) {
+      return;
+    }
+    if (typeof finishSprintAndWait !== "function") {
+      alert("Finish helper unavailable \u2014 refresh the page.");
+      return;
+    }
+    const total = targets.length;
+    if (typeof _smgmtBoardLock === "function") {
+      _smgmtBoardLock("Signing off ready sprints\u2026", {
+        progress: true,
+        total,
+        clearLog: true,
+        showDone: true
+      });
+    }
+    let done = 0;
+    let failed = null;
+    for (const target of targets) {
+      const { label, kind } = target;
+      const action = kind === "bulk" ? "Bulk completing" : "Completing";
+      if (typeof _smgmtBoardLog === "function") {
+        _smgmtBoardLog(`${action} ${sprintLabelDisplay(label)}\u2026`, "step");
+      }
+      try {
+        if (kind === "bulk") {
+          if (typeof bulkCompleteLineageAndWait !== "function") {
+            throw new Error("Bulk complete helper unavailable \u2014 refresh the page.");
+          }
+          await bulkCompleteLineageAndWait(label);
+        } else {
+          await finishSprintAndWait(label);
+        }
+        done += 1;
+        if (typeof _smgmtBoardProgress === "function")
+          _smgmtBoardProgress(done, total);
+        if (typeof _smgmtBoardLog === "function") {
+          _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(label)} completed`, "ok");
+        }
+      } catch (e) {
+        failed = { label, message: e.message || String(e) };
+        if (typeof _smgmtBoardLog === "function") {
+          _smgmtBoardLog(`\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`, "err");
+        }
+        break;
+      }
+    }
+    const finishMsg = failed ? `Stopped at ${sprintLabelDisplay(failed.label)}: ${failed.message}` : `Signed off ${done} sprint(s).`;
+    if (typeof _smgmtBoardFinish === "function") {
+      _smgmtBoardFinish({
+        ok: !failed,
+        message: finishMsg,
+        onDone: () => {
+          _histResetLedgerCache();
+          const repo = _cachedFullRepo[_slug];
+          if (repo)
+            _histLoadLedger2(repo, { force: true });
+          if (typeof loadSprintMgmt === "function")
+            loadSprintMgmt(true).catch(() => {
+            });
+        }
+      });
+    } else {
+      alert(finishMsg);
+      _histForceRefresh();
+    }
   }
 
   // apps/dashboard/static/src/sprint-board/rerun-modal.js
@@ -3125,6 +3271,80 @@ Replace the existing draft (${data.existing_label})?`
       if (_fsActiveJob)
         _fsActiveJob.es = null;
     };
+  }
+  function finishSprintAndWait2(label) {
+    return new Promise(async (resolve, reject) => {
+      const repo = _smgmtRepo();
+      if (!repo) {
+        reject(new Error("No project loaded"));
+        return;
+      }
+      const parts = repo.split("/");
+      const owner = parts[0];
+      const repoName = parts.slice(1).join("/");
+      try {
+        const prevRes = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
+        );
+        if (!prevRes.ok) {
+          const err = await prevRes.json().catch(() => ({}));
+          throw new Error(err.detail || `Preview failed (HTTP ${prevRes.status})`);
+        }
+        const preview = await prevRes.json();
+        if (preview.conflict_error)
+          throw new Error(preview.conflict_error);
+        const allTickets = preview.all_tickets || [];
+        const bgParams = {
+          confirmed: true,
+          move_non_uat_to: preview.next_sprint_label || "",
+          selected_ticket_numbers: allTickets.map((t) => t.number),
+          selected_tickets: allTickets.map((t) => ({
+            number: t.number,
+            title: t.title || `#${t.number}`
+          })),
+          merge_pr: !!preview.sprint_pr,
+          sprint_pr_url: preview.sprint_pr ? preview.sprint_pr.url : null,
+          total: allTickets.length + 2
+        };
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bgParams)
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+        const es = new EventSource(url);
+        es.onmessage = (e) => {
+          let snap;
+          try {
+            snap = JSON.parse(e.data);
+          } catch {
+            return;
+          }
+          if (snap.ping)
+            return;
+          if (snap.status === "done") {
+            es.close();
+            resolve(snap);
+          } else if (snap.status === "error") {
+            es.close();
+            reject(new Error(snap.error || "Finish failed"));
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          reject(new Error("Finish stream disconnected"));
+        };
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
   async function _fsRetry() {
     if (!_fsActiveJob)
@@ -3483,6 +3703,33 @@ Replace the existing draft (${data.existing_label})?`
       throw new Error(detail);
     }
     return res.json();
+  }
+  async function bulkCompleteLineageAndWait2(label) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      throw new Error("No project loaded");
+    const parts = repo.split("/");
+    const owner = parts[0];
+    const repoName = parts.slice(1).join("/");
+    const preview = await _bcFetchPreview(owner, repoName, label);
+    const order = (preview.complete_order || []).slice();
+    if (!order.length)
+      throw new Error("Nothing to bulk complete");
+    for (const sLabel of order) {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmed: true })
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+      }
+    }
+    return { label, steps: order.length };
   }
   async function _bcConfirm() {
     const repo = _smgmtRepo();
@@ -8079,12 +8326,14 @@ ${data.errors.join("\n")}`);
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
   globalThis._fsRetry = _fsRetry;
+  globalThis.finishSprintAndWait = finishSprintAndWait2;
   globalThis._bcOpen = _bcOpen;
   globalThis._bcClose = _bcClose;
   globalThis._bcCatClass = _bcCatClass;
   globalThis._bcSelectAll = _bcSelectAll;
   globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
   globalThis._bcConfirm = _bcConfirm;
+  globalThis.bulkCompleteLineageAndWait = bulkCompleteLineageAndWait2;
   globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
   globalThis._recApply = _recApply;
   globalThis._recClose = _recClose;
@@ -8227,6 +8476,7 @@ ${data.errors.join("\n")}`);
   globalThis._histToggleShowClosed = _histToggleShowClosed;
   globalThis._histForceRefresh = _histForceRefresh;
   globalThis._histSetTtlMin = _histSetTtlMin;
+  globalThis._histBulkSignOff = _histBulkSignOff;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
   // apps/dashboard/static/src/index.js

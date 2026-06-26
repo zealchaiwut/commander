@@ -58,16 +58,16 @@ def test_bulk_complete_row_not_promoted_by_clear_stale_failure():
     assert rec["failed_tickets"]
 
 
-def test_active_only_excludes_running_and_partial_finished():
+def test_active_only_excludes_running_includes_partial_finished_lineage():
     recs = [
         {"label": "sprint-86", "lifecycle_state": "running", "_sort_key": "2026-06-15"},
         {"label": "sprint-77", "lifecycle_state": "partial_finished", "_sort_key": "2026-06-14"},
         {"label": "sprint-77.1", "lifecycle_state": "ready_to_merge", "_sort_key": "2026-06-14"},
         {"label": "sprint-2", "lifecycle_state": "needs_rework", "_sort_key": "2026-06-02"},
+        {"label": "sprint-9", "lifecycle_state": "draft", "_sort_key": "2026-06-01"},
     ]
     out = h._filter_active_records(recs, keep_completed=0)
     labels = {r["label"] for r in out}
     assert "sprint-86" not in labels
-    assert "sprint-77" not in labels
-    assert "sprint-77.1" in labels
-    assert "sprint-2" in labels
+    assert "sprint-9" not in labels
+    assert {"sprint-77", "sprint-77.1", "sprint-2"} <= labels

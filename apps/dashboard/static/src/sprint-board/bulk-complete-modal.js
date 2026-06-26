@@ -179,6 +179,33 @@ async function _bcMergeStep(owner, repoName, step) {
   return res.json();
 }
 
+/** Run bulk complete (complete-step chain) for one lineage base; resolves when done. */
+export async function bulkCompleteLineageAndWait(label) {
+  const repo = _smgmtRepo();
+  if (!repo) throw new Error('No project loaded');
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+  const preview = await _bcFetchPreview(owner, repoName, label);
+  const order = (preview.complete_order || []).slice();
+  if (!order.length) throw new Error('Nothing to bulk complete');
+  for (const sLabel of order) {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+    }
+  }
+  return { label, steps: order.length };
+}
+
 export async function _bcConfirm() {
   const repo = _smgmtRepo();
   if (!_bcLabel || !repo || !_bcPreview) return;

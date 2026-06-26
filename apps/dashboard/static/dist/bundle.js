@@ -6273,6 +6273,36 @@ Proceed anyway?`)) {
       requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
     }
   }
+  function _pfRecalcStepFails() {
+    let fails = 0;
+    if (_pfCycle && _pfCycle.length)
+      fails++;
+    const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
+    if (pendingFlags.length > 0) {
+      fails++;
+      _pfStepState("missizing", "fail", `${pendingFlags.length} flag(s) require review`);
+    } else if (_pfFlags && (_pfFlags.flags || []).length > 0) {
+      _pfStepState("missizing", "pass", "All flags resolved");
+    }
+    _pfStepFails = fails;
+    _pfStepperSummary();
+  }
+  var _PF_SIZE_TIERS = /* @__PURE__ */ new Set(["S", "M", "L", "XL"]);
+  function _pfFlagDefaultReestimateSize(flag) {
+    const hist = String(flag?.historical_avg_actual_size || "").toUpperCase();
+    if (_PF_SIZE_TIERS.has(hist))
+      return hist;
+    const cur = String(flag?.current_estimate || "").toUpperCase();
+    if (_PF_SIZE_TIERS.has(cur))
+      return cur;
+    return "S";
+  }
+  function _pfFlagAutoReestimate(num) {
+    const flag = (_pfFlags?.flags || []).find((f) => f.issue_number === num);
+    if (!flag)
+      return;
+    _pfFlagAction(num, "reestimated", _pfFlagDefaultReestimateSize(flag));
+  }
   function _pfUpdateConfirmBtn() {
     const hasCycle = !!(_pfCycle && _pfCycle.length);
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
@@ -6410,17 +6440,8 @@ Proceed anyway?`)) {
         actionsHtml = `
         <div class="pf-flag-actions" id="pf-flag-actions-${num}">
           <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
-          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || "S")}')">Re-estimate</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagAutoReestimate(${num})" title="Apply historical average size">Re-estimate</button>
           <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
-        </div>
-        <div id="pf-flag-picker-${num}" style="display:none">
-          <div class="pf-flag-size-picker">
-            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
-            ${["S", "M", "L", "XL"].map(
-          (s) => `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
-        ).join("")}
-            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
-          </div>
         </div>`;
       }
       return `<div class="${itemClass}" id="pf-flag-item-${num}">
@@ -6444,21 +6465,10 @@ Proceed anyway?`)) {
     ${rows.join("")}
   </div>`;
   }
-  function _pfFlagShowSizePicker(num, _currentSize) {
-    const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-    const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl)
-      actionsEl.style.display = "none";
-    if (pickerEl)
-      pickerEl.style.display = "block";
+  function _pfFlagShowSizePicker(num) {
+    _pfFlagAutoReestimate(num);
   }
-  function _pfFlagHidePicker(num) {
-    const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-    const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl)
-      actionsEl.style.display = "";
-    if (pickerEl)
-      pickerEl.style.display = "none";
+  function _pfFlagHidePicker(_num) {
   }
   async function _pfFlagAction(num, action, newSize) {
     const label = _pfCurrentLabel;
@@ -6494,6 +6504,7 @@ Proceed anyway?`)) {
         const newHtml = _pfBuildFlagsHtml();
         flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
       }
+      _pfRecalcStepFails();
       _pfUpdateConfirmBtn();
     } catch (e) {
       _smgmtShowToast("Flag action failed: " + e.message, "error");
@@ -6504,7 +6515,6 @@ Proceed anyway?`)) {
     }
   }
   function _pfFlagReestimate(num, newSize) {
-    _pfFlagHidePicker(num);
     _pfFlagAction(num, "reestimated", newSize);
   }
   function _pfBuildDAGHtml(dag) {
@@ -8038,6 +8048,7 @@ ${data.errors.join("\n")}`);
   globalThis._pfFlagHidePicker = _pfFlagHidePicker;
   globalThis._pfFlagAction = _pfFlagAction;
   globalThis._pfFlagReestimate = _pfFlagReestimate;
+  globalThis._pfFlagAutoReestimate = _pfFlagAutoReestimate;
   globalThis._pfBuildDAGHtml = _pfBuildDAGHtml;
   globalThis._pfDrawDAGArrows = _pfDrawDAGArrows;
   globalThis._pfToggleTicket = _pfToggleTicket;

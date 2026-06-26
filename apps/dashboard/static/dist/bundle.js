@@ -1154,11 +1154,18 @@ Replace the existing draft (${data.existing_label})?`
     }
     return '<span class="iss-icon idle"></span>';
   }
-  function _histProgressText(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histIssueSucceeded(iss) {
+    return _histIssueChip(iss).cls === "merged";
+  }
+  function _histProgressText(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (!issues.length)
       return "";
-    const done = issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
+    const done = issues.filter(_histIssueSucceeded).length;
+    const failed = issues.filter((i) => _histIssueChip(i).cls === "crashed").length;
+    if (failed) {
+      return `${done}/${issues.length} done \xB7 ${failed} failed`;
+    }
     return `${done}/${issues.length} done`;
   }
   function _histLooseEndCount(s) {
@@ -1173,9 +1180,9 @@ Replace the existing draft (${data.existing_label})?`
       return g.count;
     return 0;
   }
-  function _histHeadStatsHtml(s) {
+  function _histHeadStatsHtml(s, group) {
     const parts = [];
-    const progress = _histProgressText(s);
+    const progress = _histProgressText(s, group);
     if (progress)
       parts.push(progress);
     const stats = _histRunStats[s.label];
@@ -1258,37 +1265,44 @@ Replace the existing draft (${data.existing_label})?`
           map.set(iss.ticket_id, String(iss.title));
         }
       }
+      try {
+        const tickets = s.label && _smgmtBySprint[s.label] || [];
+        for (const t of tickets) {
+          if (t.number != null && t.title && !map.has(t.number)) {
+            map.set(t.number, String(t.title));
+          }
+        }
+      } catch (_) {
+      }
     }
     return map;
   }
-  function _histLaterSiblingTicketIds(s, group) {
-    if (!group || !s || !_histIsChild(s.label))
-      return /* @__PURE__ */ new Set();
-    const sub = _histLabelParts(s.label).sub;
-    const ids = /* @__PURE__ */ new Set();
-    for (const c of group.children || []) {
-      if (_histLabelParts(c.label).sub <= sub)
-        continue;
-      for (const iss of c.issues || []) {
-        if (iss.ticket_id != null)
-          ids.add(String(iss.ticket_id));
+  function _histCanonicalOwnerLabel(ticketId, group) {
+    if (!group || ticketId == null)
+      return null;
+    let bestSub = -1;
+    let owner = null;
+    for (const s of _histGroupMembers(group)) {
+      const sub = _histLabelParts(s.label).sub;
+      const listed = (s.issues || []).some(
+        (i) => String(i.ticket_id) === String(ticketId)
+      );
+      if (listed && sub >= bestSub) {
+        bestSub = sub;
+        owner = s.label;
       }
     }
-    return ids;
+    return owner;
   }
   function _histIssuesForDisplay(s, group) {
     const issues = Array.isArray(s.issues) ? s.issues : [];
     if (!group)
       return issues;
-    const laterIds = _histLaterSiblingTicketIds(s, group);
-    if (!laterIds.size)
-      return issues;
     return issues.filter((iss) => {
       if (iss.ticket_id == null)
         return true;
-      if (!laterIds.has(String(iss.ticket_id)))
-        return true;
-      return _histIssueChip(iss).cls === "merged";
+      const owner = _histCanonicalOwnerLabel(iss.ticket_id, group);
+      return owner === s.label;
     });
   }
   function _histIssueRowHtml(iss, isChild, s) {
@@ -1981,7 +1995,7 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(base).replace("Sprint ", "");
     return `\u2190 from ${display}`;
   }
-  function _histParentRowHtml(s, bulkBtn, parentBodyExpanded) {
+  function _histParentRowHtml(s, bulkBtn, parentBodyExpanded, group) {
     const display = sprintLabelDisplay(s.label);
     const lbl = escHtml(s.label || "");
     const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
@@ -1996,7 +2010,7 @@ Replace the existing draft (${data.existing_label})?`
     <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
     <span class="hist-parent-name">${escHtml(display)}</span>
     ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s)}
+    ${_histHeadStatsHtml(s, group)}
     <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histRecoveryBtnHtml(s)}${_histDeleteBtnHtml(s)}${_histSecondaryLinksHtml(s)}</span>
   </div>`;
   }
@@ -2032,7 +2046,7 @@ Replace the existing draft (${data.existing_label})?`
         <i class="ti ${chev} hist-chev"></i>
         <span class="hist-child-title">${escHtml(display)}` + (fromLine ? ` <span class="hist-child-from">${escHtml(fromLine)}</span>` : "") + `</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${_histHeadStatsHtml(s)}
+        ${_histHeadStatsHtml(s, group)}
       </div>
       ${headRight}
     </div>
@@ -2426,7 +2440,7 @@ Replace the existing draft (${data.existing_label})?`
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
       const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
       const groupCls = "hist-sprint-group";
-      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded) : "";
+      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded, group) : "";
       const parentBody = parentBodyExpanded && group.baseSprint ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>` : "";
       const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
       return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;

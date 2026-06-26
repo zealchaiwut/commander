@@ -590,10 +590,23 @@ def test_ac14_what_list_and_issue_list_not_both_called():
 
 
 def test_lineage_superseded_failures_filtered():
-    """Failed tickets retried in a later child must not repeat in earlier runs."""
+    """Each ticket appears only on the latest lineage run that lists it."""
     body = _fn_body("_histIssuesForDisplay")
-    assert "_histLaterSiblingTicketIds" in body
-    assert "chip.cls === 'merged'" in body or "cls === 'merged'" in body
+    assert "_histCanonicalOwnerLabel" in body
+    assert "owner === s.label" in body
+
+
+def test_progress_counts_failures_separately():
+    """Headline progress must not count crashed tickets as done."""
+    body = _fn_body("_histProgressText")
+    assert "_histIssueSucceeded" in body or "_histIssueChip" in body
+    assert "failed" in body
+
+
+def test_lineage_title_map_includes_board_cache():
+    """Title map must pull from per-sprint board cache as well as issue rows."""
+    body = _fn_body("_histBuildLineageTitleMap")
+    assert "_smgmtBySprint" in body
 
 
 def test_parent_body_uses_same_outcome_renderer_as_children():

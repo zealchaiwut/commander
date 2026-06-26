@@ -5,11 +5,14 @@ Use when History inbox shows stale needs_rework / ready_to_merge rows whose spri
 branches are already merged into develop, or when cross-project rows leaked into
 the wrong project's feed.
 
+Requires Python 3.10+ (Commander dashboard venv is 3.12). Do NOT use system
+python3 on macOS if it is 3.9 — use ./venv/bin/python3 from the prd clone.
+
 Examples:
-  DB_PATH=./apps/dashboard/commander.db python3 scripts/repair_sprint_inbox_from_github.py \\
+  DB_PATH=./apps/dashboard/commander.db ./venv/bin/python3 scripts/repair_sprint_inbox_from_github.py \\
     --project zealchaiwut/commander --dry-run
 
-  DB_PATH=./apps/dashboard/commander.db python3 scripts/repair_sprint_inbox_from_github.py \\
+  DB_PATH=./apps/dashboard/commander.db ./venv/bin/python3 scripts/repair_sprint_inbox_from_github.py \\
     --project zealchaiwut/commander --apply
 """
 from __future__ import annotations
@@ -17,6 +20,14 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+
+if sys.version_info < (3, 10):
+    sys.exit(
+        "ERROR: Python 3.10+ required (dashboard uses 3.12).\n"
+        "Run: DB_PATH=./apps/dashboard/commander.db "
+        "./venv/bin/python3 scripts/repair_sprint_inbox_from_github.py ...\n"
+        f"(you invoked {sys.executable} → {sys.version.split()[0]})",
+    )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))

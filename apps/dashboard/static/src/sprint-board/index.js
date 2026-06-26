@@ -46,6 +46,7 @@ import {
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
   _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
+  _pfFlagAutoReestimate, _pfFlagDefaultReestimateSize,
   _pfBuildDAGHtml, _pfDrawDAGArrows, _pfToggleTicket, _pfGetSelectedTickets,
   _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
@@ -136,6 +137,7 @@ globalThis._pfFlagShowSizePicker = _pfFlagShowSizePicker;
 globalThis._pfFlagHidePicker = _pfFlagHidePicker;
 globalThis._pfFlagAction = _pfFlagAction;
 globalThis._pfFlagReestimate = _pfFlagReestimate;
+globalThis._pfFlagAutoReestimate = _pfFlagAutoReestimate;
 globalThis._pfBuildDAGHtml = _pfBuildDAGHtml;
 globalThis._pfDrawDAGArrows = _pfDrawDAGArrows;
 globalThis._pfToggleTicket = _pfToggleTicket;

@@ -216,38 +216,35 @@ def test_child_sprint_legend_renders_above_ledger():
 def test_child_sprint_card_helpers_exist():
     """Nested child sprint layout helpers must exist."""
     assert _fn_exists("_histChildCardHtml"), "_histChildCardHtml must exist"
-    assert _fn_exists("_histParentRowHtml"), "_histParentRowHtml must exist"
+    child = _fn_body("_histChildCardHtml")
+    assert "isLineageParent" in child or "hist-lineage-parent" in child, \
+        "lineage parent must use the same child card shell"
     assert _fn_exists("_histAgentTimeBarHtml") or "hist-agent-bar" in _fn_body("_histChildMetricsHtml"), \
         "collapsed agent-time bar must be implemented"
 
 
-def test_child_group_uses_parent_row_and_child_wrap():
-    """Groups with children must nest under a parent row + L-connector wrap."""
+def test_child_group_uses_unified_lineage_cards():
+    """Parent and children in a group must share hist-child-card."""
     body = _fn_body("_histGroupHtml")
-    assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
+    assert "isLineageParent: true" in body or "isLineageParent:true" in body.replace(" ", ""), \
+        "parent sprint must render via _histChildCardHtml with isLineageParent"
     assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
     assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
-    assert "hist-sprint-group collapsed" not in body or "hist-parent-body" in body, (
-        "group collapse must hide parent ticket block only, not child sprints"
-    )
-    parent = _fn_body("_histParentRowHtml")
-    assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
+    child = _fn_body("_histChildCardHtml")
+    assert "_histLooseEndBandHtml" in child
+    assert "_histWhatListHtml" in child
+    assert "_histCardOutcomeHtml" in child
 
 
-def test_parent_row_includes_reconcile_and_recovery():
-    """Lineage parent rows must expose Reconcile/Complete like child cards."""
-    parent = _fn_body("_histParentRowHtml")
-    assert "_histRecoveryBtnHtml" in parent, \
-        "parent row must include recovery actions (Reconcile / Complete)"
+def test_lineage_parent_includes_reconcile_and_recovery():
+    """Lineage parent cards must expose Reconcile/Complete like child cards."""
+    child = _fn_body("_histChildCardHtml")
+    assert "_histRecoveryBtnHtml" in child, \
+        "lineage cards must include recovery actions (Reconcile / Complete)"
     recovery = _fn_body("_histRecoveryBtnHtml")
     assert "smgmtReconcileSprint" in recovery, \
         "recovery helper must wire the Reconcile button"
-
-
-    assert _fn_exists("_histToggleGroup"), "_histToggleGroup must exist for parent collapse"
-    parent = _fn_body("_histParentRowHtml")
-    assert "_histToggleGroup" in parent
-    assert "event.stopPropagation()" in parent
+    assert "_histToggleCard" in child
 
 
 def test_ac4_loose_end_band_css_uses_amber():
@@ -610,9 +607,11 @@ def test_lineage_title_map_includes_board_cache():
 
 
 def test_parent_body_uses_same_outcome_renderer_as_children():
-    """Parent ticket block must use _histCardOutcomeHtml like child cards."""
+    """Parent and child lineage cards share one body builder."""
     body = _fn_body("_histGroupHtml")
-    assert "_histCardOutcomeHtml(group.baseSprint, group)" in body
+    assert "_histChildCardHtml(group.baseSprint" in body
+    child = _fn_body("_histChildCardHtml")
+    assert "_histCardOutcomeHtml(s, group)" in child
     assert "_histIssueListHtml(group.baseSprint)" not in body
 
 

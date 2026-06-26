@@ -347,8 +347,8 @@ def test_bulk_complete_button_on_parent_with_children():
     group = _fn_body("_histGroupHtml")
     assert "_histBulkCompleteBtnHtml" in group
     assert "bulkCompleteBtn" in _fn_body("_histGroupHtml")
-    parent = _fn_body("_histParentRowHtml")
-    assert "hist-parent-actions" in parent
+    child = _fn_body("_histChildCardHtml")
+    assert "hist-child-head-right" in child
     btn = _fn_body("_histBulkCompleteBtnHtml")
     assert "smgmtBulkCompleteSprint" in btn
     assert "Bulk complete" in btn

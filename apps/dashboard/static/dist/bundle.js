@@ -1084,7 +1084,6 @@ Replace the existing draft (${data.existing_label})?`
   var _histLedgerData = [];
   globalThis._histLedgerData = _histLedgerData;
   var _histExpanded = /* @__PURE__ */ new Set();
-  var _histGroupCollapsed = /* @__PURE__ */ new Set();
   var _histDidAutoExpand = false;
   var _histFoldSize = 10;
   var _histFoldExpanded = /* @__PURE__ */ new Set();
@@ -1489,13 +1488,16 @@ Replace the existing draft (${data.existing_label})?`
           const cst = (c.lifecycle_state || "").toLowerCase();
           return cst !== "completed" && cst !== "deleted";
         });
-        if (parentSt === "completed" && !anyChildOpen) {
-          _histGroupCollapsed.add(baseLbl);
+        if (g.baseSprint && parentSt === "completed" && !anyChildOpen) {
+          _histExpanded.delete(g.baseSprint.label);
         }
       }
       if (i >= _histFoldSize)
         continue;
       if (children.length) {
+        if (g.baseSprint && (_histShouldAutoExpand(g.baseSprint) || _histIssuesForDisplay(g.baseSprint, g).length)) {
+          _expand(g.baseSprint);
+        }
         for (const c of children) {
           if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
             _expand(c);
@@ -1995,31 +1997,16 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(base).replace("Sprint ", "");
     return `\u2190 from ${display}`;
   }
-  function _histParentRowHtml(s, bulkBtn, parentBodyExpanded, group) {
-    const display = sprintLabelDisplay(s.label);
-    const lbl = escHtml(s.label || "");
-    const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
-    const cls = ["hist-parent-row"];
-    if (String(s.lifecycle_state || "").toLowerCase() === "completed")
-      cls.push("settled");
-    if (parentBodyExpanded)
-      cls.push("expanded");
-    return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
-    onclick="_histToggleGroup('${lbl}')"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
-    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
-    <span class="hist-parent-name">${escHtml(display)}</span>
-    ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s, group)}
-    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histRecoveryBtnHtml(s)}${_histDeleteBtnHtml(s)}${_histSecondaryLinksHtml(s)}</span>
-  </div>`;
-  }
-  function _histChildCardHtml(s, group) {
+  function _histChildCardHtml(s, group, opts) {
+    opts = opts || {};
+    const isLineageParent = !!opts.isLineageParent;
     const expanded = _histExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
     const state = (s.lifecycle_state || "").toLowerCase();
     const displayState = state === "needs_rework" && s.end_reason && (String(s.end_reason).toLowerCase() === "natural" || String(s.end_reason).toLowerCase() === "merge_sprint") && !_histSprintFailed(s) ? "ready_to_merge" : state;
     const cls = ["hist-child-card"];
+    if (isLineageParent)
+      cls.push("hist-lineage-parent");
     if (displayState === "ready_to_merge")
       cls.push("ready");
     if (displayState === "completed")
@@ -2027,15 +2014,17 @@ Replace the existing draft (${data.existing_label})?`
     if (expanded)
       cls.push("expanded");
     const display = sprintLabelDisplay(s.label);
-    const fromLine = _histParentFromLabel(s.label);
+    const fromLine = !isLineageParent && _histIsChild(s.label) ? _histParentFromLabel(s.label) : "";
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const recoveryBtn = _histRecoveryBtnHtml(s);
     const deleteBtn = _histDeleteBtnHtml(s);
     const secondaryLinks = _histSecondaryLinksHtml(s);
-    const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}</span>`;
+    const bulkBtn = opts.bulkCompleteBtn || "";
+    const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>`;
     if (expanded && !(s.label in _histRunStats))
       _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-child-body">
+        ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
         ${_histWhatListHtml(s)}
         ${_histCardOutcomeHtml(s, group)}
@@ -2332,14 +2321,7 @@ Replace the existing draft (${data.existing_label})?`
     _histRenderLedger(_histLedgerData);
   }
   function _histToggleGroup(baseLabel) {
-    if (!baseLabel)
-      return;
-    if (_histGroupCollapsed.has(baseLabel)) {
-      _histGroupCollapsed.delete(baseLabel);
-    } else {
-      _histGroupCollapsed.add(baseLabel);
-    }
-    _histRenderLedger(_histLedgerData);
+    _histToggleCard(baseLabel);
   }
   function _histLabelParts(label) {
     const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(label || "");
@@ -2438,12 +2420,13 @@ Replace the existing draft (${data.existing_label})?`
     const children = group.children || [];
     if (children.length) {
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
-      const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
       const groupCls = "hist-sprint-group";
-      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded, group) : "";
-      const parentBody = parentBodyExpanded && group.baseSprint ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>` : "";
+      const parentCard = group.baseSprint ? _histChildCardHtml(group.baseSprint, group, {
+        isLineageParent: true,
+        bulkCompleteBtn: bulkBtn
+      }) : "";
       const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
-      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
+      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
     if (group.baseSprint) {
       return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint, group) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });

@@ -2773,12 +2773,32 @@ def _sprint_db_mark_merged_completed(
     ``needs_rework`` superseded ancestors need actor=reconcile (B2 edge).
     ``running`` / ``ready_to_merge`` orphans need actor=manager. Try both when
     unsure so bulk-complete resume does not wedge on an illegal edge.
+
+    Sprints that ran before per-project DB rows existed (or never got a lifecycle
+    write) read as ``draft`` — ``draft→completed`` is illegal. After the git
+    merge already landed, bootstrap through ``ready_to_merge`` first.
     """
     try:
         row = db.get_sprint(sprint_label, project=project or None)
         current = db.canonical_lifecycle((row or {}).get("state") or "draft")
     except Exception:
         current = "unknown"
+    # partial_finished is derived-only but may appear on legacy rows; treat like
+    # ready_to_merge for post-merge settlement.
+    if current in ("draft", "planned", "unknown", "partial_finished"):
+        _sprint_db_set_state(
+            sprint_label,
+            project,
+            "ready_to_merge",
+            actor="manager",
+            end_reason=extra_fields.get("end_reason") or "merge_sprint",
+            ended_at=extra_fields.get("ended_at"),
+        )
+        try:
+            row = db.get_sprint(sprint_label, project=project or None)
+            current = db.canonical_lifecycle((row or {}).get("state") or "draft")
+        except Exception:
+            current = "unknown"
     if current == "needs_rework":
         actors = ("reconcile",)
     else:

@@ -3581,7 +3581,8 @@ Replace the existing draft (${data.existing_label})?`
       return;
     if (!preview || preview.exists === false) {
       body.innerHTML = `<div style="font-size:13px;color:var(--text-muted)">
-      This sprint has no lifecycle row in this dashboard's DB${preview && preview.wrong_project ? " for this project" : ""}, so there is nothing to reconcile here.
+      This sprint has no lifecycle row in this dashboard's DB${preview && preview.wrong_project ? " for this project" : ""}, so Reconcile cannot change lifecycle here.
+      ${preview && preview.exists === false ? '<div style="margin-top:8px">If git branches are already merged, use <b>Bulk complete</b> on the lineage parent \u2014 that seeds the DB row and marks each step completed.</div>' : ""}
     </div>`;
       if (applyBtn)
         applyBtn.classList.add("hidden");

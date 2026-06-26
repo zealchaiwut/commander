@@ -1220,17 +1220,76 @@ Replace the existing draft (${data.existing_label})?`
     }
     return { title, accent, time: meta.time };
   }
-  function _histIssueTitle(iss, s) {
+  function _histIssueTitle(iss, s, titleMap) {
     if (iss.title)
       return String(iss.title);
+    const tid = iss.ticket_id;
+    if (titleMap && tid != null) {
+      const hit = titleMap.get(tid) || titleMap.get(String(tid));
+      if (hit)
+        return String(hit);
+    }
     try {
       const tickets = s && s.label && _smgmtBySprint[s.label] || [];
-      const hit = tickets.find((t) => String(t.number) === String(iss.ticket_id));
+      const hit = tickets.find((t) => String(t.number) === String(tid));
       if (hit && hit.title)
         return String(hit.title);
     } catch (_) {
     }
+    try {
+      for (const row of _histLedgerData || []) {
+        const hit = (row.issues || []).find(
+          (i) => String(i.ticket_id) === String(tid) && i.title
+        );
+        if (hit)
+          return String(hit.title);
+      }
+    } catch (_) {
+    }
     return "";
+  }
+  function _histBuildLineageTitleMap(group) {
+    const map = /* @__PURE__ */ new Map();
+    if (!group)
+      return map;
+    for (const s of _histGroupMembers(group)) {
+      for (const iss of s.issues || []) {
+        if (iss.ticket_id != null && iss.title) {
+          map.set(iss.ticket_id, String(iss.title));
+        }
+      }
+    }
+    return map;
+  }
+  function _histLaterSiblingTicketIds(s, group) {
+    if (!group || !s || !_histIsChild(s.label))
+      return /* @__PURE__ */ new Set();
+    const sub = _histLabelParts(s.label).sub;
+    const ids = /* @__PURE__ */ new Set();
+    for (const c of group.children || []) {
+      if (_histLabelParts(c.label).sub <= sub)
+        continue;
+      for (const iss of c.issues || []) {
+        if (iss.ticket_id != null)
+          ids.add(String(iss.ticket_id));
+      }
+    }
+    return ids;
+  }
+  function _histIssuesForDisplay(s, group) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (!group)
+      return issues;
+    const laterIds = _histLaterSiblingTicketIds(s, group);
+    if (!laterIds.size)
+      return issues;
+    return issues.filter((iss) => {
+      if (iss.ticket_id == null)
+        return true;
+      if (!laterIds.has(String(iss.ticket_id)))
+        return true;
+      return _histIssueChip(iss).cls === "merged";
+    });
   }
   function _histIssueRowHtml(iss, isChild, s) {
     const chip = _histIssueChip(iss);
@@ -1270,25 +1329,6 @@ Replace the existing draft (${data.existing_label})?`
       return false;
     return true;
   }
-  function _histFailedBlockHtml(s) {
-    if (!_histSprintFailed(s))
-      return "";
-    const state = (s.lifecycle_state || "").toLowerCase();
-    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-    const sprintReason = s.failure_reason || s.end_reason;
-    if (!failed.length && !sprintReason)
-      return "";
-    const items = failed.map((ft) => {
-      const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
-      const reason = ft.failure_reason || "Agent failed";
-      return `<div class="hist-fail-item"><span class="fail-id">${escHtml(String(id))}</span><span>${escHtml(String(reason))}</span></div>`;
-    }).join("");
-    const summary = !failed.length && sprintReason ? `<div class="hist-fail-item"><span>${escHtml(String(sprintReason))}</span></div>` : "";
-    return `<div class="hist-fail-block">
-    <div class="fail-head"><i class="ti ti-alert-triangle"></i> Sprint failed</div>
-    ${items}${summary}
-  </div>`;
-  }
   function _histPartialChildrenHtml(s) {
     const state = (s.lifecycle_state || "").toLowerCase();
     if (state !== "partial_finished")
@@ -1314,19 +1354,6 @@ Replace the existing draft (${data.existing_label})?`
     const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-  function _histIssueListHtml(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const isChild = _histIsChild(s.label);
-    const failedBlock = _histFailedBlockHtml(s);
-    const partialBlock = _histPartialChildrenHtml(s);
-    if (!issues.length) {
-      if (partialBlock)
-        return `${failedBlock}${partialBlock}`;
-      const empty = failedBlock ? "" : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
-      return `${failedBlock}${empty}`;
-    }
-    return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>`;
   }
   function _histRepo(s) {
     const cached = _cachedFullRepo[_slug];
@@ -1427,7 +1454,7 @@ Replace the existing draft (${data.existing_label})?`
     const st = (s.lifecycle_state || "").toLowerCase();
     if (_histIsLocked(st))
       return false;
-    return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running";
+    return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running" || st === "draft" || st === "planned" || st === "partial_finished";
   }
   var _histCollapseDefaultsApplied = /* @__PURE__ */ new Set();
   function _histAutoExpandRecent(groups) {
@@ -1443,14 +1470,23 @@ Replace the existing draft (${data.existing_label})?`
       const baseLbl = g.baseLabel || g.baseSprint && g.baseSprint.label || "";
       if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
         _histCollapseDefaultsApplied.add(baseLbl);
-        const st = (g.baseSprint && g.baseSprint.lifecycle_state || "").toLowerCase();
-        if (st === "completed")
+        const parentSt = (g.baseSprint && g.baseSprint.lifecycle_state || "").toLowerCase();
+        const anyChildOpen = children.some((c) => {
+          const cst = (c.lifecycle_state || "").toLowerCase();
+          return cst !== "completed" && cst !== "deleted";
+        });
+        if (parentSt === "completed" && !anyChildOpen) {
           _histGroupCollapsed.add(baseLbl);
+        }
       }
       if (i >= _histFoldSize)
         continue;
       if (children.length) {
-        _expand(children[children.length - 1]);
+        for (const c of children) {
+          if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
+            _expand(c);
+          }
+        }
       } else {
         _expand(g.baseSprint);
       }
@@ -1855,10 +1891,10 @@ Replace the existing draft (${data.existing_label})?`
       return 0;
     return (hit.segments || []).filter((seg) => seg.fix_round).length;
   }
-  function _histDoneIssueRowHtml(iss, s, stats) {
+  function _histDoneIssueRowHtml(iss, s, stats, titleMap) {
     const num = iss.ticket_id;
     const id = num != null ? "#" + num : "#?";
-    const titleText = _histIssueTitle(iss, s);
+    const titleText = _histIssueTitle(iss, s, titleMap);
     const repo = _histRepo(s);
     const chip = _histIssueChip(iss);
     const crashed = chip.cls === "crashed";
@@ -1883,12 +1919,13 @@ Replace the existing draft (${data.existing_label})?`
     ${logHtml}
   </div>`;
   }
-  function _histDoneIssuesHtml(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histDoneIssuesHtml(s, group) {
+    const titleMap = group ? _histBuildLineageTitleMap(group) : /* @__PURE__ */ new Map();
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (!issues.length)
       return "";
     const stats = _histRunStats[s.label];
-    return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
+    return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats, titleMap)).join("")}</div>`;
   }
   function _histCardShowsDoneSummary(s) {
     const issues = Array.isArray(s.issues) ? s.issues : [];
@@ -1903,10 +1940,12 @@ Replace the existing draft (${data.existing_label})?`
     }
     return state === "ready_to_merge" || state === "completed" || state === "running";
   }
-  function _histCardOutcomeHtml(s) {
-    if (!_histCardShowsDoneSummary(s))
+  function _histCardOutcomeHtml(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
+    const show = _histCardShowsDoneSummary(s) || issues.length > 0;
+    if (!show)
       return "";
-    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
   }
   var _histAgentTimeExpanded = /* @__PURE__ */ new Set();
   var _histMetricsDetailsExpanded = /* @__PURE__ */ new Set();
@@ -1942,14 +1981,14 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(base).replace("Sprint ", "");
     return `\u2190 from ${display}`;
   }
-  function _histParentRowHtml(s, bulkBtn, groupExpanded) {
+  function _histParentRowHtml(s, bulkBtn, parentBodyExpanded) {
     const display = sprintLabelDisplay(s.label);
     const lbl = escHtml(s.label || "");
-    const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
+    const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
     const cls = ["hist-parent-row"];
     if (String(s.lifecycle_state || "").toLowerCase() === "completed")
       cls.push("settled");
-    if (groupExpanded)
+    if (parentBodyExpanded)
       cls.push("expanded");
     return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
     onclick="_histToggleGroup('${lbl}')"
@@ -1961,7 +2000,7 @@ Replace the existing draft (${data.existing_label})?`
     <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histRecoveryBtnHtml(s)}${_histDeleteBtnHtml(s)}${_histSecondaryLinksHtml(s)}</span>
   </div>`;
   }
-  function _histChildCardHtml(s) {
+  function _histChildCardHtml(s, group) {
     const expanded = _histExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
     const state = (s.lifecycle_state || "").toLowerCase();
@@ -1984,7 +2023,8 @@ Replace the existing draft (${data.existing_label})?`
       _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-child-body">
         ${_histLooseEndBandHtml(s)}
-        ${_histCardOutcomeHtml(s)}
+        ${_histWhatListHtml(s)}
+        ${_histCardOutcomeHtml(s, group)}
       </div>` : "";
     return `<div class="${cls.join(" ")}" data-label="${lbl}">
     <div class="hist-child-head" onclick="_histToggleCard('${lbl}')">
@@ -2250,7 +2290,7 @@ Replace the existing draft (${data.existing_label})?`
     const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
-      ${_histCardOutcomeHtml(s)}
+      ${_histCardOutcomeHtml(s, null)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ""}
     </div>` : "";
@@ -2384,16 +2424,15 @@ Replace the existing draft (${data.existing_label})?`
     const children = group.children || [];
     if (children.length) {
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
-      const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
-      const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
-      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded) : "";
-      const parentOwnIssues = group.baseSprint && Array.isArray(group.baseSprint.issues) ? group.baseSprint.issues : [];
-      const parentBody = groupExpanded && parentOwnIssues.length ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>` : "";
-      const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
+      const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
+      const groupCls = "hist-sprint-group";
+      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded) : "";
+      const parentBody = parentBodyExpanded && group.baseSprint ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>` : "";
+      const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
       return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
     if (group.baseSprint) {
-      return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
+      return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint, group) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
     }
     return "";
   }

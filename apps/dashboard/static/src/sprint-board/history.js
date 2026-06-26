@@ -1229,19 +1229,11 @@ function _histDoneIssuesHtml(s, group) {
 }
 
 /** Agent bar + ticket rows when the sprint has a per-issue run snapshot. */
-function _histCardShowsDoneSummary(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histCardShowsDoneSummary(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (_histSprintFailed(s)) return issues.length > 0;
+  if (issues.length) return true;
   const state = (s.lifecycle_state || "").toLowerCase();
-  if (state === "needs_rework" || state === "partial_finished") {
-    const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
-    if (unfinished.length) return false;
-    // Every ticket merged — the work landed; the needs_rework / partial_finished
-    // flag is only about fix-rounds or lineage, not unfinished work. Show the done
-    // summary + per-ticket rows (previously these fell through to a final return
-    // that excluded needs_rework, so a fully-merged sprint showed no issue list).
-    return issues.length > 0;
-  }
   return (
     state === "ready_to_merge"
     || state === "completed"
@@ -1251,8 +1243,7 @@ function _histCardShowsDoneSummary(s) {
 
 function _histCardOutcomeHtml(s, group) {
   const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
-  const show = _histCardShowsDoneSummary(s) || issues.length > 0;
-  if (!show) return "";
+  if (!_histCardShowsDoneSummary(s, group) && !issues.length) return "";
   return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
 }
 
@@ -1329,7 +1320,7 @@ function _histChildCardHtml(s, group, opts) {
     ? `<div class="hist-child-body">
         ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
-        ${_histWhatListHtml(s)}
+        ${_histWhatListHtml(s, group)}
         ${_histCardOutcomeHtml(s, group)}
       </div>`
     : "";
@@ -1416,14 +1407,17 @@ function _histLooseEndBandHtml(s) {
 //   actually-failed sprint  → "Why it failed" list from s.failed_tickets
 //   partial / needs_rework  → "Unfinished N of M" list of unmerged issues
 //   complete / locked       → '' (nothing to display — AC7)
-function _histWhatListHtml(s) {
+function _histWhatListHtml(s, group) {
   if (_histIsLocked(s.lifecycle_state)) return '';
   const state = (s.lifecycle_state || '').toLowerCase();
+  const displayIssues = group
+    ? _histIssuesForDisplay(s, group)
+    : (Array.isArray(s.issues) ? s.issues : []);
 
   // Failed branch: crash summary header; per-ticket detail lives in issue rows (AC5/AC14)
   if (_histSprintFailed(s)) {
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const issues = displayIssues;
     const sprintReason = s.failure_reason || s.end_reason;
     if (!failed.length && !sprintReason) return "";
     const n = failed.length || 1;
@@ -1461,17 +1455,16 @@ function _histWhatListHtml(s) {
     </div>`;
   }
 
-  // Partial branch: unfinished tickets, each listed ONCE (AC6)
+  // Partial branch: heading only — ticket rows render in hist-irow (AC6/AC14).
   if (state === 'partial_finished' || state === 'needs_rework') {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const unfinished = issues.filter(i => (i.state || '').toLowerCase() !== 'merged');
+    const unfinished = displayIssues.filter(
+      (i) => (i.state || '').toLowerCase() !== 'merged',
+    );
     if (!unfinished.length) return '';
     const n = unfinished.length;
-    const m = issues.length;
-    const isChild = _histIsChild(s.label);
+    const m = displayIssues.length;
     return `<div class="hist-what-list">
       <div class="hist-what-head">Unfinished ${n} of ${m}</div>
-      <div class="iss-list">${unfinished.map(i => _histIssueRowHtml(i, isChild, s)).join('')}</div>
     </div>`;
   }
 

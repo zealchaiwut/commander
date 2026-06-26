@@ -1304,25 +1304,6 @@ Replace the existing draft (${data.existing_label})?`
       return owner === s.label;
     });
   }
-  function _histIssueRowHtml(iss, isChild, s) {
-    const chip = _histIssueChip(iss);
-    const rerun = iss.is_rerun || iss.rerun || isChild;
-    const arrow = rerun ? '<span class="iss-rerun">\u21B3</span> ' : "";
-    const num = iss.ticket_id;
-    const id = num != null ? "#" + num : "#?";
-    const titleText = _histIssueTitle(iss, s);
-    const title = titleText ? `<span class="iss-title">${escHtml(titleText)}</span>` : "";
-    const repo = typeof _histRepo === "function" ? _histRepo(s) : "";
-    const clickable = num != null && repo ? ` role="link" tabindex="0" title="Open #${escHtml(String(num))} on GitHub" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
-    const cls = "iss-row" + (clickable ? " iss-row-link" : "");
-    return `<div class="${cls}"${clickable}>
-    ${_histIssueIcon(iss)}
-    <span class="iss-id">${arrow}${escHtml(String(id))}</span>
-    ${title}
-    <span class="iss-chip ${chip.cls}">${chip.label}</span>
-    <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
-  </div>`;
-  }
   function _histSprintFailed(s) {
     const st = (s.lifecycle_state || "").toLowerCase();
     if (st === "failed")
@@ -1943,23 +1924,18 @@ Replace the existing draft (${data.existing_label})?`
     const stats = _histRunStats[s.label];
     return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats, titleMap)).join("")}</div>`;
   }
-  function _histCardShowsDoneSummary(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histCardShowsDoneSummary(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (_histSprintFailed(s))
       return issues.length > 0;
+    if (issues.length)
+      return true;
     const state = (s.lifecycle_state || "").toLowerCase();
-    if (state === "needs_rework" || state === "partial_finished") {
-      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
-      if (unfinished.length)
-        return false;
-      return issues.length > 0;
-    }
     return state === "ready_to_merge" || state === "completed" || state === "running";
   }
   function _histCardOutcomeHtml(s, group) {
     const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
-    const show = _histCardShowsDoneSummary(s) || issues.length > 0;
-    if (!show)
+    if (!_histCardShowsDoneSummary(s, group) && !issues.length)
       return "";
     return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
   }
@@ -2026,7 +2002,7 @@ Replace the existing draft (${data.existing_label})?`
     const body = expanded ? `<div class="hist-child-body">
         ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
-        ${_histWhatListHtml(s)}
+        ${_histWhatListHtml(s, group)}
         ${_histCardOutcomeHtml(s, group)}
       </div>` : "";
     return `<div class="${cls.join(" ")}" data-label="${lbl}">
@@ -2090,13 +2066,14 @@ Replace the existing draft (${data.existing_label})?`
     }
     return "";
   }
-  function _histWhatListHtml(s) {
+  function _histWhatListHtml(s, group) {
     if (_histIsLocked(s.lifecycle_state))
       return "";
     const state = (s.lifecycle_state || "").toLowerCase();
+    const displayIssues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (_histSprintFailed(s)) {
       const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-      const issues = Array.isArray(s.issues) ? s.issues : [];
+      const issues = displayIssues;
       const sprintReason = s.failure_reason || s.end_reason;
       if (!failed.length && !sprintReason)
         return "";
@@ -2130,16 +2107,15 @@ Replace the existing draft (${data.existing_label})?`
     </div>`;
     }
     if (state === "partial_finished" || state === "needs_rework") {
-      const issues = Array.isArray(s.issues) ? s.issues : [];
-      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
+      const unfinished = displayIssues.filter(
+        (i) => (i.state || "").toLowerCase() !== "merged"
+      );
       if (!unfinished.length)
         return "";
       const n = unfinished.length;
-      const m = issues.length;
-      const isChild = _histIsChild(s.label);
+      const m = displayIssues.length;
       return `<div class="hist-what-list">
       <div class="hist-what-head">Unfinished ${n} of ${m}</div>
-      <div class="iss-list">${unfinished.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>
     </div>`;
     }
     return "";

@@ -125,10 +125,18 @@ function _histIssueIcon(iss) {
   return '<span class="iss-icon idle"></span>';
 }
 
-function _histProgressText(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histIssueSucceeded(iss) {
+  return _histIssueChip(iss).cls === 'merged';
+}
+
+function _histProgressText(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (!issues.length) return '';
-  const done = issues.filter(i => (i.state || '').toLowerCase() === 'merged').length;
+  const done = issues.filter(_histIssueSucceeded).length;
+  const failed = issues.filter((i) => _histIssueChip(i).cls === 'crashed').length;
+  if (failed) {
+    return `${done}/${issues.length} done · ${failed} failed`;
+  }
   return `${done}/${issues.length} done`;
 }
 
@@ -143,9 +151,9 @@ function _histLooseEndCount(s) {
   return 0;
 }
 
-function _histHeadStatsHtml(s) {
+function _histHeadStatsHtml(s, group) {
   const parts = [];
-  const progress = _histProgressText(s);
+  const progress = _histProgressText(s, group);
   if (progress) parts.push(progress);
   const stats = _histRunStats[s.label];
   const agentSecs = stats && stats.has_runs && stats.agent_total_seconds != null
@@ -245,34 +253,44 @@ function _histBuildLineageTitleMap(group) {
         map.set(iss.ticket_id, String(iss.title));
       }
     }
+    try {
+      const tickets = (s.label && _smgmtBySprint[s.label]) || [];
+      for (const t of tickets) {
+        if (t.number != null && t.title && !map.has(t.number)) {
+          map.set(t.number, String(t.title));
+        }
+      }
+    } catch (_) {}
   }
   return map;
 }
 
-/** Ticket ids that appear in any later child sprint (rerun picked them up). */
-function _histLaterSiblingTicketIds(s, group) {
-  if (!group || !s || !_histIsChild(s.label)) return new Set();
-  const sub = _histLabelParts(s.label).sub;
-  const ids = new Set();
-  for (const c of (group.children || [])) {
-    if (_histLabelParts(c.label).sub <= sub) continue;
-    for (const iss of (c.issues || [])) {
-      if (iss.ticket_id != null) ids.add(String(iss.ticket_id));
+/** Sprint label that owns a ticket in this lineage (latest sub-index that lists it). */
+function _histCanonicalOwnerLabel(ticketId, group) {
+  if (!group || ticketId == null) return null;
+  let bestSub = -1;
+  let owner = null;
+  for (const s of _histGroupMembers(group)) {
+    const sub = _histLabelParts(s.label).sub;
+    const listed = (s.issues || []).some(
+      (i) => String(i.ticket_id) === String(ticketId),
+    );
+    if (listed && sub >= bestSub) {
+      bestSub = sub;
+      owner = s.label;
     }
   }
-  return ids;
+  return owner;
 }
 
-/** Per-sprint issue rows: hide failures superseded by a later rerun child. */
+/** Per-sprint issue rows: each ticket appears only on its latest lineage run. */
 export function _histIssuesForDisplay(s, group) {
   const issues = Array.isArray(s.issues) ? s.issues : [];
   if (!group) return issues;
-  const laterIds = _histLaterSiblingTicketIds(s, group);
-  if (!laterIds.size) return issues;
   return issues.filter((iss) => {
     if (iss.ticket_id == null) return true;
-    if (!laterIds.has(String(iss.ticket_id))) return true;
-    return _histIssueChip(iss).cls === 'merged';
+    const owner = _histCanonicalOwnerLabel(iss.ticket_id, group);
+    return owner === s.label;
   });
 }
 
@@ -1273,7 +1291,7 @@ function _histParentFromLabel(label) {
   return `← from ${display}`;
 }
 
-function _histParentRowHtml(s, bulkBtn, parentBodyExpanded) {
+function _histParentRowHtml(s, bulkBtn, parentBodyExpanded, group) {
   const display = sprintLabelDisplay(s.label);
   const lbl = escHtml(s.label || "");
   const chev = parentBodyExpanded ? "ti-chevron-down" : "ti-chevron-right";
@@ -1289,7 +1307,7 @@ function _histParentRowHtml(s, bulkBtn, parentBodyExpanded) {
     <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
     <span class="hist-parent-name">${escHtml(display)}</span>
     ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s)}
+    ${_histHeadStatsHtml(s, group)}
     <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histRecoveryBtnHtml(s)}${_histDeleteBtnHtml(s)}${_histSecondaryLinksHtml(s)}</span>
   </div>`;
 }
@@ -1333,7 +1351,7 @@ function _histChildCardHtml(s, group) {
     + (fromLine ? ` <span class="hist-child-from">${escHtml(fromLine)}</span>` : "")
     + `</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${_histHeadStatsHtml(s)}
+        ${_histHeadStatsHtml(s, group)}
       </div>
       ${headRight}
     </div>
@@ -1785,7 +1803,7 @@ function _histGroupHtml(group) {
     const parentBodyExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
     const groupCls = "hist-sprint-group";
     const parentRow = group.baseSprint
-      ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded)
+      ? _histParentRowHtml(group.baseSprint, bulkBtn, parentBodyExpanded, group)
       : "";
     const parentBody = parentBodyExpanded && group.baseSprint
       ? `<div class="hist-parent-body">${_histPartialChildrenHtml(group.baseSprint)}${_histCardOutcomeHtml(group.baseSprint, group)}</div>`

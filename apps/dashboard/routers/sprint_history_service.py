@@ -750,12 +750,17 @@ def _finalize_lineage(records: list[dict]) -> None:
                 state_by_label[label] = "completed"
 
 
-def _finalize_issues(records: list[dict], sprints_dirs: Path | list[Path],
-                     title_map: dict | None = None) -> None:
-    """Per-record issue enrichment (in-place). None of this is cross-record, so
-    it is safe to run on the visible WINDOW only — which is the whole point: the
-    agent_runs queries here were the dominant History cost when run for every
-    sprint.
+def _finalize_issues(
+    records: list[dict],
+    sprints_dirs: Path | list[Path],
+    title_map: dict | None = None,
+    ran_by_label: dict[str, set[int]] | None = None,
+) -> None:
+    """Per-record issue enrichment (in-place).
+
+    Safe to run on the visible WINDOW only for disk/file reads. Pass
+    *ran_by_label* from the full sprint list (before pagination) so lineage
+    sibling attribution sees reruns outside the window.
 
     Steps: fill the issue list from agent_runs when empty, union the running
     roster, fill missing PR/summary links, attribute tickets to the sprint that
@@ -777,7 +782,7 @@ def _finalize_issues(records: list[dict], sprints_dirs: Path | list[Path],
             _union_planned_roster(rec, sprints_dirs)
 
     _fill_missing_links(records, sprints_dirs)
-    _attribute_issues_to_runs(records)
+    _attribute_issues_to_runs(records, ran_by_label)
     _drop_cross_project_issues(records)
 
     if title_map:
@@ -810,20 +815,8 @@ def _filter_active_records(records: list[dict], keep_completed: int = 3) -> list
     return active + closed[:keep_completed]
 
 
-def _attribute_issues_to_runs(records: list[dict]) -> None:
-    """Filter each sprint's issue list to the tickets it actually owns.
-
-    A sprint owns a ticket only if that ticket actually RAN under its label
-    (agent_runs) AND did not re-run in a descendant child sprint (where it now
-    belongs). This fixes two long-standing History mismatches:
-      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
-        #572/#574 after they re-ran in sprint-63.1), and
-      - a child listing carried-over already-done tickets it never re-ran (e.g.
-        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
-
-    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
-    we never blank a sprint that simply predates run tracking.
-    """
+def _build_ran_by_label(records: list[dict]) -> dict[str, set[int]]:
+    """Map sprint label → issue numbers with agent_runs under that label."""
     ran_by_label: dict[str, set[int]] = {}
     for rec in records:
         label = rec.get("label")
@@ -842,24 +835,65 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
             if n > 0:
                 nums.add(n)
         ran_by_label[label] = nums
+    return ran_by_label
+
+
+def _ran_in_later_lineage_siblings(
+    label: str,
+    ran_by_label: dict[str, set[int]],
+) -> set[int]:
+    """Issue numbers that ran in a later rerun sibling (sprint-N.M, same base N).
+
+    Rerun children are flat siblings (sprint-97.1, sprint-97.2, …), not nested
+    under sprint-97.1.* — so ``label + "."`` prefix matching was wrong.
+    """
+    base = _label_base(label)
+    sub = _label_sub_index(label)
+    out: set[int] = set()
+    for other, nums in ran_by_label.items():
+        if other == label or _label_base(other) != base:
+            continue
+        if _label_sub_index(other) > sub:
+            out |= nums
+    return out
+
+
+def _attribute_issues_to_runs(
+    records: list[dict],
+    ran_by_label: dict[str, set[int]] | None = None,
+) -> None:
+    """Filter each sprint's issue list to the tickets it actually owns.
+
+    A sprint owns a ticket only if that ticket actually RAN under its label
+    (agent_runs) AND did not re-run in a later lineage sibling (where it now
+    belongs). This fixes two long-standing History mismatches:
+      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
+        #572/#574 after they re-ran in sprint-63.1), and
+      - a child listing carried-over already-done tickets it never re-ran (e.g.
+        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
+
+    Pass *ran_by_label* built from the full sprint list (not just the paginated
+    window) so a visible sprint-97.1 row still knows #867 re-ran in sprint-97.4.
+
+    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
+    we never blank a sprint that simply predates run tracking.
+    """
+    if ran_by_label is None:
+        ran_by_label = _build_ran_by_label(records)
 
     for rec in records:
         label = rec.get("label") or ""
         ran_here = ran_by_label.get(label) or set()
         if not ran_here:
             continue  # no run record — leave the list as-is (legacy sprints)
-        prefix = label + "."
-        ran_in_children: set[int] = set()
-        for other, nums in ran_by_label.items():
-            if other != label and other.startswith(prefix):
-                ran_in_children |= nums
+        ran_in_later = _ran_in_later_lineage_siblings(label, ran_by_label)
         # A running sprint keeps its full planned roster (incl. queued tickets
         # unioned in above) so History matches the live view; only finished
         # sprints are narrowed to tickets that actually ran under this label.
         is_running = (rec.get("lifecycle_state") or "") == "running"
         rec["issues"] = [
             i for i in (rec.get("issues") or [])
-            if i.get("ticket_id") not in ran_in_children
+            if i.get("ticket_id") not in ran_in_later
             and (is_running or i.get("ticket_id") in ran_here)
         ]
 
@@ -1143,6 +1177,11 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     # below — that was the dominant History cost when run for every sprint.
     _finalize_lineage(records)
 
+    # Agent-run map for the whole project feed — siblings outside the paginated
+    # window must still suppress tickets on earlier lineage runs (sprint-97.1 vs
+    # sprint-97.4).
+    ran_by_label = _build_ran_by_label(records)
+
     if active_only:
         records = _filter_active_records(records)
 
@@ -1162,7 +1201,7 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         except Exception:
             pass
 
-    _finalize_issues(window, search_dirs, title_map=title_map)
+    _finalize_issues(window, search_dirs, title_map=title_map, ran_by_label=ran_by_label)
 
     for r in window:
         r.pop("_sort_key", None)

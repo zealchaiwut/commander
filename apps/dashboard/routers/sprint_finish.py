@@ -363,8 +363,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             )
         except Exception as exc:
             errors.append(f"plan.json update failed for {lbl}: {exc}")
-        srv._sprint_db_set_state(
-            lbl, repo, "completed",
+        srv._sprint_db_mark_merged_completed(
+            lbl, repo,
             ended_at=_ended_at,
             end_reason="merge_sprint",
         )
@@ -483,12 +483,16 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 ended_at=now,
                 end_reason="bulk_complete",
             )
-            srv._sprint_db_set_state(
-                lbl, repo, "completed",
+            ok = srv._sprint_db_mark_merged_completed(
+                lbl, repo,
                 ended_at=now,
                 end_reason="bulk_complete",
-                actor="reconcile",
             )
+            if ok is False:
+                errors.append(
+                    f"{lbl}: DB transition to completed rejected by state machine"
+                )
+                continue
             completed += 1
         except Exception as exc:
             errors.append(f"plan.json update failed for {lbl}: {exc}")
@@ -619,8 +623,8 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     now = datetime.now(timezone.utc).isoformat()
     try:
         srv._plan_json_set_state(project_root, label, "completed", ended_at=now, end_reason="merge_sprint")
-        db_ok = srv._sprint_db_set_state(
-            label, repo, "completed", ended_at=now, end_reason="merge_sprint", actor="reconcile",
+        db_ok = srv._sprint_db_mark_merged_completed(
+            label, repo, ended_at=now, end_reason="merge_sprint",
         )
     except Exception as exc:
         raise HTTPException(500, detail=f"merged {label} but failed to mark completed: {exc}")

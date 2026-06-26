@@ -2763,6 +2763,35 @@ def _sprint_db_set_state(
     return True
 
 
+def _sprint_db_mark_merged_completed(
+    sprint_label: str,
+    project: str,
+    **extra_fields,
+) -> bool:
+    """Mark a sprint completed after its branch merged, using the right actor.
+
+    ``needs_rework`` superseded ancestors need actor=reconcile (B2 edge).
+    ``running`` / ``ready_to_merge`` orphans need actor=manager. Try both when
+    unsure so bulk-complete resume does not wedge on an illegal edge.
+    """
+    try:
+        row = db.get_sprint(sprint_label, project=project or None)
+        current = db.canonical_lifecycle((row or {}).get("state") or "draft")
+    except Exception:
+        current = "unknown"
+    if current == "needs_rework":
+        actors = ("reconcile",)
+    else:
+        actors = ("manager", "reconcile")
+    for actor in actors:
+        ok = _sprint_db_set_state(
+            sprint_label, project, "completed", actor=actor, **extra_fields,
+        )
+        if ok is not False:
+            return True
+    return False
+
+
 def _get_sprint_pid(project_root: Path, sprint_label: str) -> Optional[int]:
     """Return PID from PID file, or None if missing/unset."""
     sprints_dir = _commander_dir(project_root) / "sprints"

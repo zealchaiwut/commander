@@ -588,6 +588,22 @@ class TestWorktreePoolMissingSlot:
         assert wt2.is_dir()
         assert (wt2 / ".git").exists()
 
+    def test_acquire_raises_when_slot_cannot_be_recreated(self, tmp_path):
+        pool_dir = tmp_path / "pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        wt_path = pool_dir / "slot-0"
+        pool = WorktreePool(pool_dir, repo_root, "main", slots=1)
+        pool._free = [wt_path]
+        pool._in_use = set()
+
+        with patch.object(pool, "_ensure_slot_ready", return_value=False):
+            with pytest.raises(RuntimeError, match="could not be recreated"):
+                pool.acquire()
+
+        assert wt_path in pool._free
+        assert pool._in_use == set()
+
     def test_create_skips_failed_slots(self, tmp_path, capsys):
         pool_dir = tmp_path / "pool"
         repo_root = tmp_path / "repo"

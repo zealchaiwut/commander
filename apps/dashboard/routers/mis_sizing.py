@@ -7,6 +7,7 @@ logic is duplicated or rewritten here.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -16,6 +17,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -115,7 +118,13 @@ def get_mis_sizing_flags(sprint_label: str, project: str):
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
     if not _MIS_SIZING_AVAILABLE:
-        return {"sprint_label": sprint_label, "flags": [], "audit_log": [], "generated_at": None, "config": {}}
+        return {
+            "sprint_label": sprint_label,
+            "flags": [],
+            "audit_log": [],
+            "generated_at": None,
+            "config": {},
+        }
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
     return _mis_sizing.load_flags(commander, sprint_label)
@@ -127,7 +136,13 @@ def generate_mis_sizing_flags(sprint_label: str, project: str):
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
     if not _MIS_SIZING_AVAILABLE:
-        return {"sprint_label": sprint_label, "flags": [], "audit_log": [], "generated_at": None, "config": {}}
+        return {
+            "sprint_label": sprint_label,
+            "flags": [],
+            "audit_log": [],
+            "generated_at": None,
+            "config": {},
+        }
 
     project_root = _project_root_path(project)
     commander = _commander_dir(project_root)
@@ -141,7 +156,9 @@ def generate_mis_sizing_flags(sprint_label: str, project: str):
 
 
 @router.post("/api/sprints/{sprint_label}/mis-sizing-flags/{issue_id}/action")
-def act_on_mis_sizing_flag(sprint_label: str, issue_id: int, body: MisSizingActionBody, project: str):
+def act_on_mis_sizing_flag(
+    sprint_label: str, issue_id: int, body: MisSizingActionBody, project: str
+):
     """Take an action on a mis-sizing flag: approved, reestimated, or dismissed.
 
     For reestimated, also updates the estimate file and GitHub size label.
@@ -175,8 +192,12 @@ def act_on_mis_sizing_flag(sprint_label: str, issue_id: int, body: MisSizingActi
             try:
                 est_data = json.loads(est_path.read_text(encoding="utf-8"))
                 est_data["size"] = body.new_size
-                est_data["minutes"] = _mis_sizing.CANONICAL_MINUTES.get(body.new_size, 0)
-                est_path.write_text(json.dumps(est_data, indent=2), encoding="utf-8")
+                est_data["minutes"] = _mis_sizing.CANONICAL_MINUTES.get(
+                    body.new_size, 0
+                )
+                est_path.write_text(
+                    json.dumps(est_data, indent=2), encoding="utf-8"
+                )
             except (json.JSONDecodeError, OSError):
                 pass
         try:
@@ -255,10 +276,15 @@ def rebuild_mis_sizing_history(project: str):
     if not raw_completed:
         history = _mis_sizing.build_history_from_completed([])
         _mis_sizing.save_history(commander, history)
-        return {"message": "No completed estimated tickets found", "total_events": 0, "labels_with_history": 0}
+        return {
+            "message": "No completed estimated tickets found",
+            "total_events": 0,
+            "labels_with_history": 0,
+        }
 
     issue_numbers = {c["number"] for c in raw_completed}
     labels_by_num: dict[int, list[str]] = {}
+    labels_fetched = False
     try:
         repo = github_client.get_repo_for_operation(project)
         result = subprocess.run(
@@ -273,8 +299,16 @@ def rebuild_mis_sizing_history(project: str):
                     labels_by_num[n] = [
                         lbl["name"] for lbl in iss.get("labels", [])
                     ]
-    except Exception:
-        pass
+            if labels_by_num:
+                labels_fetched = True
+        else:
+            logger.warning(
+                "gh issue list exited with code %d: %s",
+                result.returncode,
+                result.stderr.strip(),
+            )
+    except Exception as exc:
+        logger.warning("GitHub label fetch failed: %s", exc)
 
     for rec in raw_completed:
         rec["labels"] = labels_by_num.get(rec["number"], [])
@@ -282,13 +316,18 @@ def rebuild_mis_sizing_history(project: str):
     history = _mis_sizing.build_history_from_completed(raw_completed)
     _mis_sizing.save_history(commander, history)
 
-    total_events = sum(len(v) for v in history.get("events_by_label", {}).values())
+    total_events = sum(
+        len(v) for v in history.get("events_by_label", {}).values()
+    )
     labels_count = len(history.get("events_by_label", {}))
     return {
-        "message": f"History rebuilt: {total_events} events across {labels_count} labels",
+        "message": (
+            f"History rebuilt: {total_events} events across {labels_count} labels"
+        ),
         "labels_with_history": labels_count,
         "total_events": total_events,
         "last_rebuilt": history.get("last_rebuilt"),
+        "labels_fetched": labels_fetched,
     }
 
 

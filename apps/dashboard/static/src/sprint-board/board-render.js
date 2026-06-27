@@ -144,9 +144,10 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   }
 
   try {
-    // Load calibrated size minutes before rendering rollups / budget bars (issue #801).
+    // Pre-warm capacity data concurrently with sprint data — don't block render on it.
+    // The post-DOM-build call at _smgmtEnsureCapData(false) will pick up the result.
     if (typeof _smgmtEnsureCapData === "function") {
-      await _smgmtEnsureCapData();
+      _smgmtEnsureCapData();
     }
 
     // Fetch sprint management data + running sprint status + summaries in parallel
@@ -901,9 +902,9 @@ export function _smgmtOutcomeFromBoard(label, tickets) {
 export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     const tickets = bySprint[label] || [];
-    if (tickets.length === 0) continue;
+    if (tickets.length === 0) return;
     // Populate reverse lookup for reactivity
     for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
     const issueNums = tickets.map((t) => t.number).join(",");
@@ -911,7 +912,7 @@ export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       const resp = await fetch(
         `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
       if (estEl && data.complete && data.total_hours !== null) {
@@ -936,27 +937,27 @@ export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently — leave as "— estimated"
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue;
-    if (_smgmtFinishedLabels.has(label)) continue;
+  await Promise.all(orderedLabels.map(async (label) => {
+    if (_smgmtRunningLabels.has(label)) return;
+    if (_smgmtFinishedLabels.has(label)) return;
     const tickets = bySprint[label] || [];
     const pending = tickets.filter(
       (t) => (t.status || "backlog") === "backlog",
     );
-    if (pending.length < 2) continue;
+    if (pending.length < 2) return;
     // Clear stale entries for this sprint's tickets before repopulating
     for (const t of pending) delete _smgmtConflictsByIssue[t.number];
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       for (const c of data.conflicts || []) {
         if (!_smgmtConflictsByIssue[c.ticket1_id])
@@ -978,26 +979,26 @@ export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue;
-    if (_smgmtFinishedLabels.has(label)) continue;
+  await Promise.all(orderedLabels.map(async (label) => {
+    if (_smgmtRunningLabels.has(label)) return;
+    if (_smgmtFinishedLabels.has(label)) return;
     const tickets = bySprint[label] || [];
     const pending = tickets.filter(
       (t) => (t.status || "backlog") === "backlog",
     );
-    if (pending.length < 2) continue;
+    if (pending.length < 2) return;
     for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       if (data.has_cycle) {
         const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
@@ -1024,20 +1025,20 @@ export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadGoals(orderedLabels) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     const goalEl = document.getElementById(`smgmt-goal-${label}`);
-    if (!goalEl) continue;
+    if (!goalEl) return;
     try {
       const resp = await fetch(
         `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       const goal = (data.goal || "").trim();
       if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
@@ -1052,7 +1053,7 @@ export async function _smgmtLoadGoals(orderedLabels) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export function _smgmtOutcomeBandHtml(label, outcome) {

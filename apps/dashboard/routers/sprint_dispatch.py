@@ -5,6 +5,7 @@ import subprocess
 import sys
 import uuid
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
@@ -391,9 +392,13 @@ def get_sprint_management_issues(repo: str):
     identifies their exact sprint label, including dotted sub-labels.
     """
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
-        sprints = github_client.list_sprints(repo_name=repo)
-        all_sprint_labels = github_client.list_sprint_labels(repo_name=repo)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_issues = pool.submit(github_client.list_open_issues_with_body, repo, 200)
+            f_sprints = pool.submit(github_client.list_sprints, repo)
+            f_labels = pool.submit(github_client.list_sprint_labels, repo)
+            issues = f_issues.result()
+            sprints = f_sprints.result()
+            all_sprint_labels = f_labels.result()
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:

@@ -4526,7 +4526,7 @@ ${listing}`)) {
     }
     try {
       if (typeof _smgmtEnsureCapData === "function") {
-        await _smgmtEnsureCapData();
+        _smgmtEnsureCapData();
       }
       const [resp, runningResp] = await Promise.all([
         fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
@@ -5113,10 +5113,10 @@ ${listing}`)) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       const tickets = bySprint[label] || [];
       if (tickets.length === 0)
-        continue;
+        return;
       for (const t of tickets)
         _smgmtTicketToSprint[t.number] = label;
       const issueNums = tickets.map((t) => t.number).join(",");
@@ -5125,7 +5125,7 @@ ${listing}`)) {
           `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         const estEl = document.getElementById(`smgmt-est-${label}`);
         if (estEl && data.complete && data.total_hours !== null) {
@@ -5146,23 +5146,23 @@ ${listing}`)) {
         }
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
-        continue;
+        return;
       if (_smgmtFinishedLabels.has(label))
-        continue;
+        return;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter(
         (t) => (t.status || "backlog") === "backlog"
       );
       if (pending.length < 2)
-        continue;
+        return;
       for (const t of pending)
         delete _smgmtConflictsByIssue[t.number];
       try {
@@ -5170,7 +5170,7 @@ ${listing}`)) {
           `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         for (const c of data.conflicts || []) {
           if (!_smgmtConflictsByIssue[c.ticket1_id])
@@ -5192,23 +5192,23 @@ ${listing}`)) {
           _smgmtUpdateConflictBadge(t.number);
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
-        continue;
+        return;
       if (_smgmtFinishedLabels.has(label))
-        continue;
+        return;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter(
         (t) => (t.status || "backlog") === "backlog"
       );
       if (pending.length < 2)
-        continue;
+        return;
       for (const t of pending)
         delete _smgmtDepOrderByIssue[t.number];
       try {
@@ -5216,7 +5216,7 @@ ${listing}`)) {
           `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         if (data.has_cycle) {
           const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
@@ -5243,22 +5243,22 @@ ${listing}`)) {
           _smgmtUpdateDepOrderBadge(t.number);
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadGoals(orderedLabels) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
       if (!goalEl)
-        continue;
+        return;
       try {
         const resp = await fetch(
           `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         const goal = (data.goal || "").trim();
         if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
@@ -5273,7 +5273,7 @@ ${listing}`)) {
         }
       } catch (_) {
       }
-    }
+    }));
   }
   function _smgmtOutcomeBandHtml(label, outcome) {
     const st = outcome.sprint_status;

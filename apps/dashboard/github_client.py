@@ -508,6 +508,31 @@ def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dic
     return _cached(key, fetch)
 
 
+def group_issues_by_sprint(repo_name: str | None = None) -> dict[int, list[dict]] | None:
+    """Group all issues (open + closed) by their plain sprint-N label number.
+
+    Uses the DB mirror when available — a single O(n) pass vs N separate
+    list_issues() calls each doing their own O(n) scan. Returns None when the
+    mirror is not populated so callers can fall back to per-sprint gh calls.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is None:
+        return None
+    result: dict[int, list[dict]] = {}
+    for issue in mirror:
+        col = classify_issue(issue)
+        issue_with_col: dict = {"column": col, **issue}
+        for lbl in issue.get("labels", []):
+            name = lbl.get("name", "") if isinstance(lbl, dict) else ""
+            m = SPRINT_RE.match(name)
+            if m:
+                n = int(m.group(1))
+                result.setdefault(n, []).append(issue_with_col)
+                break  # one sprint label per issue is sufficient for grouping
+    return result
+
+
 def _live_sprint_label_names(repo_name: str) -> list[str]:
     """Sprint-* label names from a TTL-cached ``gh label list`` (300s).
 

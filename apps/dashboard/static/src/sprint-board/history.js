@@ -1584,6 +1584,16 @@ function _histRecoveryBtnHtml(s) {
       title="Complete sprint — merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
   }
+  if (state === 'draft' && s.parent) {
+    // Orphaned child sprint — rerun created it but dispatch failed or was deferred.
+    // Offer a direct Run (preflight) rather than Re-run which would create a grandchild.
+    const runDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+    const runTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot run: another sprint is currently running."' : '';
+    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+      onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
+      <i class="ti ti-player-play"></i> Run</button>`;
+  }
   if (state === 'running') return '';
   return reconcileBtn;
 }

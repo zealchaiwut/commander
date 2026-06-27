@@ -894,10 +894,22 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     if not body.auto_run:
         result["queued"] = True
+        # Plan is at "draft" — promote so History shows a Run button for this child.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="queued", parent=sprint_label)
+        except Exception:
+            pass
         return result
 
     # Auto-run: dispatch sprint_manager for the sub-sprint
     if not srv.SPRINT_MANAGER_PATH.exists():
+        # Plan is at "draft" — promote so History shows a Run button for this child.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="sprint_manager_missing", parent=sprint_label)
+        except Exception:
+            pass
         return result
 
     log_dir = commander / "logs"
@@ -925,16 +937,27 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
-    proc = sprint_run_service.spawn_sprint_process(
-        srv._sprint_manager_argv(sub_label, project, project_root),
-        cwd=str(coder_path),
-        env=stripped_env,
-        log_path=run_log_path,
-        pid_path=pid_path,
-        pending_path=pending_path,
-        sprint_label=sub_label,
-        project=project,
-    )
+    try:
+        proc = sprint_run_service.spawn_sprint_process(
+            srv._sprint_manager_argv(sub_label, project, project_root),
+            cwd=str(coder_path),
+            env=stripped_env,
+            log_path=run_log_path,
+            pid_path=pid_path,
+            pending_path=pending_path,
+            sprint_label=sub_label,
+            project=project,
+        )
+    except HTTPException:
+        # Spawn failed — roll plan/DB back to needs_rework so History can re-dispatch.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="spawn_failed", parent=sprint_label)
+            srv._sprint_db_set_state(sub_label, project, "needs_rework",
+                                     end_reason="spawn_failed")
+        except Exception:
+            pass
+        raise
 
     result["run_id"] = run_id
     result["pid"] = proc.pid

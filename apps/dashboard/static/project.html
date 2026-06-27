@@ -7277,6 +7277,59 @@
       font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
     }
 
+    /* ── Bulk flag actions (Approve All / Re-estimate All) ── */
+    .pf-flags-label-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .pf-flags-label-row .pf-flags-label { margin-bottom: 0; flex: 1; }
+    .pf-flags-bulk-btns { display: flex; gap: 6px; }
+    .pf-flags-bulk-btn {
+      font-size: 11px; padding: 2px 9px; border-radius: 5px;
+      border: 1px solid var(--border); background: none; color: var(--text-muted);
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+      transition: background .1s, color .1s;
+    }
+    .pf-flags-bulk-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); color: var(--text); }
+    .pf-bulk-overlay {
+      position: absolute; inset: 0; z-index: 10; border-radius: 10px;
+      background: var(--surface); display: flex; flex-direction: column;
+    }
+    .pf-bulk-overlay.hidden { display: none; }
+    .pf-bulk-overlay-header {
+      padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .pf-bulk-overlay-title { font-size: 14px; font-weight: 600; color: var(--text); }
+    .pf-bulk-overlay-body { flex: 1; overflow-y: auto; padding: 4px 20px; }
+    .pf-bulk-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 0;
+      border-bottom: 1px solid rgba(0,0,0,.05);
+    }
+    [data-theme="dark"] .pf-bulk-item { border-bottom-color: rgba(255,255,255,.05); }
+    .pf-bulk-item:last-child { border-bottom: none; }
+    .pf-bulk-item-id {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0; width: 44px;
+    }
+    .pf-bulk-item-title {
+      flex: 1; min-width: 0; font-size: 13px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-bulk-item-status { flex-shrink: 0; width: 20px; text-align: center; font-size: 14px; line-height: 1; }
+    .pf-bulk-item-status.pending { color: var(--text-muted); }
+    .pf-bulk-item-status.processing { color: var(--blue, #2563eb); }
+    .pf-bulk-item-status.done { color: #16a34a; }
+    .pf-bulk-item-status.error { color: #dc2626; }
+    .pf-bulk-spinner {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: pf-spin .7s linear infinite;
+    }
+    .pf-bulk-overlay-footer {
+      padding: 12px 20px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; flex-shrink: 0;
+    }
+
     /* ── XL split suggestions section (issue #1424) ── */
     .pf-xl-section { margin-top: 16px; }
     .pf-xl-section-label {
@@ -28793,6 +28846,17 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer hidden" id="pf-footer">
     <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
     <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  </div>
+  <!-- Bulk flag action progress overlay (Approve All / Re-estimate All) -->
+  <div class="pf-bulk-overlay hidden" id="pf-bulk-overlay">
+    <div class="pf-bulk-overlay-header">
+      <span class="pf-bulk-overlay-title" id="pf-bulk-title"></span>
+      <button class="modal-close" onclick="_pfBulkClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="pf-bulk-overlay-body" id="pf-bulk-list"></div>
+    <div class="pf-bulk-overlay-footer">
+      <button class="btn-ghost" id="pf-bulk-done-btn" onclick="_pfBulkClose()" disabled>Close</button>
+    </div>
   </div>
 </div>
 

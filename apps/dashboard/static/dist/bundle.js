@@ -2674,6 +2674,8 @@ Replace the existing draft (${data.existing_label})?`
       title="Complete sprint \u2014 merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
     }
+    if (state === "running")
+      return "";
     return reconcileBtn;
   }
   function _histDeleteBtnHtml(s) {
@@ -2911,7 +2913,7 @@ Replace the existing draft (${data.existing_label})?`
     const children = group.children || [];
     if (children.length) {
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
-      const groupCls = "hist-sprint-group";
+      const groupCls = "hist-sprint-group" + (_histExpanded.has(baseLbl) ? "" : " collapsed");
       const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
       const parentCard = _histChildCardHtml(parentSprint, group, {
         isLineageParent: true,
@@ -3362,6 +3364,8 @@ ${listing}`)) {
           const repo = _cachedFullRepo[_slug];
           if (repo)
             _histLoadLedger2(repo, { force: true });
+          else
+            _histForceRefresh();
           if (typeof loadSprintMgmt === "function")
             loadSprintMgmt(true).catch(() => {
             });
@@ -4642,7 +4646,7 @@ Resolve manually and re-run Bulk complete.`,
       return { ready: false, reasons: ["invalid ticket"] };
     const reasons = [];
     const body = (ticket.body || "").trim();
-    if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\s*$/im.test(body)) {
+    if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\b/im.test(body)) {
       reasons.push("missing AC");
     }
     if (!/^#{1,6}\s+(design\s+references?|design\s+refs?)\s*$/im.test(body)) {
@@ -4738,7 +4742,7 @@ Resolve manually and re-run Bulk complete.`,
         _smgmtRunningLabels.add(optimisticRunningLabel);
         _smgmtAnySprintRunning = true;
       }
-      _smgmtRender2(data);
+      _smgmtRender(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
         _smgmtHydrateSchedToggles(repo);
       }
@@ -4817,7 +4821,7 @@ Resolve manually and re-run Bulk complete.`,
       return false;
     return _smgmtCompareSprintLabels(label, latest) < 0;
   }
-  function _smgmtRender2(data) {
+  function _smgmtRender(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
       return;
@@ -4880,29 +4884,6 @@ Resolve manually and re-run Bulk complete.`,
     });
     _smgmtOrderedLabels = orderedLabels;
     _smgmtFinishedLabels = _finishedSet;
-    let _smgmtNextUpLabel = null;
-    const sortedForNext = [...orderedLabels].sort((a, b) => {
-      const ka = _smgmtSprintLabelSortKey(a);
-      const kb = _smgmtSprintLabelSortKey(b);
-      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-        const d = (ka[i] ?? Infinity) - (kb[i] ?? Infinity);
-        if (d !== 0)
-          return d;
-      }
-      return 0;
-    });
-    for (const lbl of sortedForNext) {
-      if (_smgmtRunningLabels.has(lbl))
-        continue;
-      if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl))
-        continue;
-      if (_smgmtFinishedLabels.has(lbl))
-        continue;
-      if ((bySprint[lbl] || []).length >= 1) {
-        _smgmtNextUpLabel = lbl;
-        break;
-      }
-    }
     const focusGuideEl = document.getElementById("smgmt-focus-guide");
     if (focusGuideEl) {
       focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
@@ -5024,8 +5005,6 @@ Resolve manually and re-run Bulk complete.`,
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
     _smgmtEnsureCapData(false);
-    if (_smgmtSelectedIssues.size > 0)
-      _smgmtUpdateSelectionUI();
     for (const [lbl, fc] of Object.entries(_smgmtFinishCards)) {
       if (fc)
         _smgmtRenderFinishCard(lbl, fc.card, fc.branch, _smgmtRepo());
@@ -5739,7 +5718,7 @@ Resolve manually and re-run Bulk complete.`,
         }
         ticketsContainerHtml = tickets.length > 0 ? tickets.map(
           (t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)
-        ).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        ).join("") : "";
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const _movedToChild = /* @__PURE__ */ new Set();
@@ -5762,7 +5741,7 @@ Resolve manually and re-run Bulk complete.`,
     } else if (isRunningView) {
       ticketsContainerHtml = _smgmtRunningTicketRowsHtml(label, tickets);
     } else {
-      ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+      ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : "";
       if (finished) {
         outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">READY TO MERGE</span>`;
       }
@@ -5804,10 +5783,7 @@ Resolve manually and re-run Bulk complete.`,
                onclick="smgmtApplyDagOrder('${escHtml(label)}')">
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
-         ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
-         ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
-         ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
         <div class="smgmt-sprint-header-left sc-header-left">
@@ -5885,7 +5861,7 @@ Resolve manually and re-run Bulk complete.`,
     const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets).slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
     const cardRepo = _smgmtRepo();
     if (sourceTickets.length === 0) {
-      return '<div class="smgmt-drop-hint">No tickets in this sprint</div>';
+      return "";
     }
     let prevLevel = 0;
     return sourceTickets.map((t) => {
@@ -6082,7 +6058,7 @@ Resolve manually and re-run Bulk complete.`,
       <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
       <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
-        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+        ${ticketRowsHtml || ""}
       </div>
       ${renderProgressActivity2(
       {
@@ -6227,7 +6203,6 @@ Resolve manually and re-run Bulk complete.`,
       done: "smgmt-status-done"
     }[ticket.status] || "smgmt-status-backlog";
     const statusLabel = hasRework ? "needs rework" : ticket.status || "backlog";
-    const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const _outcomeMap = {
       done: ["ti-circle-check", "outcome-success"],
       uat: ["ti-circle-check", "outcome-success"],
@@ -6260,24 +6235,12 @@ Resolve manually and re-run Bulk complete.`,
     const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const sk = escHtml(label);
     return `
-    <div class="smgmt-ticket${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
-         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
-         ondragend="_smgmtTicketDragEnd(event)"
-         ondragover="_smgmtTicketReorderDragOver(event)"
-         ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
-         onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
-             onclick="event.stopPropagation()"
-             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
-      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -6340,7 +6303,7 @@ Resolve manually and re-run Bulk complete.`,
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
     if (sorted.length === 0) {
       const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:var(--space-3) var(--space-4);text-align:center;">${msg}</div>`;
+      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
     } else {
       ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
     }
@@ -6348,7 +6311,6 @@ Resolve manually and re-run Bulk complete.`,
     _blUpdateActions();
   }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
-    const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const schedDepHtml = _smgmtSchedDepHtml(ticket);
@@ -6367,16 +6329,11 @@ Resolve manually and re-run Bulk complete.`,
          onclick="event.stopPropagation();smgmtAddToDraft(${ticket.number},'${escHtml(draftLabel)}')">
          <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>` : "";
     return `
-    <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row" id="smgmt-ticket-${ticket.number}"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
-         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
-             onclick="event.stopPropagation()"
-             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
@@ -6752,7 +6709,7 @@ Resolve manually and re-run Bulk complete.`,
       const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
       const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
       const readinessBadge = _smgmtReadinessBadgeHtml(t);
-      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + readinessBadge + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
+      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + readinessBadge + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
     }).join("");
     const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
     const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
@@ -8005,739 +7962,8 @@ Proceed anyway?`)) {
     await _ksFinish(label);
   }
 
-  // apps/dashboard/static/src/sprint-board/drag-drop.js
+  // apps/dashboard/static/src/sprint-board/board-overlay.js
   var _smgmtBoardOverlayHasProgress = false;
-  function isDragBlocked(state) {
-    return !!(state && state.moveLock);
-  }
-  function computeDropPlan(dragInfo, targetLabel) {
-    if (!dragInfo)
-      return { mode: "none", tickets: [], targetLabel, noop: true };
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      return { mode: "multi", tickets: dragInfo.multi.slice(), targetLabel, noop: false };
-    }
-    const noop = dragInfo.fromSprint === targetLabel;
-    return { mode: "single", tickets: noop ? [] : [dragInfo.number], targetLabel, noop };
-  }
-  function _smgmtUpdateSelectionUI2() {
-    const count = _smgmtSelectedIssues.size;
-    _blUpdateActions();
-    document.getElementById("smgmt-selection-bar")?.remove();
-    const bar = document.getElementById("proj-selection-bar");
-    const listEl = document.getElementById("smgmt-sprint-list");
-    const onSprintTab = typeof _activeTab === "undefined" || _activeTab === "sprint-mgmt";
-    const onBoard = typeof _smgmtSubView === "undefined" || _smgmtSubView === "board";
-    if (count > 0 && bar && onSprintTab && onBoard) {
-      bar.classList.remove("hidden");
-      if (listEl)
-        listEl.classList.add("has-selection");
-      const countEl = document.getElementById("smgmt-sel-count");
-      if (countEl)
-        countEl.textContent = count === 1 ? "1 issue selected" : `${count} issues selected`;
-      const closeBtn = document.getElementById("smgmt-sel-close-btn");
-      if (closeBtn) {
-        const label = count === 1 ? "Close ticket" : `Close ${count} tickets`;
-        closeBtn.innerHTML = `<i class="ti ti-circle-x"></i> ${label}`;
-      }
-    } else {
-      if (bar) {
-        bar.classList.add("hidden");
-      }
-      if (listEl)
-        listEl.classList.remove("has-selection");
-    }
-    if (typeof _smgmtUpdateToolbarTop === "function") {
-      _smgmtUpdateToolbarTop();
-      requestAnimationFrame(_smgmtUpdateToolbarTop);
-    }
-  }
-  function _smgmtPopulateSelectionDropdown() {
-  }
-  function _smgmtPopulateMoveToMenu() {
-  }
-  function _smgmtToggleMoveToMenu(event) {
-    event?.stopPropagation();
-    if (typeof _smgmtMoveToModalOpen === "function")
-      _smgmtMoveToModalOpen();
-  }
-  function _smgmtCloseMoveToMenu() {
-  }
-  function _smgmtClearSelection() {
-    _smgmtSelectedIssues.forEach((num) => {
-      const el = document.getElementById(`smgmt-ticket-${num}`);
-      if (el) {
-        el.classList.remove("is-selected");
-        const cb = el.querySelector(".smgmt-ticket-cb");
-        if (cb)
-          cb.checked = false;
-      }
-    });
-    _smgmtSelectedIssues.clear();
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtSetSelected(number, selected) {
-    if (selected)
-      _smgmtSelectedIssues.add(number);
-    else
-      _smgmtSelectedIssues.delete(number);
-    const el = document.getElementById(`smgmt-ticket-${number}`);
-    if (el) {
-      el.classList.toggle("is-selected", selected);
-      const cb = el.querySelector(".smgmt-ticket-cb");
-      if (cb)
-        cb.checked = selected;
-    }
-  }
-  function _smgmtTicketSprintKey(number) {
-    const iss = (_smgmtData?.issues || []).find((i) => i.number === number);
-    if (!iss)
-      return void 0;
-    return iss.sprint == null ? "backlog" : iss.sprint;
-  }
-  function _smgmtSelectionSprintKey() {
-    const first = [..._smgmtSelectedIssues][0];
-    return first == null ? void 0 : _smgmtTicketSprintKey(first);
-  }
-  function _smgmtEnforceSelectionScope(number) {
-    if (_smgmtSelectedIssues.size === 0)
-      return;
-    const cur = _smgmtSelectionSprintKey();
-    const next = _smgmtTicketSprintKey(number);
-    if (cur !== void 0 && next !== void 0 && cur !== next) {
-      _smgmtClearSelection();
-    }
-  }
-  function _smgmtToggleSelect(number, checked) {
-    if (checked)
-      _smgmtEnforceSelectionScope(number);
-    _smgmtSetSelected(number, checked);
-    _smgmtLastSelectedNum = checked ? number : null;
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtRowClick(event, number, label) {
-    const container = label ? document.getElementById(`smgmt-tickets-${label}`) : document.getElementById("smgmt-backlog-tickets");
-    if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
-      const nums = Array.from(container.querySelectorAll(".smgmt-ticket[data-issue]")).map((r) => parseInt(r.dataset.issue, 10));
-      const a = nums.indexOf(_smgmtLastSelectedNum);
-      const b = nums.indexOf(number);
-      if (a !== -1 && b !== -1) {
-        const [lo, hi] = a <= b ? [a, b] : [b, a];
-        for (let i = lo; i <= hi; i++)
-          _smgmtSetSelected(nums[i], true);
-        _smgmtLastSelectedNum = number;
-        _smgmtUpdateSelectionUI2();
-        const sel = window.getSelection && window.getSelection();
-        if (sel)
-          sel.removeAllRanges();
-        return;
-      }
-    }
-    if (event.ctrlKey || event.metaKey) {
-      const nowSelected2 = !_smgmtSelectedIssues.has(number);
-      if (nowSelected2)
-        _smgmtEnforceSelectionScope(number);
-      _smgmtSetSelected(number, nowSelected2);
-      _smgmtLastSelectedNum = nowSelected2 ? number : null;
-      _smgmtUpdateSelectionUI2();
-      return;
-    }
-    const nowSelected = !_smgmtSelectedIssues.has(number);
-    if (nowSelected)
-      _smgmtEnforceSelectionScope(number);
-    _smgmtSetSelected(number, nowSelected);
-    _smgmtLastSelectedNum = nowSelected ? number : null;
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtIsDeletableIssue(num) {
-    if (!_smgmtData)
-      return false;
-    const iss = _smgmtData.issues.find((i) => i.number === num);
-    if (!iss)
-      return false;
-    return iss.status === "done" || iss.sprint === null;
-  }
-  async function _smgmtDeleteSelected() {
-    if (_smgmtSelectedIssues.size !== 1)
-      return;
-    const num = [..._smgmtSelectedIssues][0];
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const iss = _smgmtData?.issues.find((i) => i.number === num);
-    const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
-    if (!confirm(`Delete ${label}?
-
-This will close the issue on GitHub. This cannot be undone.`))
-      return;
-    if (_smgmtData)
-      _smgmtData.issues = _smgmtData.issues.filter((i) => i.number !== num);
-    _smgmtClearSelection();
-    _smgmtRender(_smgmtData);
-    _smgmtBoardLock2(`Deleting #${num}\u2026`);
-    try {
-      const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
-        method: "POST"
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      _smgmtShowToast(`Issue #${num} closed.`);
-    } catch (e) {
-      alert("Failed to delete issue: " + e.message);
-      await loadSprintMgmt();
-    } finally {
-      _smgmtBoardUnlock();
-    }
-  }
-  async function _smgmtMoveSelectedTo(targetLabel) {
-    if (!targetLabel || _smgmtSelectedIssues.size === 0)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const nums = Array.from(_smgmtSelectedIssues);
-    const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel }));
-    const dest = targetLabel === "backlog" ? "Backlog" : `Sprint ${targetLabel.split("-")[1]}`;
-    if (_smgmtData) {
-      const targetNum = targetLabel === "backlog" ? null : parseInt(targetLabel.split("-")[1], 10);
-      nums.forEach((n) => {
-        const iss = _smgmtData.issues.find((i) => i.number === n);
-        if (iss)
-          iss.sprint = targetNum;
-      });
-      _smgmtClearSelection();
-      _smgmtRender(_smgmtData);
-    }
-    _smgmtBoardLock2(`Moving ${nums.length} ticket${nums.length !== 1 ? "s" : ""} to ${dest}\u2026`);
-    try {
-      const res = await fetch("/api/sprints/batch-labels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ changes, project: repo })
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      const data = await res.json();
-      if (data.failed > 0 && data.errors && data.errors.length > 0) {
-        _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? "s" : ""} failed to move:
-${data.errors.join("\n")}`);
-      } else if (data.applied > 0) {
-        _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? "s" : ""} to ${dest}.`);
-      }
-      await loadSprintMgmt();
-    } catch (e) {
-      _smgmtShowToast("Failed to move tickets: " + e.message);
-      await loadSprintMgmt();
-    } finally {
-      _smgmtBoardUnlock();
-    }
-  }
-  function _smgmtTicketDragStart(event, issueNum, fromSprint) {
-    if (fromSprint) {
-      const card = document.getElementById(`smgmt-card-${fromSprint}`);
-      if (card && card.querySelector(".smgmt-rename-wrap")) {
-        event.preventDefault();
-        return;
-      }
-    }
-    const isChecked = _smgmtSelectedIssues.has(issueNum);
-    if (isChecked && _smgmtSelectedIssues.size > 1) {
-      const nums = Array.from(_smgmtSelectedIssues);
-      const sprints = new Set(nums.map((n) => {
-        const iss = (_smgmtData?.issues || []).find((i) => i.number === n);
-        return iss ? iss.sprint : null;
-      }));
-      _smgmtDragTicket = {
-        number: issueNum,
-        fromSprint: fromSprint || null,
-        multi: nums,
-        multiSprints: sprints.size
-      };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", nums.join(","));
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill) {
-        const label = sprints.size > 1 ? `Moving ${nums.length} tickets from ${sprints.size} sprints` : `Moving ${nums.length} tickets`;
-        pill.textContent = label;
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-      setTimeout(() => {
-        nums.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.add("dragging-ticket");
-        });
-      }, 0);
-    } else {
-      _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null, multi: null };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(issueNum));
-      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el)
-        setTimeout(() => el.classList.add("dragging-ticket"), 0);
-    }
-    _smgmtGhostShow();
-  }
-  function _smgmtDragMovePill(event) {
-    if (_smgmtDragTicket?.multi) {
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill && pill.textContent) {
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-    }
-  }
-  function _smgmtGhostComputeNextFree() {
-    if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
-      return _smgmtData.placeholder_sprint;
-    }
-    const nums = (_smgmtData?.sprints || []).map(Number).filter((n) => !isNaN(n));
-    return nums.length ? Math.max(...nums) + 1 : 1;
-  }
-  function _smgmtGhostShow() {
-    if (_smgmtRunningLabels.size > 0) {
-      showToast("Cannot create new sprint while one is running.", "warning");
-      return;
-    }
-    _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    const titleEl = document.getElementById("smgmt-ghost-title");
-    const subEl = document.getElementById("smgmt-ghost-sub");
-    if (!ghost)
-      return;
-    titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-    subEl.textContent = "next sprint number";
-    ghost.classList.add("ghost-visible");
-  }
-  function _smgmtGhostHide() {
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    ghost.classList.remove("ghost-visible", "ghost-hot");
-    _smgmtGhostNextNum = null;
-  }
-  function _smgmtGhostDragOver(event) {
-    if (!_smgmtDragTicket)
-      return;
-    if (_smgmtRunningLabels.size > 0)
-      return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    const titleEl = document.getElementById("smgmt-ghost-title");
-    const subEl = document.getElementById("smgmt-ghost-sub");
-    ghost.classList.add("ghost-hot");
-    if (titleEl)
-      titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
-    if (subEl)
-      subEl.textContent = "you'll be asked to confirm";
-  }
-  function _smgmtGhostDragLeave(event) {
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    if (!ghost.contains(event.relatedTarget)) {
-      ghost.classList.remove("ghost-hot");
-      const titleEl = document.getElementById("smgmt-ghost-title");
-      const subEl = document.getElementById("smgmt-ghost-sub");
-      if (titleEl)
-        titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-      const existing = new Set((_smgmtData?.sprints || []).map((n) => Number(n)));
-      const skipped = [];
-      for (let i = 1; i < _smgmtGhostNextNum; i++) {
-        if (!existing.has(i))
-          skipped.push(i);
-      }
-      if (subEl)
-        subEl.textContent = skipped.length > 0 ? `next free number \xB7 skipped empty ${skipped.map((s) => `Sprint ${s}`).join(", ")}` : "next free number";
-    }
-  }
-  async function _smgmtGhostDrop(event) {
-    event.preventDefault();
-    if (!_smgmtDragTicket)
-      return;
-    if (_smgmtRunningLabels.size > 0)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    const nextNum = _smgmtGhostNextNum;
-    _smgmtGhostHide();
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      return;
-    }
-    const dragEl = document.getElementById(`smgmt-ticket-${dragInfo.number}`);
-    if (dragEl)
-      dragEl.classList.remove("dragging-ticket");
-    _smgmtDragTicket = null;
-    if (nextNum == null)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const sprintLabel = `sprint-${nextNum}`;
-    const issue = (_smgmtData?.issues || []).find((i) => i.number === dragInfo.number);
-    const fromLabel = dragInfo.fromSprint || "backlog";
-    document.getElementById("gc-sprint-name").textContent = sprintLabel;
-    document.getElementById("gc-ticket-info").textContent = issue ? `#${issue.number} \u2014 ${issue.title}` : `#${dragInfo.number}`;
-    document.getElementById("gc-source-pane").textContent = fromLabel === "backlog" ? "Backlog" : `Sprint ${fromLabel.replace("sprint-", "")}`;
-    const confirmBtn = document.getElementById("gc-confirm-btn");
-    confirmBtn.textContent = `Create ${sprintLabel} & move`;
-    confirmBtn.disabled = false;
-    const errEl = document.getElementById("gc-error");
-    errEl.textContent = "";
-    errEl.classList.add("hidden");
-    document.getElementById("gc-modal").dataset.issueNum = String(dragInfo.number);
-    document.getElementById("gc-modal").dataset.fromSprint = fromLabel;
-    document.getElementById("gc-modal").dataset.sprintNum = String(nextNum);
-    document.getElementById("gc-modal").dataset.repo = repo;
-    document.getElementById("gc-backdrop").classList.remove("hidden");
-    document.getElementById("gc-modal").classList.remove("hidden");
-    confirmBtn.focus();
-  }
-  function _gcClose() {
-    document.getElementById("gc-backdrop").classList.add("hidden");
-    document.getElementById("gc-modal").classList.add("hidden");
-  }
-  async function _gcConfirm() {
-    const modal = document.getElementById("gc-modal");
-    const issueNum = parseInt(modal.dataset.issueNum, 10);
-    const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-    const repo = modal.dataset.repo;
-    const sprintLabel = `sprint-${sprintNum}`;
-    const confirmBtn = document.getElementById("gc-confirm-btn");
-    const errEl = document.getElementById("gc-error");
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Creating\u2026";
-    errEl.classList.add("hidden");
-    try {
-      const createRes = await fetch("/api/sprints/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_number: sprintNum })
-      });
-      if (!createRes.ok) {
-        const d = await createRes.json().catch(() => ({}));
-        throw new Error(d.detail || "HTTP " + createRes.status);
-      }
-      const moveRes = await fetch(`/api/issues/${issueNum}/sprint-label`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sprint_label: sprintLabel, project: repo })
-      });
-      if (!moveRes.ok) {
-        const d = await moveRes.json().catch(() => ({}));
-        throw new Error(d.detail || "HTTP " + moveRes.status);
-      }
-      _gcClose();
-      await loadSprintMgmt();
-    } catch (e) {
-      errEl.textContent = `Failed: ${e.message}`;
-      errEl.classList.remove("hidden");
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = `Create ${sprintLabel} & move`;
-    }
-  }
-  function _smgmtTicketDragEnd(_event) {
-    if (_smgmtDragTicket) {
-      if (_smgmtDragTicket.multi) {
-        _smgmtDragTicket.multi.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.remove("dragging-ticket");
-        });
-      } else {
-        const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
-        if (el)
-          el.classList.remove("dragging-ticket");
-      }
-    }
-    const pill = document.getElementById("smgmt-drag-pill");
-    if (pill) {
-      pill.style.top = "-100px";
-      pill.style.left = "-100px";
-      pill.textContent = "";
-    }
-    _smgmtGhostHide();
-    _smgmtDragTicket = null;
-    document.querySelectorAll(".smgmt-sprint-card").forEach((el) => el.classList.remove("drag-over-sprint"));
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-  }
-  function _smgmtDragOver(event, sprintLabel) {
-    if (_smgmtDragTicket) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      document.querySelectorAll(".smgmt-sprint-card").forEach((b) => b.classList.remove("drag-over-sprint"));
-      document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-      const target = document.getElementById(`smgmt-card-${sprintLabel}`);
-      if (target)
-        target.classList.add("drag-over-sprint");
-    }
-  }
-  function _smgmtDragLeave(event) {
-    if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
-      event.currentTarget.classList.remove("drag-over-sprint");
-    }
-  }
-  async function _smgmtDropOnSprint(event, targetLabel) {
-    event.preventDefault();
-    document.querySelectorAll(".smgmt-sprint-card").forEach((el) => el.classList.remove("drag-over-sprint"));
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
-      return;
-    if (!_smgmtDragTicket)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    _smgmtDragTicket = null;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      const nums = dragInfo.multi;
-      const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
-      if (_smgmtData) {
-        nums.forEach((n) => {
-          const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss)
-            iss.sprint = targetNum;
-        });
-      }
-      _smgmtClearSelection();
-      if (_smgmtData)
-        _smgmtRender(_smgmtData);
-      const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel || "backlog" }));
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch("/api/sprints/batch-labels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changes, project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        alert(`Failed to move tickets: ${e.message}`);
-        await loadSprintMgmt();
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    } else {
-      const { number, fromSprint } = dragInfo;
-      if (fromSprint === targetLabel)
-        return;
-      const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
-      if (_smgmtData) {
-        const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss)
-          iss.sprint = targetNum;
-        _smgmtRender(_smgmtData);
-      }
-      _smgmtClearSelection();
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch(`/api/issues/${number}/sprint-label`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sprint_label: targetLabel || "backlog", project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        if (_smgmtData) {
-          const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss)
-            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
-          _smgmtRender(_smgmtData);
-        }
-        alert(`Failed to move ticket #${number}: ${e.message}`);
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    }
-  }
-  function _smgmtTicketReorderDragOver(event) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
-      return;
-    const target = event.currentTarget;
-    const targetSprint = target.dataset.sprint;
-    const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
-    if (targetSprint !== dragSprint)
-      return;
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = target.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    target.classList.remove("drag-before", "drag-after");
-    target.classList.add(event.clientY < midY ? "drag-before" : "drag-after");
-  }
-  function _smgmtTicketReorderDragLeave(event) {
-    event.currentTarget.classList.remove("drag-before", "drag-after");
-  }
-  async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    if (dragInfo.fromSprint !== sprintLabel)
-      return;
-    const dragIssue = dragInfo.number;
-    if (dragIssue === targetIssue) {
-      event.currentTarget.classList.remove("drag-before", "drag-after");
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const insertAfter = event.clientY >= rect.top + rect.height / 2;
-    event.currentTarget.classList.remove("drag-before", "drag-after");
-    const repo = _smgmtRepo();
-    if (!repo || !_smgmtData)
-      return;
-    const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
-    if (!container)
-      return;
-    const rows = Array.from(container.querySelectorAll(".smgmt-ticket[data-issue]"));
-    let order = rows.map((r) => parseInt(r.dataset.issue, 10)).filter((n) => !isNaN(n));
-    order = order.filter((n) => n !== dragIssue);
-    const insertIdx = order.indexOf(targetIssue) + (insertAfter ? 1 : 0);
-    order.splice(insertIdx, 0, dragIssue);
-    _smgmtDragTicket = null;
-    try {
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(order)
-        }
-      );
-      if (!res.ok)
-        throw new Error(await res.text());
-      await loadSprintMgmt();
-    } catch (e) {
-      alert(`Failed to reorder tickets: ${e.message}`);
-      await loadSprintMgmt();
-    }
-  }
-  function _smgmtBacklogTicketDragStart(event, issueNum) {
-    const isChecked = _smgmtSelectedIssues.has(issueNum);
-    if (isChecked && _smgmtSelectedIssues.size > 1) {
-      const nums = Array.from(_smgmtSelectedIssues);
-      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: nums, multiSprints: 1 };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", nums.join(","));
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill) {
-        pill.textContent = `Moving ${nums.length} tickets`;
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-      setTimeout(() => {
-        nums.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.add("dragging-ticket");
-        });
-      }, 0);
-    } else {
-      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(issueNum));
-      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el)
-        setTimeout(() => el.classList.add("dragging-ticket"), 0);
-    }
-    _smgmtGhostShow();
-  }
-  function _smgmtBacklogDragOver(event) {
-    if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      document.getElementById("smgmt-backlog-pane")?.classList.add("drag-over-backlog");
-    }
-  }
-  function _smgmtBacklogDragLeave(event) {
-    const pane = document.getElementById("smgmt-backlog-pane");
-    if (pane && !pane.contains(event.relatedTarget)) {
-      pane.classList.remove("drag-over-backlog");
-    }
-  }
-  async function _smgmtDropOnBacklog(event) {
-    event.preventDefault();
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
-      return;
-    if (!_smgmtDragTicket)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    _smgmtDragTicket = null;
-    if (!dragInfo.fromSprint)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      const nums = dragInfo.multi;
-      if (_smgmtData) {
-        nums.forEach((n) => {
-          const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss)
-            iss.sprint = null;
-        });
-      }
-      _smgmtClearSelection();
-      if (_smgmtData)
-        _smgmtRender(_smgmtData);
-      const changes = nums.map((n) => ({ issue_num: n, sprint_label: "backlog" }));
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch("/api/sprints/batch-labels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changes, project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        alert(`Failed to move tickets to backlog: ${e.message}`);
-        await loadSprintMgmt();
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    } else {
-      const { number, fromSprint } = dragInfo;
-      if (_smgmtData) {
-        const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss)
-          iss.sprint = null;
-        _smgmtRender(_smgmtData);
-      }
-      _smgmtClearSelection();
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch(`/api/issues/${number}/sprint-label`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sprint_label: "backlog", project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        if (_smgmtData) {
-          const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss)
-            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
-          _smgmtRender(_smgmtData);
-        }
-        alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    }
-  }
   function _smgmtBoardLock2(message, opts) {
     _smgmtMoveLock = true;
     _smgmtArStopTicker();
@@ -8989,40 +8215,6 @@ ${data.errors.join("\n")}`);
   globalThis._pfStepperSummary = _pfStepperSummary;
   globalThis.smgmtKickoffRun = smgmtKickoffRun;
   globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
-  globalThis.computeDropPlan = computeDropPlan;
-  globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI2;
-  globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
-  globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;
-  globalThis._smgmtToggleMoveToMenu = _smgmtToggleMoveToMenu;
-  globalThis._smgmtCloseMoveToMenu = _smgmtCloseMoveToMenu;
-  globalThis._smgmtClearSelection = _smgmtClearSelection;
-  globalThis._smgmtSetSelected = _smgmtSetSelected;
-  globalThis._smgmtToggleSelect = _smgmtToggleSelect;
-  globalThis._smgmtRowClick = _smgmtRowClick;
-  globalThis._smgmtIsDeletableIssue = _smgmtIsDeletableIssue;
-  globalThis._smgmtDeleteSelected = _smgmtDeleteSelected;
-  globalThis._smgmtMoveSelectedTo = _smgmtMoveSelectedTo;
-  globalThis._smgmtTicketDragStart = _smgmtTicketDragStart;
-  globalThis._smgmtDragMovePill = _smgmtDragMovePill;
-  globalThis._smgmtGhostComputeNextFree = _smgmtGhostComputeNextFree;
-  globalThis._smgmtGhostShow = _smgmtGhostShow;
-  globalThis._smgmtGhostHide = _smgmtGhostHide;
-  globalThis._smgmtGhostDragOver = _smgmtGhostDragOver;
-  globalThis._smgmtGhostDragLeave = _smgmtGhostDragLeave;
-  globalThis._smgmtGhostDrop = _smgmtGhostDrop;
-  globalThis._gcClose = _gcClose;
-  globalThis._gcConfirm = _gcConfirm;
-  globalThis._smgmtTicketDragEnd = _smgmtTicketDragEnd;
-  globalThis._smgmtDragOver = _smgmtDragOver;
-  globalThis._smgmtDragLeave = _smgmtDragLeave;
-  globalThis._smgmtDropOnSprint = _smgmtDropOnSprint;
-  globalThis._smgmtTicketReorderDragOver = _smgmtTicketReorderDragOver;
-  globalThis._smgmtTicketReorderDragLeave = _smgmtTicketReorderDragLeave;
-  globalThis._smgmtTicketReorderDrop = _smgmtTicketReorderDrop;
-  globalThis._smgmtBacklogTicketDragStart = _smgmtBacklogTicketDragStart;
-  globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
-  globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
-  globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
   globalThis._smgmtBoardLock = _smgmtBoardLock2;
   globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
   globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
@@ -9031,7 +8223,7 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtBoardHalt = _smgmtBoardHalt;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
-  globalThis._smgmtRender = _smgmtRender2;
+  globalThis._smgmtRender = _smgmtRender;
   globalThis._smgmtLabelFilterRender = _smgmtLabelFilterRender;
   globalThis._smgmtLabelFilterApply = _smgmtLabelFilterApply;
   globalThis._smgmtFetchMissingOutcomes = _smgmtFetchMissingOutcomes;

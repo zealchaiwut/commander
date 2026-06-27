@@ -41,7 +41,7 @@ class TestLookupInSmRobustness:
         import sprint_manager as sm
 
         def lambda_patch():  # different qualname than _run_timed
-            return None
+            pass
         original = sm._run_timed
         sm._run_timed = lambda_patch
         try:

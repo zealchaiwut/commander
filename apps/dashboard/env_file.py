@@ -3,8 +3,11 @@
 Parsing rules:
 - A variable line matches ``KEY=VALUE`` (an optional ``export `` prefix is
   allowed). KEY must start with a letter or underscore.
-- The returned value is the text after the first ``=``, with a trailing inline
-  comment (`` # ...``) stripped and surrounding whitespace removed.
+- For quoted values the surrounding quotes are stripped and the inner content
+  is returned (e.g. ``KEY="value #1"`` → ``value #1``).
+- For unquoted values the raw trimmed value is returned as-is; inline
+  comments are intentionally NOT stripped so that legitimate values such as
+  ``SECRET=secret #1`` round-trip losslessly (issue #750).
 - Comment-only lines and blank lines are not returned by the parser but are
   preserved verbatim on write.
 
@@ -14,6 +17,13 @@ Write rules (issue #727 AC):
 - A rewritten key appears at its original position.
 - A new key is appended at the end of the file.
 - A key absent from the submitted set is removed.
+
+Quoting rules (issue #750 AC):
+- Values that contain whitespace or a space-hash sequence (`` #``) are
+  written wrapped in double quotes so the parser does not misread them as
+  having an inline comment on the next read.
+- Values with no whitespace and no `` #`` are written unquoted (no change in
+  behaviour for clean values).
 """
 
 from __future__ import annotations
@@ -25,25 +35,54 @@ from pathlib import Path
 _VAR_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
-def _strip_inline_comment(raw_value: str) -> str:
-    """Return the value with a trailing `` # comment`` removed.
+def _parse_value(raw_value: str) -> str:
+    """Return the display value for a raw .env value string
+    (everything after the ``=`` delimiter).
 
-    Only an unquoted inline comment (whitespace then ``#``) is stripped. A value
-    wrapped in matching quotes is returned with its quotes intact so round-trips
-    are lossless for quoted secrets.
+    For quoted values the surrounding quotes are stripped and the inner content
+    is returned (e.g. ``"a b"`` → ``a b``).
+    For unquoted values the trimmed raw string is returned verbatim; inline
+    comments are NOT stripped so the full value is preserved (issue #750 AC1).
     """
     value = raw_value.strip()
     if value[:1] in ("'", '"'):
         quote = value[0]
         end = value.find(quote, 1)
         if end != -1:
-            return value[: end + 1]
+            return value[1:end]
         return value
-    # Unquoted: a comment starts at the first " #" sequence.
+    return value
+
+
+def _comparison_value(raw_value: str) -> str:
+    """Return the value used for change-detection in the write path.
+
+    For quoted values: same as ``_parse_value`` (inner content, no quotes).
+    For unquoted values: trailing inline comment (``\\s+#``) is stripped so
+    that a file line such as ``PORT=5432  # note`` is treated as unchanged
+    when the editor submits ``5432``, preserving the comment verbatim.
+    """
+    value = raw_value.strip()
+    if value[:1] in ("'", '"'):
+        quote = value[0]
+        end = value.find(quote, 1)
+        if end != -1:
+            return value[1:end]
+        return value
     m = re.search(r"\s+#", value)
     if m:
-        value = value[: m.start()]
-    return value.strip()
+        return value[: m.start()].strip()
+    return value
+
+
+def _needs_quoting(value: str) -> bool:
+    """Return ``True`` if *value* must be wrapped in double quotes on write.
+
+    Values containing whitespace or a space-hash (`` #``) sequence are quoted
+    so the parser reads them back in full without truncation
+    (issue #750 AC2-4).
+    """
+    return bool(re.search(r"\s", value)) or " #" in value
 
 
 def parse_env_text(text: str) -> list[tuple[str, str]]:
@@ -54,7 +93,7 @@ def parse_env_text(text: str) -> list[tuple[str, str]]:
         if not m:
             continue
         key = m.group(1)
-        value = _strip_inline_comment(m.group(2))
+        value = _parse_value(m.group(2))
         pairs.append((key, value))
     return pairs
 
@@ -102,15 +141,17 @@ def write_env_vars(path: Path, pairs: list[tuple[str, str]]) -> None:
         if key in seen:
             continue  # duplicate original key — keep only first occurrence
         seen.add(key)
-        current = _strip_inline_comment(m.group(2))
+        current = _comparison_value(m.group(2))
         if current == new_map[key]:
             out.append(line)  # unchanged — verbatim, preserves inline comment
         else:
-            out.append(f"{key}={new_map[key]}")  # rewritten in place
+            v = new_map[key]
+            out.append(f'{key}="{v}"' if _needs_quoting(v) else f"{key}={v}")
 
     for key in order:
         if key not in seen:
-            out.append(f"{key}={new_map[key]}")  # new key appended at end
+            v = new_map[key]
+            out.append(f'{key}="{v}"' if _needs_quoting(v) else f"{key}={v}")
 
     text = "\n".join(out)
     if text and not text.endswith("\n"):

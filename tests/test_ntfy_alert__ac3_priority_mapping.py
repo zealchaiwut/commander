@@ -2,11 +2,11 @@
 import sys
 import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "sprint_manager"))
 
-from alerts import _alert_ntfy
+from alerts import _alert_ntfy  # noqa: E402
 
 
 @patch("alerts.urllib.request.urlopen")
@@ -16,7 +16,6 @@ def test_priority_high_for_failure(mock_urlopen):
 
     _alert_ntfy("Test", "Body", category="failure")
 
-    # Check that urlopen was called
     assert mock_urlopen.called
     req = mock_urlopen.call_args[0][0]
     assert req.headers.get("priority") == "4" or req.headers.get("Priority") == "4"

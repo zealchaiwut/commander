@@ -6,6 +6,8 @@ All other sprint_manager modules may import from here without creating cycles.
 from __future__ import annotations
 
 import json
+import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,8 @@ class IssueState:
     coder_model:          Optional[str] = None  # resolved coder model for this ticket (size-routed, issue #789)
     coder_backend:        Optional[str] = None  # resolved dispatch backend: 'claude-code' or 'cline' (issue #919)
     coder_routing_reason: Optional[str] = None  # routing reason for coder badge tooltip (issue #1403)
+    coder_pid:            Optional[int] = None  # OS PID of the coder subprocess (issue #777)
+    tester_pid:           Optional[int] = None  # OS PID of the tester subprocess (issue #777)
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +68,8 @@ class IssueState:
             "coder_model":        self.coder_model,
             "coder_backend":      self.coder_backend,
             "coder_routing_reason": self.coder_routing_reason,
+            "coder_pid":          self.coder_pid,
+            "tester_pid":         self.tester_pid,
         }
 
     @staticmethod
@@ -89,6 +95,8 @@ class IssueState:
         iss.coder_model = d.get("coder_model")
         iss.coder_backend = d.get("coder_backend")
         iss.coder_routing_reason = d.get("coder_routing_reason")
+        iss.coder_pid = d.get("coder_pid")
+        iss.tester_pid = d.get("tester_pid")
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -132,6 +140,11 @@ class SprintState:
     max_coder_slots:         int                 = 1
     max_tester_slots:        int                 = 1
     active_coder_slots:      int                 = 0
+
+    def __post_init__(self) -> None:
+        # Not a dataclass field — excluded from to_dict/from_dict and serialization.
+        # Issue #776: serialize save() calls across concurrent pipeline threads.
+        self._save_lock: threading.Lock = threading.Lock()
 
     def to_dict(self) -> dict:
         return {
@@ -196,7 +209,14 @@ class SprintState:
     def save(self, path: Path) -> None:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self.to_dict(), indent=2))
+            with self._save_lock:
+                # Serialize to_dict() inside the lock so a concurrent thread
+                # mutating self.issues cannot corrupt the snapshot (issue #776).
+                payload = json.dumps(self.to_dict(), indent=2)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(payload, encoding="utf-8")
+                # os.replace() is atomic on POSIX — readers never see a partial file.
+                os.replace(tmp, path)
         except OSError as _e:
             structured_log.error("sprint_state_write_error", f"could not write state JSON: {_e}", path=str(path), exc=str(_e))
 

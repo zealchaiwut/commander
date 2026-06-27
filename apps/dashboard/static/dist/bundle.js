@@ -686,8 +686,29 @@
     const subTabsRow = document.querySelector(".sub-tabs-row");
     if (subTabsRow)
       subTabsRow.classList.toggle("hidden", onGlobalSettings);
-    const _topLevelTabs = ["sprint-mgmt", "tickets", "manage", "planning", "settings"];
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings"].forEach((t) => {
+    const _topLevelTabs = [
+      "sprint-mgmt",
+      "tickets",
+      "manage",
+      "planning",
+      "settings"
+    ];
+    [
+      "sprint-mgmt",
+      "tickets",
+      "logs",
+      "deploy",
+      "bulk-create",
+      "timeline",
+      "compare",
+      "metrics",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor",
+      "settings"
+    ].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
       if (!btn)
         return;
@@ -712,7 +733,23 @@
       if (trigger)
         trigger.classList.toggle("active", !!group.querySelector(".stab.active"));
     });
-    ["sprint-mgmt", "tickets", "logs", "deploy", "bulk-create", "timeline", "compare", "metrics", "est-vs-actual", "calibration", "notes", "roadmap", "advisor", "settings", "global-settings"].forEach((t) => {
+    [
+      "sprint-mgmt",
+      "tickets",
+      "logs",
+      "deploy",
+      "bulk-create",
+      "timeline",
+      "compare",
+      "metrics",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor",
+      "settings",
+      "global-settings"
+    ].forEach((t) => {
       const pane = document.getElementById("pane-" + t);
       if (pane)
         pane.classList.toggle("active", t === tab);
@@ -796,7 +833,18 @@
   var _subTabsEl = document.getElementById("sub-tabs");
   if (_subTabsEl) {
     _subTabsEl.addEventListener("keydown", function(e) {
-      const enabledTabs = ["sprint-mgmt", "tickets", "manage", "logs", "deploy", "metrics", "planning", "roadmap", "advisor", "settings"];
+      const enabledTabs = [
+        "sprint-mgmt",
+        "tickets",
+        "manage",
+        "logs",
+        "deploy",
+        "metrics",
+        "planning",
+        "roadmap",
+        "advisor",
+        "settings"
+      ];
       const focused = document.activeElement;
       const currentId = focused ? focused.id.replace("stab-", "") : null;
       const currentIdx = enabledTabs.indexOf(currentId);

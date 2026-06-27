@@ -295,25 +295,26 @@ def get_project_events(
 
     # issue #764: enrich agent_finished rows with the durable duration_seconds
     # from agent_runs so the Activity tab can show a Duration column. Matched by
-    # issue number + agent role; falls back to the duration already carried in
-    # the event detail when no agent_runs row is found.
+    # (issue_number, agent_role, sprint_label) when sprint_label is present in
+    # the event detail (#820), or by (issue_number, agent_role) when absent.
     # issue #920: also enrich with backend from the most recent closed agent_runs row.
     _agent_finished = [
         d for d in db_result
         if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
     ]
     if _agent_finished:
-        _issue_nums = {
-            d["detail"].get("issue_num")
+        # Group by (issue_num, sprint_label) so each pair gets one scoped DB query.
+        _issue_sprint_pairs = {
+            (d["detail"].get("issue_num"), d["detail"].get("sprint_label"))
             for d in _agent_finished
             if d["detail"].get("issue_num") is not None
         }
         _runs_by_key: dict = {}
         _backend_by_key: dict = {}
         try:
-            for _num in _issue_nums:
-                for _r in db.agent_runs_for_issue(int(_num)):
-                    _key = (int(_num), str(_r.get("agent", "")).lower())
+            for _num, _sl in _issue_sprint_pairs:
+                for _r in db.agent_runs_for_issue(int(_num), sprint_label=_sl):
+                    _key = (int(_num), str(_r.get("agent", "")).lower(), _sl)
                     if _r.get("duration_seconds") is not None:
                         _runs_by_key[_key] = _r["duration_seconds"]
                     if _r.get("backend") is not None:
@@ -325,16 +326,17 @@ def get_project_events(
             det = d["detail"]
             num = det.get("issue_num")
             role = str(det.get("role", "")).lower()
+            sprint_label = det.get("sprint_label")
             dur = None
             if num is not None:
-                dur = _runs_by_key.get((int(num), role))
+                dur = _runs_by_key.get((int(num), role, sprint_label))
             if dur is None:
                 dur = det.get("duration")
             if dur is not None:
                 d["duration_seconds"] = dur
             # Enrich with backend (issue #920)
             if num is not None:
-                bk = _backend_by_key.get((int(num), role))
+                bk = _backend_by_key.get((int(num), role, sprint_label))
                 if bk is not None:
                     d["backend"] = bk
 

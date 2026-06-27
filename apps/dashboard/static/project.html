@@ -1932,26 +1932,6 @@
     }
     .bab-dismiss-btn:hover { background: var(--surface-2); }
 
-    /* ── Sprint board multi-select bar (Sprint tab / Board subview, in proj-header) ── */
-    .proj-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 28px;
-      margin: 0;
-      background: var(--blue-bg);
-      border: none;
-      border-top: 1px solid var(--blue);
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      flex-wrap: wrap;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .proj-selection-bar:not(.hidden) { display: flex; }
-    .proj-selection-bar-hint { color: var(--text-muted); }
-    .smgmt-sel-bar-spacer { flex: 1; min-width: 8px; }
     /* ── Bulk close confirm modal ── */
     .bcm-modal { width: min(480px, calc(100vw - 32px)); }
     .bcm-ticket-list {
@@ -2230,6 +2210,7 @@
     .hist-parent-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
     /* Child sprint — nested with L-connector */
     .hist-child-wrap { position: relative; margin-left: 32px; margin-top: 4px; }
+    .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-child-wrap::before {
       content: ''; position: absolute; left: -20px; top: -10px;
       width: 15px; height: 36px;
@@ -3336,15 +3317,6 @@
     .smgmt-sprint-tickets {
       padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
     }
-    .smgmt-drop-hint {
-      font-size: 12px; color: var(--text-sub); text-align: center;
-      padding: 10px; border: 1px dashed var(--border); border-radius: 5px; margin: 4px 8px;
-    }
-    .smgmt-sprint-card.drag-over-sprint,
-    .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
-    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint,
-    .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
-    .smgmt-sprint-block.drag-over-zone { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
     .smgmt-ticket {
       display: flex; align-items: center; gap: var(--space-2);
       padding: var(--space-2) var(--space-4); background: var(--surface); font-size: var(--font-size-md);
@@ -3356,32 +3328,6 @@
       -webkit-user-select: none; user-select: none;
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
-    .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
-    .smgmt-ticket[draggable="true"]:active { cursor: grabbing; }
-    .smgmt-ticket[draggable="false"] { cursor: default; }
-    .smgmt-ticket.dragging-ticket {
-      opacity: 0.5;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.14);
-      position: relative; z-index: 1;
-    }
-    .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
-    .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
-    .smgmt-ticket.is-selected { background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
-    .smgmt-ticket-grip {
-      color: var(--text-sub); font-size: 13px; flex-shrink: 0;
-      opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
-      cursor: grab;
-    }
-    .smgmt-ticket[draggable="true"]:hover .smgmt-ticket-grip { opacity: 1; }
-    .smgmt-ticket.dragging-ticket .smgmt-ticket-grip {
-      opacity: 1; color: var(--text); transform: scale(1.18);
-    }
-    .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
-    .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
-    .smgmt-ticket:hover .smgmt-ticket-cb,
-    .smgmt-ticket.is-selected .smgmt-ticket-cb,
-    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-muted);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -3459,13 +3405,6 @@
     .smgmt-state-badge.state-partial  { background: var(--yellow-bg);  color: var(--yellow);    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);  }
     .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
-    /* NEXT UP badge */
-    .smgmt-next-badge {
-      font-family: var(--mono); font-size: 10px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .08em;
-      background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
-      flex-shrink: 0;
-    }
     /* Parent sprint lineage indicator */
     .smgmt-sprint-lineage {
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
@@ -3906,152 +3845,6 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (legacy inline — now lives in proj-header) ── */
-    .proj-selection-bar.legacy-inline { display: none !important; }
-
-    /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
-    .smgmt-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 9px 16px;
-      background: var(--blue-bg);
-      border: 1px solid var(--blue);
-      border-radius: 8px;
-      margin-bottom: 10px;
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      /* Pin to the top of the sprint pane so it stays visible while scrolling a
-         long list and selecting tickets (multi-select usability). */
-      position: sticky;
-      top: 6px;
-      z-index: 20;
-      box-shadow: 0 2px 8px rgba(0,0,0,.08);
-    }
-    .smgmt-selection-bar.show {
-      display: flex;
-    }
-    .smgmt-selection-bar-count {
-      font-weight: 600;
-    }
-    .smgmt-sel-bar-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      position: relative;
-      flex-shrink: 0;
-    }
-    .smgmt-selection-bar-deselect {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--blue);
-      border: 1px solid var(--blue);
-      border-radius: 5px;
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: 4px;
-      transition: background .15s, color .15s, border-color .15s;
-    }
-    .smgmt-selection-bar-deselect:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
-    .smgmt-selection-bar-delete {
-      display: none;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--red);
-      border: 1px solid var(--red-bg);
-      border-radius: 5px;
-      cursor: pointer;
-      transition: background .15s, color .15s, border-color .15s;
-      align-items: center;
-      gap: 4px;
-    }
-    .smgmt-selection-bar-delete.show { display: inline-flex; }
-    .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
-    .smgmt-sel-reest-btn {
-      padding: 5px 10px; font-size: 12px; font-weight: 600;
-      background: var(--surface); color: var(--text);
-      border: 1px solid var(--border); border-radius: 5px;
-      cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-    }
-    .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
-    .smgmt-sel-close-btn {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--red);
-      border: 1px solid var(--red-bg);
-      border-radius: 5px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background .15s, color .15s, border-color .15s;
-    }
-    .smgmt-sel-close-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
-    .smgmt-move-to-btn {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      cursor: pointer;
-      transition: background .15s;
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-    .smgmt-move-to-btn:hover { background: var(--surface-hover); }
-    /* Move-to dropdown menu */
-    .smgmt-move-to-menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 4px);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      box-shadow: 0 4px 16px rgba(0,0,0,.12);
-      z-index: 400;
-      min-width: 140px;
-      padding: 4px 0;
-      display: none;
-    }
-    .smgmt-move-to-menu.open { display: block; }
-    .smgmt-move-to-item {
-      display: block;
-      width: 100%;
-      text-align: left;
-      padding: 7px 14px;
-      font-size: 13px;
-      background: none;
-      border: none;
-      color: var(--text);
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .smgmt-move-to-item:hover { background: var(--surface-hover); }
-
-    /* ── Multi-drag floating pill ── */
-    .smgmt-drag-pill {
-      position: fixed;
-      top: -100px;
-      left: -100px;
-      background: var(--blue);
-      color: #fff;
-      border-radius: 20px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 600;
-      pointer-events: none;
-      z-index: 9999;
-      box-shadow: 0 4px 12px rgba(0,0,0,.2);
-      white-space: nowrap;
-    }
-
     /* ── Modal shared ── */
     .modal-backdrop {
       position: fixed; inset: 0;
@@ -4426,7 +4219,6 @@
     /* Planning ticket rows (no drag) */
     .smgmt-plan-tickets { padding: 8px 0; }
     .smgmt-plan-ticket { cursor: default; }
-    .smgmt-plan-ticket .smgmt-ticket-grip { display: none; }
     .smgmt-plan-empty { padding: 14px 18px; color: var(--text-sub); font-size: 13px; }
     .smgmt-plan-row-menu .smgmt-ctx-item--remove { color: var(--red); }
     /* + Add ticket affordance */
@@ -4659,84 +4451,6 @@
     .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
     .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
 
-    /* ── Ghost pane — drag-below to create sprint (issue #364) ── */
-    .smgmt-ghost-pane {
-      display: none; /* shown during drag */
-      border: 2px dashed var(--blue);
-      border-radius: 8px;
-      background: var(--blue-bg);
-      margin-top: 12px;
-      padding: 20px 16px;
-      text-align: center;
-      cursor: default;
-      transition: background 0.15s, transform 0.12s, box-shadow 0.12s;
-    }
-    .smgmt-ghost-pane.ghost-visible {
-      display: block;
-    }
-    .smgmt-ghost-pane.ghost-hot {
-      background: var(--blue);
-      border-style: solid;
-      transform: scale(1.012);
-      box-shadow: 0 4px 16px rgba(37,99,235,.25);
-    }
-    .smgmt-ghost-title {
-      font-size: 14px; font-weight: 700; color: var(--blue);
-      pointer-events: none;
-    }
-    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-title {
-      color: #fff;
-    }
-    .smgmt-ghost-sub {
-      font-size: 12px; color: var(--blue); margin-top: 4px;
-      pointer-events: none;
-    }
-    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-sub {
-      color: rgba(255,255,255,.85);
-    }
-
-    /* ── Ghost-confirm modal (issue #364) ── */
-    .gc-modal {
-      min-width: 340px;
-      max-width: 480px;
-    }
-    .gc-modal .modal-footer .btn-blue {
-      background: var(--blue);
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 7px 18px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .gc-modal .modal-footer .btn-blue:hover { background: #1d4ed8; }
-    .gc-modal .modal-footer .btn-blue:disabled { opacity: .55; cursor: default; }
-    .gc-detail-row {
-      font-size: 13px; color: var(--text);
-      padding: 4px 0;
-    }
-    .gc-detail-label {
-      color: var(--text-muted); font-size: 12px;
-    }
-    .gc-note {
-      font-size: 12px; color: var(--text-sub);
-      background: var(--surface-2);
-      border-radius: 6px;
-      padding: 8px 12px;
-      margin-top: 12px;
-    }
-    .gc-error {
-      font-size: 12px; color: var(--red);
-      background: rgba(220,38,38,.07);
-      border: 1px solid rgba(220,38,38,.2);
-      border-radius: 5px;
-      padding: 7px 12px;
-      margin-top: 10px;
-    }
-    .gc-error.hidden { display: none; }
-
     /* "Move to" popup for backlog/sprint tickets */
     .smgmt-moveto-popup {
       position: fixed;
@@ -4865,12 +4579,6 @@
     .hs-plan-step:last-child { border-bottom: none; }
     .hs-plan-step strong { color: var(--text); }
     .hs-note { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; line-height: 1.45; }
-    .smgmt-move-to-item--hotswap {
-      border-top: 1px dashed var(--border);
-      color: var(--amber);
-      font-weight: 600;
-    }
-    .smgmt-move-to-item--hotswap:hover { background: var(--amber-bg); }
     .mt-modal .modal-body { max-height: min(70vh, 520px); }
     .mt-modal .mt-selection-row {
       position: sticky;
@@ -8203,9 +7911,6 @@
       .smgmt-row-menu-btn,
       .smgmt-rename-btn,
       .smgmt-summary-row-action { opacity: 1; }
-      /* The selection checkbox was hover-only too, so multi-select was impossible
-         on touch (it only showed once a row was already selected — chicken-egg). */
-      .smgmt-ticket-cb { opacity: 1; }
       /* Give rows a ~44px touch target without changing desktop density. */
       .smgmt-ticket { padding-top: 11px; padding-bottom: 11px; }
       #pane-sprint-mgmt.smgmt-compact .smgmt-ticket { padding-top: 8px; padding-bottom: 8px; }
@@ -9798,31 +9503,6 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
-      <!-- Sprint board multi-select bar — its own full-width row beneath the nav
-           tabs (was inline in .sub-tabs-row, which crowded the tabs). -->
-      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-        <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-          <i class="ti ti-x"></i> Deselect all
-        </button>
-        <i class="ti ti-checkbox" aria-hidden="true"></i>
-        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-        <span class="proj-selection-bar-hint">— batch move, close, or reestimate</span>
-        <div class="smgmt-sel-bar-spacer" aria-hidden="true"></div>
-        <div class="smgmt-sel-bar-actions">
-          <button type="button" class="smgmt-sel-close-btn" id="smgmt-sel-close-btn"
-                  onclick="_smgmtCloseSelected()">
-            <i class="ti ti-circle-x"></i> Close ticket
-          </button>
-          <button type="button" class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
-          <button type="button" class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                  onclick="_smgmtMoveToModalOpen()">
-            <i class="ti ti-send"></i> Move to Sprint
-          </button>
-        </div>
-      </div><!-- /proj-selection-bar -->
     </header>
 
     </div><!-- /proj-sticky-chrome -->
@@ -9909,12 +9589,6 @@
 
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
-          </div>
-
-          <!-- Ghost pane — create next sprint (issue #364); drag removed (issue #1044) -->
-          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane">
-            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Create Sprint 1</div>
-            <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
           <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
@@ -11724,10 +11398,14 @@ let _projectData = null;   // full project config from /api/home
 let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
-let _smgmtSelectedIssues = new Set();
 let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
-let _smgmtDragTicket     = null;
-let _smgmtDragSprintLabel = null;
+// Drag-drop/selection removed (issue #1044) — stubs keep call sites that remain for single-ticket
+// move-to-modal flow from throwing ReferenceErrors.
+const _smgmtSelectedIssues = new Set();
+function _smgmtClearSelection() { _smgmtSelectedIssues.clear(); }
+function _smgmtUpdateSelectionUI() {}
+function _smgmtCloseMoveToMenu() {}
+async function _smgmtMoveSelectedTo() {}
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
@@ -13108,9 +12786,6 @@ async function init() {
   // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
   _setupModals();
 
-  // Track drag cursor position for the multi-drag pill
-  document.addEventListener('dragover', _smgmtDragMovePill);
-
   // Set up sticky toolbar shadow and condensed header on scroll
   _smgmtInitScrollShadow();
   _projCondensedHeaderInit();
@@ -13569,7 +13244,7 @@ function _smgmtRestoreDefaultOrder(label) {
   const issues  = _smgmtData.issues || [];
   const tickets = issues.filter(i => i.sprint_label === label);
   if (tickets.length === 0) {
-    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    container.innerHTML = '';
     return;
   }
   container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
@@ -15097,10 +14772,7 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     const badge = document.createElement('span');
     badge.className = `smgmt-state-badge ${meta.badgeCls}`;
     badge.textContent = meta.badge;
-    // Insert after the NEXT UP badge if present, else after the sprint name
-    const anchor = headerLeft.querySelector('.smgmt-next-badge')
-      || headerLeft.querySelector('.smgmt-sprint-name')
-      || headerLeft.children[1];
+    const anchor = headerLeft.querySelector('.smgmt-sprint-name') || headerLeft.children[1];
     if (anchor && anchor.nextSibling) headerLeft.insertBefore(badge, anchor.nextSibling);
     else headerLeft.appendChild(badge);
   }
@@ -20442,57 +20114,6 @@ let _fsPreview = null;
 
 
 
-// Close move-to menu on outside click (legacy no-op — modal uses backdrop)
-document.addEventListener('click', function(e) {
-  const bar = document.getElementById('proj-selection-bar');
-  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
-});
-
-
-
-
-// Click a ticket row to select/deselect it (toggle). Shift+click extends the
-// selection from the last-clicked ticket to this one, like a file picker.
-// Ctrl/Cmd+click toggles individual items without disturbing other selections.
-// Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
-
-
-
-
-// ── Drag-and-drop ──────────────────────────────────────────────────────────
-
-
-// ── Ghost pane — drag-below to create next sprint (issue #364) ──────────────
-
-/** Cached next-free sprint number for the current drag session. */
-let _smgmtGhostNextNum = null;
-
-/**
- * Next sprint number = max existing + 1. Uses the server's placeholder_sprint
- * (computed over sprint labels AND finished-summary numbers, so a deleted early
- * label never resets it to 1). Falls back to a client-side max if absent.
- */
-
-/** Show the ghost pane below the sprint list, pre-computing next-free number. */
-
-/** Hide the ghost pane and reset hot state. */
-
-
-
-
-/** Close ghost confirm modal — full no-op. */
-
-/** Confirm: create sprint and move ticket atomically. */
-
-
-
-
-
-// ── Within-sprint ticket reorder (issue #247) ─────────────────────────────
-
-
-
-
 // ── Backlog pane (issue #274) ──────────────────────────────────────────────
 
 function smgmtToggleCollapse(label) {
@@ -21411,13 +21032,9 @@ async function _smgmtCloseIssueConfirm() {
   }
 }
 
-// ── Backlog drag handlers ──────────────────────────────────────────────────
 
+// Close Move-to popup on Escape
 
-
-
-
-// Close Move-to popup, ghost pane, and ghost confirm modal on Escape
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     const popup = document.getElementById('smgmt-moveto-popup');
@@ -21433,15 +21050,6 @@ document.addEventListener('keydown', function(e) {
     if (hsModal && !hsModal.classList.contains('hidden')) _smgmtHotswapModalClose();
     const ciModal = document.getElementById('ci-modal');
     if (ciModal && !ciModal.classList.contains('hidden')) _smgmtCloseIssueCancel();
-    // Dismiss ghost mid-drag
-    if (_smgmtDragTicket) {
-      _smgmtGhostHide();
-    }
-    // Close ghost confirm modal (no-op if not open)
-    const gcModal = document.getElementById('gc-modal');
-    if (gcModal && !gcModal.classList.contains('hidden')) {
-      _gcClose();
-    }
   }
 });
 
@@ -21480,7 +21088,7 @@ function _smgmtKbColTickets(label) {
 
 /** Returns true if any modal, dialog, or dropdown is open. */
 function _smgmtKbAnyModalOpen() {
-  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'apm-backdrop'];
   if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
   const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
   if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
@@ -21743,12 +21351,6 @@ async function _smgmtArDoRefresh() {
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
   if (_smgmtPreflightLock) return; // freeze while a pre-flight fix is running (board would rebuild mid-fix)
-  // Freeze while a drag is in progress: a mid-drag board re-render (this tick
-  // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
-  // innerHTML) replaces the dragged DOM node, and the browser immediately
-  // cancels the drag. With a short refresh interval that clobbers nearly every
-  // attempt, making the board feel permanently un-draggable in all browsers.
-  if (_smgmtDragTicket) return;
   _arRemaining -= 1;
   if (_arRemaining <= 0) {
     _arRemaining = _arInterval;
@@ -22540,10 +22142,6 @@ function _setupModals() {
       this.textContent = 'Create Sprint';
     }
   });
-
-  // ── Ghost confirm modal wiring (issue #364) ──
-  document.getElementById('gc-backdrop').addEventListener('click', _gcClose);
-  document.getElementById('gc-confirm-btn').addEventListener('click', _gcConfirm);
 
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
@@ -28635,42 +28233,6 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 
-<!-- ── Inline multi-select action bar (proj-selection-bar in header) ── -->
-
-<!-- ── Ghost-confirm modal (issue #364) ── -->
-<div class="modal-backdrop hidden" id="gc-backdrop"></div>
-<div class="modal gc-modal hidden" id="gc-modal"
-     role="dialog" aria-modal="true" aria-labelledby="gc-modal-title">
-  <div class="modal-header">
-    <span class="modal-title" id="gc-modal-title">Create new sprint?</span>
-    <button class="modal-close" id="gc-close-btn" aria-label="Close" onclick="_gcClose()">&times;</button>
-  </div>
-  <div class="modal-body">
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">New sprint:</span>&nbsp;
-      <strong id="gc-sprint-name"></strong>
-    </div>
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">Moving ticket:</span>&nbsp;
-      <span id="gc-ticket-info"></span>
-    </div>
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">From:</span>&nbsp;
-      <span id="gc-source-pane"></span>
-    </div>
-    <div class="gc-note">
-      This sprint number is the lowest positive integer not yet used.
-      To use a specific number, drag directly onto an existing empty sprint pane
-      or use <em>New Sprint</em>.
-    </div>
-    <div class="gc-error hidden" id="gc-error"></div>
-  </div>
-  <div class="modal-footer">
-    <button class="btn-ghost" id="gc-cancel-btn" type="button" onclick="_gcClose()">Cancel</button>
-    <button class="btn-blue" id="gc-confirm-btn" type="button">Create sprint-1 &amp; move</button>
-  </div>
-</div>
-
 <!-- ====================================================================== -->
 <!-- Add Project modal — CANONICAL markup. Keep BYTE-IDENTICAL with the copy -->
 <!-- in home-preview.html. Replaced the legacy index.html modal (issue #425). -->
@@ -28843,9 +28405,6 @@ document.addEventListener('keydown', function(e) {
     <button class="btn-blue" type="button" id="dao-confirm-btn" onclick="_smgmtDagOrderConfirm()" disabled>Apply</button>
   </div>
 </div>
-
-<!-- ── Multi-drag pill (follows cursor) ── -->
-<div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
 
 <!-- ── Log viewer modal (issue #264) ── -->
 <div class="modal-backdrop hidden" id="lv-backdrop" onclick="closeLvModal()"></div>

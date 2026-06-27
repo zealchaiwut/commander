@@ -342,3 +342,23 @@ def test_ac8_no_new_columns_in_sprints(fresh_db):
         "summary_settled_done", "summary_uat_count", "summary_failure_count",
     }
     assert not issue_new_cols, f"new columns added by this issue: {issue_new_cols}"
+
+
+# ── Idempotent same-state no-op (bulk-complete resume) ───────────────────────
+
+def test_same_state_completed_is_idempotent_noop(fresh_db):
+    """Re-completing an already-`completed` sprint is an accepted no-op, not an
+    illegal edge. Guards bulk-complete resume: a prior run may have completed a
+    member; re-running must skip it, not reject `completed→completed` and wedge."""
+    _set_state_direct(fresh_db, "sprint-99", "completed")
+    r = fresh_db.transition_sprint_state("sprint-99", "completed", actor="manager")
+    assert r.accepted is True, f"same-state must be accepted; reason={r.reason!r}"
+    assert _get_state(fresh_db, "sprint-99") == "completed"
+
+
+def test_same_state_noop_does_not_raise_or_change(fresh_db):
+    """needs_rework→needs_rework (and any same-state) is a no-op success too."""
+    _set_state_direct(fresh_db, "sprint-100", "needs_rework")
+    r = fresh_db.transition_sprint_state("sprint-100", "needs_rework", actor="manager")
+    assert r.accepted is True
+    assert _get_state(fresh_db, "sprint-100") == "needs_rework"

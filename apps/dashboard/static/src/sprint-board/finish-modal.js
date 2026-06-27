@@ -175,6 +175,80 @@ function _fsConnectStream(owner, repoName, label) {
   };
 }
 
+/** Run Complete (finish-bg + stream) for one sprint; resolves when done. */
+export function finishSprintAndWait(label) {
+  return new Promise(async (resolve, reject) => {
+    const repo = _smgmtRepo();
+    if (!repo) {
+      reject(new Error('No project loaded'));
+      return;
+    }
+    const parts = repo.split('/');
+    const owner = parts[0];
+    const repoName = parts.slice(1).join('/');
+    try {
+      const prevRes = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`,
+      );
+      if (!prevRes.ok) {
+        const err = await prevRes.json().catch(() => ({}));
+        throw new Error(err.detail || `Preview failed (HTTP ${prevRes.status})`);
+      }
+      const preview = await prevRes.json();
+      if (preview.conflict_error) throw new Error(preview.conflict_error);
+      const allTickets = preview.all_tickets || [];
+      const bgParams = {
+        confirmed: true,
+        move_non_uat_to: preview.next_sprint_label || '',
+        selected_ticket_numbers: allTickets.map((t) => t.number),
+        selected_tickets: allTickets.map((t) => ({
+          number: t.number,
+          title: t.title || `#${t.number}`,
+        })),
+        merge_pr: !!preview.sprint_pr,
+        sprint_pr_url: preview.sprint_pr ? preview.sprint_pr.url : null,
+        total: allTickets.length + 2,
+      };
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bgParams),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+      const es = new EventSource(url);
+      es.onmessage = (e) => {
+        let snap;
+        try {
+          snap = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (snap.ping) return;
+        if (snap.status === 'done') {
+          es.close();
+          resolve(snap);
+        } else if (snap.status === 'error') {
+          es.close();
+          reject(new Error(snap.error || 'Finish failed'));
+        }
+      };
+      es.onerror = () => {
+        es.close();
+        reject(new Error('Finish stream disconnected'));
+      };
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 /** Retry a failed finish operation using the stored params. */
 export async function _fsRetry() {
   if (!_fsActiveJob) return;

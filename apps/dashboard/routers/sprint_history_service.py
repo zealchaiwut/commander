@@ -177,15 +177,14 @@ def _normalize_issue(iss: dict) -> dict:
         pr = iss["pr"].get("number")
     agent_status = (iss.get("agent_status") or "").strip().lower() or None
     failure_reason = iss.get("failure_reason")
+    title = iss.get("title")
     out = {
         "ticket_id": ticket_id,
         "state": _map_issue_state(iss.get("status") or iss.get("state")),
         "time_spent": iss.get("time_spent", _issue_time_spent(iss)),
         "pr_number": pr,
+        "title": str(title) if title else "",
     }
-    title = iss.get("title")
-    if title:
-        out["title"] = str(title)
     if agent_status:
         out["agent_status"] = agent_status
     if failure_reason:
@@ -304,6 +303,32 @@ def _issues_from_agent_runs(label: str, project: str | None = None) -> list[dict
     return issues
 
 
+def _reconcile_issue_outcomes_with_agent_runs(records: list[dict]) -> None:
+    """Promote per-ticket state from agent_runs when the state file lags GitHub.
+
+    A ticket that finished coder+tester (agent_runs outcome merged) but still
+    shows OPEN·UAT in the ingested roster must read as merged on History cards
+    (e.g. #818 on sprint-97.5 before the sprint crashed on the next ticket).
+    """
+    for rec in records:
+        label = rec.get("label") or ""
+        project = rec.get("project") or None
+        by_tid = {i["ticket_id"]: i for i in _issues_from_agent_runs(label, project)}
+        if not by_tid:
+            continue
+        for iss in rec.get("issues") or []:
+            tid = iss.get("ticket_id")
+            syn = by_tid.get(tid)
+            if not syn:
+                continue
+            syn_st = (syn.get("state") or "").lower()
+            cur_st = (iss.get("state") or "").lower()
+            if syn_st == "merged" and cur_st != "merged":
+                iss["state"] = "merged"
+            elif syn_st == "closed" and cur_st == "open":
+                iss.setdefault("agent_status", "failed")
+
+
 def _find_summary_path(sprints_dirs: Path | list[Path], label: str) -> str | None:
     """Most recent ``<label>-summary-*.md`` path for a sprint, or None."""
     dirs = [sprints_dirs] if isinstance(sprints_dirs, Path) else list(sprints_dirs)
@@ -355,7 +380,7 @@ def _enrich_from_state(label: str, sprints_dirs: Path | list[Path]) -> dict:
         if _extra.get("ticket_id") not in _have:
             out["issues"].append(_extra)
             _have.add(_extra.get("ticket_id"))
-    out["failed_tickets"] = _failed_tickets_from_raw(issues_raw)
+    out["failed_tickets"] = _failed_tickets_from_raw(out["issues"])
     tin = state.get("total_tokens_in") or 0
     tout = state.get("total_tokens_out") or 0
     out["tokens"] = int(tin) + int(tout)
@@ -371,6 +396,9 @@ def _enrich_from_state(label: str, sprints_dirs: Path | list[Path]) -> dict:
     out["summary_issue_num"] = _parse_issue_num_from_url(surl)
     if out["failed_tickets"]:
         out["failure_reason"] = out["failed_tickets"][-1]["failure_reason"]
+    if _issues_all_shipped(out["issues"]):
+        out["failed_tickets"] = []
+        out["failure_reason"] = None
     out["post_sprint"] = _build_post_sprint(state)
     return out
 
@@ -441,8 +469,23 @@ def _normalize_state(raw: str | None) -> str:
     return _db().canonical_lifecycle(raw)
 
 
+def _issues_all_shipped(issues: list[dict]) -> bool:
+    """True when every ticket in the sprint run merged or completed successfully."""
+    if not issues:
+        return False
+    return all(
+        (i.get("state") or "").lower() == "merged"
+        or (i.get("agent_status") or "").lower() in ("completed", "done")
+        for i in issues
+    )
+
+
 def _lifecycle_display_state(lifecycle: str, end_reason: str | None, issues: list[dict]) -> str:
-    """Correct needs_rework rows that are successful natural ends (issue #1137)."""
+    """Correct mis-tagged terminal rows before History renders them (issue #1137)."""
+    if lifecycle in ("completed", "deleted"):
+        return lifecycle
+    if lifecycle in ("needs_rework", "failed") and _issues_all_shipped(issues):
+        return "ready_to_merge"
     if lifecycle != "needs_rework" or (end_reason or "") != "natural":
         return lifecycle
     if not issues:
@@ -456,6 +499,22 @@ def _lifecycle_display_state(lifecycle: str, end_reason: str | None, issues: lis
     return lifecycle
 
 
+def _clear_stale_failure_signals(rec: dict) -> None:
+    """Drop phantom failed_tickets when every issue actually shipped."""
+    st = (rec.get("lifecycle_state") or "").lower()
+    if st in ("completed", "deleted"):
+        return
+    if (rec.get("end_reason") or "").strip() == "bulk_complete":
+        return
+    issues = rec.get("issues") or []
+    if not _issues_all_shipped(issues):
+        return
+    rec["failed_tickets"] = []
+    rec["failure_reason"] = None
+    if st in ("needs_rework", "failed"):
+        rec["lifecycle_state"] = "ready_to_merge"
+
+
 # ── record builders ───────────────────────────────────────────────────────────
 
 def _record_from_history(rec: dict) -> dict:
@@ -466,10 +525,17 @@ def _record_from_history(rec: dict) -> dict:
         for i in issues
         if i.get("failure_reason") or (i.get("agent_status") or "").lower() == "failed"
     ]
+    lifecycle_state = _lifecycle_display_state(
+        _normalize_state(rec.get("lifecycle_state")),
+        rec.get("end_reason"),
+        issues,
+    )
+    if _issues_all_shipped(issues):
+        failed_tickets = []
     return {
         "label": rec.get("label"),
         "project": rec.get("project", ""),
-        "lifecycle_state": _normalize_state(rec.get("lifecycle_state")),
+        "lifecycle_state": lifecycle_state,
         "end_reason": rec.get("end_reason"),
         "duration": rec.get("duration"),
         "tokens": rec.get("tokens"),
@@ -484,6 +550,7 @@ def _record_from_history(rec: dict) -> dict:
         "failure_reason": rec.get("failure_reason") or (failed_tickets[-1]["failure_reason"] if failed_tickets else None),
         "post_sprint": rec.get("post_sprint"),
         "_sort_key": rec.get("created_at") or "",
+        "_source": "history",
     }
 
 
@@ -558,6 +625,8 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
         "plan_status": enrich.get("plan_status"),
         "post_sprint": enrich.get("post_sprint"),
         "_sort_key": row.get("ended_at") or row.get("started_at") or row.get("created_at") or "",
+        "ended_at": row.get("ended_at"),
+        "_source": "lifecycle",
     }
 
 
@@ -578,10 +647,15 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
         or state_file.get("start_timestamp")
         or ""
     )
+    lifecycle_state = _lifecycle_display_state(
+        _normalize_state(state_raw) if state_raw else "unknown",
+        enrich.get("end_reason"),
+        enrich["issues"],
+    )
     return {
         "label": label,
         "project": plan.get("project", ""),
-        "lifecycle_state": _normalize_state(state_raw) if state_raw else "unknown",
+        "lifecycle_state": lifecycle_state,
         "end_reason": enrich.get("end_reason"),
         "duration": enrich["duration"],
         "tokens": enrich["tokens"],
@@ -597,6 +671,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
         "plan_status": enrich.get("plan_status"),
         "post_sprint": enrich.get("post_sprint"),
         "_sort_key": sort_key,
+        "_source": "files",
     }
 
 
@@ -618,6 +693,71 @@ def _label_sub_index(label: str | None) -> int:
 def _label_base(label: str | None) -> str:
     m = re.match(r"^(sprint-\d+)", label or "")
     return m.group(1) if m else (label or "")
+
+
+# Lifecycle authority when deduping competing rows for the same (label, project).
+_SETTLED_MERGE_STATES = frozenset({"completed", "deleted"})
+_MERGE_STATE_RANK: dict[str, int] = {
+    "deleted": 100,
+    "completed": 90,
+    "ready_to_merge": 50,
+    "needs_rework": 40,
+    "failed": 35,
+    "partial_finished": 30,
+    "running": 25,
+    "planned": 20,
+    "draft": 15,
+    "unknown": 10,
+    "cancelled": 10,
+}
+_ACTIVE_RERUN_STATES = frozenset({"draft", "planned", "running", "ready_to_merge"})
+
+
+def _record_recency(rec: dict) -> str:
+    for field in ("_sort_key", "ended_at", "started_at", "created_at"):
+        val = rec.get(field)
+        if val:
+            return str(val)
+    return ""
+
+
+def _merge_state_rank(rec: dict) -> int:
+    return _MERGE_STATE_RANK.get((rec.get("lifecycle_state") or "").lower(), 0)
+
+
+def _merge_history_record(existing: dict | None, new: dict) -> dict:
+    """Pick the winning row when multiple sources share (label, project).
+
+    Settled ``completed``/``deleted`` rows beat stale history snapshots unless
+    the challenger is clearly a newer lifecycle rerun (sprint-99 guard).
+    """
+    if existing is None:
+        return new
+    st_e = (existing.get("lifecycle_state") or "").lower()
+    st_n = (new.get("lifecycle_state") or "").lower()
+    rec_e = _record_recency(existing)
+    rec_n = _record_recency(new)
+
+    if st_e in _SETTLED_MERGE_STATES and st_n not in _SETTLED_MERGE_STATES:
+        return existing
+    if st_n in _SETTLED_MERGE_STATES and st_e not in _SETTLED_MERGE_STATES:
+        return new
+
+    src_e = existing.get("_source") or ""
+    src_n = new.get("_source") or ""
+    if (
+        src_e == "history"
+        and src_n == "lifecycle"
+        and rec_n >= rec_e
+        and st_n in _ACTIVE_RERUN_STATES
+    ):
+        return new
+
+    rank_e = _merge_state_rank(existing)
+    rank_n = _merge_state_rank(new)
+    if rank_n != rank_e:
+        return new if rank_n > rank_e else existing
+    return new if rec_n >= rec_e else existing
 
 
 # Child states that close the partial_finished chain (sprint-lifecycle.md): a parent
@@ -658,11 +798,15 @@ def _union_planned_roster(rec: dict, sprints_dirs: Path | list[Path]) -> None:
             })
 
 
-# Actionable lifecycle states for the active_only History view (issue: History
-# pane slow). Everything else is "closed" — shown lazily / a few most-recent.
+# Actionable lifecycle states for the active_only History inbox (sprint-lifecycle
+# redesign). Finished work awaiting sign-off, failures, and partial_finished
+# lineage parents. ``running`` uses the Running tab; ``draft``/``planned`` are
+# pre-run board states — never History inbox rows.
 _ACTIONABLE_STATES = frozenset({
-    "running", "ready_to_merge", "needs_rework", "partial_finished", "draft", "planned",
+    "ready_to_merge", "needs_rework", "failed", "partial_finished",
 })
+# Optional context tail on active_only — completed/deleted only (never running).
+_CLOSED_TAIL_STATES = frozenset({"completed", "deleted"})
 
 
 def _finalize_lineage(records: list[dict]) -> None:
@@ -696,6 +840,8 @@ def _finalize_lineage(records: list[dict]) -> None:
         rec["has_rerun_child"] = any(_label_sub_index(c) > sub for c in siblings)
         if sub == 0:
             rec["has_rerun_child"] = bool(siblings)
+
+        _clear_stale_failure_signals(rec)
 
         # Failed tickets are recorded facts — unless the sprint is already settled.
         if rec.get("failed_tickets") and rec.get("lifecycle_state") not in (
@@ -750,12 +896,17 @@ def _finalize_lineage(records: list[dict]) -> None:
                 state_by_label[label] = "completed"
 
 
-def _finalize_issues(records: list[dict], sprints_dirs: Path | list[Path],
-                     title_map: dict | None = None) -> None:
-    """Per-record issue enrichment (in-place). None of this is cross-record, so
-    it is safe to run on the visible WINDOW only — which is the whole point: the
-    agent_runs queries here were the dominant History cost when run for every
-    sprint.
+def _finalize_issues(
+    records: list[dict],
+    sprints_dirs: Path | list[Path],
+    title_map: dict | None = None,
+    ran_by_label: dict[str, set[int]] | None = None,
+) -> None:
+    """Per-record issue enrichment (in-place).
+
+    Safe to run on the visible WINDOW only for disk/file reads. Pass
+    *ran_by_label* from the full sprint list (before pagination) so lineage
+    sibling attribution sees reruns outside the window.
 
     Steps: fill the issue list from agent_runs when empty, union the running
     roster, fill missing PR/summary links, attribute tickets to the sprint that
@@ -777,16 +928,36 @@ def _finalize_issues(records: list[dict], sprints_dirs: Path | list[Path],
             _union_planned_roster(rec, sprints_dirs)
 
     _fill_missing_links(records, sprints_dirs)
-    _attribute_issues_to_runs(records)
+    _reconcile_issue_outcomes_with_agent_runs(records)
+    _attribute_issues_to_runs(records, ran_by_label)
     _drop_cross_project_issues(records)
 
-    if title_map:
-        for rec in records:
-            for iss in rec.get("issues") or []:
-                if not iss.get("title"):
-                    t = title_map.get(iss.get("ticket_id"))
-                    if t:
-                        iss["title"] = t
+    db_mod = _db()
+    for rec in records:
+        project_key = (rec.get("project") or "").strip()
+        for iss in rec.get("issues") or []:
+            if (iss.get("title") or "").strip():
+                continue
+            tid = iss.get("ticket_id")
+            if tid is None:
+                continue
+            t = None
+            if title_map:
+                try:
+                    t = title_map.get(int(tid))
+                except (TypeError, ValueError):
+                    pass
+                if not t:
+                    t = title_map.get(tid)
+            if not t and project_key:
+                try:
+                    row = db_mod.get_mirrored_issue(project_key, int(tid))
+                    if row and row.get("title"):
+                        t = row["title"]
+                except Exception:
+                    pass
+            if t:
+                iss["title"] = t
 
 
 def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path],
@@ -799,31 +970,45 @@ def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path],
     _finalize_issues(records, sprints_dirs, title_map=title_map)
 
 
-def _filter_active_records(records: list[dict], keep_completed: int = 3) -> list[dict]:
-    """active_only History view: actionable sprints + the most recent N closed
-    ones for context. Runs AFTER _finalize_lineage so derived
-    partial_finished/completed states are respected.
+def _filter_active_records(records: list[dict], keep_completed: int = 0) -> list[dict]:
+    """Action inbox: actionable sprints only (+ optional recent completed tail).
+
+    Runs AFTER _finalize_lineage. When any lineage member is actionable, every
+    row sharing that base label is kept so the UI renders one parent group
+    (sprint-97 + 97.5) instead of orphan child cards beside unrelated sprints.
     """
-    active = [r for r in records if (r.get("lifecycle_state") or "") in _ACTIONABLE_STATES]
-    closed = [r for r in records if (r.get("lifecycle_state") or "") not in _ACTIONABLE_STATES]
+    by_label = {r.get("label"): r for r in records if r.get("label")}
+    actionable_bases: set[str] = set()
+    for rec in records:
+        st = (rec.get("lifecycle_state") or "").lower()
+        if st in _ACTIONABLE_STATES:
+            actionable_bases.add(_label_base(rec.get("label") or ""))
+
+    include_labels: set[str] = set()
+    for lbl, rec in by_label.items():
+        st = (rec.get("lifecycle_state") or "").lower()
+        if st in _ACTIONABLE_STATES:
+            include_labels.add(lbl)
+    for base in actionable_bases:
+        for lbl in by_label:
+            if _label_base(lbl) == base:
+                include_labels.add(lbl)
+
+    inbox = [r for r in records if r.get("label") in include_labels]
+    if keep_completed <= 0:
+        return inbox
+
+    closed = [
+        r for r in records
+        if (r.get("lifecycle_state") or "").lower() in _CLOSED_TAIL_STATES
+        and r.get("label") not in include_labels
+    ]
     closed.sort(key=lambda r: r.get("_sort_key") or "", reverse=True)
-    return active + closed[:keep_completed]
+    return inbox + closed[:keep_completed]
 
 
-def _attribute_issues_to_runs(records: list[dict]) -> None:
-    """Filter each sprint's issue list to the tickets it actually owns.
-
-    A sprint owns a ticket only if that ticket actually RAN under its label
-    (agent_runs) AND did not re-run in a descendant child sprint (where it now
-    belongs). This fixes two long-standing History mismatches:
-      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
-        #572/#574 after they re-ran in sprint-63.1), and
-      - a child listing carried-over already-done tickets it never re-ran (e.g.
-        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
-
-    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
-    we never blank a sprint that simply predates run tracking.
-    """
+def _build_ran_by_label(records: list[dict]) -> dict[str, set[int]]:
+    """Map sprint label → issue numbers with agent_runs under that label."""
     ran_by_label: dict[str, set[int]] = {}
     for rec in records:
         label = rec.get("label")
@@ -842,24 +1027,65 @@ def _attribute_issues_to_runs(records: list[dict]) -> None:
             if n > 0:
                 nums.add(n)
         ran_by_label[label] = nums
+    return ran_by_label
+
+
+def _ran_in_later_lineage_siblings(
+    label: str,
+    ran_by_label: dict[str, set[int]],
+) -> set[int]:
+    """Issue numbers that ran in a later rerun sibling (sprint-N.M, same base N).
+
+    Rerun children are flat siblings (sprint-97.1, sprint-97.2, …), not nested
+    under sprint-97.1.* — so ``label + "."`` prefix matching was wrong.
+    """
+    base = _label_base(label)
+    sub = _label_sub_index(label)
+    out: set[int] = set()
+    for other, nums in ran_by_label.items():
+        if other == label or _label_base(other) != base:
+            continue
+        if _label_sub_index(other) > sub:
+            out |= nums
+    return out
+
+
+def _attribute_issues_to_runs(
+    records: list[dict],
+    ran_by_label: dict[str, set[int]] | None = None,
+) -> None:
+    """Filter each sprint's issue list to the tickets it actually owns.
+
+    A sprint owns a ticket only if that ticket actually RAN under its label
+    (agent_runs) AND did not re-run in a later lineage sibling (where it now
+    belongs). This fixes two long-standing History mismatches:
+      - a parent listing tickets that moved to a child (e.g. sprint-63 showing
+        #572/#574 after they re-ran in sprint-63.1), and
+      - a child listing carried-over already-done tickets it never re-ran (e.g.
+        sprint-90.1's ingested roster of 7 when only #1338/#1340 actually ran).
+
+    Pass *ran_by_label* built from the full sprint list (not just the paginated
+    window) so a visible sprint-97.1 row still knows #867 re-ran in sprint-97.4.
+
+    Sprints with no agent_runs at all (legacy / file-only) are left untouched so
+    we never blank a sprint that simply predates run tracking.
+    """
+    if ran_by_label is None:
+        ran_by_label = _build_ran_by_label(records)
 
     for rec in records:
         label = rec.get("label") or ""
         ran_here = ran_by_label.get(label) or set()
         if not ran_here:
             continue  # no run record — leave the list as-is (legacy sprints)
-        prefix = label + "."
-        ran_in_children: set[int] = set()
-        for other, nums in ran_by_label.items():
-            if other != label and other.startswith(prefix):
-                ran_in_children |= nums
+        ran_in_later = _ran_in_later_lineage_siblings(label, ran_by_label)
         # A running sprint keeps its full planned roster (incl. queued tickets
         # unioned in above) so History matches the live view; only finished
         # sprints are narrowed to tickets that actually ran under this label.
         is_running = (rec.get("lifecycle_state") or "") == "running"
         rec["issues"] = [
             i for i in (rec.get("issues") or [])
-            if i.get("ticket_id") not in ran_in_children
+            if i.get("ticket_id") not in ran_in_later
             and (is_running or i.get("ticket_id") in ran_here)
         ]
 
@@ -1043,28 +1269,41 @@ def _resolve_sprint_project(
     declared: str,
     sprints_dirs: Path | list[Path],
     db_module,
+    scope_project: str | None = None,
 ) -> str:
     """Infer owner/repo when the sprints row was ingested without project (child reruns)."""
-    if (declared or "").strip():
-        return declared.strip()
+    declared_clean = (declared or "").strip()
+    scope = (scope_project or "").strip()
+    # Never reassign a row already owned by another project (perf-coach sprint-77
+    # must not appear in commander History because commander has a同名 plan file).
+    if declared_clean and scope and declared_clean != scope:
+        return ""
+    if declared_clean and (not scope or declared_clean == scope):
+        return declared_clean
+
+    def _project_in_scope(proj: str) -> bool:
+        if not proj:
+            return False
+        return not scope or proj == scope
+
     plan = _read_plan_file(sprints_dirs, label) or {}
     proj = (plan.get("project") or "").strip()
-    if proj:
+    if _project_in_scope(proj):
         return proj
     state = _read_state_file(sprints_dirs, label) or {}
     proj = (state.get("project") or "").strip()
-    if proj:
+    if _project_in_scope(proj):
         return proj
     parent = (plan.get("parent") or "").strip()
     if parent:
-        prow = db_module.get_sprint(parent)
+        prow = db_module.get_sprint(parent, project=scope_project)
         if prow and (prow.get("project") or "").strip():
             return prow["project"].strip()
-    row = db_module.get_sprint(label)
+    row = db_module.get_sprint(label, project=scope_project)
     if row:
         parent = (row.get("parent_label") or "").strip()
         if parent:
-            prow = db_module.get_sprint(parent)
+            prow = db_module.get_sprint(parent, project=scope_project)
             if prow and (prow.get("project") or "").strip():
                 return prow["project"].strip()
     return ""
@@ -1079,9 +1318,9 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     ``project`` (owner/repo) scopes the ledger to one project — without it the
     board showed every project's sprints plus project-less junk rows.
 
-    ``active_only`` returns just actionable sprints (running / ready_to_merge /
-    needs_rework / partial_finished / draft / planned) plus the few most-recent
-    closed ones — the default fast view for the History pane.
+    ``active_only`` returns the action inbox: ready_to_merge / needs_rework /
+    failed / partial_finished lineage groups (plus optional recent completed
+    tail when keep_completed > 0). Running, draft, and planned are excluded.
     """
     search_dirs = _as_sprints_dirs(sprints_dir, project)
     offset = max(0, int(offset))
@@ -1089,59 +1328,65 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
     db = _db()
 
     records: list[dict] = []
-    # Dedup by (label, project), NOT label alone: sprint labels are unique only
-    # per repo, so a label-only key let one project's snapshot shadow another's
-    # sprint. E.g. commander's deleted `sprint-66` snapshot claimed the label and
-    # skipped perf-coach's live `sprint-66` lifecycle row, which then got dropped
-    # by the project filter — making perf-coach's sprint invisible in History.
-    seen: set[tuple[str, str]] = set()
+    candidates: list[dict] = []
+    db_backed_labels: set[str] = set()
 
     def _key(label, proj) -> tuple[str, str]:
         return (label or "", (proj or "").strip())
 
-    # 1) sprint_history snapshots (deleted etc.) — authoritative, take first.
     for rec in db.list_sprint_history():
-        key = _key(rec.get("label"), rec.get("project"))
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_record_from_history(rec))
+        lbl = rec.get("label") or ""
+        if lbl:
+            db_backed_labels.add(lbl)
+        candidates.append(_record_from_history(rec))
 
-    # 2) sprints lifecycle rows not already represented by a snapshot.
     for row in db.list_sprints_lifecycle():
-        key = _key(row.get("label"), row.get("project"))
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_record_from_lifecycle(row, search_dirs))
+        lbl = row.get("label") or ""
+        if lbl:
+            db_backed_labels.add(lbl)
+        candidates.append(_record_from_lifecycle(row, search_dirs))
 
-    # 3) file-only sprints with no DB row at all. search_dirs are scoped to
-    # `project`, so attribute file labels to it; in the all-projects view (no
-    # project) skip a label already represented for any project.
-    _seen_any_label = {k[0] for k in seen}
     for label in _discover_file_labels(search_dirs):
-        key = _key(label, project)
-        if key in seen or (not project and label in _seen_any_label):
+        if label in db_backed_labels:
             continue
-        seen.add(key)
-        records.append(_record_from_files(label, search_dirs))
+        candidates.append(_record_from_files(label, search_dirs))
 
     if project:
-        for rec in records:
-            if not (rec.get("project") or "").strip():
-                rec["project"] = _resolve_sprint_project(
+        scoped: list[dict] = []
+        for rec in candidates:
+            cur = (rec.get("project") or "").strip()
+            if cur and cur != project:
+                continue  # hard exclude — never resolve across projects
+            if not cur:
+                resolved = _resolve_sprint_project(
                     rec.get("label") or "",
-                    rec.get("project") or "",
+                    cur,
                     search_dirs,
                     db,
+                    scope_project=project,
                 )
-        records = [r for r in records if r.get("project") == project]
+                if resolved:
+                    rec["project"] = resolved
+            if rec.get("project") == project:
+                scoped.append(rec)
+        candidates = scoped
+
+    by_key: dict[tuple[str, str], dict] = {}
+    for rec in candidates:
+        key = _key(rec.get("label"), rec.get("project"))
+        by_key[key] = _merge_history_record(by_key.get(key), rec)
+    records = list(by_key.values())
 
     # Lineage rollup needs every record (a parent's state depends on its
     # children), so run it on the full set. The expensive per-record issue
     # enrichment (agent_runs queries + disk) is deferred to the visible window
     # below — that was the dominant History cost when run for every sprint.
     _finalize_lineage(records)
+
+    # Agent-run map for the whole project feed — siblings outside the paginated
+    # window must still suppress tickets on earlier lineage runs (sprint-97.1 vs
+    # sprint-97.4).
+    ran_by_label = _build_ran_by_label(records)
 
     if active_only:
         records = _filter_active_records(records)
@@ -1162,10 +1407,12 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
         except Exception:
             pass
 
-    _finalize_issues(window, search_dirs, title_map=title_map)
+    _finalize_issues(window, search_dirs, title_map=title_map, ran_by_label=ran_by_label)
 
     for r in window:
         r.pop("_sort_key", None)
+        r.pop("_source", None)
+        r.pop("ended_at", None)
 
     return {"sprints": window, "offset": offset, "limit": limit, "total": total}
 

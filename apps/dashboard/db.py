@@ -563,6 +563,9 @@ _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
     "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
     "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
+    # Derived-only in normal flow; if a legacy row stored this value, allow
+    # settlement after Merge Sprint / bulk complete (same as ready_to_merge).
+    "partial_finished": frozenset({"ready_to_merge", "completed", "needs_rework", "deleted"}),
     "needs_rework":   frozenset({"running", "deleted"}),
     "completed":      frozenset({"deleted"}),
     "deleted":        frozenset(),
@@ -643,6 +646,16 @@ def transition_sprint_state(
                 "SELECT state FROM sprints WHERE label = ?", (label,)
             ).fetchone()
     current = canonical_lifecycle(row["state"] if row else "draft")
+
+    # Idempotent no-op: re-issuing a transition to the state the sprint is
+    # already in is a success, not an illegal edge. Without this, resuming a
+    # partially-done bulk-complete re-attempts `completed→completed` on members a
+    # prior run already finished; the edge table has no completed→completed entry,
+    # so the state machine rejected it ("illegal edge — lifecycle left unchanged")
+    # and wedged the whole resume. Same-state is semantically a no-op — accept it
+    # and skip the write so the original timestamps/end_reason are preserved.
+    if current == to_state:
+        return TransitionResult(accepted=True, reason=f"no-op: already {to_state!r}")
 
     allowed = _LEGAL_SPRINT_EDGES.get(current, frozenset())
     reconcile_promote = (

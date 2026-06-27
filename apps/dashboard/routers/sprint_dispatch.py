@@ -5,6 +5,7 @@ import subprocess
 import sys
 import uuid
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
@@ -391,9 +392,13 @@ def get_sprint_management_issues(repo: str):
     identifies their exact sprint label, including dotted sub-labels.
     """
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
-        sprints = github_client.list_sprints(repo_name=repo)
-        all_sprint_labels = github_client.list_sprint_labels(repo_name=repo)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_issues = pool.submit(github_client.list_open_issues_with_body, repo, 200)
+            f_sprints = pool.submit(github_client.list_sprints, repo)
+            f_labels = pool.submit(github_client.list_sprint_labels, repo)
+            issues = f_issues.result()
+            sprints = f_sprints.result()
+            all_sprint_labels = f_labels.result()
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
@@ -569,21 +574,10 @@ def get_sprint_management_issues(repo: str):
     # the nav pill uses (cross-machine).
     finished_sprints = sorted(finished_set)
 
-    # Placeholder/next sprint = max existing + 1 (not the lowest free number — a
-    # deleted early label must not reset the next sprint back to 1). The max is
-    # taken over both sprint labels AND finished-summary numbers, so it stays
-    # correct even if a finished sprint's label was later removed.
-    _max_num = 0
-    for n in sprints:
-        try:
-            _max_num = max(_max_num, int(n))
-        except (TypeError, ValueError):
-            pass
-    for lbl in finished_map:
-        m = sprint_label_re.match(lbl)
-        if m:
-            _max_num = max(_max_num, int(m.group(1).split(".")[0]))
-    placeholder_sprint = _max_num + 1
+    # Placeholder/next sprint = high-water mark + 1 over labels, finished
+    # summaries, lifecycle DB, sprint_history, and local artifacts — not GitHub
+    # labels alone (a deleted sprint-99 ledger row must not allow reusing 99).
+    placeholder_sprint = _server()._next_new_sprint_number(repo)
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
 

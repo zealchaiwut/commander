@@ -557,7 +557,7 @@
     hostEl.innerHTML = renderProgressActivity2(payload, renderOpts);
     _restoreLogScroll(paId, scrollState);
   }
-  function mountProgressActivity(host, payload, opts) {
+  function mountProgressActivity2(host, payload, opts) {
     const hostEl = _resolveHost(host);
     if (!hostEl)
       return null;
@@ -611,7 +611,7 @@
       Object.assign({}, opts || {}, { id: paId })
     );
   }
-  function appendProgressActivityLog(host, line, type, opts) {
+  function appendProgressActivityLog2(host, line, type, opts) {
     const hostEl = _resolveHost(host);
     if (!hostEl)
       return null;
@@ -636,7 +636,7 @@
       Object.assign({}, opts || {}, { id: paId })
     );
   }
-  function unmountProgressActivity(host) {
+  function unmountProgressActivity2(host) {
     const hostEl = _resolveHost(host);
     if (!hostEl)
       return;
@@ -888,6 +888,455 @@
     }
   }
 
+  // apps/dashboard/static/src/settings/cleanup.js
+  var CLN_PA_ID = "ps-cln-pa";
+  var _psCleanupConfirmFn = null;
+  var _psCleanupBusy = false;
+  function _psProjectSlug() {
+    const slug = typeof _slug !== "undefined" && _slug || window._currentProjectSlug || "";
+    return String(slug || "").trim();
+  }
+  function _psProjectRepo() {
+    const slug = _psProjectSlug();
+    if (typeof _cachedFullRepo !== "undefined" && slug && _cachedFullRepo[slug]) {
+      return _cachedFullRepo[slug];
+    }
+    return slug;
+  }
+  function _psCleanupStatus(text) {
+    const el = document.getElementById("ps-cleanup-status");
+    if (el)
+      el.textContent = text || "";
+  }
+  function _psCleanupLog(tag, message, kind, data) {
+    const wrap = document.getElementById("ps-cleanup-log");
+    const body = document.getElementById("ps-cleanup-log-body");
+    if (!body)
+      return;
+    if (wrap)
+      wrap.hidden = false;
+    const ts = (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    const kindClass = kind === "ok" ? "ps-cleanup-log-line--ok" : kind === "err" ? "ps-cleanup-log-line--err" : "ps-cleanup-log-line--step";
+    let extra = "";
+    if (data !== void 0) {
+      try {
+        extra = " " + JSON.stringify(data);
+      } catch (_) {
+        extra = " " + String(data);
+      }
+    }
+    const line = document.createElement("div");
+    line.className = "ps-cleanup-log-line " + kindClass;
+    line.textContent = ts + " [" + tag + "] " + message + extra;
+    body.appendChild(line);
+    body.scrollTop = body.scrollHeight;
+  }
+  function psCleanupLogClear() {
+    const body = document.getElementById("ps-cleanup-log-body");
+    if (body)
+      body.innerHTML = "";
+    const wrap = document.getElementById("ps-cleanup-log");
+    if (wrap)
+      wrap.hidden = true;
+  }
+  function _psCleanupModalReset() {
+    _psCleanupConfirmFn = null;
+    _psCleanupBusy = false;
+    const err = document.getElementById("ps-cln-error");
+    if (err) {
+      err.textContent = "";
+      err.classList.add("hidden");
+    }
+    const list = document.getElementById("ps-cln-list");
+    if (list)
+      list.innerHTML = "";
+    const summary = document.getElementById("ps-cln-summary");
+    if (summary)
+      summary.textContent = "";
+    const review = document.getElementById("ps-cln-review");
+    const progress = document.getElementById("ps-cln-progress");
+    if (review)
+      review.hidden = false;
+    if (progress) {
+      progress.hidden = true;
+      progress.innerHTML = "";
+      unmountProgressActivity("ps-cln-pa-host");
+    }
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    const doneBtn = document.getElementById("ps-cln-done");
+    const cancelBtn = document.getElementById("ps-cln-cancel");
+    if (confirmBtn) {
+      confirmBtn.hidden = false;
+      confirmBtn.disabled = false;
+    }
+    if (doneBtn)
+      doneBtn.hidden = true;
+    if (cancelBtn)
+      cancelBtn.hidden = false;
+  }
+  function _psCleanupModalClose() {
+    if (_psCleanupBusy)
+      return;
+    document.getElementById("ps-cln-backdrop")?.classList.add("hidden");
+    document.getElementById("ps-cln-modal")?.classList.add("hidden");
+    if (typeof _clearBodyInert === "function")
+      _clearBodyInert();
+    _psCleanupModalReset();
+  }
+  function _psCleanupModalOpen(title) {
+    _psCleanupModalReset();
+    const titleEl = document.getElementById("ps-cln-title");
+    if (titleEl)
+      titleEl.textContent = title || "Cleanup";
+    document.getElementById("ps-cln-backdrop")?.classList.remove("hidden");
+    document.getElementById("ps-cln-modal")?.classList.remove("hidden");
+    if (typeof _setBodyInert === "function") {
+      _setBodyInert(["ps-cln-backdrop", "ps-cln-modal"]);
+    }
+  }
+  function _psCleanupModalLoading(message) {
+    const progress = document.getElementById("ps-cln-progress");
+    const review = document.getElementById("ps-cln-review");
+    if (review)
+      review.hidden = true;
+    if (!progress)
+      return;
+    progress.hidden = false;
+    progress.innerHTML = '<div id="ps-cln-pa-host"></div>';
+    mountProgressActivity("ps-cln-pa-host", {
+      status: "running",
+      mode: "indeterminate",
+      current: message || "Working\u2026",
+      log_tail: []
+    }, { id: CLN_PA_ID, hideLog: true });
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    const cancelBtn = document.getElementById("ps-cln-cancel");
+    if (confirmBtn)
+      confirmBtn.hidden = true;
+    if (cancelBtn)
+      cancelBtn.hidden = true;
+  }
+  function _psCleanupModalShowReview(opts) {
+    const review = document.getElementById("ps-cln-review");
+    const progress = document.getElementById("ps-cln-progress");
+    if (progress) {
+      progress.hidden = true;
+      progress.innerHTML = "";
+    }
+    if (review)
+      review.hidden = false;
+    const items = opts.items || [];
+    const shown = items.slice(0, 60);
+    const more = items.length - shown.length;
+    const summaryEl = document.getElementById("ps-cln-summary");
+    if (summaryEl)
+      summaryEl.textContent = opts.summary || "";
+    const listEl = document.getElementById("ps-cln-list");
+    if (listEl) {
+      if (!items.length) {
+        listEl.innerHTML = '<li style="color:var(--text-muted)">' + escHtml(opts.emptyMsg || "Nothing to clean.") + "</li>";
+      } else {
+        listEl.innerHTML = shown.map((f) => "<li>" + escHtml(String(f)) + "</li>").join("") + (more > 0 ? '<li style="color:var(--text-muted)">\u2026 and ' + more + " more</li>" : "");
+      }
+    }
+    _psCleanupConfirmFn = opts.onConfirm || null;
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    const doneBtn = document.getElementById("ps-cln-done");
+    const cancelBtn = document.getElementById("ps-cln-cancel");
+    if (confirmBtn) {
+      const canConfirm = !!(items.length && opts.onConfirm);
+      confirmBtn.hidden = !canConfirm;
+      confirmBtn.disabled = !canConfirm;
+      confirmBtn.textContent = opts.confirmLabel || "Confirm";
+    }
+    if (doneBtn)
+      doneBtn.hidden = true;
+    if (cancelBtn)
+      cancelBtn.hidden = false;
+  }
+  function _psCleanupModalShowDone(message) {
+    _psCleanupConfirmFn = null;
+    _psCleanupBusy = false;
+    const summaryEl = document.getElementById("ps-cln-summary");
+    if (summaryEl)
+      summaryEl.textContent = message || "Done.";
+    const listEl = document.getElementById("ps-cln-list");
+    if (listEl)
+      listEl.innerHTML = "";
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    const doneBtn = document.getElementById("ps-cln-done");
+    const cancelBtn = document.getElementById("ps-cln-cancel");
+    if (confirmBtn)
+      confirmBtn.hidden = true;
+    if (cancelBtn)
+      cancelBtn.hidden = true;
+    if (doneBtn)
+      doneBtn.hidden = false;
+    unmountProgressActivity("ps-cln-pa-host");
+    const progress = document.getElementById("ps-cln-progress");
+    if (progress) {
+      progress.hidden = true;
+      progress.innerHTML = "";
+    }
+  }
+  function _psCleanupModalShowError(message) {
+    _psCleanupBusy = false;
+    _psCleanupConfirmFn = null;
+    const err = document.getElementById("ps-cln-error");
+    if (err) {
+      err.textContent = message || "Something went wrong.";
+      err.classList.remove("hidden");
+    }
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    const cancelBtn = document.getElementById("ps-cln-cancel");
+    if (confirmBtn)
+      confirmBtn.hidden = true;
+    if (cancelBtn)
+      cancelBtn.hidden = false;
+    unmountProgressActivity("ps-cln-pa-host");
+  }
+  async function _psCleanupModalConfirm() {
+    if (!_psCleanupConfirmFn || _psCleanupBusy)
+      return;
+    _psCleanupBusy = true;
+    const confirmBtn = document.getElementById("ps-cln-confirm");
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Working\u2026";
+    }
+    _psCleanupModalLoading("Applying\u2026");
+    try {
+      const msg = await _psCleanupConfirmFn((line, kind) => {
+        appendProgressActivityLog("ps-cln-pa-host", line, kind === "err" ? "fail" : "dispatch", { id: CLN_PA_ID });
+      });
+      _psCleanupModalShowDone(msg || "Done.");
+    } catch (e) {
+      _psCleanupLog("cleanup", e.message || String(e), "err");
+      _psCleanupModalShowError(e.message || String(e));
+    }
+  }
+  async function _psCleanupPreviewFlow(tag, title, fetchPreview, buildReview) {
+    if (_psCleanupBusy)
+      return;
+    _psCleanupStatus("");
+    _psCleanupLog(tag, "Starting preview\u2026", "step");
+    _psCleanupModalOpen(title);
+    _psCleanupModalLoading("Scanning\u2026");
+    try {
+      const data = await fetchPreview();
+      const review = buildReview(data);
+      _psCleanupLog(tag, review.logMsg || "Preview ready", "ok", review.logData);
+      _psCleanupModalShowReview(review);
+    } catch (e) {
+      const msg = e.message || String(e);
+      _psCleanupLog(tag, msg, "err");
+      _psCleanupStatus("Preview failed: " + msg);
+      _psCleanupModalShowError(msg);
+    }
+  }
+  async function _sprintCleanupPost(dryRun) {
+    const slug = _psProjectSlug();
+    if (!slug)
+      throw new Error("Project not loaded \u2014 switch to Settings again.");
+    const resp = await fetch("/api/maintenance/sprints/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: slug, dry_run: dryRun })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || "HTTP " + resp.status);
+    }
+    return resp.json();
+  }
+  async function _testFilesCleanupPost(dryRun) {
+    const slug = _psProjectSlug();
+    if (!slug)
+      throw new Error("Project not loaded \u2014 switch to Settings again.");
+    const resp = await fetch("/api/maintenance/tests/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: slug, keep: 100, dry_run: dryRun })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || "HTTP " + resp.status);
+    }
+    return resp.json();
+  }
+  async function sprintCleanupPreview() {
+    await _psCleanupPreviewFlow("sprint-files", "Archive stale sprint runtime files", () => _sprintCleanupPost(true), (data) => {
+      const files = data && data.archived || [];
+      return {
+        logMsg: files.length ? files.length + " file(s) to archive" : "Nothing to archive",
+        logData: { count: files.length },
+        title: "Archive stale sprint runtime files",
+        summary: files.length ? files.length + " file(s) will be archived." : "",
+        items: files,
+        emptyMsg: "No stale runtime files to archive.",
+        confirmLabel: "Archive " + files.length,
+        onConfirm: async (log) => {
+          if (log)
+            log("Archiving sprint runtime files\u2026", "step");
+          const r = await _sprintCleanupPost(false);
+          const n = r && r.archived ? r.archived.length : 0;
+          const kept = r && typeof r.kept_count === "number" ? r.kept_count : "?";
+          _psCleanupLog("sprint-files", "Archived " + n + " file(s)", "ok", { kept_count: kept });
+          _psCleanupStatus("Archived " + n + " file(s); " + kept + " kept in place.");
+          return "Archived " + n + " file(s); " + kept + " kept.";
+        }
+      };
+    });
+  }
+  async function testFilesCleanupPreview() {
+    await _psCleanupPreviewFlow("test-files", "Clean old test files", () => _testFilesCleanupPost(true), (data) => {
+      const files = data && data.remove || [];
+      return {
+        logMsg: files.length ? files.length + " test file(s) to remove" : "No old test files",
+        logData: { remove: files.length, kept: data && data.kept_count || 0 },
+        title: "Clean old test files",
+        summary: "Keeping " + (data && data.kept_count || 0) + " newest of " + (data && data.total_count || 0) + " test files (git recency).",
+        items: files,
+        emptyMsg: "No old test files to remove.",
+        confirmLabel: "Delete " + files.length,
+        onConfirm: async (log) => {
+          if (log)
+            log("Deleting old test files\u2026", "step");
+          const r = await _testFilesCleanupPost(false);
+          const n = r && r.deleted ? r.deleted.length : 0;
+          _psCleanupLog("test-files", "Deleted " + n + " test file(s)", "ok", { kept: r && r.kept_count || 0 });
+          _psCleanupStatus("Deleted " + n + " test file(s); kept " + (r && r.kept_count || 0) + ".");
+          return "Deleted " + n + " test file(s); kept " + (r && r.kept_count || 0) + ".";
+        }
+      };
+    });
+  }
+  async function psStaleBranchesScan() {
+    const repo = _psProjectRepo();
+    if (!repo) {
+      _psCleanupLog("branches", "Project repo not loaded", "err");
+      _psCleanupStatus("Project repo not loaded.");
+      return;
+    }
+    if (_psCleanupBusy)
+      return;
+    _psCleanupStatus("");
+    _psCleanupLog("branches", "Scanning remote for stale branches\u2026", "step");
+    _psCleanupModalOpen("Scan stale branches");
+    _psCleanupModalLoading("Scanning remote\u2026");
+    _psCleanupBusy = true;
+    const btn = document.getElementById("ps-stale-scan-btn");
+    if (btn)
+      btn.disabled = true;
+    try {
+      const resp = await fetch("/scan-stale-branches?repo=" + encodeURIComponent(repo));
+      if (!resp.ok)
+        throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      const branches = (data.branches || []).map((b) => b.branch || b);
+      if (typeof _histScanStale === "function")
+        await _histScanStale();
+      _psCleanupLog("branches", "Scan complete", "ok", { count: branches.length });
+      _psCleanupStatus(branches.length ? branches.length + " stale branch(es) found." : "No stale branches found.");
+      _psCleanupModalShowReview({
+        title: "Scan stale branches",
+        summary: branches.length ? branches.length + " feature branch(es) flagged on History rows." : "No leftover feature branches on the remote.",
+        items: branches,
+        emptyMsg: "No stale branches found.",
+        confirmLabel: "",
+        onConfirm: null
+      });
+      const confirmBtn = document.getElementById("ps-cln-confirm");
+      const doneBtn = document.getElementById("ps-cln-done");
+      if (confirmBtn)
+        confirmBtn.hidden = true;
+      if (doneBtn)
+        doneBtn.hidden = false;
+      _psCleanupBusy = false;
+    } catch (e) {
+      const msg = e.message || String(e);
+      _psCleanupLog("branches", msg, "err");
+      _psCleanupStatus("Scan failed: " + msg);
+      _psCleanupModalShowError(msg);
+    } finally {
+      if (btn)
+        btn.disabled = false;
+      _psCleanupBusy = false;
+    }
+  }
+  async function psPruneMergedBranches() {
+    const repo = _psProjectRepo();
+    if (!repo) {
+      _psCleanupLog("branches", "Project repo not loaded", "err");
+      _psCleanupStatus("Project repo not loaded.");
+      return;
+    }
+    await _psCleanupPreviewFlow("branches", "Prune merged feature branches", async () => {
+      const scanResp = await fetch("/scan-stale-branches?repo=" + encodeURIComponent(repo));
+      if (!scanResp.ok)
+        throw new Error("HTTP " + scanResp.status);
+      const scanData = await scanResp.json();
+      const branches = (scanData.branches || []).map((b) => b.branch || b);
+      if (!branches.length)
+        return { toDelete: [], skipped: [], branches: [] };
+      const dryResp = await fetch("/cleanup-stale-branches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, branches, confirm: false })
+      });
+      if (!dryResp.ok)
+        throw new Error("HTTP " + dryResp.status);
+      const plan = await dryResp.json();
+      return {
+        toDelete: plan.to_delete || [],
+        skipped: plan.skipped_unmerged || [],
+        branches
+      };
+    }, (plan) => {
+      const toDelete = plan.toDelete || [];
+      const skipped = plan.skipped || [];
+      return {
+        logMsg: toDelete.length ? toDelete.length + " merged branch(es) to delete" : "No merged branches to delete",
+        logData: { delete: toDelete.length, skipped: skipped.length },
+        title: "Prune merged feature branches",
+        summary: skipped.length ? skipped.length + " unmerged branch(es) skipped \u2014 never deleted." : "Only fully-merged branches are deleted.",
+        items: toDelete,
+        emptyMsg: "No merged branches to delete.",
+        confirmLabel: "Delete " + toDelete.length,
+        onConfirm: async (log) => {
+          if (log)
+            log("Deleting merged branches\u2026", "step");
+          const resp = await fetch("/cleanup-stale-branches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repo, branches: plan.branches, confirm: true })
+          });
+          if (!resp.ok)
+            throw new Error("HTTP " + resp.status);
+          const result = await resp.json();
+          const deleted = (result.deleted || []).length;
+          const failed = (result.failed || []).length;
+          if (typeof _histScanStale === "function")
+            await _histScanStale();
+          _psCleanupLog("branches", "Deleted " + deleted + " branch(es)", failed ? "err" : "ok", { failed });
+          _psCleanupStatus("Deleted " + deleted + " merged branch" + (deleted !== 1 ? "es" : "") + (failed ? " (" + failed + " failed)" : "") + ".");
+          return "Deleted " + deleted + " merged branch" + (deleted !== 1 ? "es" : "") + (failed ? " (" + failed + " failed)" : "") + ".";
+        }
+      };
+    });
+  }
+  async function psCleanupModalConfirm() {
+    await _psCleanupModalConfirm();
+  }
+  function sprintCleanupConfirm() {
+  }
+  function testFilesCleanupConfirm() {
+  }
+  function _psCleanupPaneClose() {
+  }
+  function _psCleanupPaneConfirm() {
+  }
+
   // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
@@ -1074,7 +1523,13 @@ Replace the existing draft (${data.existing_label})?`
   }
 
   // apps/dashboard/static/src/sprint-board/history.js
-  var _HIST_ACTION_STATES = /* @__PURE__ */ new Set(["ready_to_merge", "needs_rework", "failed"]);
+  var _HIST_ACTION_STATES = /* @__PURE__ */ new Set([
+    "ready_to_merge",
+    "needs_rework",
+    "failed",
+    "partial_finished"
+  ]);
+  var _HIST_INBOX_STATES = _HIST_ACTION_STATES;
   function _histNeedsActionCount() {
     return (_histLedgerData || []).reduce(
       (acc, s) => acc + (_HIST_ACTION_STATES.has(s && s.lifecycle_state) ? 1 : 0),
@@ -1084,7 +1539,6 @@ Replace the existing draft (${data.existing_label})?`
   var _histLedgerData = [];
   globalThis._histLedgerData = _histLedgerData;
   var _histExpanded = /* @__PURE__ */ new Set();
-  var _histGroupCollapsed = /* @__PURE__ */ new Set();
   var _histDidAutoExpand = false;
   var _histFoldSize = 10;
   var _histFoldExpanded = /* @__PURE__ */ new Set();
@@ -1131,21 +1585,43 @@ Replace the existing draft (${data.existing_label})?`
       return (n / 1e3).toFixed(1) + "k";
     return String(n);
   }
-  function _histIssueChip(iss) {
+  function _histIssueChip(iss, opts) {
+    opts = opts || {};
     const st = (iss.state || "").toLowerCase();
-    if (iss.failure_reason || (iss.agent_status || "").toLowerCase() === "failed") {
+    const agent = (iss.agent_status || "").toLowerCase();
+    if (iss.failure_reason || agent === "failed") {
       return { cls: "crashed", label: "CRASHED \xB7 in-progress" };
     }
-    if (st === "merged")
+    if (st === "merged" || agent === "completed" || agent === "done") {
       return { cls: "merged", label: "MERGED" };
+    }
+    if (opts.binary) {
+      return { cls: "crashed", label: "NOT DONE" };
+    }
     if (st === "closed")
       return { cls: "crashed", label: "CRASHED" };
     if (iss.time_spent != null)
       return { cls: "uat", label: "OPEN \xB7 UAT" };
     return { cls: "notrun", label: "NOT RUN" };
   }
-  function _histIssueIcon(iss) {
-    const chip = _histIssueChip(iss);
+  function _histSprintShowsBinaryIssues(s) {
+    if (!s)
+      return false;
+    if (_histSprintFailed(s))
+      return true;
+    const st = (s.lifecycle_state || "").toLowerCase();
+    return [
+      "partial_finished",
+      "needs_rework",
+      "ready_to_merge",
+      "completed",
+      "failed",
+      "cancelled"
+    ].includes(st);
+  }
+  function _histIssueIcon(iss, sprint) {
+    const binary = _histSprintShowsBinaryIssues(sprint);
+    const chip = _histIssueChip(iss, { binary });
     if (chip.cls === "merged") {
       return '<span class="iss-icon ok"><i class="ti ti-check"></i></span>';
     }
@@ -1154,11 +1630,21 @@ Replace the existing draft (${data.existing_label})?`
     }
     return '<span class="iss-icon idle"></span>';
   }
-  function _histProgressText(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histIssueSucceeded(iss, sprint) {
+    return _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(sprint) }).cls === "merged";
+  }
+  function _histProgressText(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (!issues.length)
       return "";
-    const done = issues.filter((i) => (i.state || "").toLowerCase() === "merged").length;
+    const done = issues.filter((i) => _histIssueSucceeded(i, s)).length;
+    const failed = issues.filter((i) => {
+      const chip = _histIssueChip(i, { binary: _histSprintShowsBinaryIssues(s) });
+      return chip.cls === "crashed";
+    }).length;
+    if (failed) {
+      return `${done}/${issues.length} done \xB7 ${failed} failed`;
+    }
     return `${done}/${issues.length} done`;
   }
   function _histLooseEndCount(s) {
@@ -1173,9 +1659,9 @@ Replace the existing draft (${data.existing_label})?`
       return g.count;
     return 0;
   }
-  function _histHeadStatsHtml(s) {
+  function _histHeadStatsHtml(s, group) {
     const parts = [];
-    const progress = _histProgressText(s);
+    const progress = _histProgressText(s, group);
     if (progress)
       parts.push(progress);
     const stats = _histRunStats[s.label];
@@ -1220,36 +1706,83 @@ Replace the existing draft (${data.existing_label})?`
     }
     return { title, accent, time: meta.time };
   }
-  function _histIssueTitle(iss, s) {
+  function _histIssueTitle(iss, s, titleMap) {
     if (iss.title)
       return String(iss.title);
+    const tid = iss.ticket_id;
+    if (titleMap && tid != null) {
+      const hit = titleMap.get(tid) || titleMap.get(String(tid));
+      if (hit)
+        return String(hit);
+    }
     try {
       const tickets = s && s.label && _smgmtBySprint[s.label] || [];
-      const hit = tickets.find((t) => String(t.number) === String(iss.ticket_id));
+      const hit = tickets.find((t) => String(t.number) === String(tid));
       if (hit && hit.title)
         return String(hit.title);
     } catch (_) {
     }
+    try {
+      for (const row of _histLedgerData || []) {
+        const hit = (row.issues || []).find(
+          (i) => String(i.ticket_id) === String(tid) && i.title
+        );
+        if (hit)
+          return String(hit.title);
+      }
+    } catch (_) {
+    }
     return "";
   }
-  function _histIssueRowHtml(iss, isChild, s) {
-    const chip = _histIssueChip(iss);
-    const rerun = iss.is_rerun || iss.rerun || isChild;
-    const arrow = rerun ? '<span class="iss-rerun">\u21B3</span> ' : "";
-    const num = iss.ticket_id;
-    const id = num != null ? "#" + num : "#?";
-    const titleText = _histIssueTitle(iss, s);
-    const title = titleText ? `<span class="iss-title">${escHtml(titleText)}</span>` : "";
-    const repo = typeof _histRepo === "function" ? _histRepo(s) : "";
-    const clickable = num != null && repo ? ` role="link" tabindex="0" title="Open #${escHtml(String(num))} on GitHub" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
-    const cls = "iss-row" + (clickable ? " iss-row-link" : "");
-    return `<div class="${cls}"${clickable}>
-    ${_histIssueIcon(iss)}
-    <span class="iss-id">${arrow}${escHtml(String(id))}</span>
-    ${title}
-    <span class="iss-chip ${chip.cls}">${chip.label}</span>
-    <span class="iss-time">${escHtml(_histFmtSecs(iss.time_spent))}</span>
-  </div>`;
+  function _histBuildLineageTitleMap(group) {
+    const map = /* @__PURE__ */ new Map();
+    if (!group)
+      return map;
+    for (const s of _histGroupMembers(group)) {
+      for (const iss of s.issues || []) {
+        if (iss.ticket_id != null && iss.title) {
+          map.set(iss.ticket_id, String(iss.title));
+        }
+      }
+      try {
+        const tickets = s.label && _smgmtBySprint[s.label] || [];
+        for (const t of tickets) {
+          if (t.number != null && t.title && !map.has(t.number)) {
+            map.set(t.number, String(t.title));
+          }
+        }
+      } catch (_) {
+      }
+    }
+    return map;
+  }
+  function _histCanonicalOwnerLabel(ticketId, group) {
+    if (!group || ticketId == null)
+      return null;
+    let bestSub = -1;
+    let owner = null;
+    for (const s of _histGroupMembers(group)) {
+      const sub = _histLabelParts(s.label).sub;
+      const listed = (s.issues || []).some(
+        (i) => String(i.ticket_id) === String(ticketId)
+      );
+      if (listed && sub >= bestSub) {
+        bestSub = sub;
+        owner = s.label;
+      }
+    }
+    return owner;
+  }
+  function _histIssuesForDisplay(s, group) {
+    const issues = Array.isArray(s.issues) ? s.issues : [];
+    if (!group)
+      return issues;
+    return issues.filter((iss) => {
+      if (iss.ticket_id == null)
+        return true;
+      const owner = _histCanonicalOwnerLabel(iss.ticket_id, group);
+      return owner === s.label;
+    });
   }
   function _histSprintFailed(s) {
     const st = (s.lifecycle_state || "").toLowerCase();
@@ -1269,25 +1802,6 @@ Replace the existing draft (${data.existing_label})?`
     ))
       return false;
     return true;
-  }
-  function _histFailedBlockHtml(s) {
-    if (!_histSprintFailed(s))
-      return "";
-    const state = (s.lifecycle_state || "").toLowerCase();
-    const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-    const sprintReason = s.failure_reason || s.end_reason;
-    if (!failed.length && !sprintReason)
-      return "";
-    const items = failed.map((ft) => {
-      const id = ft.ticket_id != null ? "#" + ft.ticket_id : "#?";
-      const reason = ft.failure_reason || "Agent failed";
-      return `<div class="hist-fail-item"><span class="fail-id">${escHtml(String(id))}</span><span>${escHtml(String(reason))}</span></div>`;
-    }).join("");
-    const summary = !failed.length && sprintReason ? `<div class="hist-fail-item"><span>${escHtml(String(sprintReason))}</span></div>` : "";
-    return `<div class="hist-fail-block">
-    <div class="fail-head"><i class="ti ti-alert-triangle"></i> Sprint failed</div>
-    ${items}${summary}
-  </div>`;
   }
   function _histPartialChildrenHtml(s) {
     const state = (s.lifecycle_state || "").toLowerCase();
@@ -1314,19 +1828,6 @@ Replace the existing draft (${data.existing_label})?`
     const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-  function _histIssueListHtml(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const isChild = _histIsChild(s.label);
-    const failedBlock = _histFailedBlockHtml(s);
-    const partialBlock = _histPartialChildrenHtml(s);
-    if (!issues.length) {
-      if (partialBlock)
-        return `${failedBlock}${partialBlock}`;
-      const empty = failedBlock ? "" : `<div class="iss-list iss-list-empty">No tickets recorded for this sprint.</div>`;
-      return `${failedBlock}${empty}`;
-    }
-    return `${failedBlock}${partialBlock}<div class="iss-list">${issues.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>`;
   }
   function _histRepo(s) {
     const cached = _cachedFullRepo[_slug];
@@ -1427,7 +1928,7 @@ Replace the existing draft (${data.existing_label})?`
     const st = (s.lifecycle_state || "").toLowerCase();
     if (_histIsLocked(st))
       return false;
-    return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running";
+    return st === "needs_rework" || st === "failed" || st === "ready_to_merge" || st === "running" || st === "draft" || st === "planned" || st === "partial_finished";
   }
   var _histCollapseDefaultsApplied = /* @__PURE__ */ new Set();
   function _histAutoExpandRecent(groups) {
@@ -1443,14 +1944,26 @@ Replace the existing draft (${data.existing_label})?`
       const baseLbl = g.baseLabel || g.baseSprint && g.baseSprint.label || "";
       if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
         _histCollapseDefaultsApplied.add(baseLbl);
-        const st = (g.baseSprint && g.baseSprint.lifecycle_state || "").toLowerCase();
-        if (st === "completed")
-          _histGroupCollapsed.add(baseLbl);
+        const parentSt = (g.baseSprint && g.baseSprint.lifecycle_state || "").toLowerCase();
+        const anyChildOpen = children.some((c) => {
+          const cst = (c.lifecycle_state || "").toLowerCase();
+          return cst !== "completed" && cst !== "deleted";
+        });
+        if (g.baseSprint && parentSt === "completed" && !anyChildOpen) {
+          _histExpanded.delete(g.baseSprint.label);
+        }
       }
       if (i >= _histFoldSize)
         continue;
       if (children.length) {
-        _expand(children[children.length - 1]);
+        if (g.baseSprint && (_histShouldAutoExpand(g.baseSprint) || _histIssuesForDisplay(g.baseSprint, g).length)) {
+          _expand(g.baseSprint);
+        }
+        for (const c of children) {
+          if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
+            _expand(c);
+          }
+        }
       } else {
         _expand(g.baseSprint);
       }
@@ -1855,15 +2368,15 @@ Replace the existing draft (${data.existing_label})?`
       return 0;
     return (hit.segments || []).filter((seg) => seg.fix_round).length;
   }
-  function _histDoneIssueRowHtml(iss, s, stats) {
+  function _histDoneIssueRowHtml(iss, s, stats, titleMap) {
     const num = iss.ticket_id;
     const id = num != null ? "#" + num : "#?";
-    const titleText = _histIssueTitle(iss, s);
+    const titleText = _histIssueTitle(iss, s, titleMap);
     const repo = _histRepo(s);
-    const chip = _histIssueChip(iss);
+    const chip = _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(s) });
     const crashed = chip.cls === "crashed";
     const clickable = num != null && repo ? ` role="link" tabindex="0" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"` : "";
-    const icon = _histIssueIcon(iss);
+    const icon = _histIssueIcon(iss, s);
     let dur = _histFmtSecs(iss.time_spent);
     const fixN = _histFixCountForIssue(num, stats);
     if (fixN)
@@ -1883,30 +2396,28 @@ Replace the existing draft (${data.existing_label})?`
     ${logHtml}
   </div>`;
   }
-  function _histDoneIssuesHtml(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histDoneIssuesHtml(s, group) {
+    const titleMap = group ? _histBuildLineageTitleMap(group) : /* @__PURE__ */ new Map();
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (!issues.length)
       return "";
     const stats = _histRunStats[s.label];
-    return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
+    return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats, titleMap)).join("")}</div>`;
   }
-  function _histCardShowsDoneSummary(s) {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+  function _histCardShowsDoneSummary(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (_histSprintFailed(s))
       return issues.length > 0;
+    if (issues.length)
+      return true;
     const state = (s.lifecycle_state || "").toLowerCase();
-    if (state === "needs_rework" || state === "partial_finished") {
-      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
-      if (unfinished.length)
-        return false;
-      return issues.length > 0;
-    }
     return state === "ready_to_merge" || state === "completed" || state === "running";
   }
-  function _histCardOutcomeHtml(s) {
-    if (!_histCardShowsDoneSummary(s))
+  function _histCardOutcomeHtml(s, group) {
+    const issues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
+    if (!_histCardShowsDoneSummary(s, group) && !issues.length)
       return "";
-    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+    return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
   }
   var _histAgentTimeExpanded = /* @__PURE__ */ new Set();
   var _histMetricsDetailsExpanded = /* @__PURE__ */ new Set();
@@ -1942,31 +2453,16 @@ Replace the existing draft (${data.existing_label})?`
     const display = sprintLabelDisplay(base).replace("Sprint ", "");
     return `\u2190 from ${display}`;
   }
-  function _histParentRowHtml(s, bulkBtn, groupExpanded) {
-    const display = sprintLabelDisplay(s.label);
-    const lbl = escHtml(s.label || "");
-    const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
-    const cls = ["hist-parent-row"];
-    if (String(s.lifecycle_state || "").toLowerCase() === "completed")
-      cls.push("settled");
-    if (groupExpanded)
-      cls.push("expanded");
-    return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
-    onclick="_histToggleGroup('${lbl}')"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
-    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
-    <span class="hist-parent-name">${escHtml(display)}</span>
-    ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s)}
-    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
-  </div>`;
-  }
-  function _histChildCardHtml(s) {
+  function _histChildCardHtml(s, group, opts) {
+    opts = opts || {};
+    const isLineageParent = !!opts.isLineageParent;
     const expanded = _histExpanded.has(s.label);
     const lbl = escHtml(s.label || "");
     const state = (s.lifecycle_state || "").toLowerCase();
     const displayState = state === "needs_rework" && s.end_reason && (String(s.end_reason).toLowerCase() === "natural" || String(s.end_reason).toLowerCase() === "merge_sprint") && !_histSprintFailed(s) ? "ready_to_merge" : state;
     const cls = ["hist-child-card"];
+    if (isLineageParent)
+      cls.push("hist-lineage-parent");
     if (displayState === "ready_to_merge")
       cls.push("ready");
     if (displayState === "completed")
@@ -1974,17 +2470,20 @@ Replace the existing draft (${data.existing_label})?`
     if (expanded)
       cls.push("expanded");
     const display = sprintLabelDisplay(s.label);
-    const fromLine = _histParentFromLabel(s.label);
+    const fromLine = !isLineageParent && _histIsChild(s.label) ? _histParentFromLabel(s.label) : "";
     const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
     const recoveryBtn = _histRecoveryBtnHtml(s);
     const deleteBtn = _histDeleteBtnHtml(s);
     const secondaryLinks = _histSecondaryLinksHtml(s);
-    const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}</span>`;
+    const bulkBtn = opts.bulkCompleteBtn || "";
+    const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>`;
     if (expanded && !(s.label in _histRunStats))
       _histLoadRunStats(s.label);
     const body = expanded ? `<div class="hist-child-body">
+        ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
-        ${_histCardOutcomeHtml(s)}
+        ${_histWhatListHtml(s, group)}
+        ${_histCardOutcomeHtml(s, group)}
       </div>` : "";
     return `<div class="${cls.join(" ")}" data-label="${lbl}">
     <div class="hist-child-head" onclick="_histToggleCard('${lbl}')">
@@ -1992,7 +2491,7 @@ Replace the existing draft (${data.existing_label})?`
         <i class="ti ${chev} hist-chev"></i>
         <span class="hist-child-title">${escHtml(display)}` + (fromLine ? ` <span class="hist-child-from">${escHtml(fromLine)}</span>` : "") + `</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${_histHeadStatsHtml(s)}
+        ${_histHeadStatsHtml(s, group)}
       </div>
       ${headRight}
     </div>
@@ -2047,13 +2546,14 @@ Replace the existing draft (${data.existing_label})?`
     }
     return "";
   }
-  function _histWhatListHtml(s) {
+  function _histWhatListHtml(s, group) {
     if (_histIsLocked(s.lifecycle_state))
       return "";
     const state = (s.lifecycle_state || "").toLowerCase();
+    const displayIssues = group ? _histIssuesForDisplay(s, group) : Array.isArray(s.issues) ? s.issues : [];
     if (_histSprintFailed(s)) {
       const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-      const issues = Array.isArray(s.issues) ? s.issues : [];
+      const issues = displayIssues;
       const sprintReason = s.failure_reason || s.end_reason;
       if (!failed.length && !sprintReason)
         return "";
@@ -2087,16 +2587,15 @@ Replace the existing draft (${data.existing_label})?`
     </div>`;
     }
     if (state === "partial_finished" || state === "needs_rework") {
-      const issues = Array.isArray(s.issues) ? s.issues : [];
-      const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
+      const unfinished = displayIssues.filter(
+        (i) => (i.state || "").toLowerCase() !== "merged"
+      );
       if (!unfinished.length)
         return "";
       const n = unfinished.length;
-      const m = issues.length;
-      const isChild = _histIsChild(s.label);
+      const m = displayIssues.length;
       return `<div class="hist-what-list">
       <div class="hist-what-head">Unfinished ${n} of ${m}</div>
-      <div class="iss-list">${unfinished.map((i) => _histIssueRowHtml(i, isChild, s)).join("")}</div>
     </div>`;
     }
     return "";
@@ -2157,21 +2656,27 @@ Replace the existing draft (${data.existing_label})?`
     const state = (s.lifecycle_state || "").toLowerCase();
     const lbl = escHtml(s.label || "");
     const rawLabel = s.label || "";
+    const reconcileBtn = `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
+      onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
+      title="Reconcile this sprint's DB state against GitHub truth">
+      <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
       const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
       const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
-      return `<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     }
     if (state === "ready_to_merge") {
-      return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
       onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')"
       title="Complete sprint \u2014 merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
     }
-    return "";
+    if (state === "running")
+      return "";
+    return reconcileBtn;
   }
   function _histDeleteBtnHtml(s) {
     if (_histIsLocked(s.lifecycle_state))
@@ -2246,7 +2751,7 @@ Replace the existing draft (${data.existing_label})?`
     const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
-      ${_histCardOutcomeHtml(s)}
+      ${_histCardOutcomeHtml(s, null)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ""}
     </div>` : "";
@@ -2274,14 +2779,7 @@ Replace the existing draft (${data.existing_label})?`
     _histRenderLedger(_histLedgerData);
   }
   function _histToggleGroup(baseLabel) {
-    if (!baseLabel)
-      return;
-    if (_histGroupCollapsed.has(baseLabel)) {
-      _histGroupCollapsed.delete(baseLabel);
-    } else {
-      _histGroupCollapsed.add(baseLabel);
-    }
-    _histRenderLedger(_histLedgerData);
+    _histToggleCard(baseLabel);
   }
   function _histLabelParts(label) {
     const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(label || "");
@@ -2343,18 +2841,33 @@ Replace the existing draft (${data.existing_label})?`
       return st !== "completed" && st !== "deleted";
     });
   }
+  function _histChildRunFinished(s) {
+    const st = (s.lifecycle_state || "").toLowerCase();
+    return [
+      "completed",
+      "deleted",
+      "ready_to_merge",
+      "needs_rework",
+      "failed",
+      "cancelled",
+      "partial_finished"
+    ].includes(st);
+  }
   function _histChildSprintsAllCompleted(group) {
     const children = group.children || [];
     if (!children.length)
       return false;
-    const settled = /* @__PURE__ */ new Set(["completed", "deleted", "ready_to_merge"]);
     return children.every((s, i) => {
-      if (settled.has((s.lifecycle_state || "").toLowerCase()))
+      if (_histChildRunFinished(s))
         return true;
-      return children.slice(i + 1).some(
-        (later) => settled.has((later.lifecycle_state || "").toLowerCase())
-      );
+      return children.slice(i + 1).some((later) => _histChildRunFinished(later));
     });
+  }
+  function _histChildSprintsStillRunning(group) {
+    const active = /* @__PURE__ */ new Set(["running", "draft", "planned"]);
+    return (group.children || []).some(
+      (s) => active.has((s.lifecycle_state || "").toLowerCase())
+    );
   }
   function _histBulkCompleteBtnHtml(group) {
     if (!group.children?.length || !group.baseSprint)
@@ -2362,8 +2875,13 @@ Replace the existing draft (${data.existing_label})?`
     if (!_histGroupNeedsBulkComplete(group))
       return "";
     const lbl = escHtml(group.baseLabel || "");
-    const childrenReady = _histChildSprintsAllCompleted(group);
-    if (!childrenReady) {
+    if (_histChildSprintsStillRunning(group)) {
+      return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Wait for child sprint runs to finish before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+    }
+    if (!_histChildSprintsAllCompleted(group)) {
       return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
             title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete
@@ -2375,21 +2893,37 @@ Replace the existing draft (${data.existing_label})?`
     <i class="ti ti-circle-check"></i> Bulk complete
   </button>`;
   }
+  function _histGroupHasActionable(group) {
+    return _histGroupMembers(group).some((s) => {
+      const st = (s && s.lifecycle_state || "").toLowerCase();
+      return _HIST_INBOX_STATES.has(st);
+    });
+  }
+  function _histSynthParent(baseLabel, group) {
+    const children = group.children || [];
+    return {
+      label: baseLabel,
+      lifecycle_state: "partial_finished",
+      partial_children: children.map((c) => c.label).filter(Boolean),
+      issues: []
+    };
+  }
   function _histGroupHtml(group) {
     const bulkBtn = _histBulkCompleteBtnHtml(group);
     const children = group.children || [];
     if (children.length) {
       const baseLbl = group.baseLabel || group.baseSprint && group.baseSprint.label || "";
-      const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
-      const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
-      const parentRow = group.baseSprint ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded) : "";
-      const parentOwnIssues = group.baseSprint && Array.isArray(group.baseSprint.issues) ? group.baseSprint.issues : [];
-      const parentBody = groupExpanded && parentOwnIssues.length ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>` : "";
-      const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
+      const groupCls = "hist-sprint-group" + (_histExpanded.has(baseLbl) ? "" : " collapsed");
+      const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
+      const parentCard = _histChildCardHtml(parentSprint, group, {
+        isLineageParent: true,
+        bulkCompleteBtn: bulkBtn
+      });
+      const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
+      return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
     }
     if (group.baseSprint) {
-      return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
+      return _histIsChild(group.baseSprint.label) ? _histChildCardHtml(group.baseSprint, group) : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
     }
     return "";
   }
@@ -2467,14 +3001,11 @@ Replace the existing draft (${data.existing_label})?`
     _histRenderLedger(_histLedgerData);
   }
   function _histToolbarHtml() {
-    return `<div class="hist-toolbar">
-    <span class="hist-toolbar-note">
-      <i class="ti ti-stack-2"></i>
-      Latest ${_histFoldSize} sprint groups expanded below \u2014 older groups collapse to sprint numbers; click to open details.
-    </span>
-  </div>`;
+    const note = _histShowClosed ? `<span class="hist-toolbar-note"><i class="ti ti-history"></i> Full archive \u2014 older sprint groups collapse into numbered folds; click to expand.</span>` : `<span class="hist-toolbar-note"><i class="ti ti-inbox"></i> Action inbox \u2014 sprints needing Complete, Re-run, or Bulk complete. Lineage groups stay together (e.g. Sprint 98 with 98.1).</span>`;
+    const signOffBtn = _histShowClosed ? "" : `<button type="button" class="btn-ghost hist-bulk-signoff-btn" id="hist-bulk-signoff-btn" onclick="_histBulkSignOff()" title="Complete every ready-to-merge sprint in this inbox"><i class="ti ti-circle-check"></i> Sign off all ready</button>`;
+    return `<div class="hist-toolbar">${note}${signOffBtn}</div>`;
   }
-  async function _histScanStale() {
+  async function _histScanStale2() {
     const repo = _cachedFullRepo[_slug];
     if (!repo)
       return;
@@ -2581,18 +3112,30 @@ Replace the existing draft (${data.existing_label})?`
     if (!el)
       return;
     if (!sprints || !sprints.length) {
-      el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet \u2014 finished and deleted sprints appear here.</div>`;
+      const emptyMsg = _histShowClosed ? "No sprint history yet \u2014 finished and deleted sprints appear here." : "Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.";
+      el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
       return;
     }
-    const groups = _histGroupSprints(sprints);
+    let groups = _histGroupSprints(sprints);
+    if (!_histShowClosed) {
+      groups = groups.filter(_histGroupHasActionable);
+      if (!groups.length) {
+        el.innerHTML = `<div class="hist-ledger-empty">Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.</div>`;
+        return;
+      }
+    }
     if (!_histDidAutoExpand && groups.length) {
       _histAutoExpandRecent(groups);
       _histDidAutoExpand = true;
     }
-    const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
-    const recentHtml = recent.map(_histGroupHtml).join("");
-    const foldsHtml = folds.map(_histFoldHtml).join("");
-    el.innerHTML = _histLegendHtml() + _histToolbarHtml() + recentHtml + foldsHtml;
+    let bodyHtml;
+    if (!_histShowClosed) {
+      bodyHtml = groups.map(_histGroupHtml).join("");
+    } else {
+      const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
+      bodyHtml = recent.map(_histGroupHtml).join("") + folds.map(_histFoldHtml).join("");
+    }
+    el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
   }
   function _histRerunSprint(label) {
     if (typeof globalThis.smgmtRerunSprint === "function") {
@@ -2690,7 +3233,7 @@ Replace the existing draft (${data.existing_label})?`
     if (!btn)
       return;
     btn.innerHTML = _histShowClosed ? '<i class="ti ti-eye-off"></i> Active only' : '<i class="ti ti-history"></i> Show completed';
-    btn.title = _histShowClosed ? "Show only actionable sprints + a few recent completed" : "Load the full closed-sprint history";
+    btn.title = _histShowClosed ? "Show only the action inbox (sprints needing you)" : "Load the full closed-sprint archive";
   }
   function _histToggleShowClosed() {
     _histShowClosed = !_histShowClosed;
@@ -2715,6 +3258,123 @@ Replace the existing draft (${data.existing_label})?`
   }
   function _histNextChildLabel(parentLabel) {
     return _nextSprintSublabel(parentLabel);
+  }
+  function _histBulkSignOffTargets(sprints) {
+    const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+    const targets = [];
+    const skipLabels = /* @__PURE__ */ new Set();
+    for (const g of groups) {
+      const members = _histGroupMembers(g);
+      const rtm = members.filter(
+        (s) => (s.lifecycle_state || "").toLowerCase() === "ready_to_merge"
+      );
+      if (!rtm.length)
+        continue;
+      const useBulk = (g.children || []).length && g.baseLabel && _histGroupNeedsBulkComplete(g) && _histChildSprintsAllCompleted(g) && !_histChildSprintsStillRunning(g);
+      if (useBulk) {
+        targets.push({ kind: "bulk", label: g.baseLabel });
+        for (const s of members)
+          skipLabels.add(s.label);
+        continue;
+      }
+      for (const s of rtm) {
+        if (!skipLabels.has(s.label)) {
+          targets.push({ kind: "finish", label: s.label });
+        }
+      }
+    }
+    return targets.sort((a, b) => {
+      const pa = _histLabelParts(a.label);
+      const pb = _histLabelParts(b.label);
+      if (pa.baseNum !== pb.baseNum)
+        return pa.baseNum - pb.baseNum;
+      return pa.sub - pb.sub;
+    });
+  }
+  async function _histBulkSignOff() {
+    if (_histShowClosed) {
+      alert("Switch to the action inbox first (toggle off Show completed).");
+      return;
+    }
+    const targets = _histBulkSignOffTargets(_histLedgerData);
+    if (!targets.length) {
+      alert("No ready-to-merge sprints in the inbox.");
+      return;
+    }
+    const listing = targets.map((t) => {
+      const disp = sprintLabelDisplay(t.label);
+      return t.kind === "bulk" ? `${disp} (bulk complete lineage)` : disp;
+    }).join("\n");
+    if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
+
+${listing}`)) {
+      return;
+    }
+    if (typeof finishSprintAndWait !== "function") {
+      alert("Finish helper unavailable \u2014 refresh the page.");
+      return;
+    }
+    const total = targets.length;
+    if (typeof _smgmtBoardLock === "function") {
+      _smgmtBoardLock("Signing off ready sprints\u2026", {
+        progress: true,
+        total,
+        clearLog: true,
+        showDone: true
+      });
+    }
+    let done = 0;
+    let failed = null;
+    for (const target of targets) {
+      const { label, kind } = target;
+      const action = kind === "bulk" ? "Bulk completing" : "Completing";
+      if (typeof _smgmtBoardLog === "function") {
+        _smgmtBoardLog(`${action} ${sprintLabelDisplay(label)}\u2026`, "step");
+      }
+      try {
+        if (kind === "bulk") {
+          if (typeof bulkCompleteLineageAndWait !== "function") {
+            throw new Error("Bulk complete helper unavailable \u2014 refresh the page.");
+          }
+          await bulkCompleteLineageAndWait(label);
+        } else {
+          await finishSprintAndWait(label);
+        }
+        done += 1;
+        if (typeof _smgmtBoardProgress === "function")
+          _smgmtBoardProgress(done, total);
+        if (typeof _smgmtBoardLog === "function") {
+          _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(label)} completed`, "ok");
+        }
+      } catch (e) {
+        failed = { label, message: e.message || String(e) };
+        if (typeof _smgmtBoardLog === "function") {
+          _smgmtBoardLog(`\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`, "err");
+        }
+        break;
+      }
+    }
+    const finishMsg = failed ? `Stopped at ${sprintLabelDisplay(failed.label)}: ${failed.message}` : `Signed off ${done} sprint(s).`;
+    if (typeof _smgmtBoardFinish === "function") {
+      _smgmtBoardFinish({
+        ok: !failed,
+        message: finishMsg,
+        onDone: () => {
+          _histResetLedgerCache();
+          const repo = _cachedFullRepo[_slug];
+          if (repo)
+            _histLoadLedger2(repo, { force: true });
+          else
+            _histForceRefresh();
+          if (typeof loadSprintMgmt === "function")
+            loadSprintMgmt(true).catch(() => {
+            });
+        }
+      });
+    } else {
+      alert(finishMsg);
+      _histForceRefresh();
+    }
   }
 
   // apps/dashboard/static/src/sprint-board/rerun-modal.js
@@ -3064,6 +3724,80 @@ Replace the existing draft (${data.existing_label})?`
       if (_fsActiveJob)
         _fsActiveJob.es = null;
     };
+  }
+  function finishSprintAndWait2(label) {
+    return new Promise(async (resolve, reject) => {
+      const repo = _smgmtRepo();
+      if (!repo) {
+        reject(new Error("No project loaded"));
+        return;
+      }
+      const parts = repo.split("/");
+      const owner = parts[0];
+      const repoName = parts.slice(1).join("/");
+      try {
+        const prevRes = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`
+        );
+        if (!prevRes.ok) {
+          const err = await prevRes.json().catch(() => ({}));
+          throw new Error(err.detail || `Preview failed (HTTP ${prevRes.status})`);
+        }
+        const preview = await prevRes.json();
+        if (preview.conflict_error)
+          throw new Error(preview.conflict_error);
+        const allTickets = preview.all_tickets || [];
+        const bgParams = {
+          confirmed: true,
+          move_non_uat_to: preview.next_sprint_label || "",
+          selected_ticket_numbers: allTickets.map((t) => t.number),
+          selected_tickets: allTickets.map((t) => ({
+            number: t.number,
+            title: t.title || `#${t.number}`
+          })),
+          merge_pr: !!preview.sprint_pr,
+          sprint_pr_url: preview.sprint_pr ? preview.sprint_pr.url : null,
+          total: allTickets.length + 2
+        };
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bgParams)
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+        const es = new EventSource(url);
+        es.onmessage = (e) => {
+          let snap;
+          try {
+            snap = JSON.parse(e.data);
+          } catch {
+            return;
+          }
+          if (snap.ping)
+            return;
+          if (snap.status === "done") {
+            es.close();
+            resolve(snap);
+          } else if (snap.status === "error") {
+            es.close();
+            reject(new Error(snap.error || "Finish failed"));
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          reject(new Error("Finish stream disconnected"));
+        };
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
   async function _fsRetry() {
     if (!_fsActiveJob)
@@ -3423,6 +4157,33 @@ Replace the existing draft (${data.existing_label})?`
     }
     return res.json();
   }
+  async function bulkCompleteLineageAndWait2(label) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      throw new Error("No project loaded");
+    const parts = repo.split("/");
+    const owner = parts[0];
+    const repoName = parts.slice(1).join("/");
+    const preview = await _bcFetchPreview(owner, repoName, label);
+    const order = (preview.complete_order || []).slice();
+    if (!order.length)
+      throw new Error("Nothing to bulk complete");
+    for (const sLabel of order) {
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmed: true })
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+      }
+    }
+    return { label, steps: order.length };
+  }
   async function _bcConfirm() {
     const repo = _smgmtRepo();
     if (!_bcLabel || !repo || !_bcPreview)
@@ -3444,6 +4205,7 @@ Replace the existing draft (${data.existing_label})?`
     }
     let doneSteps = 0;
     const totalSteps = order.length + 1;
+    let failedIdx = 0;
     _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
@@ -3452,8 +4214,16 @@ Replace the existing draft (${data.existing_label})?`
       // Done button stays disabled until the run settles
     });
     _smgmtBoardLog("Starting per-step complete (deepest child first)\u2026", "step");
+    const _onDone = () => {
+      if (typeof globalThis._histResetLedgerCache === "function")
+        globalThis._histResetLedgerCache();
+      loadSprintMgmt().catch(() => {
+      });
+    };
     try {
-      for (const sLabel of order) {
+      for (let i = 0; i < order.length; i++) {
+        failedIdx = i;
+        const sLabel = order[i];
         _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
         const res = await fetch(
           `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
@@ -3481,24 +4251,182 @@ Replace the existing draft (${data.existing_label})?`
       _smgmtBoardFinish({
         ok: true,
         message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
-        onDone: () => {
-          if (typeof globalThis._histResetLedgerCache === "function")
-            globalThis._histResetLedgerCache();
-          loadSprintMgmt().catch(() => {
-          });
-        }
+        onDone: _onDone
       });
     } catch (e) {
       _smgmtBoardLog(`\u2717 ${e.message}`, "err");
+      const isConflict = /merge conflict/i.test(e.message);
       _smgmtBoardFinish({
         ok: false,
-        message: "Stopped: " + e.message + "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).",
-        onDone: () => {
-          if (typeof globalThis._histResetLedgerCache === "function")
-            globalThis._histResetLedgerCache();
-          loadSprintMgmt().catch(() => {
-          });
+        message: "Stopped: " + e.message + (isConflict ? '\n\nClick "Resolve with AI" to fix automatically, or resolve manually and re-run.' : "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped)."),
+        onDone: _onDone
+      });
+      if (isConflict) {
+        const cinfo = _bcParseConflictInfo(e.message);
+        if (cinfo) {
+          setTimeout(() => {
+            _bcInjectResolveButton(cinfo, owner, repoName, label, order, failedIdx, doneSteps, totalSteps, _onDone);
+          }, 0);
         }
+      }
+    }
+  }
+  function _bcParseConflictInfo(msg) {
+    const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+)\s+failed/i);
+    if (!m)
+      return null;
+    return { head: `sprint/${m[1]}`, base: `sprint/${m[2]}` };
+  }
+  function _bcInjectResolveButton(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+    const doneEl = document.getElementById("smgmt-op-done");
+    if (!doneEl)
+      return;
+    const existing = document.getElementById("smgmt-op-resolve-ai-btn");
+    if (existing)
+      existing.remove();
+    const btn = document.createElement("button");
+    btn.id = "smgmt-op-resolve-ai-btn";
+    btn.type = "button";
+    btn.className = "btn-primary";
+    btn.textContent = "\u2726 Resolve with AI";
+    btn.style.cssText = "margin-right:8px;background:var(--violet,#6e56cf);border-color:var(--violet,#6e56cf)";
+    btn.onclick = () => {
+      btn.disabled = true;
+      _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
+    };
+    const doneBtn = document.getElementById("smgmt-op-done-btn");
+    if (doneBtn)
+      doneEl.insertBefore(btn, doneBtn);
+    else
+      doneEl.prepend(btn);
+  }
+  async function _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+    const spinner = document.getElementById("smgmt-move-spinner");
+    const msgEl = document.getElementById("smgmt-move-overlay-msg");
+    const errEl = document.getElementById("smgmt-op-error");
+    const doneEl = document.getElementById("smgmt-op-done");
+    const overlay = document.getElementById("smgmt-move-overlay");
+    if (spinner)
+      spinner.style.display = "";
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = "";
+    }
+    if (doneEl) {
+      doneEl.hidden = true;
+      doneEl.innerHTML = "";
+    }
+    if (overlay)
+      overlay.setAttribute("aria-busy", "true");
+    const startMs = Date.now();
+    const timerInterval = setInterval(() => {
+      const secs = Math.floor((Date.now() - startMs) / 1e3);
+      const mins = Math.floor(secs / 60);
+      const ts = mins > 0 ? `${mins}m ${secs % 60}s` : `${secs}s`;
+      if (msgEl)
+        msgEl.textContent = `Resolving conflicts with AI\u2026 (${ts})`;
+    }, 1e3);
+    if (msgEl)
+      msgEl.textContent = "Resolving conflicts with AI\u2026 (0s)";
+    try {
+      const startRes = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-branch-conflict`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ head: cinfo.head, base: cinfo.base })
+        }
+      );
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${startRes.status}`);
+      }
+      const { job_key } = await startRes.json();
+      _smgmtBoardLog("AI resolver started\u2026", "step");
+      await new Promise((resolve, reject) => {
+        const es = new EventSource(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-conflict-stream/${encodeURIComponent(job_key)}`
+        );
+        es.onmessage = (ev) => {
+          try {
+            const snap = JSON.parse(ev.data);
+            if (snap.ping)
+              return;
+            if (snap.current && snap.status === "running")
+              _smgmtBoardLog(snap.current, "step");
+            if (snap.status === "done") {
+              es.close();
+              resolve(snap);
+            } else if (snap.status === "error") {
+              es.close();
+              reject(new Error(snap.error || "Resolve failed"));
+            }
+          } catch (_) {
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          reject(new Error("SSE connection lost"));
+        };
+      });
+      clearInterval(timerInterval);
+      if (msgEl)
+        msgEl.textContent = "\u2713 Resolved \u2014 retrying bulk complete\u2026";
+      _smgmtBoardLog("\u2713 Conflicts resolved \u2014 resuming\u2026", "ok");
+      if (spinner)
+        spinner.style.display = "";
+      await _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
+    } catch (resolveErr) {
+      clearInterval(timerInterval);
+      _smgmtBoardLog(`\u2717 AI resolve failed: ${resolveErr.message}`, "err");
+      _smgmtBoardFinish({
+        ok: false,
+        message: `AI resolution failed: ${resolveErr.message}
+
+Resolve manually and re-run Bulk complete.`,
+        onDone
+      });
+    }
+  }
+  async function _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+    try {
+      for (let i = fromIdx; i < order.length; i++) {
+        const sLabel = order[i];
+        _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
+        const res = await fetch(
+          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmed: true })
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+        }
+        const sd = await res.json();
+        doneSteps += 1;
+        _smgmtBoardProgress(doneSteps, totalSteps);
+        const into = sd.merged ? ` \u2192 merged into ${sd.merged_into}` : "";
+        _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(sLabel)} completed${into}`, "ok");
+      }
+      _smgmtBoardLog("Refreshing board\u2026", "step");
+      await loadSprintMgmt();
+      doneSteps += 1;
+      _smgmtBoardProgress(doneSteps, totalSteps);
+      _smgmtBoardLog("\u2713 Complete finished", "ok");
+      _smgmtBoardFinish({
+        ok: true,
+        message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
+        onDone
+      });
+    } catch (e2) {
+      _smgmtBoardLog(`\u2717 ${e2.message}`, "err");
+      _smgmtBoardFinish({
+        ok: false,
+        message: "Stopped: " + e2.message + "\n\nResolve the conflict, then re-run Bulk complete.",
+        onDone
       });
     }
   }
@@ -3541,7 +4469,8 @@ Replace the existing draft (${data.existing_label})?`
       return;
     if (!preview || preview.exists === false) {
       body.innerHTML = `<div style="font-size:13px;color:var(--text-muted)">
-      This sprint has no lifecycle row in this dashboard's DB${preview && preview.wrong_project ? " for this project" : ""}, so there is nothing to reconcile here.
+      This sprint has no lifecycle row in this dashboard's DB${preview && preview.wrong_project ? " for this project" : ""}, so Reconcile cannot change lifecycle here.
+      ${preview && preview.exists === false ? '<div style="margin-top:8px">If git branches are already merged, use <b>Bulk complete</b> on the lineage parent \u2014 that seeds the DB row and marks each step completed.</div>' : ""}
     </div>`;
       if (applyBtn)
         applyBtn.classList.add("hidden");
@@ -3717,7 +4646,7 @@ Replace the existing draft (${data.existing_label})?`
       return { ready: false, reasons: ["invalid ticket"] };
     const reasons = [];
     const body = (ticket.body || "").trim();
-    if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\s*$/im.test(body)) {
+    if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\b/im.test(body)) {
       reasons.push("missing AC");
     }
     if (!/^#{1,6}\s+(design\s+references?|design\s+refs?)\s*$/im.test(body)) {
@@ -3768,7 +4697,7 @@ Replace the existing draft (${data.existing_label})?`
     }
     try {
       if (typeof _smgmtEnsureCapData === "function") {
-        await _smgmtEnsureCapData();
+        _smgmtEnsureCapData();
       }
       const [resp, runningResp] = await Promise.all([
         fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
@@ -3813,7 +4742,7 @@ Replace the existing draft (${data.existing_label})?`
         _smgmtRunningLabels.add(optimisticRunningLabel);
         _smgmtAnySprintRunning = true;
       }
-      _smgmtRender2(data);
+      _smgmtRender(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
         _smgmtHydrateSchedToggles(repo);
       }
@@ -3892,7 +4821,7 @@ Replace the existing draft (${data.existing_label})?`
       return false;
     return _smgmtCompareSprintLabels(label, latest) < 0;
   }
-  function _smgmtRender2(data) {
+  function _smgmtRender(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
       return;
@@ -3955,29 +4884,6 @@ Replace the existing draft (${data.existing_label})?`
     });
     _smgmtOrderedLabels = orderedLabels;
     _smgmtFinishedLabels = _finishedSet;
-    let _smgmtNextUpLabel = null;
-    const sortedForNext = [...orderedLabels].sort((a, b) => {
-      const ka = _smgmtSprintLabelSortKey(a);
-      const kb = _smgmtSprintLabelSortKey(b);
-      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-        const d = (ka[i] ?? Infinity) - (kb[i] ?? Infinity);
-        if (d !== 0)
-          return d;
-      }
-      return 0;
-    });
-    for (const lbl of sortedForNext) {
-      if (_smgmtRunningLabels.has(lbl))
-        continue;
-      if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl))
-        continue;
-      if (_smgmtFinishedLabels.has(lbl))
-        continue;
-      if ((bySprint[lbl] || []).length >= 1) {
-        _smgmtNextUpLabel = lbl;
-        break;
-      }
-    }
     const focusGuideEl = document.getElementById("smgmt-focus-guide");
     if (focusGuideEl) {
       focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
@@ -4099,8 +5005,6 @@ Replace the existing draft (${data.existing_label})?`
     _smgmtInitCapacityGauges(orderedLabels);
     _smgmtRenderAllCapBars();
     _smgmtEnsureCapData(false);
-    if (_smgmtSelectedIssues.size > 0)
-      _smgmtUpdateSelectionUI();
     for (const [lbl, fc] of Object.entries(_smgmtFinishCards)) {
       if (fc)
         _smgmtRenderFinishCard(lbl, fc.card, fc.branch, _smgmtRepo());
@@ -4355,10 +5259,10 @@ Replace the existing draft (${data.existing_label})?`
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       const tickets = bySprint[label] || [];
       if (tickets.length === 0)
-        continue;
+        return;
       for (const t of tickets)
         _smgmtTicketToSprint[t.number] = label;
       const issueNums = tickets.map((t) => t.number).join(",");
@@ -4367,7 +5271,7 @@ Replace the existing draft (${data.existing_label})?`
           `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         const estEl = document.getElementById(`smgmt-est-${label}`);
         if (estEl && data.complete && data.total_hours !== null) {
@@ -4388,23 +5292,23 @@ Replace the existing draft (${data.existing_label})?`
         }
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
-        continue;
+        return;
       if (_smgmtFinishedLabels.has(label))
-        continue;
+        return;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter(
         (t) => (t.status || "backlog") === "backlog"
       );
       if (pending.length < 2)
-        continue;
+        return;
       for (const t of pending)
         delete _smgmtConflictsByIssue[t.number];
       try {
@@ -4412,7 +5316,7 @@ Replace the existing draft (${data.existing_label})?`
           `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         for (const c of data.conflicts || []) {
           if (!_smgmtConflictsByIssue[c.ticket1_id])
@@ -4434,23 +5338,23 @@ Replace the existing draft (${data.existing_label})?`
           _smgmtUpdateConflictBadge(t.number);
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
-        continue;
+        return;
       if (_smgmtFinishedLabels.has(label))
-        continue;
+        return;
       const tickets = bySprint[label] || [];
       const pending = tickets.filter(
         (t) => (t.status || "backlog") === "backlog"
       );
       if (pending.length < 2)
-        continue;
+        return;
       for (const t of pending)
         delete _smgmtDepOrderByIssue[t.number];
       try {
@@ -4458,7 +5362,7 @@ Replace the existing draft (${data.existing_label})?`
           `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         if (data.has_cycle) {
           const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
@@ -4485,22 +5389,22 @@ Replace the existing draft (${data.existing_label})?`
           _smgmtUpdateDepOrderBadge(t.number);
       } catch (_) {
       }
-    }
+    }));
   }
   async function _smgmtLoadGoals(orderedLabels) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    for (const label of orderedLabels) {
+    await Promise.all(orderedLabels.map(async (label) => {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
       if (!goalEl)
-        continue;
+        return;
       try {
         const resp = await fetch(
           `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
         );
         if (!resp.ok)
-          continue;
+          return;
         const data = await resp.json();
         const goal = (data.goal || "").trim();
         if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
@@ -4515,7 +5419,7 @@ Replace the existing draft (${data.existing_label})?`
         }
       } catch (_) {
       }
-    }
+    }));
   }
   function _smgmtOutcomeBandHtml(label, outcome) {
     const st = outcome.sprint_status;
@@ -4814,7 +5718,7 @@ Replace the existing draft (${data.existing_label})?`
         }
         ticketsContainerHtml = tickets.length > 0 ? tickets.map(
           (t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)
-        ).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        ).join("") : "";
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const _movedToChild = /* @__PURE__ */ new Set();
@@ -4837,7 +5741,7 @@ Replace the existing draft (${data.existing_label})?`
     } else if (isRunningView) {
       ticketsContainerHtml = _smgmtRunningTicketRowsHtml(label, tickets);
     } else {
-      ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+      ticketsContainerHtml = tickets.length > 0 ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("") : "";
       if (finished) {
         outcomeBadgeHtml = `<span class="smgmt-state-badge state-finished">READY TO MERGE</span>`;
       }
@@ -4879,10 +5783,7 @@ Replace the existing draft (${data.existing_label})?`
                onclick="smgmtApplyDagOrder('${escHtml(label)}')">
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
-         ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
-         ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
-         ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
         <div class="smgmt-sprint-header-left sc-header-left">
@@ -4960,7 +5861,7 @@ Replace the existing draft (${data.existing_label})?`
     const sourceTickets = (liveIssues.length > 0 ? liveIssues : tickets).slice().sort((a, b) => (a.dispatch_level || 0) - (b.dispatch_level || 0));
     const cardRepo = _smgmtRepo();
     if (sourceTickets.length === 0) {
-      return '<div class="smgmt-drop-hint">No tickets in this sprint</div>';
+      return "";
     }
     let prevLevel = 0;
     return sourceTickets.map((t) => {
@@ -5157,7 +6058,7 @@ Replace the existing draft (${data.existing_label})?`
       <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
       <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
-        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+        ${ticketRowsHtml || ""}
       </div>
       ${renderProgressActivity2(
       {
@@ -5302,7 +6203,6 @@ Replace the existing draft (${data.existing_label})?`
       done: "smgmt-status-done"
     }[ticket.status] || "smgmt-status-backlog";
     const statusLabel = hasRework ? "needs rework" : ticket.status || "backlog";
-    const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const _outcomeMap = {
       done: ["ti-circle-check", "outcome-success"],
       uat: ["ti-circle-check", "outcome-success"],
@@ -5335,24 +6235,12 @@ Replace the existing draft (${data.existing_label})?`
     const ticketLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const sk = escHtml(label);
     return `
-    <div class="smgmt-ticket${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
-         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
-         ondragend="_smgmtTicketDragEnd(event)"
-         ondragover="_smgmtTicketReorderDragOver(event)"
-         ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
-         onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
-             onclick="event.stopPropagation()"
-             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
-      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -5415,7 +6303,7 @@ Replace the existing draft (${data.existing_label})?`
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
     if (sorted.length === 0) {
       const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:var(--space-3) var(--space-4);text-align:center;">${msg}</div>`;
+      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
     } else {
       ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
     }
@@ -5423,7 +6311,6 @@ Replace the existing draft (${data.existing_label})?`
     _blUpdateActions();
   }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
-    const isSelected = _smgmtSelectedIssues.has(ticket.number);
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
     const schedDepHtml = _smgmtSchedDepHtml(ticket);
@@ -5442,16 +6329,11 @@ Replace the existing draft (${data.existing_label})?`
          onclick="event.stopPropagation();smgmtAddToDraft(${ticket.number},'${escHtml(draftLabel)}')">
          <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>` : "";
     return `
-    <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row" id="smgmt-ticket-${ticket.number}"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
-         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
-             onclick="event.stopPropagation()"
-             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
@@ -5827,7 +6709,7 @@ Replace the existing draft (${data.existing_label})?`
       const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
       const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
       const readinessBadge = _smgmtReadinessBadgeHtml(t);
-      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + readinessBadge + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
+      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + readinessBadge + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
     }).join("");
     const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
     const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
@@ -6269,6 +7151,36 @@ Proceed anyway?`)) {
       requestAnimationFrame(() => _pfDrawDAGArrows(_pfDagData.edges));
     }
   }
+  function _pfRecalcStepFails() {
+    let fails = 0;
+    if (_pfCycle && _pfCycle.length)
+      fails++;
+    const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
+    if (pendingFlags.length > 0) {
+      fails++;
+      _pfStepState("missizing", "fail", `${pendingFlags.length} flag(s) require review`);
+    } else if (_pfFlags && (_pfFlags.flags || []).length > 0) {
+      _pfStepState("missizing", "pass", "All flags resolved");
+    }
+    _pfStepFails = fails;
+    _pfStepperSummary();
+  }
+  var _PF_SIZE_TIERS = /* @__PURE__ */ new Set(["S", "M", "L", "XL"]);
+  function _pfFlagDefaultReestimateSize(flag) {
+    const hist = String(flag?.historical_avg_actual_size || "").toUpperCase();
+    if (_PF_SIZE_TIERS.has(hist))
+      return hist;
+    const cur = String(flag?.current_estimate || "").toUpperCase();
+    if (_PF_SIZE_TIERS.has(cur))
+      return cur;
+    return "S";
+  }
+  function _pfFlagAutoReestimate(num) {
+    const flag = (_pfFlags?.flags || []).find((f) => f.issue_number === num);
+    if (!flag)
+      return;
+    _pfFlagAction(num, "reestimated", _pfFlagDefaultReestimateSize(flag));
+  }
   function _pfUpdateConfirmBtn() {
     const hasCycle = !!(_pfCycle && _pfCycle.length);
     const pendingFlags = _pfFlags && (_pfFlags.flags || []).filter((f) => f.status === "pending") || [];
@@ -6406,17 +7318,8 @@ Proceed anyway?`)) {
         actionsHtml = `
         <div class="pf-flag-actions" id="pf-flag-actions-${num}">
           <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
-          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || "S")}')">Re-estimate</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagAutoReestimate(${num})" title="Apply historical average size">Re-estimate</button>
           <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
-        </div>
-        <div id="pf-flag-picker-${num}" style="display:none">
-          <div class="pf-flag-size-picker">
-            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
-            ${["S", "M", "L", "XL"].map(
-          (s) => `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
-        ).join("")}
-            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
-          </div>
         </div>`;
       }
       return `<div class="${itemClass}" id="pf-flag-item-${num}">
@@ -6440,21 +7343,10 @@ Proceed anyway?`)) {
     ${rows.join("")}
   </div>`;
   }
-  function _pfFlagShowSizePicker(num, _currentSize) {
-    const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-    const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl)
-      actionsEl.style.display = "none";
-    if (pickerEl)
-      pickerEl.style.display = "block";
+  function _pfFlagShowSizePicker(num) {
+    _pfFlagAutoReestimate(num);
   }
-  function _pfFlagHidePicker(num) {
-    const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-    const pickerEl = document.getElementById(`pf-flag-picker-${num}`);
-    if (actionsEl)
-      actionsEl.style.display = "";
-    if (pickerEl)
-      pickerEl.style.display = "none";
+  function _pfFlagHidePicker(_num) {
   }
   async function _pfFlagAction(num, action, newSize) {
     const label = _pfCurrentLabel;
@@ -6490,6 +7382,7 @@ Proceed anyway?`)) {
         const newHtml = _pfBuildFlagsHtml();
         flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
       }
+      _pfRecalcStepFails();
       _pfUpdateConfirmBtn();
     } catch (e) {
       _smgmtShowToast("Flag action failed: " + e.message, "error");
@@ -6500,7 +7393,6 @@ Proceed anyway?`)) {
     }
   }
   function _pfFlagReestimate(num, newSize) {
-    _pfFlagHidePicker(num);
     _pfFlagAction(num, "reestimated", newSize);
   }
   function _pfBuildDAGHtml(dag) {
@@ -6659,7 +7551,7 @@ Proceed anyway?`)) {
   }
   function _pfShowError(msg) {
     document.getElementById("pf-loading").classList.add("hidden");
-    unmountProgressActivity("pf-stepper-steps");
+    unmountProgressActivity2("pf-stepper-steps");
     document.getElementById("pf-content").classList.add("hidden");
     document.getElementById("pf-error-msg").textContent = msg;
     document.getElementById("pf-error").classList.remove("hidden");
@@ -6691,7 +7583,7 @@ Proceed anyway?`)) {
     const stepsEl = document.getElementById("pf-stepper-steps");
     if (!stepsEl)
       return;
-    mountProgressActivity(stepsEl, {
+    mountProgressActivity2(stepsEl, {
       status: "running",
       mode: "indeterminate",
       current: currentLabel || "Loading\u2026"
@@ -6705,7 +7597,7 @@ Proceed anyway?`)) {
     const stepsEl = document.getElementById("pf-stepper-steps");
     if (!stepsEl)
       return;
-    mountProgressActivity(stepsEl, {
+    mountProgressActivity2(stepsEl, {
       status: "running",
       mode: "stepper",
       steps: PF_STEPS.map((s) => ({
@@ -6871,7 +7763,7 @@ Proceed anyway?`)) {
     const stepsEl = document.getElementById("smgmt-kickoff-steps");
     if (!stepsEl)
       return;
-    mountProgressActivity(stepsEl, {
+    mountProgressActivity2(stepsEl, {
       status: "running",
       mode: "stepper",
       steps: KS_STEPS.map((s) => ({
@@ -7070,739 +7962,8 @@ Proceed anyway?`)) {
     await _ksFinish(label);
   }
 
-  // apps/dashboard/static/src/sprint-board/drag-drop.js
+  // apps/dashboard/static/src/sprint-board/board-overlay.js
   var _smgmtBoardOverlayHasProgress = false;
-  function isDragBlocked(state) {
-    return !!(state && state.moveLock);
-  }
-  function computeDropPlan(dragInfo, targetLabel) {
-    if (!dragInfo)
-      return { mode: "none", tickets: [], targetLabel, noop: true };
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      return { mode: "multi", tickets: dragInfo.multi.slice(), targetLabel, noop: false };
-    }
-    const noop = dragInfo.fromSprint === targetLabel;
-    return { mode: "single", tickets: noop ? [] : [dragInfo.number], targetLabel, noop };
-  }
-  function _smgmtUpdateSelectionUI2() {
-    const count = _smgmtSelectedIssues.size;
-    _blUpdateActions();
-    document.getElementById("smgmt-selection-bar")?.remove();
-    const bar = document.getElementById("proj-selection-bar");
-    const listEl = document.getElementById("smgmt-sprint-list");
-    const onSprintTab = typeof _activeTab === "undefined" || _activeTab === "sprint-mgmt";
-    const onBoard = typeof _smgmtSubView === "undefined" || _smgmtSubView === "board";
-    if (count > 0 && bar && onSprintTab && onBoard) {
-      bar.classList.remove("hidden");
-      if (listEl)
-        listEl.classList.add("has-selection");
-      const countEl = document.getElementById("smgmt-sel-count");
-      if (countEl)
-        countEl.textContent = count === 1 ? "1 issue selected" : `${count} issues selected`;
-      const closeBtn = document.getElementById("smgmt-sel-close-btn");
-      if (closeBtn) {
-        const label = count === 1 ? "Close ticket" : `Close ${count} tickets`;
-        closeBtn.innerHTML = `<i class="ti ti-circle-x"></i> ${label}`;
-      }
-    } else {
-      if (bar) {
-        bar.classList.add("hidden");
-      }
-      if (listEl)
-        listEl.classList.remove("has-selection");
-    }
-    if (typeof _smgmtUpdateToolbarTop === "function") {
-      _smgmtUpdateToolbarTop();
-      requestAnimationFrame(_smgmtUpdateToolbarTop);
-    }
-  }
-  function _smgmtPopulateSelectionDropdown() {
-  }
-  function _smgmtPopulateMoveToMenu() {
-  }
-  function _smgmtToggleMoveToMenu(event) {
-    event?.stopPropagation();
-    if (typeof _smgmtMoveToModalOpen === "function")
-      _smgmtMoveToModalOpen();
-  }
-  function _smgmtCloseMoveToMenu() {
-  }
-  function _smgmtClearSelection() {
-    _smgmtSelectedIssues.forEach((num) => {
-      const el = document.getElementById(`smgmt-ticket-${num}`);
-      if (el) {
-        el.classList.remove("is-selected");
-        const cb = el.querySelector(".smgmt-ticket-cb");
-        if (cb)
-          cb.checked = false;
-      }
-    });
-    _smgmtSelectedIssues.clear();
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtSetSelected(number, selected) {
-    if (selected)
-      _smgmtSelectedIssues.add(number);
-    else
-      _smgmtSelectedIssues.delete(number);
-    const el = document.getElementById(`smgmt-ticket-${number}`);
-    if (el) {
-      el.classList.toggle("is-selected", selected);
-      const cb = el.querySelector(".smgmt-ticket-cb");
-      if (cb)
-        cb.checked = selected;
-    }
-  }
-  function _smgmtTicketSprintKey(number) {
-    const iss = (_smgmtData?.issues || []).find((i) => i.number === number);
-    if (!iss)
-      return void 0;
-    return iss.sprint == null ? "backlog" : iss.sprint;
-  }
-  function _smgmtSelectionSprintKey() {
-    const first = [..._smgmtSelectedIssues][0];
-    return first == null ? void 0 : _smgmtTicketSprintKey(first);
-  }
-  function _smgmtEnforceSelectionScope(number) {
-    if (_smgmtSelectedIssues.size === 0)
-      return;
-    const cur = _smgmtSelectionSprintKey();
-    const next = _smgmtTicketSprintKey(number);
-    if (cur !== void 0 && next !== void 0 && cur !== next) {
-      _smgmtClearSelection();
-    }
-  }
-  function _smgmtToggleSelect(number, checked) {
-    if (checked)
-      _smgmtEnforceSelectionScope(number);
-    _smgmtSetSelected(number, checked);
-    _smgmtLastSelectedNum = checked ? number : null;
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtRowClick(event, number, label) {
-    const container = label ? document.getElementById(`smgmt-tickets-${label}`) : document.getElementById("smgmt-backlog-tickets");
-    if (event.shiftKey && _smgmtLastSelectedNum != null && container) {
-      const nums = Array.from(container.querySelectorAll(".smgmt-ticket[data-issue]")).map((r) => parseInt(r.dataset.issue, 10));
-      const a = nums.indexOf(_smgmtLastSelectedNum);
-      const b = nums.indexOf(number);
-      if (a !== -1 && b !== -1) {
-        const [lo, hi] = a <= b ? [a, b] : [b, a];
-        for (let i = lo; i <= hi; i++)
-          _smgmtSetSelected(nums[i], true);
-        _smgmtLastSelectedNum = number;
-        _smgmtUpdateSelectionUI2();
-        const sel = window.getSelection && window.getSelection();
-        if (sel)
-          sel.removeAllRanges();
-        return;
-      }
-    }
-    if (event.ctrlKey || event.metaKey) {
-      const nowSelected2 = !_smgmtSelectedIssues.has(number);
-      if (nowSelected2)
-        _smgmtEnforceSelectionScope(number);
-      _smgmtSetSelected(number, nowSelected2);
-      _smgmtLastSelectedNum = nowSelected2 ? number : null;
-      _smgmtUpdateSelectionUI2();
-      return;
-    }
-    const nowSelected = !_smgmtSelectedIssues.has(number);
-    if (nowSelected)
-      _smgmtEnforceSelectionScope(number);
-    _smgmtSetSelected(number, nowSelected);
-    _smgmtLastSelectedNum = nowSelected ? number : null;
-    _smgmtUpdateSelectionUI2();
-  }
-  function _smgmtIsDeletableIssue(num) {
-    if (!_smgmtData)
-      return false;
-    const iss = _smgmtData.issues.find((i) => i.number === num);
-    if (!iss)
-      return false;
-    return iss.status === "done" || iss.sprint === null;
-  }
-  async function _smgmtDeleteSelected() {
-    if (_smgmtSelectedIssues.size !== 1)
-      return;
-    const num = [..._smgmtSelectedIssues][0];
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const iss = _smgmtData?.issues.find((i) => i.number === num);
-    const label = iss ? `#${num}: ${iss.title}` : `#${num}`;
-    if (!confirm(`Delete ${label}?
-
-This will close the issue on GitHub. This cannot be undone.`))
-      return;
-    if (_smgmtData)
-      _smgmtData.issues = _smgmtData.issues.filter((i) => i.number !== num);
-    _smgmtClearSelection();
-    _smgmtRender(_smgmtData);
-    _smgmtBoardLock2(`Deleting #${num}\u2026`);
-    try {
-      const res = await fetch(`/api/issues/${num}/close?repo=${encodeURIComponent(repo)}`, {
-        method: "POST"
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      _smgmtShowToast(`Issue #${num} closed.`);
-    } catch (e) {
-      alert("Failed to delete issue: " + e.message);
-      await loadSprintMgmt();
-    } finally {
-      _smgmtBoardUnlock();
-    }
-  }
-  async function _smgmtMoveSelectedTo(targetLabel) {
-    if (!targetLabel || _smgmtSelectedIssues.size === 0)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const nums = Array.from(_smgmtSelectedIssues);
-    const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel }));
-    const dest = targetLabel === "backlog" ? "Backlog" : `Sprint ${targetLabel.split("-")[1]}`;
-    if (_smgmtData) {
-      const targetNum = targetLabel === "backlog" ? null : parseInt(targetLabel.split("-")[1], 10);
-      nums.forEach((n) => {
-        const iss = _smgmtData.issues.find((i) => i.number === n);
-        if (iss)
-          iss.sprint = targetNum;
-      });
-      _smgmtClearSelection();
-      _smgmtRender(_smgmtData);
-    }
-    _smgmtBoardLock2(`Moving ${nums.length} ticket${nums.length !== 1 ? "s" : ""} to ${dest}\u2026`);
-    try {
-      const res = await fetch("/api/sprints/batch-labels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ changes, project: repo })
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      const data = await res.json();
-      if (data.failed > 0 && data.errors && data.errors.length > 0) {
-        _smgmtShowInlineError(`${data.failed} ticket${data.failed !== 1 ? "s" : ""} failed to move:
-${data.errors.join("\n")}`);
-      } else if (data.applied > 0) {
-        _smgmtShowToast(`Moved ${data.applied} ticket${data.applied !== 1 ? "s" : ""} to ${dest}.`);
-      }
-      await loadSprintMgmt();
-    } catch (e) {
-      _smgmtShowToast("Failed to move tickets: " + e.message);
-      await loadSprintMgmt();
-    } finally {
-      _smgmtBoardUnlock();
-    }
-  }
-  function _smgmtTicketDragStart(event, issueNum, fromSprint) {
-    if (fromSprint) {
-      const card = document.getElementById(`smgmt-card-${fromSprint}`);
-      if (card && card.querySelector(".smgmt-rename-wrap")) {
-        event.preventDefault();
-        return;
-      }
-    }
-    const isChecked = _smgmtSelectedIssues.has(issueNum);
-    if (isChecked && _smgmtSelectedIssues.size > 1) {
-      const nums = Array.from(_smgmtSelectedIssues);
-      const sprints = new Set(nums.map((n) => {
-        const iss = (_smgmtData?.issues || []).find((i) => i.number === n);
-        return iss ? iss.sprint : null;
-      }));
-      _smgmtDragTicket = {
-        number: issueNum,
-        fromSprint: fromSprint || null,
-        multi: nums,
-        multiSprints: sprints.size
-      };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", nums.join(","));
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill) {
-        const label = sprints.size > 1 ? `Moving ${nums.length} tickets from ${sprints.size} sprints` : `Moving ${nums.length} tickets`;
-        pill.textContent = label;
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-      setTimeout(() => {
-        nums.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.add("dragging-ticket");
-        });
-      }, 0);
-    } else {
-      _smgmtDragTicket = { number: issueNum, fromSprint: fromSprint || null, multi: null };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(issueNum));
-      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el)
-        setTimeout(() => el.classList.add("dragging-ticket"), 0);
-    }
-    _smgmtGhostShow();
-  }
-  function _smgmtDragMovePill(event) {
-    if (_smgmtDragTicket?.multi) {
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill && pill.textContent) {
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-    }
-  }
-  function _smgmtGhostComputeNextFree() {
-    if (_smgmtData && Number.isInteger(_smgmtData.placeholder_sprint)) {
-      return _smgmtData.placeholder_sprint;
-    }
-    const nums = (_smgmtData?.sprints || []).map(Number).filter((n) => !isNaN(n));
-    return nums.length ? Math.max(...nums) + 1 : 1;
-  }
-  function _smgmtGhostShow() {
-    if (_smgmtRunningLabels.size > 0) {
-      showToast("Cannot create new sprint while one is running.", "warning");
-      return;
-    }
-    _smgmtGhostNextNum = _smgmtGhostComputeNextFree();
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    const titleEl = document.getElementById("smgmt-ghost-title");
-    const subEl = document.getElementById("smgmt-ghost-sub");
-    if (!ghost)
-      return;
-    titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-    subEl.textContent = "next sprint number";
-    ghost.classList.add("ghost-visible");
-  }
-  function _smgmtGhostHide() {
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    ghost.classList.remove("ghost-visible", "ghost-hot");
-    _smgmtGhostNextNum = null;
-  }
-  function _smgmtGhostDragOver(event) {
-    if (!_smgmtDragTicket)
-      return;
-    if (_smgmtRunningLabels.size > 0)
-      return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    const titleEl = document.getElementById("smgmt-ghost-title");
-    const subEl = document.getElementById("smgmt-ghost-sub");
-    ghost.classList.add("ghost-hot");
-    if (titleEl)
-      titleEl.textContent = `Release to create Sprint ${_smgmtGhostNextNum}`;
-    if (subEl)
-      subEl.textContent = "you'll be asked to confirm";
-  }
-  function _smgmtGhostDragLeave(event) {
-    const ghost = document.getElementById("smgmt-ghost-pane");
-    if (!ghost)
-      return;
-    if (!ghost.contains(event.relatedTarget)) {
-      ghost.classList.remove("ghost-hot");
-      const titleEl = document.getElementById("smgmt-ghost-title");
-      const subEl = document.getElementById("smgmt-ghost-sub");
-      if (titleEl)
-        titleEl.textContent = `Drop here to create Sprint ${_smgmtGhostNextNum}`;
-      const existing = new Set((_smgmtData?.sprints || []).map((n) => Number(n)));
-      const skipped = [];
-      for (let i = 1; i < _smgmtGhostNextNum; i++) {
-        if (!existing.has(i))
-          skipped.push(i);
-      }
-      if (subEl)
-        subEl.textContent = skipped.length > 0 ? `next free number \xB7 skipped empty ${skipped.map((s) => `Sprint ${s}`).join(", ")}` : "next free number";
-    }
-  }
-  async function _smgmtGhostDrop(event) {
-    event.preventDefault();
-    if (!_smgmtDragTicket)
-      return;
-    if (_smgmtRunningLabels.size > 0)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    const nextNum = _smgmtGhostNextNum;
-    _smgmtGhostHide();
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      return;
-    }
-    const dragEl = document.getElementById(`smgmt-ticket-${dragInfo.number}`);
-    if (dragEl)
-      dragEl.classList.remove("dragging-ticket");
-    _smgmtDragTicket = null;
-    if (nextNum == null)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    const sprintLabel = `sprint-${nextNum}`;
-    const issue = (_smgmtData?.issues || []).find((i) => i.number === dragInfo.number);
-    const fromLabel = dragInfo.fromSprint || "backlog";
-    document.getElementById("gc-sprint-name").textContent = sprintLabel;
-    document.getElementById("gc-ticket-info").textContent = issue ? `#${issue.number} \u2014 ${issue.title}` : `#${dragInfo.number}`;
-    document.getElementById("gc-source-pane").textContent = fromLabel === "backlog" ? "Backlog" : `Sprint ${fromLabel.replace("sprint-", "")}`;
-    const confirmBtn = document.getElementById("gc-confirm-btn");
-    confirmBtn.textContent = `Create ${sprintLabel} & move`;
-    confirmBtn.disabled = false;
-    const errEl = document.getElementById("gc-error");
-    errEl.textContent = "";
-    errEl.classList.add("hidden");
-    document.getElementById("gc-modal").dataset.issueNum = String(dragInfo.number);
-    document.getElementById("gc-modal").dataset.fromSprint = fromLabel;
-    document.getElementById("gc-modal").dataset.sprintNum = String(nextNum);
-    document.getElementById("gc-modal").dataset.repo = repo;
-    document.getElementById("gc-backdrop").classList.remove("hidden");
-    document.getElementById("gc-modal").classList.remove("hidden");
-    confirmBtn.focus();
-  }
-  function _gcClose() {
-    document.getElementById("gc-backdrop").classList.add("hidden");
-    document.getElementById("gc-modal").classList.add("hidden");
-  }
-  async function _gcConfirm() {
-    const modal = document.getElementById("gc-modal");
-    const issueNum = parseInt(modal.dataset.issueNum, 10);
-    const sprintNum = parseInt(modal.dataset.sprintNum, 10);
-    const repo = modal.dataset.repo;
-    const sprintLabel = `sprint-${sprintNum}`;
-    const confirmBtn = document.getElementById("gc-confirm-btn");
-    const errEl = document.getElementById("gc-error");
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Creating\u2026";
-    errEl.classList.add("hidden");
-    try {
-      const createRes = await fetch("/api/sprints/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_number: sprintNum })
-      });
-      if (!createRes.ok && createRes.status !== 409) {
-        const d = await createRes.json().catch(() => ({}));
-        throw new Error(d.detail || "HTTP " + createRes.status);
-      }
-      const moveRes = await fetch(`/api/issues/${issueNum}/sprint-label`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sprint_label: sprintLabel, project: repo })
-      });
-      if (!moveRes.ok) {
-        const d = await moveRes.json().catch(() => ({}));
-        throw new Error(d.detail || "HTTP " + moveRes.status);
-      }
-      _gcClose();
-      await loadSprintMgmt();
-    } catch (e) {
-      errEl.textContent = `Failed: ${e.message}`;
-      errEl.classList.remove("hidden");
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = `Create ${sprintLabel} & move`;
-    }
-  }
-  function _smgmtTicketDragEnd(_event) {
-    if (_smgmtDragTicket) {
-      if (_smgmtDragTicket.multi) {
-        _smgmtDragTicket.multi.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.remove("dragging-ticket");
-        });
-      } else {
-        const el = document.getElementById(`smgmt-ticket-${_smgmtDragTicket.number}`);
-        if (el)
-          el.classList.remove("dragging-ticket");
-      }
-    }
-    const pill = document.getElementById("smgmt-drag-pill");
-    if (pill) {
-      pill.style.top = "-100px";
-      pill.style.left = "-100px";
-      pill.textContent = "";
-    }
-    _smgmtGhostHide();
-    _smgmtDragTicket = null;
-    document.querySelectorAll(".smgmt-sprint-card").forEach((el) => el.classList.remove("drag-over-sprint"));
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-  }
-  function _smgmtDragOver(event, sprintLabel) {
-    if (_smgmtDragTicket) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      document.querySelectorAll(".smgmt-sprint-card").forEach((b) => b.classList.remove("drag-over-sprint"));
-      document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-      const target = document.getElementById(`smgmt-card-${sprintLabel}`);
-      if (target)
-        target.classList.add("drag-over-sprint");
-    }
-  }
-  function _smgmtDragLeave(event) {
-    if (event.currentTarget && !event.currentTarget.contains(event.relatedTarget)) {
-      event.currentTarget.classList.remove("drag-over-sprint");
-    }
-  }
-  async function _smgmtDropOnSprint(event, targetLabel) {
-    event.preventDefault();
-    document.querySelectorAll(".smgmt-sprint-card").forEach((el) => el.classList.remove("drag-over-sprint"));
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
-      return;
-    if (!_smgmtDragTicket)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    _smgmtDragTicket = null;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      const nums = dragInfo.multi;
-      const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
-      if (_smgmtData) {
-        nums.forEach((n) => {
-          const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss)
-            iss.sprint = targetNum;
-        });
-      }
-      _smgmtClearSelection();
-      if (_smgmtData)
-        _smgmtRender(_smgmtData);
-      const changes = nums.map((n) => ({ issue_num: n, sprint_label: targetLabel || "backlog" }));
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch("/api/sprints/batch-labels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changes, project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        alert(`Failed to move tickets: ${e.message}`);
-        await loadSprintMgmt();
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    } else {
-      const { number, fromSprint } = dragInfo;
-      if (fromSprint === targetLabel)
-        return;
-      const targetNum = targetLabel ? parseInt(targetLabel.split("-")[1], 10) : null;
-      if (_smgmtData) {
-        const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss)
-          iss.sprint = targetNum;
-        _smgmtRender(_smgmtData);
-      }
-      _smgmtClearSelection();
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch(`/api/issues/${number}/sprint-label`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sprint_label: targetLabel || "backlog", project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        if (_smgmtData) {
-          const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss)
-            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
-          _smgmtRender(_smgmtData);
-        }
-        alert(`Failed to move ticket #${number}: ${e.message}`);
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    }
-  }
-  function _smgmtTicketReorderDragOver(event) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
-      return;
-    const target = event.currentTarget;
-    const targetSprint = target.dataset.sprint;
-    const dragSprint = _smgmtDragTicket ? _smgmtDragTicket.fromSprint : null;
-    if (targetSprint !== dragSprint)
-      return;
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = target.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    target.classList.remove("drag-before", "drag-after");
-    target.classList.add(event.clientY < midY ? "drag-before" : "drag-after");
-  }
-  function _smgmtTicketReorderDragLeave(event) {
-    event.currentTarget.classList.remove("drag-before", "drag-after");
-  }
-  async function _smgmtTicketReorderDrop(event, targetIssue, sprintLabel) {
-    if (!_smgmtDragTicket || _smgmtDragTicket.multi && _smgmtDragTicket.multi.length > 1)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    if (dragInfo.fromSprint !== sprintLabel)
-      return;
-    const dragIssue = dragInfo.number;
-    if (dragIssue === targetIssue) {
-      event.currentTarget.classList.remove("drag-before", "drag-after");
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const insertAfter = event.clientY >= rect.top + rect.height / 2;
-    event.currentTarget.classList.remove("drag-before", "drag-after");
-    const repo = _smgmtRepo();
-    if (!repo || !_smgmtData)
-      return;
-    const container = document.getElementById(`smgmt-tickets-${sprintLabel}`);
-    if (!container)
-      return;
-    const rows = Array.from(container.querySelectorAll(".smgmt-ticket[data-issue]"));
-    let order = rows.map((r) => parseInt(r.dataset.issue, 10)).filter((n) => !isNaN(n));
-    order = order.filter((n) => n !== dragIssue);
-    const insertIdx = order.indexOf(targetIssue) + (insertAfter ? 1 : 0);
-    order.splice(insertIdx, 0, dragIssue);
-    _smgmtDragTicket = null;
-    try {
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(sprintLabel)}/plan?project=${encodeURIComponent(repo)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(order)
-        }
-      );
-      if (!res.ok)
-        throw new Error(await res.text());
-      await loadSprintMgmt();
-    } catch (e) {
-      alert(`Failed to reorder tickets: ${e.message}`);
-      await loadSprintMgmt();
-    }
-  }
-  function _smgmtBacklogTicketDragStart(event, issueNum) {
-    const isChecked = _smgmtSelectedIssues.has(issueNum);
-    if (isChecked && _smgmtSelectedIssues.size > 1) {
-      const nums = Array.from(_smgmtSelectedIssues);
-      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: nums, multiSprints: 1 };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", nums.join(","));
-      const pill = document.getElementById("smgmt-drag-pill");
-      if (pill) {
-        pill.textContent = `Moving ${nums.length} tickets`;
-        pill.style.top = event.clientY - 20 + "px";
-        pill.style.left = event.clientX + 12 + "px";
-      }
-      setTimeout(() => {
-        nums.forEach((n) => {
-          const el = document.getElementById(`smgmt-ticket-${n}`);
-          if (el)
-            el.classList.add("dragging-ticket");
-        });
-      }, 0);
-    } else {
-      _smgmtDragTicket = { number: issueNum, fromSprint: null, multi: null };
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(issueNum));
-      const el = document.getElementById(`smgmt-ticket-${issueNum}`);
-      if (el)
-        setTimeout(() => el.classList.add("dragging-ticket"), 0);
-    }
-    _smgmtGhostShow();
-  }
-  function _smgmtBacklogDragOver(event) {
-    if (_smgmtDragTicket && _smgmtDragTicket.fromSprint !== null) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      document.getElementById("smgmt-backlog-pane")?.classList.add("drag-over-backlog");
-    }
-  }
-  function _smgmtBacklogDragLeave(event) {
-    const pane = document.getElementById("smgmt-backlog-pane");
-    if (pane && !pane.contains(event.relatedTarget)) {
-      pane.classList.remove("drag-over-backlog");
-    }
-  }
-  async function _smgmtDropOnBacklog(event) {
-    event.preventDefault();
-    document.getElementById("smgmt-backlog-pane")?.classList.remove("drag-over-backlog");
-    if (isDragBlocked({ moveLock: _smgmtMoveLock }))
-      return;
-    if (!_smgmtDragTicket)
-      return;
-    const dragInfo = _smgmtDragTicket;
-    _smgmtDragTicket = null;
-    if (!dragInfo.fromSprint)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    if (dragInfo.multi && dragInfo.multi.length > 1) {
-      const nums = dragInfo.multi;
-      if (_smgmtData) {
-        nums.forEach((n) => {
-          const iss = _smgmtData.issues.find((i) => i.number === n);
-          if (iss)
-            iss.sprint = null;
-        });
-      }
-      _smgmtClearSelection();
-      if (_smgmtData)
-        _smgmtRender(_smgmtData);
-      const changes = nums.map((n) => ({ issue_num: n, sprint_label: "backlog" }));
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch("/api/sprints/batch-labels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ changes, project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        alert(`Failed to move tickets to backlog: ${e.message}`);
-        await loadSprintMgmt();
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    } else {
-      const { number, fromSprint } = dragInfo;
-      if (_smgmtData) {
-        const iss = _smgmtData.issues.find((i) => i.number === number);
-        if (iss)
-          iss.sprint = null;
-        _smgmtRender(_smgmtData);
-      }
-      _smgmtClearSelection();
-      _smgmtBoardLock2();
-      try {
-        const res = await fetch(`/api/issues/${number}/sprint-label`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sprint_label: "backlog", project: repo })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        await loadSprintMgmt();
-      } catch (e) {
-        if (_smgmtData) {
-          const iss = _smgmtData.issues.find((i) => i.number === number);
-          if (iss)
-            iss.sprint = fromSprint ? parseInt(fromSprint.split("-")[1], 10) : null;
-          _smgmtRender(_smgmtData);
-        }
-        alert(`Failed to move ticket #${number} to backlog: ${e.message}`);
-      } finally {
-        _smgmtBoardUnlock();
-      }
-    }
-  }
   function _smgmtBoardLock2(message, opts) {
     _smgmtMoveLock = true;
     _smgmtArStopTicker();
@@ -7830,7 +7991,7 @@ ${data.errors.join("\n")}`);
     if (paHost) {
       paHost.hidden = !showProgress;
       if (showProgress) {
-        mountProgressActivity(paHost, {
+        mountProgressActivity2(paHost, {
           status: "running",
           mode: "bar",
           done: 0,
@@ -7841,7 +8002,7 @@ ${data.errors.join("\n")}`);
           id: BOARD_OVERLAY_PA_ID
         });
       } else {
-        unmountProgressActivity(paHost);
+        unmountProgressActivity2(paHost);
       }
     }
     if (showProgress && opts.total != null) {
@@ -7882,7 +8043,7 @@ ${data.errors.join("\n")}`);
   function _smgmtBoardLog2(line, kind) {
     if (_smgmtBoardOverlayHasProgress) {
       const mappedType = kind === "ok" ? "success" : kind === "err" ? "fail" : kind === "step" ? "dispatch" : "dispatch";
-      appendProgressActivityLog("smgmt-op-pa-host", line, mappedType, { id: BOARD_OVERLAY_PA_ID });
+      appendProgressActivityLog2("smgmt-op-pa-host", line, mappedType, { id: BOARD_OVERLAY_PA_ID });
       return;
     }
     const logEl = document.getElementById("smgmt-op-log");
@@ -7902,7 +8063,7 @@ ${data.errors.join("\n")}`);
       overlay.classList.remove("active");
     const paHost = document.getElementById("smgmt-op-pa-host");
     if (paHost) {
-      unmountProgressActivity(paHost);
+      unmountProgressActivity2(paHost);
       paHost.hidden = true;
     }
     const progWrap = document.getElementById("smgmt-op-progress-wrap");
@@ -8007,12 +8168,14 @@ ${data.errors.join("\n")}`);
   globalThis.smgmtFinishSprint = smgmtFinishSprint;
   globalThis._fsConfirm = _fsConfirm;
   globalThis._fsRetry = _fsRetry;
+  globalThis.finishSprintAndWait = finishSprintAndWait2;
   globalThis._bcOpen = _bcOpen;
   globalThis._bcClose = _bcClose;
   globalThis._bcCatClass = _bcCatClass;
   globalThis._bcSelectAll = _bcSelectAll;
   globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
   globalThis._bcConfirm = _bcConfirm;
+  globalThis.bulkCompleteLineageAndWait = bulkCompleteLineageAndWait2;
   globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
   globalThis._recApply = _recApply;
   globalThis._recClose = _recClose;
@@ -8034,6 +8197,7 @@ ${data.errors.join("\n")}`);
   globalThis._pfFlagHidePicker = _pfFlagHidePicker;
   globalThis._pfFlagAction = _pfFlagAction;
   globalThis._pfFlagReestimate = _pfFlagReestimate;
+  globalThis._pfFlagAutoReestimate = _pfFlagAutoReestimate;
   globalThis._pfBuildDAGHtml = _pfBuildDAGHtml;
   globalThis._pfDrawDAGArrows = _pfDrawDAGArrows;
   globalThis._pfToggleTicket = _pfToggleTicket;
@@ -8051,40 +8215,6 @@ ${data.errors.join("\n")}`);
   globalThis._pfStepperSummary = _pfStepperSummary;
   globalThis.smgmtKickoffRun = smgmtKickoffRun;
   globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
-  globalThis.computeDropPlan = computeDropPlan;
-  globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI2;
-  globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
-  globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;
-  globalThis._smgmtToggleMoveToMenu = _smgmtToggleMoveToMenu;
-  globalThis._smgmtCloseMoveToMenu = _smgmtCloseMoveToMenu;
-  globalThis._smgmtClearSelection = _smgmtClearSelection;
-  globalThis._smgmtSetSelected = _smgmtSetSelected;
-  globalThis._smgmtToggleSelect = _smgmtToggleSelect;
-  globalThis._smgmtRowClick = _smgmtRowClick;
-  globalThis._smgmtIsDeletableIssue = _smgmtIsDeletableIssue;
-  globalThis._smgmtDeleteSelected = _smgmtDeleteSelected;
-  globalThis._smgmtMoveSelectedTo = _smgmtMoveSelectedTo;
-  globalThis._smgmtTicketDragStart = _smgmtTicketDragStart;
-  globalThis._smgmtDragMovePill = _smgmtDragMovePill;
-  globalThis._smgmtGhostComputeNextFree = _smgmtGhostComputeNextFree;
-  globalThis._smgmtGhostShow = _smgmtGhostShow;
-  globalThis._smgmtGhostHide = _smgmtGhostHide;
-  globalThis._smgmtGhostDragOver = _smgmtGhostDragOver;
-  globalThis._smgmtGhostDragLeave = _smgmtGhostDragLeave;
-  globalThis._smgmtGhostDrop = _smgmtGhostDrop;
-  globalThis._gcClose = _gcClose;
-  globalThis._gcConfirm = _gcConfirm;
-  globalThis._smgmtTicketDragEnd = _smgmtTicketDragEnd;
-  globalThis._smgmtDragOver = _smgmtDragOver;
-  globalThis._smgmtDragLeave = _smgmtDragLeave;
-  globalThis._smgmtDropOnSprint = _smgmtDropOnSprint;
-  globalThis._smgmtTicketReorderDragOver = _smgmtTicketReorderDragOver;
-  globalThis._smgmtTicketReorderDragLeave = _smgmtTicketReorderDragLeave;
-  globalThis._smgmtTicketReorderDrop = _smgmtTicketReorderDrop;
-  globalThis._smgmtBacklogTicketDragStart = _smgmtBacklogTicketDragStart;
-  globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
-  globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
-  globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
   globalThis._smgmtBoardLock = _smgmtBoardLock2;
   globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
   globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
@@ -8093,7 +8223,7 @@ ${data.errors.join("\n")}`);
   globalThis._smgmtBoardHalt = _smgmtBoardHalt;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
-  globalThis._smgmtRender = _smgmtRender2;
+  globalThis._smgmtRender = _smgmtRender;
   globalThis._smgmtLabelFilterRender = _smgmtLabelFilterRender;
   globalThis._smgmtLabelFilterApply = _smgmtLabelFilterApply;
   globalThis._smgmtFetchMissingOutcomes = _smgmtFetchMissingOutcomes;
@@ -8139,7 +8269,7 @@ ${data.errors.join("\n")}`);
   globalThis._histNeedsActionCount = _histNeedsActionCount;
   globalThis._histLoadLedger = _histLoadLedger2;
   globalThis._histPrefetchLedger = _histPrefetchLedger;
-  globalThis._histScanStale = _histScanStale;
+  globalThis._histScanStale = _histScanStale2;
   globalThis._histCleanupStale = _histCleanupStale;
   globalThis._histToggleCard = _histToggleCard;
   globalThis._histToggleGroup = _histToggleGroup;
@@ -8154,6 +8284,7 @@ ${data.errors.join("\n")}`);
   globalThis._histToggleShowClosed = _histToggleShowClosed;
   globalThis._histForceRefresh = _histForceRefresh;
   globalThis._histSetTtlMin = _histSetTtlMin;
+  globalThis._histBulkSignOff = _histBulkSignOff;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
 
   // apps/dashboard/static/src/index.js
@@ -8166,11 +8297,11 @@ ${data.errors.join("\n")}`);
   root.updateProgressActivityLog = updateProgressActivityLog;
   root.patchProgressActivityInPlace = patchProgressActivityInPlace2;
   root.paToggleLog = paToggleLog;
-  root.mountProgressActivity = mountProgressActivity;
+  root.mountProgressActivity = mountProgressActivity2;
   root.patchProgressActivity = patchProgressActivity;
   root.patchProgressActivityStep = patchProgressActivityStep;
-  root.unmountProgressActivity = unmountProgressActivity;
-  root.appendProgressActivityLog = appendProgressActivityLog;
+  root.unmountProgressActivity = unmountProgressActivity2;
+  root.appendProgressActivityLog = appendProgressActivityLog2;
   root.getProgressActivityPayload = getProgressActivityPayload;
   root.BOARD_OVERLAY_PA_ID = BOARD_OVERLAY_PA_ID;
   injectProgressActivityCss();
@@ -8182,5 +8313,27 @@ ${data.errors.join("\n")}`);
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
+  root.sprintCleanupPreview = sprintCleanupPreview;
+  root.sprintCleanupConfirm = sprintCleanupConfirm;
+  root.testFilesCleanupPreview = testFilesCleanupPreview;
+  root.testFilesCleanupConfirm = testFilesCleanupConfirm;
+  root.psStaleBranchesScan = psStaleBranchesScan;
+  root.psPruneMergedBranches = psPruneMergedBranches;
+  root.psCleanupLogClear = psCleanupLogClear;
+  root.psCleanupModalConfirm = psCleanupModalConfirm;
+  root._psCleanupModalClose = _psCleanupModalClose;
+  root._psCleanupPaneClose = _psCleanupPaneClose;
+  root._psCleanupPaneConfirm = _psCleanupPaneConfirm;
+  globalThis.sprintCleanupPreview = sprintCleanupPreview;
+  globalThis.sprintCleanupConfirm = sprintCleanupConfirm;
+  globalThis.testFilesCleanupPreview = testFilesCleanupPreview;
+  globalThis.testFilesCleanupConfirm = testFilesCleanupConfirm;
+  globalThis.psStaleBranchesScan = psStaleBranchesScan;
+  globalThis.psPruneMergedBranches = psPruneMergedBranches;
+  globalThis.psCleanupLogClear = psCleanupLogClear;
+  globalThis.psCleanupModalConfirm = psCleanupModalConfirm;
+  globalThis._psCleanupModalClose = _psCleanupModalClose;
+  globalThis._psCleanupPaneClose = _psCleanupPaneClose;
+  globalThis._psCleanupPaneConfirm = _psCleanupPaneConfirm;
 })();
 //# sourceMappingURL=bundle.js.map

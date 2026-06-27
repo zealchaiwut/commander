@@ -210,6 +210,25 @@ def test_dag_order_places_dependency_before_dependent():
     assert set(nums) == {1, 2}  # no ticket lost
 
 
+def test_dag_order_independent_tickets_ascending_by_number():
+    """Independent tickets (no shared files) dispatch ascending by issue number,
+    regardless of input order — so the live run starts from the lowest number,
+    matching the preview-dag (not GitHub's newest-first selection order)."""
+    tickets = [PlanTicket(number=n, files=[f"f{n}.py"]) for n in (140, 137, 151)]
+    ordered = dag_order(tickets)
+    assert [t.number for t in ordered] == [137, 140, 151]
+
+
+def test_dag_order_carry_over_first_then_ascending():
+    """Carry-over tickets keep priority (AC4), then ascending number within."""
+    a = PlanTicket(number=5, files=["a.py"])
+    b = PlanTicket(number=10, files=["b.py"], carry_over=True)
+    c = PlanTicket(number=3, files=["c.py"])
+    ordered = dag_order([a, b, c])
+    # carry-over #10 first, then the rest ascending (#3, #5)
+    assert [t.number for t in ordered] == [10, 3, 5]
+
+
 def test_dag_order_degrades_on_cycle_without_dropping_tickets():
     """AC8: a dependency cycle degrades to input order, never drops tickets."""
     # Two tickets each owning a file the other also touches → mutual dependency.

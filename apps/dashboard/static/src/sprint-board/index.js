@@ -23,6 +23,7 @@ import {
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
+  _histBulkSignOff,
 } from './history.js';
 
 import {
@@ -31,11 +32,11 @@ import {
 } from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
-  smgmtFinishSprint, _fsConfirm, _fsRetry,
+  smgmtFinishSprint, _fsConfirm, _fsRetry, finishSprintAndWait,
 } from './finish-modal.js';
 import {
   _bcOpen, _bcClose, _bcCatClass, _bcSelectAll,
-  smgmtBulkCompleteSprint, _bcConfirm,
+  smgmtBulkCompleteSprint, _bcConfirm, bulkCompleteLineageAndWait,
 } from './bulk-complete-modal.js';
 import {
   smgmtReconcileSprint, _recApply, _recClose,
@@ -46,6 +47,7 @@ import {
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
   _pfFlagShowSizePicker, _pfFlagHidePicker, _pfFlagAction, _pfFlagReestimate,
+  _pfFlagAutoReestimate, _pfFlagDefaultReestimateSize,
   _pfBuildDAGHtml, _pfDrawDAGArrows, _pfToggleTicket, _pfGetSelectedTickets,
   _pfComputeConflicts, _pfBuildConflictsHtml, _pfBuildOrderHtml,
   _pfUpdateSections, _pfShowError, _pfRetry, _pfConfirm,
@@ -53,22 +55,9 @@ import {
   smgmtKickoffRun, smgmtKickoffRetry,
 } from './run-controls.js';
 import {
-  computeDropPlan,
-  _smgmtUpdateSelectionUI, _smgmtPopulateSelectionDropdown, 
-  _smgmtPopulateMoveToMenu, _smgmtToggleMoveToMenu, _smgmtCloseMoveToMenu, 
-  _smgmtClearSelection, _smgmtSetSelected, _smgmtToggleSelect, 
-  _smgmtRowClick, _smgmtIsDeletableIssue, _smgmtDeleteSelected, 
-  _smgmtMoveSelectedTo, _smgmtTicketDragStart, _smgmtDragMovePill, 
-  _smgmtGhostComputeNextFree, _smgmtGhostShow, _smgmtGhostHide, 
-  _smgmtGhostDragOver, _smgmtGhostDragLeave, _smgmtGhostDrop, _gcClose, 
-  _gcConfirm, _smgmtTicketDragEnd, _smgmtDragOver, _smgmtDragLeave, 
-  _smgmtDropOnSprint, _smgmtTicketReorderDragOver, 
-  _smgmtTicketReorderDragLeave, _smgmtTicketReorderDrop, 
-  _smgmtBacklogTicketDragStart, _smgmtBacklogDragOver, 
-  _smgmtBacklogDragLeave, _smgmtDropOnBacklog, _smgmtBoardLock,
-  _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
-  _smgmtBoardFinish, _smgmtBoardHalt,
-} from './drag-drop.js';
+  _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress,
+  _smgmtBoardLog, _smgmtBoardFinish, _smgmtBoardHalt,
+} from './board-overlay.js';
 import {
   loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender,
   _smgmtLabelFilterRender, _smgmtLabelFilterApply,
@@ -104,6 +93,7 @@ globalThis._fsSelectAll = _fsSelectAll;
 globalThis.smgmtFinishSprint = smgmtFinishSprint;
 globalThis._fsConfirm = _fsConfirm;
 globalThis._fsRetry = _fsRetry;
+globalThis.finishSprintAndWait = finishSprintAndWait;
 
 // Bulk Complete modal (parent + child lineage)
 globalThis._bcOpen = _bcOpen;
@@ -112,6 +102,7 @@ globalThis._bcCatClass = _bcCatClass;
 globalThis._bcSelectAll = _bcSelectAll;
 globalThis.smgmtBulkCompleteSprint = smgmtBulkCompleteSprint;
 globalThis._bcConfirm = _bcConfirm;
+globalThis.bulkCompleteLineageAndWait = bulkCompleteLineageAndWait;
 
 globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
 globalThis._recApply = _recApply;
@@ -136,6 +127,7 @@ globalThis._pfFlagShowSizePicker = _pfFlagShowSizePicker;
 globalThis._pfFlagHidePicker = _pfFlagHidePicker;
 globalThis._pfFlagAction = _pfFlagAction;
 globalThis._pfFlagReestimate = _pfFlagReestimate;
+globalThis._pfFlagAutoReestimate = _pfFlagAutoReestimate;
 globalThis._pfBuildDAGHtml = _pfBuildDAGHtml;
 globalThis._pfDrawDAGArrows = _pfDrawDAGArrows;
 globalThis._pfToggleTicket = _pfToggleTicket;
@@ -156,43 +148,7 @@ globalThis._pfStepperSummary = _pfStepperSummary;
 globalThis.smgmtKickoffRun = smgmtKickoffRun;
 globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
 
-// Drag & drop + multi-select + ghost pane + board lock (issues #247/#276/#660)
-// computeDropPlan is a DOM-free decision helper kept on the global (and thus in
-// the bundle) for the drag/drop smoke-test contract — see test_..__797.py.
-globalThis.computeDropPlan = computeDropPlan;
-globalThis._smgmtUpdateSelectionUI = _smgmtUpdateSelectionUI;
-globalThis._smgmtPopulateSelectionDropdown = _smgmtPopulateSelectionDropdown;
-globalThis._smgmtPopulateMoveToMenu = _smgmtPopulateMoveToMenu;
-globalThis._smgmtToggleMoveToMenu = _smgmtToggleMoveToMenu;
-globalThis._smgmtCloseMoveToMenu = _smgmtCloseMoveToMenu;
-globalThis._smgmtClearSelection = _smgmtClearSelection;
-globalThis._smgmtSetSelected = _smgmtSetSelected;
-globalThis._smgmtToggleSelect = _smgmtToggleSelect;
-globalThis._smgmtRowClick = _smgmtRowClick;
-globalThis._smgmtIsDeletableIssue = _smgmtIsDeletableIssue;
-globalThis._smgmtDeleteSelected = _smgmtDeleteSelected;
-globalThis._smgmtMoveSelectedTo = _smgmtMoveSelectedTo;
-globalThis._smgmtTicketDragStart = _smgmtTicketDragStart;
-globalThis._smgmtDragMovePill = _smgmtDragMovePill;
-globalThis._smgmtGhostComputeNextFree = _smgmtGhostComputeNextFree;
-globalThis._smgmtGhostShow = _smgmtGhostShow;
-globalThis._smgmtGhostHide = _smgmtGhostHide;
-globalThis._smgmtGhostDragOver = _smgmtGhostDragOver;
-globalThis._smgmtGhostDragLeave = _smgmtGhostDragLeave;
-globalThis._smgmtGhostDrop = _smgmtGhostDrop;
-globalThis._gcClose = _gcClose;
-globalThis._gcConfirm = _gcConfirm;
-globalThis._smgmtTicketDragEnd = _smgmtTicketDragEnd;
-globalThis._smgmtDragOver = _smgmtDragOver;
-globalThis._smgmtDragLeave = _smgmtDragLeave;
-globalThis._smgmtDropOnSprint = _smgmtDropOnSprint;
-globalThis._smgmtTicketReorderDragOver = _smgmtTicketReorderDragOver;
-globalThis._smgmtTicketReorderDragLeave = _smgmtTicketReorderDragLeave;
-globalThis._smgmtTicketReorderDrop = _smgmtTicketReorderDrop;
-globalThis._smgmtBacklogTicketDragStart = _smgmtBacklogTicketDragStart;
-globalThis._smgmtBacklogDragOver = _smgmtBacklogDragOver;
-globalThis._smgmtBacklogDragLeave = _smgmtBacklogDragLeave;
-globalThis._smgmtDropOnBacklog = _smgmtDropOnBacklog;
+// Board move-lock overlay (issue #276)
 globalThis._smgmtBoardLock = _smgmtBoardLock;
 globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
 globalThis._smgmtBoardProgress = _smgmtBoardProgress;
@@ -274,4 +230,5 @@ globalThis._histResetLedgerCache = _histResetLedgerCache;
 globalThis._histToggleShowClosed = _histToggleShowClosed;
 globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
+globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;

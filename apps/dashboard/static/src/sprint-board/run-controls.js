@@ -565,9 +565,16 @@ export function _pfBuildFlagsHtml() {
   const subtitle = pending > 0
     ? `${pending} ticket${pending > 1 ? 's' : ''} flagged for review`
     : 'All flags resolved';
+  const bulkBtnsHtml = pending > 0 ? `
+      <div class="pf-flags-bulk-btns">
+        <button class="pf-flags-bulk-btn" onclick="_pfApproveAll()">Approve all</button>
+        <button class="pf-flags-bulk-btn" onclick="_pfReestimateAll()">Re-estimate all</button>
+      </div>` : '';
 
   return `<div class="pf-flags-section" id="pf-flags-section">
-    <div class="pf-flags-label">Mis-sizing review — ${subtitle}</div>
+    <div class="pf-flags-label-row">
+      <span class="pf-flags-label">Mis-sizing review — ${subtitle}</span>${bulkBtnsHtml}
+    </div>
     ${rows.join('')}
   </div>`;
 }
@@ -620,6 +627,96 @@ export async function _pfFlagAction(num, action, newSize) {
 
 export function _pfFlagReestimate(num, newSize) {
   _pfFlagAction(num, 'reestimated', newSize);
+}
+
+// ── Bulk flag actions (Approve All / Re-estimate All) ──────────────────────
+
+let _pfBulkRunning = false;
+
+export async function _pfApproveAll() {
+  const pending = (_pfFlags?.flags || []).filter(f => f.status === 'pending');
+  if (!pending.length) return;
+  await _pfBulkProcess(pending, 'approved');
+}
+
+export async function _pfReestimateAll() {
+  const pending = (_pfFlags?.flags || []).filter(f => f.status === 'pending');
+  if (!pending.length) return;
+  await _pfBulkProcess(pending, 'reestimated');
+}
+
+export function _pfBulkClose() {
+  if (_pfBulkRunning) return;
+  const overlay = document.getElementById('pf-bulk-overlay');
+  if (overlay) overlay.classList.add('hidden');
+  const flagsSection = document.getElementById('pf-flags-section');
+  if (flagsSection) {
+    const newHtml = _pfBuildFlagsHtml();
+    flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
+  }
+  _pfRecalcStepFails();
+  _pfUpdateConfirmBtn();
+}
+
+async function _pfBulkProcess(flags, action) {
+  _pfBulkRunning = true;
+  const overlay = document.getElementById('pf-bulk-overlay');
+  const titleEl = document.getElementById('pf-bulk-title');
+  const listEl  = document.getElementById('pf-bulk-list');
+  const doneBtn = document.getElementById('pf-bulk-done-btn');
+  if (!overlay || !titleEl || !listEl || !doneBtn) { _pfBulkRunning = false; return; }
+
+  const modeLabel = action === 'approved' ? 'Approving' : 'Re-estimating';
+  titleEl.textContent = `${modeLabel} ${flags.length} flag${flags.length !== 1 ? 's' : ''}…`;
+  doneBtn.disabled = true;
+  doneBtn.textContent = 'Close';
+
+  listEl.innerHTML = flags.map(f => `
+    <div class="pf-bulk-item">
+      <span class="pf-bulk-item-id">#${f.issue_number}</span>
+      <span class="pf-bulk-item-title" title="${escHtml(f.title)}">${escHtml(f.title)}</span>
+      <span class="pf-bulk-item-status pending" id="pf-bulk-status-${f.issue_number}">
+        <i class="ti ti-clock"></i>
+      </span>
+    </div>`).join('');
+
+  overlay.classList.remove('hidden');
+
+  let errorCount = 0;
+  for (const f of flags) {
+    const statusEl = document.getElementById(`pf-bulk-status-${f.issue_number}`);
+    if (statusEl) {
+      statusEl.className = 'pf-bulk-item-status processing';
+      statusEl.innerHTML = '<span class="pf-bulk-spinner"></span>';
+    }
+    try {
+      const body = { action };
+      if (action === 'reestimated') body.new_size = _pfFlagDefaultReestimateSize(f);
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(_pfCurrentLabel)}/mis-sizing-flags/${f.issue_number}/action?project=${encodeURIComponent(_pfCurrentRepo)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      _pfFlags = await res.json();
+      if (statusEl) {
+        statusEl.className = 'pf-bulk-item-status done';
+        statusEl.innerHTML = '<i class="ti ti-check"></i>';
+      }
+    } catch (e) {
+      errorCount++;
+      if (statusEl) {
+        statusEl.className = 'pf-bulk-item-status error';
+        statusEl.innerHTML = '<i class="ti ti-x"></i>';
+        statusEl.title = e.message;
+      }
+    }
+  }
+
+  const doneLabel = action === 'approved' ? 'Approved' : 'Re-estimated';
+  const suffix = errorCount ? ` — ${errorCount} error${errorCount !== 1 ? 's' : ''}` : '';
+  titleEl.textContent = `${doneLabel}${suffix}`;
+  doneBtn.disabled = false;
+  _pfBulkRunning = false;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

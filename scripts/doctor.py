@@ -84,12 +84,22 @@ def _run(cmd, timeout: int = DEFAULT_TIMEOUT):
 # ── Individual checks ────────────────────────────────────────────────────────
 
 def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
-    """`claude` CLI is on the service PATH and answers a cheap probe.
+    """`claude` CLI is on the service PATH and its OAuth token is live (issue #868).
 
-    Uses ``claude --version`` — a fast probe that confirms the binary is
-    reachable and runnable, never a full agent run (issue #789 separation).
+    Two-gate check (issue #789 separation — never a full agent run):
+
+    Gate 1 — reachability: ``claude --version`` confirms the binary is installed
+    and executable. Fails immediately with a "CLI not found" message when the
+    binary is absent or crashes.
+
+    Gate 2 — auth probe: ``claude -p "" --output-format json`` exercises the
+    OAuth token with the lightest possible invocation. An auth error here
+    indicates a missing or expired token, not a missing binary, and is reported
+    with a distinct fix message that guides the user to log in.
     """
-    name = "claude CLI reachable"
+    name = "Claude CLI (auth)"
+
+    # ── Gate 1: reachability ─────────────────────────────────────────────────
     path = which("claude")
     if not path:
         return _result(
@@ -104,7 +114,7 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             ),
         )
     try:
-        proc = runner(["claude", "--version"])
+        ver_proc = runner(["claude", "--version"])
     except FileNotFoundError:
         return _result(
             name,
@@ -117,17 +127,48 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             False,
             fix=f"`claude --version` timed out (>{DEFAULT_TIMEOUT}s); check the install.",
         )
-    if proc.returncode != 0:
+    if ver_proc.returncode != 0:
         return _result(
             name,
             False,
             fix=(
-                "`claude --version` returned non-zero. Re-authenticate Claude "
-                "Code (`claude` then `/login`) and verify the install."
+                "`claude --version` returned non-zero. Verify the Claude Code "
+                "install and ensure the binary is on the service PATH."
             ),
-            detail=(proc.stderr or "").strip(),
+            detail=(ver_proc.stderr or "").strip(),
         )
-    return _result(name, True, detail=f"{path} ({(proc.stdout or '').strip()})")
+
+    # ── Gate 2: auth probe ───────────────────────────────────────────────────
+    try:
+        auth_proc = runner(["claude", "-p", "", "--output-format", "json"])
+    except FileNotFoundError:
+        return _result(
+            name,
+            False,
+            fix="Install Claude Code and put `claude` on the service PATH.",
+        )
+    except subprocess.TimeoutExpired:
+        return _result(
+            name,
+            False,
+            fix=f"Claude auth probe timed out (>{DEFAULT_TIMEOUT}s); check network/auth.",
+        )
+    if auth_proc.returncode != 0:
+        return _result(
+            name,
+            False,
+            fix=(
+                "Claude CLI is installed but not authenticated. Run `claude` "
+                "and log in via `/login`, or set CLAUDE_CODE_OAUTH_TOKEN in the "
+                "launchd plist EnvironmentVariables for headless auth."
+            ),
+            detail=((auth_proc.stderr or "") + (auth_proc.stdout or "")).strip(),
+        )
+    return _result(
+        name,
+        True,
+        detail=f"{path} — reachable and authenticated ({(ver_proc.stdout or '').strip()})",
+    )
 
 
 def check_gh_cli(*, which=shutil.which, runner=_run) -> CheckResult:

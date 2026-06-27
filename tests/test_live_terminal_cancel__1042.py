@@ -1,14 +1,11 @@
 """Cancelled / ended sprints must not keep /live in a running state."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "apps" / "dashboard"))
-from server import _live_freeze_terminal_fields  # noqa: E402
+from routers.sprint_live import _live_freeze_terminal_fields  # noqa: E402
 
 
 def test_live_freeze_terminal_clears_active_agents():

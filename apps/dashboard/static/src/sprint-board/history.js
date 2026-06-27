@@ -540,8 +540,8 @@ function _histHeadActionsHtml(s) {
     onclick="event.stopPropagation()" title="Open sprint logs">
     <i class="ti ti-list-details"></i> Logs</a>`;
 
-  if (!_histIsLocked(s.lifecycle_state)) {
-    const state = (s.lifecycle_state || '').toLowerCase();
+  const state = (s.lifecycle_state || '').toLowerCase();
+  if (!_histIsLocked(s.lifecycle_state) && state !== 'running') {
     const lbl = escHtml(s.label || '');
     const rawLabel = s.label || '';
     html += `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
@@ -1584,6 +1584,7 @@ function _histRecoveryBtnHtml(s) {
       title="Complete sprint — merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
   }
+  if (state === 'running') return '';
   return reconcileBtn;
 }
 
@@ -1843,7 +1844,7 @@ function _histGroupHtml(group) {
   const children = group.children || [];
   if (children.length) {
     const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
-    const groupCls = "hist-sprint-group";
+    const groupCls = "hist-sprint-group" + (_histExpanded.has(baseLbl) ? "" : " collapsed");
     const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
     const parentCard = _histChildCardHtml(parentSprint, group, {
       isLineageParent: true,
@@ -2386,6 +2387,7 @@ export async function _histBulkSignOff() {
         _histResetLedgerCache();
         const repo = _cachedFullRepo[_slug];
         if (repo) _histLoadLedger(repo, { force: true });
+        else _histForceRefresh();
         if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true).catch(() => {});
       },
     });

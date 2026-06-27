@@ -164,7 +164,10 @@ def get_sprint_nav_status(repo: str = ""):
         with ThreadPoolExecutor(max_workers=min(10, len(sprint_nums))) as pool:
             futures = {n: pool.submit(github_client.list_issues, n, repo_name) for n in sprint_nums}
             for n, fut in futures.items():
-                issues = fut.result()
+                try:
+                    issues = fut.result()
+                except subprocess.CalledProcessError:
+                    continue
                 if issues:
                     all_sprint_issues[n] = issues
 

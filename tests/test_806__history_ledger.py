@@ -377,7 +377,7 @@ def test_bulk_complete_modal_mounts():
     assert "bulk-complete-preview" in modal_js or "smgmtBulkCompleteSprint" in modal_js
     # Re-fetch merge chain after each merge (parent→develop only known post child merge).
     assert "_bcRemainingMergeSteps" in modal_js
-    assert "while (mergeSteps.length > 0)" in modal_js
+    assert "for (let i = 0; i < order.length; i++)" in modal_js
 
 
 def test_bc_confirm_reads_merge_steps_before_close():
@@ -385,7 +385,7 @@ def test_bc_confirm_reads_merge_steps_before_close():
     modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
     body = _fn_body("_bcConfirm", modal_js)
     close_at = body.find("_bcClose()")
-    preview_merge_at = body.find("_bcPreview.merge_steps")
+    preview_merge_at = body.find("_bcPreview.complete_order")
     assert close_at != -1 and preview_merge_at != -1
     assert preview_merge_at < close_at, (
         "_bcPreview.merge_steps must be read before _bcClose clears _bcPreview"

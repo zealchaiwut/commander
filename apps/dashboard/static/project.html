@@ -18729,7 +18729,7 @@ async function _smgmtLivePollTick() {
       });
     }
 
-    for (const label of _smgmtRunningLabels) {
+    await Promise.all(Array.from(_smgmtRunningLabels).map(async (label) => {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
       ).catch(() => null);
@@ -18757,7 +18757,7 @@ async function _smgmtLivePollTick() {
         _smgmtRunningViewUpdate(label, live);
         if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, live);
       }
-    }
+    }));
   } catch (_) { /* silently ignore poll errors */ }
 }
 

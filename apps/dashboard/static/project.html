@@ -14354,20 +14354,20 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const gen = ++_smgmtMiniRailGen;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     if (gen !== _smgmtMiniRailGen) return;
-    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtRunningLabels.has(label)) return;
     const outcome = _smgmtOutcomeCache[label];
     const isHasRework = outcome && outcome.state === 'has_rework';
-    if (_smgmtFinishedLabels.has(label) && !isHasRework) continue;
+    if (_smgmtFinishedLabels.has(label) && !isHasRework) return;
     const tickets = bySprint[label] || [];
-    if (tickets.length < 1) continue;
+    if (tickets.length < 1) return;
     const pfHints = _preflightEnabled() ? _smgmtPreflightHints(tickets) : null;
     const sig = _smgmtMiniRailSig(tickets, pfHints);
     const cached = _smgmtMiniRailCache[label];
     if (cached && cached.sig === sig && cached.html) {
       _smgmtInjectMiniRailHtml(label, cached.html);
-      continue;
+      return;
     }
     try {
       const resp = await fetch(
@@ -14377,10 +14377,11 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
       if (resp.ok) {
         const data = await resp.json();
         _smgmtInjectMiniRail(label, data, pfHints, tickets);
-        continue;
+        return;
       }
     } catch (_) { /* fall through to hints-only rail */ }
     // Has-rework / empty DAG: still show run preview row with pre-flight hints.
+    if (gen !== _smgmtMiniRailGen) return;
     if (pfHints && (pfHints.missingAC || pfHints.unsized)) {
       _smgmtInjectMiniRail(
         label,
@@ -14389,7 +14390,7 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
         tickets,
       );
     }
-  }
+  }));
 }
 
 

@@ -8,7 +8,6 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
-
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -42,7 +41,7 @@ class TestLookupInSmRobustness:
         import sprint_manager as sm
 
         def lambda_patch():  # different qualname than _run_timed
-            return None
+            pass
         original = sm._run_timed
         sm._run_timed = lambda_patch
         try:

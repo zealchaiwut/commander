@@ -514,6 +514,7 @@ class TestFinishFeatureUsesRemoteRef:
     def test_finish_feature_merges_origin_ref(self, tmp_path):
         """finish_feature.py subprocess call must use `origin/<branch>` not `<branch>`."""
         import importlib.util
+        import subprocess as _subprocess
 
         ff_path = REPO_ROOT / "scripts" / "finish_feature.py"
         assert ff_path.exists(), f"finish_feature.py not found at {ff_path}"
@@ -526,7 +527,7 @@ class TestFinishFeatureUsesRemoteRef:
         def fake_run(*cmd):
             calls.append(list(cmd))
             if cmd == ("git", "rev-parse", "HEAD"):
-                raise subprocess.CalledProcessError(1, cmd)
+                raise _subprocess.CalledProcessError(1, cmd)
             return ""
 
         def fake_try(*cmd):

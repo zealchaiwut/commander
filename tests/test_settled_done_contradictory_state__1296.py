@@ -12,7 +12,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 _SERVICE = _REPO / "apps" / "dashboard" / "routers" / "sprint_artifact_service.py"
-_SERVER = _REPO / "apps" / "dashboard" / "startup.py"
+_SPRINT_NAV = _REPO / "apps" / "dashboard" / "routers" / "sprint_nav.py"
 
 
 def _load_compute_summary_counts():
@@ -27,8 +27,8 @@ def _load_compute_summary_counts():
 
 
 def _load_settled_done_from_columns():
-    """Import _settled_done_from_columns without loading the full server module."""
-    src = _SERVER.read_text(encoding="utf-8")
+    """Import _settled_done_from_columns without loading the full sprint_nav module."""
+    src = _SPRINT_NAV.read_text(encoding="utf-8")
     start = src.index("def _settled_done_from_columns(")
     nxt = src.index("\ndef ", start + 1)
     ns: dict = {}

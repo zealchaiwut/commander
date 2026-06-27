@@ -2722,6 +2722,13 @@ Replace the existing draft (${data.existing_label})?`
       title="Complete sprint \u2014 merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
     }
+    if (state === "draft" && s.parent) {
+      const runDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+      const runTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+      onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
+      <i class="ti ti-player-play"></i> Run</button>`;
+    }
     if (state === "running")
       return "";
     return reconcileBtn;

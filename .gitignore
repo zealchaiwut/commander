@@ -58,6 +58,9 @@ apps/dashboard/tests/
 # Backup config — stores gist ID, gitignored by design
 .commander/backup_config.json
 
+# Migration artifacts — local data state, never committed
+.commander/project_todos_store.json.migrated
+
 # Runtime state — attachment bare-clone cache and draft uploads (issue #188)
 apps/dashboard/runtime/
 # Added by code-review-graph

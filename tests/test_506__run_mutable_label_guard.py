@@ -275,13 +275,21 @@ class TestUpdateTicketGuard:
         # Should not print guard messages
         assert "Refused to" not in stderr
 
-    def test_guard_logs_blocked_label_for_uat(self):
-        """With COMMANDER_SPRINT_RUNNING, 'blocked' label removal is refused."""
+    def test_guard_refuses_non_mutable_target_during_sprint(self):
+        """With COMMANDER_SPRINT_RUNNING, a transition to a state outside
+        RUN_MUTABLE_LABELS (e.g. 'blocked') is refused.
+
+        The #509 migration moved label writes from per-label add/remove (the old
+        STATUS_MAP "Refused to remove label X" path) to the state-transition
+        layer, so the guard now refuses the *target state* and cites
+        RUN_MUTABLE_LABELS. The original AC-5 intent — a non-run-mutable label is
+        rejected mid-sprint — is unchanged."""
         env = {"COMMANDER_SPRINT_RUNNING": "sprint-37"}
-        stdout, stderr, _ = self._run_update_ticket("uat", env)
-        # 'blocked' is in STATUS_MAP["uat"]["remove"] but outside RUN_MUTABLE_LABELS
-        assert 'Refused to remove label "blocked"' in stderr
+        stdout, stderr, rc = self._run_update_ticket("blocked", env)
+        # 'blocked' maps to TicketState.BLOCKED, which is outside RUN_MUTABLE_LABELS.
+        assert "transition blocked" in stderr
         assert "RUN_MUTABLE_LABELS" in stderr
+        assert rc != 0
 
     def test_guard_does_not_block_uat_add(self):
         """With COMMANDER_SPRINT_RUNNING, UAT label is still added (it's in RUN_MUTABLE_LABELS)."""

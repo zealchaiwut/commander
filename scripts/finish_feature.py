@@ -21,7 +21,6 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,11 +29,11 @@ _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402  (deferred: sys.path set above)
 load_dotenv(_DASHBOARD_DIR / ".env")
-import github_client
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
+import github_client  # noqa: E402  (deferred: sys.path set above)
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
 
 
 def _run(*cmd) -> str:
@@ -233,7 +232,7 @@ def main():
     _try("git", "push", "origin", "--delete", branch)
 
     sys.stdout.write(str(f"✅  Merged {branch} into {target}") + "\n")
-    sys.stdout.write(str(f"    Feature branch deleted locally and on origin") + "\n")
+    sys.stdout.write(str("    Feature branch deleted locally and on origin") + "\n")
     # Signal to sprint_manager that merge succeeded; label transitions are
     # handled exclusively by sprint_manager via state_machine.transition().
     sys.stdout.write(str(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}") + "\n")

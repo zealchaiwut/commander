@@ -22574,14 +22574,18 @@ function _bcEnsureSprintsLoaded(job) {
  *  draft. Estimates fill in via SSE; the user is NOT held here. */
 function bcStartEstimation() {
   _bcEstimateGatePassed = true;
-  _bcRenderStep2();                 // advance to Sprint immediately
-  if (!_bcJobId || !_bcJobState) return;
-  (_bcJobState.tickets || []).forEach(t => {
-    if (t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
-        && t.estimate_state !== 'sized' && t.estimate_state !== 'estimating') {
-      _bcReestimateDraft(t.index);  // fire-and-forget → /estimate-draft
-    }
-  });
+  // Fire sizing BEFORE advancing — _bcReestimateDraft reads the bc-draft-title/
+  // body inputs, which _bcRenderStep2 removes from the DOM. Running it after the
+  // re-render made every estimate silently no-op (the inputs were already gone).
+  if (_bcJobId && _bcJobState) {
+    (_bcJobState.tickets || []).forEach(t => {
+      if (t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+          && t.estimate_state !== 'sized' && t.estimate_state !== 'estimating') {
+        _bcReestimateDraft(t.index);  // fire-and-forget → /estimate-draft
+      }
+    });
+  }
+  _bcRenderStep2();                 // advance to Sprint
 }
 
 /** Estimate stage → Sprint stage without sizing. */

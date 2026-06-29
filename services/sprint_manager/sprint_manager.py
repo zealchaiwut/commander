@@ -3301,6 +3301,7 @@ def run_sprint_loop(
                 _ser_est = _load_estimate(num)
                 _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
+                issue_state.coder_routing_reason = _ser_route_reason  # tooltip/sub-label on running pane badge (issue #1427)
                 issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
                 _db_agent_start_sm(
                     num, label, "coder",

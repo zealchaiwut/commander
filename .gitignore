@@ -65,3 +65,17 @@ apps/dashboard/tests/
 apps/dashboard/runtime/
 # Added by code-review-graph
 .code-review-graph/
+
+
+
+
+
+
+
+
+
+
+
+# Local settings fallback store — per-clone artifact, never commit (issue #1359)
+.commander/settings_store.json
+

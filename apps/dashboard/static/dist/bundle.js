@@ -649,6 +649,26 @@
   }
 
   // apps/dashboard/static/src/shell/tabs.js
+  var _GROUP_CHILDREN = {
+    manage: ["logs", "deploy", "metrics", "bulk-create"],
+    planning: [
+      "timeline",
+      "compare",
+      "est-vs-actual",
+      "calibration",
+      "notes",
+      "roadmap",
+      "advisor"
+    ]
+  };
+  function computeRovingTabindex(tab, onGlobalSettings) {
+    return Object.fromEntries(
+      ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+        const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
+        return [t, ownsTab ? 0 : -1];
+      })
+    );
+  }
   function switchTab(tab, pushHistory) {
     let _statusDeepLink = false;
     if (tab === "status") {
@@ -716,13 +736,13 @@
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-selected", String(isActive));
     });
+    const _rovingMap = computeRovingTabindex(tab, onGlobalSettings);
     _topLevelTabs.forEach((t) => {
       const suffix = t === "manage" ? "manage-trigger" : t === "planning" ? "planning-trigger" : t;
       const btn = document.getElementById("stab-" + suffix);
       if (!btn)
         return;
-      const isTopActive = !onGlobalSettings && (t === tab || btn.classList.contains("active"));
-      btn.tabIndex = isTopActive ? 0 : -1;
+      btn.tabIndex = _rovingMap[t];
     });
     closeAllStabDropdowns();
     ["analytics", "more", "planning", "manage"].forEach((groupName) => {

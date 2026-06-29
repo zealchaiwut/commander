@@ -3,17 +3,46 @@
  * switchTab, dropdown helpers, keyboard nav, and popstate deep-link handler.
  * Cross-module globals live on window from project.html inline scripts.
  */
-/* eslint-disable no-unused-vars */
 /* global _slug, _activeTab, _cachedFullRepo, _ticketsLoaded, _sprintMgmtLoaded,
-          loadSprintMgmt, loadTickets, _smgmtArStopTicker, _smgmtArInit, _smgmtArStartTicker,
+          loadSprintMgmt, loadTickets, _smgmtArInit, _smgmtArStartTicker,
           _smgmtLivePollId, _smgmtLogPollId, _statusRefreshId, logsDestroy, deployTabDestroy,
           deployTabInit, ganttInit, compareInit, metricsInit, evaInit, calibInit, notesInit,
           roadmapInit, advInit, projSettingsInit, settingsInitValues, settingsPopulateRepos,
           globalSettingsLoad, _bcInitTab, _lpRenderBc, logsInit, _deepLinkSprintSubView,
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
-          _globalSettingsLinkActive, _ticketsRepo, _deepLinkView, _deepLinkFilter,
-          _evlState, parseUrl, _arTickerId, _arInterval */
-/* eslint-enable no-unused-vars */
+          _globalSettingsLinkActive, _evlState, parseUrl, _arTickerId, _arInterval */
+
+// Maps each dropdown group to its child tab ids so the roving tabindex
+// can assign tabIndex=0 to the group trigger without relying on .active class
+// state being set first (fixes issue #1175).
+const _GROUP_CHILDREN = {
+  manage: ["logs", "deploy", "metrics", "bulk-create"],
+  planning: [
+    "timeline",
+    "compare",
+    "est-vs-actual",
+    "calibration",
+    "notes",
+    "roadmap",
+    "advisor",
+  ],
+};
+
+/**
+ * Compute roving tabindex assignments for the top-level tab strip.
+ * Returns an object mapping each top-level key to 0 (Tab-reachable) or -1.
+ * Exactly one key gets 0 unless onGlobalSettings is true (strip is hidden).
+ */
+export function computeRovingTabindex(tab, onGlobalSettings) {
+  return Object.fromEntries(
+    ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+      const ownsTab =
+        !onGlobalSettings &&
+        (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
+      return [t, ownsTab ? 0 : -1];
+    }),
+  );
+}
 
 export function switchTab(tab, pushHistory) {
   let _statusDeepLink = false;
@@ -86,7 +115,10 @@ export function switchTab(tab, pushHistory) {
     btn.classList.toggle("active", isActive);
     btn.setAttribute("aria-selected", String(isActive));
   });
-  // Roving tabindex: active top-level tab gets 0; others get -1 so Tab exits the group
+  // Roving tabindex: exactly one top-level element gets tabIndex=0; group triggers
+  // own the slot when a child tab is active. Uses explicit group membership so the
+  // result is correct regardless of when .active classes are applied (issue #1175).
+  const _rovingMap = computeRovingTabindex(tab, onGlobalSettings);
   _topLevelTabs.forEach((t) => {
     const suffix =
       t === "manage"
@@ -96,9 +128,7 @@ export function switchTab(tab, pushHistory) {
           : t;
     const btn = document.getElementById("stab-" + suffix);
     if (!btn) return;
-    const isTopActive =
-      !onGlobalSettings && (t === tab || btn.classList.contains("active"));
-    btn.tabIndex = isTopActive ? 0 : -1;
+    btn.tabIndex = _rovingMap[t];
   });
   closeAllStabDropdowns();
   ["analytics", "more", "planning", "manage"].forEach((groupName) => {

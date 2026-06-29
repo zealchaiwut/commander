@@ -25,8 +25,8 @@ _DEFAULT_CODER_BY_SIZE: dict = {
     "XL": "claude-sonnet-4-6",
 }
 
-# Extensions that mark a path as docs/config (issue #1403).
-_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".json"})
+# Extensions that mark a path as docs/config (issue #1403, #1428).
+_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".yml", ".json"})
 # Extensions that mark a path as code — their presence disqualifies docs-only routing.
 _CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
 

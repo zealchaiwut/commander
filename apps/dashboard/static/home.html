@@ -243,9 +243,11 @@
   let _projBySlug = {};   // slug -> { name, icon, color } from /api/home
   let _curDate = null;    // YYYY-MM-DD currently displayed
 
+  const PBIC_PALETTE = new Set(['gray','blue','green','purple','red','orange','amber','yellow','pink','cyan','teal','indigo']);
   function _projectBadgeHtml(slug){
     const proj = _projBySlug[slug] || {};
-    const color = (proj.color || proj.icon_color || 'gray').toLowerCase().replace(/[^a-z]/g, '');
+    const raw = (proj.color || proj.icon_color || 'gray').toLowerCase().replace(/[^a-z]/g, '');
+    const color = PBIC_PALETTE.has(raw) ? raw : 'gray';
     const icon = proj.icon || 'ti-folder';
     return `<span class="pbic pbic--${esc(color)}" aria-hidden="true"><i class="ti ${esc(icon)}"></i></span>`;
   }

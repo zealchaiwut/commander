@@ -104,7 +104,7 @@ class TestAC1SprintBranchCreatedAtStart:
              mock.patch.object(sm, "_post_sprint_status", fake_post_sprint_status), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",
@@ -195,7 +195,7 @@ class TestAC2SprintBranchPassedToDispatchers:
              mock.patch.object(sm, "_post_sprint_status", lambda s, **kw: None), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",
@@ -243,7 +243,7 @@ class TestAC2SprintBranchPassedToDispatchers:
              mock.patch.object(sm, "_post_sprint_status", lambda s, **kw: None), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",
@@ -290,7 +290,7 @@ class TestAC3DevelopNotTouched:
              mock.patch.object(sm, "_post_sprint_status", lambda s, **kw: None), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",
@@ -404,7 +404,7 @@ class TestAC5ExplicitDevelopOverride:
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_post_sprint_status", lambda s, **kw: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",
@@ -457,7 +457,7 @@ class TestAC5ExplicitDevelopOverride:
              mock.patch.object(sm, "_post_sprint_status", lambda s, **kw: None), \
              mock.patch.object(sm, "_warn_file_conflicts", lambda issues: None), \
              mock.patch.object(sm, "_setup_pid_file", lambda n: None), \
-             mock.patch.object(sm, "_apply_in_progress_label", lambda n, cfg=None: None), \
+             mock.patch.object(sm, "_transition_safe", lambda *a, **k: None), \
              mock.patch.object(sm, "_find_feature_branch", lambda n: f"feature/{n}-stub"):
             sm.run_sprint(
                 label="sprint-18",

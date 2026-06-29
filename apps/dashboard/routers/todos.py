@@ -18,7 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from services.sprint_manager import todo_attachment_repo, todo_repo
 
@@ -55,11 +55,25 @@ class TodoOut(BaseModel):
 class TodoCreate(BaseModel):
     text: str
 
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("text must not be empty or whitespace-only")
+        return v
+
 
 class TodoUpdate(BaseModel):
     text: Optional[str] = None
     done: Optional[bool] = None
     position: Optional[int] = None
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("text must not be empty or whitespace-only")
+        return v
 
 
 def _attach_url(project: str, todo_id: int, name: str) -> str:

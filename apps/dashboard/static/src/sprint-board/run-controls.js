@@ -310,6 +310,38 @@ export function _pfShowSuccess() {
   }
 }
 
+/** Recompute blocking stepper fails from live preflight state (e.g. after mis-sizing review). */
+function _pfRecalcStepFails() {
+  let fails = 0;
+  if (_pfCycle && _pfCycle.length) fails++;
+  const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
+  if (pendingFlags.length > 0) {
+    fails++;
+    _pfStepState('missizing', 'fail', `${pendingFlags.length} flag(s) require review`);
+  } else if (_pfFlags && (_pfFlags.flags || []).length > 0) {
+    _pfStepState('missizing', 'pass', 'All flags resolved');
+  }
+  _pfStepFails = fails;
+  _pfStepperSummary();
+}
+
+const _PF_SIZE_TIERS = new Set(['S', 'M', 'L', 'XL']);
+
+/** Pick the size to apply on one-click Re-estimate (historical avg, then current, else S). */
+export function _pfFlagDefaultReestimateSize(flag) {
+  const hist = String(flag?.historical_avg_actual_size || '').toUpperCase();
+  if (_PF_SIZE_TIERS.has(hist)) return hist;
+  const cur = String(flag?.current_estimate || '').toUpperCase();
+  if (_PF_SIZE_TIERS.has(cur)) return cur;
+  return 'S';
+}
+
+export function _pfFlagAutoReestimate(num) {
+  const flag = (_pfFlags?.flags || []).find((f) => f.issue_number === num);
+  if (!flag) return;
+  _pfFlagAction(num, 'reestimated', _pfFlagDefaultReestimateSize(flag));
+}
+
 export function _pfUpdateConfirmBtn() {
   const hasCycle = !!(_pfCycle && _pfCycle.length);
   const pendingFlags = (_pfFlags && (_pfFlags.flags || []).filter(f => f.status === 'pending')) || [];
@@ -509,17 +541,8 @@ export function _pfBuildFlagsHtml() {
       actionsHtml = `
         <div class="pf-flag-actions" id="pf-flag-actions-${num}">
           <button class="pf-flag-action-btn approve" onclick="_pfFlagAction(${num}, 'approved')">Approve</button>
-          <button class="pf-flag-action-btn" onclick="_pfFlagShowSizePicker(${num}, '${escHtml(f.current_estimate || 'S')}')">Re-estimate</button>
+          <button class="pf-flag-action-btn" onclick="_pfFlagAutoReestimate(${num})" title="Apply historical average size">Re-estimate</button>
           <button class="pf-flag-action-btn dismiss" onclick="_pfFlagAction(${num}, 'dismissed')">Dismiss</button>
-        </div>
-        <div id="pf-flag-picker-${num}" style="display:none">
-          <div class="pf-flag-size-picker">
-            <span style="font-size:12px;color:var(--text-muted);">New size:</span>
-            ${['S','M','L','XL'].map(s =>
-              `<button class="pf-flag-size-btn" onclick="_pfFlagReestimate(${num}, '${s}')">${s}</button>`
-            ).join('')}
-            <button class="pf-flag-size-cancel" onclick="_pfFlagHidePicker(${num})">Cancel</button>
-          </div>
         </div>`;
     }
 
@@ -542,25 +565,26 @@ export function _pfBuildFlagsHtml() {
   const subtitle = pending > 0
     ? `${pending} ticket${pending > 1 ? 's' : ''} flagged for review`
     : 'All flags resolved';
+  const bulkBtnsHtml = pending > 0 ? `
+      <div class="pf-flags-bulk-btns">
+        <button class="pf-flags-bulk-btn" onclick="_pfApproveAll()">Approve all</button>
+        <button class="pf-flags-bulk-btn" onclick="_pfReestimateAll()">Re-estimate all</button>
+      </div>` : '';
 
   return `<div class="pf-flags-section" id="pf-flags-section">
-    <div class="pf-flags-label">Mis-sizing review — ${subtitle}</div>
+    <div class="pf-flags-label-row">
+      <span class="pf-flags-label">Mis-sizing review — ${subtitle}</span>${bulkBtnsHtml}
+    </div>
     ${rows.join('')}
   </div>`;
 }
 
-export function _pfFlagShowSizePicker(num, _currentSize) {
-  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
-  if (actionsEl) actionsEl.style.display = 'none';
-  if (pickerEl)  pickerEl.style.display  = 'block';
+export function _pfFlagShowSizePicker(num) {
+  _pfFlagAutoReestimate(num);
 }
 
-export function _pfFlagHidePicker(num) {
-  const actionsEl = document.getElementById(`pf-flag-actions-${num}`);
-  const pickerEl  = document.getElementById(`pf-flag-picker-${num}`);
-  if (actionsEl) actionsEl.style.display = '';
-  if (pickerEl)  pickerEl.style.display  = 'none';
+export function _pfFlagHidePicker(_num) {
+  // Size picker removed — one-click re-estimate uses historical average.
 }
 
 export async function _pfFlagAction(num, action, newSize) {
@@ -593,6 +617,7 @@ export async function _pfFlagAction(num, action, newSize) {
       const newHtml = _pfBuildFlagsHtml();
       flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
     }
+    _pfRecalcStepFails();
     _pfUpdateConfirmBtn();
   } catch (e) {
     _smgmtShowToast('Flag action failed: ' + e.message, 'error');
@@ -601,8 +626,97 @@ export async function _pfFlagAction(num, action, newSize) {
 }
 
 export function _pfFlagReestimate(num, newSize) {
-  _pfFlagHidePicker(num);
   _pfFlagAction(num, 'reestimated', newSize);
+}
+
+// ── Bulk flag actions (Approve All / Re-estimate All) ──────────────────────
+
+let _pfBulkRunning = false;
+
+export async function _pfApproveAll() {
+  const pending = (_pfFlags?.flags || []).filter(f => f.status === 'pending');
+  if (!pending.length) return;
+  await _pfBulkProcess(pending, 'approved');
+}
+
+export async function _pfReestimateAll() {
+  const pending = (_pfFlags?.flags || []).filter(f => f.status === 'pending');
+  if (!pending.length) return;
+  await _pfBulkProcess(pending, 'reestimated');
+}
+
+export function _pfBulkClose() {
+  if (_pfBulkRunning) return;
+  const overlay = document.getElementById('pf-bulk-overlay');
+  if (overlay) overlay.classList.add('hidden');
+  const flagsSection = document.getElementById('pf-flags-section');
+  if (flagsSection) {
+    const newHtml = _pfBuildFlagsHtml();
+    flagsSection.outerHTML = newHtml || '<div id="pf-flags-section"></div>';
+  }
+  _pfRecalcStepFails();
+  _pfUpdateConfirmBtn();
+}
+
+async function _pfBulkProcess(flags, action) {
+  _pfBulkRunning = true;
+  const overlay = document.getElementById('pf-bulk-overlay');
+  const titleEl = document.getElementById('pf-bulk-title');
+  const listEl  = document.getElementById('pf-bulk-list');
+  const doneBtn = document.getElementById('pf-bulk-done-btn');
+  if (!overlay || !titleEl || !listEl || !doneBtn) { _pfBulkRunning = false; return; }
+
+  const modeLabel = action === 'approved' ? 'Approving' : 'Re-estimating';
+  titleEl.textContent = `${modeLabel} ${flags.length} flag${flags.length !== 1 ? 's' : ''}…`;
+  doneBtn.disabled = true;
+  doneBtn.textContent = 'Close';
+
+  listEl.innerHTML = flags.map(f => `
+    <div class="pf-bulk-item">
+      <span class="pf-bulk-item-id">#${f.issue_number}</span>
+      <span class="pf-bulk-item-title" title="${escHtml(f.title)}">${escHtml(f.title)}</span>
+      <span class="pf-bulk-item-status pending" id="pf-bulk-status-${f.issue_number}">
+        <i class="ti ti-clock"></i>
+      </span>
+    </div>`).join('');
+
+  overlay.classList.remove('hidden');
+
+  let errorCount = 0;
+  for (const f of flags) {
+    const statusEl = document.getElementById(`pf-bulk-status-${f.issue_number}`);
+    if (statusEl) {
+      statusEl.className = 'pf-bulk-item-status processing';
+      statusEl.innerHTML = '<span class="pf-bulk-spinner"></span>';
+    }
+    try {
+      const body = { action };
+      if (action === 'reestimated') body.new_size = _pfFlagDefaultReestimateSize(f);
+      const res = await fetch(
+        `/api/sprints/${encodeURIComponent(_pfCurrentLabel)}/mis-sizing-flags/${f.issue_number}/action?project=${encodeURIComponent(_pfCurrentRepo)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      _pfFlags = await res.json();
+      if (statusEl) {
+        statusEl.className = 'pf-bulk-item-status done';
+        statusEl.innerHTML = '<i class="ti ti-check"></i>';
+      }
+    } catch (e) {
+      errorCount++;
+      if (statusEl) {
+        statusEl.className = 'pf-bulk-item-status error';
+        statusEl.innerHTML = '<i class="ti ti-x"></i>';
+        statusEl.title = e.message;
+      }
+    }
+  }
+
+  const doneLabel = action === 'approved' ? 'Approved' : 'Re-estimated';
+  const suffix = errorCount ? ` — ${errorCount} error${errorCount !== 1 ? 's' : ''}` : '';
+  titleEl.textContent = `${doneLabel}${suffix}`;
+  doneBtn.disabled = false;
+  _pfBulkRunning = false;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

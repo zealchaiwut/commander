@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -153,10 +154,22 @@ def get_sprint_nav_status(repo: str = ""):
     # This ensures a running sprint takes precedence over a higher-numbered
     # planned sprint that only has backlog tickets.
     all_sprint_issues: dict[int, list[dict]] = {}
-    for n in reversed(sprint_nums):
-        issues = github_client.list_issues(n, repo_name=repo_name)
-        if issues:
-            all_sprint_issues[n] = issues
+    sprint_nums_set = set(sprint_nums)
+    grouped = github_client.group_issues_by_sprint(repo_name=repo_name)
+    if grouped is not None:
+        # Mirror path: O(n) single pass vs N × O(n) per-sprint scans
+        all_sprint_issues = {n: issues for n, issues in grouped.items() if n in sprint_nums_set}
+    else:
+        # Mirror not available: fetch all sprints concurrently rather than sequentially
+        with ThreadPoolExecutor(max_workers=min(10, len(sprint_nums))) as pool:
+            futures = {n: pool.submit(github_client.list_issues, n, repo_name) for n in sprint_nums}
+            for n, fut in futures.items():
+                try:
+                    issues = fut.result()
+                except subprocess.CalledProcessError:
+                    continue
+                if issues:
+                    all_sprint_issues[n] = issues
 
     if not all_sprint_issues:
         return {"has_sprint": False}

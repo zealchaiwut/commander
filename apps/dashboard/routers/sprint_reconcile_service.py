@@ -181,19 +181,17 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
                 pass
         return {"state": "needs_rework", "end_reason": end_reason or "github-reconcile"}
     if not has_rework and canonical == "needs_rework" and stored in ("needs_rework", "failed", "cancelled"):
-        # All tickets settled on GitHub — promote to ready_to_merge when plausible.
-        failed_in_db = False
-        try:
-            import json
-            issues = json.loads(row.get("issues_json") or "[]")
-            failed_in_db = any(
-                (i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason")
-                for i in issues
-            )
-        except Exception:
-            pass
-        if not failed_in_db:
-            return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
+        # GitHub shows no open rework / unfinished work tickets → the sprint's work
+        # has settled, so promote to ready_to_merge.
+        #
+        # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
+        # stale snapshot from the ORIGINAL run and survives even after the failed
+        # ticket was re-run and passed in a child sprint. Trusting it left
+        # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
+        # would_change=false), which disabled Bulk complete. The live GitHub signal
+        # (has_rework) is authoritative; a genuinely-unfinished ticket would still
+        # be open/not-done and keep has_rework True.
+        return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
 
 
@@ -378,7 +376,14 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
         if project and row.get("project") != project:
             continue
         state = row.get("state") or ""
-        if state == "running" or state in ("draft", "planned", "planning"):
+        # Skip states the reconciler can't usefully change:
+        #  • running / draft / planned / planning — not terminal, nothing to settle.
+        #  • completed / deleted — FINAL terminal states (completed only ever goes
+        #    to deleted; deleted is the end). Re-checking them every History load
+        #    burned ~4s on tangled lineages (mostly completed members) with no
+        #    possible state change. Only ready_to_merge / needs_rework / failed can
+        #    still move, so reconcile just those.
+        if state in ("running", "draft", "planned", "planning", "completed", "deleted"):
             continue
         checked += 1
         if reconcile_sprint_label(label, project):
@@ -609,6 +614,12 @@ def refresh_post_sprint_reconciliations(project: str, limit: int = 40) -> list[s
             continue
         state = row.get("state") or ""
         if state == "running" or state in ("draft", "planned", "planning"):
+            continue
+        # A completed/deleted sprint that already has a stored reconciliation block
+        # is settled — re-deriving its loose-ends every History load is pure churn
+        # (the ~4s lag on tangled lineages, mostly completed members). Compute it
+        # once (no block yet), then skip. Non-final terminals still refresh.
+        if state in ("completed", "deleted") and (row.get("reconciliation_json") or "").strip():
             continue
         checked += 1
         if refresh_post_sprint_reconciliation(label, project):

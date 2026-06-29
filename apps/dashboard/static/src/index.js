@@ -33,6 +33,19 @@ import {
 } from "./progress-host.js";
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
 import { loadCommanderFeatures } from './shell/features.js';
+import {
+  sprintCleanupPreview,
+  sprintCleanupConfirm,
+  testFilesCleanupPreview,
+  testFilesCleanupConfirm,
+  psStaleBranchesScan,
+  psPruneMergedBranches,
+  psCleanupLogClear,
+  psCleanupModalConfirm,
+  _psCleanupModalClose,
+  _psCleanupPaneClose,
+  _psCleanupPaneConfirm,
+} from './settings/cleanup.js';
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -65,3 +78,27 @@ globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
+
+// Project Settings cleanup (issue #735 / #808)
+root.sprintCleanupPreview = sprintCleanupPreview;
+root.sprintCleanupConfirm = sprintCleanupConfirm;
+root.testFilesCleanupPreview = testFilesCleanupPreview;
+root.testFilesCleanupConfirm = testFilesCleanupConfirm;
+root.psStaleBranchesScan = psStaleBranchesScan;
+root.psPruneMergedBranches = psPruneMergedBranches;
+root.psCleanupLogClear = psCleanupLogClear;
+root.psCleanupModalConfirm = psCleanupModalConfirm;
+root._psCleanupModalClose = _psCleanupModalClose;
+root._psCleanupPaneClose = _psCleanupPaneClose;
+root._psCleanupPaneConfirm = _psCleanupPaneConfirm;
+globalThis.sprintCleanupPreview = sprintCleanupPreview;
+globalThis.sprintCleanupConfirm = sprintCleanupConfirm;
+globalThis.testFilesCleanupPreview = testFilesCleanupPreview;
+globalThis.testFilesCleanupConfirm = testFilesCleanupConfirm;
+globalThis.psStaleBranchesScan = psStaleBranchesScan;
+globalThis.psPruneMergedBranches = psPruneMergedBranches;
+globalThis.psCleanupLogClear = psCleanupLogClear;
+globalThis.psCleanupModalConfirm = psCleanupModalConfirm;
+globalThis._psCleanupModalClose = _psCleanupModalClose;
+globalThis._psCleanupPaneClose = _psCleanupPaneClose;
+globalThis._psCleanupPaneConfirm = _psCleanupPaneConfirm;

@@ -121,7 +121,9 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
-    if body.new_sprint_number in existing:
+    if body.new_sprint_number in existing or srv._sprint_number_reserved(
+        body.project, body.new_sprint_number,
+    ):
         raise HTTPException(409, detail=f"Sprint {body.new_sprint_number} already exists")
 
     project_root = srv._project_root_path(body.project)

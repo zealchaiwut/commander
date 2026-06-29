@@ -1,21 +1,21 @@
 # Changelog
 
-## Sprint 98.1
+## Sprint 97.2
 
-Follow-up hardening pass (re-run of sprint-98) across the timeline projection, model routing, sprint-label resolution, and frontend design-token/accessibility plumbing. The sprint-timeline `projected_finish` math is corrected: `running_remaining_min` is renamed to `running_remaining` and serial mode now *sums* every running issue's remaining time (both must finish) while pipeline mode takes the *max* (they overlap), fixing an understated finish estimate in serial dispatch (#1167); the `timeline_service` data helpers (`_get_sprint_issues`, `_get_agent_runs`, `_get_settings`, `_get_sprint_row`, `_get_calibration_records`, `_get_launch_issue_order`) now log a WARNING with traceback instead of silently swallowing exceptions (#1169). Coder model routing gains `.yml` in `_DOCS_PATH_EXTENSIONS` so `.yml`-only changes route as docs/config alongside `.yaml`/`.md`/`.json` (#1428), and serial dispatch now sets `issue_state.coder_routing_reason` so the running-pane coder badge shows its routing-reason tooltip (#1427). `rebuild_calibration_cache` threads `DB_PATH` into `_calibration_absorb_state_file` so an explicit cache rebuild uses the SQLite size-label fallback (#1364). Sprint-label resolution is hardened against zombie sprints: `_all_sprint_label_names` now intersects mirror-derived sprint labels against the live `gh` label registry, so a deleted sprint label lingering in stale closed-issue mirror rows no longer resurrects in `/api/sprints` — falling back to the unfiltered mirror only when the live list is empty (gh down / offline) (#1355). The mis-sizing history rebuild (`rebuild_mis_sizing_history`) now logs a WARNING on a `gh issue list` non-zero exit or exception instead of swallowing it, and returns a `labels_fetched` flag in the rebuild response (#1396). On the frontend, the home project badge validates the project color against a fixed palette and falls back to the gray class for non-palette values (#1174); the top-level tab strip's roving tabindex now uses a `_GROUP_CHILDREN` map and a new exported `computeRovingTabindex()` helper so a dropdown-group trigger (manage/planning) stays keyboard-reachable when one of its child tabs is active, fixing the case where no tab was Tab-focusable (#1175); `project.html`'s inline `:root` token block that shadowed the canonical `tokens.css` is removed (only the page-specific `--sidebar-width` remains) (#1200); and impeccable rule suppressions are scoped per-file via `impeccable-disable` comments in `project.html`/`project-todo.js` instead of disabled globally (#1205). The test artifact `.commander/settings_store.json` accidentally committed under #1342 is removed from version control and gitignored (#1359). No schema or endpoint changes — correctness, observability, accessibility, and cleanup only.
+Follow-up hardening pass (re-run of sprint-97.1/97) covering sprint-manager concurrency, subprocess robustness, the issues mirror, and a few dashboard UI fixes. Concurrency and process safety: `SprintState.save` now serializes writes under a `threading.Lock` and persists atomically via `os.replace()` so concurrent-pipeline runs can't interleave or corrupt `state.json` (#776), and dual active-agent cards now read per-issue `coder_pid`/`tester_pid` instead of a shared field so each card shows the correct PID (#777). Subprocess calls are bounded: deploy/restart helpers (#747) and the stale-branch scan/cleanup `gh` calls (#849) now pass explicit timeouts so a hung child can't wedge the pipeline. Sprint-state correctness: `RUN_MUTABLE_LABELS` now includes `blocked` by importing the canonical constant from `state_machine` (with `_apply_in_progress_label`/`_apply_needs_rework_label` helpers) so a blocked ticket stays mutable mid-run (#814). Issues mirror: `_fetch_issues_conditional` follows the `Link` rel="next" pagination header, fixing the 100-issue cap that silently truncated the mirror (#815). Events/activity API: `agent_runs` duration enrichment is scoped by `sprint_label` so durations no longer bleed across sprints (#820). Deploy config: `GET/PUT /api/projects/{slug}/deploy-config` gains a seed-only-project fallback so newly-seeded projects resolve config instead of 404-ing (#746). Frontend CI commits `package-lock.json` and switches from `npm install` to `npm ci` for reproducible builds (#837). Tooling: `doctor.py` now probes Claude CLI auth via a `-p` empty-prompt call rather than only `--version`, catching authenticated-but-broken setups (#868). Dashboard UI: the History loose-end band and Details now surface all failed reconciliation checks instead of dropping non-`stale_labels` failures (#1154), and ancestor expand/collapse state is restored from `localStorage` on render so it survives reloads (#1155). No new schema or endpoints — internal correctness, robustness, and UI fixes only.
 
-- [#1167](https://github.com/zealchaiwut/commander/issues/1167) Fix misleading running_remaining_min name and serial-mode summing in timeline projected_finish — 2026-06-25
-- [#1169](https://github.com/zealchaiwut/commander/issues/1169) Log swallowed exceptions in timeline_service data helpers — 2026-06-25
-- [#1174](https://github.com/zealchaiwut/commander/issues/1174) Home project badge: fall back to default color class for non-palette values — 2026-06-25
-- [#1175](https://github.com/zealchaiwut/commander/issues/1175) Roving tabindex: keep dropdown-group tab focusable via computeRovingTabindex helper — 2026-06-26
-- [#1200](https://github.com/zealchaiwut/commander/issues/1200) Consolidate design tokens — remove inline :root block shadowing tokens.css in project.html — 2026-06-26
-- [#1205](https://github.com/zealchaiwut/commander/issues/1205) Scope impeccable rule suppressions per-file instead of disabling globally — 2026-06-26
-- [#1355](https://github.com/zealchaiwut/commander/issues/1355) Zombie sprints: filter mirror sprint labels against live registry to drop deleted labels — 2026-06-26
-- [#1359](https://github.com/zealchaiwut/commander/issues/1359) Remove accidentally committed .commander/settings_store.json test artifact — 2026-06-26
-- [#1364](https://github.com/zealchaiwut/commander/issues/1364) Thread db_path into rebuild_calibration_cache for SQLite size-label fallback — 2026-06-26
-- [#1396](https://github.com/zealchaiwut/commander/issues/1396) Surface GitHub fetch failures in mis-sizing history rebuild — 2026-06-26
-- [#1427](https://github.com/zealchaiwut/commander/issues/1427) Serial dispatch sets coder_routing_reason for badge tooltip — 2026-06-26
-- [#1428](https://github.com/zealchaiwut/commander/issues/1428) Add .yml to docs-only routing extensions — 2026-06-26
+- [#746](https://github.com/zealchaiwut/commander/issues/746) Add seed-only-project fallback to GET/PUT deploy-config — 2026-06-25
+- [#747](https://github.com/zealchaiwut/commander/issues/747) Add timeouts to deploy/restart subprocess calls — 2026-06-25
+- [#776](https://github.com/zealchaiwut/commander/issues/776) Serialize SprintState.save under concurrent pipeline mode — 2026-06-25
+- [#777](https://github.com/zealchaiwut/commander/issues/777) Per-issue coder_pid/tester_pid fixes shared PID on dual agent cards — 2026-06-25
+- [#814](https://github.com/zealchaiwut/commander/issues/814) Add "blocked" to RUN_MUTABLE_LABELS via state_machine constant — 2026-06-25
+- [#815](https://github.com/zealchaiwut/commander/issues/815) Follow Link pagination in issues-mirror sync (fix 100-issue cap) — 2026-06-25
+- [#820](https://github.com/zealchaiwut/commander/issues/820) Scope agent_runs duration enrichment by sprint_label in events API — 2026-06-25
+- [#837](https://github.com/zealchaiwut/commander/issues/837) Commit package-lock.json and use npm ci in frontend CI — 2026-06-25
+- [#849](https://github.com/zealchaiwut/commander/issues/849) Add timeout to gh subprocess calls in stale-branch scan/cleanup — 2026-06-25
+- [#868](https://github.com/zealchaiwut/commander/issues/868) doctor.py claude check: probe auth, not just --version — 2026-06-25
+- [#1154](https://github.com/zealchaiwut/commander/issues/1154) Surface all failed reconciliation checks in loose-end band and Details — 2026-06-25
+- [#1155](https://github.com/zealchaiwut/commander/issues/1155) Restore ancestor expand/collapse state from localStorage on render — 2026-06-25
 
 ## Sprint 96
 
@@ -518,3 +518,128 @@ and analytics. No GitHub ticket — shipped directly to `hotfix/board-history-ru
 - #344: [follow-up] app.js: Add timeout to preview endpoint fetch in rerun modal
 - #345: [follow-up] check_neon_connection.py: Consolidate psycopg2 import error handling
 - #346: [follow-up] app.js: Remove unused RERUN_STRIP_LABELS constant
+
+## Sprint 98.1
+
+Follow-up hardening pass (re-run of sprint-98) across the timeline projection, model routing, sprint-label resolution, and frontend design-token/accessibility plumbing. The sprint-timeline `projected_finish` math is corrected: `running_remaining_min` is renamed to `running_remaining` and serial mode now *sums* every running issue's remaining time (both must finish) while pipeline mode takes the *max* (they overlap), fixing an understated finish estimate in serial dispatch (#1167); the `timeline_service` data helpers (`_get_sprint_issues`, `_get_agent_runs`, `_get_settings`, `_get_sprint_row`, `_get_calibration_records`, `_get_launch_issue_order`) now log a WARNING with traceback instead of silently swallowing exceptions (#1169). Coder model routing gains `.yml` in `_DOCS_PATH_EXTENSIONS` so `.yml`-only changes route as docs/config alongside `.yaml`/`.md`/`.json` (#1428), and serial dispatch now sets `issue_state.coder_routing_reason` so the running-pane coder badge shows its routing-reason tooltip (#1427). `rebuild_calibration_cache` threads `DB_PATH` into `_calibration_absorb_state_file` so an explicit cache rebuild uses the SQLite size-label fallback (#1364). Sprint-label resolution is hardened against zombie sprints: `_all_sprint_label_names` now intersects mirror-derived sprint labels against the live `gh` label registry, so a deleted sprint label lingering in stale closed-issue mirror rows no longer resurrects in `/api/sprints` — falling back to the unfiltered mirror only when the live list is empty (gh down / offline) (#1355). The mis-sizing history rebuild (`rebuild_mis_sizing_history`) now logs a WARNING on a `gh issue list` non-zero exit or exception instead of swallowing it, and returns a `labels_fetched` flag in the rebuild response (#1396). On the frontend, the home project badge validates the project color against a fixed palette and falls back to the gray class for non-palette values (#1174); the top-level tab strip's roving tabindex now uses a `_GROUP_CHILDREN` map and a new exported `computeRovingTabindex()` helper so a dropdown-group trigger (manage/planning) stays keyboard-reachable when one of its child tabs is active, fixing the case where no tab was Tab-focusable (#1175); `project.html`'s inline `:root` token block that shadowed the canonical `tokens.css` is removed (only the page-specific `--sidebar-width` remains) (#1200); and impeccable rule suppressions are scoped per-file via `impeccable-disable` comments in `project.html`/`project-todo.js` instead of disabled globally (#1205). The test artifact `.commander/settings_store.json` accidentally committed under #1342 is removed from version control and gitignored (#1359). No schema or endpoint changes — correctness, observability, accessibility, and cleanup only.
+
+- [#1167](https://github.com/zealchaiwut/commander/issues/1167) Fix misleading running_remaining_min name and serial-mode summing in timeline projected_finish — 2026-06-25
+- [#1169](https://github.com/zealchaiwut/commander/issues/1169) Log swallowed exceptions in timeline_service data helpers — 2026-06-25
+- [#1174](https://github.com/zealchaiwut/commander/issues/1174) Home project badge: fall back to default color class for non-palette values — 2026-06-25
+- [#1175](https://github.com/zealchaiwut/commander/issues/1175) Roving tabindex: keep dropdown-group tab focusable via computeRovingTabindex helper — 2026-06-26
+- [#1200](https://github.com/zealchaiwut/commander/issues/1200) Consolidate design tokens — remove inline :root block shadowing tokens.css in project.html — 2026-06-26
+- [#1205](https://github.com/zealchaiwut/commander/issues/1205) Scope impeccable rule suppressions per-file instead of disabling globally — 2026-06-26
+- [#1355](https://github.com/zealchaiwut/commander/issues/1355) Zombie sprints: filter mirror sprint labels against live registry to drop deleted labels — 2026-06-26
+- [#1359](https://github.com/zealchaiwut/commander/issues/1359) Remove accidentally committed .commander/settings_store.json test artifact — 2026-06-26
+- [#1364](https://github.com/zealchaiwut/commander/issues/1364) Thread db_path into rebuild_calibration_cache for SQLite size-label fallback — 2026-06-26
+- [#1396](https://github.com/zealchaiwut/commander/issues/1396) Surface GitHub fetch failures in mis-sizing history rebuild — 2026-06-26
+- [#1427](https://github.com/zealchaiwut/commander/issues/1427) Serial dispatch sets coder_routing_reason for badge tooltip — 2026-06-26
+- [#1428](https://github.com/zealchaiwut/commander/issues/1428) Add .yml to docs-only routing extensions — 2026-06-26
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

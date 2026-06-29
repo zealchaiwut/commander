@@ -58,10 +58,24 @@ apps/dashboard/tests/
 # Backup config — stores gist ID, gitignored by design
 .commander/backup_config.json
 
-# Local settings fallback store — per-clone artifact, never commit (issue #1359)
-.commander/settings_store.json
+# Migration artifacts — local data state, never committed
+.commander/project_todos_store.json.migrated
 
 # Runtime state — attachment bare-clone cache and draft uploads (issue #188)
 apps/dashboard/runtime/
 # Added by code-review-graph
 .code-review-graph/
+
+
+
+
+
+
+
+
+
+
+
+# Local settings fallback store — per-clone artifact, never commit (issue #1359)
+.commander/settings_store.json
+

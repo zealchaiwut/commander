@@ -61,11 +61,17 @@ def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=
         raise HTTPException(400, detail=str(e))
 
     if sprint_number is not None:
-        if sprint_number in sprints:
-            raise HTTPException(409, detail=f"Sprint {sprint_number} already exists")
+        if sprint_number in sprints or srv._sprint_number_reserved(project, sprint_number):
+            raise HTTPException(
+                409,
+                detail=(
+                    f"Sprint {sprint_number} already exists "
+                    f"(label, history, or local artifacts)"
+                ),
+            )
         target_num = sprint_number
     else:
-        target_num = (max(sprints) if sprints else 0) + 1
+        target_num = srv._next_new_sprint_number(project)
 
     sprint_label = f"sprint-{target_num}"
     eff_goal = (goal or sprint_label).strip() or sprint_label
@@ -349,8 +355,7 @@ def plan_next_sprint(project: str, replace: bool = False) -> dict:
         for i in backlog_issues
     ]
 
-    sprints = gc.list_sprints(repo_name=project)
-    next_num = (max(sprints) if sprints else 0) + 1
+    next_num = srv._next_new_sprint_number(project)
 
     estimate_fn = _make_estimate_fn(srv, gc, project, issue_by_num, size_minutes)
     result = sprint_planner.plan_next_sprint(

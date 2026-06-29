@@ -1,4 +1,13 @@
 [tool.ruff.lint.per-file-ignores]
+# Test files use sys.path.insert(...) before local imports so the repo root is
+# on the path. This pattern intentionally places imports after path manipulation —
+# E402 is noise here, not a real issue. Suppressing it globally for tests
+# prevents parallel Coder agents from adding conflicting # noqa: E402 annotations
+# to the same test files, which caused repeated merge conflicts in sprint branches.
+"tests/*.py" = [
+    "E402",  # module-level import not at top — intentional sys.path pattern
+]
+
 # server.py uses a deferred import pattern (_auto_install_deps runs first)
 # and carries pre-existing legacy issues; suppress only what predates this repo.
 "apps/dashboard/server.py" = [

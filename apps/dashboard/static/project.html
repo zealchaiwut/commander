@@ -1383,6 +1383,34 @@
     .ps-cleanup-pane-x { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted); }
     .ps-cleanup-pane-list { max-height: 260px; overflow-y: auto; padding: 8px 14px; margin: 0; }
     .ps-cleanup-pane-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--border); }
+    /* Cleanup console (sync-log style) + confirm modal */
+    .ps-cleanup-log {
+      margin-top: 14px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    }
+    .ps-cleanup-log-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 7px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+      font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .ps-cleanup-log-clear {
+      font-size: 10px; font-weight: 600; letter-spacing: 0; text-transform: none;
+      padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-muted); cursor: pointer;
+    }
+    .ps-cleanup-log-clear:hover { background: var(--surface-hover); color: var(--text); }
+    .ps-cleanup-log-body {
+      max-height: 200px; overflow-y: auto; padding: 8px 10px; margin: 0;
+      background: #0a0a0a; font-family: var(--mono); font-size: 11px; line-height: 1.5;
+      color: #a8b3cf;
+    }
+    .ps-cleanup-log-line--ok { color: #4ade80; }
+    .ps-cleanup-log-line--err { color: #f87171; }
+    .ps-cleanup-log-line--step { color: #fb923c; }
+    .ps-cln-modal { min-width: 340px; max-width: 520px; }
+    .ps-cln-modal .modal-body { max-height: min(70vh, 520px); overflow-y: auto; }
+    .ps-cln-summary { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+    #ps-cln-list { max-height: 260px; overflow-y: auto; }
     .ps-btn-danger { border-color: var(--red, #dc2626); color: var(--red, #dc2626); }
     .ps-btn-danger:hover { background: var(--red, #dc2626); color: #fff; }
     .ps-scaffold-stray-label { font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .05em; }
@@ -1829,26 +1857,6 @@
     }
     .bab-dismiss-btn:hover { background: var(--surface-2); }
 
-    /* ── Sprint board multi-select bar (Sprint tab / Board subview, in proj-header) ── */
-    .proj-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 28px;
-      margin: 0;
-      background: var(--blue-bg);
-      border: none;
-      border-top: 1px solid var(--blue);
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      flex-wrap: wrap;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .proj-selection-bar:not(.hidden) { display: flex; }
-    .proj-selection-bar-hint { color: var(--text-muted); }
-    .smgmt-sel-bar-spacer { flex: 1; min-width: 8px; }
     /* ── Bulk close confirm modal ── */
     .bcm-modal { width: min(480px, calc(100vw - 32px)); }
     .bcm-ticket-list {
@@ -2081,6 +2089,7 @@
     .hist-card.child { margin-left: 0; padding-left: 2px; }
     /* Re-run sub-sprints (.1, .2, …) nest under their base sprint row. */
     .hist-sprint-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+    .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     /* Agent legend — shared across all history sprint rows */
     .hist-legend-top {
       display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -2120,13 +2129,13 @@
     }
     .hist-parent-row.settled:not(.expanded):hover { opacity: 1; }
     .hist-parent-row.settled:not(.expanded) .hist-parent-name { color: var(--text-muted); }
-    .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-sprint-group.collapsed .hist-parent-body { display: none; }
     .hist-parent-body { padding: 4px 14px 8px; }
     .hist-parent-name { font-weight: 700; font-size: 14px; color: var(--text); }
     .hist-parent-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
     /* Child sprint — nested with L-connector */
     .hist-child-wrap { position: relative; margin-left: 32px; margin-top: 4px; }
+    .hist-sprint-group.collapsed .hist-child-wrap { display: none; }
     .hist-child-wrap::before {
       content: ''; position: absolute; left: -20px; top: -10px;
       width: 15px; height: 36px;
@@ -2136,6 +2145,9 @@
     .hist-child-card {
       border: 1px solid var(--border); border-radius: 11px;
       background: var(--surface); overflow: hidden;
+    }
+    .hist-sprint-group > .hist-child-card.hist-lineage-parent {
+      margin-bottom: 6px;
     }
     .hist-child-card.ready {
       border-color: var(--green);
@@ -2477,8 +2489,11 @@
       border: 1px solid var(--border);
     }
     .recon-passed-item i { font-size: 10px; color: var(--text-sub); }
+    /* Failed checks in Details: amber X badge (#1154) */
+    .recon-failed-item { background: color-mix(in srgb, var(--amber) 10%, var(--surface-2)); border-color: color-mix(in srgb, var(--amber) 30%, var(--border)); }
+    .recon-failed-item i { color: var(--amber); }
 
-    /* Loose-end amber band: exactly ONE per card (AC4) */
+    /* Loose-end amber band: one per failing recon check + stale branches (#1041, #1154) */
     .hist-loose-end-band {
       display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       margin: 0; padding: 8px 12px;
@@ -3230,15 +3245,6 @@
     .smgmt-sprint-tickets {
       padding: 4px 0; min-height: 48px; display: flex; flex-direction: column;
     }
-    .smgmt-drop-hint {
-      font-size: 12px; color: var(--text-sub); text-align: center;
-      padding: 10px; border: 1px dashed var(--border); border-radius: 5px; margin: 4px 8px;
-    }
-    .smgmt-sprint-card.drag-over-sprint,
-    .smgmt-sprint-block.drag-over-sprint { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
-    .smgmt-sprint-card.drag-over-sprint .smgmt-drop-hint,
-    .smgmt-sprint-block.drag-over-sprint .smgmt-drop-hint { border-color: var(--blue); }
-    .smgmt-sprint-block.drag-over-zone { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
     .smgmt-ticket {
       display: flex; align-items: center; gap: var(--space-2);
       padding: var(--space-2) var(--space-4); background: var(--surface); font-size: var(--font-size-md);
@@ -3250,32 +3256,6 @@
       -webkit-user-select: none; user-select: none;
     }
     .smgmt-ticket:hover { background: var(--surface-hover); }
-    .smgmt-ticket[draggable="true"]:hover { cursor: grab; }
-    .smgmt-ticket[draggable="true"]:active { cursor: grabbing; }
-    .smgmt-ticket[draggable="false"] { cursor: default; }
-    .smgmt-ticket.dragging-ticket {
-      opacity: 0.5;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.14);
-      position: relative; z-index: 1;
-    }
-    .smgmt-ticket.drag-before { box-shadow: inset 0 2px 0 var(--blue); }
-    .smgmt-ticket.drag-after  { box-shadow: inset 0 -2px 0 var(--blue); }
-    .smgmt-ticket.is-selected { background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
-    .smgmt-ticket-grip {
-      color: var(--text-sub); font-size: 13px; flex-shrink: 0;
-      opacity: 0; transition: opacity 0.15s, color 0.15s, transform 0.12s;
-      cursor: grab;
-    }
-    .smgmt-ticket[draggable="true"]:hover .smgmt-ticket-grip { opacity: 1; }
-    .smgmt-ticket.dragging-ticket .smgmt-ticket-grip {
-      opacity: 1; color: var(--text); transform: scale(1.18);
-    }
-    .smgmt-ticket[draggable="false"] .smgmt-ticket-grip { opacity: 0 !important; cursor: default; }
-    .smgmt-ticket-grip:active { cursor: grabbing; }
-    .smgmt-ticket-cb { cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
-    .smgmt-ticket:hover .smgmt-ticket-cb,
-    .smgmt-ticket.is-selected .smgmt-ticket-cb,
-    .smgmt-sprint-list.has-selection .smgmt-ticket-cb { opacity: 1; }
     .smgmt-ticket-num {
       font-family: var(--mono); font-size: 12px; color: var(--text-muted);
       text-decoration: none; flex-shrink: 0; min-width: 42px;
@@ -3353,13 +3333,6 @@
     .smgmt-state-badge.state-partial  { background: var(--yellow-bg);  color: var(--yellow);    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);  }
     .smgmt-state-badge.state-rework   { background: var(--amber-bg); color: var(--amber);   border-color: var(--amber); }
     .smgmt-state-badge.state-idle     { background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
-    /* NEXT UP badge */
-    .smgmt-next-badge {
-      font-family: var(--mono); font-size: 10px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .08em;
-      background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 4px;
-      flex-shrink: 0;
-    }
     /* Parent sprint lineage indicator */
     .smgmt-sprint-lineage {
       font-size: 11px; color: var(--text-muted); flex-shrink: 0;
@@ -3800,152 +3773,6 @@
     .smgmt-ar-turn-off { color: var(--text-muted); }
     .smgmt-ar-turn-off:hover { color: var(--red, #dc2626); background: var(--red-bg, #fff0f0); }
 
-    /* ── Project-level selection bar (legacy inline — now lives in proj-header) ── */
-    .proj-selection-bar.legacy-inline { display: none !important; }
-
-    /* ── Inline selection action bar (legacy — superseded by proj-selection-bar) ── */
-    .smgmt-selection-bar {
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding: 9px 16px;
-      background: var(--blue-bg);
-      border: 1px solid var(--blue);
-      border-radius: 8px;
-      margin-bottom: 10px;
-      font-size: 13px;
-      color: var(--blue);
-      white-space: nowrap;
-      /* Pin to the top of the sprint pane so it stays visible while scrolling a
-         long list and selecting tickets (multi-select usability). */
-      position: sticky;
-      top: 6px;
-      z-index: 20;
-      box-shadow: 0 2px 8px rgba(0,0,0,.08);
-    }
-    .smgmt-selection-bar.show {
-      display: flex;
-    }
-    .smgmt-selection-bar-count {
-      font-weight: 600;
-    }
-    .smgmt-sel-bar-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      position: relative;
-      flex-shrink: 0;
-    }
-    .smgmt-selection-bar-deselect {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--blue);
-      border: 1px solid var(--blue);
-      border-radius: 5px;
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: 4px;
-      transition: background .15s, color .15s, border-color .15s;
-    }
-    .smgmt-selection-bar-deselect:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
-    .smgmt-selection-bar-delete {
-      display: none;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--red);
-      border: 1px solid var(--red-bg);
-      border-radius: 5px;
-      cursor: pointer;
-      transition: background .15s, color .15s, border-color .15s;
-      align-items: center;
-      gap: 4px;
-    }
-    .smgmt-selection-bar-delete.show { display: inline-flex; }
-    .smgmt-selection-bar-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
-    .smgmt-sel-reest-btn {
-      padding: 5px 10px; font-size: 12px; font-weight: 600;
-      background: var(--surface); color: var(--text);
-      border: 1px solid var(--border); border-radius: 5px;
-      cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-    }
-    .smgmt-sel-reest-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
-    .smgmt-sel-close-btn {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--red);
-      border: 1px solid var(--red-bg);
-      border-radius: 5px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background .15s, color .15s, border-color .15s;
-    }
-    .smgmt-sel-close-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
-    .smgmt-move-to-btn {
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      cursor: pointer;
-      transition: background .15s;
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-    .smgmt-move-to-btn:hover { background: var(--surface-hover); }
-    /* Move-to dropdown menu */
-    .smgmt-move-to-menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 4px);
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      box-shadow: 0 4px 16px rgba(0,0,0,.12);
-      z-index: 400;
-      min-width: 140px;
-      padding: 4px 0;
-      display: none;
-    }
-    .smgmt-move-to-menu.open { display: block; }
-    .smgmt-move-to-item {
-      display: block;
-      width: 100%;
-      text-align: left;
-      padding: 7px 14px;
-      font-size: 13px;
-      background: none;
-      border: none;
-      color: var(--text);
-      cursor: pointer;
-      font-family: inherit;
-    }
-    .smgmt-move-to-item:hover { background: var(--surface-hover); }
-
-    /* ── Multi-drag floating pill ── */
-    .smgmt-drag-pill {
-      position: fixed;
-      top: -100px;
-      left: -100px;
-      background: var(--blue);
-      color: #fff;
-      border-radius: 20px;
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 600;
-      pointer-events: none;
-      z-index: 9999;
-      box-shadow: 0 4px 12px rgba(0,0,0,.2);
-      white-space: nowrap;
-    }
-
     /* ── Modal shared ── */
     .modal-backdrop {
       position: fixed; inset: 0;
@@ -4320,7 +4147,6 @@
     /* Planning ticket rows (no drag) */
     .smgmt-plan-tickets { padding: 8px 0; }
     .smgmt-plan-ticket { cursor: default; }
-    .smgmt-plan-ticket .smgmt-ticket-grip { display: none; }
     .smgmt-plan-empty { padding: 14px 18px; color: var(--text-sub); font-size: 13px; }
     .smgmt-plan-row-menu .smgmt-ctx-item--remove { color: var(--red); }
     /* + Add ticket affordance */
@@ -4346,6 +4172,9 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .smgmt-add-to-sprint-btn:hover { border-color: var(--blue); color: var(--blue); }
+    /* Backlog multi-select checkbox (restored) */
+    .smgmt-ticket-cb { flex-shrink: 0; margin: 0 4px 0 0; cursor: pointer; accent-color: var(--blue, #0969da); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg, rgba(9,105,218,.08)); }
     /* ── end planning board layout ── */
     .smgmt-backlog-pane {
       border: 1px solid var(--border);
@@ -4553,84 +4382,6 @@
     .smgmt-ticket:hover .smgmt-moveto-pill { opacity: 1; }
     .smgmt-moveto-pill:hover { background: var(--surface-hover); color: var(--text); }
 
-    /* ── Ghost pane — drag-below to create sprint (issue #364) ── */
-    .smgmt-ghost-pane {
-      display: none; /* shown during drag */
-      border: 2px dashed var(--blue);
-      border-radius: 8px;
-      background: var(--blue-bg);
-      margin-top: 12px;
-      padding: 20px 16px;
-      text-align: center;
-      cursor: default;
-      transition: background 0.15s, transform 0.12s, box-shadow 0.12s;
-    }
-    .smgmt-ghost-pane.ghost-visible {
-      display: block;
-    }
-    .smgmt-ghost-pane.ghost-hot {
-      background: var(--blue);
-      border-style: solid;
-      transform: scale(1.012);
-      box-shadow: 0 4px 16px rgba(37,99,235,.25);
-    }
-    .smgmt-ghost-title {
-      font-size: 14px; font-weight: 700; color: var(--blue);
-      pointer-events: none;
-    }
-    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-title {
-      color: #fff;
-    }
-    .smgmt-ghost-sub {
-      font-size: 12px; color: var(--blue); margin-top: 4px;
-      pointer-events: none;
-    }
-    .smgmt-ghost-pane.ghost-hot .smgmt-ghost-sub {
-      color: rgba(255,255,255,.85);
-    }
-
-    /* ── Ghost-confirm modal (issue #364) ── */
-    .gc-modal {
-      min-width: 340px;
-      max-width: 480px;
-    }
-    .gc-modal .modal-footer .btn-blue {
-      background: var(--blue);
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 7px 18px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .gc-modal .modal-footer .btn-blue:hover { background: #1d4ed8; }
-    .gc-modal .modal-footer .btn-blue:disabled { opacity: .55; cursor: default; }
-    .gc-detail-row {
-      font-size: 13px; color: var(--text);
-      padding: 4px 0;
-    }
-    .gc-detail-label {
-      color: var(--text-muted); font-size: 12px;
-    }
-    .gc-note {
-      font-size: 12px; color: var(--text-sub);
-      background: var(--surface-2);
-      border-radius: 6px;
-      padding: 8px 12px;
-      margin-top: 12px;
-    }
-    .gc-error {
-      font-size: 12px; color: var(--red);
-      background: rgba(220,38,38,.07);
-      border: 1px solid rgba(220,38,38,.2);
-      border-radius: 5px;
-      padding: 7px 12px;
-      margin-top: 10px;
-    }
-    .gc-error.hidden { display: none; }
-
     /* "Move to" popup for backlog/sprint tickets */
     .smgmt-moveto-popup {
       position: fixed;
@@ -4759,12 +4510,6 @@
     .hs-plan-step:last-child { border-bottom: none; }
     .hs-plan-step strong { color: var(--text); }
     .hs-note { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; line-height: 1.45; }
-    .smgmt-move-to-item--hotswap {
-      border-top: 1px dashed var(--border);
-      color: var(--amber);
-      font-weight: 600;
-    }
-    .smgmt-move-to-item--hotswap:hover { background: var(--amber-bg); }
     .mt-modal .modal-body { max-height: min(70vh, 520px); }
     .mt-modal .mt-selection-row {
       position: sticky;
@@ -7463,6 +7208,59 @@
       font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px;
     }
 
+    /* ── Bulk flag actions (Approve All / Re-estimate All) ── */
+    .pf-flags-label-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .pf-flags-label-row .pf-flags-label { margin-bottom: 0; flex: 1; }
+    .pf-flags-bulk-btns { display: flex; gap: 6px; }
+    .pf-flags-bulk-btn {
+      font-size: 11px; padding: 2px 9px; border-radius: 5px;
+      border: 1px solid var(--border); background: none; color: var(--text-muted);
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+      transition: background .1s, color .1s;
+    }
+    .pf-flags-bulk-btn:hover { background: var(--surface-hover, rgba(0,0,0,.05)); color: var(--text); }
+    .pf-bulk-overlay {
+      position: absolute; inset: 0; z-index: 10; border-radius: 10px;
+      background: var(--surface); display: flex; flex-direction: column;
+    }
+    .pf-bulk-overlay.hidden { display: none; }
+    .pf-bulk-overlay-header {
+      padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .pf-bulk-overlay-title { font-size: 14px; font-weight: 600; color: var(--text); }
+    .pf-bulk-overlay-body { flex: 1; overflow-y: auto; padding: 4px 20px; }
+    .pf-bulk-item {
+      display: flex; align-items: center; gap: 10px; padding: 9px 0;
+      border-bottom: 1px solid rgba(0,0,0,.05);
+    }
+    [data-theme="dark"] .pf-bulk-item { border-bottom-color: rgba(255,255,255,.05); }
+    .pf-bulk-item:last-child { border-bottom: none; }
+    .pf-bulk-item-id {
+      font-family: var(--font-mono, monospace); font-size: 12px;
+      color: var(--text-muted); flex-shrink: 0; width: 44px;
+    }
+    .pf-bulk-item-title {
+      flex: 1; min-width: 0; font-size: 13px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pf-bulk-item-status { flex-shrink: 0; width: 20px; text-align: center; font-size: 14px; line-height: 1; }
+    .pf-bulk-item-status.pending { color: var(--text-muted); }
+    .pf-bulk-item-status.processing { color: var(--blue, #2563eb); }
+    .pf-bulk-item-status.done { color: #16a34a; }
+    .pf-bulk-item-status.error { color: #dc2626; }
+    .pf-bulk-spinner {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: pf-spin .7s linear infinite;
+    }
+    .pf-bulk-overlay-footer {
+      padding: 12px 20px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; flex-shrink: 0;
+    }
+
     /* ── XL split suggestions section (issue #1424) ── */
     .pf-xl-section { margin-top: 16px; }
     .pf-xl-section-label {
@@ -8097,9 +7895,6 @@
       .smgmt-row-menu-btn,
       .smgmt-rename-btn,
       .smgmt-summary-row-action { opacity: 1; }
-      /* The selection checkbox was hover-only too, so multi-select was impossible
-         on touch (it only showed once a row was already selected — chicken-egg). */
-      .smgmt-ticket-cb { opacity: 1; }
       /* Give rows a ~44px touch target without changing desktop density. */
       .smgmt-ticket { padding-top: 11px; padding-bottom: 11px; }
       #pane-sprint-mgmt.smgmt-compact .smgmt-ticket { padding-top: 8px; padding-bottom: 8px; }
@@ -9692,31 +9487,6 @@
         </div>
       </div>
       </div><!-- /sub-tabs-row -->
-      <!-- Sprint board multi-select bar — its own full-width row beneath the nav
-           tabs (was inline in .sub-tabs-row, which crowded the tabs). -->
-      <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
-        <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
-          <i class="ti ti-x"></i> Deselect all
-        </button>
-        <i class="ti ti-checkbox" aria-hidden="true"></i>
-        <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
-        <span class="proj-selection-bar-hint">— batch move, close, or reestimate</span>
-        <div class="smgmt-sel-bar-spacer" aria-hidden="true"></div>
-        <div class="smgmt-sel-bar-actions">
-          <button type="button" class="smgmt-sel-close-btn" id="smgmt-sel-close-btn"
-                  onclick="_smgmtCloseSelected()">
-            <i class="ti ti-circle-x"></i> Close ticket
-          </button>
-          <button type="button" class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
-                  onclick="_smgmtReEstimateSelected()">
-            <i class="ti ti-sparkles"></i> Reestimate
-          </button>
-          <button type="button" class="smgmt-move-to-btn" id="smgmt-move-to-btn"
-                  onclick="_smgmtMoveToModalOpen()">
-            <i class="ti ti-send"></i> Move to Sprint
-          </button>
-        </div>
-      </div><!-- /proj-selection-bar -->
     </header>
 
     </div><!-- /proj-sticky-chrome -->
@@ -9803,12 +9573,6 @@
 
           <div id="smgmt-sprint-list" class="smgmt-sprint-list">
             <div class="loading-msg" id="smgmt-loading">Loading sprints…</div>
-          </div>
-
-          <!-- Ghost pane — create next sprint (issue #364); drag removed (issue #1044) -->
-          <div class="smgmt-ghost-pane" id="smgmt-ghost-pane">
-            <div class="smgmt-ghost-title" id="smgmt-ghost-title">Create Sprint 1</div>
-            <div class="smgmt-ghost-sub" id="smgmt-ghost-sub"></div>
           </div>
 
           <!-- Backlog panel (issue #800) — full-width bottom panel: filter pills,
@@ -10889,7 +10653,7 @@
                         title="Keep the 100 most recently committed tests/test_*.py files; remove the rest">
                   <i class="ti ti-file-minus"></i> Clean old test files
                 </button>
-                <button class="ps-btn" id="ps-stale-scan-btn" onclick="_histScanStale()" title="Scan remote for leftover feature branches and flag them on sprint history rows">
+                <button class="ps-btn" id="ps-stale-scan-btn" onclick="psStaleBranchesScan()" title="Scan remote for leftover feature branches and flag them on sprint history rows">
                   <i class="ti ti-git-branch"></i> Scan stale branches
                 </button>
                 <button class="ps-btn" id="ps-stale-prune-btn" onclick="psPruneMergedBranches()"
@@ -10897,6 +10661,13 @@
                   <i class="ti ti-git-branch-deleted"></i> Prune merged branches
                 </button>
                 <span id="ps-cleanup-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div id="ps-cleanup-log" class="ps-cleanup-log" hidden>
+                <div class="ps-cleanup-log-head">
+                  <span>Cleanup log</span>
+                  <button type="button" class="ps-cleanup-log-clear" onclick="psCleanupLogClear()">Clear</button>
+                </div>
+                <div id="ps-cleanup-log-body" class="ps-cleanup-log-body" aria-live="polite"></div>
               </div>
               <!-- Shared review pane (#6): every cleanup button populates this one
                    collapsed pane with a list + Confirm. Hidden until a button runs. -->
@@ -11038,13 +10809,13 @@
                   </div>
                   <div class="ps-picker-group">
                     <div class="ps-picker-title" id="ps-icon-picker-label">Icon</div>
-                    <div class="ps-icon-grid" id="ps-icon-grid" role="radiogroup" aria-labelledby="ps-icon-picker-label"></div>
+                    <div class="ps-icon-grid" id="ps-icon-grid" role="radiogroup" aria-labelledby="ps-icon-picker-label" onkeydown="_psIconGridKeydown(event)"></div>
                     <button type="button" class="ps-icons-see-more hidden" id="ps-icons-see-more"
                             onclick="_psToggleIconGrid()">See more</button>
                   </div>
                   <div class="ps-picker-group">
                     <div class="ps-picker-title" id="ps-color-picker-label">Color</div>
-                    <div class="ps-color-grid" id="ps-color-grid" role="radiogroup" aria-labelledby="ps-color-picker-label"></div>
+                    <div class="ps-color-grid" id="ps-color-grid" role="radiogroup" aria-labelledby="ps-color-picker-label" onkeydown="_psColorGridKeydown(event)"></div>
                   </div>
                   <div class="ps-identity-error hidden" id="ps-identity-error" role="alert"></div>
                 </div>
@@ -11611,10 +11382,29 @@ let _projectData = null;   // full project config from /api/home
 let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
-let _smgmtSelectedIssues = new Set();
 let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
-let _smgmtDragTicket     = null;
-let _smgmtDragSprintLabel = null;
+// Drag-drop/selection removed (issue #1044) — stubs keep call sites that remain for single-ticket
+// move-to-modal flow from throwing ReferenceErrors.
+const _smgmtSelectedIssues = new Set();
+function _smgmtClearSelection() {
+  _smgmtSelectedIssues.clear();
+  document.querySelectorAll('.smgmt-ticket-cb:checked').forEach((cb) => { cb.checked = false; });
+  document.querySelectorAll('.smgmt-ticket.is-selected').forEach((r) => r.classList.remove('is-selected'));
+  if (typeof _blUpdateActions === 'function') _blUpdateActions();
+}
+// Backlog multi-select (restored, issue #1044 follow-up): the row checkbox toggles
+// _smgmtSelectedIssues; the intact bl-actions bar (_blUpdateActions/_blConfirmAdd)
+// reads it to bulk-add selected backlog tickets to a target sprint.
+function _smgmtToggleSelect(num, checked) {
+  if (checked) _smgmtSelectedIssues.add(num);
+  else _smgmtSelectedIssues.delete(num);
+  const row = document.getElementById('smgmt-ticket-' + num);
+  if (row) row.classList.toggle('is-selected', !!checked);
+  if (typeof _blUpdateActions === 'function') _blUpdateActions();
+}
+function _smgmtUpdateSelectionUI() { if (typeof _blUpdateActions === 'function') _blUpdateActions(); }
+function _smgmtCloseMoveToMenu() {}
+async function _smgmtMoveSelectedTo() {}
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
@@ -12995,9 +12785,6 @@ async function init() {
   // Wire up modal event listeners (DOM is ready at DOMContentLoaded)
   _setupModals();
 
-  // Track drag cursor position for the multi-drag pill
-  document.addEventListener('dragover', _smgmtDragMovePill);
-
   // Set up sticky toolbar shadow and condensed header on scroll
   _smgmtInitScrollShadow();
   _projCondensedHeaderInit();
@@ -13456,7 +13243,7 @@ function _smgmtRestoreDefaultOrder(label) {
   const issues  = _smgmtData.issues || [];
   const tickets = issues.filter(i => i.sprint_label === label);
   if (tickets.length === 0) {
-    container.innerHTML = '<div class="smgmt-drop-hint">Drop tickets here</div>';
+    container.innerHTML = '';
     return;
   }
   container.innerHTML = tickets.map(t => _smgmtTicketRowHtml(t, label)).join('');
@@ -14241,20 +14028,20 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const gen = ++_smgmtMiniRailGen;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     if (gen !== _smgmtMiniRailGen) return;
-    if (_smgmtRunningLabels.has(label)) continue;
+    if (_smgmtRunningLabels.has(label)) return;
     const outcome = _smgmtOutcomeCache[label];
     const isHasRework = outcome && outcome.state === 'has_rework';
-    if (_smgmtFinishedLabels.has(label) && !isHasRework) continue;
+    if (_smgmtFinishedLabels.has(label) && !isHasRework) return;
     const tickets = bySprint[label] || [];
-    if (tickets.length < 1) continue;
+    if (tickets.length < 1) return;
     const pfHints = _preflightEnabled() ? _smgmtPreflightHints(tickets) : null;
     const sig = _smgmtMiniRailSig(tickets, pfHints);
     const cached = _smgmtMiniRailCache[label];
     if (cached && cached.sig === sig && cached.html) {
       _smgmtInjectMiniRailHtml(label, cached.html);
-      continue;
+      return;
     }
     try {
       const resp = await fetch(
@@ -14264,10 +14051,11 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
       if (resp.ok) {
         const data = await resp.json();
         _smgmtInjectMiniRail(label, data, pfHints, tickets);
-        continue;
+        return;
       }
     } catch (_) { /* fall through to hints-only rail */ }
     // Has-rework / empty DAG: still show run preview row with pre-flight hints.
+    if (gen !== _smgmtMiniRailGen) return;
     if (pfHints && (pfHints.missingAC || pfHints.unsized)) {
       _smgmtInjectMiniRail(
         label,
@@ -14276,7 +14064,7 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
         tickets,
       );
     }
-  }
+  }));
 }
 
 
@@ -14983,10 +14771,7 @@ function _smgmtInjectOutcomeBand(label, outcome) {
     const badge = document.createElement('span');
     badge.className = `smgmt-state-badge ${meta.badgeCls}`;
     badge.textContent = meta.badge;
-    // Insert after the NEXT UP badge if present, else after the sprint name
-    const anchor = headerLeft.querySelector('.smgmt-next-badge')
-      || headerLeft.querySelector('.smgmt-sprint-name')
-      || headerLeft.children[1];
+    const anchor = headerLeft.querySelector('.smgmt-sprint-name') || headerLeft.children[1];
     if (anchor && anchor.nextSibling) headerLeft.insertBefore(badge, anchor.nextSibling);
     else headerLeft.appendChild(badge);
   }
@@ -18615,7 +18400,7 @@ async function _smgmtLivePollTick() {
       });
     }
 
-    for (const label of _smgmtRunningLabels) {
+    await Promise.all(Array.from(_smgmtRunningLabels).map(async (label) => {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
       ).catch(() => null);
@@ -18643,7 +18428,7 @@ async function _smgmtLivePollTick() {
         _smgmtRunningViewUpdate(label, live);
         if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, live);
       }
-    }
+    }));
   } catch (_) { /* silently ignore poll errors */ }
 }
 
@@ -19759,6 +19544,20 @@ function _smgmtGetCapacity(label) {
   } catch (_) { return 0; }
 }
 
+/** HTML for the sprint budget section containing the cap container (AC2 — issue #801). */
+function _smgmtCapBudgetSectionHtml(label) {
+  const sl = escHtml(label);
+  return `<div class="sc-budget-section">
+    <div class="sc-budget-head">
+      <span class="sc-budget-eyebrow">SPRINT BUDGET</span>
+      <span class="sc-budget-forecast" id="sc-budget-forecast-${sl}"></span>
+    </div>
+    <div class="cap" id="smgmt-cap-${sl}"></div>
+    <div class="smgmt-sprint-goal-text" id="smgmt-goal-${sl}" style="display:none"></div>
+  </div>
+  <div class="sc-preview-slot" id="sc-preview-${sl}"></div>`;
+}
+
 function _smgmtCapacityInputHtml(label) {
   const cap = _smgmtGetCapacity(label);
   const val = cap > 0 ? String(cap) : '';
@@ -19891,7 +19690,7 @@ function _smgmtUpdateCapBar(label) {
 
     let hintClass = 'cap-hint', hintText;
     if (total > budget) {
-      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ${escHtml(fmtDur(total - budget))}</strong>`;
+      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ~${escHtml(fmtDur(total - budget))}</strong>`;
       hintClass = 'cap-hint cap-hint--over';
     } else {
       const headroom = budget - total;
@@ -19900,7 +19699,7 @@ function _smgmtUpdateCapBar(label) {
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
-      hintText += ` · ${unestimated} unestimated`;
+      hintText += ` · ${unestimated} unestimated excluded`;
     }
 
     let forecastHtml = '';
@@ -20324,57 +20123,6 @@ let _fsPreview = null;
 // ── Multi-select helpers ───────────────────────────────────────────────────
 
 
-
-
-
-
-// Close move-to menu on outside click (legacy no-op — modal uses backdrop)
-document.addEventListener('click', function(e) {
-  const bar = document.getElementById('proj-selection-bar');
-  if (bar && !bar.contains(e.target)) _smgmtCloseMoveToMenu();
-});
-
-
-
-
-// Click a ticket row to select/deselect it (toggle). Shift+click extends the
-// selection from the last-clicked ticket to this one, like a file picker.
-// Ctrl/Cmd+click toggles individual items without disturbing other selections.
-// Clicks on the checkbox/link/menu don't reach here (they stopPropagation).
-
-
-
-
-// ── Drag-and-drop ──────────────────────────────────────────────────────────
-
-
-// ── Ghost pane — drag-below to create next sprint (issue #364) ──────────────
-
-/** Cached next-free sprint number for the current drag session. */
-let _smgmtGhostNextNum = null;
-
-/**
- * Next sprint number = max existing + 1. Uses the server's placeholder_sprint
- * (computed over sprint labels AND finished-summary numbers, so a deleted early
- * label never resets it to 1). Falls back to a client-side max if absent.
- */
-
-/** Show the ghost pane below the sprint list, pre-computing next-free number. */
-
-/** Hide the ghost pane and reset hot state. */
-
-
-
-
-/** Close ghost confirm modal — full no-op. */
-
-/** Confirm: create sprint and move ticket atomically. */
-
-
-
-
-
-// ── Within-sprint ticket reorder (issue #247) ─────────────────────────────
 
 
 
@@ -21297,13 +21045,9 @@ async function _smgmtCloseIssueConfirm() {
   }
 }
 
-// ── Backlog drag handlers ──────────────────────────────────────────────────
 
+// Close Move-to popup on Escape
 
-
-
-
-// Close Move-to popup, ghost pane, and ghost confirm modal on Escape
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     const popup = document.getElementById('smgmt-moveto-popup');
@@ -21319,15 +21063,6 @@ document.addEventListener('keydown', function(e) {
     if (hsModal && !hsModal.classList.contains('hidden')) _smgmtHotswapModalClose();
     const ciModal = document.getElementById('ci-modal');
     if (ciModal && !ciModal.classList.contains('hidden')) _smgmtCloseIssueCancel();
-    // Dismiss ghost mid-drag
-    if (_smgmtDragTicket) {
-      _smgmtGhostHide();
-    }
-    // Close ghost confirm modal (no-op if not open)
-    const gcModal = document.getElementById('gc-modal');
-    if (gcModal && !gcModal.classList.contains('hidden')) {
-      _gcClose();
-    }
   }
 });
 
@@ -21366,7 +21101,7 @@ function _smgmtKbColTickets(label) {
 
 /** Returns true if any modal, dialog, or dropdown is open. */
 function _smgmtKbAnyModalOpen() {
-  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'gc-backdrop', 'apm-backdrop'];
+  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'apm-backdrop'];
   if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
   const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
   if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
@@ -21629,12 +21364,6 @@ async function _smgmtArDoRefresh() {
 function _smgmtArTick() {
   if (_smgmtMoveLock) return; // freeze the countdown while a ticket move is in flight
   if (_smgmtPreflightLock) return; // freeze while a pre-flight fix is running (board would rebuild mid-fix)
-  // Freeze while a drag is in progress: a mid-drag board re-render (this tick
-  // calls loadSprintMgmt → _smgmtRenderBacklog, which rebuilds the rows via
-  // innerHTML) replaces the dragged DOM node, and the browser immediately
-  // cancels the drag. With a short refresh interval that clobbers nearly every
-  // attempt, making the board feel permanently un-draggable in all browsers.
-  if (_smgmtDragTicket) return;
   _arRemaining -= 1;
   if (_arRemaining <= 0) {
     _arRemaining = _arInterval;
@@ -22426,10 +22155,6 @@ function _setupModals() {
       this.textContent = 'Create Sprint';
     }
   });
-
-  // ── Ghost confirm modal wiring (issue #364) ──
-  document.getElementById('gc-backdrop').addEventListener('click', _gcClose);
-  document.getElementById('gc-confirm-btn').addEventListener('click', _gcConfirm);
 
   // ── New Ticket modal wiring ──
   document.getElementById('nt-close-btn').addEventListener('click', _ntClose);
@@ -28521,42 +28246,6 @@ document.addEventListener('keydown', function(e) {
 });
 </script>
 
-<!-- ── Inline multi-select action bar (proj-selection-bar in header) ── -->
-
-<!-- ── Ghost-confirm modal (issue #364) ── -->
-<div class="modal-backdrop hidden" id="gc-backdrop"></div>
-<div class="modal gc-modal hidden" id="gc-modal"
-     role="dialog" aria-modal="true" aria-labelledby="gc-modal-title">
-  <div class="modal-header">
-    <span class="modal-title" id="gc-modal-title">Create new sprint?</span>
-    <button class="modal-close" id="gc-close-btn" aria-label="Close" onclick="_gcClose()">&times;</button>
-  </div>
-  <div class="modal-body">
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">New sprint:</span>&nbsp;
-      <strong id="gc-sprint-name"></strong>
-    </div>
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">Moving ticket:</span>&nbsp;
-      <span id="gc-ticket-info"></span>
-    </div>
-    <div class="gc-detail-row">
-      <span class="gc-detail-label">From:</span>&nbsp;
-      <span id="gc-source-pane"></span>
-    </div>
-    <div class="gc-note">
-      This sprint number is the lowest positive integer not yet used.
-      To use a specific number, drag directly onto an existing empty sprint pane
-      or use <em>New Sprint</em>.
-    </div>
-    <div class="gc-error hidden" id="gc-error"></div>
-  </div>
-  <div class="modal-footer">
-    <button class="btn-ghost" id="gc-cancel-btn" type="button" onclick="_gcClose()">Cancel</button>
-    <button class="btn-blue" id="gc-confirm-btn" type="button">Create sprint-1 &amp; move</button>
-  </div>
-</div>
-
 <!-- ====================================================================== -->
 <!-- Add Project modal — CANONICAL markup. Keep BYTE-IDENTICAL with the copy -->
 <!-- in home-preview.html. Replaced the legacy index.html modal (issue #425). -->
@@ -28629,6 +28318,29 @@ document.addEventListener('keydown', function(e) {
 <!-- ── Keyboard navigation screen-reader announce region (issue #549) ── -->
 <div id="smgmt-kb-announce" aria-live="polite" aria-atomic="true"
      style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
+
+<!-- ── Project Settings cleanup modal (issue #735) ── -->
+<div class="modal-backdrop hidden" id="ps-cln-backdrop" onclick="_psCleanupModalClose()"></div>
+<div class="modal ps-cln-modal hidden" id="ps-cln-modal"
+     role="dialog" aria-modal="true" aria-labelledby="ps-cln-title">
+  <div class="modal-header">
+    <span class="modal-title" id="ps-cln-title">Cleanup</span>
+    <button class="modal-close" aria-label="Close" onclick="_psCleanupModalClose()">&times;</button>
+  </div>
+  <div class="modal-body">
+    <div id="ps-cln-progress" hidden></div>
+    <div id="ps-cln-review">
+      <div class="ps-cln-summary" id="ps-cln-summary"></div>
+      <ul id="ps-cln-list" class="ps-scaffold-list"></ul>
+    </div>
+    <div class="gc-error hidden" id="ps-cln-error"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn-ghost" type="button" id="ps-cln-cancel" onclick="_psCleanupModalClose()">Cancel</button>
+    <button class="btn-blue" type="button" id="ps-cln-confirm" onclick="psCleanupModalConfirm()">Confirm</button>
+    <button class="btn-primary hidden" type="button" id="ps-cln-done" onclick="_psCleanupModalClose()">Done</button>
+  </div>
+</div>
 
 <!-- ── "Move to" modal (issue #275 follow-up) ── -->
 <div class="modal-backdrop hidden" id="mt-backdrop" onclick="_smgmtMoveToModalClose()"></div>
@@ -28706,9 +28418,6 @@ document.addEventListener('keydown', function(e) {
     <button class="btn-blue" type="button" id="dao-confirm-btn" onclick="_smgmtDagOrderConfirm()" disabled>Apply</button>
   </div>
 </div>
-
-<!-- ── Multi-drag pill (follows cursor) ── -->
-<div class="smgmt-drag-pill" id="smgmt-drag-pill"></div>
 
 <!-- ── Log viewer modal (issue #264) ── -->
 <div class="modal-backdrop hidden" id="lv-backdrop" onclick="closeLvModal()"></div>
@@ -29097,6 +28806,17 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer hidden" id="pf-footer">
     <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
     <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  </div>
+  <!-- Bulk flag action progress overlay (Approve All / Re-estimate All) -->
+  <div class="pf-bulk-overlay hidden" id="pf-bulk-overlay">
+    <div class="pf-bulk-overlay-header">
+      <span class="pf-bulk-overlay-title" id="pf-bulk-title"></span>
+      <button class="modal-close" onclick="_pfBulkClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="pf-bulk-overlay-body" id="pf-bulk-list"></div>
+    <div class="pf-bulk-overlay-footer">
+      <button class="btn-ghost" id="pf-bulk-done-btn" onclick="_pfBulkClose()" disabled>Close</button>
+    </div>
   </div>
 </div>
 
@@ -30469,6 +30189,42 @@ function _psSelectColor(color) {
   _psSelectedColor = color;
   _psRenderColorPicker();
   _psUpdateIdentityPreview();
+}
+
+function _psIconGridKeydown(event) {
+  const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
+  if (!ARROW_KEYS.includes(event.key)) return;
+  event.preventDefault();
+  const grid = document.getElementById('ps-icon-grid');
+  const btns = Array.from(grid.querySelectorAll('button[role="radio"]:not(.ps-icon-opt--hidden)'));
+  if (!btns.length) return;
+  const current = btns.findIndex(b => b === document.activeElement || b.tabIndex === 0);
+  const base = current < 0 ? 0 : current;
+  const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+  const next = forward
+    ? (base + 1) % btns.length
+    : (base - 1 + btns.length) % btns.length;
+  btns.forEach((b, i) => b.setAttribute('tabindex', i === next ? '0' : '-1'));
+  btns[next].focus();
+  _psSelectIcon(btns[next].title);
+}
+
+function _psColorGridKeydown(event) {
+  const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
+  if (!ARROW_KEYS.includes(event.key)) return;
+  event.preventDefault();
+  const grid = document.getElementById('ps-color-grid');
+  const btns = Array.from(grid.querySelectorAll('button[role="radio"]'));
+  if (!btns.length) return;
+  const current = btns.findIndex(b => b === document.activeElement || b.tabIndex === 0);
+  const base = current < 0 ? 0 : current;
+  const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+  const next = forward
+    ? (base + 1) % btns.length
+    : (base - 1 + btns.length) % btns.length;
+  btns.forEach((b, i) => b.setAttribute('tabindex', i === next ? '0' : '-1'));
+  btns[next].focus();
+  _psSelectColor(btns[next].title);
 }
 
 function _psUpdateIdentityPreview() {
@@ -32392,225 +32148,9 @@ async function scaffoldApplyConfirm() {
   }
 }
 
-// ── Sprint file cleanup (issue #735) ──────────────────────────────────────────
-let _cleanupPreviewFiles = [];
-let _testCleanupPreviewFiles = [];
-
-async function _sprintCleanupPost(dryRun) {
-  var slug = window._currentProjectSlug || '';
-  if (!slug) return null;
-  var resp = await fetch('/api/maintenance/sprints/cleanup', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({project: slug, dry_run: dryRun}),
-  });
-  if (!resp.ok) {
-    var err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || ('HTTP ' + resp.status));
-  }
-  return await resp.json();
-}
-
-// ── Shared cleanup review pane (#6) ───────────────────────────────────────────
-// Every cleanup button fetches its dry-run preview, then routes the list here.
-// One pane, one Confirm — collapsed until a button runs.
-let _psCleanupConfirmFn = null;
-
-function _psCleanupPaneOpen(opts) {
-  const pane = document.getElementById('ps-cleanup-pane');
-  if (!pane) return;
-  _psCleanupConfirmFn = opts.onConfirm || null;
-  const items = opts.items || [];
-  const shown = items.slice(0, 60);
-  const more = items.length - shown.length;
-  document.getElementById('ps-cleanup-pane-title').textContent = opts.title || 'Review';
-  document.getElementById('ps-cleanup-pane-summary').textContent = opts.summary || '';
-  const listEl = document.getElementById('ps-cleanup-pane-list');
-  if (!items.length) {
-    listEl.innerHTML = `<li style="color:var(--text-muted)">${escHtml(opts.emptyMsg || 'Nothing to clean.')}</li>`;
-  } else {
-    listEl.innerHTML = shown.map(f => `<li>${escHtml(String(f))}</li>`).join('')
-      + (more > 0 ? `<li style="color:var(--text-muted)">… and ${more} more</li>` : '');
-  }
-  const confirmBtn = document.getElementById('ps-cleanup-pane-confirm');
-  const canConfirm = !!(items.length && opts.onConfirm);
-  confirmBtn.style.display = canConfirm ? '' : 'none';
-  confirmBtn.textContent = opts.confirmLabel || 'Confirm';
-  confirmBtn.disabled = false;
-  pane.style.display = '';
-}
-function _psCleanupPaneClose() {
-  const pane = document.getElementById('ps-cleanup-pane');
-  if (pane) pane.style.display = 'none';
-  _psCleanupConfirmFn = null;
-}
-async function _psCleanupPaneConfirm(btn) {
-  if (!_psCleanupConfirmFn) return;
-  btn.disabled = true; btn.textContent = 'Working…';
-  try {
-    const msg = await _psCleanupConfirmFn();
-    document.getElementById('ps-cleanup-pane-summary').textContent = msg || 'Done.';
-    document.getElementById('ps-cleanup-pane-list').innerHTML = '';
-    btn.style.display = 'none';
-    _psCleanupConfirmFn = null;
-  } catch (e) {
-    document.getElementById('ps-cleanup-pane-summary').textContent = 'Failed: ' + e.message;
-    btn.disabled = false; btn.textContent = 'Confirm';
-  }
-}
-
-async function sprintCleanupPreview() {
-  var statusEl = document.getElementById('ps-cleanup-status');
-  if (statusEl) statusEl.textContent = 'Scanning…';
-  try {
-    var data = await _sprintCleanupPost(true);
-    var files = (data && data.archived) || [];
-    _psCleanupPaneOpen({
-      title: 'Archive stale sprint runtime files',
-      summary: files.length ? (files.length + ' file(s) will be archived.') : '',
-      items: files,
-      emptyMsg: 'No stale runtime files to archive.',
-      confirmLabel: 'Archive ' + files.length,
-      onConfirm: async function () {
-        var r = await _sprintCleanupPost(false);
-        var n = (r && r.archived) ? r.archived.length : 0;
-        var kept = (r && typeof r.kept_count === 'number') ? r.kept_count : '?';
-        return 'Archived ' + n + ' file(s); ' + kept + ' kept.';
-      },
-    });
-    if (statusEl) statusEl.textContent = '';
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Preview failed: ' + e.message;
-  }
-}
-
-async function sprintCleanupConfirm() {
-  var statusEl = document.getElementById('ps-cleanup-status');
-  var confirmWrap = document.getElementById('ps-cleanup-confirm-wrap');
-  if (statusEl) statusEl.textContent = 'Archiving…';
-  try {
-    var data = await _sprintCleanupPost(false);
-    var n = (data && data.archived) ? data.archived.length : 0;
-    var kept = (data && typeof data.kept_count === 'number') ? data.kept_count : '?';
-    if (statusEl) statusEl.textContent = 'Archived ' + n + ' file(s); ' + kept + ' kept in place.';
-    if (confirmWrap) confirmWrap.style.display = 'none';
-    _cleanupPreviewFiles = [];
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Archive failed: ' + e.message;
-  }
-}
-
-async function _testFilesCleanupPost(dryRun) {
-  var slug = window._currentProjectSlug || '';
-  if (!slug) return null;
-  var resp = await fetch('/api/maintenance/tests/cleanup', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({project: slug, keep: 100, dry_run: dryRun}),
-  });
-  if (!resp.ok) {
-    var err = await resp.json().catch(function() { return {}; });
-    throw new Error(err.detail || ('HTTP ' + resp.status));
-  }
-  return await resp.json();
-}
-
-async function testFilesCleanupPreview() {
-  var statusEl = document.getElementById('ps-cleanup-status');
-  if (statusEl) statusEl.textContent = 'Scanning test files…';
-  try {
-    var data = await _testFilesCleanupPost(true);
-    var files = (data && data.remove) || [];
-    _psCleanupPaneOpen({
-      title: 'Clean old test files',
-      summary: 'Keeping ' + ((data && data.kept_count) || 0) + ' newest of '
-        + ((data && data.total_count) || 0) + ' test files (git recency).',
-      items: files,
-      emptyMsg: 'No old test files to remove.',
-      confirmLabel: 'Delete ' + files.length,
-      onConfirm: async function () {
-        var r = await _testFilesCleanupPost(false);
-        var n = (r && r.deleted) ? r.deleted.length : 0;
-        return 'Deleted ' + n + ' test file(s); kept ' + ((r && r.kept_count) || 0) + '.';
-      },
-    });
-    if (statusEl) statusEl.textContent = '';
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Test preview failed: ' + e.message;
-  }
-}
-
-async function testFilesCleanupConfirm() {
-  var statusEl = document.getElementById('ps-cleanup-status');
-  var confirmWrap = document.getElementById('ps-tests-confirm-wrap');
-  if (!confirm('Delete ' + _testCleanupPreviewFiles.length + ' old test file(s)? This cannot be undone from the dashboard.')) return;
-  if (statusEl) statusEl.textContent = 'Deleting old test files…';
-  try {
-    var data = await _testFilesCleanupPost(false);
-    var n = (data && data.deleted) ? data.deleted.length : 0;
-    if (statusEl) statusEl.textContent = 'Deleted ' + n + ' test file(s); kept ' + ((data && data.kept_count) || 0) + '.';
-    if (confirmWrap) confirmWrap.style.display = 'none';
-    _testCleanupPreviewFiles = [];
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Test cleanup failed: ' + e.message;
-  }
-}
-
-async function psPruneMergedBranches() {
-  var statusEl = document.getElementById('ps-cleanup-status');
-  var repo = (_cachedFullRepo && _slug) ? _cachedFullRepo[_slug] : null;
-  if (!repo) {
-    if (statusEl) statusEl.textContent = 'Project repo not loaded.';
-    return;
-  }
-  if (statusEl) statusEl.textContent = 'Scanning stale branches…';
-  try {
-    var scanResp = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
-    if (!scanResp.ok) throw new Error('HTTP ' + scanResp.status);
-    var scanData = await scanResp.json();
-    var branches = (scanData.branches || []).map(function(b) { return b.branch; });
-    if (typeof _histScanStale === 'function') await _histScanStale();
-    if (!branches.length) {
-      if (statusEl) statusEl.textContent = 'No stale branches found.';
-      return;
-    }
-    var dryResp = await fetch('/cleanup-stale-branches', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({repo: repo, branches: branches, confirm: false}),
-    });
-    if (!dryResp.ok) throw new Error('HTTP ' + dryResp.status);
-    var plan = await dryResp.json();
-    var toDelete = plan.to_delete || [];
-    var skipped = plan.skipped_unmerged || [];
-    if (statusEl) statusEl.textContent = '';
-    _psCleanupPaneOpen({
-      title: 'Prune merged feature branches',
-      summary: skipped.length
-        ? (skipped.length + ' unmerged branch(es) skipped — never deleted.')
-        : 'Only fully-merged branches are deleted.',
-      items: toDelete,
-      emptyMsg: 'No merged branches to delete.',
-      confirmLabel: 'Delete ' + toDelete.length,
-      onConfirm: async function () {
-        var resp = await fetch('/cleanup-stale-branches', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({repo: repo, branches: branches, confirm: true}),
-        });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        var result = await resp.json();
-        var deleted = (result.deleted || []).length;
-        var failed = (result.failed || []).length;
-        if (typeof _histScanStale === 'function') await _histScanStale();
-        return 'Deleted ' + deleted + ' merged branch' + (deleted !== 1 ? 'es' : '')
-          + (failed ? ' (' + failed + ' failed)' : '') + '.';
-      },
-    });
-  } catch (e) {
-    if (statusEl) statusEl.textContent = 'Branch prune failed: ' + e.message;
-  }
-}
+// ── Sprint file cleanup (issue #735) — logic in static/src/settings/cleanup.js ─
+// POST /api/maintenance/sprints/cleanup  POST /api/maintenance/tests/cleanup
+// GET /scan-stale-branches  POST /cleanup-stale-branches
 
 // ── Roadmap tab (issue #878) ──────────────────────────────────────────────────
 var _rmData = null;

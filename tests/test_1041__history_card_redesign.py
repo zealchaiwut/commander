@@ -190,17 +190,20 @@ def test_ac4_loose_end_band_function_exists():
     assert _fn_exists("_histLooseEndBandHtml"), "_histLooseEndBandHtml function must exist"
 
 
-def test_ac4_loose_end_band_returns_early_after_first_match():
-    """_histLooseEndBandHtml must return after finding the first loose end (not accumulate)."""
+def test_ac4_loose_end_band_handles_sprint_pr_and_stale_labels():
+    """_histLooseEndBandHtml must handle sprint_pr and stale_labels checks.
+
+    Note: issue #1154 changed the single-band design to multi-band; the old
+    early-return / band_count <= 3 assertion no longer applies.
+    """
     body = _fn_body("_histLooseEndBandHtml")
-    # Must have at least one early return so only ONE band is emitted
-    # (not two appended band strings)
-    assert "return" in body, "_histLooseEndBandHtml must return after first match"
+    assert "return" in body, "_histLooseEndBandHtml must have a return statement"
     assert "sprint_pr" in body, "sprint PR unmerged must be a loose-end priority"
-    # The function must not concatenate two separate band HTML strings
+    assert "stale_labels" in body, "stale_labels check must be explicitly handled"
+    # Function must emit at least one hist-loose-end-band template (sprint PR, stale labels, etc.)
     band_count = body.count("hist-loose-end-band")
-    assert band_count <= 3, \
-        f"Should define the band class at most three times (sprint PR, stale labels, branches), got {band_count}"
+    assert band_count >= 3, \
+        f"Should define at least three band templates (sprint PR, stale labels, generic/branches), got {band_count}"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -216,27 +219,35 @@ def test_child_sprint_legend_renders_above_ledger():
 def test_child_sprint_card_helpers_exist():
     """Nested child sprint layout helpers must exist."""
     assert _fn_exists("_histChildCardHtml"), "_histChildCardHtml must exist"
-    assert _fn_exists("_histParentRowHtml"), "_histParentRowHtml must exist"
+    child = _fn_body("_histChildCardHtml")
+    assert "isLineageParent" in child or "hist-lineage-parent" in child, \
+        "lineage parent must use the same child card shell"
     assert _fn_exists("_histAgentTimeBarHtml") or "hist-agent-bar" in _fn_body("_histChildMetricsHtml"), \
         "collapsed agent-time bar must be implemented"
 
 
-def test_child_group_uses_parent_row_and_child_wrap():
-    """Groups with children must nest under a parent row + L-connector wrap."""
+def test_child_group_uses_unified_lineage_cards():
+    """Parent and children in a group must share hist-child-card."""
     body = _fn_body("_histGroupHtml")
-    assert "_histParentRowHtml" in body, "parent sprint must render as a one-line row"
+    assert "isLineageParent: true" in body or "isLineageParent:true" in body.replace(" ", ""), \
+        "parent sprint must render via _histChildCardHtml with isLineageParent"
     assert "_histChildCardHtml" in body, "child sprints must use the child card builder"
     assert "hist-child-wrap" in body, "children must sit in hist-child-wrap for the L-connector"
-    assert "hist-sprint-group collapsed" in body, "collapsed groups hide child wrap via CSS"
-    parent = _fn_body("_histParentRowHtml")
-    assert "_histToggleGroup" in parent, "parent row must toggle group collapse"
+    child = _fn_body("_histChildCardHtml")
+    assert "_histLooseEndBandHtml" in child
+    assert "_histWhatListHtml" in child
+    assert "_histCardOutcomeHtml" in child
 
 
-def test_parent_group_toggle_helper_exists():
-    assert _fn_exists("_histToggleGroup"), "_histToggleGroup must exist for parent collapse"
-    parent = _fn_body("_histParentRowHtml")
-    assert "_histToggleGroup" in parent
-    assert "event.stopPropagation()" in parent
+def test_lineage_parent_includes_reconcile_and_recovery():
+    """Lineage parent cards must expose Reconcile/Complete like child cards."""
+    child = _fn_body("_histChildCardHtml")
+    assert "_histRecoveryBtnHtml" in child, \
+        "lineage cards must include recovery actions (Reconcile / Complete)"
+    recovery = _fn_body("_histRecoveryBtnHtml")
+    assert "smgmtReconcileSprint" in recovery, \
+        "recovery helper must wire the Reconcile button"
+    assert "_histToggleCard" in child
 
 
 def test_ac4_loose_end_band_css_uses_amber():
@@ -313,19 +324,16 @@ def test_ac5_issue_list_html_not_called_in_card_body():
 # AC6 — Partial "Unfinished N of M" list
 # ═════════════════════════════════════════════════════════════════════════════
 
-def test_ac6_what_list_for_partial_uses_unfinished_text():
-    """_histWhatListHtml must emit 'Unfinished' heading for partial sprints."""
-    body = _fn_body("_histWhatListHtml")
-    assert "Unfinished" in body or "unfinished" in body.lower(), \
-        "_histWhatListHtml must include 'Unfinished N of M' for partial sprints"
-
-
-def test_ac6_partial_list_filters_unmerged():
-    """The partial branch in _histWhatListHtml must filter issues to unmerged ones."""
-    body = _fn_body("_histWhatListHtml")
-    # Must filter by state !== 'merged'
-    assert "merged" in body.lower(), \
-        "_histWhatListHtml partial branch must filter out merged tickets"
+def test_partial_sprint_shows_hist_irow_not_iss_list():
+    """needs_rework/partial_finished cards must use hist-irow outcome, not iss-list."""
+    shows = _fn_body("_histCardShowsDoneSummary")
+    assert "_histIssuesForDisplay" in shows, \
+        "done summary must not hide when lineage tickets are unfinished"
+    what = _fn_body("_histWhatListHtml")
+    assert "iss-list" not in what, "what-list must not emit legacy iss-list rows"
+    assert "Unfinished" in what, "partial branch keeps the unfinished heading"
+    assert "_histIssuesForDisplay" in what, \
+        "partial branch must count lineage-owned tickets only"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -333,11 +341,20 @@ def test_ac6_partial_list_filters_unmerged():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_ac7_loose_end_band_returns_empty_for_no_loose_end():
-    """_histLooseEndBandHtml must return '' when no loose end exists."""
+    """_histLooseEndBandHtml must return '' when no loose end exists.
+
+    Note: issue #1154 changed the implementation to use an accumulator pattern
+    (bands.join('')); an empty array join produces '' without a literal 'return ""'.
+    """
     body = _fn_body("_histLooseEndBandHtml")
-    # Must have a terminal empty-string return (no loose end → no band)
-    assert "return ''" in body or 'return ""' in body, \
-        "_histLooseEndBandHtml must return '' when no loose end is found"
+    # Either an explicit return '' or a join on an empty array (bands.join('') === '')
+    has_empty_path = (
+        "return ''" in body
+        or 'return ""' in body
+        or ".join(" in body
+    )
+    assert has_empty_path, \
+        "_histLooseEndBandHtml must return '' when no loose end is found (via return '' or empty join)"
 
 
 def test_ac7_what_list_returns_empty_for_locked():
@@ -576,6 +593,42 @@ def test_ac14_what_list_and_issue_list_not_both_called():
     assert has_what, "_histCardHtml must call _histWhatListHtml"
     assert not has_iss, \
         "_histCardHtml must not also call _histIssueListHtml alongside _histWhatListHtml"
+
+
+def test_lineage_superseded_failures_filtered():
+    """Each ticket appears only on the latest lineage run that lists it."""
+    body = _fn_body("_histIssuesForDisplay")
+    assert "_histCanonicalOwnerLabel" in body
+    assert "owner === s.label" in body
+
+
+def test_progress_counts_failures_separately():
+    """Headline progress must not count crashed tickets as done."""
+    body = _fn_body("_histProgressText")
+    assert "_histIssueSucceeded" in body or "_histIssueChip" in body
+    assert "failed" in body
+
+
+def test_lineage_title_map_includes_board_cache():
+    """Title map must pull from per-sprint board cache as well as issue rows."""
+    body = _fn_body("_histBuildLineageTitleMap")
+    assert "_smgmtBySprint" in body
+
+
+def test_parent_body_uses_same_outcome_renderer_as_children():
+    """Parent and child lineage cards share one body builder."""
+    body = _fn_body("_histGroupHtml")
+    assert "_histChildCardHtml(group.baseSprint" in body
+    child = _fn_body("_histChildCardHtml")
+    assert "_histCardOutcomeHtml(s, group)" in child
+    assert "_histIssueListHtml(group.baseSprint)" not in body
+
+
+def test_lineage_title_map_helper_exists():
+    """Titles must backfill from sibling sprints in the same lineage group."""
+    assert _fn_exists("_histBuildLineageTitleMap")
+    title_fn = _fn_body("_histIssueTitle")
+    assert "_histLedgerData" in title_fn or "titleMap" in title_fn
 
 
 # ═════════════════════════════════════════════════════════════════════════════

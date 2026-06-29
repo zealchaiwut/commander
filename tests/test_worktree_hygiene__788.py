@@ -277,7 +277,17 @@ class TestAC3HardReset:
 
         assert worktree_sha == origin_sha, \
             f"worktree_sha must equal post-reset HEAD. Got {worktree_sha}"
-        assert err is None
+
+    def test_missing_worktree_path_returns_worktree_missing(self, tmp_path):
+        """Missing pool slot must not crash hygiene — return worktree-missing."""
+        _, _, err = sm._worktree_hygiene(
+            worktree=tmp_path / "slot-0-missing",
+            ticket_id=867,
+            merge_target="sprint/sprint-97.4",
+            is_retry=True,
+            repo_root=tmp_path,
+        )
+        assert err == "worktree-missing"
 
 
 # ---------------------------------------------------------------------------

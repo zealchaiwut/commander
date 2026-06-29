@@ -346,4 +346,5 @@ def test_ui_has_cleanup_card_and_preview_and_confirm():
 def test_ui_confirm_calls_cleanup_endpoint():
     """AC7: the confirm handler posts to the cleanup endpoint."""
     html = (STATIC_DIR / "project.html").read_text()
-    assert "/api/maintenance/sprints/cleanup" in html
+    cleanup_js = (STATIC_DIR / "src" / "settings" / "cleanup.js").read_text()
+    assert "/api/maintenance/sprints/cleanup" in html or "/api/maintenance/sprints/cleanup" in cleanup_js

@@ -658,6 +658,25 @@ def _run_pipeline_dispatch(
     by_num = {iss.number: iss for iss in state.issues}
     pctx: dict[int, dict] = {}
 
+    # issue #1436: in concurrent mode (max_coder_slots>1) the role-flexible
+    # scheduler runs _coder_stage/_tester_stage in multiple worker threads,
+    # outside its own scheduling lock. Those stages do non-atomic RMW on
+    # state.total_tokens_in/out and call state.save() — racing writers
+    # can drop token counts and interleave the single state-file write. Route
+    # every worker-thread counter mutation and save through one lock via this
+    # guard. Single-slot runs (concurrent=False) take no lock — zero overhead,
+    # identical code path to pre-fix behaviour.
+    from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415
+        ConcurrentStateGuard,
+    )
+    _state_guard = ConcurrentStateGuard(
+        state, state_path, concurrent=state.max_coder_slots > 1,
+    )
+
+    def _save_state() -> None:
+        """Persist sprint state, serialized in concurrent mode (issue #1436)."""
+        _state_guard.save()
+
     def _finalize_skip(num, ist, reason, category, *, tag, gate=False):
         ist.set_agent_status("failed")
         ist.failure_reason = reason
@@ -691,7 +710,7 @@ def _run_pipeline_dispatch(
             gate=gate, sprint_label=label,
         )
         _neon_ticket_status(label, num, "failed", eff_sprints_dir)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     def _coder_stage(num, attempt):
@@ -715,7 +734,7 @@ def _run_pipeline_dispatch(
         ctx["skip_coder"] = skip_coder
 
         ist.set_agent_status("queued")
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
 
         if skip_coder:
@@ -742,14 +761,14 @@ def _run_pipeline_dispatch(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
         _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
         def _on_coder_running(_ist=ist):
             _ist.set_agent_status("coder_running")
             _neon_ticket_status(label, num, "running", eff_sprints_dir)
-            state.save(state_path)
+            _save_state()
             _post_sprint_status(state, api_url=api_url)
 
         _stage_coder_t0 = time.monotonic()
@@ -769,8 +788,7 @@ def _run_pipeline_dispatch(
         finally:
             _pool_release(_pipe_pool_slot)
         _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
-        state.total_tokens_in += _ctin
-        state.total_tokens_out += _ctout
+        _state_guard.add_tokens(_ctin, _ctout)
         _db_agent_finish_sm(  # issue #764: one closed row per coder dispatch
             num, label, "coder",
             duration_seconds=time.monotonic() - _stage_coder_t0,
@@ -863,7 +881,7 @@ def _run_pipeline_dispatch(
                             type="ticket_agent_finished", target=f"#{num}", actor="system",
                             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
                         )
-                        state.save(state_path)
+                        _save_state()
                         _post_sprint_status(state, api_url=api_url)
                         return _StageResult.PASS
                     # hang_continue also failed — fall through to _finalize_skip
@@ -892,7 +910,7 @@ def _run_pipeline_dispatch(
             type="ticket_agent_finished", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
         return _StageResult.PASS
 
@@ -910,12 +928,12 @@ def _run_pipeline_dispatch(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
 
         def _on_tester_running(_ist=ist):
             _ist.set_agent_status("tester_running")
-            state.save(state_path)
+            _save_state()
             _post_sprint_status(state, api_url=api_url)
 
         _stage_tester_t0 = time.monotonic()
@@ -937,8 +955,7 @@ def _run_pipeline_dispatch(
                 prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
             )
             _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
-            state.total_tokens_in += _ttin
-            state.total_tokens_out += _ttout
+            _state_guard.add_tokens(_ttin, _ttout)
             _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
                 num, label, "tester",
                 duration_seconds=time.monotonic() - _stage_tester_t0,
@@ -959,7 +976,7 @@ def _run_pipeline_dispatch(
                 type="ticket_agent_finished", target=f"#{num}", actor="system",
                 detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
             )
-            state.save(state_path)
+            _save_state()
             _post_sprint_status(state, api_url=api_url)
 
             merged, summary_line, gate_category = handle_post_tester(
@@ -1018,7 +1035,7 @@ def _run_pipeline_dispatch(
         summary.merged.append(f"#{num}")
         _neon_ticket_status(label, num, "done", eff_sprints_dir,
                             total_tokens=ist.tokens_in + ist.tokens_out)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     def _on_needs_rework(num):
@@ -1046,7 +1063,7 @@ def _run_pipeline_dispatch(
         _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
         _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
         _neon_ticket_status(label, num, "failed", eff_sprints_dir)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     prev_level_idx = -1
@@ -1108,7 +1125,7 @@ def _run_pipeline_dispatch(
 
             def _on_slot_change(_count: int) -> None:
                 state.active_coder_slots = _count
-                state.save(state_path)
+                _save_state()
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
             from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415

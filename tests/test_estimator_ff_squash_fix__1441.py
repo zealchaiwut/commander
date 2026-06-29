@@ -1,5 +1,4 @@
 """Tests for issue #1441: Estimator accuracy miscounts files on ff/squash merges (runs against UAT)"""
-import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -157,7 +156,6 @@ def test_ff_squash_fix__ff_merge_uses_merge_base_diff(temp_git_repo):
         def mock_ff_run(*cmd):
             """Simulate git commands for a ff merge scenario."""
             call_count[0] += 1
-            call_num = call_count[0]
 
             cmd_str = " ".join(cmd)
 

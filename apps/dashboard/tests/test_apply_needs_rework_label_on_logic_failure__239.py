@@ -13,11 +13,10 @@ Acceptance Criteria:
 """
 
 import sys
-import subprocess
 import importlib
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -35,8 +34,6 @@ sys.path.insert(0, str(SPRINT_MGR_DIR))
 
 def _import_sprint_manager():
     """Import sprint_manager, mocking heavy deps so it loads in test env."""
-    import importlib
-    import types
 
     # stub dotenv and github_client before import
     dotenv_stub = types.ModuleType("dotenv")
@@ -63,8 +60,6 @@ def _import_sprint_manager():
 
 def _import_update_ticket():
     """Import update_ticket module, stubbing github_client."""
-    import importlib
-    import types
 
     gc_stub = types.ModuleType("github_client")
     gc_stub.repo = lambda: "zealchaiwut/commander"

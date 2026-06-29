@@ -10,8 +10,6 @@ This test suite verifies:
 7. Direct git merge is blocked/discouraged in prompts
 """
 import os
-import subprocess
-import json
 import pytest
 import httpx
 from pathlib import Path

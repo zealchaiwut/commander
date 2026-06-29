@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import subprocess
 import sys
 import types
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent  # .../coder or .../tester
 SPRINT_MANAGER_PATH = REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"

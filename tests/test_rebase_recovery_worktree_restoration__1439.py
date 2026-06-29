@@ -2,9 +2,6 @@
 import os
 import pytest
 import httpx
-import subprocess
-import tempfile
-import shutil
 from pathlib import Path
 
 

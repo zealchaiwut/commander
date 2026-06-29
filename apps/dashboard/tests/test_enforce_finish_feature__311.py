@@ -10,8 +10,6 @@ This test suite verifies:
 7. Direct git merge is blocked/discouraged in prompts
 """
 import os
-import subprocess
-import json
 import pytest
 import httpx
 from pathlib import Path
@@ -112,13 +110,20 @@ def test_enforce_finish_feature__in_progress_label_applied_on_coder_start(client
 
     content = sprint_manager_path.read_text()
 
-    # Verify _apply_in_progress_label function exists
-    assert "_apply_in_progress_label" in content, "_apply_in_progress_label function missing"
+    # The in-progress label is applied via the single transition() source of
+    # truth.  The old _apply_in_progress_label helper was removed (issue #1585);
+    # the live path is _transition_safe(..., _TicketState.IN_PROGRESS).
+    assert "_apply_in_progress_label" not in content, (
+        "dead _apply_in_progress_label helper must be gone (issue #1585)"
+    )
     assert "in-progress" in content, "in-progress label not referenced"
-    assert "update_ticket.py" in content, "update_ticket.py not used to apply label"
+    assert "_transition_safe(" in content, "_transition_safe not used to apply label"
 
-    # Verify it's called when coder starts (look for the integration point)
-    assert "_apply_in_progress_label" in content, "Function defined but may not be called"
+    # Verify the in-progress transition is wired when the coder starts.
+    assert "_TicketState.IN_PROGRESS" in content, (
+        "in-progress label must be applied via _transition_safe(_TicketState.IN_PROGRESS) "
+        "when the coder starts"
+    )
 
 
 def test_enforce_finish_feature__finish_feature_atomic_transition(client):

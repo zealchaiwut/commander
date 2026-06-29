@@ -13,11 +13,10 @@ Acceptance Criteria:
 """
 
 import sys
-import subprocess
 import importlib
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -35,8 +34,6 @@ sys.path.insert(0, str(SPRINT_MGR_DIR))
 
 def _import_sprint_manager():
     """Import sprint_manager, mocking heavy deps so it loads in test env."""
-    import importlib
-    import types
 
     # stub dotenv and github_client before import
     dotenv_stub = types.ModuleType("dotenv")
@@ -63,8 +60,6 @@ def _import_sprint_manager():
 
 def _import_update_ticket():
     """Import update_ticket module, stubbing github_client."""
-    import importlib
-    import types
 
     gc_stub = types.ModuleType("github_client")
     gc_stub.repo = lambda: "zealchaiwut/commander"
@@ -79,18 +74,27 @@ def _import_update_ticket():
 
 class TestAC1LogicFailureTriggerNeedsRework:
 
-    def test_tester_rejected_calls_apply_needs_rework(self):
+    # The standalone _apply_needs_rework_label helper was removed (issue #1585);
+    # needs-rework labelling now flows through _transition_safe(NEEDS_REWORK),
+    # which delegates to the single state_machine.transition() source of truth.
+
+    def test_needs_rework_transition_routes_to_state_machine(self):
         sm = _import_sprint_manager()
-        called = []
+        from services.sprint_manager import label_transitions as lt
 
-        def fake_run(cmd, **kwargs):
-            called.append(cmd)
-            return MagicMock(returncode=0, stdout="", stderr="")
+        captured = []
 
-        with patch("subprocess.run", side_effect=fake_run):
-            sm._apply_needs_rework_label(42, sm.FailureCategory.TESTER_REJECTED)
+        def fake_transition(issue, target_state, **kwargs):
+            captured.append((issue, target_state))
+            return True
 
-        assert called, "TESTER_REJECTED must trigger update_ticket.py call"
+        with patch.object(sm, "_sm_transition", fake_transition), \
+             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+            sm._transition_safe(42, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
+
+        assert captured == [(42, sm._TicketState.NEEDS_REWORK)], (
+            "needs-rework labelling must route through state_machine.transition()"
+        )
 
     @pytest.mark.parametrize("category", [
         "TESTER_REJECTED",
@@ -105,25 +109,22 @@ class TestAC1LogicFailureTriggerNeedsRework:
             f"{category} must be in _LOGIC_FAILURE_CATEGORIES to trigger needs-rework label"
         )
 
-    def test_apply_needs_rework_calls_update_ticket_with_correct_args(self):
-        sm = _import_sprint_manager()
-        captured_cmds = []
+    def test_needs_rework_state_maps_to_needs_rework_label(self):
+        """The NEEDS_REWORK state applies the 'needs-rework' status label and
+        clears the other status labels — the behaviour the old helper performed
+        via update_ticket.py, now owned by state_machine.transition()."""
+        from services.sprint_manager import state_machine as smach
 
-        def fake_run(cmd, **kwargs):
-            captured_cmds.append(cmd)
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("subprocess.run", side_effect=fake_run):
-            sm._apply_needs_rework_label(99, sm.FailureCategory.CODER_NO_WORK)
-
-        assert len(captured_cmds) == 1, "Expected exactly one subprocess.run call"
-        cmd = captured_cmds[0]
-        assert "update_ticket.py" in " ".join(str(c) for c in cmd)
-        assert "--status" in cmd
-        assert "needs-rework" in cmd
-        assert "--force" in cmd
-        assert "--issue" in cmd
-        assert "99" in cmd
+        labels = smach.STATE_LABELS[smach.TicketState.NEEDS_REWORK]
+        assert labels == frozenset({"needs-rework"}), (
+            f"NEEDS_REWORK must add exactly the 'needs-rework' label, got {labels!r}"
+        )
+        # in-progress / SIT / UAT are status labels, so transition() clears them
+        # when moving to NEEDS_REWORK (to_remove = current_status - desired).
+        for other in ("in-progress", "SIT", "UAT"):
+            assert other in smach.STATUS_LABELS, (
+                f"{other} must be a managed status label so it is cleared on rework"
+            )
 
     def test_all_five_logic_categories_defined_on_failure_category(self):
         sm = _import_sprint_manager()
@@ -156,33 +157,21 @@ class TestAC2InfraFailuresNoNeedsRework:
         "HANG",
         "RETRY_EXHAUSTED",
     ])
-    def test_apply_needs_rework_noop_for_infra_category(self, category):
+    def test_infra_category_gate_skips_needs_rework(self, category):
+        """The call-site gate is `if category in _LOGIC_FAILURE_CATEGORIES`.
+        Infra categories are not members, so the NEEDS_REWORK transition is
+        never reached for them."""
         sm = _import_sprint_manager()
-        called = []
-
-        def fake_run(cmd, **kwargs):
-            called.append(cmd)
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("subprocess.run", side_effect=fake_run):
-            sm._apply_needs_rework_label(5, category)
-
-        assert called == [], (
-            f"_apply_needs_rework_label must NOT call subprocess for infra category {category}"
+        fc_category = getattr(sm.FailureCategory, category)
+        assert fc_category not in sm._LOGIC_FAILURE_CATEGORIES, (
+            f"infra category {category} must NOT gate-through to a needs-rework transition"
         )
 
-    def test_apply_needs_rework_noop_for_none_category(self):
+    def test_none_category_gate_skips_needs_rework(self):
         sm = _import_sprint_manager()
-        called = []
-
-        def fake_run(cmd, **kwargs):
-            called.append(cmd)
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        with patch("subprocess.run", side_effect=fake_run):
-            sm._apply_needs_rework_label(5, None)
-
-        assert called == [], "None category must NOT trigger needs-rework label"
+        assert None not in sm._LOGIC_FAILURE_CATEGORIES, (
+            "None category must NOT gate-through to a needs-rework transition"
+        )
 
 
 # ── AC-3: update_ticket.py STATUS_MAP has correct needs-rework entry ──────────
@@ -251,53 +240,59 @@ class TestAC3StatusMapNeedsRework:
 
 class TestAC4Resilience:
 
-    def test_apply_needs_rework_survives_subprocess_exception(self):
+    # _transition_safe() is the resilient wrapper that replaced the old helper's
+    # best-effort behaviour: a failed transition must never raise out of the
+    # sprint pipeline — it is logged as a warning instead.
+
+    def _patch_labels(self):
+        from services.sprint_manager import label_transitions as lt
+        return patch.object(lt, "_current_status_labels", lambda n, repo: frozenset())
+
+    def test_transition_safe_survives_generic_exception(self):
         sm = _import_sprint_manager()
 
         def boom(*a, **kw):
             raise RuntimeError("network error")
 
-        with patch("subprocess.run", side_effect=boom):
-            # Must not raise — exceptions are caught and printed as warnings
-            sm._apply_needs_rework_label(7, sm.FailureCategory.PYTEST_FAIL)
+        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+            # Must not raise — exceptions are caught and logged as warnings.
+            sm._transition_safe(7, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
-    def test_apply_needs_rework_survives_timeout(self):
+    def test_transition_safe_survives_transition_error(self):
         sm = _import_sprint_manager()
 
-        def timeout(*a, **kw):
-            raise subprocess.TimeoutExpired(cmd="update_ticket.py", timeout=60)
+        def boom(*a, **kw):
+            raise sm._TransitionError("gh issue edit failed after retries")
 
-        with patch("subprocess.run", side_effect=timeout):
-            sm._apply_needs_rework_label(7, sm.FailureCategory.LINT_FAIL)
+        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+            sm._transition_safe(7, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
-    def test_apply_needs_rework_handles_exit_code_2(self):
-        """Exit code 2 from update_ticket.py means partial failure with warning comment posted."""
-        sm = _import_sprint_manager()
-        called = []
-
-        def fake_run(cmd, **kwargs):
-            called.append(True)
-            return MagicMock(returncode=2, stdout="", stderr="label not found")
-
-        with patch("subprocess.run", side_effect=fake_run):
-            # Should not raise — exit code 2 is treated as best-effort warning
-            sm._apply_needs_rework_label(8, sm.FailureCategory.MERGE_CONFLICT)
-
-        assert called, "subprocess.run should have been called"
-
-    def test_apply_needs_rework_warns_on_unexpected_exit_code(self, capsys):
-        """Non-zero, non-2 exit code produces a warning to stderr."""
+    def test_transition_safe_returns_none_on_failure(self):
         sm = _import_sprint_manager()
 
-        def fake_run(cmd, **kwargs):
-            return MagicMock(returncode=1, stdout="", stderr="label missing on repo")
+        def boom(*a, **kw):
+            raise RuntimeError("boom")
 
-        with patch("subprocess.run", side_effect=fake_run):
-            sm._apply_needs_rework_label(9, sm.FailureCategory.TESTER_REJECTED)
+        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+            result = sm._transition_safe(8, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
+        assert result is None, "_transition_safe is best-effort and returns None"
 
-        captured = capsys.readouterr()
-        assert "WARNING" in captured.err or "warning" in captured.err.lower(), (
-            "A warning should be printed to stderr when update_ticket.py exits non-zero"
+    def test_transition_safe_logs_warning_on_failure(self):
+        sm = _import_sprint_manager()
+        from services.sprint_manager import label_transitions as lt
+
+        def boom(*a, **kw):
+            raise RuntimeError("label missing on repo")
+
+        warn_mock = MagicMock()
+        log_stub = MagicMock(warn=warn_mock)
+        with patch.object(sm, "_sm_transition", boom), \
+             patch.object(lt, "structured_log", log_stub), \
+             self._patch_labels():
+            sm._transition_safe(9, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
+
+        assert warn_mock.called, (
+            "a failed transition must be logged as a warning (best-effort)"
         )
 
 

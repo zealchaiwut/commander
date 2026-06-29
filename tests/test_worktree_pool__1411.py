@@ -335,6 +335,14 @@ class TestWorktreeRelease:
         with patch("subprocess.run", side_effect=_success):
             pool.create()
 
+        # subprocess is mocked, so `git worktree add` never makes a real dir;
+        # materialize the slot so acquire()/release() operate on an existing,
+        # healthy worktree and release() runs git clean/checkout rather than
+        # the recreate branch.
+        slot = pool_dir / "slot-0"
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+
         wt = pool.acquire()
 
         with patch("subprocess.run", side_effect=_success) as mock_run:
@@ -571,9 +579,12 @@ class TestWorktreePoolMissingSlot:
             slots=1,
         )
 
-        def _mk_slot(path: Path) -> None:
+        def _mk_slot(path: Path) -> bool:
+            # Mirror the real _create_slot() contract: build the slot and
+            # report success so create() enqueues it (issue #1435).
             path.mkdir(parents=True, exist_ok=True)
             (path / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+            return True
 
         with patch.object(pool, "_create_slot", side_effect=lambda p: _mk_slot(p)):
             pool.create()
@@ -589,12 +600,14 @@ class TestWorktreePoolMissingSlot:
         assert (wt2 / ".git").exists()
 
     def test_create_skips_failed_slots(self, tmp_path, capsys):
+        # A slot is "failed" when _create_slot() returns a falsy success flag;
+        # create() must keep those paths out of the free pool (issue #1435).
         pool_dir = tmp_path / "pool"
         repo_root = tmp_path / "repo"
         repo_root.mkdir(parents=True)
         pool = WorktreePool(pool_dir, repo_root, "main", slots=2)
 
-        with patch.object(pool, "_create_slot") as mock_create:
+        with patch.object(pool, "_create_slot", return_value=False) as mock_create:
             pool.create()
 
         assert mock_create.call_count == 2

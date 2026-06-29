@@ -28,6 +28,11 @@ _WORKTESTER_ROOT = Path(os.environ.get(
 ))
 _DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 _SPRINTS_DIR = _DASHBOARD_DIR / "sprints"
+
+# Hard cap on concurrent coder/tester worker slots (mirrors
+# worktree_pool.MAX_SLOTS). The scheduler spawns max_coder_slots worker threads,
+# so clamping here keeps thread count and worktree-pool size aligned (issue #1437).
+MAX_SLOTS = 4
 _ALERTS_DIR = _DASHBOARD_DIR / "alerts"
 
 _DEFAULT_CODER_BY_SIZE: dict = {
@@ -319,6 +324,10 @@ def load_config(path: Path) -> "SprintConfig":
             max_coder_slots = int(data["max_coder_slots"])
         except (TypeError, ValueError):
             pass
+    # Clamp to the documented hard cap so the worker-thread count spawned by
+    # concurrent_scheduler stays aligned with the worktree-pool size (issue #1437).
+    if max_coder_slots is not None:
+        max_coder_slots = min(max_coder_slots, MAX_SLOTS)
 
     max_tester_slots: Optional[int] = None
     if data.get("max_tester_slots") is not None:

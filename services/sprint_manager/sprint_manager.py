@@ -1334,6 +1334,25 @@ def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> No
     sys.stdout.write(str(f"  Sprint branch {sprint_branch!r} created and pushed.") + "\n")
 
 
+def _restore_worktree_branch(wt_root, target_branch: str) -> None:
+    """Restore a shared worktree to target_branch after a rebase recovery attempt.
+
+    The automated rebase recovery (issue #1414) checks out the feature branch in
+    the tester worktree. Issue #1439: that worktree is shared by the next
+    dispatched ticket, so it must always be returned to target_branch — whether
+    the rebase succeeded, conflicted, or raised — and without touching the feature
+    branch's commits. This only switches branches; it never rewrites history.
+    """
+    # If an interrupted rebase is still in progress, abort it first so the
+    # checkout can succeed. A no-op abort (no rebase active) fails harmlessly.
+    _try("git", "rebase", "--abort", cwd=wt_root)
+    ok, _, err = _try("git", "checkout", target_branch, cwd=wt_root)
+    if not ok:
+        sys.stdout.write(str(
+            f"  [rebase] WARNING: could not restore worktree to {target_branch}: {err}"
+        ) + "\n")
+
+
 def _call_finish_feature(
     issue_num: int,
     worktester_root: Optional[Path] = None,
@@ -1422,46 +1441,54 @@ def _call_finish_feature(
         sys.stdout.write(str(f"  [rebase] could not checkout {feature_branch}: {co_err}") + "\n")
         return False, []
 
-    # Attempt a single rebase onto the current target (AC8: only one attempt).
-    ok_rb, rb_out, rb_err = _try(
-        "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
-    )
-    rebase_combined = rb_out + "\n" + rb_err
+    # issue #1439: once we leave target_branch for the feature branch above, the
+    # shared tester worktree must always be returned to target_branch before this
+    # function returns — otherwise the next ticket dispatched into the same
+    # worktree starts from a prior ticket's feature branch. The restore runs in a
+    # `finally` so it executes whether the rebase succeeds, conflicts, or raises.
+    try:
+        # Attempt a single rebase onto the current target (AC8: only one attempt).
+        ok_rb, rb_out, rb_err = _try(
+            "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
+        )
+        rebase_combined = rb_out + "\n" + rb_err
 
-    if not ok_rb:
-        conflict_files = _extract_rebase_conflict_files(rebase_combined)
+        if not ok_rb:
+            conflict_files = _extract_rebase_conflict_files(rebase_combined)
+            sys.stdout.write(str(
+                f"  [rebase] rebase conflict for #{issue_num} in "
+                f"{len(conflict_files)} file(s): {conflict_files}"
+            ) + "\n")
+            _try("git", "rebase", "--abort", cwd=wt_root)
+            return False, conflict_files
+
+        # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
+        sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
+        ok_push, _, push_err = _try(
+            "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
+        )
+        if not ok_push:
+            sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+            return False, []
+
+        # Retry the merge exactly once after the successful rebase (AC8).
         sys.stdout.write(str(
-            f"  [rebase] rebase conflict for #{issue_num} in "
-            f"{len(conflict_files)} file(s): {conflict_files}"
+            f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
         ) + "\n")
-        _try("git", "rebase", "--abort", cwd=wt_root)
-        return False, conflict_files
+        with _develop_merge_guard():
+            result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+        if result2.stdout:
+            sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
+        if result2.returncode == 0:
+            sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
+            return True, []
 
-    # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
-    sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
-    ok_push, _, push_err = _try(
-        "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
-    )
-    if not ok_push:
-        sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+        sys.stdout.write(str(
+            f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
+        ) + "\n")
         return False, []
-
-    # Retry the merge exactly once after the successful rebase (AC8).
-    sys.stdout.write(str(
-        f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
-    ) + "\n")
-    with _develop_merge_guard():
-        result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
-    if result2.stdout:
-        sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
-    if result2.returncode == 0:
-        sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
-        return True, []
-
-    sys.stdout.write(str(
-        f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
-    ) + "\n")
-    return False, []
+    finally:
+        _restore_worktree_branch(wt_root, target_branch)
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────

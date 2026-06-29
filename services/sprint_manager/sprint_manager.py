@@ -1304,6 +1304,71 @@ def _revert_to_sit_impl(issue_num: int, gate_name: str, output: str,
         structured_log.warn("github_update_failed", f"failed to post gate failure comment: {e}", issue_num=issue_num, exc=str(e))
 
 
+def _revert_to_sit_aggregate(issue_num: int, failed_results: "list[GateResult]",
+                             total: Optional[int] = None,
+                             repo_name: Optional[str] = None,
+                             repo_root: Optional[Path] = None) -> None:
+    """Revert ONCE for all failing gates: a single comment listing every failure,
+    one sidecar covering them all (so the coder's retry fixes everything in one
+    pass), and one SIT transition. Replaces the per-gate revert now that
+    run_quality_gates runs all gates in a single pass (no early-return).
+    """
+    if not failed_results:
+        return
+    n = len(failed_results)
+    names = ", ".join(r.gate for r in failed_results)
+    denom = f"/{total}" if total else ""
+    parts = [
+        f"❌ **{n}{denom} quality gate(s) failed: {names}**",
+        "Issue reverted to SIT — fix all of the items below in one pass, "
+        "then push; the same single retry re-runs every gate.",
+    ]
+    files_to_inspect: list[str] = []
+    detail_parts: list[str] = []
+    primary_class: Optional[str] = None
+    for r in failed_results:
+        out = r.output or ""
+        truncated = out[:2000] if len(out) > 2000 else out
+        parts.append(f"\n### {r.gate}\n```\n{truncated}\n```")
+        fclass = _GATE_FAILURE_CLASS_MAP.get(r.gate, r.gate)
+        if primary_class is None:
+            primary_class = fclass
+        detail_parts.append(f"[{r.gate}]\n{truncated}")
+        if _FAILURE_PARSING_AVAILABLE:
+            try:
+                failures = parse_failures(r.gate, out)
+                parts.append(build_failure_block(r.gate, failures))
+                files_to_inspect.extend(
+                    f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
+                    for f in failures if f.get("file")
+                )
+            except Exception as e:
+                structured_log.error(
+                    "failure_parsing_error",
+                    f"failure parsing failed for {r.gate}: {e}",
+                    issue_num=issue_num, exc=str(e),
+                )
+
+    record_failure(
+        issue_num,
+        primary_class or "gate",
+        detail="\n\n".join(detail_parts)[:4000],
+        repo_root=repo_root,
+        summary=f"Issue #{issue_num}: {n}{denom} gate(s) failed: {names}",
+        files_to_inspect=sorted(set(files_to_inspect)),
+    )
+    for r in failed_results:
+        _write_gate_failure_record(issue_num, r.gate, r.output or "", repo_root=repo_root)
+
+    _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
+    try:
+        github_client.add_comment(issue_num, "\n".join(parts), repo_name=repo_name)
+    except Exception as e:
+        structured_log.warn("github_update_failed",
+                            f"failed to post aggregate gate failure comment: {e}",
+                            issue_num=issue_num, exc=str(e))
+
+
 def _post_success_comment(issue_num: int, results: list[GateResult],
                           repo_name: Optional[str] = None,
                           gates_skipped: bool = False,
@@ -1824,8 +1889,7 @@ def handle_post_tester(
             return True, f"Issue #{issue_num}: all gates passed, merge already done, UAT applied", None
         return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
     else:
-        failed = next((r for r in results if not r.passed), None)
-        gate_name = failed.gate if failed else "unknown"
+        failed_list = [r for r in results if not r.passed]
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
             "typecheck":     FailureCategory.GATE_FAIL,
@@ -1835,17 +1899,29 @@ def handle_post_tester(
             "merge-preview": FailureCategory.MERGE_CONFLICT,
             "monolith":      FailureCategory.GATE_FAIL,
         }
+        # Aggregate ALL failing gates into ONE revert (comment + sidecar + SIT) so
+        # a single retry fixes everything — including a merge conflict caught in the
+        # same pass — instead of burning one attempt per gate.
+        _revert_to_sit_aggregate(issue_num, failed_list, total=len(results), repo_name=eff_repo)
+        # Category drives the pipeline fix-loop. A code gate (typecheck / lint /
+        # design / pytest / monolith) failing means the coder must fix code, so a
+        # code category wins over merge-preview. merge-preview ALONE → MERGE_CONFLICT,
+        # which preserves the transient-rebase-race free-retry path.
+        _code_order = ["typecheck", "lint", "design", "pytest", "monolith"]
+        primary = next((r for r in failed_list if r.gate in _code_order), failed_list[0])
+        gate_name = primary.gate
         # A gate may override the category for a failure that isn't a code defect
         # (e.g. pytest reports ENV_ERROR when its binary is missing) — honor that
         # so infra failures skip the coder fix-loop + needs-rework.
         gate_category = (
-            getattr(failed, "category", None)
+            getattr(primary, "category", None)
             or gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
         )
+        names = ", ".join(r.gate for r in failed_list)
         _gate_msg = (
             f"Issue #{issue_num}: gate {gate_name} environment error (test infra missing)"
             if gate_category == FailureCategory.ENV_ERROR
-            else f"Issue #{issue_num}: gate failed ({gate_name})"
+            else f"Issue #{issue_num}: {len(failed_list)}/{len(results)} gates failed: {names}"
         )
         return (False, _gate_msg, gate_category)
 

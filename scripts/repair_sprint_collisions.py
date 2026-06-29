@@ -194,6 +194,23 @@ def _get_sprint_row_unscoped(conn, label: str):
         return None
 
 
+def _get_sprint_row_scoped(conn, label: str, project: str):
+    """Return the sprints row for this exact (label, project), or None.
+
+    Scoped lookup for the ASSERT_ABSENT guard (issue #1481): under the composite
+    (label, project) schema two projects can share a sprint label, so an
+    unscoped ``WHERE label = ?`` may return the wrong project's row and miss a
+    real running ghost. Scoping to (label, project) targets the correct row.
+    """
+    try:
+        return conn.execute(
+            "SELECT * FROM sprints WHERE label = ? AND project = ? LIMIT 1",
+            (label, project),
+        ).fetchone()
+    except Exception:
+        return None
+
+
 def _commander_row_exists(conn, label: str, project: str) -> bool:
     """True if a row with this exact (label, project) exists."""
     try:
@@ -285,12 +302,8 @@ def apply(manifest: list | None = None, commander_dir: Path | None = None) -> di
             label = entry["label"]
             project = entry["project"]
 
-            row = _get_sprint_row_unscoped(conn, label)
-            running = (
-                row is not None
-                and (row["project"] or "").strip() == project
-                and row["state"] == "running"
-            )
+            row = _get_sprint_row_scoped(conn, label, project)
+            running = row is not None and row["state"] == "running"
 
             key = (
                 _KEY_PERF_COACH
@@ -408,7 +421,7 @@ def main() -> int:
     if created:
         print(f"\nSummary: 1 row created ({_COMMANDER}/{_LABEL}), 1 assertion evaluated.")
     elif existed:
-        print(f"\nSummary: 0 rows created (already repaired), 1 assertion evaluated.")
+        print("\nSummary: 0 rows created (already repaired), 1 assertion evaluated.")
     return 0
 
 

@@ -4,8 +4,7 @@
  * run-stats — fed by GET /api/sprints/history (local-only).
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
-          _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel, CSS */
+          _smgmtBySprint, _smgmtUpdateSubnav, _nextSprintSublabel, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
@@ -398,7 +397,7 @@ function _histIssueListHtml(s) {
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
 // only; locked (finished/deleted) sprints render no verbs at all (links only).
-function _histVerbsHtml(s) {
+export function _histVerbsHtml(s) {
   // Verbs gated by the unified lifecycle (sprint-lifecycle.md):
   //   needs_rework     → Re-run (creates a child sub-sprint)
   //   ready_to_merge   → Finish (merge sign-off) + Delete
@@ -477,7 +476,7 @@ function _histLinksHtml(s) {
 }
 
 // Compact PR / summary pills on the card head — visible without expanding.
-function _histHeadLinksHtml(s) {
+export function _histHeadLinksHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -494,7 +493,7 @@ function _histHeadLinksHtml(s) {
 }
 
 // Compact header actions: PR / Summary / Logs + lifecycle verbs in one row.
-function _histHeadActionsHtml(s) {
+export function _histHeadActionsHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -544,7 +543,7 @@ function _histHeadActionsHtml(s) {
 
 // Metrics row: an estimate-accuracy bar (actual ÷ estimated) plus duration and
 // token badges, per mock v5.
-function _histMetricsHtml(s) {
+export function _histMetricsHtml(s) {
   const acc = s.estimate_accuracy;
   let bar = '';
   if (acc != null && !isNaN(acc)) {
@@ -717,7 +716,7 @@ function _histMergeGanttTickets(s, stats) {
 // Coder segments are purple, tester amber — fix rounds use the same solid colors.
 // A red ✕ crash marker is painted at the crash ticket's end offset, but only
 // for a sprint that actually failed (AC4).
-function _histGanttHtml(s, stats) {
+export function _histGanttHtml(s, stats) {
   const tickets = _histMergeGanttTickets(s, stats);
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
@@ -999,7 +998,7 @@ function _histReconcileChipHtml(s) {
 }
 
 // Header hint chips (kept for backward-compat; no longer used by _histCardHtml).
-function _histHeadHintsHtml(s, expanded) {
+export function _histHeadHintsHtml(s, expanded) {
   if (expanded) {
     return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
   }
@@ -1836,7 +1835,7 @@ function _histTicketsDone(s) {
 // (rendered expanded) plus a list of older folds, each holding exactly
 // `foldSize` sprints. Both the recent slice and every fold are sized by the
 // same `history_fold_size` setting (AC2/AC8).
-function _histPartition(sprints, foldSize) {
+export function _histPartition(sprints, foldSize) {
   foldSize = Math.max(1, foldSize | 0);
   const recent = sprints.slice(0, foldSize);
   const older = sprints.slice(foldSize);

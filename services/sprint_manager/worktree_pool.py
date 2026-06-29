@@ -1,12 +1,18 @@
 """Warm git worktree pool for concurrent coder dispatch (issue #1411).
 
-Creates K isolated git worktrees under .commander/runtime/worktree-pool/,
-each with its own fresh virtualenv. Coders acquire a slot before dispatch
-and release it after completion. The pool is torn down at sprint end.
-On startup, orphaned worktrees are reconciled before new dispatch.
+Creates K isolated git worktrees under .commander/runtime/worktree-pool/.
+Each slot is linked to a PERSISTENT shared virtualenv (keyed by the
+requirements.txt hash, stored under .commander/runtime/venv-cache/) via a
+symlink — built once and reused across every sprint run and slot. This removes
+the per-run `python -m venv` + `pip install` that previously cost 2-3 minutes on
+every Run before the first coder dispatch. Coders acquire a slot before dispatch
+and release it after. The pool's worktrees are torn down at sprint end; the
+shared venv-cache is kept for the next run. On startup, orphaned worktrees are
+reconciled before new dispatch.
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -73,6 +79,9 @@ class WorktreePool:
         self.base_branch = base_branch
         self.slots = slots
         self.requirements_file = requirements_file
+        # Persistent shared-venv cache, OUTSIDE pool_dir so it survives teardown
+        # (which rmtrees pool_dir). Keyed by requirements hash; built once.
+        self._venv_cache = pool_dir.parent / "venv-cache"
 
         self._free: list[Path] = []
         self._in_use: set[Path] = set()
@@ -83,9 +92,89 @@ class WorktreePool:
     # Pool lifecycle
     # ------------------------------------------------------------------
 
+    def _req_hash(self) -> str:
+        """Short hash identifying the requirements set the shared venv is built for."""
+        if not (self.requirements_file and self.requirements_file.exists()):
+            return "norequirements"
+        try:
+            return hashlib.sha256(self.requirements_file.read_bytes()).hexdigest()[:16]
+        except OSError:
+            return "norequirements"
+
+    def _shared_venv(self) -> Path:
+        """Path to the persistent shared venv for the current requirements hash."""
+        return self._venv_cache / self._req_hash() / "venv"
+
+    def _ensure_shared_venv(self) -> Optional[Path]:
+        """Build the persistent shared venv ONCE per requirements hash; reuse after.
+
+        This is the fix for the 2-3 min Run→dispatch latency: previously every Run
+        rebuilt a per-slot venv + `pip install`. Now the venv is built once, lives
+        outside the worktrees, and is reused across runs and slots. Returns the
+        venv path, or None on failure (slots then run without a venv, as before
+        for the no-requirements case).
+        """
+        venv_path = self._shared_venv()
+        if (venv_path / "bin" / "python").exists():
+            return venv_path  # already built for this requirements hash — reuse
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        ok, _, err = _run(
+            [sys.executable, "-m", "venv", str(venv_path)],
+            cwd=self._venv_cache, timeout=300,
+        )
+        if not ok:
+            sys.stdout.write(
+                f"  [worktree-pool] WARNING: shared venv create failed: {err}\n"
+            )
+            return None
+        if self.requirements_file and self.requirements_file.exists():
+            pip = venv_path / "bin" / "pip"
+            ok, _, err = _run(
+                [str(pip), "install", "-r", str(self.requirements_file), "-q"],
+                cwd=self._venv_cache, timeout=600,
+            )
+            if not ok:
+                sys.stdout.write(
+                    f"  [worktree-pool] WARNING: shared venv pip install failed: {err}\n"
+                )
+        sys.stdout.write(
+            f"  [worktree-pool] Shared venv ready ({self._req_hash()}) — reused across runs\n"
+        )
+        return venv_path
+
+    def _link_venv(self, wt_path: Path) -> None:
+        """(Re)create the slot's `venv` symlink to the persistent shared venv.
+
+        Called on slot creation and after each release (git clean removes the
+        untracked symlink). A symlink — not a copy — keeps the venv's real prefix
+        valid. No-op (with a warning) if the shared venv isn't available.
+        """
+        shared = self._shared_venv()
+        slot_venv = wt_path / "venv"
+        if not (shared / "bin" / "python").exists():
+            sys.stdout.write(
+                f"  [worktree-pool] WARNING: shared venv unavailable; slot"
+                f" {wt_path.name} has no venv\n"
+            )
+            return
+        try:
+            if slot_venv.is_symlink():
+                if slot_venv.resolve() == shared.resolve():
+                    return  # already linked correctly
+                slot_venv.unlink()
+            elif slot_venv.exists():
+                shutil.rmtree(slot_venv, ignore_errors=True)
+            slot_venv.symlink_to(shared, target_is_directory=True)
+        except OSError as e:
+            sys.stdout.write(
+                f"  [worktree-pool] WARNING: venv symlink failed for {wt_path}: {e}\n"
+            )
+
     def create(self) -> None:
-        """Create all K worktrees and their virtualenvs."""
+        """Create all K worktrees, each symlinked to the persistent shared venv."""
         self.pool_dir.mkdir(parents=True, exist_ok=True)
+        # Build the shared venv once (slow only the first time / on requirements change).
+        self._ensure_shared_venv()
         created: list[Path] = []
         for i in range(self.slots):
             wt_path = self.pool_dir / f"{SLOT_PREFIX}{i}"
@@ -138,8 +227,12 @@ class WorktreePool:
     def release(self, worktree: Path) -> None:
         """Reset worktree to clean base state and return it to the free pool."""
         if worktree.is_dir():
-            _run(["git", "clean", "-fdx"], cwd=worktree)
+            # Preserve the venv symlink across the clean (-e venv); re-link
+            # defensively in case it was removed, so the next acquire keeps the
+            # shared venv (no rebuild).
+            _run(["git", "clean", "-fdx", "-e", "venv"], cwd=worktree)
             _run(["git", "checkout", self.base_branch], cwd=worktree)
+            self._link_venv(worktree)
         else:
             sys.stdout.write(
                 f"  [worktree-pool] WARNING: slot {worktree.name} missing on release"
@@ -204,6 +297,7 @@ class WorktreePool:
         the next acquire. Without recreation, hygiene crashes on ``git fetch``.
         """
         if self._slot_healthy(wt_path):
+            self._link_venv(wt_path)  # cheap: ensure the shared-venv symlink is present
             return True
         sys.stdout.write(
             f"  [worktree-pool] Recreating missing slot {wt_path.name}...\n"
@@ -237,30 +331,10 @@ class WorktreePool:
             )
             return
 
-        # Create fresh venv — never copy or reuse another slot's venv.
-        venv_path = wt_path / "venv"
-        ok, _, err = _run(
-            [sys.executable, "-m", "venv", str(venv_path)],
-            cwd=wt_path,
-        )
-        if not ok:
-            sys.stdout.write(
-                f"  [worktree-pool] WARNING: venv create failed for"
-                f" {wt_path}: {err}\n"
-            )
-            return
-
-        if self.requirements_file and self.requirements_file.exists():
-            pip = venv_path / "bin" / "pip"
-            ok, _, err = _run(
-                [str(pip), "install", "-r", str(self.requirements_file), "-q"],
-                cwd=wt_path,
-            )
-            if not ok:
-                sys.stdout.write(
-                    f"  [worktree-pool] WARNING: pip install failed for"
-                    f" {wt_path}: {err}\n"
-                )
+        # Link the slot to the PERSISTENT shared venv (built once per requirements
+        # hash, outside the worktree). Replaces the per-slot `python -m venv` +
+        # `pip install` that cost 2-3 min on every Run.
+        self._link_venv(wt_path)
 
         sys.stdout.write(f"  [worktree-pool] Created {wt_path.name}\n")
 

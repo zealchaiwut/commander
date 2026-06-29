@@ -455,6 +455,28 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
             ),
         )
 
+    # Honesty guard: refuse to complete a lineage whose member sprints still have
+    # open rework / SIT / unfinished work tickets — those need Re-run, not Complete.
+    # Mirror-backed (_has_rework_tickets reads the local issues mirror), no GH calls.
+    _has_rework = getattr(srv, "_has_rework_tickets", None)
+    if _has_rework is not None:
+        rework_members: list[str] = []
+        for lbl in all_labels:
+            try:
+                if _has_rework(lbl, repo):
+                    rework_members.append(lbl)
+            except Exception:
+                pass
+        if rework_members:
+            raise HTTPException(
+                409,
+                detail=(
+                    "Cannot complete — needs-rework/SIT tickets remain in: "
+                    + ", ".join(sorted(rework_members))
+                    + ". Re-run those sprints first."
+                ),
+            )
+
     selected = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
     closed = 0
     errors: list[str] = []
@@ -564,6 +586,23 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
 
     if srv._is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — complete after it finishes")
+
+    # Honesty guard: a sprint with open rework / SIT / unfinished work tickets is
+    # not done — Re-run it, don't Complete. Mirror-backed, no GitHub calls.
+    _has_rework = getattr(srv, "_has_rework_tickets", None)
+    if _has_rework is not None:
+        try:
+            _rework = _has_rework(label, repo)
+        except Exception:
+            _rework = False
+        if _rework:
+            raise HTTPException(
+                409,
+                detail=(
+                    f"Cannot complete {label} — it still has needs-rework/SIT tickets. "
+                    "Re-run it first."
+                ),
+            )
 
     is_base = not srv._is_child_sprint_label(label)
     head = srv._sprint_branch_name(label)

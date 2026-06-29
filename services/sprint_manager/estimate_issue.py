@@ -81,6 +81,7 @@ def parse_files_to_touch(body: str) -> list:
     Returns [] when the section is absent or contains no parseable paths.
     """
     in_section = False
+    in_comment = False
     seen: set = set()
     paths: list = []
     for line in body.split("\n"):
@@ -91,7 +92,19 @@ def parse_files_to_touch(body: str) -> list:
             if re.match(r"^#", line):
                 break
             stripped = line.strip()
-            if not stripped or stripped.startswith("<!--") or stripped == "-->":
+            # Track multi-line HTML-comment state. A line that opens `<!--`
+            # without a closing `-->` on the same line enters comment mode;
+            # the line containing the subsequent `-->` exits it. Every line
+            # in between (and the opening/closing lines themselves) is skipped.
+            if in_comment:
+                if "-->" in stripped:
+                    in_comment = False
+                continue
+            if "<!--" in stripped:
+                if "-->" not in stripped:
+                    in_comment = True
+                continue
+            if not stripped:
                 continue
             if stripped not in seen:
                 seen.add(stripped)

@@ -183,6 +183,16 @@ async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     from . import split_xl_service  # noqa: PLC0415
     result = split_xl_service.split_apply(body.project, label, issue, body.children)
+    if not result.get("ok"):
+        # Surface partial-failure recovery info (created child numbers +
+        # compensation outcome) as a structured 500 detail so the UI can tell the
+        # user exactly what was created and whether manual cleanup is needed (#1453).
+        raise HTTPException(500, detail={
+            "error": result.get("error"),
+            "partial": result.get("partial", False),
+            "created": result.get("created_numbers", []),
+            "compensation": result.get("compensation"),
+        })
     if result.get("ok"):
         try:
             import server as srv  # noqa: PLC0415

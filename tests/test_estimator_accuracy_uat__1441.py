@@ -9,11 +9,16 @@ import pytest
 import httpx
 
 
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
-if not BASE_URL.startswith("http"):
-    raise RuntimeError(
-        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+_uat_url = os.environ.get("UAT_BASE_URL", "")
+_uat_port = os.environ.get("UAT_PORT", "")
+if not _uat_url and _uat_port:
+    _uat_url = f"http://localhost:{_uat_port}"
+if not _uat_url:
+    pytest.skip(
+        "UAT_BASE_URL / UAT_PORT not set — skipping UAT-only tests",
+        allow_module_level=True,
     )
+BASE_URL = _uat_url
 
 
 @pytest.fixture

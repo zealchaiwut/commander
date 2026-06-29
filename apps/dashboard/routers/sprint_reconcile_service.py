@@ -362,6 +362,83 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     return lifecycle_updated or counts_updated
 
 
+def _parse_sprint_label(label: str) -> tuple[str, tuple[int, ...]]:
+    """'sprint-90.3' → ('sprint-90', (90, 3)). Returns ('', ()) if unparseable."""
+    core = label[len("sprint-"):] if label.startswith("sprint-") else label
+    try:
+        parts = tuple(int(p) for p in core.split("."))
+    except ValueError:
+        return "", ()
+    if not parts:
+        return "", ()
+    return f"sprint-{parts[0]}", parts
+
+
+def _terminalize_superseded_orphans(project: str) -> list[str]:
+    """Terminalize orphan queued rework children that a later sibling has shipped.
+
+    A rework child written at run-end (plan.json state='needs_rework',
+    end_reason='queued') but never dispatched has no DB row and lingers on the
+    board as a phantom (perf-coach 90.3, 91.1). When a LATER child in the same
+    lineage chain has reached 'completed' in the DB, that queued orphan is
+    superseded — mark its plan.json completed/superseded so it stops surfacing.
+    Writes only the orphan's own plan.json; touches no GitHub and no DB.
+    """
+    terminalized: list[str] = []
+    try:
+        import server as srv  # noqa: PLC0415
+        sprints_dir = srv._project_root_path(project) / ".commander" / "sprints"
+    except Exception:
+        return terminalized
+    if not sprints_dir.exists():
+        return terminalized
+
+    db = _db()
+    completed_by_base: dict[str, list[tuple[int, ...]]] = {}
+    for row in db.list_sprints_lifecycle():
+        if project and row.get("project") != project:
+            continue
+        if (row.get("state") or "").lower() != "completed":
+            continue
+        base, parts = _parse_sprint_label(row.get("label") or "")
+        if base:
+            completed_by_base.setdefault(base, []).append(parts)
+
+    for plan_path in sorted(sprints_dir.glob("sprint-*-plan.json")):
+        try:
+            data = json.loads(plan_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if (data.get("state") or "").lower() != "needs_rework":
+            continue
+        if (data.get("end_reason") or "").lower() != "queued":
+            continue
+        label = plan_path.name[: -len("-plan.json")]
+        # Skip if it actually ran (state file) or is tracked in the DB.
+        if (sprints_dir / f"{label}-state.json").exists():
+            continue
+        if db.get_sprint(label, project=project or None):
+            continue
+        base, parts = _parse_sprint_label(label)
+        if not base:
+            continue
+        # Superseded only if a strictly-later sibling in the same lineage completed.
+        if not any(sib > parts for sib in completed_by_base.get(base, [])):
+            continue
+        data["state"] = "completed"
+        data["end_reason"] = "superseded"
+        try:
+            tmp = plan_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(str(tmp), str(plan_path))
+            terminalized.append(label)
+        except Exception:
+            pass
+    return terminalized
+
+
 def reconcile_project(project: str, limit: int = 40) -> list[str]:
     """Reconcile terminal sprints for *project*. Returns labels that were updated."""
     updated: list[str] = []

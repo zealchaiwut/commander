@@ -4316,6 +4316,7 @@
       .bl-grid .bl-row { border-right: none; }
     }
     .bl-row { min-width: 0; }
+    .bl-row--selectable { cursor: pointer; }
     /* ── Top multi-select action bar (proj-selection-bar) ── */
     .proj-selection-bar {
       display: none; align-items: center; gap: 12px;
@@ -11445,6 +11446,16 @@ function _smgmtClearSelection() {
 // Backlog multi-select (restored, issue #1044 follow-up): the row checkbox toggles
 // _smgmtSelectedIssues; the intact bl-actions bar (_blUpdateActions/_blConfirmAdd)
 // reads it to bulk-add selected backlog tickets to a target sprint.
+/** Click anywhere on a backlog row (not just the checkbox) toggles selection.
+ *  Interactive children (link, buttons, the checkbox) opt out via stopPropagation. */
+function _smgmtRowClickSelect(event, num) {
+  if (event.target.closest('a, button, input, .smgmt-row-menu-btn')) return;
+  const cb = document.querySelector('#smgmt-ticket-' + num + ' .smgmt-ticket-cb');
+  const checked = cb ? !cb.checked : !_smgmtSelectedIssues.has(num);
+  if (cb) cb.checked = checked;
+  _smgmtToggleSelect(num, checked);
+}
+
 function _smgmtToggleSelect(num, checked) {
   if (checked) _smgmtSelectedIssues.add(num);
   else _smgmtSelectedIssues.delete(num);

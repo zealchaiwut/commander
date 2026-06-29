@@ -6405,10 +6405,11 @@ Resolve manually and re-run Bulk complete.`,
          <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>` : "";
     const isSelected = typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.has(ticket.number);
     return `
-    <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row bl-row--selectable${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
+         onclick="_smgmtRowClickSelect(event,${ticket.number})"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
       <input type="checkbox" class="smgmt-ticket-cb" ${isSelected ? "checked" : ""}
              title="Select for bulk add to a sprint"

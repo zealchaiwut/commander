@@ -2507,7 +2507,14 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, pro
     if durable_state is None:
         plan = _read_plan_json(project_root, sprint_label) or {}
         state = plan.get("state")
-        if state in _TERMINAL_PLAN_STATES and plan.get("tickets"):
+        # end_reason 'queued' = the child was created (carrying its planned
+        # tickets) but never dispatched — no run, no DB row, no state.json. That
+        # is NOT a real run, even though tickets are present, so Run must be
+        # allowed to dispatch it for the first time. Blocking here forced the
+        # operator to Re-run into yet another never-dispatched child — the
+        # 90.3 / 91.1 / 99.3 zombie loop.
+        never_dispatched = (plan.get("end_reason") or "").lower() == "queued"
+        if state in _TERMINAL_PLAN_STATES and plan.get("tickets") and not never_dispatched:
             _raise_terminal_redispatch(sprint_label, state)
 
 

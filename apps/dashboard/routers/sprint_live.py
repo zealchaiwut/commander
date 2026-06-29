@@ -432,6 +432,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
       "active_agent": {"name": "coder"|"tester", "model": "...", "pid": N} | null,
       "active_agents": [{"name": "coder"|"tester", "ticket": {"number": N, "title": "..."}, "pid": N}, ...],
       "pipeline_mode": <bool>,
+      "max_coder_slots": <int>, "max_tester_slots": <int>,   # lane capacity (issue #1415)
+      "active_coder_slots": <int>, "active_tester_slots": <int>,  # lane occupancy (issue #1440)
       "levels": [{"level": N, "total": N, "merged": N, "state": "complete"|"active"|"waiting"}, ...],
       "recent_log_lines": [{"timestamp": "HH:MM:SS", "type": "...", "message": "..."}, ...],
       "issues": [
@@ -660,17 +662,25 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     agent_pid = active_agent.get("pid") if active_agent else None
     coder_entries: list[dict] = []
     tester_entry = None
+    active_tester_slots = 0
     for iss in issues:
         ticket = {"number": iss.get("number"), "title": iss.get("title", "")}
         cs, cf = iss.get("coder_started_at"), iss.get("coder_finished_at")
         ts, tf = iss.get("tester_started_at"), iss.get("tester_finished_at")
         if ts and not tf:
             tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
+            active_tester_slots += 1
         elif cs and not cf:
             coder_entries.append({"name": "coder", "ticket": ticket, "pid": agent_pid})
     active_agents: list[dict] = coder_entries + ([tester_entry] if tester_entry else [])
     if not active_agents and active_agent:
         active_agents = [active_agent]
+
+    # Active lane occupancy (issue #1440) — how many coder/tester slots are
+    # currently busy. The frontend multi-lane view gates on max_coder_slots > 1
+    # AND more than one active coder, so these counts must travel with the
+    # capacity (max_*_slots) values in the same snapshot.
+    active_coder_slots = len(coder_entries)
 
     levels_out = _live_metrics.compute_levels(issues)
 
@@ -702,6 +712,8 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "est_remaining_minutes": est_remaining_minutes,
         "issues":               issues_out,
         **_live_metrics.lane_capacity(status_data),
+        "active_coder_slots":   active_coder_slots,
+        "active_tester_slots":  active_tester_slots,
         "fix_round_max":        fix_round_max,
         **_live_metrics.running_metrics(sprint_label, project),
     }

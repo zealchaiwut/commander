@@ -1675,6 +1675,8 @@ Replace the existing draft (${data.existing_label})?`
   function _histSprintShowsBinaryIssues(s) {
     if (!s)
       return false;
+    if ((s.end_reason || "").toLowerCase() === "queued")
+      return false;
     if (_histSprintFailed(s))
       return true;
     const st = (s.lifecycle_state || "").toLowerCase();
@@ -1861,6 +1863,8 @@ Replace the existing draft (${data.existing_label})?`
     const er = (s.end_reason || "").toLowerCase();
     if (er === "natural" || er === "merge_sprint")
       return false;
+    if (er === "queued")
+      return false;
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
     if (failed.length)
       return true;
@@ -1948,10 +1952,11 @@ Replace the existing draft (${data.existing_label})?`
   function _histStateChip(state, sprint) {
     const s = (state || "unknown").toLowerCase();
     const er = sprint && sprint.end_reason ? String(sprint.end_reason).toLowerCase() : "";
-    const displayState = s === "needs_rework" && (er === "natural" || er === "merge_sprint") && sprint && !_histSprintFailed(sprint) ? "ready_to_merge" : s;
+    const displayState = s === "needs_rework" && (er === "natural" || er === "merge_sprint") && sprint && !_histSprintFailed(sprint) ? "ready_to_merge" : s === "needs_rework" && er === "queued" ? "queued_rerun" : s;
     const map = {
       completed: ["completed", "COMPLETED"],
       ready_to_merge: ["ready_to_merge", "READY TO MERGE"],
+      queued_rerun: ["planning", "QUEUED \xB7 RE-RUN"],
       needs_rework: ["failed", "FAILED"],
       partial_finished: ["partial", "PARTIAL"],
       deleted: ["deleted", "DELETED"],

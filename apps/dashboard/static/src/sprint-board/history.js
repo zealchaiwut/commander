@@ -129,6 +129,8 @@ function _histIssueChip(iss, opts) {
 
 function _histSprintShowsBinaryIssues(s) {
   if (!s) return false;
+  // Never-dispatched (queued) sprint: its issues are pending, not pass/fail.
+  if ((s.end_reason || '').toLowerCase() === 'queued') return false;
   if (_histSprintFailed(s)) return true;
   const st = (s.lifecycle_state || '').toLowerCase();
   return [
@@ -354,6 +356,9 @@ function _histSprintFailed(s) {
   if (st !== 'needs_rework') return false;
   const er = (s.end_reason || '').toLowerCase();
   if (er === 'natural' || er === 'merge_sprint') return false;
+  // A rework child created but never dispatched (end_reason 'queued', no run) is
+  // a pending re-run, NOT a failed sprint — don't render it as FAILED/crashed.
+  if (er === 'queued') return false;
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   if (failed.length) return true;
   const issues = Array.isArray(s.issues) ? s.issues : [];
@@ -614,10 +619,13 @@ export function _histStateChip(state, sprint) {
   const displayState = (s === 'needs_rework' && (er === 'natural' || er === 'merge_sprint')
     && sprint && !_histSprintFailed(sprint))
     ? 'ready_to_merge'
-    : s;
+    : (s === 'needs_rework' && er === 'queued')
+      ? 'queued_rerun'
+      : s;
   const map = {
     completed:        ['completed', 'COMPLETED'],
     ready_to_merge:   ['ready_to_merge', 'READY TO MERGE'],
+    queued_rerun:     ['planning',  'QUEUED · RE-RUN'],
     needs_rework:     ['failed',    'FAILED'],
     partial_finished: ['partial',   'PARTIAL'],
     deleted:          ['deleted',   'DELETED'],

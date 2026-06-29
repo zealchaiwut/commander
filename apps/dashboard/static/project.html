@@ -14276,10 +14276,19 @@ function _smgmtUpdateOrderViolations(sprintLabel) {
 }
 
 /**
- * Fix a single ticket's order violation: compute new order, POST to plan API,
- * then reload the sprint board.
+ * Fix a single ticket's order violation by reordering the dispatch slots in the
+ * DOM only — UI-only, no backend write.
+ *
+ * Scope reconciliation (issue #1446, follow-up to #1422): #1422's Out of Scope
+ * explicitly listed "Persisting or syncing the fixed order to any backend
+ * service (UI-only re-evaluation)". The original implementation POSTed the new
+ * order to /api/sprints/{label}/plan and then called loadSprintMgmt(), which
+ * both persisted and triggered a full board reload — contradicting that
+ * contract. This function now performs a pure DOM reorder and re-runs the same
+ * local violation re-evaluation the drag-drop path uses. Because nothing is
+ * persisted, a hard page reload reverts the board to the backend-stored order.
  */
-async function smgmtFixOrderViolation(sprintLabel, ticketNum, btnEl) {
+function smgmtFixOrderViolation(sprintLabel, ticketNum, btnEl) {
   const violations = _smgmtGetOrderViolations(sprintLabel);
   const viols = violations[ticketNum];
   if (!viols || viols.length === 0) return;
@@ -14295,20 +14304,24 @@ async function smgmtFixOrderViolation(sprintLabel, ticketNum, btnEl) {
   const insertAt = latestIdx + 1;
   const newOrder = [...remaining.slice(0, insertAt), ticketNum, ...remaining.slice(insertAt)];
 
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Fixing…'; }
-  try {
-    const repo = _smgmtRepo();
-    const qs = repo ? `?project=${encodeURIComponent(repo)}` : '';
-    const resp = await fetch(
-      `/api/sprints/${encodeURIComponent(sprintLabel)}/plan${qs}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newOrder) }
-    );
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    loadSprintMgmt();
-  } catch (err) {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Fix order'; }
-    console.error('smgmtFixOrderViolation:', err);
+  // Pure DOM reorder: re-insert the ticket rows in newOrder sequence at the
+  // position the first ticket currently occupies, leaving non-ticket siblings
+  // untouched. No network write and no full board reload — see scope note above.
+  const byNum = new Map(rows.map(r => [parseInt(r.dataset.issue, 10), r]));
+  const refRow = rows[0];
+  if (!refRow || !refRow.parentNode) return;
+  const parent = refRow.parentNode;
+  let anchor = null;
+  for (const num of newOrder) {
+    const el = byNum.get(num);
+    if (!el) continue;
+    if (anchor === null) parent.insertBefore(el, refRow);
+    else anchor.after(el);
+    anchor = el;
   }
+
+  // Re-evaluate violations locally against the new DOM order (drag-drop path).
+  _smgmtUpdateOrderViolations(sprintLabel);
 }
 
 /** Fetch preview-dag and render the mini-rail for each planned / has-rework sprint. */

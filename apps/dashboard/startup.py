@@ -3366,6 +3366,11 @@ _SESSION_STATE_LABELS = frozenset({
     "in-progress",
     "sit-away",
     "tester-rejected",
+    # A ticket left mid-review from a prior attempt carries a stale session state;
+    # re-run starts a fresh attempt, so reset it to clean backlog rather than carry
+    # the prior `code-review` label forward (it would mislead the board and the
+    # next reviewer about where the ticket actually stands).
+    "code-review",
 })
 
 

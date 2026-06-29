@@ -8387,6 +8387,10 @@
       color: var(--text-sub); display: flex; align-items: center; gap: 8px; }
     .lane-title-coder { color: var(--purple); }
     .lane-title-tester { color: var(--amber); }
+    .lane-model-pill { font-family: var(--mono); font-size: 10px; font-weight: 600;
+      text-transform: none; letter-spacing: 0; color: var(--text-muted);
+      background: var(--surface-hover); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 6px; }
     .lane-capacity { font-size: 11px; color: var(--text-muted); font-family: var(--mono);
       margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .lane-dots { display: flex; gap: 4px; align-items: center; }
@@ -16328,9 +16332,19 @@ function _smgmtLanesHtml(label, live) {
       + `</div>`;
   };
 
+  // Model pill for a lane header — shows the model the role is CURRENTLY using,
+  // sourced from the working issues' coder_model/tester_model in the /live snapshot.
+  const _laneModelPill = (items, field) => {
+    const m = items.map(x => x && x.iss && x.iss[field]).find(Boolean);
+    if (!m || typeof _shortModelName !== 'function') return '';
+    return `<span class="lane-model-pill" title="Model in use">${escHtml(_shortModelName(m))}</span>`;
+  };
+  const coderModelPill  = _laneModelPill(coderWorking, 'coder_model');
+  const testerModelPill = _laneModelPill(testerWorking, 'tester_model');
+
   const coderLane = `<div class="lane" data-lane="coder">
     <div class="lane-head">
-      <div class="lane-title"><i class="ti ti-code lane-title-coder" aria-hidden="true"></i><span class="lane-title-coder">Coder</span></div>
+      <div class="lane-title"><i class="ti ti-code lane-title-coder" aria-hidden="true"></i><span class="lane-title-coder">Coder</span>${coderModelPill}</div>
       <div class="lane-capacity">
         <span>${escHtml(_smgmtLaneCapacityText(coderWorking.length, maxCoder, coderWaiting.length))}</span>
       </div>
@@ -16343,7 +16357,7 @@ function _smgmtLanesHtml(label, live) {
 
   const testerLane = `<div class="lane" data-lane="tester">
     <div class="lane-head">
-      <div class="lane-title"><i class="ti ti-flask lane-title-tester" aria-hidden="true"></i><span class="lane-title-tester">Tester</span></div>
+      <div class="lane-title"><i class="ti ti-flask lane-title-tester" aria-hidden="true"></i><span class="lane-title-tester">Tester</span>${testerModelPill}</div>
       <div class="lane-capacity">
         <span>${escHtml(_smgmtLaneCapacityText(testerWorking.length, maxTester, testerWaiting.length))}</span>
       </div>

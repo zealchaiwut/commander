@@ -419,17 +419,6 @@ export function _smgmtRender(data) {
 
   // ── Categorize sprints into Lineage / Ready to merge / Rework / Running / Draft ─
   const _planStates = data.sprint_plan_states || {};
-  const planningLabel = orderedLabels.find((l) => {
-    if (_smgmtResolvedAncestors.has(l)) return false;
-    if (_smgmtRunningLabels.has(l))     return false;
-    const ps = (_planStates[l] || "").toLowerCase();
-    return ["draft", "planned", "planning"].includes(ps);
-  });
-
-  const _usesDraftCard = (label) => {
-    const ps = (_planStates[label] || "").toLowerCase();
-    return label === planningLabel && ["draft", "planning"].includes(ps);
-  };
 
   const _buildCard = (label) => {
     const tickets = bySprint[label] || [];
@@ -458,13 +447,9 @@ export function _smgmtRender(data) {
       );
     }
 
-    if (_usesDraftCard(label)) {
-      return (
-        `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` +
-        _smgmtDraftCardHtml(label, tickets) +
-        `</div>`
-      );
-    }
+    // Draft/planning sprints render via the same _smgmtCardHtml as planned/running
+    // cards (unified design: budget bar + dispatch-level mini-rail, no sprint-goal
+    // input — the goal field was dropped). Previously they used _smgmtDraftCardHtml.
 
     if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
     // Linger is Running-pane only: on the Board a lingering (just-finished) sprint

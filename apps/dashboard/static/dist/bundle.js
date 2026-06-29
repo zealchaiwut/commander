@@ -4738,15 +4738,6 @@ Resolve manually and re-run Bulk complete.`,
     }
     return { ready: reasons.length === 0, reasons };
   }
-  function _smgmtReadinessBadgeHtml(ticket) {
-    const { ready, reasons } = _smgmtReadinessCheck(ticket);
-    if (ready) {
-      return `<span class="smgmt-dor-badge smgmt-dor-badge--ready" title="Ready"><i class="ti ti-circle-check"></i></span>`;
-    }
-    const reasonText = escHtml(reasons.join(" \xB7 "));
-    const titleText = escHtml("Not ready: " + reasons.join(", "));
-    return `<span class="smgmt-dor-badge smgmt-dor-badge--notready" title="${titleText}"><i class="ti ti-circle-x"></i><span class="smgmt-dor-reasons">${reasonText}</span></span>`;
-  }
   function _smgmtDorNotReadyTickets(tickets) {
     const result = [];
     for (const t of tickets || []) {
@@ -4964,18 +4955,6 @@ Resolve manually and re-run Bulk complete.`,
       focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
     }
     const _planStates = data.sprint_plan_states || {};
-    const planningLabel = orderedLabels.find((l) => {
-      if (_smgmtResolvedAncestors.has(l))
-        return false;
-      if (_smgmtRunningLabels.has(l))
-        return false;
-      const ps = (_planStates[l] || "").toLowerCase();
-      return ["draft", "planned", "planning"].includes(ps);
-    });
-    const _usesDraftCard = (label) => {
-      const ps = (_planStates[label] || "").toLowerCase();
-      return label === planningLabel && ["draft", "planning"].includes(ps);
-    };
     const _buildCard = (label) => {
       const tickets = bySprint[label] || [];
       if (_smgmtResolvedAncestors.has(label)) {
@@ -4997,9 +4976,6 @@ Resolve manually and re-run Bulk complete.`,
         }
         const cachedOutcome = _smgmtOutcomeCache[label];
         return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, cachedOutcome, childLabel) + `</div>`;
-      }
-      if (_usesDraftCard(label)) {
-        return `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtDraftCardHtml(label, tickets) + `</div>`;
       }
       if (_smgmtIsFreshRerunSprint(label))
         delete _smgmtOutcomeCache[label];
@@ -6740,85 +6716,6 @@ Resolve manually and re-run Bulk complete.`,
       return `<div class="smgmt-focus-step"><span class="smgmt-focus-num smgmt-focus-num--${s.priority}">${s.num}</span><span class="smgmt-focus-text">${s.text}</span></div>`;
     }).join("");
     return `<div class="smgmt-focus-guide-title">What to do, in order</div>` + stepHtml;
-  }
-  function _smgmtTicketsEstBreakdown(tickets) {
-    const sizeCounts = { S: 0, M: 0, L: 0, XL: 0 };
-    let totalMin = 0;
-    for (const t of tickets || []) {
-      const sz = _smgmtTicketSize(t);
-      if (sz && sizeCounts[sz] !== void 0)
-        sizeCounts[sz]++;
-      totalMin += _sizeMinutes(sz) || 0;
-    }
-    return { totalMin, sizeCounts };
-  }
-  function _smgmtFmtBudgetHours(minutes) {
-    if (minutes >= 60) {
-      const h = minutes / 60;
-      return Number.isInteger(h) ? `${h}h` : `${Math.round(h * 10) / 10}h`;
-    }
-    return `${minutes}m`;
-  }
-  function _smgmtBudgetBarHtml(tickets, capHours = 3) {
-    const { totalMin, sizeCounts } = _smgmtTicketsEstBreakdown(tickets);
-    const capMin = capHours * 60;
-    const pct = capMin > 0 ? Math.min(100, Math.round(totalMin / capMin * 100)) : 0;
-    const headroomMin = capMin - totalMin;
-    const overBudget = totalMin > capMin;
-    const fillClass = overBudget ? "smgmt-budget-fill smgmt-budget-fill--over" : totalMin >= capMin * 0.85 ? "smgmt-budget-fill smgmt-budget-fill--warn" : "smgmt-budget-fill";
-    const breakdown = Object.entries(sizeCounts).filter(([, n]) => n > 0).map(([s, n]) => `${s}x${n}`).join(" \xB7 ");
-    let headroomText;
-    if (overBudget) {
-      headroomText = `${_smgmtFmtBudgetHours(totalMin - capMin)} over`;
-    } else if (headroomMin >= 60) {
-      const xlRoom = Math.floor(headroomMin / 60);
-      headroomText = `${_smgmtFmtBudgetHours(headroomMin)} headroom \xB7 room for ~${xlRoom} more XL`;
-    } else {
-      headroomText = `${headroomMin}m headroom`;
-    }
-    const subLine = breakdown ? `${breakdown} \u2014 ${headroomText}` : headroomText;
-    return `<div class="smgmt-budget-bar"><div class="smgmt-budget-bar-top"><span class="smgmt-budget-label">Sprint budget</span><span class="smgmt-budget-used">${_smgmtFmtBudgetHours(totalMin)} of ${capHours}h</span></div><div class="smgmt-budget-track"><div class="${fillClass}" style="width:${pct}%"></div></div><div class="smgmt-budget-sub${overBudget ? " smgmt-budget-sub--over" : headroomMin < 30 ? " smgmt-budget-sub--warn" : ""}">` + escHtml(subLine) + `</div></div>`;
-  }
-  function _smgmtDraftCardHtml(label, tickets) {
-    const display = sprintLabelDisplay(label);
-    const shortNum = display.replace("Sprint ", "");
-    const budgetBar = _smgmtBudgetBarHtml(tickets);
-    const { totalMin } = _smgmtTicketsEstBreakdown(tickets);
-    const estMeta = tickets.length > 0 ? `${tickets.length} ticket${tickets.length !== 1 ? "s" : ""} \xB7 ~${_smgmtFmtBudgetHours(totalMin)}` : "0 tickets";
-    const ticketRowsHtml = (tickets || []).map((t) => {
-      const sizeValue = _smgmtTicketSize(t) || "";
-      const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
-      const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
-      const readinessBadge = _smgmtReadinessBadgeHtml(t);
-      return `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}" data-issue="${t.number}" data-sprint="${escHtml(label)}" oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})"><a class="smgmt-ticket-num" href="${escHtml(t.url || "#")}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${t.number}</a><span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` + sizePill + estMins + readinessBadge + `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0" title="Ticket actions" aria-haspopup="true" onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')"><i class="ti ti-dots"></i></button></div>`;
-    }).join("");
-    const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
-    const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-    const signoffPending = _smgmtSignoffState(label) === "pending";
-    const signoffBadge = _smgmtSignoffBadgeHtml(label);
-    const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
-    const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
-    const goalRequired = _smgmtGoalRequired();
-    const dorMode = _smgmtDorMode();
-    const notReady = dorMode === "block" ? _smgmtDorNotReadyTickets(tickets || []) : [];
-    let runDisabled = "";
-    let runTitle = "";
-    if (signoffPending) {
-      runDisabled = "disabled";
-      runTitle = 'title="Approve the sprint plan before running"';
-    } else if (!canRun) {
-      runDisabled = "disabled";
-      runTitle = 'title="No dispatchable tickets \u2014 add tickets from the backlog"';
-    } else if (goalRequired) {
-      runDisabled = "disabled";
-      runTitle = 'title="Enter a sprint goal to enable Run"';
-    } else if (dorMode === "block" && notReady.length > 0) {
-      runDisabled = "disabled";
-      const dorTooltip = notReady.map((t) => `#${t.number} (${t.reasons.join(", ")})`).join("; ");
-      runTitle = `title="Not ready: ${dorTooltip.replace(/"/g, "&quot;")}"`;
-    }
-    const goalPlaceholder = goalRequired ? "Set a sprint goal to run \u2014 e.g. 'Milestone burndown + activity cleanup'" : "Optional sprint goal \u2014 e.g. 'Milestone burndown + activity cleanup'";
-    return `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}"><div class="smgmt-card-head"><button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0"><i class="ti ti-chevron-down"></i></button><span class="smgmt-sprint-name">${escHtml(display)}</span><span class="smgmt-draft-badge">DRAFT</span>` + signoffBadge + `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span><div class="smgmt-card-actions"><button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint" onclick="smgmtDeleteSprint('${escHtml(label)}')"><i class="ti ti-trash"></i></button>` + signoffActions + `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" ${runDisabled} ${runTitle} onclick="smgmtRunSprint('${escHtml(label)}')"><i class="ti ti-player-play"></i> Run Sprint</button></div></div><div class="smgmt-goal-slot smgmt-goal-slot--dashed"><i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i><input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text" placeholder="${escHtml(goalPlaceholder)}" oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')"></div>` + budgetBar + `<div class="smgmt-plan-tickets">` + (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet \u2014 add from Backlog below.</div>`) + `</div><div class="smgmt-add-ticket-row"><button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')"><i class="ti ti-circle-plus"></i> Add ticket</button><span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span></div></div>`;
   }
   function smgmtPlanningRowMenu(event, issueNum, label) {
     event.stopPropagation();

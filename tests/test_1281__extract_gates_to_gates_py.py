@@ -166,28 +166,32 @@ class TestRunQualityGatesOrder:
         ], f"Gate order wrong: {call_log}"
         assert all(r.passed for r in results)
 
-    def test_stops_after_first_failure(self, tmp_path):
-        """If typecheck fails, lint/design/pytest/merge/monolith must not run."""
+    def test_all_gates_run_even_after_failure(self, tmp_path):
+        """All gates run in one pass even when an early gate fails — every failure
+        surfaces together so a single retry can fix them all (replaces the old
+        fail-fast behaviour that cost one attempt per gate)."""
         from sprint_manager import _run_quality_gates
         call_log = []
 
-        def fail_typecheck(*a, **kw):
-            call_log.append("typecheck")
-            return self._make_fail_result("typecheck")
+        def fail_gate(name):
+            def gate(*a, **kw):
+                call_log.append(name)
+                return self._make_fail_result(name)
+            return gate
 
-        def should_not_run(name):
+        def pass_gate(name):
             def gate(*a, **kw):
                 call_log.append(name)
                 return self._make_pass_result(name)
             return gate
 
         with patch.multiple("sprint_manager",
-                            _gate_typecheck=fail_typecheck,
-                            _gate_lint=should_not_run("lint"),
-                            _gate_design=should_not_run("design"),
-                            _gate_pytest=should_not_run("pytest"),
-                            _gate_merge_preview=should_not_run("merge-preview"),
-                            _gate_monolith=should_not_run("monolith"),
+                            _gate_typecheck=fail_gate("typecheck"),
+                            _gate_lint=pass_gate("lint"),
+                            _gate_design=fail_gate("design"),
+                            _gate_pytest=pass_gate("pytest"),
+                            _gate_merge_preview=fail_gate("merge-preview"),
+                            _gate_monolith=pass_gate("monolith"),
                             _log_gate_result=lambda *a, **kw: None):
             results = _run_quality_gates(
                 issue_num=1,
@@ -200,11 +204,45 @@ class TestRunQualityGatesOrder:
                 gate_merge_preview=True,
             )
 
-        assert call_log == ["typecheck"], (
-            f"Should stop at first failure; got: {call_log}"
-        )
-        assert len(results) == 1
-        assert results[0].passed is False
+        # Every gate ran despite typecheck failing first.
+        assert call_log == [
+            "typecheck", "lint", "design", "pytest", "merge-preview", "monolith"
+        ], f"All gates must run; got: {call_log}"
+        assert len(results) == 6
+        failed = [r.gate for r in results if not r.passed]
+        assert failed == ["typecheck", "design", "merge-preview"]
+
+    def test_revert_suppressed_during_run_then_restored(self, tmp_path):
+        """Per-gate reverts are suppressed while gates run (the caller aggregates),
+        and the suppression flag is restored afterward."""
+        from sprint_manager import _run_quality_gates
+        from services.sprint_manager import gates as _gates
+
+        seen = {}
+
+        def fail_gate(name):
+            def gate(*a, **kw):
+                seen[name] = _gates._REVERT_SUPPRESSED
+                return self._make_fail_result(name)
+            return gate
+
+        assert _gates._REVERT_SUPPRESSED is False
+        with patch.multiple("sprint_manager",
+                            _gate_typecheck=fail_gate("typecheck"),
+                            _gate_lint=fail_gate("lint"),
+                            _gate_design=fail_gate("design"),
+                            _gate_pytest=fail_gate("pytest"),
+                            _gate_merge_preview=fail_gate("merge-preview"),
+                            _gate_monolith=fail_gate("monolith"),
+                            _log_gate_result=lambda *a, **kw: None):
+            _run_quality_gates(
+                issue_num=1, feature_branch="feature/1-test",
+                worktester_root=tmp_path, worktester_dashboard=tmp_path,
+                skip_all=False, gate_pytest=True, gate_lint=True,
+                gate_merge_preview=True,
+            )
+        assert all(v is True for v in seen.values()), "reverts not suppressed during run"
+        assert _gates._REVERT_SUPPRESSED is False, "suppression flag not restored"
 
     def test_skip_all_skips_every_gate(self, tmp_path):
         """When skip_all=True every gate returns skipped=True."""

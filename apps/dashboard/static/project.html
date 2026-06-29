@@ -4316,6 +4316,27 @@
       .bl-grid .bl-row { border-right: none; }
     }
     .bl-row { min-width: 0; }
+    /* ── Top multi-select action bar (proj-selection-bar) ── */
+    .proj-selection-bar {
+      display: none; align-items: center; gap: 12px;
+      padding: 10px 16px; margin-bottom: 10px;
+      background: var(--blue-bg); border: 1px solid var(--blue); border-radius: 8px;
+      font-size: 13px; color: var(--blue); white-space: nowrap; flex-wrap: wrap;
+      position: sticky; top: 6px; z-index: 20; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .proj-selection-bar:not(.hidden) { display: flex; }
+    .proj-selection-bar-hint { color: var(--text-muted); }
+    .smgmt-selection-bar-count { font-weight: 600; }
+    .smgmt-sel-bar-spacer { flex: 1; min-width: 8px; }
+    .smgmt-sel-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .proj-selection-bar button {
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+      font-size: 12px; padding: 5px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    }
+    .proj-selection-bar button:hover { background: var(--surface-hover); }
+    .smgmt-sel-close-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
     .bl-actions {
       display: flex;
       flex-wrap: wrap;
@@ -9569,6 +9590,31 @@
         <!-- Board sub-view (default) -->
         <div class="smgmt-subview show" id="smgmt-subview-board" role="tabpanel" aria-labelledby="smgmt-subtab-board">
 
+        <!-- Multi-select action bar — shows on top when backlog tickets are selected -->
+        <div class="proj-selection-bar hidden" id="proj-selection-bar" role="status" aria-live="polite">
+          <button type="button" class="smgmt-selection-bar-deselect" onclick="_smgmtClearSelection()">
+            <i class="ti ti-x"></i> Deselect all
+          </button>
+          <i class="ti ti-checkbox" aria-hidden="true"></i>
+          <strong class="smgmt-selection-bar-count" id="smgmt-sel-count">0 issues selected</strong>
+          <span class="proj-selection-bar-hint">— batch move, close, or reestimate</span>
+          <div class="smgmt-sel-bar-spacer" aria-hidden="true"></div>
+          <div class="smgmt-sel-bar-actions">
+            <button type="button" class="smgmt-sel-close-btn" id="smgmt-sel-close-btn"
+                    onclick="_smgmtCloseSelected()">
+              <i class="ti ti-circle-x"></i> Close ticket
+            </button>
+            <button type="button" class="smgmt-sel-reest-btn" id="smgmt-sel-reest-btn"
+                    onclick="_smgmtReEstimateSelected()">
+              <i class="ti ti-sparkles"></i> Reestimate
+            </button>
+            <button type="button" class="smgmt-move-to-btn" id="smgmt-move-to-btn"
+                    onclick="_smgmtMoveToModalOpen()">
+              <i class="ti ti-send"></i> Move to Sprint
+            </button>
+          </div>
+        </div><!-- /proj-selection-bar -->
+
         <!-- Sprint list -->
         <div class="smgmt-content">
 
@@ -11394,7 +11440,7 @@ function _smgmtClearSelection() {
   _smgmtSelectedIssues.clear();
   document.querySelectorAll('.smgmt-ticket-cb:checked').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('.smgmt-ticket.is-selected').forEach((r) => r.classList.remove('is-selected'));
-  if (typeof _blUpdateActions === 'function') _blUpdateActions();
+  _smgmtUpdateSelectionUI();
 }
 // Backlog multi-select (restored, issue #1044 follow-up): the row checkbox toggles
 // _smgmtSelectedIssues; the intact bl-actions bar (_blUpdateActions/_blConfirmAdd)
@@ -11404,9 +11450,18 @@ function _smgmtToggleSelect(num, checked) {
   else _smgmtSelectedIssues.delete(num);
   const row = document.getElementById('smgmt-ticket-' + num);
   if (row) row.classList.toggle('is-selected', !!checked);
+  _smgmtUpdateSelectionUI();
+}
+function _smgmtUpdateSelectionUI() {
+  const bar = document.getElementById('proj-selection-bar');
+  const n = (typeof _smgmtSelectedIssues !== 'undefined' && _smgmtSelectedIssues) ? _smgmtSelectedIssues.size : 0;
+  if (bar) {
+    bar.classList.toggle('hidden', n === 0);
+    const cnt = document.getElementById('smgmt-sel-count');
+    if (cnt) cnt.textContent = `${n} issue${n !== 1 ? 's' : ''} selected`;
+  }
   if (typeof _blUpdateActions === 'function') _blUpdateActions();
 }
-function _smgmtUpdateSelectionUI() { if (typeof _blUpdateActions === 'function') _blUpdateActions(); }
 function _smgmtCloseMoveToMenu() {}
 async function _smgmtMoveSelectedTo() {}
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);

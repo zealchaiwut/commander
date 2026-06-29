@@ -12,9 +12,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 # Ensure repo root is on path
 _REPO_ROOT = Path(__file__).parent.parent
@@ -81,7 +80,8 @@ class TestAssertRunMutable:
 
     def test_log_message_format(self, capsys=None):
         from services.sprint_manager.sprint_manager import _assert_run_mutable
-        import io, contextlib
+        import io
+        import contextlib
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
             try:
@@ -216,39 +216,44 @@ class TestCommanderSprintRunningInjection:
         assert env is not None
         assert env.get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
 
-    def test_apply_in_progress_label_injects_env(self):
+    # The standalone _apply_in_progress_label / _apply_needs_rework_label helpers
+    # were removed (issue #1585).  In-progress and needs-rework labels are now
+    # written in-process through the single state_machine.transition() source of
+    # truth via _transition_safe(); the run-lock guard reads the ambient
+    # COMMANDER_SPRINT_RUNNING directly (no per-call subprocess env injection).
+    # These tests verify the replacement path routes through transition().
+
+    def test_in_progress_label_routes_through_transition(self):
         from services.sprint_manager import sprint_manager as sm
+        from services.sprint_manager import label_transitions as lt
 
-        captured_envs = []
+        captured = []
 
-        def fake_run(cmd, **kwargs):
-            captured_envs.append(kwargs.get("env"))
-            return MagicMock(returncode=0, stdout="", stderr="")
+        def fake_transition(issue, target_state, **kwargs):
+            captured.append(target_state)
+            return True
 
-        with patch.object(sm.subprocess, "run", side_effect=fake_run):
-            sm._apply_in_progress_label(issue_num=1, sprint_label="sprint-37")
+        with patch.object(sm, "_sm_transition", fake_transition), \
+             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+            sm._transition_safe(1, sm._TicketState.IN_PROGRESS, actor="sprint_manager")
 
-        assert captured_envs
-        assert captured_envs[0].get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
+        assert captured == [sm._TicketState.IN_PROGRESS]
 
-    def test_apply_needs_rework_label_injects_env(self):
+    def test_needs_rework_label_routes_through_transition(self):
         from services.sprint_manager import sprint_manager as sm
+        from services.sprint_manager import label_transitions as lt
 
-        captured_envs = []
+        captured = []
 
-        def fake_run(cmd, **kwargs):
-            captured_envs.append(kwargs.get("env"))
-            return MagicMock(returncode=0, stdout="", stderr="")
+        def fake_transition(issue, target_state, **kwargs):
+            captured.append(target_state)
+            return True
 
-        with patch.object(sm.subprocess, "run", side_effect=fake_run):
-            sm._apply_needs_rework_label(
-                issue_num=1,
-                category=sm.FailureCategory.CODER_NO_WORK,
-                sprint_label="sprint-37",
-            )
+        with patch.object(sm, "_sm_transition", fake_transition), \
+             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+            sm._transition_safe(1, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
-        assert captured_envs
-        assert captured_envs[0].get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
+        assert captured == [sm._TicketState.NEEDS_REWORK]
 
 
 class TestUpdateTicketGuard:
@@ -270,13 +275,21 @@ class TestUpdateTicketGuard:
         # Should not print guard messages
         assert "Refused to" not in stderr
 
-    def test_guard_logs_blocked_label_for_uat(self):
-        """With COMMANDER_SPRINT_RUNNING, 'blocked' label removal is refused."""
+    def test_guard_refuses_non_mutable_target_during_sprint(self):
+        """With COMMANDER_SPRINT_RUNNING, a transition to a state outside
+        RUN_MUTABLE_LABELS (e.g. 'blocked') is refused.
+
+        The #509 migration moved label writes from per-label add/remove (the old
+        STATUS_MAP "Refused to remove label X" path) to the state-transition
+        layer, so the guard now refuses the *target state* and cites
+        RUN_MUTABLE_LABELS. The original AC-5 intent — a non-run-mutable label is
+        rejected mid-sprint — is unchanged."""
         env = {"COMMANDER_SPRINT_RUNNING": "sprint-37"}
-        stdout, stderr, _ = self._run_update_ticket("uat", env)
-        # 'blocked' is in STATUS_MAP["uat"]["remove"] but outside RUN_MUTABLE_LABELS
-        assert 'Refused to remove label "blocked"' in stderr
+        stdout, stderr, rc = self._run_update_ticket("blocked", env)
+        # 'blocked' maps to TicketState.BLOCKED, which is outside RUN_MUTABLE_LABELS.
+        assert "transition blocked" in stderr
         assert "RUN_MUTABLE_LABELS" in stderr
+        assert rc != 0
 
     def test_guard_does_not_block_uat_add(self):
         """With COMMANDER_SPRINT_RUNNING, UAT label is still added (it's in RUN_MUTABLE_LABELS)."""
@@ -293,14 +306,14 @@ class TestFinishFeatureUATFlow:
         """STATUS_MAP['uat']['add'] contains only RUN_MUTABLE_LABELS entries."""
         sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
         # Import update_ticket constants directly without executing main()
-        import importlib, types
+        import importlib
+        import types
         spec = importlib.util.spec_from_file_location(
             "update_ticket_mod",
             str(_REPO_ROOT / "scripts" / "update_ticket.py"),
         )
         mod = importlib.util.module_from_spec(spec)
         # Stub heavy deps so we can read STATUS_MAP without side effects
-        stub = types.ModuleType
         sys.modules.setdefault("github_client", types.ModuleType("github_client"))
         try:
             spec.loader.exec_module(mod)

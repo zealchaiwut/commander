@@ -900,14 +900,37 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     Prefers the remote tracking ref so we get the current authoritative tip
     (e.g. after a tester's finish_feature.py pushed the final commit) rather
     than a potentially stale local copy.
+
+    When MORE THAN ONE feature/<N>-* branch exists (a stale mismatched-slug
+    leftover next to the real one), pick the branch whose tip commit references
+    ``(issue #N)`` — i.e. the branch that actually carries this issue's work —
+    instead of the alphabetical [0], which could pick the wrong branch and merge
+    unrelated work (the saga's feature/117-display-bangkok-time vs
+    feature/117-chunk-overlap-fix).
     """
+    candidates: list[str] = []
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
-        return out.strip().splitlines()[0].strip().removeprefix("origin/")
-    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
-    return None
+        candidates = [
+            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+        ]
+    if not candidates:
+        ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
+        if ok and out.strip():
+            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    for branch in candidates:
+        ref = f"origin/{branch}"
+        ok, _, _ = _try("git", "rev-parse", "--verify", ref)
+        if not ok:
+            ref = branch
+        ok, msg, _ = _try("git", "log", "-1", "--format=%s%n%b", ref)
+        if ok and f"issue #{issue_num}" in (msg or ""):
+            return branch
+    return candidates[0]
 
 
 def _is_branch_merged_into(branch: str, target: str, issue_num: Optional[int] = None) -> bool:

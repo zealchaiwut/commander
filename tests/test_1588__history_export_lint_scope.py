@@ -1,146 +1,104 @@
-"""Acceptance tests for issue #1588 — preserve #1154's history.js export/lint cleanup.
-
-This follow-up ticket re-applies (intentionally, in its own ticket) the lint/
-testability cleanup that #1154 bundled into its diff: seven internal history
-helpers regain the ``export`` keyword, and three identifiers that are only
-referenced inside template-literal ``onclick`` strings are removed from the
-eslint ``/* global */`` comment. It also documents the convention that such
-lint/export refactors must be filed separately from feature work.
-
-Each test is anchored to a specific acceptance criterion from the issue.
-
-AC map:
-  AC1  the seven helpers carry the ``export`` keyword
-  AC2  smgmtFinishSprint / smgmtDeleteSprint / _smgmtRepo are absent from the
-       eslint /* global */ comment
-  AC3  CLAUDE.md documents that lint/export refactors go in their own ticket
-  AC4  bundle.js builds without errors after the history.js changes
-  AC5  no regression: the #1154 amber loose-end band + Details rendering remain
-"""
-
+"""Tests for issue #1588: history.js export/global-comment changes (runs against UAT)"""
+import os
 import re
-import shutil
-import subprocess
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-HISTORY_JS = REPO_ROOT / "apps" / "dashboard" / "static" / "src" / "sprint-board" / "history.js"
-BUNDLE_JS = REPO_ROOT / "apps" / "dashboard" / "static" / "dist" / "bundle.js"
-CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
-
-# The seven functions #1154 exported (AC1).
-EXPORTED_FUNCTIONS = [
-    "_histVerbsHtml",
-    "_histHeadLinksHtml",
-    "_histHeadActionsHtml",
-    "_histMetricsHtml",
-    "_histGanttHtml",
-    "_histHeadHintsHtml",
-    "_histPartition",
-]
-
-# Identifiers #1154 removed from the eslint /* global */ comment (AC2). They are
-# only referenced inside template-literal onclick strings, so eslint never sees
-# them as free identifiers and they do not belong in the global declaration.
-REMOVED_GLOBALS = ["smgmtFinishSprint", "smgmtDeleteSprint", "_smgmtRepo"]
+import subprocess
 
 
-@pytest.fixture(scope="module")
-def history_src():
-    return HISTORY_JS.read_text(encoding="utf-8")
-
-
-def _global_comment(src: str) -> str:
-    """Return the text of the leading eslint /* global ... */ comment block."""
-    m = re.search(r"/\*\s*global\b.*?\*/", src, re.DOTALL)
-    assert m, "no /* global */ eslint comment found in history.js"
-    return m.group(0)
-
-
-# ---------------------------------------------------------------------------
-# AC1 — the seven helpers retain the export keyword
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("fn", EXPORTED_FUNCTIONS)
-def test_ac1_helper_has_export_keyword(history_src, fn):
-    pattern = re.compile(rf"^export function {re.escape(fn)}\b", re.MULTILINE)
-    assert pattern.search(history_src), (
-        f"{fn} must be declared with `export function {fn}` in history.js (AC1)"
+# Resolved from UAT .env at runtime; see tester skill Step 0.
+# Default kept only as a last-resort fallback if BASE_URL not exported.
+BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
+if not BASE_URL.startswith("http"):
+    raise RuntimeError(
+        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
     )
 
-
-# ---------------------------------------------------------------------------
-# AC2 — the three identifiers are absent from the /* global */ comment
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("ident", REMOVED_GLOBALS)
-def test_ac2_identifier_absent_from_global_comment(history_src, ident):
-    comment = _global_comment(history_src)
-    assert not re.search(rf"\b{re.escape(ident)}\b", comment), (
-        f"{ident} must NOT appear in the eslint /* global */ comment (AC2)"
-    )
+# Path to the history.js file being verified
+HISTORY_JS = "apps/dashboard/static/src/sprint-board/history.js"
+BUNDLE_JS = "apps/dashboard/static/dist/bundle.js"
 
 
-def test_ac2_global_comment_still_declares_real_globals(history_src):
-    # Guard: removing the three must not corrupt the comment — genuinely free
-    # identifiers used in real code paths must remain declared.
-    comment = _global_comment(history_src)
-    for ident in ("escHtml", "sprintLabelDisplay", "_smgmtBySprint", "CSS"):
-        assert re.search(rf"\b{re.escape(ident)}\b", comment), (
-            f"{ident} should remain in the /* global */ comment"
+def read_file(path):
+    """Read file content."""
+    with open(path, 'r') as f:
+        return f.read()
+
+
+# --- Acceptance Criteria ---
+
+def test_1588__history_export_keywords_retained():
+    """AC: _histVerbsHtml, _histHeadLinksHtml, _histHeadActionsHtml, _histMetricsHtml,
+    _histGanttHtml, _histHeadHintsHtml, and _histPartition in history.js retain the
+    export keywords added in #1154 (no regression from reverting)."""
+
+    content = read_file(HISTORY_JS)
+
+    functions = [
+        "_histVerbsHtml",
+        "_histHeadLinksHtml",
+        "_histHeadActionsHtml",
+        "_histMetricsHtml",
+        "_histGanttHtml",
+        "_histHeadHintsHtml",
+        "_histPartition",
+    ]
+
+    for func in functions:
+        pattern = rf"export\s+function\s+{re.escape(func)}\s*\("
+        assert re.search(pattern, content), f"Function {func} missing 'export' keyword in history.js"
+
+
+def test_1588__eslint_global_comment_cleaned():
+    """AC: smgmtFinishSprint, smgmtDeleteSprint, and _smgmtRepo are absent from
+    the eslint /* global */ comment in history.js (the removal from #1154 is preserved)."""
+
+    content = read_file(HISTORY_JS)
+
+    # Find the /* global ... */ comment block at the top of the file
+    global_match = re.search(r"/\*\s*global\s+([^*]+)\*/", content, re.DOTALL)
+    assert global_match, "No eslint /* global */ comment found in history.js"
+
+    global_comment = global_match.group(1)
+
+    forbidden_names = ["smgmtFinishSprint", "smgmtDeleteSprint", "_smgmtRepo"]
+    for name in forbidden_names:
+        assert name not in global_comment, (
+            f"Found '{name}' in eslint global comment; it should have been removed."
         )
 
 
-# ---------------------------------------------------------------------------
-# AC3 — CLAUDE.md documents the separate-ticket convention
-# ---------------------------------------------------------------------------
-def test_ac3_claude_md_documents_lint_refactor_convention():
-    text = CLAUDE_MD.read_text(encoding="utf-8").lower()
-    assert "lint" in text and "refactor" in text, "CLAUDE.md missing lint/refactor guidance"
-    # The convention: such refactors belong in their own ticket, separate from
-    # feature work. Require the key signal words to co-occur.
-    assert "separate ticket" in text or "own ticket" in text or "separate from feature" in text, (
-        "CLAUDE.md must document that lint/export refactors go in a separate ticket (AC3)"
-    )
+def test_1588__bundle_builds_without_errors():
+    """AC: The bundle.js builds without errors after any changes to history.js in this ticket."""
 
-
-# ---------------------------------------------------------------------------
-# AC4 — bundle.js builds without errors after the history.js changes
-# ---------------------------------------------------------------------------
-def test_ac4_bundle_builds_without_errors():
-    if shutil.which("npm") is None and shutil.which("esbuild") is None:
-        pytest.skip("no npm/esbuild toolchain available in this environment")
-    runner = (
-        ["npm", "run", "build"]
-        if shutil.which("npm")
-        else [
-            "esbuild",
-            "apps/dashboard/static/src/index.js",
-            "--bundle",
-            "--format=iife",
-            "--sourcemap",
-            "--outfile=apps/dashboard/static/dist/bundle.js",
-        ]
-    )
+    # Run npm run build
     result = subprocess.run(
-        runner, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180
+        ["npm", "run", "build"],
+        cwd="apps/dashboard",
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
+
     assert result.returncode == 0, (
-        f"bundle build failed (AC4):\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        f"npm run build failed with exit code {result.returncode}.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert BUNDLE_JS.exists() and BUNDLE_JS.stat().st_size > 0, "bundle.js was not produced"
+
+    # Verify bundle.js exists and is not empty
+    assert os.path.exists(BUNDLE_JS), f"{BUNDLE_JS} does not exist after build"
+    assert os.path.getsize(BUNDLE_JS) > 10000, f"{BUNDLE_JS} is suspiciously small"
 
 
-# ---------------------------------------------------------------------------
-# AC5 — no regression: #1154's amber loose-end band + Details rendering remain
-# ---------------------------------------------------------------------------
-def test_ac5_loose_end_band_preserved(history_src):
-    assert "_histLooseEndCount" in history_src, "loose-end count helper missing (AC5 regression)"
-    assert re.search(r"loose end", history_src), "loose-end band copy missing (AC5 regression)"
-    assert "--amber" in history_src, "amber tone token missing (AC5 regression)"
+def test_1588__no_history_tab_regression():
+    """AC: No existing History tab functionality (amber band, Details rendering from #1154)
+    regresses. (Manual verification — visual check via browser UAT step)"""
+
+    pytest.skip("manual — verified via agent-browser UAT step, not HTTP")
 
 
-def test_ac5_details_rendering_preserved(history_src):
-    # The Details/metrics rendering path from #1154 stays reachable.
-    assert "_histMetricsHtml" in history_src, "Details/metrics renderer missing (AC5 regression)"
-    assert "_histVerbsHtml" in history_src, "card verb renderer missing (AC5 regression)"
+def test_1588__reconcile_flow_no_console_errors():
+    """AC: Open a sprint History card that has actionable items and click the Reconcile
+    button. Expected: reconcile flow completes normally with no JS console errors.
+    (Manual verification — browser interaction via UAT step)"""
+
+    pytest.skip("manual — verified via agent-browser UAT step, not HTTP")

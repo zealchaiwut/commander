@@ -2413,12 +2413,23 @@ def _issues_from_plan_numbers(
     for num in plan_numbers:
         issue = by_num.get(num)
         if not issue:
+            # A roster ticket that isn't an open issue carrying `label` is dropped.
+            # Log it — silent drops here let a ticket vanish from a run with no
+            # trace (e.g. closed, or its sprint label was stripped/moved).
+            sys.stdout.write(str(f"  [roster] #{num}: not an open issue on '{label}' "
+                f"(closed or missing the sprint label) — skipped") + "\n")
             continue
         labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
-        if _classify(labels_set) in ("uat", "done"):
+        cls = _classify(labels_set)
+        if cls in ("uat", "done"):
             continue
         if _is_dispatchable(labels_set):
             result.append(issue)
+        else:
+            # Non-dispatchable roster ticket — never silently drop it; surface why
+            # so a skipped ticket is visible in the run log instead of vanishing.
+            sys.stdout.write(str(f"  [roster] #{num}: not dispatchable (class={cls}, "
+                f"labels={sorted(labels_set)}) — skipped") + "\n")
     return result
 
 

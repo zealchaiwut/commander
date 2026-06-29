@@ -946,7 +946,17 @@ def _gate_design(
 
     # ── changed-scope: fail only on net-new anti-patterns the diff introduces ──
     if gate_scope != "full":
-        changed = _changed_frontend_files(base_branch, cwd=worktester_dashboard)
+        # Pin the comparison to the merge-base (where this feature branch diverged
+        # from the sprint branch), NOT the moving branch tip. Sibling tickets that
+        # merge into the sprint branch mid-run otherwise shift the baseline, so a
+        # file that PASSED the design gate at coder time can flip to FAIL post-tester
+        # (observed: #1059's 11.5px tiny-text passed at coder, failed at tester once
+        # a sibling merged into the sprint branch). Merge-base keeps "net-new vs the
+        # diff this branch introduces" stable across both gate stages.
+        mb_rc, mb_out, _ = _run_timed(
+            "git", "merge-base", "HEAD", base_branch, cwd=worktester_dashboard)
+        base_ref = mb_out.strip() if (mb_rc == 0 and mb_out.strip()) else base_branch
+        changed = _changed_frontend_files(base_ref, cwd=worktester_dashboard)
         if not changed:
             sys.stdout.write(str("  [gate:design] no changed frontend files — PASS") + "\n")
             return GateResult(gate="design", passed=True,
@@ -967,7 +977,7 @@ def _gate_design(
                 continue  # file is clean at HEAD; nothing to compare
             # Base version of the file (empty if newly added → all findings net-new)
             rc_show, base_src, _ = _run_timed(
-                "git", "show", f"{base_branch}:{rel}", cwd=worktester_dashboard,
+                "git", "show", f"{base_ref}:{rel}", cwd=worktester_dashboard,
             )
             base_findings: list[dict] = []
             if rc_show == 0:

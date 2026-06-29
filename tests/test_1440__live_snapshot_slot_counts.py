@@ -155,8 +155,8 @@ class TestAC2ActiveSlotCounts:
     def test_active_slot_count_keys_present(self, client):
         _post_status(client, _sprint_status([_active_coder(100)], max_coder_slots=2))
         data = _get_live(client)
-        assert "active_coder_slots" in data, "payload must expose active coder slot count"
-        assert "active_tester_slots" in data, "payload must expose active tester slot count"
+        assert "active_coder_slots" in data
+        assert "active_tester_slots" in data
 
     def test_active_coder_count_matches_working_coders(self, client):
         _post_status(client, _sprint_status(
@@ -181,7 +181,8 @@ class TestAC2ActiveSlotCounts:
         )
 
     def test_no_active_agents_reports_zero(self, client):
-        _post_status(client, _sprint_status([_issue(100), _issue(101)], max_coder_slots=2))
+        status = _sprint_status([_issue(100), _issue(101)], max_coder_slots=1)
+        _post_status(client, status)
         data = _get_live(client)
         assert data["active_coder_slots"] == 0
         assert data["active_tester_slots"] == 0
@@ -196,7 +197,7 @@ class TestAC3ResolvesToSnapshotValue:
         _post_status(client, _sprint_status([_active_coder(100)], max_coder_slots=3))
         data = _get_live(client)
         assert data["max_coder_slots"] == 3, (
-            "max_coder_slots must reflect the running sprint's capacity (3), not default 1"
+            "max_coder_slots must reflect the posted capacity (3), not 1"
         )
 
     def test_tester_value_reflects_posted_capacity(self, client):

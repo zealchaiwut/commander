@@ -959,6 +959,33 @@ def _finalize_issues(
             if t:
                 iss["title"] = t
 
+    # Honesty gate: a sprint shown completed / ready_to_merge whose OWN open work
+    # tickets still carry rework / SIT / non-DONE labels is not actually done —
+    # downgrade to needs_rework so the card offers Re-run, not Complete (a
+    # completed sprint can hide unfixed needs-rework/SIT tickets). Mirror-backed:
+    # _has_rework_tickets reads the local issues mirror, so no GitHub calls. Runs
+    # on the visible window only.
+    try:
+        import server as _srv  # noqa: PLC0415
+        _has_rework = getattr(_srv, "_has_rework_tickets", None)
+    except Exception:
+        _has_rework = None
+    if _has_rework is not None:
+        for rec in records:
+            if (rec.get("lifecycle_state") or "").lower() not in ("completed", "ready_to_merge"):
+                continue
+            label = (rec.get("label") or "").strip()
+            project = (rec.get("project") or "").strip()
+            if not label or not project:
+                continue
+            try:
+                if _has_rework(label, project):
+                    rec["lifecycle_state"] = "needs_rework"
+                    if not rec.get("end_reason"):
+                        rec["end_reason"] = "ticket-rework"
+            except Exception:
+                pass
+
 
 def _finalize_records(records: list[dict], sprints_dirs: Path | list[Path],
                       title_map: dict | None = None) -> None:

@@ -64,6 +64,12 @@ def _try(*cmd, cwd: Optional[Path] = None) -> tuple[bool, str, str]:
 # circular import AND respects monkeypatching in tests that patch
 # "sprint_manager._revert_to_sit" (the same pattern used for _run_timed).
 
+# When True, per-gate _revert_to_sit calls are no-ops: run_quality_gates runs
+# ALL gates and aggregates every failure into a single revert/comment/sidecar
+# (so one retry fixes all failing gates at once instead of one-per-attempt).
+_REVERT_SUPPRESSED = False
+
+
 def _revert_to_sit(
     issue_num: int,
     gate_name: str,
@@ -71,6 +77,8 @@ def _revert_to_sit(
     repo_name: Optional[str] = None,
     repo_root: Optional[Path] = None,
 ) -> None:
+    if _REVERT_SUPPRESSED:
+        return
     _f = _lookup_in_sm("_revert_to_sit", _revert_to_sit)
     if _f is not None:
         kw: dict = {"repo_name": repo_name}
@@ -946,7 +954,17 @@ def _gate_design(
 
     # ── changed-scope: fail only on net-new anti-patterns the diff introduces ──
     if gate_scope != "full":
-        changed = _changed_frontend_files(base_branch, cwd=worktester_dashboard)
+        # Pin the comparison to the merge-base (where this feature branch diverged
+        # from the sprint branch), NOT the moving branch tip. Sibling tickets that
+        # merge into the sprint branch mid-run otherwise shift the baseline, so a
+        # file that PASSED the design gate at coder time can flip to FAIL post-tester
+        # (observed: #1059's 11.5px tiny-text passed at coder, failed at tester once
+        # a sibling merged into the sprint branch). Merge-base keeps "net-new vs the
+        # diff this branch introduces" stable across both gate stages.
+        mb_rc, mb_out, _ = _run_timed(
+            "git", "merge-base", "HEAD", base_branch, cwd=worktester_dashboard)
+        base_ref = mb_out.strip() if (mb_rc == 0 and mb_out.strip()) else base_branch
+        changed = _changed_frontend_files(base_ref, cwd=worktester_dashboard)
         if not changed:
             sys.stdout.write(str("  [gate:design] no changed frontend files — PASS") + "\n")
             return GateResult(gate="design", passed=True,
@@ -967,7 +985,7 @@ def _gate_design(
                 continue  # file is clean at HEAD; nothing to compare
             # Base version of the file (empty if newly added → all findings net-new)
             rc_show, base_src, _ = _run_timed(
-                "git", "show", f"{base_branch}:{rel}", cwd=worktester_dashboard,
+                "git", "show", f"{base_ref}:{rel}", cwd=worktester_dashboard,
             )
             base_findings: list[dict] = []
             if rc_show == 0:
@@ -1131,11 +1149,14 @@ def _run_quality_gates(
     base_branch: str = "develop",
     gate_scope: str = "changed",
 ) -> "list[GateResult]":
-    """Run quality gates sequentially. Returns list of GateResult.
+    """Run ALL quality gates in one pass. Returns list of GateResult.
 
-    Order (cheap/deterministic first): typecheck → lint → design → pytest → merge-preview.
-    Stops early on first failure (remaining gates are not run).
-    If skip_all is True, all gates are skipped.
+    Order (cheap/deterministic first): typecheck → lint → design → pytest →
+    merge-preview → monolith. Every gate runs (no early-return), so a single pass
+    surfaces all failures at once — including merge conflicts — and the caller
+    aggregates them into one revert + one retry instead of one-failure-per-attempt.
+    Per-gate reverts are suppressed during the pass (the caller does the combined
+    revert). If skip_all is True, all gates are skipped.
 
     base_branch: branch to diff against when gate_scope='changed' (default: 'develop').
     gate_scope: 'changed' (default) scopes gates to changed files only;
@@ -1158,6 +1179,13 @@ def _run_quality_gates(
 
     results: list[GateResult] = []
 
+    # Run ALL gates (no early-return) so every failure surfaces in one pass.
+    # Suppress each gate's own revert/comment/sidecar; the caller aggregates all
+    # failures into a single report + one retry. Restored before returning.
+    global _REVERT_SUPPRESSED
+    _prev_suppressed = _REVERT_SUPPRESSED
+    _REVERT_SUPPRESSED = True
+
     # Gate 1 -- typecheck (cheap, deterministic)
     r_tc = fn_tc(
         issue_num,
@@ -1169,8 +1197,6 @@ def _run_quality_gates(
     )
     results.append(r_tc)
     fn_log(r_tc, issue_num)
-    if not r_tc.passed:
-        return results
 
     # Gate 2 -- lint (Python ruff + frontend eslint/biome/prettier)
     r_lint = fn_lint(
@@ -1184,8 +1210,6 @@ def _run_quality_gates(
     )
     results.append(r_lint)
     fn_log(r_lint, issue_num)
-    if not r_lint.passed:
-        return results
 
     # Gate 3 -- design (impeccable UI anti-pattern detector, no LLM)
     r_design = fn_design(
@@ -1198,8 +1222,6 @@ def _run_quality_gates(
     )
     results.append(r_design)
     fn_log(r_design, issue_num)
-    if not r_design.passed:
-        return results
 
     # Gate 4 -- pytest
     r_pytest = fn_pytest(
@@ -1213,8 +1235,6 @@ def _run_quality_gates(
     )
     results.append(r_pytest)
     fn_log(r_pytest, issue_num)
-    if not r_pytest.passed:
-        return results
 
     # Gate 5 -- merge-preview (most expensive; run last)
     r_merge = fn_merge(
@@ -1227,8 +1247,6 @@ def _run_quality_gates(
     )
     results.append(r_merge)
     fn_log(r_merge, issue_num)
-    if not r_merge.passed:
-        return results
 
     # Gate 6 -- monolith (strangler-fig: reject server.py growth, issue #761)
     r_monolith = fn_monolith(
@@ -1241,4 +1259,5 @@ def _run_quality_gates(
     results.append(r_monolith)
     fn_log(r_monolith, issue_num)
 
+    _REVERT_SUPPRESSED = _prev_suppressed
     return results

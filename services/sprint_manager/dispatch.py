@@ -881,7 +881,7 @@ def _dispatch_coder(
                 sys.stdout.write(str(f"  [coder] {_cli_name} CLI not found -- stub success") + "\n")
                 if on_running is not None:
                     try:
-                        on_running()
+                        on_running(None)
                     except Exception:
                         pass
                 return True, None
@@ -911,7 +911,7 @@ def _dispatch_coder(
 
         if on_running is not None:
             try:
-                on_running()
+                on_running(proc.pid)
             except Exception:
                 pass
 
@@ -1411,7 +1411,7 @@ def _dispatch_tester(
                 sys.stdout.write(str("  [tester] claude CLI not found -- stub success") + "\n")
                 if on_running is not None:
                     try:
-                        on_running()
+                        on_running(None)
                     except Exception:
                         pass
                 return 0, None
@@ -1439,7 +1439,7 @@ def _dispatch_tester(
 
         if on_running is not None:
             try:
-                on_running()
+                on_running(proc.pid)
             except Exception:
                 pass
 

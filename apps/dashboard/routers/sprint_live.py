@@ -659,7 +659,6 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
 
     pipeline_mode = bool(status_data.get("pipeline_mode", False))
 
-    agent_pid = active_agent.get("pid") if active_agent else None
     coder_entries: list[dict] = []
     tester_entry = None
     active_tester_slots = 0
@@ -668,10 +667,10 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         cs, cf = iss.get("coder_started_at"), iss.get("coder_finished_at")
         ts, tf = iss.get("tester_started_at"), iss.get("tester_finished_at")
         if ts and not tf:
-            tester_entry = {"name": "tester", "ticket": ticket, "pid": agent_pid}
+            tester_entry = {"name": "tester", "ticket": ticket, "pid": iss.get("tester_pid")}
             active_tester_slots += 1
         elif cs and not cf:
-            coder_entries.append({"name": "coder", "ticket": ticket, "pid": agent_pid})
+            coder_entries.append({"name": "coder", "ticket": ticket, "pid": iss.get("coder_pid")})
     active_agents: list[dict] = coder_entries + ([tester_entry] if tester_entry else [])
     if not active_agents and active_agent:
         active_agents = [active_agent]

@@ -10,6 +10,7 @@ No render-time disk reads — all segment data comes from the agent_runs table.
 from __future__ import annotations
 
 import json
+import logging
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,8 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db as _db  # noqa: E402
 import settings_repo as _settings_repo  # noqa: E402
 from settings_schema import APP_CONFIG_KEY  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 # Minimum analytics samples required to override settings value with calibrated median.
 _MIN_CALIBRATION_SAMPLES = 3
@@ -59,6 +62,7 @@ def _get_sprint_issues(sprint_label: str, project: str) -> list[dict]:
         issues = srv.github_client.list_open_issues_with_body(repo_name=project, limit=300)
         return [i for i in issues if _primary_sprint_label(i) == sprint_label]
     except Exception:
+        _log.warning("_get_sprint_issues failed for %s/%s", sprint_label, project, exc_info=True)
         return []
 
 
@@ -67,6 +71,7 @@ def _get_agent_runs(sprint_label: str, project: str | None = None) -> list[dict]
     try:
         return _db.agent_runs_for_sprint(sprint_label, project=project)
     except Exception:
+        _log.warning("_get_agent_runs failed for %s", sprint_label, exc_info=True)
         return []
 
 
@@ -78,6 +83,7 @@ def _get_settings(project: str) -> dict:
         defaults = {k: v["default"] for k, v in KNOWN_FIELDS.items() if not v.get("secret")}
         return {**defaults, **stored}
     except Exception:
+        _log.warning("_get_settings failed for %s; returning defaults", project, exc_info=True)
         from settings_schema import KNOWN_FIELDS
         return {k: v["default"] for k, v in KNOWN_FIELDS.items() if not v.get("secret")}
 
@@ -88,6 +94,7 @@ def _get_sprint_row(sprint_label: str, project: str | None = None) -> Optional[d
     try:
         return _db.get_sprint(sprint_label, project=project or None)
     except Exception:
+        _log.warning("_get_sprint_row failed for %s", sprint_label, exc_info=True)
         return None
 
 
@@ -97,6 +104,7 @@ def _get_calibration_records() -> list:
         from calibration import sqlite_calibration_records
         return sqlite_calibration_records()
     except Exception:
+        _log.warning("_get_calibration_records failed", exc_info=True)
         return []
 
 
@@ -133,6 +141,7 @@ def _get_launch_issue_order(sprint_label: str, project: str) -> list[int]:
                 order.append(int(num))
         return order
     except Exception:
+        _log.warning("_get_launch_issue_order failed for %s/%s", sprint_label, project, exc_info=True)
         return []
 
 
@@ -331,7 +340,9 @@ def get_timeline(sprint_label: str, project: str) -> dict:
 
     # Build per-issue data
     issue_list = []
-    running_remaining_min: Optional[float] = None
+    # Serial: sum of all running issues' remaining (conservative — both must finish).
+    # Pipeline: max of all running issues' remaining (they overlap).
+    running_remaining: float = 0.0
     queued_estimates: list[float] = []
 
     for gh_iss in github_issues:
@@ -358,10 +369,10 @@ def get_timeline(sprint_label: str, project: str) -> dict:
             elapsed = _elapsed_for_issue(issue_runs, now)
             remaining = max(0.0, est - elapsed)
             entry["estimated_remaining"] = remaining
-            if running_remaining_min is None:
-                running_remaining_min = remaining
+            if pipeline_mode:
+                running_remaining = max(running_remaining, remaining)
             else:
-                running_remaining_min = max(running_remaining_min, remaining)
+                running_remaining += remaining
         elif status == "queued":
             queued_estimates.append(est)
 
@@ -377,7 +388,7 @@ def get_timeline(sprint_label: str, project: str) -> dict:
     wrap_up["total"] = doc_min + rev_min
 
     # Projected finish
-    remaining_running = running_remaining_min or 0.0
+    remaining_running = running_remaining
 
     if pipeline_mode:
         queue_time = _pipeline_queue_time(queued_estimates)

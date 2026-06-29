@@ -127,7 +127,15 @@ class WorktreePool:
                 self._cond.wait()
             wt = self._free.pop(0)
             self._in_use.add(wt)
-        self._ensure_slot_ready(wt)
+        if not self._ensure_slot_ready(wt):
+            with self._cond:
+                self._in_use.discard(wt)
+                if wt not in self._free:
+                    self._free.append(wt)
+                self._cond.notify_all()
+            raise RuntimeError(
+                f"worktree pool slot {wt.name} is missing and could not be recreated"
+            )
         return wt
 
     def release(self, worktree: Path) -> None:

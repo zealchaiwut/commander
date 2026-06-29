@@ -46,6 +46,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 ROUTERS_DIR = DASHBOARD_DIR / "routers"
 PROJECT_HTML = (DASHBOARD_DIR / "static" / "project.html").read_text(encoding="utf-8")
+HISTORY_JS = (DASHBOARD_DIR / "static" / "src" / "sprint-board" / "history.js").read_text(encoding="utf-8")
+CLEANUP_JS = (DASHBOARD_DIR / "static" / "src" / "settings" / "cleanup.js").read_text(encoding="utf-8")
 
 for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:
@@ -240,25 +242,34 @@ def test_ac2_cleanup_endpoint_confirm(patched, client):
 
 # ════════════════════ frontend design-contract (AC3–AC7) ═════════════════════
 
-def _fn_body(name: str, src: str = PROJECT_HTML) -> str:
-    """Return the brace-balanced body of a JS function defined in ``src``."""
+def _fn_body(name: str, src: str | None = None) -> str:
+    """Return the brace-balanced body of a JS function defined in frontend source."""
+    sources = [src] if src else (PROJECT_HTML, HISTORY_JS, CLEANUP_JS)
     pos = -1
-    for needle in (f"function {name}(", f"{name} = function", f"async function {name}("):
-        pos = src.find(needle)
+    chosen = ""
+    for text in sources:
+        if not text:
+            continue
+        for needle in (f"function {name}(", f"{name} = function", f"async function {name}(",
+                       f"export function {name}(", f"export async function {name}("):
+            pos = text.find(needle)
+            if pos != -1:
+                chosen = text
+                break
         if pos != -1:
             break
     assert pos != -1, f"function {name} not found"
-    brace = src.find("{", pos)
+    brace = chosen.find("{", pos)
     assert brace != -1, f"no opening brace for {name}"
     depth = 0
-    for i in range(brace, len(src)):
-        c = src[i]
+    for i in range(brace, len(chosen)):
+        c = chosen[i]
         if c == "{":
             depth += 1
         elif c == "}":
             depth -= 1
             if depth == 0:
-                return src[brace:i + 1]
+                return chosen[brace:i + 1]
     raise AssertionError(f"unbalanced braces for {name}")
 
 
@@ -288,9 +299,12 @@ def test_ac3_chip_builder_reads_count_and_clean_up_label():
 
 
 def test_ac3_chip_is_rendered_in_the_card_head():
-    card = _fn_body("_histCardHtml")
-    assert "_histStaleChipHtml(s)" in card, \
-        "the card head renders the stale chip for the sprint"
+    hints = _fn_body("_histHeadHintsHtml", HISTORY_JS)
+    assert "_histStaleChipHtml(s)" in hints, "hint chips still include the stale chip builder"
+    loose = _fn_body("_histLooseEndBandHtml", HISTORY_JS)
+    assert "stale branch" in loose, "expanded loose-end band surfaces stale branches"
+    card = _fn_body("_histCardHtml", HISTORY_JS)
+    assert "_histLooseEndBandHtml(s)" in card, "card body includes the loose-end band when expanded"
 
 
 # ── AC4 — toolbar scan button ─────────────────────────────────────────────────
@@ -299,16 +313,15 @@ def test_ac4_toolbar_has_scan_button():
     assert 'id="ps-stale-scan-btn"' in PROJECT_HTML
     assert "Scan stale branches" in PROJECT_HTML
     assert 'id="ps-sprint-cleanup-card"' in PROJECT_HTML
-    assert "_histScanStale()" in PROJECT_HTML, "the button triggers the scan handler"
+    assert "psStaleBranchesScan()" in PROJECT_HTML, "the button triggers the scan handler"
     toolbar = _fn_body("_histToolbarHtml")
     assert "Scan stale branches" not in toolbar, "scan action lives in project settings, not history toolbar"
 
 
 def test_ac4_scan_handler_hits_the_scan_endpoint():
-    body = _fn_body("_histScanStale")
+    body = _fn_body("psStaleBranchesScan", CLEANUP_JS)
     assert "/scan-stale-branches" in body, "scan calls the scan endpoint"
-    assert "_histStaleBySprint" in body, "scan stores results for the chips"
-    assert "_histRenderLedger" in body, "scan re-renders so chips appear"
+    assert "_histScanStale" in body, "scan refreshes History chips after scan"
 
 
 # ── AC5 — confirm dialog ──────────────────────────────────────────────────────
@@ -336,21 +349,10 @@ def test_ac6_chip_cleared_after_successful_cleanup():
 # ── AC7 — chips/cleanup allowed on locked rows ────────────────────────────────
 
 def test_ac7_chip_renders_regardless_of_locked_state():
-    """The stale chip is inserted into the card head unconditionally, so it
-    appears on locked (finished/deleted) rows too — scan/cleanup are repo
-    actions, not record changes."""
-    card = _fn_body("_histCardHtml")
-    # The chip call sits in the always-rendered head, not inside the
-    # `expanded ? ... : ''` body and not gated by `locked`.
-    head_marker = "_histStateChip(s.lifecycle_state"
-    chip_marker = "_histStaleChipHtml(s)"
-    assert head_marker in card and chip_marker in card
-    assert card.index(chip_marker) > card.index(head_marker)
-    # The body (verbs/links) is the part suppressed when locked; the chip must
-    # not live there.
-    body_var = _fn_body("_histCardHtml")
-    # crude guard: chip is referenced exactly once and before the `body` const.
-    assert body_var.count(chip_marker) == 1
+    """Stale-branch cleanup is a repo action — the loose-end band is not gated on locked."""
+    loose = _fn_body("_histLooseEndBandHtml", HISTORY_JS)
+    assert "_histCleanupStale" in loose, "stale-branch band triggers cleanup"
+    assert "locked" not in loose, "loose-end band is not suppressed for locked rows"
 
 
 # ── AC8 (frontend half) — skipped unmerged surfaced in the dialog ─────────────

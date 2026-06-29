@@ -347,8 +347,8 @@ def test_bulk_complete_button_on_parent_with_children():
     group = _fn_body("_histGroupHtml")
     assert "_histBulkCompleteBtnHtml" in group
     assert "bulkCompleteBtn" in _fn_body("_histGroupHtml")
-    parent = _fn_body("_histParentRowHtml")
-    assert "hist-parent-actions" in parent
+    child = _fn_body("_histChildCardHtml")
+    assert "hist-child-head-right" in child
     btn = _fn_body("_histBulkCompleteBtnHtml")
     assert "smgmtBulkCompleteSprint" in btn
     assert "Bulk complete" in btn
@@ -358,6 +358,16 @@ def test_bulk_complete_button_on_parent_with_children():
     assert "completed" in needs and "deleted" in needs
     assert "_histChildSprintsAllCompleted" in _fn_body("_histBulkCompleteBtnHtml")
     assert "Complete all child sprints before bulk completing" in btn
+    run_finished = _fn_body("_histChildRunFinished")
+    assert "needs_rework" in run_finished and "failed" in run_finished
+
+
+def test_bulk_complete_enabled_when_child_failed_not_running():
+    """Failed/needs_rework children are finished runs — bulk complete must not stay disabled."""
+    hist_js = (DASHBOARD_DIR / "static/src/sprint-board/history.js").read_text(encoding="utf-8")
+    assert "_histChildRunFinished" in hist_js
+    assert "_histChildSprintsStillRunning" in _fn_body("_histBulkCompleteBtnHtml")
+    assert "Wait for child sprint runs to finish" in _fn_body("_histBulkCompleteBtnHtml")
 
 
 def test_bulk_complete_modal_mounts():
@@ -367,7 +377,7 @@ def test_bulk_complete_modal_mounts():
     assert "bulk-complete-preview" in modal_js or "smgmtBulkCompleteSprint" in modal_js
     # Re-fetch merge chain after each merge (parent→develop only known post child merge).
     assert "_bcRemainingMergeSteps" in modal_js
-    assert "while (mergeSteps.length > 0)" in modal_js
+    assert "for (let i = 0; i < order.length; i++)" in modal_js
 
 
 def test_bc_confirm_reads_merge_steps_before_close():
@@ -375,7 +385,7 @@ def test_bc_confirm_reads_merge_steps_before_close():
     modal_js = (DASHBOARD_DIR / "static/src/sprint-board/bulk-complete-modal.js").read_text(encoding="utf-8")
     body = _fn_body("_bcConfirm", modal_js)
     close_at = body.find("_bcClose()")
-    preview_merge_at = body.find("_bcPreview.merge_steps")
+    preview_merge_at = body.find("_bcPreview.complete_order")
     assert close_at != -1 and preview_merge_at != -1
     assert preview_merge_at < close_at, (
         "_bcPreview.merge_steps must be read before _bcClose clears _bcPreview"

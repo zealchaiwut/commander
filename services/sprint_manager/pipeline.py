@@ -46,6 +46,15 @@ if TYPE_CHECKING:
 # Cap on coder attempts per ticket before it is dropped as needs-rework.
 DEFAULT_MAX_ATTEMPTS = 3
 
+# A MERGE_CONFLICT whose signature CHANGES between attempts is almost always a
+# rebase race (a sibling ticket merged and moved the base), not a defect in this
+# ticket's code. Such races get this many FREE retries that do NOT count against
+# the code-fix budget above, so a racing ticket still gets its real coder
+# attempts instead of exhausting on transient conflicts (the #1053 saga: 3
+# attempts all burned by races vs #1049 while its own tests passed). An IDENTICAL
+# repeated conflict is treated as a genuine overlap and exhausts normally.
+MERGE_CONFLICT_FREE_RETRIES = 3
+
 # Kill-switch env var: when truthy, serial mode is forced regardless of any
 # pipeline_mode setting value.
 PIPELINE_KILL_SWITCH_ENV = "COMMANDER_PIPELINE_DISABLE"
@@ -64,6 +73,7 @@ class StageResult(Enum):
     REJECT = "reject"    # tester only: send back to the coder queue
     FAIL = "fail"        # infra/non-retryable: drop, no rework label
     EXHAUST = "exhaust"  # tester only: consecutive identical failure — finalize needs-rework immediately
+    RETRY_FREE = "retry_free"  # tester only: transient merge-conflict race — requeue WITHOUT counting an attempt
 
 
 def pipeline_mode_enabled(
@@ -170,6 +180,11 @@ def _run_serial(
 
         test_res = test_fn(ticket, attempt)
         result.order.append((ticket, "tester", attempt))
+        if test_res is StageResult.RETRY_FREE:
+            # Transient merge-conflict race — requeue without burning an attempt.
+            attempts[ticket] -= 1
+            work.appendleft(ticket)
+            continue
         _apply_tester_outcome(
             ticket, attempt, test_res, result, work, max_attempts,
             requeue_front=True,
@@ -282,6 +297,11 @@ def _run_pipeline(
                     result.needs_rework.append(ticket)
                     if on_needs_rework:
                         on_needs_rework(ticket)
+                elif test_res is StageResult.RETRY_FREE:
+                    # Transient merge-conflict race — requeue without burning an
+                    # attempt (decrement nets out the next coder pop's increment).
+                    attempts[ticket] -= 1
+                    coder_q.appendleft(ticket)
                 elif test_res is StageResult.REJECT:
                     if attempt >= max_attempts:
                         terminal.add(ticket)
@@ -765,8 +785,9 @@ def _run_pipeline_dispatch(
         _post_sprint_status(state, api_url=api_url)
         _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
-        def _on_coder_running(_ist=ist):
+        def _on_coder_running(pid=None, _ist=ist):
             _ist.set_agent_status("coder_running")
+            _ist.coder_pid = pid
             _neon_ticket_status(label, num, "running", eff_sprints_dir)
             _save_state()
             _post_sprint_status(state, api_url=api_url)
@@ -931,8 +952,9 @@ def _run_pipeline_dispatch(
         _save_state()
         _post_sprint_status(state, api_url=api_url)
 
-        def _on_tester_running(_ist=ist):
+        def _on_tester_running(pid=None, _ist=ist):
             _ist.set_agent_status("tester_running")
+            _ist.tester_pid = pid
             _save_state()
             _post_sprint_status(state, api_url=api_url)
 
@@ -997,10 +1019,31 @@ def _run_pipeline_dispatch(
         category = gate_category or FailureCategory.CRASH
         ctx["category"] = category
         if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
-            record_failure(num, category, detail=summary_line)
-            ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
             _sig = f"{category}:{summary_line[:80]}"
             _last = ctx.get("last_failure_sig")
+            # Transient merge-conflict race: the conflict signature CHANGED since
+            # the last attempt (a sibling merged and moved the base), so this is
+            # not a defect in this ticket's code. Give it a free retry that does
+            # NOT append to fix_history / count against max_attempts, so the
+            # code-fix budget is preserved for genuine failures. Bounded by
+            # MERGE_CONFLICT_FREE_RETRIES; an IDENTICAL repeated conflict (real
+            # overlap) skips this and exhausts via the consecutive check below.
+            if (
+                category == FailureCategory.MERGE_CONFLICT
+                and _sig != _last
+                and ctx.get("conflict_free_retries", 0) < MERGE_CONFLICT_FREE_RETRIES
+            ):
+                ctx["conflict_free_retries"] = ctx.get("conflict_free_retries", 0) + 1
+                ctx["last_failure_sig"] = _sig
+                sys.stdout.write(
+                    f"  [pipeline] #{num}: merge conflict (likely rebase race) — free retry "
+                    f"{ctx['conflict_free_retries']}/{MERGE_CONFLICT_FREE_RETRIES}, "
+                    f"not counting against the fix budget\n"
+                )
+                sys.stdout.flush()
+                return _StageResult.RETRY_FREE
+            record_failure(num, category, detail=summary_line)
+            ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
             ctx["last_failure_sig"] = _sig
             if _sig == _last:
                 sys.stdout.write(

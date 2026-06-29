@@ -2507,7 +2507,14 @@ def _reject_terminal_label_redispatch(project_root: Path, sprint_label: str, pro
     if durable_state is None:
         plan = _read_plan_json(project_root, sprint_label) or {}
         state = plan.get("state")
-        if state in _TERMINAL_PLAN_STATES and plan.get("tickets"):
+        # end_reason 'queued' = the child was created (carrying its planned
+        # tickets) but never dispatched — no run, no DB row, no state.json. That
+        # is NOT a real run, even though tickets are present, so Run must be
+        # allowed to dispatch it for the first time. Blocking here forced the
+        # operator to Re-run into yet another never-dispatched child — the
+        # 90.3 / 91.1 / 99.3 zombie loop.
+        never_dispatched = (plan.get("end_reason") or "").lower() == "queued"
+        if state in _TERMINAL_PLAN_STATES and plan.get("tickets") and not never_dispatched:
             _raise_terminal_redispatch(sprint_label, state)
 
 
@@ -2773,12 +2780,32 @@ def _sprint_db_mark_merged_completed(
     ``needs_rework`` superseded ancestors need actor=reconcile (B2 edge).
     ``running`` / ``ready_to_merge`` orphans need actor=manager. Try both when
     unsure so bulk-complete resume does not wedge on an illegal edge.
+
+    Sprints that ran before per-project DB rows existed (or never got a lifecycle
+    write) read as ``draft`` — ``draft→completed`` is illegal. After the git
+    merge already landed, bootstrap through ``ready_to_merge`` first.
     """
     try:
         row = db.get_sprint(sprint_label, project=project or None)
         current = db.canonical_lifecycle((row or {}).get("state") or "draft")
     except Exception:
         current = "unknown"
+    # partial_finished is derived-only but may appear on legacy rows; treat like
+    # ready_to_merge for post-merge settlement.
+    if current in ("draft", "planned", "unknown", "partial_finished"):
+        _sprint_db_set_state(
+            sprint_label,
+            project,
+            "ready_to_merge",
+            actor="manager",
+            end_reason=extra_fields.get("end_reason") or "merge_sprint",
+            ended_at=extra_fields.get("ended_at"),
+        )
+        try:
+            row = db.get_sprint(sprint_label, project=project or None)
+            current = db.canonical_lifecycle((row or {}).get("state") or "draft")
+        except Exception:
+            current = "unknown"
     if current == "needs_rework":
         actors = ("reconcile",)
     else:
@@ -3346,6 +3373,11 @@ _SESSION_STATE_LABELS = frozenset({
     "in-progress",
     "sit-away",
     "tester-rejected",
+    # A ticket left mid-review from a prior attempt carries a stale session state;
+    # re-run starts a fresh attempt, so reset it to clean backlog rather than carry
+    # the prior `code-review` label forward (it would mislead the board and the
+    # next reviewer about where the ticket actually stands).
+    "code-review",
 })
 
 
@@ -6657,25 +6689,91 @@ def _resolve_bulk_sprint_label(sprint_label: str | None, repo: str | None) -> st
         return ""
 
 
+def _sprint_base_number(label: str) -> int | None:
+    """Parse the integer N from ``sprint-N`` or ``sprint-N.M``."""
+    if not _SPRINT_LABEL_RE.match(label or ""):
+        return None
+    try:
+        return int((label or "").split("-", 1)[1].split(".")[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def _sprint_row_matches_project(row_project: str | None, repo: str | None) -> bool:
+    """True when a DB/history row belongs to ``repo`` (or is legacy unscoped)."""
+    proj = (row_project or "").strip()
+    want = (repo or "").strip()
+    if not want:
+        return True
+    return not proj or proj == want
+
+
+def _used_sprint_numbers(repo: str | None) -> set[int]:
+    """Base sprint numbers already recorded for this project.
+
+    GitHub labels alone are insufficient: finished sprints often drop their
+    ``sprint-N`` label, and an old sprint-99 ledger row must block reusing 99
+    even when the label is gone (issue: History showed ancient #1/#11 tickets
+    beside a new sprint-99 board card).
+    """
+    used: set[int] = set()
+    for n in github_client.list_sprints(repo_name=repo) or []:
+        try:
+            used.add(int(n))
+        except (TypeError, ValueError):
+            pass
+    for lbl in _finished_sprint_summaries(repo):
+        base = _sprint_base_number(lbl)
+        if base is not None:
+            used.add(base)
+    try:
+        for row in db.list_sprints_lifecycle():
+            if not _sprint_row_matches_project(row.get("project"), repo):
+                continue
+            base = _sprint_base_number(row.get("label") or "")
+            if base is not None:
+                used.add(base)
+        for rec in db.list_sprint_history():
+            if not _sprint_row_matches_project(rec.get("project"), repo):
+                continue
+            base = _sprint_base_number(rec.get("label") or "")
+            if base is not None:
+                used.add(base)
+    except Exception:
+        pass
+    if repo:
+        try:
+            project_root = _project_root_path(repo)
+            sprints_dir = _commander_dir(project_root) / "sprints"
+            if sprints_dir.is_dir():
+                from routers import sprint_history_service as shs  # noqa: PLC0415
+                for lbl in shs._discover_file_labels(sprints_dir):
+                    base = _sprint_base_number(lbl)
+                    if base is not None:
+                        used.add(base)
+        except Exception:
+            pass
+    return used
+
+
 def _next_new_sprint_number(repo: str | None) -> int:
     """Next sprint number for a brand-new sprint — the SAME value the board's
     "New sprint (Sprint N)" option shows.
 
-    Must take the max over BOTH live sprint labels AND finished-sprint summary
-    numbers: a sprint's `sprint-N` label is often deleted once it finishes, so
-    counting labels alone resets the next number back to 1 (issue: bulk-create
-    "NEW" said 54 but created sprint-1). The finished-summary issues preserve
-    the real high-water mark cross-machine.
+    High-water mark over live labels, finished summaries, lifecycle DB,
+    sprint_history snapshots, and on-disk sprint artifacts for the project.
     """
-    nums: list[int] = list(github_client.list_sprints(repo_name=repo) or [])
-    for lbl in _finished_sprint_summaries(repo):
-        if _SPRINT_LABEL_RE.match(lbl):
-            try:
-                # lbl is "sprint-N" or "sprint-N.X" — take the base number N.
-                nums.append(int(lbl.split("-", 1)[1].split(".")[0]))
-            except (IndexError, ValueError):
-                pass
-    return (max(nums) if nums else 0) + 1
+    used = _used_sprint_numbers(repo)
+    return (max(used) if used else 0) + 1
+
+
+def _sprint_number_reserved(repo: str | None, sprint_number: int) -> bool:
+    """Return True when sprint_number is already recorded for this project."""
+    try:
+        n = int(sprint_number)
+    except (TypeError, ValueError):
+        return True
+    return n in _used_sprint_numbers(repo)
 
 
 def _compose_ticket_labels(sprint_label: str, item_labels: list[str]) -> list[str]:

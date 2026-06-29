@@ -140,6 +140,7 @@ try:
         TransitionError as _TransitionError,
         STATE_LABELS as _STATE_LABELS,
         STATUS_LABELS as _STATUS_LABELS,
+        RUN_MUTABLE_LABELS as _SM_RUN_MUTABLE_LABELS,
     )
     _STATE_MACHINE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):  # pragma: no cover
@@ -148,6 +149,7 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _TransitionError = Exception  # type: ignore[assignment,misc]
     _STATE_LABELS = {}  # type: ignore[assignment]
     _STATUS_LABELS = frozenset()  # type: ignore[assignment]
+    _SM_RUN_MUTABLE_LABELS = None  # type: ignore[assignment]
     _STATE_MACHINE_AVAILABLE = False
 
 try:
@@ -512,6 +514,14 @@ def _plan_json_set_state_sm(
                 existing = {"tickets": raw}
         existing["state"] = state
         existing.update(extra_fields)
+        # A running sprint has no terminal reason. Clear any stale end_reason /
+        # ended_at carried over from a prior queued/draft state, otherwise the
+        # board's running detection treats end_reason-set as "ended" and hides a
+        # genuinely live sprint (sprint-15.3 ran but showed DRAFT/not-running
+        # because its rerun-created plan still carried end_reason="queued").
+        if state == "running":
+            existing.pop("end_reason", None)
+            existing.pop("ended_at", None)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         os.replace(str(tmp), str(path))
@@ -704,9 +714,11 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 # Consolidated from old _RUN_MUTABLE_GITHUB_LABELS constant (issue #506, Wave 1 label protection).
-RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "needs-rework",
-})
+RUN_MUTABLE_LABELS: frozenset[str] = (
+    _SM_RUN_MUTABLE_LABELS
+    if _SM_RUN_MUTABLE_LABELS is not None
+    else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
+)
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
@@ -888,14 +900,37 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     Prefers the remote tracking ref so we get the current authoritative tip
     (e.g. after a tester's finish_feature.py pushed the final commit) rather
     than a potentially stale local copy.
+
+    When MORE THAN ONE feature/<N>-* branch exists (a stale mismatched-slug
+    leftover next to the real one), pick the branch whose tip commit references
+    ``(issue #N)`` — i.e. the branch that actually carries this issue's work —
+    instead of the alphabetical [0], which could pick the wrong branch and merge
+    unrelated work (the saga's feature/117-display-bangkok-time vs
+    feature/117-chunk-overlap-fix).
     """
+    candidates: list[str] = []
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
-        return out.strip().splitlines()[0].strip().removeprefix("origin/")
-    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
-    return None
+        candidates = [
+            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+        ]
+    if not candidates:
+        ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
+        if ok and out.strip():
+            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    for branch in candidates:
+        ref = f"origin/{branch}"
+        ok, _, _ = _try("git", "rev-parse", "--verify", ref)
+        if not ok:
+            ref = branch
+        ok, msg, _ = _try("git", "log", "-1", "--format=%s%n%b", ref)
+        if ok and f"issue #{issue_num}" in (msg or ""):
+            return branch
+    return candidates[0]
 
 
 def _is_branch_merged_into(branch: str, target: str, issue_num: Optional[int] = None) -> bool:
@@ -1269,6 +1304,71 @@ def _revert_to_sit_impl(issue_num: int, gate_name: str, output: str,
         structured_log.warn("github_update_failed", f"failed to post gate failure comment: {e}", issue_num=issue_num, exc=str(e))
 
 
+def _revert_to_sit_aggregate(issue_num: int, failed_results: "list[GateResult]",
+                             total: Optional[int] = None,
+                             repo_name: Optional[str] = None,
+                             repo_root: Optional[Path] = None) -> None:
+    """Revert ONCE for all failing gates: a single comment listing every failure,
+    one sidecar covering them all (so the coder's retry fixes everything in one
+    pass), and one SIT transition. Replaces the per-gate revert now that
+    run_quality_gates runs all gates in a single pass (no early-return).
+    """
+    if not failed_results:
+        return
+    n = len(failed_results)
+    names = ", ".join(r.gate for r in failed_results)
+    denom = f"/{total}" if total else ""
+    parts = [
+        f"❌ **{n}{denom} quality gate(s) failed: {names}**",
+        "Issue reverted to SIT — fix all of the items below in one pass, "
+        "then push; the same single retry re-runs every gate.",
+    ]
+    files_to_inspect: list[str] = []
+    detail_parts: list[str] = []
+    primary_class: Optional[str] = None
+    for r in failed_results:
+        out = r.output or ""
+        truncated = out[:2000] if len(out) > 2000 else out
+        parts.append(f"\n### {r.gate}\n```\n{truncated}\n```")
+        fclass = _GATE_FAILURE_CLASS_MAP.get(r.gate, r.gate)
+        if primary_class is None:
+            primary_class = fclass
+        detail_parts.append(f"[{r.gate}]\n{truncated}")
+        if _FAILURE_PARSING_AVAILABLE:
+            try:
+                failures = parse_failures(r.gate, out)
+                parts.append(build_failure_block(r.gate, failures))
+                files_to_inspect.extend(
+                    f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
+                    for f in failures if f.get("file")
+                )
+            except Exception as e:
+                structured_log.error(
+                    "failure_parsing_error",
+                    f"failure parsing failed for {r.gate}: {e}",
+                    issue_num=issue_num, exc=str(e),
+                )
+
+    record_failure(
+        issue_num,
+        primary_class or "gate",
+        detail="\n\n".join(detail_parts)[:4000],
+        repo_root=repo_root,
+        summary=f"Issue #{issue_num}: {n}{denom} gate(s) failed: {names}",
+        files_to_inspect=sorted(set(files_to_inspect)),
+    )
+    for r in failed_results:
+        _write_gate_failure_record(issue_num, r.gate, r.output or "", repo_root=repo_root)
+
+    _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
+    try:
+        github_client.add_comment(issue_num, "\n".join(parts), repo_name=repo_name)
+    except Exception as e:
+        structured_log.warn("github_update_failed",
+                            f"failed to post aggregate gate failure comment: {e}",
+                            issue_num=issue_num, exc=str(e))
+
+
 def _post_success_comment(issue_num: int, results: list[GateResult],
                           repo_name: Optional[str] = None,
                           gates_skipped: bool = False,
@@ -1489,6 +1589,37 @@ def _call_finish_feature(
         return False, []
     finally:
         _restore_worktree_branch(wt_root, target_branch)
+
+
+def _apply_in_progress_label(
+    issue_num: int,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply in-progress label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "in-progress"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
+
+
+def _apply_needs_rework_label(
+    issue_num: int,
+    category: str,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply needs-rework label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "needs-rework"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -1785,8 +1916,7 @@ def handle_post_tester(
             return True, f"Issue #{issue_num}: all gates passed, merge already done, UAT applied", None
         return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
     else:
-        failed = next((r for r in results if not r.passed), None)
-        gate_name = failed.gate if failed else "unknown"
+        failed_list = [r for r in results if not r.passed]
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
             "typecheck":     FailureCategory.GATE_FAIL,
@@ -1796,17 +1926,29 @@ def handle_post_tester(
             "merge-preview": FailureCategory.MERGE_CONFLICT,
             "monolith":      FailureCategory.GATE_FAIL,
         }
+        # Aggregate ALL failing gates into ONE revert (comment + sidecar + SIT) so
+        # a single retry fixes everything — including a merge conflict caught in the
+        # same pass — instead of burning one attempt per gate.
+        _revert_to_sit_aggregate(issue_num, failed_list, total=len(results), repo_name=eff_repo)
+        # Category drives the pipeline fix-loop. A code gate (typecheck / lint /
+        # design / pytest / monolith) failing means the coder must fix code, so a
+        # code category wins over merge-preview. merge-preview ALONE → MERGE_CONFLICT,
+        # which preserves the transient-rebase-race free-retry path.
+        _code_order = ["typecheck", "lint", "design", "pytest", "monolith"]
+        primary = next((r for r in failed_list if r.gate in _code_order), failed_list[0])
+        gate_name = primary.gate
         # A gate may override the category for a failure that isn't a code defect
         # (e.g. pytest reports ENV_ERROR when its binary is missing) — honor that
         # so infra failures skip the coder fix-loop + needs-rework.
         gate_category = (
-            getattr(failed, "category", None)
+            getattr(primary, "category", None)
             or gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
         )
+        names = ", ".join(r.gate for r in failed_list)
         _gate_msg = (
             f"Issue #{issue_num}: gate {gate_name} environment error (test infra missing)"
             if gate_category == FailureCategory.ENV_ERROR
-            else f"Issue #{issue_num}: gate failed ({gate_name})"
+            else f"Issue #{issue_num}: {len(failed_list)}/{len(results)} gates failed: {names}"
         )
         return (False, _gate_msg, gate_category)
 
@@ -2405,12 +2547,23 @@ def _issues_from_plan_numbers(
     for num in plan_numbers:
         issue = by_num.get(num)
         if not issue:
+            # A roster ticket that isn't an open issue carrying `label` is dropped.
+            # Log it — silent drops here let a ticket vanish from a run with no
+            # trace (e.g. closed, or its sprint label was stripped/moved).
+            sys.stdout.write(str(f"  [roster] #{num}: not an open issue on '{label}' "
+                f"(closed or missing the sprint label) — skipped") + "\n")
             continue
         labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
-        if _classify(labels_set) in ("uat", "done"):
+        cls = _classify(labels_set)
+        if cls in ("uat", "done"):
             continue
         if _is_dispatchable(labels_set):
             result.append(issue)
+        else:
+            # Non-dispatchable roster ticket — never silently drop it; surface why
+            # so a skipped ticket is visible in the run log instead of vanishing.
+            sys.stdout.write(str(f"  [roster] #{num}: not dispatchable (class={cls}, "
+                f"labels={sorted(labels_set)}) — skipped") + "\n")
     return result
 
 
@@ -3251,6 +3404,7 @@ def run_sprint_loop(
                 _ser_est = _load_estimate(num)
                 _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
+                issue_state.coder_routing_reason = _ser_route_reason  # tooltip/sub-label on running pane badge (issue #1427)
                 issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
                 _db_agent_start_sm(
                     num, label, "coder",
@@ -3276,10 +3430,12 @@ def run_sprint_loop(
                 _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
                 def _on_coder_running(
+                    pid=None,
                     _is=issue_state, _st=state, _sp=state_path, _api=api_url,
                     _lbl=label, _n=num, _sd=_eff_sprints_dir,
                 ) -> None:
                     _is.set_agent_status("coder_running")
+                    _is.coder_pid = pid
                     _neon_ticket_status(_lbl, _n, "running", _sd)
                     _st.save(_sp)
                     _post_sprint_status(_st, api_url=_api)
@@ -3572,9 +3728,11 @@ def run_sprint_loop(
             _post_sprint_status(state, api_url=api_url)
 
             def _on_tester_running(
+                pid=None,
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url
             ) -> None:
                 _is.set_agent_status("tester_running")
+                _is.tester_pid = pid
                 _st.save(_sp)
                 _post_sprint_status(_st, api_url=_api)
 

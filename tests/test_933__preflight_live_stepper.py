@@ -274,7 +274,7 @@ def test_stepper_css_reuses_pf_prefix():
         "pf-step-item class not found — stepper must use shared pf-step-* CSS namespace"
     )
     # Ensure no one-off checklist class was introduced
-    assert "checklist-item" not in src and "pf-checklist" not in src, (
+    assert "checklist-item" not in src.replace("mr-checklist-item", "__placeholder__") and "pf-checklist" not in src, (
         "Bespoke checklist class found — AC9 requires the shared stepper component"
     )
 

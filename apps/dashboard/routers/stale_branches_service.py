@@ -77,20 +77,17 @@ def _list_remote_feature_branches(repo: str) -> list[str]:
 
 
 def _is_merged(repo: str, branch: str, target: str) -> bool:
-    """True when ``branch`` is fully contained in ``target`` (0 commits ahead).
-
-    Timeouts and any other ``gh`` failure are already absorbed by ``_run_gh``,
-    which returns ``""`` in that case — the ``if not out`` guard below treats
-    that as "not merged". No local ``except subprocess.TimeoutExpired`` is needed
-    here; one would be unreachable dead code (issue #1587).
-    """
-    out = _run_gh(["api", f"repos/{repo}/compare/{target}...{branch}", "--jq", ".ahead_by"])
-    out = out.strip()
-    if not out:
-        return False
+    """True when ``branch`` is fully contained in ``target`` (0 commits ahead)."""
     try:
-        return int(out) == 0
-    except (TypeError, ValueError):
+        out = _run_gh(["api", f"repos/{repo}/compare/{target}...{branch}", "--jq", ".ahead_by"])
+        out = out.strip()
+        if not out:
+            return False
+        try:
+            return int(out) == 0
+        except (TypeError, ValueError):
+            return False
+    except subprocess.TimeoutExpired:
         return False
 
 
@@ -101,9 +98,11 @@ def _delete_branch(repo: str, branch: str) -> bool:
     try:
         result = subprocess.run(
             ["gh", "api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{branch}"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=30,
         )
         return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
     except Exception:
         return False
 

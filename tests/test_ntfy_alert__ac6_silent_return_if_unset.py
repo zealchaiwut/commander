@@ -6,25 +6,21 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "sprint_manager"))
 
-from sprint_manager import _alert_ntfy
+from alerts import _alert_ntfy  # noqa: E402
 
 
-@patch("sprint_manager.urllib.request.urlopen")
+@patch("alerts.urllib.request.urlopen")
 def test_silent_return_when_env_unset(mock_urlopen):
     """No HTTP request when NTFY_TOPIC_URL is unset"""
-    # Ensure env var is not set
     os.environ.pop("NTFY_TOPIC_URL", None)
 
-    # Should not raise exception
     result = _alert_ntfy("Test", "Body")
 
-    # Should not call urlopen
     assert not mock_urlopen.called
-    # Should return None (silently)
     assert result is None
 
 
-@patch("sprint_manager.urllib.request.urlopen")
+@patch("alerts.urllib.request.urlopen")
 def test_silent_return_when_env_empty_string(mock_urlopen):
     """No HTTP request when NTFY_TOPIC_URL is empty string"""
     os.environ["NTFY_TOPIC_URL"] = ""

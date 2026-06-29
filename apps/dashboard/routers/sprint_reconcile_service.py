@@ -181,19 +181,17 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
                 pass
         return {"state": "needs_rework", "end_reason": end_reason or "github-reconcile"}
     if not has_rework and canonical == "needs_rework" and stored in ("needs_rework", "failed", "cancelled"):
-        # All tickets settled on GitHub — promote to ready_to_merge when plausible.
-        failed_in_db = False
-        try:
-            import json
-            issues = json.loads(row.get("issues_json") or "[]")
-            failed_in_db = any(
-                (i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason")
-                for i in issues
-            )
-        except Exception:
-            pass
-        if not failed_in_db:
-            return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
+        # GitHub shows no open rework / unfinished work tickets → the sprint's work
+        # has settled, so promote to ready_to_merge.
+        #
+        # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
+        # stale snapshot from the ORIGINAL run and survives even after the failed
+        # ticket was re-run and passed in a child sprint. Trusting it left
+        # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
+        # would_change=false), which disabled Bulk complete. The live GitHub signal
+        # (has_rework) is authoritative; a genuinely-unfinished ticket would still
+        # be open/not-done and keep has_rework True.
+        return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
 
 

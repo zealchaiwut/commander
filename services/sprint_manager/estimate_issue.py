@@ -75,7 +75,7 @@ def load_agent_instructions() -> str:
 
 
 def parse_files_to_touch(body: str) -> list:
-    """Extract repo-relative paths from the '## Files to touch' section of an issue body.
+    """Extract repo-relative paths from the '## Files to touch' section.
 
     Returns a deduplicated list of path strings (preserving first-seen order).
     Returns [] when the section is absent or contains no parseable paths.
@@ -88,27 +88,24 @@ def parse_files_to_touch(body: str) -> list:
         if re.match(r"^#+\s+Files to touch", line, re.IGNORECASE):
             in_section = True
             continue
-        if in_section:
-            if re.match(r"^#", line):
-                break
-            stripped = line.strip()
-            # Track multi-line HTML-comment state. A line that opens `<!--`
-            # without a closing `-->` on the same line enters comment mode;
-            # the line containing the subsequent `-->` exits it. Every line
-            # in between (and the opening/closing lines themselves) is skipped.
-            if in_comment:
-                if "-->" in stripped:
-                    in_comment = False
-                continue
-            if "<!--" in stripped:
-                if "-->" not in stripped:
-                    in_comment = True
-                continue
-            if not stripped:
-                continue
-            if stripped not in seen:
-                seen.add(stripped)
-                paths.append(stripped)
+        if not in_section:
+            continue
+        if re.match(r"^#", line):
+            break
+        stripped = line.strip()
+        # Handle multi-line HTML comments.
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if "<!--" in stripped:
+            if "-->" not in stripped:
+                in_comment = True
+            continue
+        # Collect non-empty paths.
+        if stripped and stripped not in seen:
+            seen.add(stripped)
+            paths.append(stripped)
     return paths
 
 

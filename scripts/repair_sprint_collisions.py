@@ -421,7 +421,7 @@ def main() -> int:
     if created:
         print(f"\nSummary: 1 row created ({_COMMANDER}/{_LABEL}), 1 assertion evaluated.")
     elif existed:
-        print(f"\nSummary: 0 rows created (already repaired), 1 assertion evaluated.")
+        print("\nSummary: 0 rows created (already repaired), 1 assertion evaluated.")
     return 0
 
 

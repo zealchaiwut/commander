@@ -514,6 +514,14 @@ def _plan_json_set_state_sm(
                 existing = {"tickets": raw}
         existing["state"] = state
         existing.update(extra_fields)
+        # A running sprint has no terminal reason. Clear any stale end_reason /
+        # ended_at carried over from a prior queued/draft state, otherwise the
+        # board's running detection treats end_reason-set as "ended" and hides a
+        # genuinely live sprint (sprint-15.3 ran but showed DRAFT/not-running
+        # because its rerun-created plan still carried end_reason="queued").
+        if state == "running":
+            existing.pop("end_reason", None)
+            existing.pop("ended_at", None)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         os.replace(str(tmp), str(path))

@@ -36,6 +36,9 @@ from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from services.sprint_manager.failures import FailureCategory  # noqa: E402
+from services.sprint_manager.serialization import (  # noqa: E402
+    tester_worktree_guard,
+)
 
 if TYPE_CHECKING:
     from services.sprint_manager.state import IssueState
@@ -917,48 +920,58 @@ def _run_pipeline_dispatch(
 
         _stage_tester_t0 = time.monotonic()
         _stage_tester_utc0 = _token_window_utc_now()
-        tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running, sprint_label=label,
-            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-        )
-        _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
-        state.total_tokens_in += _ttin
-        state.total_tokens_out += _ttout
-        _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
-            num, label, "tester",
-            duration_seconds=time.monotonic() - _stage_tester_t0,
-            outcome="pass" if tester_rc == 0 else "fail",
-            total_tokens=(_ttin + _ttout) or None,
-        )
-        ist.tester_finished_at = ist.status_changed_at
-        if hang_category == FailureCategory.HANG:
-            _finalize_skip(num, ist, "Tester HANG detected", FailureCategory.HANG, tag="tester hang")
-            return _StageResult.FAIL
-        if hang_category == FailureCategory.RETRY_EXHAUSTED:
-            _finalize_skip(num, ist, "Subscription rate limit exhausted",
-                           FailureCategory.RETRY_EXHAUSTED, tag="rate limit exhausted")
-            return _StageResult.FAIL
+        # issue #1438: concurrent role-flexible slots can run two test_fn tasks at
+        # once, but every tester shares the single cfg.worktree_tester clone (no
+        # tester pool exists yet). Serialize the whole worktree-touching span —
+        # checkout/rebase/pytest (_dispatch_tester) through gates+merge
+        # (handle_post_tester) — so only one tester touches that clone at a time.
+        # This prevents git index.lock errors, cross-branch checkouts, and
+        # cross-contaminated pytest results. The develop_merge_guard acquired
+        # inside handle_post_tester nests safely (always tester-worktree → merge
+        # order) and continues to serialize merges independently.
+        with tester_worktree_guard():
+            tester_rc, hang_category = _dispatch_tester(
+                num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
+                on_running=_on_tester_running, sprint_label=label,
+                prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+            )
+            _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
+            state.total_tokens_in += _ttin
+            state.total_tokens_out += _ttout
+            _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
+                num, label, "tester",
+                duration_seconds=time.monotonic() - _stage_tester_t0,
+                outcome="pass" if tester_rc == 0 else "fail",
+                total_tokens=(_ttin + _ttout) or None,
+            )
+            ist.tester_finished_at = ist.status_changed_at
+            if hang_category == FailureCategory.HANG:
+                _finalize_skip(num, ist, "Tester HANG detected", FailureCategory.HANG, tag="tester hang")
+                return _StageResult.FAIL
+            if hang_category == FailureCategory.RETRY_EXHAUSTED:
+                _finalize_skip(num, ist, "Subscription rate limit exhausted",
+                               FailureCategory.RETRY_EXHAUSTED, tag="rate limit exhausted")
+                return _StageResult.FAIL
 
-        ist.set_agent_status("tester_done")
-        _emit_sprint_lifecycle_event(
-            type="ticket_agent_finished", target=f"#{num}", actor="system",
-            detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
-        )
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
+            ist.set_agent_status("tester_done")
+            _emit_sprint_lifecycle_event(
+                type="ticket_agent_finished", target=f"#{num}", actor="system",
+                detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
+            )
+            state.save(state_path)
+            _post_sprint_status(state, api_url=api_url)
 
-        merged, summary_line, gate_category = handle_post_tester(
-            issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
-            gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
-            gate_typecheck=gate_typecheck, gate_design=gate_design,
-            gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
-            target_branch=target_branch,
-            repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
-            gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
-            alert_modes=alert_modes, sprint_label=label,
-        )
+            merged, summary_line, gate_category = handle_post_tester(
+                issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
+                gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
+                gate_typecheck=gate_typecheck, gate_design=gate_design,
+                gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
+                target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
+                gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
+                alert_modes=alert_modes, sprint_label=label,
+            )
         sys.stdout.write(str(f"  {summary_line}") + "\n")
         ctx["summary_line"] = summary_line
         if merged:

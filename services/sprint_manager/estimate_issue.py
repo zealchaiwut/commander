@@ -75,27 +75,37 @@ def load_agent_instructions() -> str:
 
 
 def parse_files_to_touch(body: str) -> list:
-    """Extract repo-relative paths from the '## Files to touch' section of an issue body.
+    """Extract repo-relative paths from the '## Files to touch' section.
 
     Returns a deduplicated list of path strings (preserving first-seen order).
     Returns [] when the section is absent or contains no parseable paths.
     """
     in_section = False
+    in_comment = False
     seen: set = set()
     paths: list = []
     for line in body.split("\n"):
         if re.match(r"^#+\s+Files to touch", line, re.IGNORECASE):
             in_section = True
             continue
-        if in_section:
-            if re.match(r"^#", line):
-                break
-            stripped = line.strip()
-            if not stripped or stripped.startswith("<!--") or stripped == "-->":
-                continue
-            if stripped not in seen:
-                seen.add(stripped)
-                paths.append(stripped)
+        if not in_section:
+            continue
+        if re.match(r"^#", line):
+            break
+        stripped = line.strip()
+        # Handle multi-line HTML comments.
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if "<!--" in stripped:
+            if "-->" not in stripped:
+                in_comment = True
+            continue
+        # Collect non-empty paths.
+        if stripped and stripped not in seen:
+            seen.add(stripped)
+            paths.append(stripped)
     return paths
 
 

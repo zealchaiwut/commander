@@ -36,11 +36,25 @@ _DEFAULT_TARGET = "develop"
 
 # ── gh helpers (thin, individually patchable in tests) ────────────────────────
 
+# A timeout keeps a hung ``gh`` call from blocking a History scan indefinitely.
+_GH_TIMEOUT_SECONDS = 30
+
+
 def _run_gh(args: list[str]) -> str:
-    """Run a ``gh`` command, returning stdout (empty string on any failure)."""
+    """Run a ``gh`` command, returning stdout (empty string on any failure).
+
+    This is the *single* place a ``subprocess.TimeoutExpired`` is handled: a hung
+    ``gh`` call is swallowed here and reported as an empty string, exactly like
+    any other failure. Callers (``_is_merged``, ``_list_remote_feature_branches``)
+    therefore never see a timeout and must not re-catch one (issue #1587).
+    """
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=30
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GH_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             return ""

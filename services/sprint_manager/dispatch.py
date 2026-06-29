@@ -343,6 +343,45 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
+def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
+    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+
+    Returns the body string on success. On failure (non-zero gh exit or an
+    exception), returns the sentinel "" (empty string, NOT None) and logs the
+    failure at WARN level — so _build_design_block skips its own fallback gh
+    fetch instead of issuing a second subprocess round-trip per ticket
+    (issue #1573). Returns None only when there is no repo to query, preserving
+    the legacy path where _build_design_block performs the fetch itself.
+    """
+    if not eff_repo:
+        return None
+    try:
+        _gh_result = subprocess.run(
+            ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if _gh_result.returncode == 0:
+            return json.loads(_gh_result.stdout).get("body", "") or ""
+        structured_log.warn(
+            "coder_dispatch_issue_body_fetch_failed",
+            f"[coder] gh fetch of issue body failed for issue #{issue_num}"
+            f" (exit {_gh_result.returncode}); passing sentinel to skip re-fetch",
+            issue_num=issue_num,
+            exit_code=_gh_result.returncode,
+            stderr=(_gh_result.stderr or "").strip()[:500],
+        )
+        return ""
+    except Exception as _exc:
+        structured_log.warn(
+            "coder_dispatch_issue_body_fetch_failed",
+            f"[coder] gh fetch of issue body errored for issue #{issue_num}"
+            f" ({_exc}); passing sentinel to skip re-fetch",
+            issue_num=issue_num,
+            error=repr(_exc),
+        )
+        return ""
+
+
 def _build_design_block(*args, **kwargs):
     """Proxy to sprint_manager._build_design_block (issue #1488)."""
     _f = _lookup_in_sm("_build_design_block", _build_design_block)
@@ -604,17 +643,9 @@ def _dispatch_coder(
 
     # Fetch issue body once here and pass it to _build_design_block so it can
     # skip the redundant per-dispatch gh api subprocess call (issue #1541).
-    _fetched_issue_body: Optional[str] = None
-    if eff_repo:
-        try:
-            _gh_result = subprocess.run(
-                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if _gh_result.returncode == 0:
-                _fetched_issue_body = json.loads(_gh_result.stdout).get("body", "") or ""
-        except Exception:
-            pass  # _build_design_block will fall back to heading index
+    # On fetch failure the helper returns the "" sentinel (not None) and logs the
+    # failure, so _build_design_block does not issue a second gh call (issue #1573).
+    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(eff_repo, issue_num)
 
     _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 

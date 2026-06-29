@@ -219,39 +219,44 @@ class TestCommanderSprintRunningInjection:
         assert env is not None
         assert env.get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
 
-    def test_apply_in_progress_label_injects_env(self):
+    # The standalone _apply_in_progress_label / _apply_needs_rework_label helpers
+    # were removed (issue #1585).  In-progress and needs-rework labels are now
+    # written in-process through the single state_machine.transition() source of
+    # truth via _transition_safe(); the run-lock guard reads the ambient
+    # COMMANDER_SPRINT_RUNNING directly (no per-call subprocess env injection).
+    # These tests verify the replacement path routes through transition().
+
+    def test_in_progress_label_routes_through_transition(self):
         from services.sprint_manager import sprint_manager as sm
+        from services.sprint_manager import label_transitions as lt
 
-        captured_envs = []
+        captured = []
 
-        def fake_run(cmd, **kwargs):
-            captured_envs.append(kwargs.get("env"))
-            return MagicMock(returncode=0, stdout="", stderr="")
+        def fake_transition(issue, target_state, **kwargs):
+            captured.append(target_state)
+            return True
 
-        with patch.object(sm.subprocess, "run", side_effect=fake_run):
-            sm._apply_in_progress_label(issue_num=1, sprint_label="sprint-37")
+        with patch.object(sm, "_sm_transition", fake_transition), \
+             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+            sm._transition_safe(1, sm._TicketState.IN_PROGRESS, actor="sprint_manager")
 
-        assert captured_envs
-        assert captured_envs[0].get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
+        assert captured == [sm._TicketState.IN_PROGRESS]
 
-    def test_apply_needs_rework_label_injects_env(self):
+    def test_needs_rework_label_routes_through_transition(self):
         from services.sprint_manager import sprint_manager as sm
+        from services.sprint_manager import label_transitions as lt
 
-        captured_envs = []
+        captured = []
 
-        def fake_run(cmd, **kwargs):
-            captured_envs.append(kwargs.get("env"))
-            return MagicMock(returncode=0, stdout="", stderr="")
+        def fake_transition(issue, target_state, **kwargs):
+            captured.append(target_state)
+            return True
 
-        with patch.object(sm.subprocess, "run", side_effect=fake_run):
-            sm._apply_needs_rework_label(
-                issue_num=1,
-                category=sm.FailureCategory.CODER_NO_WORK,
-                sprint_label="sprint-37",
-            )
+        with patch.object(sm, "_sm_transition", fake_transition), \
+             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+            sm._transition_safe(1, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
-        assert captured_envs
-        assert captured_envs[0].get("COMMANDER_SPRINT_RUNNING") == "sprint-37"
+        assert captured == [sm._TicketState.NEEDS_REWORK]
 
 
 class TestUpdateTicketGuard:

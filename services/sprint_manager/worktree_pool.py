@@ -178,8 +178,11 @@ class WorktreePool:
         created: list[Path] = []
         for i in range(self.slots):
             wt_path = self.pool_dir / f"{SLOT_PREFIX}{i}"
-            self._create_slot(wt_path)
-            if wt_path.is_dir():
+            # Enqueue a slot only when it was fully built (worktree + venv +
+            # pip install all succeeded). A slot that failed partway emits a
+            # warning inside _create_slot() and is skipped, so acquire() can
+            # never hand a coder a broken/missing worktree path (issue #1435).
+            if self._create_slot(wt_path):
                 created.append(wt_path)
         with self._cond:
             self._free = created[:]
@@ -310,8 +313,15 @@ class WorktreePool:
             return False
         return True
 
-    def _create_slot(self, wt_path: Path) -> None:
-        """Create one worktree slot with a fresh virtualenv."""
+    def _create_slot(self, wt_path: Path) -> bool:
+        """Create one worktree slot with a fresh virtualenv.
+
+        Returns True only when the worktree, its venv, and (when a
+        requirements file is configured) the pip install all complete
+        successfully. Any failed step emits a warning and returns False so the
+        caller can keep the broken/half-built path out of the free pool
+        (issue #1435).
+        """
         if wt_path.exists():
             _run(
                 ["git", "worktree", "remove", "--force", str(wt_path)],
@@ -329,7 +339,7 @@ class WorktreePool:
                 f"  [worktree-pool] WARNING: failed to create worktree"
                 f" {wt_path}: {err}\n"
             )
-            return
+            return False
 
         # Link the slot to the PERSISTENT shared venv (built once per requirements
         # hash, outside the worktree). Replaces the per-slot `python -m venv` +
@@ -337,6 +347,7 @@ class WorktreePool:
         self._link_venv(wt_path)
 
         sys.stdout.write(f"  [worktree-pool] Created {wt_path.name}\n")
+        return True
 
     def _remove_worktree(self, wt_path: Path) -> None:
         """Remove a single worktree path unconditionally."""

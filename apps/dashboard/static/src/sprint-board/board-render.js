@@ -2292,12 +2292,19 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
          <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>`
     : "";
 
+  const isSelected =
+    typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.has(ticket.number);
+
   return `
-    <div class="smgmt-ticket bl-row" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
+      <input type="checkbox" class="smgmt-ticket-cb" ${isSelected ? "checked" : ""}
+             title="Select for bulk add to a sprint"
+             onclick="event.stopPropagation()"
+             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>

@@ -4247,6 +4247,9 @@
       flex-shrink: 0; white-space: nowrap;
     }
     .smgmt-add-to-sprint-btn:hover { border-color: var(--blue); color: var(--blue); }
+    /* Backlog multi-select checkbox (restored) */
+    .smgmt-ticket-cb { flex-shrink: 0; margin: 0 4px 0 0; cursor: pointer; accent-color: var(--blue, #0969da); }
+    .smgmt-ticket.is-selected { background: var(--blue-bg, rgba(9,105,218,.08)); }
     /* ── end planning board layout ── */
     .smgmt-backlog-pane {
       border: 1px solid var(--border);
@@ -11458,8 +11461,23 @@ let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
 // Drag-drop/selection removed (issue #1044) — stubs keep call sites that remain for single-ticket
 // move-to-modal flow from throwing ReferenceErrors.
 const _smgmtSelectedIssues = new Set();
-function _smgmtClearSelection() { _smgmtSelectedIssues.clear(); }
-function _smgmtUpdateSelectionUI() {}
+function _smgmtClearSelection() {
+  _smgmtSelectedIssues.clear();
+  document.querySelectorAll('.smgmt-ticket-cb:checked').forEach((cb) => { cb.checked = false; });
+  document.querySelectorAll('.smgmt-ticket.is-selected').forEach((r) => r.classList.remove('is-selected'));
+  if (typeof _blUpdateActions === 'function') _blUpdateActions();
+}
+// Backlog multi-select (restored, issue #1044 follow-up): the row checkbox toggles
+// _smgmtSelectedIssues; the intact bl-actions bar (_blUpdateActions/_blConfirmAdd)
+// reads it to bulk-add selected backlog tickets to a target sprint.
+function _smgmtToggleSelect(num, checked) {
+  if (checked) _smgmtSelectedIssues.add(num);
+  else _smgmtSelectedIssues.delete(num);
+  const row = document.getElementById('smgmt-ticket-' + num);
+  if (row) row.classList.toggle('is-selected', !!checked);
+  if (typeof _blUpdateActions === 'function') _blUpdateActions();
+}
+function _smgmtUpdateSelectionUI() { if (typeof _blUpdateActions === 'function') _blUpdateActions(); }
 function _smgmtCloseMoveToMenu() {}
 async function _smgmtMoveSelectedTo() {}
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);

@@ -11473,8 +11473,19 @@ function _smgmtUpdateSelectionUI() {
   }
   if (typeof _blUpdateActions === 'function') _blUpdateActions();
 }
-function _smgmtCloseMoveToMenu() {}
-async function _smgmtMoveSelectedTo() {}
+function _smgmtCloseMoveToMenu() {
+  document.querySelectorAll('.smgmt-moveto-popup:not(.hidden)')
+    .forEach((p) => p.classList.add('hidden'));
+}
+/** Move the currently-selected issues to a sprint (or 'backlog'/null) via the
+ *  working batch-labels path. Restores the gutted stub that left the backlog
+ *  "Add selected to Sprint" + hotswap-confirm moves doing nothing. */
+async function _smgmtMoveSelectedTo(targetLabel) {
+  const nums = Array.from(_smgmtSelectedIssues || []);
+  if (!nums.length) return;
+  const tl = (targetLabel && targetLabel !== 'backlog') ? targetLabel : null;
+  await _smgmtMoveModalPickBulk(nums, tl, false);
+}
 const RERUN_STRIP_LABELS = new Set(['UAT','UAT-approved','released','SIT','in-progress','needs-rework']);
 // Cache for sprint outcome data: key = sprint label, value = outcome object
 const _smgmtOutcomeCache = {};
@@ -13897,7 +13908,12 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       </div>`
     : '';
 
-  // Conflict fix chips: one row per file-overlap pair (AC1, AC2, AC3).
+  // Shared-file pairs: these tickets touch the same file, so the DAG runs them
+  // SEQUENTIALLY (a → b) rather than in parallel. That is the correct, already-
+  // applied handling — there is nothing to "fix" by reordering (a "Move #b after
+  // #a" was always a no-op since #b is already sequenced after #a). We surface
+  // the pair as informational, and offer Remove / Backlog as the only real
+  // levers (decouple by dropping one ticket from the sprint).
   let conflictSection = '';
   if (conflicts.length > 0) {
     const rows = conflicts.map(c => {
@@ -13911,15 +13927,10 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
       return `<div class="mr-conflict-row">
           <span class="mr-conflict-ids">
             <span class="mr-chip">#${a}</span>
-            <span style="font-size:10px;color:var(--text-muted)">∥</span>
+            <span style="font-size:10px;color:var(--text-muted)" title="runs sequentially">→</span>
             <span class="mr-chip">#${b}</span>
           </span>
-          <span class="mr-conflict-note" title="${fullTip}">${fileNote}</span>
-          <button class="mr-fix-chip is-move"
-            title="Move #${b} after #${a} in plan order"
-            onclick="_smgmtChipMoveAfter(${jsLabel}, ${JSON.stringify(a)}, ${JSON.stringify(b)}, this)">
-            Move #${b} after #${a}
-          </button>
+          <span class="mr-conflict-note" title="${fullTip}">shares ${fileNote} · sequential</span>
           <button class="mr-fix-chip is-remove"
             title="Remove #${b} from this sprint"
             onclick="_smgmtChipRemoveFromSprint(${jsLabel}, ${JSON.stringify(b)}, this)">
@@ -13933,8 +13944,8 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
         </div>`;
     }).filter(Boolean).join('');
     if (rows) {
-      conflictSection = `<div class="mr-fix-section" role="group" aria-label="Conflict fixes">
-        <span class="mr-fix-section-label">Fix conflicts</span>
+      conflictSection = `<div class="mr-fix-section" role="group" aria-label="Shared-file pairs (run sequentially)">
+        <span class="mr-fix-section-label">Shared files — run sequentially</span>
         ${rows}
       </div>`;
     }

@@ -376,7 +376,14 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
         if project and row.get("project") != project:
             continue
         state = row.get("state") or ""
-        if state == "running" or state in ("draft", "planned", "planning"):
+        # Skip states the reconciler can't usefully change:
+        #  • running / draft / planned / planning — not terminal, nothing to settle.
+        #  • completed / deleted — FINAL terminal states (completed only ever goes
+        #    to deleted; deleted is the end). Re-checking them every History load
+        #    burned ~4s on tangled lineages (mostly completed members) with no
+        #    possible state change. Only ready_to_merge / needs_rework / failed can
+        #    still move, so reconcile just those.
+        if state in ("running", "draft", "planned", "planning", "completed", "deleted"):
             continue
         checked += 1
         if reconcile_sprint_label(label, project):
@@ -607,6 +614,12 @@ def refresh_post_sprint_reconciliations(project: str, limit: int = 40) -> list[s
             continue
         state = row.get("state") or ""
         if state == "running" or state in ("draft", "planned", "planning"):
+            continue
+        # A completed/deleted sprint that already has a stored reconciliation block
+        # is settled — re-deriving its loose-ends every History load is pure churn
+        # (the ~4s lag on tangled lineages, mostly completed members). Compute it
+        # once (no block yet), then skip. Non-final terminals still refresh.
+        if state in ("completed", "deleted") and (row.get("reconciliation_json") or "").strip():
             continue
         checked += 1
         if refresh_post_sprint_reconciliation(label, project):

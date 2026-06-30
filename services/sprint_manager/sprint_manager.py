@@ -191,6 +191,10 @@ from services.sprint_manager.state import (  # noqa: E402
     GateResult,
     SprintSummary,
 )
+from services.sprint_manager.ica_preflight import (  # noqa: E402
+    check_ica_readiness,
+    IcaPreflightError,
+)
 
 try:
     # issue #860
@@ -367,6 +371,20 @@ FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# ── ICA preflight helpers (issue #1668) ──────────────────────────────────────
+
+def _get_llm_provider(eff_repo: Optional[str] = None) -> str:
+    """Return the configured llmProvider ('anthropic' or 'ica'), default 'anthropic'."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting("app_config", project=eff_repo)
+        if isinstance(stored, dict):
+            return stored.get("llmProvider", "anthropic")
+    except Exception:
+        pass
+    return "anthropic"
+
 
 # ── API cost pricing (USD per million tokens) ─────────────────────────────────
 # All agents (coder, tester, preflight) run via Claude Code CLI which is
@@ -2767,6 +2785,28 @@ def run_sprint_preflight(
     base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
         target_branch = sprint_branch
+
+    # ── ICA preflight check (issue #1668) ─────────────────────────────────────
+    if _get_llm_provider(eff_repo) == "ica":
+        try:
+            check_ica_readiness()
+        except IcaPreflightError as _pf_err:
+            sys.stdout.write(str(f"[ICA preflight] {_pf_err}") + "\n")
+            _blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            return _SprintPreflightResult(
+                state=_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}

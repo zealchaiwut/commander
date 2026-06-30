@@ -193,10 +193,10 @@ class TestNoFallback:
         call_count = 0
         real_get_sprint = _db_module.get_sprint
 
-        def _counting_get_sprint(label):
+        def _counting_get_sprint(label, project=None):
             nonlocal call_count
             call_count += 1
-            return real_get_sprint(label)
+            return real_get_sprint(label, project=project)
 
         with patch.object(_db_module, "get_sprint", side_effect=_counting_get_sprint):
             result = sprint_state.current("sprint-fallback")

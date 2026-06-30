@@ -104,6 +104,38 @@ class TestTerminalStateGuard:
         # sprint-99999 has no durable row → must pass through (no raise).
         _reject_terminal_label_redispatch(tmp_path, "sprint-99999")
 
+    def test_queued_never_dispatched_child_passes(self, tmp_path):
+        """A rework child written at run-end (needs_rework + tickets) but never
+        dispatched carries end_reason='queued' and no state.json/DB row. Despite
+        carrying its planned tickets it never ran, so Run must dispatch it for the
+        first time — blocking here forced a Re-run into another never-run child
+        (the 90.3 / 91.1 / 99.3 zombie loop)."""
+        from server import _reject_terminal_label_redispatch
+        sprints_dir = tmp_path / ".commander" / "sprints"
+        sprints_dir.mkdir(parents=True, exist_ok=True)
+        (sprints_dir / "sprint-99.3-plan.json").write_text(
+            json.dumps({"state": "needs_rework", "tickets": [1441],
+                        "parent": "sprint-99.2", "end_reason": "queued"}),
+            encoding="utf-8",
+        )
+        # Must NOT raise — never dispatched, so this is its first run.
+        _reject_terminal_label_redispatch(tmp_path, "sprint-99.3")
+
+    def test_ran_needs_rework_child_still_blocks(self, tmp_path):
+        """A needs_rework child that ACTUALLY ran (end_reason != 'queued') still
+        blocks same-label re-dispatch — Re-run must create a child."""
+        from server import _reject_terminal_label_redispatch
+        sprints_dir = tmp_path / ".commander" / "sprints"
+        sprints_dir.mkdir(parents=True, exist_ok=True)
+        (sprints_dir / "sprint-50.1-plan.json").write_text(
+            json.dumps({"state": "needs_rework", "tickets": [1],
+                        "end_reason": "ticket-failures"}),
+            encoding="utf-8",
+        )
+        with pytest.raises(HTTPException) as exc:
+            _reject_terminal_label_redispatch(tmp_path, "sprint-50.1")
+        assert exc.value.status_code == 409
+
     def test_terminal_states_constant(self):
         # P1 extended the terminal set with the unified-lifecycle endings
         # (ready_to_merge / needs_rework); cancelled stays for legacy files.

@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -71,7 +72,7 @@ def _collect_label_projects(conn) -> tuple[dict[str, set[str]], dict[str, str]]:
             if label and project:
                 label_projects[label].add(project)
                 survivors[label] = project
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # sprint_history — historical per-project records
@@ -83,7 +84,7 @@ def _collect_label_projects(conn) -> tuple[dict[str, set[str]], dict[str, str]]:
             label, project = row[0], row[1].strip()
             if label and project:
                 label_projects[label].add(project)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # agent_runs — per-project sprint activity (project column added via ALTER TABLE)
@@ -95,7 +96,7 @@ def _collect_label_projects(conn) -> tuple[dict[str, set[str]], dict[str, str]]:
             label, project = row[0], row[1].strip()
             if label and project:
                 label_projects[label].add(project)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     return label_projects, survivors
@@ -208,8 +209,6 @@ def run_audit(
 
     No DB writes are performed.
     """
-    import sqlite3
-
     resolved_db = Path(db_path) if db_path else _default_db_path()
     resolved_runtime = Path(runtime_dir) if runtime_dir else _default_runtime_dir()
 
@@ -217,7 +216,7 @@ def run_audit(
     if projects_root and Path(projects_root).is_dir():
         extra = _scan_plan_state_files(Path(projects_root))
 
-    conn = sqlite3.connect(resolved_db)
+    conn = sqlite3.connect(str(resolved_db))
     conn.row_factory = sqlite3.Row
     try:
         collisions = _build_collisions(conn, extra or None)

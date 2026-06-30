@@ -5,15 +5,21 @@
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
           _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel, CSS */
+          smgmtDeleteSprint, _nextSprintSublabel, finishSprintAndWait,
+          bulkCompleteLineageAndWait,
+          _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+          _smgmtBoardFinish, loadSprintMgmt, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
 //   ready_to_merge → Merge Sprint (UAT sign-off)
 //   needs_rework   → review + Re-run
 //   failed         → investigate / Resume
-// completed / deleted / cancelled / running are excluded (no action needed;
-// running has its own pulsing dot on the Running tab).
-const _HIST_ACTION_STATES = new Set(['ready_to_merge', 'needs_rework', 'failed']);
+//   partial_finished → lineage parent (children need action)
+// completed / deleted / running / draft / planned are excluded from the inbox.
+const _HIST_ACTION_STATES = new Set([
+  'ready_to_merge', 'needs_rework', 'failed', 'partial_finished',
+]);
+const _HIST_INBOX_STATES = _HIST_ACTION_STATES;
 
 export function _histNeedsActionCount() {
   return (_histLedgerData || []).reduce(
@@ -28,7 +34,6 @@ export function _histNeedsActionCount() {
 let _histLedgerData = [];
 globalThis._histLedgerData = _histLedgerData;
 const _histExpanded = new Set();   // labels of currently-expanded cards
-const _histGroupCollapsed = new Set(); // base labels whose child wrap is hidden
 let _histDidAutoExpand = false;    // auto-expand recent cards once per session
 // Folding (issue #807): the N most-recent sprints render expanded; older ones
 // collapse into aggregate folds of the same size. _histFoldSize mirrors the
@@ -45,9 +50,9 @@ let _histLedgerCacheRepo = '';
 let _histLedgerCacheAt = 0;
 let _HIST_LEDGER_TTL_MS = 300000;
 let _histLedgerInflight = null;
-// Default to the fast active-only feed (running/ready_to_merge/needs_rework/
-// partial_finished + 3 recent completed). "Show completed" flips this to load
-// the full closed history on demand.
+// Default to the action inbox (ready_to_merge / needs_rework / failed /
+// partial_finished lineage groups). Running uses the Running tab. "Show completed"
+// loads the full archive with fold groups.
 let _histShowClosed = false;
 
 export function _histResetLedgerCache() {
@@ -103,19 +108,40 @@ function _histFmtTokens(n) {
 // Map a per-issue local disposition → its display chip {cls,label}:
 //   merged → MERGED · closed/failed → CRASHED · open+ran → OPEN·UAT ·
 //   open + never-ran (no time_spent) → NOT RUN.
-function _histIssueChip(iss) {
+// On terminal sprint cards (hist-irow), opts.binary forces check-or-cross only.
+function _histIssueChip(iss, opts) {
+  opts = opts || {};
   const st = (iss.state || '').toLowerCase();
-  if (iss.failure_reason || (iss.agent_status || '').toLowerCase() === 'failed') {
+  const agent = (iss.agent_status || '').toLowerCase();
+  if (iss.failure_reason || agent === 'failed') {
     return { cls: 'crashed', label: 'CRASHED · in-progress' };
   }
-  if (st === 'merged') return { cls: 'merged',  label: 'MERGED' };
+  if (st === 'merged' || agent === 'completed' || agent === 'done') {
+    return { cls: 'merged', label: 'MERGED' };
+  }
+  if (opts.binary) {
+    return { cls: 'crashed', label: 'NOT DONE' };
+  }
   if (st === 'closed') return { cls: 'crashed', label: 'CRASHED' };
   if (iss.time_spent != null) return { cls: 'uat', label: 'OPEN · UAT' };
   return { cls: 'notrun', label: 'NOT RUN' };
 }
 
-function _histIssueIcon(iss) {
-  const chip = _histIssueChip(iss);
+function _histSprintShowsBinaryIssues(s) {
+  if (!s) return false;
+  // Never-dispatched (queued) sprint: its issues are pending, not pass/fail.
+  if ((s.end_reason || '').toLowerCase() === 'queued') return false;
+  if (_histSprintFailed(s)) return true;
+  const st = (s.lifecycle_state || '').toLowerCase();
+  return [
+    'partial_finished', 'needs_rework', 'ready_to_merge', 'completed',
+    'failed', 'cancelled',
+  ].includes(st);
+}
+
+function _histIssueIcon(iss, sprint) {
+  const binary = _histSprintShowsBinaryIssues(sprint);
+  const chip = _histIssueChip(iss, { binary });
   if (chip.cls === 'merged') {
     return '<span class="iss-icon ok"><i class="ti ti-check"></i></span>';
   }
@@ -125,10 +151,21 @@ function _histIssueIcon(iss) {
   return '<span class="iss-icon idle"></span>';
 }
 
-function _histProgressText(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histIssueSucceeded(iss, sprint) {
+  return _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(sprint) }).cls === 'merged';
+}
+
+function _histProgressText(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (!issues.length) return '';
-  const done = issues.filter(i => (i.state || '').toLowerCase() === 'merged').length;
+  const done = issues.filter((i) => _histIssueSucceeded(i, s)).length;
+  const failed = issues.filter((i) => {
+    const chip = _histIssueChip(i, { binary: _histSprintShowsBinaryIssues(s) });
+    return chip.cls === 'crashed';
+  }).length;
+  if (failed) {
+    return `${done}/${issues.length} done · ${failed} failed`;
+  }
   return `${done}/${issues.length} done`;
 }
 
@@ -143,9 +180,9 @@ function _histLooseEndCount(s) {
   return 0;
 }
 
-function _histHeadStatsHtml(s) {
+function _histHeadStatsHtml(s, group) {
   const parts = [];
-  const progress = _histProgressText(s);
+  const progress = _histProgressText(s, group);
   if (progress) parts.push(progress);
   const stats = _histRunStats[s.label];
   const agentSecs = stats && stats.has_runs && stats.agent_total_seconds != null
@@ -211,18 +248,83 @@ function _histEstBarMini(s) {
 // Resolve an issue title from the ledger row, falling back to the board's
 // per-sprint ticket cache so History rows show titles even when the ledger
 // (e.g. agent_runs-synthesized rows) carries only the number (hotfix #1).
-function _histIssueTitle(iss, s) {
+function _histIssueTitle(iss, s, titleMap) {
   if (iss.title) return String(iss.title);
+  const tid = iss.ticket_id;
+  if (titleMap && tid != null) {
+    const hit = titleMap.get(tid) || titleMap.get(String(tid));
+    if (hit) return String(hit);
+  }
   try {
     const tickets = (s && s.label && _smgmtBySprint[s.label]) || [];
-    const hit = tickets.find(t => String(t.number) === String(iss.ticket_id));
+    const hit = tickets.find(t => String(t.number) === String(tid));
     if (hit && hit.title) return String(hit.title);
+  } catch (_) {}
+  // Lineage fallback: any sibling sprint in the ledger may have the title.
+  try {
+    for (const row of (_histLedgerData || [])) {
+      const hit = (row.issues || []).find(
+        (i) => String(i.ticket_id) === String(tid) && i.title,
+      );
+      if (hit) return String(hit.title);
+    }
   } catch (_) {}
   return '';
 }
 
+/** Collect issue titles across a lineage group (parent + children). */
+function _histBuildLineageTitleMap(group) {
+  const map = new Map();
+  if (!group) return map;
+  for (const s of _histGroupMembers(group)) {
+    for (const iss of (s.issues || [])) {
+      if (iss.ticket_id != null && iss.title) {
+        map.set(iss.ticket_id, String(iss.title));
+      }
+    }
+    try {
+      const tickets = (s.label && _smgmtBySprint[s.label]) || [];
+      for (const t of tickets) {
+        if (t.number != null && t.title && !map.has(t.number)) {
+          map.set(t.number, String(t.title));
+        }
+      }
+    } catch (_) {}
+  }
+  return map;
+}
+
+/** Sprint label that owns a ticket in this lineage (latest sub-index that lists it). */
+function _histCanonicalOwnerLabel(ticketId, group) {
+  if (!group || ticketId == null) return null;
+  let bestSub = -1;
+  let owner = null;
+  for (const s of _histGroupMembers(group)) {
+    const sub = _histLabelParts(s.label).sub;
+    const listed = (s.issues || []).some(
+      (i) => String(i.ticket_id) === String(ticketId),
+    );
+    if (listed && sub >= bestSub) {
+      bestSub = sub;
+      owner = s.label;
+    }
+  }
+  return owner;
+}
+
+/** Per-sprint issue rows: each ticket appears only on its latest lineage run. */
+export function _histIssuesForDisplay(s, group) {
+  const issues = Array.isArray(s.issues) ? s.issues : [];
+  if (!group) return issues;
+  return issues.filter((iss) => {
+    if (iss.ticket_id == null) return true;
+    const owner = _histCanonicalOwnerLabel(iss.ticket_id, group);
+    return owner === s.label;
+  });
+}
+
 function _histIssueRowHtml(iss, isChild, s) {
-  const chip = _histIssueChip(iss);
+  const chip = _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(s) });
   const rerun = iss.is_rerun || iss.rerun || isChild;
   const arrow = rerun ? '<span class="iss-rerun">↳</span> ' : '';
   const num = iss.ticket_id;
@@ -238,7 +340,7 @@ function _histIssueRowHtml(iss, isChild, s) {
     : '';
   const cls = 'iss-row' + (clickable ? ' iss-row-link' : '');
   return `<div class="${cls}"${clickable}>
-    ${_histIssueIcon(iss)}
+    ${_histIssueIcon(iss, s)}
     <span class="iss-id">${arrow}${escHtml(String(id))}</span>
     ${title}
     <span class="iss-chip ${chip.cls}">${chip.label}</span>
@@ -254,6 +356,9 @@ function _histSprintFailed(s) {
   if (st !== 'needs_rework') return false;
   const er = (s.end_reason || '').toLowerCase();
   if (er === 'natural' || er === 'merge_sprint') return false;
+  // A rework child created but never dispatched (end_reason 'queued', no run) is
+  // a pending re-run, NOT a failed sprint — don't render it as FAILED/crashed.
+  if (er === 'queued') return false;
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   if (failed.length) return true;
   const issues = Array.isArray(s.issues) ? s.issues : [];
@@ -325,7 +430,7 @@ function _histIssueListHtml(s) {
 
 // Re-run / Finish / Delete render on COMPLETED or FAILED only; Resume on FAILED
 // only; locked (finished/deleted) sprints render no verbs at all (links only).
-function _histVerbsHtml(s) {
+export function _histVerbsHtml(s) {
   // Verbs gated by the unified lifecycle (sprint-lifecycle.md):
   //   needs_rework     → Re-run (creates a child sub-sprint)
   //   ready_to_merge   → Finish (merge sign-off) + Delete
@@ -404,7 +509,7 @@ function _histLinksHtml(s) {
 }
 
 // Compact PR / summary pills on the card head — visible without expanding.
-function _histHeadLinksHtml(s) {
+export function _histHeadLinksHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -421,7 +526,7 @@ function _histHeadLinksHtml(s) {
 }
 
 // Compact header actions: PR / Summary / Logs + lifecycle verbs in one row.
-function _histHeadActionsHtml(s) {
+export function _histHeadActionsHtml(s) {
   let html = '';
   const pr = _histPrUrl(s);
   if (pr) {
@@ -440,10 +545,14 @@ function _histHeadActionsHtml(s) {
     onclick="event.stopPropagation()" title="Open sprint logs">
     <i class="ti ti-list-details"></i> Logs</a>`;
 
-  if (!_histIsLocked(s.lifecycle_state)) {
-    const state = (s.lifecycle_state || '').toLowerCase();
+  const state = (s.lifecycle_state || '').toLowerCase();
+  if (!_histIsLocked(s.lifecycle_state) && state !== 'running') {
     const lbl = escHtml(s.label || '');
     const rawLabel = s.label || '';
+    html += `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
+      onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
+      title="Reconcile this sprint's DB state against GitHub truth">
+      <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
       const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
       const rerunTitle = _smgmtAnySprintRunning
@@ -467,7 +576,7 @@ function _histHeadActionsHtml(s) {
 
 // Metrics row: an estimate-accuracy bar (actual ÷ estimated) plus duration and
 // token badges, per mock v5.
-function _histMetricsHtml(s) {
+export function _histMetricsHtml(s) {
   const acc = s.estimate_accuracy;
   let bar = '';
   if (acc != null && !isNaN(acc)) {
@@ -510,10 +619,13 @@ export function _histStateChip(state, sprint) {
   const displayState = (s === 'needs_rework' && (er === 'natural' || er === 'merge_sprint')
     && sprint && !_histSprintFailed(sprint))
     ? 'ready_to_merge'
-    : s;
+    : (s === 'needs_rework' && er === 'queued')
+      ? 'queued_rerun'
+      : s;
   const map = {
     completed:        ['completed', 'COMPLETED'],
     ready_to_merge:   ['ready_to_merge', 'READY TO MERGE'],
+    queued_rerun:     ['planning',  'QUEUED · RE-RUN'],
     needs_rework:     ['failed',    'FAILED'],
     partial_finished: ['partial',   'PARTIAL'],
     deleted:          ['deleted',   'DELETED'],
@@ -565,8 +677,10 @@ function _histShouldAutoExpand(s) {
   if (!s || !s.label) return false;
   const st = (s.lifecycle_state || '').toLowerCase();
   if (_histIsLocked(st)) return false;
-  // Completed/partial rows stay collapsed; only actionable states open by default.
-  return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge' || st === 'running';
+  // Actionable + draft lineage children stay open so reruns are reachable.
+  return st === 'needs_rework' || st === 'failed' || st === 'ready_to_merge'
+    || st === 'running' || st === 'draft' || st === 'planned'
+    || st === 'partial_finished';
 }
 
 // Base labels whose default group-collapse has already been applied, so a user
@@ -588,14 +702,30 @@ function _histAutoExpandRecent(groups) {
     const baseLbl = g.baseLabel || (g.baseSprint && g.baseSprint.label) || '';
     if (children.length && baseLbl && !_histCollapseDefaultsApplied.has(baseLbl)) {
       _histCollapseDefaultsApplied.add(baseLbl);
-      const st = ((g.baseSprint && g.baseSprint.lifecycle_state) || '').toLowerCase();
-      if (st === 'completed') _histGroupCollapsed.add(baseLbl);
+      const parentSt = ((g.baseSprint && g.baseSprint.lifecycle_state) || '').toLowerCase();
+      const anyChildOpen = children.some((c) => {
+        const cst = (c.lifecycle_state || '').toLowerCase();
+        return cst !== 'completed' && cst !== 'deleted';
+      });
+      // Settled lineage parents start collapsed like completed child cards.
+      if (g.baseSprint && parentSt === 'completed' && !anyChildOpen) {
+        _histExpanded.delete(g.baseSprint.label);
+      }
     }
     if (i >= _histFoldSize) continue;
     if (children.length) {
-      // Re-run chain: collapse the parent and older children; expand only the
-      // latest child (children are sub-ascending, so the last one) by default.
-      _expand(children[children.length - 1]);
+      if (g.baseSprint && (
+        _histShouldAutoExpand(g.baseSprint)
+        || _histIssuesForDisplay(g.baseSprint, g).length
+      )) {
+        _expand(g.baseSprint);
+      }
+      // Expand every child that still needs attention (not only the latest).
+      for (const c of children) {
+        if (_histShouldAutoExpand(c) || _histIssuesForDisplay(c, g).length) {
+          _expand(c);
+        }
+      }
     } else {
       _expand(g.baseSprint);
     }
@@ -628,7 +758,7 @@ function _histMergeGanttTickets(s, stats) {
 // Coder segments are purple, tester amber — fix rounds use the same solid colors.
 // A red ✕ crash marker is painted at the crash ticket's end offset, but only
 // for a sprint that actually failed (AC4).
-function _histGanttHtml(s, stats) {
+export function _histGanttHtml(s, stats) {
   const tickets = _histMergeGanttTickets(s, stats);
   if (!tickets.length) return '';
   const scale = Math.max(1, stats.wall_seconds || 0);
@@ -910,7 +1040,7 @@ function _histReconcileChipHtml(s) {
 }
 
 // Header hint chips (kept for backward-compat; no longer used by _histCardHtml).
-function _histHeadHintsHtml(s, expanded) {
+export function _histHeadHintsHtml(s, expanded) {
   if (expanded) {
     return _histPostSprintChipHtml(s) + _histReconcileChipHtml(s) + _histStaleChipHtml(s);
   }
@@ -1092,17 +1222,17 @@ function _histFixCountForIssue(issueNum, stats) {
   return (hit.segments || []).filter((seg) => seg.fix_round).length;
 }
 
-function _histDoneIssueRowHtml(iss, s, stats) {
+function _histDoneIssueRowHtml(iss, s, stats, titleMap) {
   const num = iss.ticket_id;
   const id = num != null ? "#" + num : "#?";
-  const titleText = _histIssueTitle(iss, s);
+  const titleText = _histIssueTitle(iss, s, titleMap);
   const repo = _histRepo(s);
-  const chip = _histIssueChip(iss);
+  const chip = _histIssueChip(iss, { binary: _histSprintShowsBinaryIssues(s) });
   const crashed = chip.cls === "crashed";
   const clickable = num != null && repo
     ? ` role="link" tabindex="0" onclick="event.stopPropagation();window.open('https://github.com/${escHtml(repo)}/issues/${escHtml(String(num))}','_blank','noopener')"`
     : "";
-  const icon = _histIssueIcon(iss);
+  const icon = _histIssueIcon(iss, s);
   let dur = _histFmtSecs(iss.time_spent);
   const fixN = _histFixCountForIssue(num, stats);
   if (fixN) dur += ` · ${fixN} fix`;
@@ -1126,27 +1256,20 @@ function _histDoneIssueRowHtml(iss, s, stats) {
   </div>`;
 }
 
-function _histDoneIssuesHtml(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histDoneIssuesHtml(s, group) {
+  const titleMap = group ? _histBuildLineageTitleMap(group) : new Map();
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (!issues.length) return "";
   const stats = _histRunStats[s.label];
-  return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats)).join("")}</div>`;
+  return `<div class="hist-issue-rows">${issues.map((i) => _histDoneIssueRowHtml(i, s, stats, titleMap)).join("")}</div>`;
 }
 
 /** Agent bar + ticket rows when the sprint has a per-issue run snapshot. */
-function _histCardShowsDoneSummary(s) {
-  const issues = Array.isArray(s.issues) ? s.issues : [];
+function _histCardShowsDoneSummary(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
   if (_histSprintFailed(s)) return issues.length > 0;
+  if (issues.length) return true;
   const state = (s.lifecycle_state || "").toLowerCase();
-  if (state === "needs_rework" || state === "partial_finished") {
-    const unfinished = issues.filter((i) => (i.state || "").toLowerCase() !== "merged");
-    if (unfinished.length) return false;
-    // Every ticket merged — the work landed; the needs_rework / partial_finished
-    // flag is only about fix-rounds or lineage, not unfinished work. Show the done
-    // summary + per-ticket rows (previously these fell through to a final return
-    // that excluded needs_rework, so a fully-merged sprint showed no issue list).
-    return issues.length > 0;
-  }
   return (
     state === "ready_to_merge"
     || state === "completed"
@@ -1154,9 +1277,10 @@ function _histCardShowsDoneSummary(s) {
   );
 }
 
-function _histCardOutcomeHtml(s) {
-  if (!_histCardShowsDoneSummary(s)) return "";
-  return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s)}`;
+function _histCardOutcomeHtml(s, group) {
+  const issues = group ? _histIssuesForDisplay(s, group) : (Array.isArray(s.issues) ? s.issues : []);
+  if (!_histCardShowsDoneSummary(s, group) && !issues.length) return "";
+  return `${_histChildMetricsHtml(s)}${_histDoneIssuesHtml(s, group)}`;
 }
 
 const _histAgentTimeExpanded = new Set();
@@ -1199,28 +1323,9 @@ function _histParentFromLabel(label) {
   return `← from ${display}`;
 }
 
-function _histParentRowHtml(s, bulkBtn, groupExpanded) {
-  const display = sprintLabelDisplay(s.label);
-  const lbl = escHtml(s.label || "");
-  const chev = groupExpanded ? "ti-chevron-down" : "ti-chevron-right";
-  // Recede a completed group when collapsed, like standalone cards — a group
-  // parent (sprint with a rerun child) used a different class and never got the
-  // settled grey, so a done group looked active next to greyed siblings.
-  const cls = ["hist-parent-row"];
-  if ((String(s.lifecycle_state || "").toLowerCase()) === "completed") cls.push("settled");
-  if (groupExpanded) cls.push("expanded");
-  return `<div class="${cls.join(" ")}" data-label="${lbl}" role="button" tabindex="0"
-    onclick="_histToggleGroup('${lbl}')"
-    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();_histToggleGroup('${lbl}')}">
-    <i class="ti ${chev} hist-chev" aria-hidden="true"></i>
-    <span class="hist-parent-name">${escHtml(display)}</span>
-    ${_histStateChip(s.lifecycle_state, s)}
-    ${_histHeadStatsHtml(s)}
-    <span class="hist-parent-actions" onclick="event.stopPropagation()">${bulkBtn || ""}${_histSecondaryLinksHtml(s)}</span>
-  </div>`;
-}
-
-function _histChildCardHtml(s) {
+function _histChildCardHtml(s, group, opts) {
+  opts = opts || {};
+  const isLineageParent = !!opts.isLineageParent;
   const expanded = _histExpanded.has(s.label);
   const lbl = escHtml(s.label || "");
   const state = (s.lifecycle_state || "").toLowerCase();
@@ -1230,23 +1335,29 @@ function _histChildCardHtml(s) {
     ? "ready_to_merge"
     : state;
   const cls = ["hist-child-card"];
+  if (isLineageParent) cls.push("hist-lineage-parent");
   if (displayState === "ready_to_merge") cls.push("ready");
   if (displayState === "completed") cls.push("settled");
   if (expanded) cls.push("expanded");
   const display = sprintLabelDisplay(s.label);
-  const fromLine = _histParentFromLabel(s.label);
+  const fromLine = !isLineageParent && _histIsChild(s.label)
+    ? _histParentFromLabel(s.label)
+    : "";
   const chev = expanded ? "ti-chevron-down" : "ti-chevron-right";
   const recoveryBtn = _histRecoveryBtnHtml(s);
   const deleteBtn = _histDeleteBtnHtml(s);
   const secondaryLinks = _histSecondaryLinksHtml(s);
-  const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}</span>`;
+  const bulkBtn = opts.bulkCompleteBtn || "";
+  const headRight = `<span class="hist-child-head-right">${secondaryLinks}${recoveryBtn}${deleteBtn}${bulkBtn}</span>`;
 
   if (expanded && !(s.label in _histRunStats)) _histLoadRunStats(s.label);
 
   const body = expanded
     ? `<div class="hist-child-body">
+        ${isLineageParent ? _histPartialChildrenHtml(s) : ""}
         ${_histLooseEndBandHtml(s)}
-        ${_histCardOutcomeHtml(s)}
+        ${_histWhatListHtml(s, group)}
+        ${_histCardOutcomeHtml(s, group)}
       </div>`
     : "";
 
@@ -1258,7 +1369,7 @@ function _histChildCardHtml(s) {
     + (fromLine ? ` <span class="hist-child-from">${escHtml(fromLine)}</span>` : "")
     + `</span>
         ${_histStateChip(s.lifecycle_state, s)}
-        ${_histHeadStatsHtml(s)}
+        ${_histHeadStatsHtml(s, group)}
       </div>
       ${headRight}
     </div>
@@ -1332,14 +1443,17 @@ function _histLooseEndBandHtml(s) {
 //   actually-failed sprint  → "Why it failed" list from s.failed_tickets
 //   partial / needs_rework  → "Unfinished N of M" list of unmerged issues
 //   complete / locked       → '' (nothing to display — AC7)
-function _histWhatListHtml(s) {
+function _histWhatListHtml(s, group) {
   if (_histIsLocked(s.lifecycle_state)) return '';
   const state = (s.lifecycle_state || '').toLowerCase();
+  const displayIssues = group
+    ? _histIssuesForDisplay(s, group)
+    : (Array.isArray(s.issues) ? s.issues : []);
 
   // Failed branch: crash summary header; per-ticket detail lives in issue rows (AC5/AC14)
   if (_histSprintFailed(s)) {
     const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
-    const issues = Array.isArray(s.issues) ? s.issues : [];
+    const issues = displayIssues;
     const sprintReason = s.failure_reason || s.end_reason;
     if (!failed.length && !sprintReason) return "";
     const n = failed.length || 1;
@@ -1377,17 +1491,16 @@ function _histWhatListHtml(s) {
     </div>`;
   }
 
-  // Partial branch: unfinished tickets, each listed ONCE (AC6)
+  // Partial branch: heading only — ticket rows render in hist-irow (AC6/AC14).
   if (state === 'partial_finished' || state === 'needs_rework') {
-    const issues = Array.isArray(s.issues) ? s.issues : [];
-    const unfinished = issues.filter(i => (i.state || '').toLowerCase() !== 'merged');
+    const unfinished = displayIssues.filter(
+      (i) => (i.state || '').toLowerCase() !== 'merged',
+    );
     if (!unfinished.length) return '';
     const n = unfinished.length;
-    const m = issues.length;
-    const isChild = _histIsChild(s.label);
+    const m = displayIssues.length;
     return `<div class="hist-what-list">
       <div class="hist-what-head">Unfinished ${n} of ${m}</div>
-      <div class="iss-list">${unfinished.map(i => _histIssueRowHtml(i, isChild, s)).join('')}</div>
     </div>`;
   }
 
@@ -1456,22 +1569,41 @@ function _histRecoveryBtnHtml(s) {
   const state = (s.lifecycle_state || '').toLowerCase();
   const lbl = escHtml(s.label || '');
   const rawLabel = s.label || '';
+  // Reconcile against GitHub truth — available on every actionable (non-locked)
+  // History card so a zombie (e.g. needs_rework after a mid-run restart orphaned
+  // a finished sprint) can be corrected here instead of curling the reconcile
+  // API. Preview-then-apply modal; writes DB/local only, never GitHub.
+  const reconcileBtn = `<button type="button" class="hist-head-btn hist-head-btn--reconcile"
+      onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
+      title="Reconcile this sprint's DB state against GitHub truth">
+      <i class="ti ti-git-compare"></i> Reconcile</button>`;
   if (_histSprintFailed(s) || state === 'needs_rework' || state === 'failed' || state === 'cancelled') {
     const rerunDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
     const rerunTitle = _smgmtAnySprintRunning
       ? 'title="Cannot re-run: another sprint is currently running."' : '';
     const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace('Sprint ', '');
-    return `<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
+    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
   }
   if (state === 'ready_to_merge') {
-    return `<button type="button" class="hist-head-btn hist-head-btn--bulk"
+    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
       onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')"
       title="Complete sprint — merge to develop">
       <i class="ti ti-circle-check"></i> Complete</button>`;
   }
-  return '';
+  if (state === 'draft' && s.parent) {
+    // Orphaned child sprint — rerun created it but dispatch failed or was deferred.
+    // Offer a direct Run (preflight) rather than Re-run which would create a grandchild.
+    const runDisabled = _smgmtAnySprintRunning ? 'disabled' : '';
+    const runTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot run: another sprint is currently running."' : '';
+    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+      onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
+      <i class="ti ti-player-play"></i> Run</button>`;
+  }
+  if (state === 'running') return '';
+  return reconcileBtn;
 }
 
 // Delete button: quiet icon only, no label, no red styling (AC11).
@@ -1550,7 +1682,7 @@ function _histCardHtml(s, opts) {
   const body = expanded ? `<div class="hist-card-body">
       ${_histLooseEndBandHtml(s)}
       ${_histWhatListHtml(s)}
-      ${_histCardOutcomeHtml(s)}
+      ${_histCardOutcomeHtml(s, null)}
       ${_histDetailsHtml(s)}
       ${locked ? _histLinksHtml(s) : ''}
     </div>` : '';
@@ -1582,15 +1714,9 @@ export function _histToggleCard(label) {
   _histRenderLedger(_histLedgerData);
 }
 
-/** Collapse/expand a parent sprint group — hides all child sprint cards. */
+/** @deprecated Use _histToggleCard — parent lineage cards share the child card shell. */
 export function _histToggleGroup(baseLabel) {
-  if (!baseLabel) return;
-  if (_histGroupCollapsed.has(baseLabel)) {
-    _histGroupCollapsed.delete(baseLabel);
-  } else {
-    _histGroupCollapsed.add(baseLabel);
-  }
-  _histRenderLedger(_histLedgerData);
+  _histToggleCard(baseLabel);
 }
 
 // ── Sub-sprint grouping ─────────────────────────────────────────────────────
@@ -1659,29 +1785,49 @@ function _histGroupNeedsBulkComplete(group) {
   });
 }
 
+function _histChildRunFinished(s) {
+  const st = (s.lifecycle_state || '').toLowerCase();
+  // Any terminal run outcome — bulk complete settles the lineage after the run
+  // ended, including needs_rework/failed (e.g. perf-coach sprint-83: work
+  // shipped + branches merged but DB never got a row).
+  return [
+    'completed', 'deleted', 'ready_to_merge', 'needs_rework', 'failed',
+    'cancelled', 'partial_finished',
+  ].includes(st);
+}
+
 function _histChildSprintsAllCompleted(group) {
   const children = group.children || [];
   if (!children.length) return false;
-  const settled = new Set(['completed', 'deleted', 'ready_to_merge']);
   // A child counts as ready when its own run settled, OR a later sibling (higher
   // sub-index — children are sorted ascending) has. The latter means this run was
   // superseded by a rerun that itself settled, so the middle ancestor staying
   // needs_rework must not dead-end the button. Mirrors the server's recursive
   // _bulk_complete_lineage_settled gate, which already accepts this case.
   return children.every((s, i) => {
-    if (settled.has((s.lifecycle_state || '').toLowerCase())) return true;
-    return children.slice(i + 1).some(
-      later => settled.has((later.lifecycle_state || '').toLowerCase()),
-    );
+    if (_histChildRunFinished(s)) return true;
+    return children.slice(i + 1).some(later => _histChildRunFinished(later));
   });
+}
+
+function _histChildSprintsStillRunning(group) {
+  const active = new Set(['running', 'draft', 'planned']);
+  return (group.children || []).some(
+    s => active.has((s.lifecycle_state || '').toLowerCase()),
+  );
 }
 
 function _histBulkCompleteBtnHtml(group) {
   if (!group.children?.length || !group.baseSprint) return '';
   if (!_histGroupNeedsBulkComplete(group)) return '';
   const lbl = escHtml(group.baseLabel || '');
-  const childrenReady = _histChildSprintsAllCompleted(group);
-  if (!childrenReady) {
+  if (_histChildSprintsStillRunning(group)) {
+    return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
+            title="Wait for child sprint runs to finish before bulk completing">
+      <i class="ti ti-circle-check"></i> Bulk complete
+    </button>`;
+  }
+  if (!_histChildSprintsAllCompleted(group)) {
     return `<button type="button" class="hist-head-btn hist-head-btn--bulk" disabled
             title="Complete all child sprints before bulk completing">
       <i class="ti ti-circle-check"></i> Bulk complete
@@ -1694,30 +1840,40 @@ function _histBulkCompleteBtnHtml(group) {
   </button>`;
 }
 
+function _histGroupHasActionable(group) {
+  return _histGroupMembers(group).some((s) => {
+    const st = (s && s.lifecycle_state || '').toLowerCase();
+    return _HIST_INBOX_STATES.has(st);
+  });
+}
+
+function _histSynthParent(baseLabel, group) {
+  const children = group.children || [];
+  return {
+    label: baseLabel,
+    lifecycle_state: 'partial_finished',
+    partial_children: children.map((c) => c.label).filter(Boolean),
+    issues: [],
+  };
+}
+
 function _histGroupHtml(group) {
   const bulkBtn = _histBulkCompleteBtnHtml(group);
   const children = group.children || [];
   if (children.length) {
     const baseLbl = group.baseLabel || (group.baseSprint && group.baseSprint.label) || "";
-    const groupExpanded = baseLbl ? !_histGroupCollapsed.has(baseLbl) : true;
-    const groupCls = groupExpanded ? "hist-sprint-group" : "hist-sprint-group collapsed";
-    const parentRow = group.baseSprint
-      ? _histParentRowHtml(group.baseSprint, bulkBtn, groupExpanded)
-      : "";
-    // Render the parent's OWN tickets (the ones it still owns after re-runs
-    // moved some to children) under its row when the group is expanded — a
-    // parent used to show no issue list at all, hiding its completed tickets.
-    const parentOwnIssues = (group.baseSprint && Array.isArray(group.baseSprint.issues))
-      ? group.baseSprint.issues : [];
-    const parentBody = (groupExpanded && parentOwnIssues.length)
-      ? `<div class="hist-parent-body">${_histIssueListHtml(group.baseSprint)}</div>`
-      : "";
-    const childHtml = children.map((c) => _histChildCardHtml(c)).join("");
-    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentRow}${parentBody}<div class="hist-child-wrap">${childHtml}</div></div>`;
+    const groupCls = "hist-sprint-group" + (_histExpanded.has(baseLbl) ? "" : " collapsed");
+    const parentSprint = group.baseSprint || _histSynthParent(baseLbl, group);
+    const parentCard = _histChildCardHtml(parentSprint, group, {
+      isLineageParent: true,
+      bulkCompleteBtn: bulkBtn,
+    });
+    const childHtml = children.map((c) => _histChildCardHtml(c, group)).join("");
+    return `<div class="${groupCls}" data-group="${escHtml(baseLbl)}">${parentCard}<div class="hist-child-wrap">${childHtml}</div></div>`;
   }
   if (group.baseSprint) {
     return _histIsChild(group.baseSprint.label)
-      ? _histChildCardHtml(group.baseSprint)
+      ? _histChildCardHtml(group.baseSprint, group)
       : _histCardHtml(group.baseSprint, { bulkCompleteBtn: bulkBtn });
   }
   return "";
@@ -1740,7 +1896,7 @@ function _histTicketsDone(s) {
 // (rendered expanded) plus a list of older folds, each holding exactly
 // `foldSize` sprints. Both the recent slice and every fold are sized by the
 // same `history_fold_size` setting (AC2/AC8).
-function _histPartition(sprints, foldSize) {
+export function _histPartition(sprints, foldSize) {
   foldSize = Math.max(1, foldSize | 0);
   const recent = sprints.slice(0, foldSize);
   const older = sprints.slice(foldSize);
@@ -1846,12 +2002,15 @@ export function _histToggleFold(id) {
 
 // Toolbar note above the ledger explaining the fold behaviour (mock v5 AC10).
 function _histToolbarHtml() {
-  return `<div class="hist-toolbar">
-    <span class="hist-toolbar-note">
-      <i class="ti ti-stack-2"></i>
-      Latest ${_histFoldSize} sprint groups expanded below — older groups collapse to sprint numbers; click to open details.
-    </span>
-  </div>`;
+  const note = _histShowClosed
+    ? `<span class="hist-toolbar-note"><i class="ti ti-history"></i> Full archive — older sprint groups collapse into numbered folds; click to expand.</span>`
+    : `<span class="hist-toolbar-note"><i class="ti ti-inbox"></i> Action inbox — sprints needing Complete, Re-run, or Bulk complete. Lineage groups stay together (e.g. Sprint 98 with 98.1).</span>`;
+  const signOffBtn = _histShowClosed ? '' : (
+    `<button type="button" class="btn-ghost hist-bulk-signoff-btn" id="hist-bulk-signoff-btn"`
+    + ` onclick="_histBulkSignOff()" title="Complete every ready-to-merge sprint in this inbox">`
+    + `<i class="ti ti-circle-check"></i> Sign off all ready</button>`
+  );
+  return `<div class="hist-toolbar">${note}${signOffBtn}</div>`;
 }
 
 // ── Stale-branch scan + cleanup (issue #808) ────────────────────────────────
@@ -1979,20 +2138,32 @@ export function _histRenderLedger(sprints) {
   const el = document.getElementById('hist-ledger');
   if (!el) return;
   if (!sprints || !sprints.length) {
-    el.innerHTML = `<div class="hist-ledger-empty">No sprint history yet — finished and deleted sprints appear here.</div>`;
+    const emptyMsg = _histShowClosed
+      ? 'No sprint history yet — finished and deleted sprints appear here.'
+      : 'Inbox clear — no sprints need action. Toggle Show completed for the archive.';
+    el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
     return;
   }
-  // Group re-run sub-sprints under their base sprint, then partition by fold
-  // size on base groups (AC2/AC3) — sub-sprints (.1, .2) are not top-level rows.
-  const groups = _histGroupSprints(sprints);
+  let groups = _histGroupSprints(sprints);
+  if (!_histShowClosed) {
+    groups = groups.filter(_histGroupHasActionable);
+    if (!groups.length) {
+      el.innerHTML = `<div class="hist-ledger-empty">Inbox clear — no sprints need action. Toggle Show completed for the archive.</div>`;
+      return;
+    }
+  }
   if (!_histDidAutoExpand && groups.length) {
     _histAutoExpandRecent(groups);
     _histDidAutoExpand = true;
   }
-  const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
-  const recentHtml = recent.map(_histGroupHtml).join('');
-  const foldsHtml = folds.map(_histFoldHtml).join('');
-  el.innerHTML = _histLegendHtml() + _histToolbarHtml() + recentHtml + foldsHtml;
+  let bodyHtml;
+  if (!_histShowClosed) {
+    bodyHtml = groups.map(_histGroupHtml).join('');
+  } else {
+    const { recent, folds } = _histPartitionGroups(groups, _histFoldSize);
+    bodyHtml = recent.map(_histGroupHtml).join('') + folds.map(_histFoldHtml).join('');
+  }
+  el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
 }
 
 // Re-run from History uses the shared re-run modal (ticket pick) then pre-run
@@ -2100,8 +2271,8 @@ function _histSyncShowClosedBtn() {
     ? '<i class="ti ti-eye-off"></i> Active only'
     : '<i class="ti ti-history"></i> Show completed';
   btn.title = _histShowClosed
-    ? 'Show only actionable sprints + a few recent completed'
-    : 'Load the full closed-sprint history';
+    ? 'Show only the action inbox (sprints needing you)'
+    : 'Load the full closed-sprint archive';
 }
 
 // Toggle between the fast active-only feed and the full closed history.
@@ -2129,4 +2300,117 @@ export function _histForceRefresh() {
 
 function _histNextChildLabel(parentLabel) {
   return _nextSprintSublabel(parentLabel);
+}
+
+/** Collect ready_to_merge targets for bulk sign-off (inbox rows only). */
+function _histBulkSignOffTargets(sprints) {
+  const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+  const targets = [];
+  const skipLabels = new Set();
+  for (const g of groups) {
+    const members = _histGroupMembers(g);
+    const rtm = members.filter(
+      (s) => (s.lifecycle_state || '').toLowerCase() === 'ready_to_merge',
+    );
+    if (!rtm.length) continue;
+    const useBulk = (g.children || []).length && g.baseLabel
+      && _histGroupNeedsBulkComplete(g)
+      && _histChildSprintsAllCompleted(g)
+      && !_histChildSprintsStillRunning(g);
+    if (useBulk) {
+      targets.push({ kind: 'bulk', label: g.baseLabel });
+      for (const s of members) skipLabels.add(s.label);
+      continue;
+    }
+    for (const s of rtm) {
+      if (!skipLabels.has(s.label)) {
+        targets.push({ kind: 'finish', label: s.label });
+      }
+    }
+  }
+  return targets.sort((a, b) => {
+    const pa = _histLabelParts(a.label);
+    const pb = _histLabelParts(b.label);
+    if (pa.baseNum !== pb.baseNum) return pa.baseNum - pb.baseNum;
+    return pa.sub - pb.sub;
+  });
+}
+
+/** Complete every ready_to_merge sprint in the current inbox (batch sign-off). */
+export async function _histBulkSignOff() {
+  if (_histShowClosed) {
+    alert('Switch to the action inbox first (toggle off Show completed).');
+    return;
+  }
+  const targets = _histBulkSignOffTargets(_histLedgerData);
+  if (!targets.length) {
+    alert('No ready-to-merge sprints in the inbox.');
+    return;
+  }
+  const listing = targets.map((t) => {
+    const disp = sprintLabelDisplay(t.label);
+    return t.kind === 'bulk' ? `${disp} (bulk complete lineage)` : disp;
+  }).join('\n');
+  if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).\n\n${listing}`)) {
+    return;
+  }
+  if (typeof finishSprintAndWait !== 'function') {
+    alert('Finish helper unavailable — refresh the page.');
+    return;
+  }
+  const total = targets.length;
+  if (typeof _smgmtBoardLock === 'function') {
+    _smgmtBoardLock('Signing off ready sprints…', {
+      progress: true, total, clearLog: true, showDone: true,
+    });
+  }
+  let done = 0;
+  let failed = null;
+  for (const target of targets) {
+    const { label, kind } = target;
+    const action = kind === 'bulk' ? 'Bulk completing' : 'Completing';
+    if (typeof _smgmtBoardLog === 'function') {
+      _smgmtBoardLog(`${action} ${sprintLabelDisplay(label)}…`, 'step');
+    }
+    try {
+      if (kind === 'bulk') {
+        if (typeof bulkCompleteLineageAndWait !== 'function') {
+          throw new Error('Bulk complete helper unavailable — refresh the page.');
+        }
+        await bulkCompleteLineageAndWait(label);
+      } else {
+        await finishSprintAndWait(label);
+      }
+      done += 1;
+      if (typeof _smgmtBoardProgress === 'function') _smgmtBoardProgress(done, total);
+      if (typeof _smgmtBoardLog === 'function') {
+        _smgmtBoardLog(`✓ ${sprintLabelDisplay(label)} completed`, 'ok');
+      }
+    } catch (e) {
+      failed = { label, message: e.message || String(e) };
+      if (typeof _smgmtBoardLog === 'function') {
+        _smgmtBoardLog(`✗ ${sprintLabelDisplay(label)}: ${failed.message}`, 'err');
+      }
+      break;
+    }
+  }
+  const finishMsg = failed
+    ? `Stopped at ${sprintLabelDisplay(failed.label)}: ${failed.message}`
+    : `Signed off ${done} sprint(s).`;
+  if (typeof _smgmtBoardFinish === 'function') {
+    _smgmtBoardFinish({
+      ok: !failed,
+      message: finishMsg,
+      onDone: () => {
+        _histResetLedgerCache();
+        const repo = _cachedFullRepo[_slug];
+        if (repo) _histLoadLedger(repo, { force: true });
+        else _histForceRefresh();
+        if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true).catch(() => {});
+      },
+    });
+  } else {
+    alert(finishMsg);
+    _histForceRefresh();
+  }
 }

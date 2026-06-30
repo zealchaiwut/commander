@@ -1,16 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Daily Brief — Commander</title>
-  <!-- Respect the user's saved theme instead of hard-forcing dark (applied
-       before paint to avoid a flash). Mirrors the dashboard's theme key. -->
+  <!-- Apply saved theme before paint to avoid a flash. Defaults to dark. -->
   <script>
     try {
       document.documentElement.setAttribute(
-        'data-theme', localStorage.getItem('theme') || 'light');
-    } catch (_) { document.documentElement.setAttribute('data-theme', 'light'); }
+        'data-theme', localStorage.getItem('theme') || 'dark');
+    } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/css/tokens.css">
@@ -244,9 +243,11 @@
   let _projBySlug = {};   // slug -> { name, icon, color } from /api/home
   let _curDate = null;    // YYYY-MM-DD currently displayed
 
+  const PBIC_PALETTE = new Set(['gray','blue','green','purple','red','orange','amber','yellow','pink','cyan','teal','indigo']);
   function _projectBadgeHtml(slug){
     const proj = _projBySlug[slug] || {};
-    const color = (proj.color || proj.icon_color || 'gray').toLowerCase().replace(/[^a-z]/g, '');
+    const raw = (proj.color || proj.icon_color || 'gray').toLowerCase().replace(/[^a-z]/g, '');
+    const color = PBIC_PALETTE.has(raw) ? raw : 'gray';
     const icon = proj.icon || 'ti-folder';
     return `<span class="pbic pbic--${esc(color)}" aria-hidden="true"><i class="ti ${esc(icon)}"></i></span>`;
   }
@@ -738,10 +739,6 @@
       txt = 'idle · last shipped <span class="mono">' + esc(prettyLabel(last.label)) + '</span>';
     } else {
       txt = 'idle, last shipped <span class="mono">—</span>';
-    }
-    const next = p.up_next;
-    if (next && next.label){
-      txt += ' · next up <span class="mono">' + esc(prettyLabel(next.label)) + '</span>' + (next.ready ? ' (ready)' : '');
     }
     return `<div class="pb-statusline"><i class="ti ti-circle-check" style="color:var(--text-sub)"></i> ${txt}</div>`;
   }

@@ -107,6 +107,104 @@ def get_sprint_history(
     return result
 
 
+# ── Per-sprint reconcile against GitHub (zombie repair) ──────────────────────
+# On-demand single-sprint version of the background reconcile sweep: re-check one
+# sprint against GitHub truth (via the zero-quota mirror) and, on apply, correct
+# its DB lifecycle + local state. Writes never touch GitHub. Lives on the History
+# router (already mounted) per COMMANDER_GATE_MONOLITH.
+
+import re as _re  # noqa: E402
+
+_SPRINT_LABEL_RE = _re.compile(r"^sprint-\d+(\.\d+)*$")
+
+
+@router.get("/api/sprints/{label}/reconcile-preview")
+def get_sprint_reconcile_preview(label: str, project: str):
+    """Dry-run: return GitHub-vs-DB diff + post-sprint checks for one sprint. No writes."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    return sprint_reconcile_service.reconcile_preview(label, project)
+
+
+class ReconcileSprintBody(BaseModel):
+    project: str
+    confirmed: bool = True
+
+
+@router.post("/api/sprints/{label}/reconcile")
+async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
+    """Apply reconcile for one sprint: correct DB lifecycle + local state from GitHub truth."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    if not body.confirmed:
+        raise HTTPException(400, detail="Request must have confirmed=true")
+    result = sprint_reconcile_service.reconcile_apply(label, body.project)
+    if result.get("updated"):
+        try:
+            import server as srv  # noqa: PLC0415
+            await srv.broadcast({
+                "type": "update",
+                "event": {
+                    "event_type": "sprint_reconciled",
+                    "project": body.project,
+                    "labels": [label],
+                },
+            })
+        except Exception:
+            pass
+    return result
+
+
+# ── Split an XL ticket into smaller tickets (BA agent) ───────────────────────
+
+
+@router.post("/api/sprints/{label}/split-xl/{issue}/preview")
+async def split_xl_preview(label: str, issue: int, project: str):
+    """Run the BA split agent on an XL ticket; return proposed children. No writes."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    from . import split_xl_service  # noqa: PLC0415
+    return await split_xl_service.split_preview(project, label, issue)
+
+
+class SplitXlApplyBody(BaseModel):
+    project: str
+    children: list[dict]
+
+
+@router.post("/api/sprints/{label}/split-xl/{issue}/apply")
+async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
+    """Create the child tickets in the sprint + close the XL as not-planned."""
+    from fastapi import HTTPException  # noqa: PLC0415
+    if not _SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    from . import split_xl_service  # noqa: PLC0415
+    result = split_xl_service.split_apply(body.project, label, issue, body.children)
+    if not result.get("ok"):
+        # Surface partial-failure recovery info (created child numbers +
+        # compensation outcome) as a structured 500 detail so the UI can tell the
+        # user exactly what was created and whether manual cleanup is needed (#1453).
+        raise HTTPException(500, detail={
+            "error": result.get("error"),
+            "partial": result.get("partial", False),
+            "created": result.get("created_numbers", []),
+            "compensation": result.get("compensation"),
+        })
+    if result.get("ok"):
+        try:
+            import server as srv  # noqa: PLC0415
+            await srv.broadcast({
+                "type": "update",
+                "event": {"event_type": "sprint_split", "project": body.project, "label": label},
+            })
+        except Exception:
+            pass
+    return result
+
+
 # ── Stale-branch scan + cleanup (issue #808) ─────────────────────────────────
 # These live on the History router (already mounted) rather than a new router so
 # no route is added to server.py (COMMANDER_GATE_MONOLITH). Logic lives in the

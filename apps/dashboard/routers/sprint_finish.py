@@ -363,8 +363,8 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             )
         except Exception as exc:
             errors.append(f"plan.json update failed for {lbl}: {exc}")
-        srv._sprint_db_set_state(
-            lbl, repo, "completed",
+        srv._sprint_db_mark_merged_completed(
+            lbl, repo,
             ended_at=_ended_at,
             end_reason="merge_sprint",
         )
@@ -455,6 +455,28 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
             ),
         )
 
+    # Honesty guard: refuse to complete a lineage whose member sprints still have
+    # open rework / SIT / unfinished work tickets — those need Re-run, not Complete.
+    # Mirror-backed (_has_rework_tickets reads the local issues mirror), no GH calls.
+    _has_rework = getattr(srv, "_has_rework_tickets", None)
+    if _has_rework is not None:
+        rework_members: list[str] = []
+        for lbl in all_labels:
+            try:
+                if _has_rework(lbl, repo):
+                    rework_members.append(lbl)
+            except Exception:
+                pass
+        if rework_members:
+            raise HTTPException(
+                409,
+                detail=(
+                    "Cannot complete — needs-rework/SIT tickets remain in: "
+                    + ", ".join(sorted(rework_members))
+                    + ". Re-run those sprints first."
+                ),
+            )
+
     selected = set(body.selected_ticket_numbers) if body.selected_ticket_numbers else None
     closed = 0
     errors: list[str] = []
@@ -483,12 +505,16 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
                 ended_at=now,
                 end_reason="bulk_complete",
             )
-            srv._sprint_db_set_state(
-                lbl, repo, "completed",
+            ok = srv._sprint_db_mark_merged_completed(
+                lbl, repo,
                 ended_at=now,
                 end_reason="bulk_complete",
-                actor="reconcile",
             )
+            if ok is False:
+                errors.append(
+                    f"{lbl}: DB transition to completed rejected by state machine"
+                )
+                continue
             completed += 1
         except Exception as exc:
             errors.append(f"plan.json update failed for {lbl}: {exc}")
@@ -561,6 +587,23 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     if srv._is_sprint_running(project_root, label):
         raise HTTPException(409, detail=f"Sprint {label} is currently running — complete after it finishes")
 
+    # Honesty guard: a sprint with open rework / SIT / unfinished work tickets is
+    # not done — Re-run it, don't Complete. Mirror-backed, no GitHub calls.
+    _has_rework = getattr(srv, "_has_rework_tickets", None)
+    if _has_rework is not None:
+        try:
+            _rework = _has_rework(label, repo)
+        except Exception:
+            _rework = False
+        if _rework:
+            raise HTTPException(
+                409,
+                detail=(
+                    f"Cannot complete {label} — it still has needs-rework/SIT tickets. "
+                    "Re-run it first."
+                ),
+            )
+
     is_base = not srv._is_child_sprint_label(label)
     head = srv._sprint_branch_name(label)
     if is_base:
@@ -619,8 +662,8 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     now = datetime.now(timezone.utc).isoformat()
     try:
         srv._plan_json_set_state(project_root, label, "completed", ended_at=now, end_reason="merge_sprint")
-        db_ok = srv._sprint_db_set_state(
-            label, repo, "completed", ended_at=now, end_reason="merge_sprint", actor="reconcile",
+        db_ok = srv._sprint_db_mark_merged_completed(
+            label, repo, ended_at=now, end_reason="merge_sprint",
         )
     except Exception as exc:
         raise HTTPException(500, detail=f"merged {label} but failed to mark completed: {exc}")

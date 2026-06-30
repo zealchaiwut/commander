@@ -45,6 +45,14 @@ When sequencing work for a running instance you can't restart (e.g. a remote lau
 
 The Neon layer is optional and currently **disabled on the local authoring machine** (its schema is unmigrated, so writes error). Setting `COMMANDER_DISABLE_NEON=1` (in `apps/dashboard/.env`, read at import time) makes the dashboard run purely off GitHub + SQLite + local JSON: no Neon reads/writes and no startup `projects` sync. Symptoms when it's *not* disabled but the schema is missing: a 500 on sprint create (`Neon write failed`) and a startup warning `relation "projects" does not exist`. Re-enable (and migrate the schema) when that work is picked up.
 
+## Sprint reconcile & GitHub quota
+
+GitHub is the source of truth for sprint state; the DB is a replica that can drift (e.g. testing the same sprint on UAT and PRD with separate DBs). Reconciliation re-checks GitHub and corrects the DB lifecycle + local `state.json` — it **never** modifies GitHub.
+
+- **Auto-reconcile** runs as a background sweep on every History-tab load (throttled per project). Its reads are **mirror-backed** (the local `issues` table, refreshed every 60s via zero-quota 304 ETag polls) plus one cached `gh pr list` per repo for merge state — so a History load no longer fans out `gh issue list`/`gh pr view` per sprint. Set `COMMANDER_DISABLE_AUTO_RECONCILE=1` (in `apps/dashboard/.env`) on a non-primary clone (e.g. UAT) so only one dashboard self-heals against the shared token.
+- **Per-sprint reconcile button** (Board + History cards → "Reconcile"): `GET /api/sprints/{label}/reconcile-preview?project=` is a dry-run (GitHub-vs-DB diff + post-sprint checks, mirror-sourced, no writes); `POST /api/sprints/{label}/reconcile` applies it (DB + local only). Use it to clear a zombie sprint without a full sweep.
+- **Backfill scripts make zero GitHub calls.** `scripts/backfill_agent_runs_project.py` and `scripts/backfill_sprint_project.py` read only the local `issues` mirror + disk JSON — they never consume GH quota. The rate-limit risk is from interactive `gh` CLI (PR/issue GraphQL) and running multiple dashboards on one token, not these scripts.
+
 ## Branching Workflow
 
 This project uses a three-tier branching model:
@@ -83,6 +91,16 @@ separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 - Hook scripts in `hooks/` POST to localhost:8000, fail silently if server down
 - No new Python dependencies without adding to requirements.txt
 - Frontend: ES modules under `apps/dashboard/static/src/`, bundled via esbuild (`npm run build`). No React/Vue/Svelte — keep vanilla JS. Node/npm is a required dev dependency in every clone.
+
+### Keep lint/export refactors in their own ticket (issue #1588)
+
+Lint-only or testability-only refactors — adding/removing `export` keywords,
+editing eslint `/* global */` comments, renaming for clarity, reordering imports
+— must be filed as a **separate ticket** from feature work, never bundled into a
+feature ticket's diff. The per-ticket diff must match that ticket's acceptance
+criteria so reviewers can verify scope at a glance. If you notice a worthwhile
+lint/export cleanup while implementing a feature, open a follow-up ticket for it
+rather than widening the current diff (this is exactly what #1154 → #1588 did).
 
 ## MCP Servers (available in all sessions)
 

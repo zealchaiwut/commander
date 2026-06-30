@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -284,33 +285,49 @@ def _milestone_ref(ms: Optional[dict]) -> Optional[dict]:
     return {"number": ms.get("number"), "title": ms.get("title", "")}
 
 
+def _parse_next_link(link_header: str) -> Optional[str]:
+    """Return the 'next' URL from a GitHub Link header, or None if absent."""
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        m = re.match(r'\s*<([^>]+)>\s*;\s*rel="next"', part.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
 def _fetch_issues_conditional(
     owner: str,
     repo: str,
     etag: Optional[str] = None,
     per_page: int = ISSUES_PER_PAGE,
 ) -> tuple[int, Optional[list[dict]], Optional[str], dict]:
-    """Conditionally fetch repo issues using an ETag.
+    """Conditionally fetch repo issues using an ETag, following Link pagination.
 
-    Returns (status_code, issues_or_None, new_etag, rate_info). On 304 the issues
-    list is None (no body) and no quota is charged by GitHub.
+    First page uses ETag/If-None-Match (issue #756 conditional strategy). 304 →
+    early exit (mirror is current). 200 → collect items, then follow Link:
+    rel="next" across remaining pages unconditionally until exhausted. Returns
+    (status_code, all_issues_or_None, first_page_etag, rate_info).
     """
     token = _get_gh_token()
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
-    headers = {
+    base_url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    base_headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+
+    # First page: conditional request with ETag so an unchanged result costs zero quota.
+    first_page_headers = dict(base_headers)
     if etag:
-        headers["If-None-Match"] = etag
+        first_page_headers["If-None-Match"] = etag
 
     # sort=updated so ANY recently-touched issue (a label change on an old
     # ticket included) surfaces in page 1; the default created-sort never shows
     # updates to issues older than the newest `per_page`.
     resp = httpx.get(
-        url,
-        headers=headers,
+        base_url,
+        headers=first_page_headers,
         params={"state": "all", "per_page": per_page,
                 "sort": "updated", "direction": "desc"},
         timeout=15.0,
@@ -327,8 +344,21 @@ def _fetch_issues_conditional(
 
     resp.raise_for_status()
     # The issues endpoint also returns PRs; exclude them from the mirror.
-    items = [it for it in resp.json() if "pull_request" not in it]
-    return 200, items, new_etag, rate_info
+    all_items = [it for it in resp.json() if "pull_request" not in it]
+
+    # Follow Link: rel="next" for subsequent pages (unconditional — no ETag).
+    next_url = _parse_next_link(resp.headers.get("Link", ""))
+    while next_url:
+        page_resp = httpx.get(next_url, headers=base_headers, timeout=15.0)
+        page_resp.raise_for_status()
+        all_items.extend(it for it in page_resp.json() if "pull_request" not in it)
+        rate_info = {
+            "remaining": int(page_resp.headers.get("X-RateLimit-Remaining", 999)),
+            "reset": page_resp.headers.get("X-RateLimit-Reset", ""),
+        }
+        next_url = _parse_next_link(page_resp.headers.get("Link", ""))
+
+    return 200, all_items, new_etag, rate_info
 
 
 def sync_issues_mirror(repo: str, db_module=None) -> dict:

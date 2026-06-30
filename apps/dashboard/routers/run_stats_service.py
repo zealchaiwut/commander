@@ -110,7 +110,7 @@ def sprint_run_stats(label: str, project: Optional[str] = None) -> dict[str, Any
     history feed and hide the agent-derived split-bar and gantt (AC7).
     """
     try:
-        rows = _db().agent_runs_for_sprint(label)
+        rows = _db().agent_runs_for_sprint(label, project=project)
     except Exception:
         rows = []
 

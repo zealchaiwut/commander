@@ -334,7 +334,7 @@ def _build_in_progress(db, project_key: str, slug: str) -> Optional[dict]:
 
     current_ticket = None
     active_agent = None
-    runs = db.agent_runs_for_sprint(label)
+    runs = db.agent_runs_for_sprint(label, project=project_key)
     if runs:
         # Prefer an open run (finished_at is NULL); else the most recent run.
         open_runs = [r for r in runs if not r.get("finished_at")]

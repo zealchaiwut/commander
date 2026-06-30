@@ -47,6 +47,133 @@ def _ticket_rerun_category(labels: set[str]) -> str:
     return "queued"
 
 
+_NON_WORK_LABELS_RR = frozenset({"sprint-summary", "docs", "documentation"})
+
+
+def _int_ticket_numbers(raw_numbers) -> list[int]:
+    nums: list[int] = []
+    for n in raw_numbers or []:
+        try:
+            nums.append(int(n))
+        except (TypeError, ValueError):
+            continue
+    return nums
+
+
+def _artifact_rerun_ticket_numbers(srv, project_root, sprint_label: str, project: str) -> list[int]:
+    """Ticket ids from plan/state/DB when GitHub no longer carries the sprint label.
+
+    Child reruns that crash with ``process lost`` before relabel finishes leave
+    an empty GitHub column while plan.json / state.json still list the roster.
+    """
+    seen: set[int] = set()
+    ordered: list[int] = []
+
+    def _add(raw_numbers) -> None:
+        for n in _int_ticket_numbers(raw_numbers):
+            if n not in seen:
+                seen.add(n)
+                ordered.append(n)
+
+    plan = srv._read_plan_json(project_root, sprint_label) or {}
+    if isinstance(plan, dict):
+        _add(plan.get("tickets"))
+
+    commander = srv._commander_dir(project_root)
+    from routers import sprint_artifact_service  # noqa: PLC0415
+
+    resolved = sprint_artifact_service.resolve_state_path(commander / "sprints", sprint_label)
+    if resolved is not None and resolved.is_file():
+        try:
+            state = json.loads(resolved.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            state = {}
+        state_nums: list[int] = []
+        for iss in state.get("issues") or []:
+            n = iss.get("number", iss.get("ticket_id"))
+            if n is None:
+                continue
+            st = (iss.get("status") or "").lower()
+            agent = (iss.get("agent_status") or "").lower()
+            if st == "done" or agent in ("completed", "done", "merged"):
+                continue
+            try:
+                state_nums.append(int(n))
+            except (TypeError, ValueError):
+                continue
+        _add(state_nums)
+
+    try:
+        import db  # noqa: PLC0415
+
+        row = db.get_sprint(sprint_label, project=project or None)
+        if row and row.get("issues_json"):
+            db_nums: list[int] = []
+            for iss in json.loads(row["issues_json"] or "[]"):
+                n = iss.get("ticket_id", iss.get("number"))
+                if n is None:
+                    continue
+                st = (iss.get("state") or "").lower()
+                agent = (iss.get("agent_status") or "").lower()
+                if st == "merged" or agent in ("completed", "done"):
+                    continue
+                try:
+                    db_nums.append(int(n))
+                except (TypeError, ValueError):
+                    continue
+            _add(db_nums)
+    except Exception:
+        pass
+
+    return ordered
+
+
+def _resolve_rerun_sprint_issues(srv, project: str, sprint_label: str, project_root) -> list[dict]:
+    """Issues eligible for rerun preview/POST — GitHub column first, artifacts second."""
+    sprint_issues = srv._get_sprint_issues(project, sprint_label)
+    if sprint_issues:
+        return sprint_issues
+
+    fallback_nums = _artifact_rerun_ticket_numbers(
+        srv, project_root, sprint_label, project,
+    )
+    if not fallback_nums:
+        return []
+
+    try:
+        all_open = srv.github_client.list_open_issues_with_body(repo_name=project, limit=200)
+    except subprocess.CalledProcessError:
+        all_open = []
+    by_num = {iss["number"]: iss for iss in all_open}
+
+    resolved: list[dict] = []
+    for num in fallback_nums:
+        iss = by_num.get(num)
+        if iss is not None:
+            resolved.append(iss)
+        else:
+            resolved.append({
+                "number": num,
+                "title": f"Issue #{num}",
+                "labels": [],
+            })
+    return resolved
+
+
+def _rerun_remove_sprint_labels(srv, sprint_label: str, current_labels: set[str]) -> list[str]:
+    """Sprint labels to strip when moving a ticket into a rerun child.
+
+    Normally the ticket's primary label matches *sprint_label*. After a
+    ``process lost`` crash the roster may still live on a parent label
+    (e.g. sprint-15.1) while History reruns the empty child (sprint-15.2).
+    """
+    sprint_lbls = sorted(
+        lbl for lbl in current_labels
+        if srv._SPRINT_LABEL_RE.match(lbl)
+    )
+    return sprint_lbls or [sprint_label]
+
+
 @router.get("/api/sprints/{sprint_label}/branch-status")
 def get_sprint_branch_status(sprint_label: str, project: str):
     """Check if the sprint branch exists on GitHub.
@@ -116,8 +243,9 @@ def rerun_sprint_preview(sprint_label: str, project: str):
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
+    project_root = srv._project_root_path(project)
     try:
-        sprint_issues = srv._get_sprint_issues(project, sprint_label)
+        sprint_issues = _resolve_rerun_sprint_issues(srv, project, sprint_label, project_root)
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
@@ -141,7 +269,6 @@ def rerun_sprint_preview(sprint_label: str, project: str):
             "action": action,
         })
 
-    project_root = srv._project_root_path(project)
     existing_label_names = {lbl["name"] for lbl in srv.github_client.list_labels(repo_name=project)}
     new_label = srv._next_sprint_sublabel(sprint_label, existing_label_names, project_root)
 
@@ -170,18 +297,17 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
+    project_root = srv._project_root_path(project)
     try:
-        sprint_issues = srv._get_sprint_issues(project, sprint_label)
+        sprint_issues = _resolve_rerun_sprint_issues(srv, project, sprint_label, project_root)
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
-    project_root = srv._project_root_path(project)
     existing_label_names = {lbl["name"] for lbl in srv.github_client.list_labels(repo_name=project)}
     suggested_versioned_label = srv._next_sprint_sublabel(
         sprint_label, existing_label_names, project_root,
     )
 
-    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     tickets = []
     for iss in sprint_issues:
         current_labels = {lbl["name"] for lbl in iss.get("labels", [])}
@@ -625,11 +751,10 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         raise HTTPException(409, detail=f"Sprint {sprint_label} is currently running")
 
     try:
-        sprint_issues = srv._get_sprint_issues(project, sprint_label)
+        sprint_issues = _resolve_rerun_sprint_issues(srv, project, sprint_label, project_root)
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
 
-    _NON_WORK_LABELS_RR = {"sprint-summary", "docs", "documentation"}
     decisions: list[dict] = []
     issue_labels: dict[int, set[str]] = {}
     for iss in sprint_issues:
@@ -674,12 +799,14 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     for d in to_move:
         issue_num = d["issue_num"]
-        stale = srv._stale_session_labels(issue_labels.get(issue_num, set()))
+        current = issue_labels.get(issue_num, set())
+        stale = srv._stale_session_labels(current)
+        remove_sprint = _rerun_remove_sprint_labels(srv, sprint_label, current)
         try:
             srv.github_client.update_labels(
                 issue_num,
                 add=[sub_label],
-                remove=[sprint_label, *stale],
+                remove=[*remove_sprint, *stale],
                 repo_name=project,
             )
         except subprocess.CalledProcessError as e:
@@ -767,10 +894,22 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
 
     if not body.auto_run:
         result["queued"] = True
+        # Plan is at "draft" — promote so History shows a Run button for this child.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="queued", parent=sprint_label)
+        except Exception:
+            pass
         return result
 
     # Auto-run: dispatch sprint_manager for the sub-sprint
     if not srv.SPRINT_MANAGER_PATH.exists():
+        # Plan is at "draft" — promote so History shows a Run button for this child.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="sprint_manager_missing", parent=sprint_label)
+        except Exception:
+            pass
         return result
 
     log_dir = commander / "logs"
@@ -798,16 +937,27 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
-    proc = sprint_run_service.spawn_sprint_process(
-        srv._sprint_manager_argv(sub_label, project, project_root),
-        cwd=str(coder_path),
-        env=stripped_env,
-        log_path=run_log_path,
-        pid_path=pid_path,
-        pending_path=pending_path,
-        sprint_label=sub_label,
-        project=project,
-    )
+    try:
+        proc = sprint_run_service.spawn_sprint_process(
+            srv._sprint_manager_argv(sub_label, project, project_root),
+            cwd=str(coder_path),
+            env=stripped_env,
+            log_path=run_log_path,
+            pid_path=pid_path,
+            pending_path=pending_path,
+            sprint_label=sub_label,
+            project=project,
+        )
+    except HTTPException:
+        # Spawn failed — roll plan/DB back to needs_rework so History can re-dispatch.
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="spawn_failed", parent=sprint_label)
+            srv._sprint_db_set_state(sub_label, project, "needs_rework",
+                                     end_reason="spawn_failed")
+        except Exception:
+            pass
+        raise
 
     result["run_id"] = run_id
     result["pid"] = proc.pid

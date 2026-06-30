@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from config import TEST_GITHUB_REPO
+
 _logger = logging.getLogger(__name__)
 _GH_DEBUG = os.environ.get("COMMANDER_GH_API_DEBUG", "").strip() == "1"
 # gh subcommands that route through GraphQL (shared 5000/hr budget).
@@ -20,8 +22,6 @@ _GH_GRAPHQL_SUBCMDS = frozenset({
     ("issue", "list"), ("issue", "view"), ("issue", "create"),
     ("label", "list"), ("pr", "list"), ("pr", "view"),
 })
-
-from config import TEST_GITHUB_REPO
 
 CACHE_TTL = 30.0
 SPRINT_RE = re.compile(r"^sprint-(\d+)$")
@@ -235,7 +235,7 @@ def _run(*args) -> str:
 # ── classification ────────────────────────────────────────────────────────────
 
 def classify_issue(issue: dict) -> str:
-    labels = {l["name"] for l in issue.get("labels", [])}
+    labels = {lbl["name"] for lbl in issue.get("labels", [])}
     if issue.get("state") == "closed" or "UAT-approved" in labels:
         return "done"
     if "UAT" in labels:
@@ -256,7 +256,7 @@ def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
     if mirror is not None:
         issues = [
             i for i in mirror
-            if any(l.get("name") == sprint_label for l in i.get("labels", []))
+            if any(lbl.get("name") == sprint_label for lbl in i.get("labels", []))
         ]
         return [{"column": classify_issue(i), **i} for i in issues]
     key = f"issues:{r}:{sprint}"
@@ -508,6 +508,31 @@ def list_recent_closed(repo_name: str | None = None, limit: int = 5) -> list[dic
     return _cached(key, fetch)
 
 
+def group_issues_by_sprint(repo_name: str | None = None) -> dict[int, list[dict]] | None:
+    """Group all issues (open + closed) by their plain sprint-N label number.
+
+    Uses the DB mirror when available — a single O(n) pass vs N separate
+    list_issues() calls each doing their own O(n) scan. Returns None when the
+    mirror is not populated so callers can fall back to per-sprint gh calls.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is None:
+        return None
+    result: dict[int, list[dict]] = {}
+    for issue in mirror:
+        col = classify_issue(issue)
+        issue_with_col: dict = {"column": col, **issue}
+        for lbl in issue.get("labels", []):
+            name = lbl.get("name", "") if isinstance(lbl, dict) else ""
+            m = SPRINT_RE.match(name)
+            if m:
+                n = int(m.group(1))
+                result.setdefault(n, []).append(issue_with_col)
+                break  # one sprint label per issue is sufficient for grouping
+    return result
+
+
 def _live_sprint_label_names(repo_name: str) -> list[str]:
     """Sprint-* label names from a TTL-cached ``gh label list`` (300s).
 
@@ -532,13 +557,26 @@ def _live_sprint_label_names(repo_name: str) -> list[str]:
 
 def _all_sprint_label_names(repo_name: str) -> set[str]:
     """Union of mirror-derived sprint labels (zero-cost, fresh for active labels)
-    and the TTL-cached live label list (catches empty/orphan labels)."""
-    names = set(_live_sprint_label_names(repo_name))
+    and the TTL-cached live label list (catches empty/orphan labels).
+
+    Mirror labels absent from the live registry are filtered out to prevent
+    deleted labels from resurrecting as zombie sprints (issue #1355): a deleted
+    label persists in stale raw.labels of closed mirror rows but is absent from
+    the live gh label list, so intersecting the mirror contribution against live
+    blocks it. When live returns empty (gh failure or genuinely no sprints) the
+    mirror is used unfiltered as fallback so the board stays usable offline."""
+    live = set(_live_sprint_label_names(repo_name))
     mirror = _mirror_labels(repo_name)
-    if mirror is not None:
-        names.update(lbl["name"] for lbl in mirror
-                     if SPRINT_LABEL_RE_ALL.match(lbl["name"]))
-    return names
+    if mirror is None:
+        return live
+    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
+    if live:
+        # Live succeeded — only admit mirror labels that also exist live.
+        # Deleted labels linger in stale mirror rows but are absent from live,
+        # so the intersection prevents them from surfacing as zombie sprints.
+        return live | (mirror_sprint & live)
+    # Live is empty (gh down or no sprint labels yet) — fall back to mirror.
+    return mirror_sprint
 
 
 def list_sprints(repo_name: str | None = None) -> list[int]:
@@ -811,8 +849,8 @@ def list_summary_issues(repo_name: str | None = None) -> list[dict]:
             return [
                 {"number": i["number"], "title": i.get("title", ""), "url": i.get("url", "")}
                 for i in mirror
-                if any(isinstance(l, dict) and l.get("name") == "sprint-summary"
-                       for l in i.get("labels") or [])
+                if any(isinstance(lbl, dict) and lbl.get("name") == "sprint-summary"
+                       for lbl in i.get("labels") or [])
             ]
     key = f"summary_issues:{r}"
     def fetch():
@@ -833,7 +871,7 @@ def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None
         for iss in mirror:
             if iss.get("state") != "open":
                 continue
-            names = {l.get("name") for l in iss.get("labels") or [] if isinstance(l, dict)}
+            names = {lbl.get("name") for lbl in iss.get("labels") or [] if isinstance(lbl, dict)}
             if "UAT" not in names:
                 continue
             if sprint is not None and f"sprint-{sprint}" not in names:
@@ -920,7 +958,7 @@ def create_issue(title: str, body: str, labels: list[str],
     return number, url
 
 
-def list_milestones(repo_name: str | None = None, state: str = "open") -> list[dict]:
+def list_milestones(repo_name: str | None = None, state: str = "open") -> list[dict]:  # noqa: F811
     """Return the repo's milestones as [{"number", "title", "state"}, ...].
 
     Used by the milestone selector (issue #879) and the roadmap tab. ``state``
@@ -1018,7 +1056,7 @@ def update_issue_body(issue_id: int, body: str, repo_name: str | None = None):
 
 # ── milestone operations (issue #878) ────────────────────────────────────────
 
-def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:
+def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:  # noqa: F811
     """Return all milestones for the repo as a list of dicts.
 
     Fields include: number, title, description, due_on, state.

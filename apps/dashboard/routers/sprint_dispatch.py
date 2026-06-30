@@ -5,6 +5,7 @@ import subprocess
 import sys
 import uuid
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
@@ -246,7 +247,21 @@ def _sprint_rerun_into_map(project_root: Path) -> dict[str, str]:
 # ── Sign-off gate helpers ─────────────────────────────────────────────────────
 
 def _sprint_signoff_state(project_root: Path, sprint_label: str) -> Optional[str]:
-    """Return 'pending', 'approved', or None for a sprint's sign-off gate."""
+    """Return 'pending', 'approved', or None for a sprint's sign-off gate.
+
+    When sign-off is disabled globally (COMMANDER_DISABLE_SIGNOFF / the
+    disable_sprint_signoff setting), the gate does not apply — return None so a
+    draft stamped with a stale ``signoff: pending`` (sprints always stamp it at
+    creation) neither blocks the run path (_assert_sprint_signed_off) nor shows
+    a board badge. Without this, disabling sign-off left a dead-end: the Approve
+    UI + approve API are off, but the run still refused on the stale gate.
+    """
+    try:
+        import config  # noqa: PLC0415 — lazy, matches sibling modules
+        if config.sprint_signoff_disabled():
+            return None
+    except Exception:
+        pass
     plan = _read_plan_json(project_root, sprint_label)
     if not plan:
         return None
@@ -377,9 +392,13 @@ def get_sprint_management_issues(repo: str):
     identifies their exact sprint label, including dotted sub-labels.
     """
     try:
-        issues = github_client.list_open_issues_with_body(repo_name=repo, limit=200)
-        sprints = github_client.list_sprints(repo_name=repo)
-        all_sprint_labels = github_client.list_sprint_labels(repo_name=repo)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_issues = pool.submit(github_client.list_open_issues_with_body, repo, 200)
+            f_sprints = pool.submit(github_client.list_sprints, repo)
+            f_labels = pool.submit(github_client.list_sprint_labels, repo)
+            issues = f_issues.result()
+            sprints = f_sprints.result()
+            all_sprint_labels = f_labels.result()
     except subprocess.CalledProcessError as e:
         raise _gh_error(e)
     except ValueError as e:
@@ -455,14 +474,25 @@ def get_sprint_management_issues(repo: str):
 
     # Finished sprints = those with a posted "Sprint N Executive Summary" issue,
     # plus locally signed-off merges (merge_sprint / bulk_complete).
+    #
+    # We track two sets that differ only for a finished sprint that still has an
+    # open ticket (typically awaiting UAT sign-off):
+    #   - merged_set:  truly shipped — locally signed-off, lifecycle-completed,
+    #                  or merged-branch. Belongs in History; the board drops it
+    #                  even with an open UAT ticket so it stops double-showing as
+    #                  a Ready-to-merge card while History lists it Completed.
+    #   - finished_set: merged_set PLUS bare run-end summaries. A summary is
+    #                  posted at run end, BEFORE the human merges, so a
+    #                  summary-only sprint may still need its merge card — it
+    #                  stays on the board while it has open tickets.
     finished_map = _finished_sprint_summaries(repo)
-    finished_set = set(finished_map.keys()) | _locally_signed_off_sprint_labels(project_root)
-    # Also treat any sprint the lifecycle DB marks completed as finished, so the
-    # board honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
+    merged_set: set[str] = set(_locally_signed_off_sprint_labels(project_root))
+    # Treat any sprint the lifecycle DB marks completed as merged, so the board
+    # honours DB-level sign-offs (Merge Sprint, bulk complete, reconciler
     # auto-complete, manual repair) even when plan.json wasn't dual-written. The
     # sprints table is the single source of truth for lifecycle state.
     try:
-        finished_set |= {
+        merged_set |= {
             r.get("label")
             for r in db.list_sprints_lifecycle()
             if r.get("label")
@@ -476,8 +506,7 @@ def get_sprint_management_issues(repo: str):
     # PR exists for sprint/<label>) AND whose tickets are all closed (0 open) is
     # shipped — drop it from the board even without an Executive Summary issue or
     # a local sign-off, so a sprint completed on another clone stops lingering
-    # here. One cached gh call per load (not per sprint). A sprint with open
-    # tickets (e.g. awaiting UAT sign-off) is intentionally NOT hidden.
+    # here. One cached gh call per load (not per sprint).
     try:
         merged_heads = github_client.list_merged_sprint_branches(repo_name=repo)
         if merged_heads:
@@ -487,9 +516,11 @@ def get_sprint_management_issues(repo: str):
                     and sprint_ticket_counts.get(lbl, 0) == 0
                     and f"sprint/{lbl}" in merged_heads
                 ):
-                    finished_set.add(lbl)
+                    merged_set.add(lbl)
     except Exception:
         pass
+
+    finished_set = set(finished_map.keys()) | merged_set
 
     # Sprint labels to render as panes: any with tickets, PLUS empty labels that
     # are NOT finished — so a freshly-created sprint (0 tickets, no summary) still
@@ -543,21 +574,10 @@ def get_sprint_management_issues(repo: str):
     # the nav pill uses (cross-machine).
     finished_sprints = sorted(finished_set)
 
-    # Placeholder/next sprint = max existing + 1 (not the lowest free number — a
-    # deleted early label must not reset the next sprint back to 1). The max is
-    # taken over both sprint labels AND finished-summary numbers, so it stays
-    # correct even if a finished sprint's label was later removed.
-    _max_num = 0
-    for n in sprints:
-        try:
-            _max_num = max(_max_num, int(n))
-        except (TypeError, ValueError):
-            pass
-    for lbl in finished_map:
-        m = sprint_label_re.match(lbl)
-        if m:
-            _max_num = max(_max_num, int(m.group(1).split(".")[0]))
-    placeholder_sprint = _max_num + 1
+    # Placeholder/next sprint = high-water mark + 1 over labels, finished
+    # summaries, lifecycle DB, sprint_history, and local artifacts — not GitHub
+    # labels alone (a deleted sprint-99 ledger row must not allow reusing 99).
+    placeholder_sprint = _server()._next_new_sprint_number(repo)
 
     sprint_rerun_into = _sprint_rerun_into_map(project_root)
 
@@ -610,6 +630,7 @@ def get_sprint_management_issues(repo: str):
         "sprint_parents": sprint_parents,
         "sprint_plan_states": sprint_plan_states,
         "finished_sprints": finished_sprints,
+        "merged_sprints": sorted(merged_set),
         "sprint_rerun_into": sprint_rerun_into,
         "sprint_signoff": sprint_signoff,
         "sprint_has_run": sprint_has_run,

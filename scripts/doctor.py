@@ -26,6 +26,10 @@ Usage::
 
 Exit code is ``0`` only when every check passes; non-zero (``1``) with a
 summary of all failures when any check fails.
+
+Cost note (issue #1586): the Claude auth check issues a minimal Claude API
+(inference) call to validate the OAuth token, so each ``doctor.py`` run
+consumes a little subscription quota. See ``check_claude_cli`` for details.
 """
 from __future__ import annotations
 
@@ -84,12 +88,33 @@ def _run(cmd, timeout: int = DEFAULT_TIMEOUT):
 # ── Individual checks ────────────────────────────────────────────────────────
 
 def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
-    """`claude` CLI is on the service PATH and answers a cheap probe.
+    """`claude` CLI is on the service PATH and its OAuth token is live (issue #868).
 
-    Uses ``claude --version`` — a fast probe that confirms the binary is
-    reachable and runnable, never a full agent run (issue #789 separation).
+    Two-gate check (issue #789 separation — never a full agent run):
+
+    Gate 1 — reachability: ``claude --version`` confirms the binary is installed
+    and executable. Fails immediately with a "CLI not found" message when the
+    binary is absent or crashes.
+
+    Gate 2 — auth probe: ``claude -p "" --output-format json`` exercises the
+    OAuth token with the lightest possible invocation. An auth error here
+    indicates a missing or expired token, not a missing binary, and is reported
+    with a distinct fix message that guides the user to log in.
+
+    Cost note (issue #1586): unlike the sibling ``gh auth status`` check (which
+    is auth-only and makes no API work), this Gate-2 probe issues a *real* —
+    though minimal — model inference round-trip and therefore consumes
+    subscription quota on every ``doctor.py`` run. The check name and the
+    operator-visible status line surface this so the cost is never silent.
+
+    If the ``claude`` CLI ever ships a documented auth-only flag that validates
+    the OAuth token without any inference (issue #1586 AC4), switch Gate 2 to
+    that flag and drop the "minimal inference call" note below. No such flag is
+    documented as of this writing, so the probe — and the note — stay.
     """
-    name = "claude CLI reachable"
+    name = "Claude CLI (auth — makes a minimal inference call)"
+
+    # ── Gate 1: reachability ─────────────────────────────────────────────────
     path = which("claude")
     if not path:
         return _result(
@@ -104,7 +129,7 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             ),
         )
     try:
-        proc = runner(["claude", "--version"])
+        ver_proc = runner(["claude", "--version"])
     except FileNotFoundError:
         return _result(
             name,
@@ -117,17 +142,57 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             False,
             fix=f"`claude --version` timed out (>{DEFAULT_TIMEOUT}s); check the install.",
         )
-    if proc.returncode != 0:
+    if ver_proc.returncode != 0:
         return _result(
             name,
             False,
             fix=(
-                "`claude --version` returned non-zero. Re-authenticate Claude "
-                "Code (`claude` then `/login`) and verify the install."
+                "`claude --version` returned non-zero. Verify the Claude Code "
+                "install and ensure the binary is on the service PATH."
             ),
-            detail=(proc.stderr or "").strip(),
+            detail=(ver_proc.stderr or "").strip(),
         )
-    return _result(name, True, detail=f"{path} ({(proc.stdout or '').strip()})")
+
+    # ── Gate 2: auth probe ───────────────────────────────────────────────────
+    # NOTE (issue #1586): `claude -p "" --output-format json` is a REAL model
+    # inference round-trip, not a pure auth check. It is the lightest possible
+    # invocation, but it still hits the API and consumes subscription quota on
+    # every run. Keep it the lightest call available; switch to an auth-only
+    # flag (and remove this note) if `claude` ever documents one.
+    try:
+        auth_proc = runner(["claude", "-p", "", "--output-format", "json"])
+    except FileNotFoundError:
+        return _result(
+            name,
+            False,
+            fix="Install Claude Code and put `claude` on the service PATH.",
+        )
+    except subprocess.TimeoutExpired:
+        return _result(
+            name,
+            False,
+            fix=f"Claude auth probe timed out (>{DEFAULT_TIMEOUT}s); check network/auth.",
+        )
+    if auth_proc.returncode != 0:
+        return _result(
+            name,
+            False,
+            fix=(
+                "Claude CLI is installed but not authenticated. Run `claude` "
+                "and log in via `/login`, or set CLAUDE_CODE_OAUTH_TOKEN in the "
+                "launchd plist EnvironmentVariables for headless auth."
+            ),
+            detail=((auth_proc.stderr or "") + (auth_proc.stdout or "")).strip(),
+        )
+    return _result(
+        name,
+        True,
+        detail=(
+            f"{path} — reachable and authenticated via a minimal inference "
+            f"probe (consumes a little subscription quota) "
+            f"({(ver_proc.stdout or '').strip()})"
+        ),
+    )
 
 
 def check_gh_cli(*, which=shutil.which, runner=_run) -> CheckResult:
@@ -362,6 +427,108 @@ def check_headless_tokens(*, plist_path=None) -> CheckResult:
     )
 
 
+def _plist_working_dir(plist_path: Path) -> str:
+    """Return the launchd plist WorkingDirectory (or '')."""
+    import plistlib
+
+    try:
+        with open(plist_path, "rb") as fh:
+            data = plistlib.load(fh)
+    except OSError:
+        return ""
+    wd = data.get("WorkingDirectory", "")
+    return wd if isinstance(wd, str) else ""
+
+
+def _read_env_token(env_file: Path) -> str:
+    """Return the GH_TOKEN value from an agent .env (or '')."""
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("GH_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def _resolve_headless_gh_token(plist_path: Path) -> tuple:
+    """Return (token, source) the launchd dashboard would use for headless gh.
+
+    Mirrors the runtime resolution order: a plist EnvironmentVariables token is
+    set at exec by launchd and wins; otherwise the running clone's
+    apps/dashboard/.env is loaded via dotenv at startup. ('', '') when neither
+    carries a token.
+    """
+    env = _parse_plist_env(plist_path)
+    for k in GH_TOKEN_KEYS:
+        v = (env.get(k) or "").strip()
+        if v:
+            return v, f"plist {k}"
+    wd = _plist_working_dir(plist_path)
+    if wd:
+        # WorkingDirectory is usually the apps/dashboard dir itself (so .env sits
+        # beside it); fall back to the clone-root layout for older installs.
+        for env_file in (Path(wd) / ".env", Path(wd) / "apps" / "dashboard" / ".env"):
+            tok = _read_env_token(env_file)
+            if tok:
+                return tok, str(env_file)
+    return "", ""
+
+
+def _gh_token_is_valid(token: str) -> bool:
+    """True when `gh api user` succeeds with this token (validity probe)."""
+    env = {**os.environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "user", "-q", ".login"],
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_TIMEOUT,
+            env=env,
+        )
+        return proc.returncode == 0 and bool(proc.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def check_headless_gh_token_valid(
+    *, plist_path=None, validator=_gh_token_is_valid
+) -> CheckResult:
+    """The stored headless GH_TOKEN actually authenticates (not stale/revoked).
+
+    ``check_headless_tokens`` proves a token is *present*; this proves it still
+    *works*. The recurring "gh CLI token gone again" failure is a present-but-
+    revoked `gho_` device token that drifted from the keychain — caught here.
+
+    Skipped (PASS) when the service is not installed, or when no headless token
+    is configured (that absence is owned by ``check_headless_tokens``).
+    """
+    name = "headless GH_TOKEN valid"
+    plist = Path(plist_path) if plist_path is not None else DEFAULT_PLIST
+    if not plist.exists():
+        return _result(name, True, detail="launchd service not installed — skipped")
+    token, source = _resolve_headless_gh_token(plist)
+    if not token:
+        return _result(
+            name,
+            True,
+            detail="no headless GH_TOKEN configured — see 'headless auth tokens in plist'",
+        )
+    if validator(token):
+        return _result(name, True, detail=f"valid — source: {source}")
+    return _result(
+        name,
+        False,
+        fix=(
+            "Stored headless GH_TOKEN is invalid/revoked (`gh api user` failed). "
+            "Mint a long-lived PAT and reinstall: "
+            "`bash scripts/install_launchd.sh --gh-token <PAT>`, then restart the "
+            "launchd dashboard."
+        ),
+        detail=f"source: {source}",
+    )
+
+
 # ── Orchestration ────────────────────────────────────────────────────────────
 
 # Checks run in the exact order specified by the acceptance criteria.
@@ -440,7 +607,12 @@ def run_doctor() -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Validate this host is ready to run a Commander sprint."
+        description="Validate this host is ready to run a Commander sprint.",
+        epilog=(
+            "Note: the Claude auth check makes a minimal Claude API (inference) "
+            "call to validate the OAuth token, so each run consumes a little "
+            "subscription quota."
+        ),
     )
     parser.add_argument(
         "--json",

@@ -58,10 +58,8 @@ def _lookup_in_sm(attr: str, local_fn):
     return None
 
 
-# ── private helpers used by the five extracted functions ─────────────────────
-# These are local copies of small pure helpers from sprint_manager.py.
-# sprint_manager.py keeps its own copy for functions that use them outside the
-# five extracted functions (e.g. _load_agent_persona uses _git_worktree_root).
+# ── private helpers (single source of truth for the whole sprint_manager pkg) ─
+# sprint_manager.py re-imports these from here (issue #1502) — do not duplicate.
 
 def _git_worktree_root(start: "Path") -> "Path | None":
     """Return the git toplevel for ``start``, or None if not inside a worktree."""
@@ -336,8 +334,16 @@ def _worktree_hygiene(
     just-built branch.
     """
     effective_root = repo_root or REPO_ROOT
+    worktree = Path(worktree)
     sys.stdout.write(str(f"  [hygiene] Pre-dispatch hygiene for ticket #{ticket_id} in {worktree}") + "\n")
     sys.stdout.flush()
+
+    if not worktree.is_dir():
+        sys.stdout.write(str(
+            f"  [hygiene] ERROR: worktree path missing ({worktree}) — cannot run hygiene"
+        ) + "\n")
+        sys.stdout.flush()
+        return None, None, "worktree-missing"
 
     # 1 — fetch
     sys.stdout.write(str("  [hygiene] git fetch origin ...") + "\n")
@@ -369,15 +375,28 @@ def _worktree_hygiene(
     # 5 — branch validation
     # Find feature branch in this worktree
     ok, br_out, _ = _try("git", "branch", "--list", f"feature/{ticket_id}-*", cwd=worktree)
-    feature_branch: Optional[str] = None
+    local_branches: list[str] = []
     if ok and br_out.strip():
-        feature_branch = br_out.strip().splitlines()[0].strip().lstrip("* ")
+        local_branches = [
+            ln.strip().lstrip("* ") for ln in br_out.strip().splitlines() if ln.strip()
+        ]
+    feature_branch: Optional[str] = local_branches[0] if local_branches else None
     if feature_branch is None:
         ok2, br_out2, _ = _try(
             "git", "branch", "-r", "--list", f"origin/feature/{ticket_id}-*", cwd=worktree,
         )
         if ok2 and br_out2.strip():
             feature_branch = br_out2.strip().splitlines()[0].strip().removeprefix("origin/")
+    # More than one feature/<N>-* branch is ambiguous (a stale, mismatched-slug
+    # leftover alongside the real one — e.g. feature/117-display-bangkok-time vs
+    # feature/117-chunk-overlap-fix). Picking [0] alphabetically can grab the wrong
+    # one and merge unrelated work / loop on MERGE_CONFLICT. Surface it; the
+    # fresh-dispatch cleanup below deletes every divergent local one.
+    if len(local_branches) > 1:
+        sys.stdout.write(str(f"  [hygiene] WARNING: {len(local_branches)} feature/{ticket_id}-* "
+            f"branches present ({', '.join(local_branches)}) — only one should exist; "
+            f"clearing stale divergent ones on fresh dispatch") + "\n")
+        sys.stdout.flush()
 
     if not is_retry:
         # 5a — fresh-ticket: a pre-existing feature branch at a divergent SHA is a
@@ -388,32 +407,38 @@ def _worktree_hygiene(
         # #928/929/932/933. Uncommitted work was already quarantine-stashed in
         # step 3; a remote-only ref (origin/...) never blocks a fresh checkout, so
         # only a local branch needs clearing and the remote is left untouched.
-        if feature_branch is not None and base_sha:
-            ok, branch_sha, _ = _try("git", "rev-parse", feature_branch, cwd=worktree)
+        # Delete EVERY divergent local feature/<N>-* branch (not just the first),
+        # so a stale mismatched-slug leftover can't survive to be picked or merged.
+        for fb in (local_branches or ([feature_branch] if feature_branch else [])):
+            if not base_sha:
+                break
+            ok, branch_sha, _ = _try("git", "rev-parse", fb, cwd=worktree)
             branch_sha = branch_sha.strip() if ok else None
-            if branch_sha and branch_sha != base_sha:
-                ok_local, _, _ = _try(
-                    "git", "show-ref", "--verify", "--quiet",
-                    f"refs/heads/{feature_branch}", cwd=worktree,
+            if not (branch_sha and branch_sha != base_sha):
+                continue
+            ok_local, _, _ = _try(
+                "git", "show-ref", "--verify", "--quiet",
+                f"refs/heads/{fb}", cwd=worktree,
+            )
+            if not ok_local:
+                continue
+            detail = (
+                f"Stale feature branch {fb} at {branch_sha[:8]} "
+                f"(base {base_sha[:8]}) — deleting so the coder recreates it "
+                f"fresh off base"
+            )
+            sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
+            sys.stdout.flush()
+            _try("git", "branch", "-D", fb, cwd=worktree)
+            try:
+                structured_log.warn(
+                    "stale_feature_branch_cleared",
+                    f"deleted stale local {fb} before fresh dispatch of #{ticket_id}",
+                    issue_num=int(ticket_id), branch=fb,
+                    stale_sha=branch_sha, base_sha=base_sha,
                 )
-                if ok_local:
-                    detail = (
-                        f"Stale feature branch {feature_branch} at {branch_sha[:8]} "
-                        f"(base {base_sha[:8]}) — deleting so the coder recreates it "
-                        f"fresh off base"
-                    )
-                    sys.stdout.write(str(f"  [hygiene] {detail}") + "\n")
-                    sys.stdout.flush()
-                    _try("git", "branch", "-D", feature_branch, cwd=worktree)
-                    try:
-                        structured_log.warn(
-                            "stale_feature_branch_cleared",
-                            f"deleted stale local {feature_branch} before fresh dispatch of #{ticket_id}",
-                            issue_num=int(ticket_id), branch=feature_branch,
-                            stale_sha=branch_sha, base_sha=base_sha,
-                        )
-                    except Exception:
-                        pass
+            except Exception:
+                pass
     else:
         # 5b — retry-round: checkout feature branch and rebase onto base
         if feature_branch is not None:

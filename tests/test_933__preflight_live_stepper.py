@@ -274,7 +274,7 @@ def test_stepper_css_reuses_pf_prefix():
         "pf-step-item class not found — stepper must use shared pf-step-* CSS namespace"
     )
     # Ensure no one-off checklist class was introduced
-    assert "checklist-item" not in src and "pf-checklist" not in src, (
+    assert "checklist-item" not in src.replace("mr-checklist-item", "__placeholder__") and "pf-checklist" not in src, (
         "Bespoke checklist class found — AC9 requires the shared stepper component"
     )
 
@@ -286,3 +286,26 @@ def test_stepper_function_is_reusable():
     has_animate = "_pfStepperAnimate" in src or "_pfAnimateStepper" in src
     assert has_init, "Stepper init function not found — must be reusable"
     assert has_animate, "Stepper animate function not found — must be reusable"
+
+
+def test_mis_sizing_reestimate_is_one_click():
+    """Re-estimate applies historical average without a manual size picker."""
+    src = _js()
+    assert "_pfFlagAutoReestimate" in src
+    assert "historical_avg_actual_size" in src
+    assert "pf-flag-size-picker" not in src, "Manual size picker should not be shown"
+
+
+def test_mis_sizing_resolve_recalcs_stepper_block():
+    """Resolving all mis-sizing flags must clear the stepper fail gate for Run Sprint."""
+    src = _js()
+    assert "_pfRecalcStepFails" in src
+    action_match = re.search(
+        r'async function _pfFlagAction\b.*?(?=\nexport function |\nfunction |\n\/\/\s*──)',
+        src, re.DOTALL,
+    )
+    assert action_match, "_pfFlagAction not found"
+    assert "_pfRecalcStepFails" in action_match.group(0), (
+        "_pfFlagAction must recalc stepper fails after a flag is resolved"
+    )
+

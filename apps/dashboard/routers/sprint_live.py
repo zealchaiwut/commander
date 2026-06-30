@@ -625,6 +625,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             "dispatch_level": iss.get("dispatch_level", 0),
             "coder_model":          iss.get("coder_model"),
             "coder_backend":        iss.get("coder_backend"),
+            "coder_provider":       iss.get("coder_provider"),
             "tester_attempt_count": tac,
             "coder_attempt":        coder_attempt,
             "pipeline_stage":       pipeline_stage,

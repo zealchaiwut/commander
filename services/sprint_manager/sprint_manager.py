@@ -117,6 +117,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
     _select_coder_backend,
+    get_role_profile,
 )
 
 from services.sprint_manager.failures import (  # noqa: E402,F401
@@ -636,6 +637,7 @@ def _db_agent_start_sm(
     attempt_kind: Optional[str] = None,
     log_path: Optional[str] = None,
     backend: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -646,6 +648,7 @@ def _db_agent_start_sm(
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
     `backend` is 'cline' or 'claude-code' (issue #920).
+    `provider` is the LLM provider identifier, e.g. 'ICA' (issue #1673).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -659,6 +662,7 @@ def _db_agent_start_sm(
             log_path=log_path,
             backend=backend,
             project=_CURRENT_RUN_PROJECT,
+            provider=provider,
         )
     except (Exception, SystemExit):
         pass
@@ -912,12 +916,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         candidates = [
-            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
         ]
     if not candidates:
         ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
         if ok and out.strip():
-            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -3406,13 +3410,15 @@ def run_sprint_loop(
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
                 issue_state.coder_routing_reason = _ser_route_reason  # tooltip/sub-label on running pane badge (issue #1427)
                 issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
+                issue_state.coder_provider = get_role_profile("coder", cfg)  # CCPROXY_PROFILE for ICA badge (issue #1673)
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
                     attempt_kind=_next_attempt_kind,
                     log_path=str(_issue_log_path(num, cfg=cfg)),
                     backend=_next_coder_backend,
-                )  # issue #764, #789, #787, #783, #920
+                    provider=issue_state.coder_provider,
+                )  # issue #764, #789, #787, #783, #920, #1673
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",

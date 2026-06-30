@@ -79,6 +79,10 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Definition-of-Ready mode (issue #1486): off skips the check, warn surfaces gaps,
     # block enforces them. Returned in preflight metadata as dor_mode.
     "definition_of_ready_mode": {"secret": False, "default": "warn"},
+    # Global LLM provider toggle (issue #1667): "anthropic" or "ica".
+    # Changing this via POST /api/settings/provider instructs the claude-proxy
+    # to activate the matching profile; PUT /api/settings rejects this field.
+    "llmProvider": {"secret": False, "default": "anthropic"},
     # Secrets (presence-only; values never returned)
     "github_token": {"secret": True, "default": None},
     "database_url": {"secret": True, "default": None, "env_var": "DATABASE_URL"},

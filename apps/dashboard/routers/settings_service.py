@@ -174,6 +174,9 @@ def _invalidate_home_cache(slug: str) -> None:
 
 # ── Settings validation helpers ───────────────────────────────────────────────
 
+_PROXY_CONTROLLED_FIELDS: frozenset[str] = frozenset({"llmProvider"})
+
+
 def _validate_settings_body(body: dict) -> None:
     """Validate a PUT settings body. Raises HTTPException 422/400."""
     from fastapi import HTTPException
@@ -184,6 +187,15 @@ def _validate_settings_body(body: dict) -> None:
                 detail=(
                     f"Field '{key}' is a secret and cannot be written via this endpoint. "
                     "Use the dedicated secret management endpoint."
+                ),
+            )
+        if key in _PROXY_CONTROLLED_FIELDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Field '{key}' must be changed via POST /api/settings/provider — "
+                    "it instructs the claude-proxy to switch profiles and cannot be "
+                    "written directly through PUT /api/settings."
                 ),
             )
     unknown = [k for k in body if k not in KNOWN_FIELDS]

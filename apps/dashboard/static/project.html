@@ -22718,18 +22718,34 @@ function _bcEnsureSprintsLoaded(job) {
  *  draft. Estimates fill in via SSE; the user is NOT held here. */
 function bcStartEstimation() {
   _bcEstimateGatePassed = true;
-  // Fire sizing BEFORE advancing — _bcReestimateDraft reads the bc-draft-title/
-  // body inputs, which _bcRenderStep2 removes from the DOM. Running it after the
-  // re-render made every estimate silently no-op (the inputs were already gone).
   if (_bcJobId && _bcJobState) {
-    (_bcJobState.tickets || []).forEach(t => {
-      if (t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
-          && t.estimate_state !== 'sized' && t.estimate_state !== 'estimating') {
-        _bcReestimateDraft(t.index);  // fire-and-forget → /estimate-draft
-      }
-    });
+    const toEstimate = (_bcJobState.tickets || []).filter(t =>
+      t.state === 'draft_ready' && !_bcRemovedRows.has(t.index)
+      && t.estimate_state !== 'sized' && t.estimate_state !== 'estimating');
+    // Optimistically mark estimating so the stage stays on ② Estimate IMMEDIATELY
+    // — hides the Sprint dropdowns + Continue during the wait instead of flashing
+    // them until the SSE 'estimating' update lands (which confused the operator
+    // and let them click Continue before sizing started).
+    toEstimate.forEach(t => { t.estimate_state = 'estimating'; });
+    _bcRenderStep2();
+    // Bounded concurrency = the job's BA concurrency (not all-at-once).
+    _bcEstimatePool(toEstimate.map(t => t.index), _bcJobState.concurrency || 3);
+  } else {
+    _bcRenderStep2();
   }
-  _bcRenderStep2();                 // advance to Sprint
+}
+
+/** Run _bcReestimateDraft over `indices` with at most `limit` requests in flight
+ *  (mirrors the BA draft concurrency), instead of firing all at once. */
+async function _bcEstimatePool(indices, limit) {
+  const queue = indices.slice();
+  const n = Math.max(1, Math.min(limit || 1, queue.length || 1));
+  const worker = async () => {
+    while (queue.length) {
+      await _bcReestimateDraft(queue.shift());
+    }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
 }
 
 /** Estimate stage → Sprint stage without sizing. */
@@ -24150,17 +24166,20 @@ function _bcOnDraftEdit(index) {
 
 async function _bcReestimateDraft(index) {
   if (!_bcJobId) return;
+  // Prefer live editor content; fall back to job-state title/body when the draft
+  // inputs are no longer in the DOM (the estimate pool runs over time, after the
+  // stage re-renders away the editors). Editor edits are saved into the ticket
+  // by _bcRenderStep2 before re-render, so the fallback carries the latest text.
+  const t = (_bcJobState && _bcJobState.tickets || []).find(x => x.index === index);
   const titleEl = document.getElementById(`bc-draft-title-${index}`);
   const bodyEl  = document.getElementById(`bc-draft-body-${index}`);
-  if (!titleEl && !bodyEl) return;
+  const title = titleEl ? titleEl.value : (t ? t.title : undefined);
+  const body  = bodyEl  ? bodyEl.value  : (t ? t.body  : undefined);
+  if (title == null && body == null) return;
   try {
     await fetch(`/api/tickets/bulk/${_bcJobId}/estimate-draft`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        index,
-        title: titleEl ? titleEl.value : undefined,
-        body:  bodyEl  ? bodyEl.value  : undefined,
-      }),
+      body: JSON.stringify({ index, title, body }),
     });
     // The SSE ticket_update refreshes the size pill when sizing completes.
   } catch (_) {}
@@ -24309,11 +24328,19 @@ function _bcFinishPosting() {
   _bcPosting = false;
   _bcPostingComplete = false;
   if (_bcEventSource) { _bcEventSource.close(); _bcEventSource = null; }
-  localStorage.removeItem('bc_job_id');
-  _bcJobId = null;
-  _bcShowStep(1);
-  switchTab('sprint-mgmt');
-  loadSprintMgmt();
+  // Reset everything to a FRESH bulk-create so the operator can start the next
+  // batch immediately (no extra clicks) — stay on the Bulk Create tab instead of
+  // bouncing to the sprint board.
+  _bcEstimateGatePassed = false;
+  _bcSprintConfirmed = false;
+  _bcDraftSelections = new Set();
+  _bcRemovedRows = new Set();
+  _bcPostingIndices = [];
+  try { _bcClearDraftStorage(); } catch (_) {}   // drop the just-posted prompts
+  const ta = document.getElementById('bc-textarea');
+  if (ta) ta.value = '';
+  _bcRecoverFromStaleJob();   // clears job, shows fresh Step 1, repopulates controls
+  if (typeof _bcUpdateCounter === 'function') _bcUpdateCounter();
 }
 
 // Retry one failed ticket from the hung posting view with pasted text. Drops

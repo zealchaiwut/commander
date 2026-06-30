@@ -784,21 +784,23 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
-                                "subscription rate limit", "rate_limit"]
+
+from services.sprint_manager.api_client import (  # noqa: E402
+    is_retryable_rate_limit as _is_retryable_rate_limit,
+    _RATE_LIMIT_SIGNALS,
+)
 
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
-    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+    """Detect rate-limit / quota-exceeded errors in agent subprocess output.
 
-    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    Delegates to api_client.is_retryable_rate_limit which covers both the
+    Anthropic OAuth subscription shape and ICA/IBM gateway quota-exceeded
+    formats (issue #1669).  The return shape is unchanged so all callers
+    (dispatch.py proxy, handle_post_coder, handle_post_tester) continue to
+    work without modification.
     """
-    lower = output.lower()
-    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
-        return False, None
-    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
-    retry_after = int(m.group(1)) if m else None
-    return True, retry_after
+    return _is_retryable_rate_limit(output)
 
 
 # ── failure categories ────────────────────────────────────────────────────────

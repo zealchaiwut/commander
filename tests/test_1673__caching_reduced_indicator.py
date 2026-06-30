@@ -16,11 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
-import sqlite3
-import tempfile
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"

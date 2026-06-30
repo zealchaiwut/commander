@@ -20866,6 +20866,22 @@ let _smgmtMoveModalIssue  = null;  // single-issue move
 let _smgmtMoveModalFrom   = null;
 let _smgmtMoveModalIssues = [];    // non-empty ⇒ bulk move via selection bar
 
+/** Next free top-level sprint number = max sprint-N base across all known
+ *  sprints + 1. Restores the helper the Move-to modal ("Create new sprint N")
+ *  and ghost code call — it was removed with the drag/ghost code (71ee6310) but
+ *  still referenced, so the move modal threw ReferenceError and did nothing. */
+function _smgmtGhostComputeNextFree() {
+  const nums = [];
+  const collect = (lbl) => {
+    const m = /^sprint-(\d+)/.exec(lbl || '');
+    if (m) nums.push(parseInt(m[1], 10));
+  };
+  Object.keys(_smgmtBySprint || {}).forEach(collect);
+  (_smgmtOrderedLabels || []).forEach(collect);
+  ((_smgmtData && _smgmtData.order) || []).forEach(collect);
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+}
+
 function _smgmtMoveTargets() {
   const partOf = lbl => {
     const m = /^sprint-(\d+)(?:\.(\d+))?$/.exec(lbl || '');

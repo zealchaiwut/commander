@@ -140,6 +140,9 @@ class SprintState:
     max_coder_slots:         int                 = 1
     max_tester_slots:        int                 = 1
     active_coder_slots:      int                 = 0
+    # LLM provider active at sprint start (issue #1670). Persisted so historical
+    # run views show the provider that was in use, not the current global setting.
+    llm_provider:            Optional[str]       = None
 
     def __post_init__(self) -> None:
         # Not a dataclass field — excluded from to_dict/from_dict and serialization.
@@ -173,6 +176,7 @@ class SprintState:
             "max_coder_slots":           self.max_coder_slots,
             "max_tester_slots":          self.max_tester_slots,
             "active_coder_slots":        self.active_coder_slots,
+            "llm_provider":              self.llm_provider,
         }
 
     @staticmethod
@@ -204,6 +208,7 @@ class SprintState:
         s.max_coder_slots          = int(d.get("max_coder_slots", 1))
         s.max_tester_slots         = int(d.get("max_tester_slots", 1))
         s.active_coder_slots       = int(d.get("active_coder_slots", 0))
+        s.llm_provider             = d.get("llm_provider")
         return s
 
     def save(self, path: Path) -> None:

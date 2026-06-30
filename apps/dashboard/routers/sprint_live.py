@@ -710,6 +710,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "complete_count":       complete_count,
         "est_remaining_minutes": est_remaining_minutes,
         "issues":               issues_out,
+        "llm_provider":         status_data.get("llm_provider"),
         **_live_metrics.lane_capacity(status_data),
         "active_coder_slots":   active_coder_slots,
         "active_tester_slots":  active_tester_slots,

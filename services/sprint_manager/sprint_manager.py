@@ -2700,6 +2700,16 @@ class _SprintPreflightResult:
     early_exit: bool = False
 
 
+def _read_active_llm_provider() -> str:
+    """Return the active LLM provider from global settings (issue #1670)."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting_scoped("global", "app_config")
+        return stored.get("llmProvider") or "anthropic"
+    except Exception:
+        return "anthropic"
+
+
 def run_sprint_preflight(
     label: str,
     alert_modes: list,
@@ -2743,6 +2753,7 @@ def run_sprint_preflight(
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
+    _sprint_llm_provider = _read_active_llm_provider()
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -2800,6 +2811,7 @@ def run_sprint_preflight(
                 sprint_number   = sprint_num,
                 project         = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2817,6 +2829,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -2844,6 +2857,7 @@ def run_sprint_preflight(
                 sprint_number = sprint_num,
                 project       = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2861,6 +2875,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues

@@ -12,11 +12,9 @@ it shadows apps/dashboard/config.py causing ImportError.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Optional
-from unittest.mock import MagicMock, patch
 
 import pytest
 

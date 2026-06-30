@@ -31,6 +31,22 @@ _DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".yml", ".json"})
 _CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
 
 
+def get_role_profile(role: str, cfg: Optional["SprintConfig"]) -> Optional[str]:
+    """Return the CCPROXY_PROFILE override for a given agent role (issue #1671).
+
+    Returns None when cfg is None or when no per-role profile is configured —
+    the caller should then leave CCPROXY_PROFILE unset so the global value
+    from the parent environment is inherited.
+    """
+    if cfg is None:
+        return None
+    if role == "coder":
+        return cfg.coder_profile or None
+    if role == "tester":
+        return cfg.tester_profile or None
+    return None
+
+
 def _plan_json_use_cline_followups(
     sprint_label: str,
     cfg: Optional["SprintConfig"] = None,

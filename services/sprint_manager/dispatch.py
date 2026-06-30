@@ -34,6 +34,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _resolve_coder_model,
     _resolve_cline_model,
     _effective_coder_backend,
+    get_role_profile,
 )
 from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
@@ -783,6 +784,9 @@ def _dispatch_coder(
     sub_env = os.environ.copy()
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = dispatch_model  # hook records model_name on token_usage rows
+    _coder_profile = get_role_profile("coder", cfg)
+    if _coder_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _coder_profile
 
     if coder_backend == "cline":
         # Cline headless backend (issue #917).
@@ -1271,6 +1275,9 @@ def _dispatch_tester(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = tester_model  # hook records model_name on token_usage rows
+    _tester_profile = get_role_profile("tester", cfg)
+    if _tester_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _tester_profile
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:

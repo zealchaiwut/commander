@@ -24992,6 +24992,28 @@ function _gssRender(data) {
       </div>
     </div>
 
+    <div class="gss-card" id="gss-provider-card">
+      <div class="gss-card-head">
+        <i class="ti ti-plug-connected" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">LLM Provider</div><div class="gss-card-sub">Active backend for all dispatched agents — instructs the claude-proxy on change</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Active provider<span class="hint">Switches claude-proxy profile; in-flight sessions are unaffected</span></div>
+          <div class="gss-control">
+            <div class="settings-btn-group" id="gss-provider-btns">
+              <button class="settings-btn${(data.llmProvider || 'anthropic') === 'anthropic' ? ' active' : ''}" data-value="anthropic" onclick="_gssSetProvider('anthropic')">Anthropic</button>
+              <button class="settings-btn${data.llmProvider === 'ica' ? ' active' : ''}" data-value="ica" onclick="_gssSetProvider('ica')">ICA</button>
+            </div>
+          </div>
+        </div>
+        <div class="gss-row" id="gss-provider-status" style="display:none">
+          <div class="gss-label"></div>
+          <div class="gss-control"><span id="gss-provider-status-text" style="font-size:13px"></span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="gss-card">
       <div class="gss-card-head">
         <i class="ti ti-lock" style="color:var(--text-muted)"></i>
@@ -25235,6 +25257,42 @@ function openSettingsModal() {
 function _gssHideFeedback() {
   const el = document.getElementById('gss-feedback');
   if (el) { el.textContent = ''; el.className = 'gss-feedback'; }
+}
+
+// ── LLM Provider toggle (issue #1667) ─────────────────────────────────────────
+
+async function _gssSetProvider(provider) {
+  const btns = document.querySelectorAll('#gss-provider-btns .settings-btn');
+  const statusRow = document.getElementById('gss-provider-status');
+  const statusText = document.getElementById('gss-provider-status-text');
+  btns.forEach(b => b.disabled = true);
+  if (statusRow) statusRow.style.display = '';
+  if (statusText) { statusText.style.color = 'var(--text-muted)'; statusText.textContent = 'Switching…'; }
+  try {
+    const resp = await fetch('/api/settings/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    btns.forEach(b => {
+      b.classList.toggle('active', b.dataset.value === data.provider);
+    });
+    if (statusText) { statusText.style.color = 'var(--color-ok, #22c55e)'; statusText.textContent = `Active provider: ${data.provider}`; }
+    if (_gssData) _gssData.llmProvider = data.provider;
+  } catch (err) {
+    if (statusText) { statusText.style.color = 'var(--color-error, #ef4444)'; statusText.textContent = `Error: ${err.message}`; }
+    const prevProvider = (_gssData && _gssData.llmProvider) || 'anthropic';
+    btns.forEach(b => {
+      b.classList.toggle('active', b.dataset.value === prevProvider);
+    });
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
 }
 
 // ── Settings Sync helpers (issue #644) ────────────────────────────────────────

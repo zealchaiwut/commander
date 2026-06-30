@@ -951,12 +951,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         candidates = [
-            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
+            line.strip().removeprefix("origin/") for line in out.strip().splitlines() if line.strip()
         ]
     if not candidates:
         ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
         if ok and out.strip():
-            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
+            candidates = [line.strip().lstrip("* ") for line in out.strip().splitlines() if line.strip()]
     if not candidates:
         return None
     if len(candidates) == 1:

@@ -17,8 +17,6 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, patch
 
 import pytest
 

@@ -306,10 +306,16 @@ export async function _bcConfirm() {
 
 /** Parse head/base branch names from a merge-conflict error message. */
 function _bcParseConflictInfo(msg) {
-  // Matches "Merge sprint-97.5 → sprint-97.4 failed" (or ASCII >)
-  const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+)\s+failed/i);
+  // Matches the child→parent step "Merge sprint-97.5 → sprint-97.4 failed" AND
+  // the base→develop step "Merge sprint-92 → develop failed" (or ASCII >). The
+  // base may be another sprint branch or the integration branch (develop/master)
+  // — without the develop/master alternative the base step got no "Resolve with
+  // AI" button (the last lineage step ships to develop).
+  const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+|develop|master)\s+failed/i);
   if (!m) return null;
-  return { head: `sprint/${m[1]}`, base: `sprint/${m[2]}` };
+  const baseRaw = m[2];
+  const base = /^(develop|master)$/i.test(baseRaw) ? baseRaw : `sprint/${baseRaw}`;
+  return { head: `sprint/${m[1]}`, base };
 }
 
 /** Inject a "Resolve with AI" button before the Done button in the board overlay. */

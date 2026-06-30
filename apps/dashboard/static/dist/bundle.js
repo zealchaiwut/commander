@@ -4352,10 +4352,12 @@ ${listing}`)) {
     }
   }
   function _bcParseConflictInfo(msg) {
-    const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+)\s+failed/i);
+    const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+|develop|master)\s+failed/i);
     if (!m)
       return null;
-    return { head: `sprint/${m[1]}`, base: `sprint/${m[2]}` };
+    const baseRaw = m[2];
+    const base = /^(develop|master)$/i.test(baseRaw) ? baseRaw : `sprint/${baseRaw}`;
+    return { head: `sprint/${m[1]}`, base };
   }
   function _bcInjectResolveButton(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
     const doneEl = document.getElementById("smgmt-op-done");

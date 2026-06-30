@@ -136,6 +136,7 @@ def list_runs() -> list[dict]:
                 ar.duration_seconds,
                 ar.outcome,
                 ar.log_path,
+                ar.provider,
                 s.state      AS sprint_state,
                 s.started_at AS sprint_started_at,
                 s.ended_at   AS sprint_ended_at
@@ -172,6 +173,7 @@ def list_runs() -> list[dict]:
             "finished_at": r["finished_at"],
             "duration_seconds": r["duration_seconds"],
             "log_path": r["log_path"],
+            "provider": r["provider"],
         })
         # Ticket outcome = worst agent outcome
         if _outcome_rank(r["outcome"]) < _outcome_rank(ticket["outcome"]):

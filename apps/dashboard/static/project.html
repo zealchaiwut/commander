@@ -8314,6 +8314,10 @@
       padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
     .node-backend--cline  { background: var(--green-bg); color: var(--green); }
     .node-backend--claude { background: var(--text-sub); color: var(--bg); opacity: .65; }
+    /* ICA caching-reduced indicator (issue #1673) */
+    .node-caching-badge { flex: 0 0 auto; font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 999px; cursor: help;
+      background: rgba(210,153,34,.15); color: var(--yellow, #e3b341); }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
     .node.queued { opacity: .72; }
@@ -16022,6 +16026,10 @@ function _smgmtRailNodeHtml(iss, live) {
     const isCline = iss.coder_backend === 'cline';
     backendBadge = `<span class="node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}">${isCline ? 'CLINE' : 'CLAUDE'}</span>`;
   }
+  // caching: reduced badge (issue #1673): ICA proxy strips prompt caching headers
+  const cachingBadge = iss.coder_provider === 'ICA'
+    ? `<span class="node-caching-badge" title="Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn">caching: reduced</span>`
+    : '';
   let queuedEst = '';
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
@@ -16035,7 +16043,7 @@ function _smgmtRailNodeHtml(iss, live) {
     + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
     + ` onclick="event.stopPropagation()" title="Open #${num} on GitHub">#${escHtml(String(num))}</a>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
-    + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
+    + sizePill + agentBadge + backendBadge + cachingBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
 }
 
@@ -16154,6 +16162,17 @@ function _smgmtRailPatch(label, live) {
       backendEl.className = `node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}`;
       backendEl.textContent = isCline ? 'CLINE' : 'CLAUDE';
     } else if (backendEl) { backendEl.remove(); }
+    // Caching-reduced badge in-place update (issue #1673)
+    let cachingEl = nodeEl.querySelector('.node-caching-badge');
+    if (iss.coder_provider === 'ICA') {
+      if (!cachingEl) {
+        cachingEl = document.createElement('span');
+        cachingEl.className = 'node-caching-badge';
+        cachingEl.title = 'Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn';
+        nodeEl.appendChild(cachingEl);
+      }
+      cachingEl.textContent = 'caching: reduced';
+    } else if (cachingEl) { cachingEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);
     const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;

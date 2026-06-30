@@ -11439,6 +11439,7 @@ let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
 const _smgmtSelectedIssues = new Set();
 function _smgmtClearSelection() {
   _smgmtSelectedIssues.clear();
+  _smgmtLastSelectedNum = null;
   document.querySelectorAll('.smgmt-ticket-cb:checked').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('.smgmt-ticket.is-selected').forEach((r) => r.classList.remove('is-selected'));
   _smgmtUpdateSelectionUI();
@@ -11450,15 +11451,38 @@ function _smgmtClearSelection() {
  *  Interactive children (link, buttons, the checkbox) opt out via stopPropagation. */
 function _smgmtRowClickSelect(event, num) {
   if (event.target.closest('a, button, input, .smgmt-row-menu-btn')) return;
+  // Shift+click selects the contiguous range from the last-clicked anchor to
+  // this row (in the current rendered order), like a file list.
+  if (event.shiftKey && _smgmtLastSelectedNum != null && _smgmtLastSelectedNum !== num) {
+    const order = Array.from(document.querySelectorAll('.smgmt-ticket[data-issue]'))
+      .map((r) => parseInt(r.dataset.issue, 10))
+      .filter((n) => !isNaN(n));
+    const a = order.indexOf(_smgmtLastSelectedNum);
+    const b = order.indexOf(num);
+    if (a !== -1 && b !== -1) {
+      try { window.getSelection && window.getSelection().removeAllRanges(); } catch (_) {}
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      for (let i = lo; i <= hi; i++) {
+        const n = order[i];
+        const rcb = document.querySelector('#smgmt-ticket-' + n + ' .smgmt-ticket-cb');
+        if (rcb) rcb.checked = true;
+        _smgmtToggleSelect(n, true);
+      }
+      _smgmtLastSelectedNum = num;
+      return;
+    }
+  }
   const cb = document.querySelector('#smgmt-ticket-' + num + ' .smgmt-ticket-cb');
   const checked = cb ? !cb.checked : !_smgmtSelectedIssues.has(num);
   if (cb) cb.checked = checked;
   _smgmtToggleSelect(num, checked);
+  _smgmtLastSelectedNum = checked ? num : null;
 }
 
 function _smgmtToggleSelect(num, checked) {
   if (checked) _smgmtSelectedIssues.add(num);
   else _smgmtSelectedIssues.delete(num);
+  if (checked) _smgmtLastSelectedNum = num;  // anchor for shift+click range (incl. checkbox clicks)
   const row = document.getElementById('smgmt-ticket-' + num);
   if (row) row.classList.toggle('is-selected', !!checked);
   _smgmtUpdateSelectionUI();

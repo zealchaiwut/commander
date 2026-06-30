@@ -8169,6 +8169,15 @@
     }
     .run-head-meta { color: var(--text-sub); }
     .run-head-watchdog { color: var(--text-muted); font-size: 11px; }
+    .provider-badge {
+      display: inline-flex; align-items: center; padding: 1px 7px;
+      border-radius: 999px; border: 1px solid var(--border);
+      font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      font-family: var(--mono); color: var(--text-sub); background: var(--surface-2);
+      flex-shrink: 0;
+    }
+    .provider-badge--ica { color: var(--blue); border-color: var(--blue); background: var(--blue-bg, rgba(59,130,246,.08)); }
+    .provider-badge--anthropic { color: var(--text-sub); }
 
     /* ── Segmented progress gauge (issue #1107) ──────────────────────────────
        Four-segment horizontal bar: done (green) · retrying (amber) ·
@@ -15760,6 +15769,13 @@ function _smgmtGaugeHtml(live) {
   return '<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">' + bar + legend + statRow + '</div>';
 }
 
+function _smgmtProviderBadgeHtml(provider) {
+  if (!provider) return '';
+  const safeProvider = escHtml(provider);
+  const cls = provider === 'ica' ? 'provider-badge--ica' : 'provider-badge--anthropic';
+  return '<span class="provider-badge ' + cls + '" title="LLM provider: ' + safeProvider + '">' + safeProvider + '</span>';
+}
+
 function _smgmtRunHeadHtml(label, live, isLinger) {
   const display = sprintLabelDisplay(label);
   // Elapsed / est-remaining line removed from the running header (#1) — only the
@@ -15785,6 +15801,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       <div class="run-head-left">
         <span class="run-head-title">${escHtml(display)}</span>
         ${badge}
+        ${_smgmtProviderBadgeHtml(live && live.llm_provider)}
       </div>
       ${cancelBtn}
     </div>
@@ -17819,8 +17836,9 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
     stateStr = 'queued';
   }
 
+  const providerBadge = _smgmtProviderBadgeHtml(live && live.llm_provider);
   const metaHtml = '<div class="ai-row-meta">'
-    + sizePill + fixBadge + agentBadge
+    + sizePill + fixBadge + agentBadge + providerBadge
     + '<span class="ai-row-state">' + escHtml(stateStr) + '</span>'
     + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>'
     + '</div>';
@@ -18031,7 +18049,8 @@ function _smgmtAiPatchRowMeta(metaEl, iss, live) {
       agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';
     }
   }
-  metaEl.innerHTML = sizePill + fixBadge + agentBadge
+  const providerBadge = _smgmtProviderBadgeHtml(live && live.llm_provider);
+  metaEl.innerHTML = sizePill + fixBadge + agentBadge + providerBadge
     + '<span class="ai-row-state">' + escHtml(_smgmtAiRowStateStr(iss, live)) + '</span>'
     + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>';
 }

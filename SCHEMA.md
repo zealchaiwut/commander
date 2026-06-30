@@ -370,6 +370,19 @@ Returns ordered per-issue segment data sourced from DB `agent_runs` (no render-t
 > It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
 > See `docs/features/api.md` for the full response shape reference.
 
+### Settings — LLM provider toggle (issue #1667)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/settings/provider` | Returns `{"provider": "anthropic"\|"ica"}` — the currently active backend (from the global `app_config.llmProvider` setting, default `anthropic`). |
+| `POST` | `/api/settings/provider` | Switches the global LLM provider. Body `{"provider": "anthropic"\|"ica"}`. Validates the value (HTTP 400 if unknown), calls the claude-proxy profile endpoint, then persists `llmProvider`. Returns `{"provider": ..., "ok": true}`. |
+
+**Mechanism.** `POST /api/settings/provider` calls `POST {COMMANDER_PROXY_URL}/profile` with `{"name": "<provider>"}` (default `COMMANDER_PROXY_URL=http://localhost:9090`) to instruct the local claude-proxy to activate the named profile. The new value is persisted to the global `app_config` settings key **only after** the proxy confirms. If the proxy is unreachable or returns non-2xx, the endpoint raises HTTP 503 and does **not** persist — no silent fallback. In-flight agent sessions keep their existing proxy connections; only newly dispatched agents inherit the changed profile. Service logic lives in `apps/dashboard/routers/llm_provider_service.py`.
+
+`llmProvider` is a proxy-controlled field: `PUT /api/settings` rejects it with HTTP 422 (`_PROXY_CONTROLLED_FIELDS` in `settings_service.py`) so the value can only change through the proxy-aware endpoint above. It is registered in `KNOWN_FIELDS` (`services/sprint_manager/settings_schema.py`) as `{"secret": False, "default": "anthropic"}`.
+
+The active provider at sprint start is captured on `SprintState.llm_provider` (read from `app_config.llmProvider`, falling back to `anthropic`), persisted in `state.json`, and exposed in the live snapshot as `llm_provider` so historical/running run views show the provider that was actually in use for that run rather than the current global setting (issue #1670).
+
 ### Sprint file maintenance (issue #735)
 
 Archives stale per-sprint runtime files for a project's *finished* sprints into a reversible `.commander/sprints/archive/` subfolder. A sprint counts as finished only when it has a posted summary issue **or** a summary markdown **and** no live process is running it. Only `sprint-N-plan.json`, the zero-issue `sprint-N.json` placeholder, and `sprint-N-state.json` are moved; `sprint-N-status.json`, `sprint-N-estimate.json`, and summary markdown are never touched, and nothing is ever deleted. Idempotent. Also available as the CLI `python scripts/clean_sprint_files.py --project <id> [--dry-run]`.

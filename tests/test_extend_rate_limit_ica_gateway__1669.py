@@ -10,11 +10,8 @@ Acceptance Criteria coverage:
 Tests verify that is_retryable_rate_limit (used by sprint_manager._is_rate_limit_error)
 correctly identifies both Anthropic and ICA error formats and returns the same tuple shape.
 """
-import os
 import sys
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -80,7 +77,7 @@ def test_ica_and_anthropic_return_same_tuple_shape():
 
     assert isinstance(ica_result, tuple) and len(ica_result) == 2
     assert isinstance(anthropic_result, tuple) and len(anthropic_result) == 2
-    assert type(ica_result[0]) == type(anthropic_result[0])  # both bool
+    assert type(ica_result[0]) is type(anthropic_result[0])  # both bool
     assert ica_result[1] is None or isinstance(ica_result[1], int)
     assert anthropic_result[1] is None or isinstance(anthropic_result[1], int)
 

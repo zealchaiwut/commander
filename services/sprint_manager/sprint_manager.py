@@ -787,7 +787,6 @@ _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
 
 from services.sprint_manager.api_client import (  # noqa: E402
     is_retryable_rate_limit as _is_retryable_rate_limit,
-    _RATE_LIMIT_SIGNALS,
 )
 
 
@@ -914,12 +913,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         candidates = [
-            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
         ]
     if not candidates:
         ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
         if ok and out.strip():
-            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
     if not candidates:
         return None
     if len(candidates) == 1:

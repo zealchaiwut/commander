@@ -442,6 +442,8 @@ def _terminalize_superseded_orphans(project: str) -> list[str]:
 def reconcile_project(project: str, limit: int = 40) -> list[str]:
     """Reconcile terminal sprints for *project*. Returns labels that were updated."""
     updated: list[str] = []
+    for lbl in _terminalize_superseded_orphans(project):
+        updated.append(lbl)
     rows = _db().list_sprints_lifecycle()
     checked = 0
     for row in rows:

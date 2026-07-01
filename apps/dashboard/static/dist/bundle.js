@@ -6724,65 +6724,6 @@ Resolve manually and re-run Bulk complete.`,
     }).join("");
     return `<div class="smgmt-focus-guide-title">What to do, in order</div>` + stepHtml;
   }
-  function smgmtPlanningRowMenu(event, issueNum, label) {
-    event.stopPropagation();
-    const existing = document.getElementById("smgmt-plan-row-menu");
-    if (existing)
-      existing.remove();
-    const menu = document.createElement("div");
-    menu.id = "smgmt-plan-row-menu";
-    menu.className = "smgmt-ctx-menu smgmt-plan-ctx-menu";
-    menu.setAttribute("role", "menu");
-    menu.innerHTML = [
-      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${issueNum},'${escHtml(label)}',false);document.getElementById('smgmt-plan-row-menu')?.remove()"><i class="ti ti-arrows-move"></i> Move</button>`,
-      `<button class="smgmt-ctx-item smgmt-ctx-item--remove" role="menuitem" onclick="event.stopPropagation();smgmtPlanningRemove(${issueNum},'${escHtml(label)}')"><i class="ti ti-x"></i> Remove</button>`,
-      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();smgmtPlanningReorder(${issueNum},'${escHtml(label)}')"><i class="ti ti-arrows-up-down"></i> Reorder</button>`
-    ].join("");
-    document.body.appendChild(menu);
-    const rect = event.currentTarget.getBoundingClientRect();
-    menu.style.position = "fixed";
-    menu.style.top = rect.bottom + 4 + "px";
-    menu.style.left = rect.left + "px";
-    menu.style.zIndex = "9999";
-    const close = (e) => {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener("click", close);
-      }
-    };
-    setTimeout(() => document.addEventListener("click", close), 0);
-  }
-  function smgmtPlanningRemove(issueNum, label) {
-    const menu = document.getElementById("smgmt-plan-row-menu");
-    if (menu)
-      menu.remove();
-    if (typeof _smgmtRowMenuOpen === "function") {
-      const fakeEvt = { currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body, stopPropagation() {
-      } };
-      _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
-    }
-  }
-  function smgmtPlanningReorder(issueNum, label) {
-    const menu = document.getElementById("smgmt-plan-row-menu");
-    if (menu)
-      menu.remove();
-    const ticketEl = document.getElementById(`smgmt-ticket-${issueNum}`);
-    if (!ticketEl)
-      return;
-    const container = ticketEl.closest(".smgmt-plan-tickets");
-    if (!container)
-      return;
-    const rows = [...container.querySelectorAll(".smgmt-plan-ticket")];
-    const idx = rows.indexOf(ticketEl);
-    if (idx < 0)
-      return;
-    const choice = window.confirm(
-      `Move #${issueNum} \u2014 OK = move up one row, Cancel = move down one row`
-    );
-    const target = choice ? rows[idx - 1] : rows[idx + 2];
-    if (target)
-      container.insertBefore(ticketEl, choice ? target : target);
-  }
   function smgmtAddToDraft(issueNum, draftLabel) {
     if (!draftLabel)
       return;
@@ -6795,59 +6736,6 @@ Resolve manually and re-run Bulk complete.`,
     };
     if (typeof _smgmtRowMenuOpen === "function") {
       _smgmtRowMenuOpen(fakeEvt, issueNum, null, false);
-    }
-  }
-  var _smgmtGoalSaveTimers = {};
-  function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
-    const btn = document.getElementById(runBtnId);
-    if (!btn)
-      return;
-    if (_smgmtSignoffState(sprintLabel) === "pending") {
-      btn.disabled = true;
-      btn.title = "Approve the sprint plan before running";
-      return;
-    }
-    if (!_smgmtGoalRequired()) {
-      const tickets = _smgmtBySprint && _smgmtBySprint[sprintLabel] || [];
-      const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-      btn.disabled = !canRun;
-      btn.title = canRun ? "" : "No dispatchable tickets \u2014 add tickets from the backlog";
-      return;
-    }
-    const hasGoal = inputEl && inputEl.value.trim().length > 0;
-    btn.disabled = !hasGoal;
-    btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
-  }
-  function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
-    _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
-    if (!sprintLabel)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    clearTimeout(_smgmtGoalSaveTimers[sprintLabel]);
-    _smgmtGoalSaveTimers[sprintLabel] = setTimeout(async () => {
-      try {
-        await fetch("/api/sprints/goal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project: repo,
-            sprint_label: sprintLabel,
-            goal: inputEl.value.trim()
-          })
-        });
-      } catch (_) {
-      }
-    }, 400);
-  }
-  function smgmtOpenTicketPicker(label) {
-    if (typeof _smgmtPlanNextBtn === "function") {
-      _smgmtPlanNextBtn(label);
-    } else {
-      const backlogEl = document.getElementById("smgmt-backlog-pane");
-      if (backlogEl)
-        backlogEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
   function _smgmtUpdateAncestorRow(label, outcome) {
@@ -8337,11 +8225,6 @@ Proceed anyway?`)) {
   globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
   globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
   globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
-  globalThis.smgmtDraftGoalInput = smgmtDraftGoalInput;
-  globalThis.smgmtPlanningRowMenu = smgmtPlanningRowMenu;
-  globalThis.smgmtPlanningRemove = smgmtPlanningRemove;
-  globalThis.smgmtPlanningReorder = smgmtPlanningReorder;
-  globalThis.smgmtOpenTicketPicker = smgmtOpenTicketPicker;
   globalThis.smgmtAddToDraft = smgmtAddToDraft;
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;

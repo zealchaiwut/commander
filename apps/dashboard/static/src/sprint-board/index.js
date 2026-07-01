@@ -73,8 +73,7 @@ import {
   // Ancestor row (issue #1043)
   _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
   _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
-  smgmtDraftGoalInput, smgmtPlanningRowMenu, smgmtPlanningRemove,
-  smgmtPlanningReorder, smgmtOpenTicketPicker, smgmtAddToDraft,
+  smgmtAddToDraft,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -198,12 +197,6 @@ globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
 globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
 globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
 
-// Draft sprint card helpers (issue #1044)
-globalThis.smgmtDraftGoalInput = smgmtDraftGoalInput;
-globalThis.smgmtPlanningRowMenu = smgmtPlanningRowMenu;
-globalThis.smgmtPlanningRemove = smgmtPlanningRemove;
-globalThis.smgmtPlanningReorder = smgmtPlanningReorder;
-globalThis.smgmtOpenTicketPicker = smgmtOpenTicketPicker;
 globalThis.smgmtAddToDraft = smgmtAddToDraft;
 
 // Run-on-schedule toggle (issue #863)

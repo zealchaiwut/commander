@@ -64,6 +64,10 @@ class TokenUsageEvent(BaseModel):
     # owner/repo from COMMANDER_PROJECT (sprint-dispatched agents). Optional;
     # interactive sessions fall back to the working-dir basename.
     project:       Optional[str] = None
+    # ICA metered-path fields (issue #1672): sent by post_tool_used.py hook.
+    cache_read_tokens:  int = 0
+    cache_write_tokens: int = 0
+    ccproxy_profile:    Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +232,9 @@ def receive_token_usage(event: TokenUsageEvent) -> dict:
         event.output_tokens,
         agent_role=event.agent_role,
         model_name=event.model_name,
+        cache_read_tokens=event.cache_read_tokens,
+        cache_write_tokens=event.cache_write_tokens,
+        ccproxy_profile=event.ccproxy_profile,
     )
     return {"type": "update", "event": event.model_dump()}
 

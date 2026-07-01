@@ -83,3 +83,14 @@ def get_logs_ticket_stats(sprint_label: str, project: Optional[str] = None) -> A
     the durable ``agent_runs`` rows; logic lives in ``logs_stats_service``.
     """
     return logs_stats_service.ticket_stats(sprint_label, project=project)
+
+
+@router.get("/runs/{sprint_label}/ica-cost")
+def get_logs_ica_cost(sprint_label: str, project: Optional[str] = None) -> Any:
+    """Per-sprint ICA cost summary for the Logs-tab expanded run (issue #1672 AC5).
+
+    Returns pre-computed ICA token totals and USD cost for a sprint, read from
+    the ``agent_runs`` table. Only includes successful ICA runs with a positive
+    cost (AC7). Returns ``{is_ica, run_count, total_tokens, cost_usd, sprint_label}``.
+    """
+    return logs_stats_service.ica_cost_summary(sprint_label, project=project)

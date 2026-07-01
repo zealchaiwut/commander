@@ -191,6 +191,10 @@ from services.sprint_manager.state import (  # noqa: E402
     GateResult,
     SprintSummary,
 )
+from services.sprint_manager.ica_preflight import (  # noqa: E402
+    check_ica_readiness,
+    IcaPreflightError,
+)
 
 try:
     # issue #860
@@ -367,6 +371,20 @@ FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# ── ICA preflight helpers (issue #1668) ──────────────────────────────────────
+
+def _get_llm_provider(eff_repo: Optional[str] = None) -> str:
+    """Return the configured llmProvider ('anthropic' or 'ica'), default 'anthropic'."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting("app_config", project=eff_repo)
+        if isinstance(stored, dict):
+            return stored.get("llmProvider", "anthropic")
+    except Exception:
+        pass
+    return "anthropic"
+
 
 # ── API cost pricing (USD per million tokens) ─────────────────────────────────
 # All agents (coder, tester, preflight) run via Claude Code CLI which is
@@ -784,21 +802,22 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
-                                "subscription rate limit", "rate_limit"]
+
+from services.sprint_manager.api_client import (  # noqa: E402
+    is_retryable_rate_limit as _is_retryable_rate_limit,
+)
 
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
-    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+    """Detect rate-limit / quota-exceeded errors in agent subprocess output.
 
-    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    Delegates to api_client.is_retryable_rate_limit which covers both the
+    Anthropic OAuth subscription shape and ICA/IBM gateway quota-exceeded
+    formats (issue #1669).  The return shape is unchanged so all callers
+    (dispatch.py proxy, handle_post_coder, handle_post_tester) continue to
+    work without modification.
     """
-    lower = output.lower()
-    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
-        return False, None
-    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
-    retry_after = int(m.group(1)) if m else None
-    return True, retry_after
+    return _is_retryable_rate_limit(output)
 
 
 # ── failure categories ────────────────────────────────────────────────────────
@@ -912,12 +931,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         candidates = [
-            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
         ]
     if not candidates:
         ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
         if ok and out.strip():
-            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -2699,6 +2718,16 @@ class _SprintPreflightResult:
     early_exit: bool = False
 
 
+def _read_active_llm_provider() -> str:
+    """Return the active LLM provider from global settings (issue #1670)."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting_scoped("global", "app_config")
+        return stored.get("llmProvider") or "anthropic"
+    except Exception:
+        return "anthropic"
+
+
 def run_sprint_preflight(
     label: str,
     alert_modes: list,
@@ -2742,6 +2771,7 @@ def run_sprint_preflight(
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
+    _sprint_llm_provider = _read_active_llm_provider()
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -2767,6 +2797,28 @@ def run_sprint_preflight(
     base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
         target_branch = sprint_branch
+
+    # ── ICA preflight check (issue #1668) ─────────────────────────────────────
+    if _get_llm_provider(eff_repo) == "ica":
+        try:
+            check_ica_readiness()
+        except IcaPreflightError as _pf_err:
+            sys.stdout.write(str(f"[ICA preflight] {_pf_err}") + "\n")
+            _blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            return _SprintPreflightResult(
+                state=_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
@@ -2799,6 +2851,7 @@ def run_sprint_preflight(
                 sprint_number   = sprint_num,
                 project         = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2816,6 +2869,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -2843,6 +2897,7 @@ def run_sprint_preflight(
                 sprint_number = sprint_num,
                 project       = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2860,6 +2915,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues

@@ -10,9 +10,9 @@ import os
 import pytest
 
 BASE_URL = os.environ.get("UAT_BASE_URL") or (
-    "http://localhost:" + os.environ.get("UAT_PORT", "")
+    f"http://localhost:{os.environ['UAT_PORT']}" if os.environ.get("UAT_PORT") else ""
 )
-if not BASE_URL.startswith("http"):
+if not BASE_URL:
     pytest.skip(
         "UAT_BASE_URL / UAT_PORT not set — run manual ICA preflight UAT against live env",
         allow_module_level=True,

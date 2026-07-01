@@ -206,3 +206,22 @@ def ticket_stats(
 
     tickets.sort(key=lambda t: t["issue_number"])
     return {"sprint_label": sprint_label, "tickets": tickets}
+
+
+def ica_cost_summary(
+    sprint_label: str,
+    project: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return ICA cost summary for a sprint from the metrics DB (issue #1672 AC5/AC6).
+
+    Reads pre-computed cost_usd from agent_runs — no rate recalculation at call
+    time (AC6). Only includes successful ICA runs with a positive cost (AC7).
+    Returns:
+      {is_ica, run_count, total_tokens, cost_usd, sprint_label}
+    """
+    try:
+        summary = _db().ica_sprint_cost_summary(sprint_label, project=project)
+    except Exception:
+        summary = {"is_ica": False, "run_count": 0, "total_tokens": 0, "cost_usd": 0.0}
+    summary["sprint_label"] = sprint_label
+    return summary

@@ -46,6 +46,7 @@ class IssueState:
     coder_routing_reason: Optional[str] = None  # routing reason for coder badge tooltip (issue #1403)
     coder_pid:            Optional[int] = None  # OS PID of the coder subprocess (issue #777)
     tester_pid:           Optional[int] = None  # OS PID of the tester subprocess (issue #777)
+    coder_provider:       Optional[str] = None  # CCPROXY_PROFILE value, e.g. 'ICA' (issue #1673)
 
     def to_dict(self) -> dict:
         return {
@@ -70,6 +71,7 @@ class IssueState:
             "coder_routing_reason": self.coder_routing_reason,
             "coder_pid":          self.coder_pid,
             "tester_pid":         self.tester_pid,
+            "coder_provider":     self.coder_provider,
         }
 
     @staticmethod
@@ -97,6 +99,7 @@ class IssueState:
         iss.coder_routing_reason = d.get("coder_routing_reason")
         iss.coder_pid = d.get("coder_pid")
         iss.tester_pid = d.get("tester_pid")
+        iss.coder_provider = d.get("coder_provider")
         return iss
 
     def set_agent_status(self, status: str) -> None:

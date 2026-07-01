@@ -252,8 +252,15 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `base_sha` | text | Git SHA of the expected base branch at dispatch; nullable (issue #788) |
 | `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
+| `provider` | text | LLM provider identifier for this run (e.g. `ICA`); set from the role's `CCPROXY_PROFILE` at dispatch; nullable (issue #1673) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
+
+The `provider` column drives the **`caching: reduced`** indicator on the live
+board (`project.html`) and run browser (`run_browser.html`): when an agent run's
+provider is `ICA`, the proxy strips prompt-caching headers (full context is
+re-sent each turn), so a yellow badge flags the higher token cost. It surfaces in
+the live snapshot as `coder_provider` and in `/api/runs` as `provider`.
 
 ### sprint_history (issue #805)
 

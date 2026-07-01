@@ -52,6 +52,20 @@ def _token_window_sums(role: str, since_utc: str) -> "tuple[int, int]":
         return (0, 0)
 
 
+def _token_window_sums_full(role: str, since_utc: str) -> "tuple[int, int, int, int, bool]":
+    """Best-effort (raw_input, output, cache_read, cache_write, is_ica) for *role* (issue #1672).
+
+    Extends _token_window_sums with the ICA token breakdown. `is_ica` is True when
+    CCPROXY_PROFILE was set during the dispatch (IBM Cloud metered path). Falls back
+    to (0, 0, 0, 0, False) when the dashboard DB is unavailable.
+    """
+    try:
+        import db  # apps/dashboard on sys.path
+        return db.sum_token_usage_window_full(role, since_utc, _token_window_utc_now())
+    except (Exception, SystemExit):
+        return (0, 0, 0, 0, False)
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

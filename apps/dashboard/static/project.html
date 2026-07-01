@@ -7600,6 +7600,20 @@
     }
     .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
+    .logs-ica-cost { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 5px 20px 5px 44px; }
+    .logs-run-row.expanded .logs-ica-cost:not(:empty) { display: block; }
+    .logs-ica-cost-row {
+      display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .logs-ica-badge {
+      display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 9px;
+      background: var(--blue-bg,rgba(59,130,246,.12)); color: var(--blue); font-weight: 700;
+      font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+    }
+    .logs-ica-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+    .logs-ica-metric i { font-size: 12px; color: var(--text-sub); }
+    .logs-ica-cost-val { color: var(--text); font-weight: 600; }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -8323,6 +8337,10 @@
       padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
     .node-backend--cline  { background: var(--green-bg); color: var(--green); }
     .node-backend--claude { background: var(--text-sub); color: var(--bg); opacity: .65; }
+    /* ICA caching-reduced indicator (issue #1673) */
+    .node-caching-badge { flex: 0 0 auto; font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 999px; cursor: help;
+      background: rgba(210,153,34,.15); color: var(--yellow, #e3b341); }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
     .node.queued { opacity: .72; }
@@ -16030,6 +16048,10 @@ function _smgmtRailNodeHtml(iss, live) {
     const isCline = iss.coder_backend === 'cline';
     backendBadge = `<span class="node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}">${isCline ? 'CLINE' : 'CLAUDE'}</span>`;
   }
+  // caching: reduced badge (issue #1673): ICA proxy strips prompt caching headers
+  const cachingBadge = iss.coder_provider === 'ICA'
+    ? `<span class="node-caching-badge" title="Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn">caching: reduced</span>`
+    : '';
   let queuedEst = '';
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
@@ -16043,7 +16065,7 @@ function _smgmtRailNodeHtml(iss, live) {
     + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
     + ` onclick="event.stopPropagation()" title="Open #${num} on GitHub">#${escHtml(String(num))}</a>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
-    + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
+    + sizePill + agentBadge + backendBadge + cachingBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
 }
 
@@ -16162,6 +16184,17 @@ function _smgmtRailPatch(label, live) {
       backendEl.className = `node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}`;
       backendEl.textContent = isCline ? 'CLINE' : 'CLAUDE';
     } else if (backendEl) { backendEl.remove(); }
+    // Caching-reduced badge in-place update (issue #1673)
+    let cachingEl = nodeEl.querySelector('.node-caching-badge');
+    if (iss.coder_provider === 'ICA') {
+      if (!cachingEl) {
+        cachingEl = document.createElement('span');
+        cachingEl.className = 'node-caching-badge';
+        cachingEl.title = 'Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn';
+        nodeEl.appendChild(cachingEl);
+      }
+      cachingEl.textContent = 'caching: reduced';
+    } else if (cachingEl) { cachingEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);
     const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
@@ -26097,6 +26130,8 @@ const _logsState = {
   loadingEvents: new Set(),
   ticketStats: {},
   loadingStats: new Set(),
+  icaCost: {},
+  loadingIcaCost: new Set(),
   issues: null,
   viewMode: 'activity',
   pollTimer: null,
@@ -26620,6 +26655,10 @@ function logsRenderTimeline() {
     if (statsEl && _logsState.ticketStats[runId]) {
       statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
     }
+    const icaCostEl = document.getElementById(`logs-ica-cost-${runId}`);
+    if (icaCostEl && _logsState.icaCost[runId]) {
+      icaCostEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
+    }
     const eventsEl = row.querySelector('.logs-run-events');
     if (eventsEl && _logsState.events[runId]) {
       eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
@@ -26650,6 +26689,11 @@ function _logsRunRowHtml(run) {
   <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
     isExpanded && _logsState.ticketStats[run.run_id]
       ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
+      : ''
+  }</div>
+  <div class="logs-ica-cost" id="logs-ica-cost-${escHtml(run.run_id)}">${
+    isExpanded && _logsState.icaCost[run.run_id]
+      ? _logsIcaCostHtml(_logsState.icaCost[run.run_id])
       : ''
   }</div>
   <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
@@ -26696,6 +26740,28 @@ async function _logsFetchTicketStats(sprintLabel, project) {
   } catch (_) { return { tickets: [] }; }
 }
 
+function _logsIcaCostHtml(summary) {
+  if (!summary || !summary.is_ica) return '';
+  const cost = (typeof summary.cost_usd === 'number') ? `$${summary.cost_usd.toFixed(6)}` : '—';
+  const tokens = (typeof summary.total_tokens === 'number') ? summary.total_tokens.toLocaleString() : '—';
+  const runs = summary.run_count || 0;
+  return `<div class="logs-ica-cost-row">` +
+    `<span class="logs-ica-badge">ICA</span>` +
+    `<span class="logs-ica-metric" title="Successful ICA agent runs"><i class="ti ti-robot"></i>${escHtml(String(runs))} runs</span>` +
+    `<span class="logs-ica-metric" title="Total tokens (ICA path)"><i class="ti ti-coin"></i>${escHtml(tokens)}</span>` +
+    `<span class="logs-ica-metric logs-ica-cost-val" title="USD cost (ICA meter rates)"><i class="ti ti-currency-dollar"></i>${escHtml(cost)}</span>` +
+  `</div>`;
+}
+
+async function _logsFetchIcaCost(sprintLabel, project) {
+  try {
+    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ica-cost?project=${encodeURIComponent(project)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return { is_ica: false };
+    return await resp.json();
+  } catch (_) { return { is_ica: false }; }
+}
+
 function _logsEventsHtml(events) {
   const filtered = _logsFilterEvents(events);
   if (filtered.length === 0) {
@@ -26738,6 +26804,20 @@ async function logsToggleRun(headerEl) {
       _logsState.ticketStats[runId] = stats;
       const el = document.getElementById(`logs-stats-${runId}`);
       if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsTicketStatsHtml(stats);
+    });
+  }
+
+  // ICA cost summary (#1672) — fetched once per run, shown only for ICA sprints.
+  if (_logsState.icaCost[runId]) {
+    const icaEl = document.getElementById(`logs-ica-cost-${runId}`);
+    if (icaEl) icaEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
+  } else if (!_logsState.loadingIcaCost.has(runId)) {
+    _logsState.loadingIcaCost.add(runId);
+    _logsFetchIcaCost(sprintLabel, project).then(summary => {
+      _logsState.loadingIcaCost.delete(runId);
+      _logsState.icaCost[runId] = summary;
+      const el = document.getElementById(`logs-ica-cost-${runId}`);
+      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsIcaCostHtml(summary);
     });
   }
 

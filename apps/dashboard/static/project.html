@@ -13888,14 +13888,6 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
         </button>
       </li>`);
   }
-  if (conflictsCount > 0) {
-    checklistItems.push(`<li class="mr-checklist-item">
-        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
-        <button class="mr-cl-link" onclick="smgmtApplyDagOrder(${jsLabel})">
-          Resolve ${conflictsCount} file conflict${conflictsCount !== 1 ? 's' : ''}
-        </button>
-      </li>`);
-  }
   if (xlCount > 0) {
     const xlNums = (pfHints && pfHints.xlNumbers) || [];
     checklistItems.push(`<li class="mr-checklist-item">
@@ -13919,7 +13911,6 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   if (pfHints && pfHints.missingAC > 0) hintParts.push(`${pfHints.missingAC} missing AC`);
   if (pfHints && pfHints.unsized > 0) hintParts.push(`${pfHints.unsized} unsized`);
   if (unestimatedCount > 0) hintParts.push(`${unestimatedCount} unestimated`);
-  if (conflictsCount > 0) hintParts.push(`${conflictsCount} file conflict${conflictsCount > 1 ? 's' : ''}`);
 
   let warn;
   if (hintParts.length > 0) {

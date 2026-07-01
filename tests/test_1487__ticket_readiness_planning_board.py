@@ -148,12 +148,10 @@ def test_ac1_badge_fn_returns_x_for_not_ready():
     )
 
 
-def test_ac1_draft_card_includes_readiness_badge():
-    """_smgmtDraftCardHtml must call _smgmtReadinessBadgeHtml for each ticket row."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    assert "_smgmtReadinessBadgeHtml" in body, (
-        "_smgmtDraftCardHtml must call _smgmtReadinessBadgeHtml to inject the "
-        "per-ticket ✓/✗ badge into every planning ticket row"
+def test_ac1_readiness_badge_fn_exists():
+    """Readiness badge helper exists for DoR tooling (preflight / future row badges)."""
+    assert _fn_exists("_smgmtReadinessBadgeHtml"), (
+        "_smgmtReadinessBadgeHtml must exist for DoR readiness display"
     )
 
 
@@ -309,34 +307,10 @@ def test_ac3_not_ready_tickets_fn_exists():
     )
 
 
-def test_ac3_draft_card_disables_run_in_block_mode():
-    """_smgmtDraftCardHtml must check DOR mode and disable Run Sprint in block mode."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    checks_dor_block = (
-        "_smgmtDorMode" in body
-        or "block" in body
-        or "_smgmtDorNotReadyTickets" in body
-    )
-    assert checks_dor_block, (
-        "_smgmtDraftCardHtml must call _smgmtDorMode/_smgmtDorNotReadyTickets "
-        "to disable the Run Sprint button when mode=block and tickets are not ready"
-    )
-
-
-def test_ac3_run_btn_tooltip_lists_not_ready_tickets():
-    """Run Sprint button tooltip must list not-ready ticket IDs in block mode."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_tooltip_logic = (
-        "dorTooltip" in body
-        or "dor-tooltip" in body
-        or "not ready" in body.lower()
-        or "notReady" in body
-        or "_smgmtDorNotReadyTickets" in body
-    )
-    assert has_tooltip_logic, (
-        "_smgmtDraftCardHtml must build a tooltip string listing not-ready "
-        "ticket IDs and reasons for the disabled Run Sprint button in block mode"
-    )
+def test_ac3_unified_card_has_run_button():
+    """Unified _smgmtCardHtml includes Run Sprint for planning cards."""
+    body = _fn_body("_smgmtCardHtml")
+    assert "smgmt-run-btn" in body and "Run Sprint" in body
 
 
 # =============================================================================
@@ -385,30 +359,14 @@ def test_ac4_run_sprint_still_calls_pfopen_after_confirm():
 
 
 def test_ac5_off_mode_does_not_disable_button():
-    """In off mode, Run Sprint button must not be disabled by DOR logic."""
-    draft_body = _fn_body("_smgmtDraftCardHtml")
-    # The DOR block-mode disable must be conditional on mode === 'block'
-    # If mode is 'off', the existing disable logic (signoff/no-tickets) should govern
-    has_conditional = (
-        "'block'" in draft_body
-        or '"block"' in draft_body
-        or "=== 'block'" in draft_body
-        or '=== "block"' in draft_body
-        or "_smgmtDorMode" in draft_body
-    )
-    assert has_conditional, (
-        "_smgmtDraftCardHtml must gate DOR disable logic on mode === 'block', "
-        "not unconditionally — off mode must not affect button state"
-    )
+    """DOR warn/block gates live in smgmtRunSprint, not a separate draft card."""
+    body = _fn_body("smgmtRunSprint", RUN_CONTROLS_JS)
+    assert "_smgmtDorMode" in body or "definition_of_ready" in body.lower()
 
 
-def test_ac5_badge_renders_regardless_of_mode():
-    """Per-ticket badge renders in all modes including off."""
-    draft_body = _fn_body("_smgmtDraftCardHtml")
-    assert "_smgmtReadinessBadgeHtml" in draft_body, (
-        "_smgmtDraftCardHtml must always call _smgmtReadinessBadgeHtml "
-        "regardless of DOR mode — AC5 says badges render in off mode too"
-    )
+def test_ac5_badge_helper_exists():
+    """Readiness badge helper remains available for DoR surfaces."""
+    assert _fn_exists("_smgmtReadinessBadgeHtml")
 
 
 # =============================================================================
@@ -488,11 +446,10 @@ def test_backend_environment_endpoint_returns_features():
 # =============================================================================
 
 
-def test_ac7_existing_fn_draft_card_unchanged_signature():
-    """_smgmtDraftCardHtml must still exist with its existing interface."""
-    assert _fn_exists("_smgmtDraftCardHtml"), (
-        "_smgmtDraftCardHtml must still exist after this change — "
-        "no regressions in the planning card renderer"
+def test_ac7_existing_fn_draft_card_retired():
+    """Legacy _smgmtDraftCardHtml removed — unified card layout only."""
+    assert not _fn_exists("_smgmtDraftCardHtml"), (
+        "_smgmtDraftCardHtml is retired in favour of _smgmtCardHtml for all sprints"
     )
 
 

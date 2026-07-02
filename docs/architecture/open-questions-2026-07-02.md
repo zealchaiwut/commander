@@ -66,7 +66,7 @@ plan.json `parent` = immediate parent (drives merge topology); DB
   become dual-writes to retire later.
 - **B Leave as-is,** now documented.
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — consolidate into DB**: add `immediate_parent` column beside `parent_label`; rerun writes both; file copies become dual-writes to retire later.
 
 ## Q5 — Two canonical lifecycle read accessors
 
@@ -78,7 +78,7 @@ sanctioned reader.
   accessor. Mechanical.
 - **B Keep both,** document the difference.
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete the routers accessor**; migrate callers to `apps/dashboard/sprint_state.py`.
 
 ## Q6 — Queued rerun children invisible to the DB
 
@@ -93,7 +93,7 @@ implicit `draft`).
 - **B Accept plan.json as the pre-run store;** DB authority starts at first
   dispatch. Document only (done).
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — write a DB row at creation/queue time** so the DB is complete pre-run. (Adjusted for Q1: with `planned`/signoff deprecated, use `draft` at create and at rerun-queue.)
 
 ## Q7 — SQLite dual-writer robustness
 
@@ -107,7 +107,7 @@ the "authoritative" DB.
 - **B Also add a drift alarm:** reconcile flags plan.json-newer-than-DB.
 - **C Accept as-is** — reconcile sweep eventually heals.
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — enable WAL + busy_timeout in `get_conn()`** and log (not swallow) failed lifecycle writes.
 
 ## Q8 — Run-lock sentinel mismatch
 
@@ -120,7 +120,7 @@ truthy value as locked. Two guard layers, different semantics.
 - **B Unify on `"1"`** everywhere and pass the label separately.
 - **C Leave documented.**
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — unify on truthy-check** in `assert_run_mutable`; keep setting the label value for context.
 
 ## Q9 — Disk-at-render fallbacks: migrate or bless?
 
@@ -134,7 +134,7 @@ run roster fallback.
 - **B Hard migration effort:** tickets to remove each fallback; strict §1.7.
 - **C Status quo** (documented as deviations).
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless the fallbacks explicitly**; rewrite §1.7 as "DB first, sanctioned disk fallback, never disk-only"; migrate opportunistically.
 
 ## Q10 — Closed-without-UAT tickets read as resolved
 
@@ -147,7 +147,7 @@ manually vanishes from the rework signal → sprint promotes to
 - **B Not intended:** reconcile should also check closed tickets that never
   got `UAT` and keep the sprint `needs_rework` (or flag it).
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — intended**: closing a ticket is the sanctioned human "drop it"; document as the waive mechanism.
 
 ## Q11 — Reconcile tightening (flap / TTL / starvation)
 
@@ -163,7 +163,7 @@ non-final sprints.
 - **B Fix all three** including a promote-direction lag guard.
 - **C None** — all self-heal eventually.
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — fix (b) TTL-on-success and (c) sweep cursor**; leave (a) flap as self-healing.
 
 ## Q12 — `_lineage_fully_in_develop` has tests but no production caller
 
@@ -178,7 +178,7 @@ comment says needs_rework→completed is never reconciler-driven, yet
 - **B Wire it:** sweep auto-completes superseded ancestors once lineage is
   verified merged.
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete or fold** `_lineage_fully_in_develop` after comparing with `_sprint_db_mark_merged_completed`'s check; no wiring into the sweep.
 
 ## Q13 — Neon leftovers: delete or bless export-only
 
@@ -192,4 +192,4 @@ them wired invites someone to reconnect runtime code against stale docs.
 - **B Delete entirely** along with the export scripts (Neon abandoned).
 - **C Leave as-is** (docs now say export-only).
 
-**Decision:** _______
+**Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless export-only**: docstring + import-guard test preventing dashboard/server imports of `sprint_repo.py`/`models.py`.

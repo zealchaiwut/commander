@@ -1005,8 +1005,8 @@ export async function _smgmtLoadGoals(orderedLabels) {
       const goal = (data.goal || "").trim();
       if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
         if (goal) goalEl.value = goal;
-        const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-        _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
+        // _smgmtSyncDraftRunBtn was removed when draft cards were retired
+        // (20d60034); the orphaned call is dropped here.
       } else if (goal) {
         goalEl.textContent = goal;
         goalEl.title = goal;

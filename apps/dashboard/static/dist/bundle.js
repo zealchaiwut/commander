@@ -5492,8 +5492,6 @@ Resolve manually and re-run Bulk complete.`,
         if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
           if (goal)
             goalEl.value = goal;
-          const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-          _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
         } else if (goal) {
           goalEl.textContent = goal;
           goalEl.title = goal;

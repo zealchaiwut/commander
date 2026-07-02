@@ -24,6 +24,12 @@ _log = logging.getLogger(__name__)
 _RECONCILE_TTL_SECONDS = 60.0
 _last_reconcile_at: dict[str, float] = {}
 
+# Per-project rotating offset into the eligible-rows list for reconcile_project's
+# scan window (issue #1690) — lets a project with more than `limit` eligible
+# terminal sprints get full coverage across sweeps instead of only ever
+# re-checking the same first N.
+_reconcile_cursor: dict[str, int] = {}
+
 _TERMINAL_STATES = frozenset({
     "ready_to_merge", "needs_rework", "completed",
     "cancelled", "failed",  # legacy stored values
@@ -445,10 +451,8 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
     for lbl in _terminalize_superseded_orphans(project):
         updated.append(lbl)
     rows = _db().list_sprints_lifecycle()
-    checked = 0
+    eligible: list[dict] = []
     for row in rows:
-        if checked >= limit:
-            break
         label = row.get("label") or ""
         if not label:
             continue
@@ -464,7 +468,21 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
         #    still move, so reconcile just those.
         if state in ("running", "draft", "planned", "planning", "completed", "deleted"):
             continue
-        checked += 1
+        eligible.append(row)
+
+    n = len(eligible)
+    if n == 0:
+        return updated
+
+    # Rotate the scan window per project (issue #1690) so a project with more
+    # than `limit` eligible rows still gets every row reconciled eventually —
+    # a fixed "first N in list order" window let rows past #40 starve forever.
+    start = _reconcile_cursor.get(project, 0) % n
+    window = [eligible[(start + i) % n] for i in range(min(limit, n))]
+    _reconcile_cursor[project] = (start + len(window)) % n
+
+    for row in window:
+        label = row["label"]
         if reconcile_sprint_label(label, project):
             updated.append(label)
     return updated
@@ -795,7 +813,6 @@ async def reconcile_project_background(
     last = _last_reconcile_at.get(project)
     if last is not None and (now - last) < _RECONCILE_TTL_SECONDS:
         return  # coalesce rapid history refreshes — within TTL, skip the gh fan-out
-    _last_reconcile_at[project] = now
     lifecycle_updated: list[str] = []
     reconciliation_updated: list[str] = []
 
@@ -808,8 +825,13 @@ async def reconcile_project_background(
     try:
         lifecycle_updated, reconciliation_updated = await asyncio.to_thread(_run_sync)
     except Exception as exc:
+        # Issue #1690: record the timestamp only on success. Stamping it
+        # before the pass ran meant a transient failure (e.g. one gh call
+        # rate-limited) blocked retries for the full 60s window too — now a
+        # failed pass is retried on the very next History load.
         _log.warning("sprint reconcile failed for %s: %s", project, exc)
         return
+    _last_reconcile_at[project] = now
     updated = sorted(set(lifecycle_updated) | set(reconciliation_updated))
     if not updated or broadcast is None:
         return

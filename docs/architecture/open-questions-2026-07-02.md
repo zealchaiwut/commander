@@ -193,3 +193,28 @@ them wired invites someone to reconnect runtime code against stale docs.
 - **C Leave as-is** (docs now say export-only).
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless export-only**: docstring + import-guard test preventing dashboard/server imports of `sprint_repo.py`/`models.py`.
+
+---
+
+## Ticket Map (filed 2026-07-02)
+
+| Ticket | Decision(s) | Title |
+|--------|-------------|-------|
+| #1686 | Q1 | Deprecate planned lifecycle state and plan.json signoff gate |
+| #1687 | Q1 | Deprecate advisor and brief features (park until platform stable) |
+| #1688 | Q7 | SQLite hardening: WAL + busy_timeout, surface swallowed lifecycle write failures |
+| #1689 | Q8 | Unify run-lock sentinel (truthy check) |
+| #1690 | Q11 | Reconcile sweep: TTL on success only; cursor the 40-row window |
+| #1691 | Q4 | Consolidate lineage: immediate_parent DB column |
+| #1692 | Q5 | Remove duplicate lifecycle read accessor |
+| #1693 | Q6 | Draft DB row at sprint create and rerun-queue |
+| #1694 | Q12 | Resolve _lineage_fully_in_develop (delete or fold) |
+| #1695 | Q13 | Neon export-only: docstrings + import-guard test |
+| #1696 | Q2 | Merge Sprint soft rework guard |
+| #1697 | Q3 | Sweep auto-settles confirmed orphaned running sprints |
+| #1698 | Q9+Q10 | Docs: sanctioned disk fallbacks + waive-by-close rule |
+
+Suggested sequencing: #1686/#1687 (deprecations) → #1688/#1689/#1690 (hardening)
+→ #1691→#1693 (lineage/DB model; #1693 benefits from #1691 and #1686) →
+#1694/#1695 (cleanups) → #1696/#1697 (guards; #1697 pairs with #1690's sweep
+changes) → #1698 (docs, anytime).

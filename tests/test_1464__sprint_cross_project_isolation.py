@@ -229,10 +229,14 @@ class TestDeriveOutcomeLifecycleProjectScoping:
 # ── AC5: reconcile service passes project to get_sprint_children ──────────────
 
 class TestReconcileServicePassesProject:
-    """AC5: sprint_reconcile_service._lineage_fully_in_develop passes project
-    to get_sprint_children so it doesn't pick up another project's children."""
+    """AC5: get_sprint_children is project-scoped so a reconcile-adjacent lookup
+    doesn't pick up another project's children.
 
-    def test_lineage_fully_in_develop_uses_project_scoped_children(self, tmp_path):
+    (Originally written against sprint_reconcile_service._lineage_fully_in_develop,
+    deleted in issue #1694 as dead code with zero production callers — the
+    underlying project-scoping guarantee this test verifies is unchanged.)"""
+
+    def test_get_sprint_children_is_project_scoped(self, tmp_path):
         # commander child exists; perf-coach has a stray child too
         _insert_sprint("sprint-66.1", _COMMANDER, parent_label=_BASE)
         _insert_sprint("sprint-66.2", _PERF_COACH, parent_label=_BASE)

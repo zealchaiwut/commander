@@ -104,34 +104,6 @@ def transition_sprint_state(
     return bool(getattr(res, "accepted", False))
 
 
-def _lineage_fully_in_develop(label: str, project: str) -> bool:
-    """True when *label* is a lineage member whose work is already in develop.
-
-    Used to auto-complete a superseded ancestor (B2). Two conditions:
-      1. The sprint is part of a rerun lineage — it is itself a child
-         (``sprint-N.M``) or it has at least one child row. A standalone
-         needs_rework sprint with no children is a genuine failed run awaiting
-         rerun and must never be auto-completed.
-      2. Its sprint branch has no commits missing from develop — i.e. every
-         commit it produced has merged up the chain into develop.
-
-    Both checks are conservative: a missing repo, a still-open base→develop PR,
-    or any compare error leaves commits "unmerged" and blocks promotion.
-    """
-    if not project:
-        return False
-    try:
-        import server as srv  # noqa: PLC0415 — lazy, avoids import cycle
-    except Exception:
-        return False
-    is_child = srv._is_child_sprint_label(label)
-    has_children = bool(_db().get_sprint_children(label, project=project or None))
-    if not (is_child or has_children):
-        return False
-    branch = srv._sprint_branch_name(label)
-    return not srv._branch_has_unmerged_commits(project, branch, "develop")
-
-
 def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
     """Return updated fields when GitHub state diverges from the DB row, else None."""
     try:
@@ -167,8 +139,14 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
         return {"state": "ready_to_merge", "end_reason": "reconcile-orphan"}
 
     canonical = _db().canonical_lifecycle(stored)
-    # needs_rework→completed is never reconciler-driven: parent/ancestor sprints
-    # stay open until an explicit Merge Sprint or Bulk complete (manager actor).
+    # needs_rework→completed is never driven by THIS background sweep: parent/
+    # ancestor sprints stay open until an explicit Merge Sprint, Bulk complete,
+    # or Complete-step. Those call sites verify the merge themselves (each has
+    # its own _branch_has_unmerged_commits check or a full chain-pending scan)
+    # before invoking startup._sprint_db_mark_merged_completed(actor="reconcile"
+    # or "manager") — that write satisfies the DB edge guard but is not
+    # reconciler-*driven* in the sense of this sweep deciding to complete
+    # anything on its own (issue #1694).
     if has_rework and canonical in ("ready_to_merge", "completed"):
         # A natural successful run end must not be downgraded because GitHub
         # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).

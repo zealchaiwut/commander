@@ -235,6 +235,23 @@ comment says needs_rework→completed is never reconciler-driven, yet
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete or fold** `_lineage_fully_in_develop` after comparing with `_sprint_db_mark_merged_completed`'s check; no wiring into the sweep.
 
+**IMPLEMENTED (#1694, branch `fix/1686-1698-flow-decisions`):** compared the
+two paths. All three callers of `_sprint_db_mark_merged_completed`
+(finish/Merge Sprint, bulk-complete, complete-step in `sprint_finish.py`)
+already do their own merge verification before calling it — finish and
+complete-step perform the merge themselves synchronously just before marking
+completed; bulk-complete's `_bulk_complete_merge_pending` scans the *entire*
+chain (every child→parent hop plus base→develop), which is strictly stronger
+than `_lineage_fully_in_develop`'s single-label check. Production was not
+weaker, so **deleted** `_lineage_fully_in_develop` outright — it had zero
+production callers. Updated its two dedicated tests in
+`test_hotfix_lineage_completion.py` to exercise the real guard
+(`startup._sprint_merge_chain_pending`) instead, and fixed the stale
+docstring reference in `test_1464__sprint_cross_project_isolation.py`. Also
+tightened the "never reconciler-driven" comment in
+`sprint_reconcile_service.py` to name the actual call sites and clarify it
+means *this background sweep*, not the human-triggered completion paths.
+
 ## Q13 — Neon leftovers: delete or bless export-only
 
 `sprint_repo.py` / `models.py` are reachable only from

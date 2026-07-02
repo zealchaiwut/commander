@@ -30,11 +30,15 @@ def _proxy_base_url() -> str:
 def check_ica_readiness(
     proxy_url: str | None = None,
     required_models: Sequence[str] = REQUIRED_MODELS,
+    profile: str = "ica",
 ) -> None:
     """Assert ICA/claude-proxy is ready to serve all required models.
 
     Steps:
-    1. GET {proxy}/health — proxy must be reachable and return 2xx.
+    1. GET {proxy}/health?profile={profile} — proxy must be reachable and
+       return 2xx. The ?profile= param makes the proxy report the model_map
+       of the profile this run will actually use (the per-request
+       X-CCProxy-Profile routing), independent of the proxy's global default.
     2. Parse model_map from the health response body.
     3. Verify every entry in required_models is present in model_map.
 
@@ -42,7 +46,7 @@ def check_ica_readiness(
     Returns None silently when all checks pass.
     """
     base = (proxy_url or _proxy_base_url()).rstrip("/")
-    health_url = f"{base}/health"
+    health_url = f"{base}/health?profile={profile}"
 
     try:
         resp = httpx.get(health_url, timeout=5.0)

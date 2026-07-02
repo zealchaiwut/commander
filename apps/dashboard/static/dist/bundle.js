@@ -1422,6 +1422,7 @@
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
   globalThis._pfUseClineFollowups ??= false;
+  globalThis._pfLlmProvider ??= "anthropic";
   globalThis._pfXLSuggestions ??= [];
   globalThis._pfStrictXLGate ??= false;
   globalThis._pfXLMinutesSaved ??= 0;
@@ -6943,6 +6944,7 @@ Proceed anyway?`)) {
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfLlmProvider = "anthropic";
     _pfXLSuggestions = [];
     _pfStrictXLGate = false;
     _pfXLMinutesSaved = 0;
@@ -6961,6 +6963,7 @@ Proceed anyway?`)) {
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfLlmProvider = "anthropic";
     _pfXLSuggestions = [];
     _pfStrictXLGate = false;
     _pfXLMinutesSaved = 0;
@@ -7023,8 +7026,24 @@ Proceed anyway?`)) {
        <span>Use Cline (Sonnet) for follow-up coder fixes \u2014 tester stays on Claude</span>
      </label>
    </div>`;
+    const providerOptions = [
+      { value: "anthropic", label: "Anthropic (subscription)" },
+      { value: "ica", label: "IBM ICA (via claude-proxy)" }
+    ];
+    const providerSelectorHtml = `<div class="pf-section pf-provider-section">
+     <label class="pf-cline-label" style="gap:8px">
+       <span>LLM provider for this run:</span>
+       <select id="pf-provider-select" onchange="_pfLlmProvider = this.value"
+         style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+         ${providerOptions.map(
+      (o) => `<option value="${o.value}" ${_pfLlmProvider === o.value ? "selected" : ""}>${o.label}</option>`
+    ).join("")}
+       </select>
+     </label>
+   </div>`;
     document.getElementById("pf-content").innerHTML = `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${modelsHtml}
+     ${providerSelectorHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
      ${xlHtml}
@@ -7827,7 +7846,7 @@ Proceed anyway?`)) {
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups })
+        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups, llm_provider: _pfLlmProvider })
       });
       if (!res.ok) {
         let detail = await res.text();

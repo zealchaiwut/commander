@@ -25,6 +25,11 @@ class SprintMgmtRunBody(BaseModel):
     sprint_label: str
     migrate_from: list[int] = []
     use_cline_followups: bool = False
+    # Per-run LLM provider (issue #1667 follow-up): "anthropic" (direct,
+    # subscription OAuth) or "ica" (route agents through claude-proxy to IBM
+    # ICA). Explicit default means every modal-started run states its choice —
+    # the next run auto-reverts to anthropic unless re-selected.
+    llm_provider: str = "anthropic"
 
 
 class SprintRerunV2Body(BaseModel):

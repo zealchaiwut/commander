@@ -62,6 +62,84 @@ def _plan_json_use_cline_followups(
         return False
 
 
+def _plan_json_llm_provider(
+    sprint_label: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> Optional[str]:
+    """Return the per-run LLM provider from the sprint's plan.json, or None.
+
+    Written by the run modal (POST /api/sprints/run body.llm_provider) and
+    copied to rerun children — mirrors _plan_json_use_cline_followups.
+    """
+    try:
+        path = _plan_json_path(sprint_label, cfg)
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        value = raw.get("llm_provider") if isinstance(raw, dict) else None
+        return str(value) if value else None
+    except Exception:
+        return None
+
+
+def get_effective_llm_provider(
+    sprint_label: Optional[str],
+    cfg: Optional["SprintConfig"],
+    repo: Optional[str] = None,
+) -> str:
+    """Resolve the LLM provider for this run: plan.json > global setting > anthropic.
+
+    The per-run plan.json value (run-modal choice) always wins; the global
+    `llmProvider` setting covers CLI-started/legacy sprints; the final
+    fallback is direct Anthropic.
+    """
+    if sprint_label:
+        per_run = _plan_json_llm_provider(sprint_label, cfg)
+        if per_run:
+            return per_run
+    try:
+        import settings_repo  # noqa: PLC0415 — lazy, mirrors _get_llm_provider
+
+        stored = settings_repo.get_setting("app_config", project=repo) or {}
+        if not isinstance(stored, dict):
+            stored = {}
+        value = stored.get("llmProvider")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    return "anthropic"
+
+
+def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> None:
+    """Route an agent subprocess through claude-proxy to ICA (in place).
+
+    Sets on *sub_env*:
+    - ANTHROPIC_BASE_URL → the local claude-proxy (COMMANDER_PROXY_URL).
+    - ANTHROPIC_CUSTOM_HEADERS → X-CCProxy-Profile, the proxy's per-REQUEST
+      routing signal (a client-side CCPROXY_PROFILE env var never reaches the
+      proxy — only this header or the proxy's own global state do).
+    - CCPROXY_PROFILE → telemetry only: the post-tool hook forwards its own
+      env value as ccproxy_profile, which is what flags the run is_ica.
+    - Auth: ANTHROPIC_API_KEY stays stripped (never send the metered key at
+      the proxy); a dummy ANTHROPIC_AUTH_TOKEN keeps the CLI off subscription
+      OAuth for this subprocess — the proxy's openai-kind profile ignores
+      inbound auth and attaches its own ICA key upstream.
+
+    When a per-role profile (issue #1671) already set CCPROXY_PROFILE, that
+    name wins for both the header and the env var.
+    """
+    import os  # noqa: PLC0415
+
+    effective_profile = sub_env.get("CCPROXY_PROFILE") or profile_name or "ica"
+    proxy_url = os.environ.get("COMMANDER_PROXY_URL", "http://127.0.0.1:8788").rstrip("/")
+    sub_env["ANTHROPIC_BASE_URL"] = proxy_url
+    sub_env["ANTHROPIC_CUSTOM_HEADERS"] = f"X-CCProxy-Profile: {effective_profile}"
+    sub_env["CCPROXY_PROFILE"] = effective_profile
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env["ANTHROPIC_AUTH_TOKEN"] = "commander-ica-proxy"
+
+
 def _effective_coder_backend(
     sprint_label: Optional[str],
     cfg: Optional["SprintConfig"],

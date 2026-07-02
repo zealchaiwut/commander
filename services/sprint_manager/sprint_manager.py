@@ -117,6 +117,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
     _select_coder_backend,
+    get_effective_llm_provider,
     get_role_profile,
 )
 
@@ -2834,7 +2835,10 @@ def run_sprint_preflight(
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
-    _sprint_llm_provider = _read_active_llm_provider()
+    # Per-run choice (plan.json llm_provider, written by the run modal) wins
+    # over the global setting — otherwise run rows / cost tagging would
+    # disagree with where the agents were actually routed.
+    _sprint_llm_provider = get_effective_llm_provider(label, cfg, eff_repo)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -2862,7 +2866,10 @@ def run_sprint_preflight(
         target_branch = sprint_branch
 
     # ── ICA preflight check (issue #1668) ─────────────────────────────────────
-    if _get_llm_provider(eff_repo) == "ica":
+    # Gate on the EFFECTIVE provider (per-run plan.json > global setting) so a
+    # run-modal ICA selection is preflighted even when the global default is
+    # anthropic, and vice versa.
+    if _sprint_llm_provider == "ica":
         try:
             check_ica_readiness()
         except IcaPreflightError as _pf_err:

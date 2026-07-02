@@ -255,19 +255,30 @@ As implemented, `completed` is reachable through five paths:
   label = one *dashboard* attempt.
 - Every re-run creates the next child sprint (sprint-68 fails → re-run creates
   68.1; no exception for base sprints). With `auto_run=false` the child is
-  **queued, not dispatched**: it exists only as plan.json
-  (`state=needs_rework, end_reason=queued`, no DB row) so History shows Run.
+  **queued, not dispatched**: it exists as plan.json
+  (`state=needs_rework, end_reason=queued`) plus, since #1693, a `draft` DB
+  row (`db.ensure_sprint_draft_row`) so History shows Run and the row is
+  visible to `sprint_state.current()`.
 - Re-run moves tickets by stripping **all** sprint labels found plus stale
   session labels (`_SESSION_STATE_LABELS`, e.g. `code-review`, `sit-away`) —
   not just the parent's label.
-- **Lineage is tracked in three places** *(open question — consolidate?)*:
-  child plan.json `parent` = **immediate** parent (drives merge topology);
-  DB `sprints.parent_label` = **base** label, self-healed on every transition
-  (drives History grouping); parent state.json `rerun_into` = forward pointer.
+- **Lineage is tracked in three places.** Since #1691, the DB also has an
+  `immediate_parent` column (written at rerun alongside `parent_label`), but
+  merge-topology *readers* (`_sprint_merge_parent_label`,
+  `_merge_steps_for_sprint_chain` in `startup.py`) still read plan.json
+  `parent` first — switching them to prefer the DB column is unfinished
+  follow-up work. Today: child plan.json `parent` = **immediate** parent
+  (drives merge topology); DB `sprints.parent_label` = **base** label,
+  self-healed on every transition (drives History grouping); parent
+  state.json `rerun_into` = forward pointer.
 - Before dispatch, a **confirmation modal** lists the tickets that will move
   to the new child. Eligible tickets exclude:
   - the sprint summary issue, and
   - tickets already carrying the `UAT` label (their work is merged on a prior run).
+  - **Closing a ticket is the sanctioned way to waive it** (#1698 / Q10) —
+    a closed, non-UAT ticket isn't eligible to move either (there's nothing
+    left to re-run) and drops out of the rework signal the same way it does
+    for reconcile (see [`1_state-and-source-of-truth.md`](1_state-and-source-of-truth.md)).
 - If no ticket is eligible to move, Re-run is disabled.
 - A sub-sprint is a first-class sprint: its own column, branch, run, history
   row. The only parent linkage is a lineage flag shown on the History pane.

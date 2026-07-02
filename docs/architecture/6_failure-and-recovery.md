@@ -17,6 +17,8 @@ Logic failures (test/design/merge-boundary) accumulate context and retry. Infras
 
 **Label rule:** real ticket failure → immediate `needs-rework` via `state_machine.transition()`. Gate failures mid fix-loop stay on `SIT` until fix budget exhausted.
 
+**Waiving a failed ticket** (#1698 / Q10): closing a `needs-rework` ticket without ever giving it `UAT` is the sanctioned way for a human to drop it from a sprint — `_has_rework_tickets` (and rerun's move-eligibility filter) only scan **open** issues, so a closed ticket stops counting as rework by design. This is an explicit human decision, not a bug: if it should still block the sprint, reopen it and the signal comes back.
+
 **Hang redispatch** (#787): first hang redispatches once; second hang escalates. Disable with `COMMANDER_HANG_REDISPATCH_DISABLE=1`.
 
 **Pipeline reject** (#737): tester rejection pushes ticket to front of coder queue; 3-attempt cap → `needs-rework`.

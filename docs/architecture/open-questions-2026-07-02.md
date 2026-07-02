@@ -221,6 +221,16 @@ run roster fallback.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless the fallbacks explicitly**; rewrite §1.7 as "DB first, sanctioned disk fallback, never disk-only"; migrate opportunistically.
 
+**IMPLEMENTED (#1698, branch `fix/1686-1698-flow-decisions`):**
+`1_state-and-source-of-truth.md` §1.7 rewritten as "DB first; disk is a
+sanctioned fallback, never disk-only" with a table naming each of the five
+fallbacks, its trigger, and — critically — *why* it's sanctioned rather than
+just tolerated (mostly the port-coupled manager-status-POST failure mode, and
+legacy sprints predating #1693's DB-row-at-create). Flagged History's
+merge-rank logic (`_merge_history_record`) as the one genuine hardening
+target in the set, since its multi-source authority ordering lives in code
+rather than in the documented §1.5 conflict-resolution rules.
+
 ## Q10 — Closed-without-UAT tickets read as resolved
 
 `_has_rework_tickets` only scans open issues. A failed ticket someone closes

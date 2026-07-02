@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from . import finish_progress_service as _svc
+from . import sprint_finish as _fs
 
 router = APIRouter(tags=["finish-progress"])
 
@@ -36,6 +37,9 @@ class FinishBgBody(BaseModel):
     selected_tickets: list[dict] = []
     merge_pr: bool = False
     sprint_pr_url: Optional[str] = None
+    # issue #1696: soft rework guard — set true only after the confirmation
+    # modal shows the rework ticket list and the human explicitly overrides.
+    confirm_rework: bool = False
 
 
 @router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-bg")
@@ -55,6 +59,34 @@ async def start_finish_sprint_bg(
         raise HTTPException(400, detail="Request must have confirmed=true")
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+
+    # Soft rework guard (issue #1696): this endpoint — not the sibling
+    # POST /finish in sprint_finish.py — is what the dashboard UI actually
+    # calls. It closed whatever tickets the client sent with no server-side
+    # check that they'd reached UAT. Recompute from GitHub (not the client's
+    # selected_tickets payload, which carries no label data) so the guard
+    # can't be bypassed by an unmodified client. Nothing is merged or closed
+    # before this check.
+    try:
+        srv = _svc._server()
+        sprint_issues = _fs._finish_sprint_issues(srv, repo, label)
+        rework_tickets = _fs._finish_rework_tickets(srv, sprint_issues)
+    except Exception:
+        rework_tickets = []  # best-effort: a lookup failure must not block finish
+    if rework_tickets and not body.confirm_rework:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "rework_tickets_present",
+                "message": (
+                    f"{len(rework_tickets)} ticket(s) have not reached UAT and "
+                    f"will be closed unfinished. Confirm to proceed anyway."
+                ),
+                "rework_tickets": rework_tickets,
+            },
+        )
 
     key = _svc.job_key(owner, repo_name, label)
     if _svc.is_running(key):

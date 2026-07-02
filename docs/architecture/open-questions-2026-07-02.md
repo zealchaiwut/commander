@@ -25,6 +25,14 @@ plan.json `signoff` gate are deprecated for now (too hard to stabilize).
 Also deprecate the **advisor** and **brief** features in the same pass.
 Remove/disable rather than wire up; revisit when the platform is stable.
 
+**IMPLEMENTED (#1686, branch `fix/1686-1698-flow-decisions`):** `planned`
+removed from `_SPRINT_STATES`/`LIFECYCLE_STATES`/`_LEGAL_SPRINT_EDGES` in
+`apps/dashboard/db.py`, kept only as a legacy-read value canonicalizing to
+`draft`. Sign-off was already default-disabled via
+`config.sprint_signoff_disabled()` (confirmed, not re-implemented — the
+approve/reject endpoints already 404 and the run-guard already no-ops by
+default). Docs updated in sprint-lifecycle.md and 3_sprint-flow.md.
+
 ## Q2 — Merge Sprint has no rework guard
 
 Plain finish closes ALL sprint issues including `needs-rework` ones;
@@ -41,6 +49,25 @@ bulk-complete and complete-step refuse on rework. Five paths reach
 "N rework tickets will be closed"; human can override. Never close failed
 work silently.
 
+**IMPLEMENTED (#1696, branch `fix/1686-1698-flow-decisions`), with a routing
+correction:** the guard was originally written against the synchronous
+`POST .../finish` handler in `sprint_finish.py`, but that endpoint turned out
+to be effectively dead — the dashboard UI actually calls
+`POST .../finish-bg` (`routers/finish_progress.py` →
+`finish_progress_service.run_finish_sprint`, a separate background-job
+implementation added later for streaming progress). Added the guard to
+**both**: a shared `_finish_rework_tickets()`/`_finish_sprint_issues()` pair
+in `sprint_finish.py` computes "tickets that haven't reached UAT" once, and
+both `finish_sprint` and `start_finish_sprint_bg` recompute it fresh from
+GitHub (not the client's ticket payload, which carries no label data) before
+merging or closing anything, returning 409 with a structured
+`{code, message, rework_tickets}` body unless `confirm_rework: true` is set.
+`finish-preview` now also returns `rework_tickets` so the modal can warn
+before the user even clicks Merge Sprint. Frontend
+(`finish-modal.js`/`project.html`): warning banner + required override
+checkbox, wired into the request body; error rendering updated for the new
+structured 409 detail shape.
+
 ## Q3 — Orphan settling is button-only
 
 `_github_reconcile_row` can settle an orphaned `running` sprint (PID file
@@ -55,6 +82,24 @@ per-sprint Reconcile button reaches that branch.
 **Decision (2026-07-02):** **A — auto-settle confirmed orphans** in the sweep
 (PID-file-present AND process-dead only; PID-file-absent untouched per #1095).
 
+**IMPLEMENTED (#1697, branch `fix/1686-1698-flow-decisions`), which surfaced
+a deeper pre-existing bug:** removing `running` from `reconcile_project`'s
+skip list wasn't enough on its own — `reconcile_sprint_label` always called
+`transition_sprint_state(actor="reconcile")`, but `db.py`'s edge guard
+requires `actor="manager"` for `running→{ready_to_merge,needs_rework}`. That
+meant orphan settling **silently failed even via the per-sprint button** —
+`_github_reconcile_row` computed the right patch, `transition_sprint_state`
+rejected it every time, and "button-only" was actually "neither". Fixed by
+using `actor="manager"` specifically for the confirmed-orphan
+running→terminal edge (the reconciler only reaches that branch after
+confirming the manager process that would have made this transition is
+dead, so acting with equivalent authority is the intent, not a bypass);
+terminal↔terminal reconcile transitions keep `actor="reconcile"` per the
+original contract. Updated `tests/reconciler/test_reconcile_running_sprint.py`
+(two tests asserted the old, silently-broken `actor="reconcile"` expectation
+for this specific case) and manually verified all three PID scenarios via
+`reconcile_project()` directly.
+
 ## Q4 — Three lineage fields
 
 plan.json `parent` = immediate parent (drives merge topology); DB
@@ -68,6 +113,17 @@ plan.json `parent` = immediate parent (drives merge topology); DB
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — consolidate into DB**: add `immediate_parent` column beside `parent_label`; rerun writes both; file copies become dual-writes to retire later.
 
+**IMPLEMENTED (#1691, branch `fix/1686-1698-flow-decisions`):** added
+`immediate_parent` to the `sprints` table (additive column, same migration
+idiom as the other run-artifact columns). `db.set_sprint_immediate_parent()`
+writes it from the rerun endpoint (`routers/sprint_run.py`) alongside the
+existing plan.json `parent` write, creating a placeholder `draft` row for
+queued children if none exists yet. The value survives the later `running`
+transition unchanged. Merge-topology resolvers (`_sprint_merge_parent_label`,
+`_merge_steps_for_sprint_chain` in `startup.py`) still read plan.json first —
+switching them to prefer the DB column is follow-up work, not done here, so
+this ticket only adds the column and its writer.
+
 ## Q5 — Two canonical lifecycle read accessors
 
 `apps/dashboard/sprint_state.py` returns `"unknown"` for a missing row;
@@ -79,6 +135,15 @@ sanctioned reader.
 - **B Keep both,** document the difference.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete the routers accessor**; migrate callers to `apps/dashboard/sprint_state.py`.
+
+**IMPLEMENTED (#1692, branch `fix/1686-1698-flow-decisions`):** deleted
+`apps/dashboard/routers/sprint_state.py` (it was never a mounted FastAPI
+router despite the location — a plain module). Its one caller
+(`routers/sprint_history_service.py`) migrated to the top-level
+`apps/dashboard/sprint_state.py`, adjusting its `or _normalize_state(...)`
+fallback (which relied on `None` being falsy) to an explicit
+`is None or == "unknown"` check since the canonical accessor returns the
+string `"unknown"`, not `None`, for a missing row.
 
 ## Q6 — Queued rerun children invisible to the DB
 
@@ -94,6 +159,19 @@ implicit `draft`).
   dispatch. Document only (done).
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — write a DB row at creation/queue time** so the DB is complete pre-run. (Adjusted for Q1: with `planned`/signoff deprecated, use `draft` at create and at rerun-queue.)
+
+**IMPLEMENTED (#1693, branch `fix/1686-1698-flow-decisions`):** new
+`db.ensure_sprint_draft_row(label, project)` — idempotent `INSERT OR IGNORE`
+of a `draft` row, never clobbering an existing row in any state. Wired into
+sprint creation (`routers/sprints_service.py`) and the `auto_run=false`
+rerun-queue path (`routers/sprint_run.py`), both best-effort alongside their
+existing plan.json writes. The queued-child DB row is deliberately kept at
+`draft` rather than mirroring plan.json's `needs_rework`/`queued` value —
+that value is a display-only hack to make History show a Run button, not a
+real lifecycle transition (no `running` boundary was crossed), and writing
+it into the DB would violate the state machine's actual invariants. A
+never-created sprint still reads as `"unknown"` via `sprint_state.current()`
+until this helper runs; legacy pre-#1693 sprints are unaffected.
 
 ## Q7 — SQLite dual-writer robustness
 
@@ -122,6 +200,13 @@ truthy value as locked. Two guard layers, different semantics.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — unify on truthy-check** in `assert_run_mutable`; keep setting the label value for context.
 
+**IMPLEMENTED (#1689, branch `fix/1686-1698-flow-decisions`):**
+`state_machine.run_lock_active()` and `github_client._refuse_if_sprint_running`
+both now treat any non-empty `COMMANDER_SPRINT_RUNNING` value as locked,
+matching `update_ticket.py`. Two pre-existing tests asserting the old exact-`"1"`
+semantics were updated (`test_754__run_mutable_labels.py`) — production never
+sets the var to `"0"`, so treating it as truthy there costs nothing.
+
 ## Q9 — Disk-at-render fallbacks: migrate or bless?
 
 §1.7 lists five render paths still reading disk: history label discovery,
@@ -135,6 +220,16 @@ run roster fallback.
 - **C Status quo** (documented as deviations).
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless the fallbacks explicitly**; rewrite §1.7 as "DB first, sanctioned disk fallback, never disk-only"; migrate opportunistically.
+
+**IMPLEMENTED (#1698, branch `fix/1686-1698-flow-decisions`):**
+`1_state-and-source-of-truth.md` §1.7 rewritten as "DB first; disk is a
+sanctioned fallback, never disk-only" with a table naming each of the five
+fallbacks, its trigger, and — critically — *why* it's sanctioned rather than
+just tolerated (mostly the port-coupled manager-status-POST failure mode, and
+legacy sprints predating #1693's DB-row-at-create). Flagged History's
+merge-rank logic (`_merge_history_record`) as the one genuine hardening
+target in the set, since its multi-source authority ordering lives in code
+rather than in the documented §1.5 conflict-resolution rules.
 
 ## Q10 — Closed-without-UAT tickets read as resolved
 
@@ -165,6 +260,13 @@ non-final sprints.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — fix (b) TTL-on-success and (c) sweep cursor**; leave (a) flap as self-healing.
 
+**IMPLEMENTED (#1690, branch `fix/1686-1698-flow-decisions`):** (b) and (c)
+both fixed in `routers/sprint_reconcile_service.py` — TTL stamped only after
+a successful pass; per-project rotating cursor over eligible rows so a
+project with >40 eligible terminal sprints gets full coverage across sweeps
+instead of only ever re-checking the first 40. (a) left as-is per the
+recommendation.
+
 ## Q12 — `_lineage_fully_in_develop` has tests but no production caller
 
 Defined in `sprint_reconcile_service.py` for B2 auto-complete of superseded
@@ -180,6 +282,23 @@ comment says needs_rework→completed is never reconciler-driven, yet
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete or fold** `_lineage_fully_in_develop` after comparing with `_sprint_db_mark_merged_completed`'s check; no wiring into the sweep.
 
+**IMPLEMENTED (#1694, branch `fix/1686-1698-flow-decisions`):** compared the
+two paths. All three callers of `_sprint_db_mark_merged_completed`
+(finish/Merge Sprint, bulk-complete, complete-step in `sprint_finish.py`)
+already do their own merge verification before calling it — finish and
+complete-step perform the merge themselves synchronously just before marking
+completed; bulk-complete's `_bulk_complete_merge_pending` scans the *entire*
+chain (every child→parent hop plus base→develop), which is strictly stronger
+than `_lineage_fully_in_develop`'s single-label check. Production was not
+weaker, so **deleted** `_lineage_fully_in_develop` outright — it had zero
+production callers. Updated its two dedicated tests in
+`test_hotfix_lineage_completion.py` to exercise the real guard
+(`startup._sprint_merge_chain_pending`) instead, and fixed the stale
+docstring reference in `test_1464__sprint_cross_project_isolation.py`. Also
+tightened the "never reconciler-driven" comment in
+`sprint_reconcile_service.py` to name the actual call sites and clarify it
+means *this background sweep*, not the human-triggered completion paths.
+
 ## Q13 — Neon leftovers: delete or bless export-only
 
 `sprint_repo.py` / `models.py` are reachable only from
@@ -193,6 +312,27 @@ them wired invites someone to reconnect runtime code against stale docs.
 - **C Leave as-is** (docs now say export-only).
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless export-only**: docstring + import-guard test preventing dashboard/server imports of `sprint_repo.py`/`models.py`.
+
+**IMPLEMENTED (#1695, branch `fix/1686-1698-flow-decisions`), with a
+correction to the premise:** `models.py` and `neon_db.py` turned out NOT to
+be export-only — both are genuine runtime dependencies of
+`apps/dashboard/{settings_repo,todo_repo}.py`'s settings/todo KV fallback
+when Neon is enabled (`Setting`/`ProjectTodo` ORM classes). Only
+`sprint_repo.py` and `sync_projects_to_neon.py` have zero runtime callers.
+Scope adjusted accordingly:
+
+- `sprint_repo.py`, `sync_projects_to_neon.py`: EXPORT-ONLY docstrings added;
+  also fixed `sync_projects_to_neon.py`'s stale claim of being "called at
+  dashboard startup and by POST /api/projects/sync-to-db" — neither exists
+  anymore.
+- `models.py`, `neon_db.py`: docstrings clarify the split (which ORM
+  classes/paths are runtime-shared vs export-only) instead of falsely
+  claiming export-only status.
+- New `tests/test_neon_export_only.py`: AST-based static scan of every
+  `apps/dashboard/**/*.py` file plus the sprint-manager orchestrator
+  entrypoint, failing if any imports `sprint_repo` or
+  `sync_projects_to_neon`. Verified the guard actually fails when a
+  violation is introduced (mutation test), then reverted clean.
 
 ---
 

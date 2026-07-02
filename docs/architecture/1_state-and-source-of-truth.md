@@ -71,8 +71,11 @@ end-of-run via live `gh`.
 
 **Gating:** `COMMANDER_DISABLE_AUTO_RECONCILE=1` kills the background sweep
 only (button still works — intended for non-primary clones); per-project 60 s
-in-process TTL (timestamp recorded *before* the pass, so a failed pass still
-consumes the window); sweep capped at 40 rows; `running / draft / planned /
+in-process TTL, **stamped only after a successful pass** (#1690 — a transient
+failure no longer eats the window); sweep window capped at 40 rows per call
+but **rotates per project** across sweeps (#1690) so a project with more than
+40 eligible rows gets full coverage over successive History loads instead of
+only ever re-checking the same first 40; `running / draft / planned /
 completed / deleted` rows are skipped — only `ready_to_merge / needs_rework /
 failed / cancelled` are re-checked.
 
@@ -81,7 +84,11 @@ failed / cancelled` are re-checked.
 
 - Truth signal is `_has_rework_tickets`: among **open** issues whose primary
   sprint label matches, any non-summary ticket carrying a rework label or not
-  carrying `UAT` ⇒ rework. (Closed-without-UAT tickets vanish from the signal.)
+  carrying `UAT` ⇒ rework. **Closing a ticket without `UAT` is the sanctioned
+  waive mechanism (#1698 / Q10):** a closed ticket vanishes from the rework
+  signal by design, not by oversight — closing it is the human's explicit
+  "drop this, don't block the sprint on it" decision. If that's ever wrong for
+  a given ticket, reopening it restores the signal.
 - `ready_to_merge`/`completed` + rework → demote to `needs_rework`, unless
   `end_reason == "natural"` and stored `issues_json` shows everything merged
   (label-lag guard).
@@ -92,9 +99,13 @@ failed / cancelled` are re-checked.
   Merge Sprint / bulk-complete / complete-step (which use `actor="reconcile"`
   for superseded ancestors after verifying the lineage merged to develop).
 - Orphaned `running` rows (PID file present, process dead) settle to
-  `ready_to_merge`/`needs_rework` with `end_reason=reconcile-orphan` — but
-  because the sweep skips `running` rows, **orphan settling only happens via
-  the per-sprint button** in practice.
+  `ready_to_merge`/`needs_rework` with `end_reason=reconcile-orphan`.
+  **Fixed (#1697):** the sweep now includes `running` rows (only a confirmed
+  orphan is touched; live or PID-absent rows are left alone), and the settle
+  write itself now uses `actor="manager"` — it previously used
+  `actor="reconcile"`, which `db.py`'s edge guard silently rejected for
+  `running→terminal`, so orphan settling had never actually worked via
+  either path.
 
 **Inputs are mirror-backed:** ticket labels + summary issues from the local
 `issues` table; PR merge state inferred from one cached
@@ -131,9 +142,12 @@ runtime Neon touchpoints are the settings/todo KV repos, and both prefer local
 SQLite/JSON when `COMMANDER_DISABLE_NEON=1` (set on the local machines).
 
 The earlier "Neon holds lifecycle for instant render" target was superseded:
-SQLite `sprints` took that role. *(open question: delete
-`sprint_repo.py`/`models.py` or explicitly keep them as export-only —
-leaving them wired invites re-connection against stale assumptions.)*
+SQLite `sprints` took that role. **Resolved (#1695):** `sprint_repo.py` and
+`sync_projects_to_neon.py` are documented export-only with a static
+import-guard test (`tests/test_neon_export_only.py`) that fails if dashboard/
+server runtime code ever imports either; `neon_db.py`/`models.py` are
+genuinely shared with the runtime settings/todo KV path and are not
+restricted.
 
 ## 1.5 Four-store contract
 
@@ -182,28 +196,42 @@ The old `done + uat` formula undercounted needs-rework; `total − backlog` over
 
 ## 1.7 Render-time read rules
 
-**Do not read disk at render.** Disk artifacts (plan files, state sidecars, status JSON) are write-once records produced by the sprint manager. Reading them at HTTP request time introduces races with the manager and causes the disagreements documented in §1.3.
+**DB first; disk is a sanctioned fallback, never disk-only** (revised
+2026-07-02 per issue #1698 / Q9 — the original "zero disk reads" absolute was
+never true in practice and the render paths below exist for real failure
+modes, not oversights).
 
 Rules for all render-path code:
 
-- **Zero disk reads** in HTTP handlers. No `plan.json`, no `-state.json`, no `-status.json` reads inside `@app.get` / `@app.post` handlers.
+- **DB is the default and preferred source.** No render-path code should read
+  `plan.json` / `-state.json` / `-status.json` as its FIRST or ONLY source.
+- **Disk fallback is allowed only where listed in the sanctioned-fallbacks
+  table below**, and only as a fallback when the DB path is empty/stale for a
+  reason the fallback's row explains. Adding a new fallback means adding a row
+  here — don't add a silent one.
 - **Zero label inference.** Do not infer sprint state from GitHub label names. Use `sprint_state.current(label)` (see [sprint-lifecycle.md § Canonical Read Contract](sprint-lifecycle.md)).
-- **Zero multi-source reconciliation at render.** Pick one store (DB for metrics, GitHub for state) and return its data. Reconciliation runs in the background, not in the HTTP path.
+- **Migrate opportunistically.** Each sanctioned fallback is a target for
+  removal once its root cause (see "why" column) is fixed — e.g. #1693's
+  draft-row-at-create shrinks the set of sprints `POST /api/sprints/run`'s
+  roster fallback needs to cover.
 
-If no SQLite row exists for a requested artifact, return 404 or `no_data`. Ingestion runs at end-of-run only (sprint manager), never in response to HTTP requests — the on-demand path was removed in #1161.
+If no SQLite row exists for a requested artifact and no sanctioned fallback
+applies, return 404 or `no_data`. Ingestion runs at end-of-run only (sprint
+manager), never in response to HTTP requests — the on-demand path was removed
+in #1161.
 
-### Known deviations (as of 2026-07-02) — target vs reality
+### Sanctioned disk fallbacks (as of 2026-07-02)
 
-The rules above are the **target invariant**; these render paths still read
-disk today *(open question: migrate or bless as sanctioned fallbacks?)*:
+| Endpoint | Disk read | Why it's sanctioned, not just tolerated |
+|----------|-----------|------------------------------------------|
+| `GET /api/sprints/history` | Label discovery for non-DB-backed (legacy) sprints via `-state.json`/`-plan.json` (`_record_from_files`); expanded-card issue synthesis reads state files | Legacy sprints predating #1693's DB-row-at-create have no row at all — without this fallback they'd vanish from History entirely, not just render slightly stale. History assembly's ledger+lifecycle+disk+`agent_runs` merge (`_merge_history_record`) is real multi-source reconciliation and is the one case in this table that's a genuine target for hardening, not just documentation — its authority ordering should eventually move into the documented conflict-resolution rules in §1.5 instead of living in merge-rank code |
+| `GET /api/sprints/{label}/live` | `-state.json` fallback when the in-memory `_sprint_statuses` entry is missing, plus plan.json | The manager posts live status to `DASHBOARD_API_URL` over HTTP — if that env var points at the wrong port (two dashboards, e.g. PRD 8000 / UAT 8001, sharing a project), the in-memory copy never arrives and disk is the only surviving signal until end-of-run ingest |
+| `GET /api/sprint-progress` (nav pill) | `-state.json` fallback | Same port-coupling failure mode as `/live`; explicitly commented as intentional in `sprint_nav.py` |
+| `GET /api/home` | Globs and parses newest `*-summary-*.md` at render | The summary markdown is the only place "what did the last sprint ship" is written in prose form — there is no DB equivalent to fall back to instead, so this isn't so much a fallback as the only source; listed here for completeness since it violates the letter of "DB first" |
+| `POST /api/sprints/run` | plan.json ticket-roster fallback | Covers legacy/crashed sprints where the GitHub label carrying the roster was stripped mid-crash (`process lost` before relabel finished) — narrows over time as #1693's DB-row-at-create/queue reduces how often a sprint has no DB roster to read instead |
 
-| Endpoint | Disk read |
-|----------|-----------|
-| `GET /api/sprints/history` | Label discovery for non-DB-backed sprints via `-state.json`/`-plan.json` (`_record_from_files`); expanded-card issue synthesis reads state files. History assembly merges ledger + lifecycle rows + disk + `agent_runs` with rank heuristics — exactly the multi-source reconciliation §1.7 forbids, with authority embedded in `_merge_history_record` |
-| `GET /api/sprints/{label}/live` | `-state.json` fallback when the in-memory status is missing (port-coupling escape hatch) + plan.json |
-| `GET /api/sprint-progress` (nav pill) | `-state.json` fallback, explicitly commented as intentional |
-| `GET /api/home` | Globs and parses newest `*-summary-*.md` at render |
-| `POST /api/sprints/run` | plan.json ticket-roster fallback |
-
-Background/apply reconcile paths also read/write plan.json, state.json, and
-PID files — within the spirit (not render), but not the letter, of "zero disk".
+Background/apply reconcile paths (`sprint_reconcile_service.py`) also
+read/write plan.json, state.json, and PID files — that's within the spirit of
+this section (background work, not a render path) even though it isn't a
+render-time read; not listed above because it was never claimed to be
+disk-free.

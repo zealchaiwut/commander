@@ -840,6 +840,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "tickets": moved,
         "parent": sprint_label,
     })
+    # DB-side lineage link alongside the plan.json copy above (issue #1691) —
+    # best-effort; a failure here must not block the rerun.
+    try:
+        srv.db.set_sprint_immediate_parent(sub_label, project, sprint_label)
+    except Exception:
+        pass
 
     parent_state_path = sprints_dir / f"{sprint_label}-state.json"
     if parent_state_path.exists():
@@ -910,6 +916,14 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
             srv._plan_json_set_state(project_root, sub_label, "needs_rework",
                                      end_reason="queued", parent=sprint_label,
                                      **_provider_field)
+        except Exception:
+            pass
+        # DB-side draft row (issue #1693) — deliberately kept at `draft`, not
+        # mirroring plan.json's needs_rework/queued display hack: that value
+        # exists only to make History show a Run button and was never a real
+        # lifecycle transition (no `running` boundary was crossed). Best-effort.
+        try:
+            srv.db.ensure_sprint_draft_row(sub_label, project)
         except Exception:
             pass
         return result

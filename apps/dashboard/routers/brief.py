@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter
+import config
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from . import brief_artifact
@@ -20,6 +21,11 @@ from . import brief_service
 from . import brief_summary
 
 router = APIRouter(tags=["brief"])
+
+
+def _require_brief_enabled() -> None:
+    if config.brief_disabled():
+        raise HTTPException(404, detail="Brief is disabled")
 
 
 # ── response models ───────────────────────────────────────────────────────────
@@ -199,6 +205,7 @@ def get_home_brief(date: Optional[str] = None):
 @router.get("/api/projects/{slug}/brief/summary", response_model=ProjectSummary)
 def get_project_brief_summary(slug: str, date: Optional[str] = None):
     """Return the cached (or freshly generated) summary for a project brief."""
+    _require_brief_enabled()
     return brief_summary.get_or_create_project_summary(slug, date=date)
 
 
@@ -206,18 +213,21 @@ def get_project_brief_summary(slug: str, date: Optional[str] = None):
              response_model=ProjectSummary)
 def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
     """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
+    _require_brief_enabled()
     return brief_summary.get_or_create_project_summary(slug, date=date, force=True)
 
 
 @router.get("/api/brief/summary", response_model=HomeSummary)
 def get_home_brief_summary(date: Optional[str] = None):
     """Return the cached (or freshly generated) one-line home recap (AC7)."""
+    _require_brief_enabled()
     return brief_summary.get_or_create_home_summary(date=date)
 
 
 @router.post("/api/brief/summary/regenerate", response_model=HomeSummary)
 def regenerate_home_brief_summary(date: Optional[str] = None):
     """Clear the stored home recap and re-invoke the model (Regenerate)."""
+    _require_brief_enabled()
     return brief_summary.get_or_create_home_summary(date=date, force=True)
 
 

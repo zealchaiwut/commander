@@ -591,8 +591,13 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     duration = _seconds_between(row.get("started_at"), row.get("ended_at"))
     if duration is None:
         duration = enrich["duration"]
-    from . import sprint_state  # noqa: PLC0415
-    lifecycle_state = sprint_state.current(label, row.get("project")) or _normalize_state(row.get("state"))
+    import sprint_state  # noqa: PLC0415 — top-level canonical accessor (issue #1692)
+    _raw_lifecycle = sprint_state.current(label, row.get("project"))
+    lifecycle_state = (
+        _normalize_state(row.get("state"))
+        if _raw_lifecycle is None or _raw_lifecycle == "unknown"
+        else _raw_lifecycle
+    )
     end_reason = row.get("end_reason") or enrich.get("end_reason") or plan.get("end_reason")
     issues = enrich["issues"]
     lifecycle_state = _lifecycle_display_state(lifecycle_state, end_reason, issues)

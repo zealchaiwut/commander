@@ -130,6 +130,13 @@ truthy value as locked. Two guard layers, different semantics.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — unify on truthy-check** in `assert_run_mutable`; keep setting the label value for context.
 
+**IMPLEMENTED (#1689, branch `fix/1686-1698-flow-decisions`):**
+`state_machine.run_lock_active()` and `github_client._refuse_if_sprint_running`
+both now treat any non-empty `COMMANDER_SPRINT_RUNNING` value as locked,
+matching `update_ticket.py`. Two pre-existing tests asserting the old exact-`"1"`
+semantics were updated (`test_754__run_mutable_labels.py`) — production never
+sets the var to `"0"`, so treating it as truthy there costs nothing.
+
 ## Q9 — Disk-at-render fallbacks: migrate or bless?
 
 §1.7 lists five render paths still reading disk: history label discovery,

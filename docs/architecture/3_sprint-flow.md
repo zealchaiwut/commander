@@ -56,7 +56,7 @@ Enforced by `services/sprint_manager/state_machine.py` — **only** `transition(
 | `NEEDS_REWORK` | `needs-rework` |
 | `BLOCKED` | `blocked` |
 
-During an active run, only status labels may change — sprint labels and all others are frozen (`RUN_MUTABLE_LABELS`). **Sentinel caveat:** the orchestrator sets `COMMANDER_SPRINT_RUNNING` to the *sprint label*, while `state_machine.assert_run_mutable` checks for the literal `"1"` and `update_ticket.py` treats any truthy value as locked — so the state-machine guard is effectively inert in manager subprocesses and enforcement rests on `update_ticket.py` + the orchestrator's own `_guard_sprint_labels`. *(open question: unify the sentinel.)*
+During an active run, only status labels may change — sprint labels and all others are frozen (`RUN_MUTABLE_LABELS`). The orchestrator sets `COMMANDER_SPRINT_RUNNING` to the *sprint label* in subprocess envs (and `"1"` in its own process). **Fixed (#1689):** `state_machine.run_lock_active()` and `github_client._refuse_if_sprint_running` now treat any non-empty value as locked, matching `update_ticket.py` — all three guard layers agree.
 
 `transition()` enforces **no transition graph** — any state may jump to any non-pseudo state; correctness rests on call-site discipline (unlike the sprint-level edge table). Pseudo-states `BACKLOG` (no label) and `DONE` exist in the enum without labels.
 

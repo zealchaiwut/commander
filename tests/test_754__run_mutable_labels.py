@@ -100,8 +100,18 @@ class TestRunLockActive:
     def test_inactive_when_unset(self, unlocked):
         assert run_lock_active() is False
 
-    def test_inactive_when_env_is_zero(self, monkeypatch):
+    def test_active_when_env_is_zero(self, monkeypatch):
+        # issue #1689: the guard now treats any non-empty value as locked
+        # (matching scripts/update_ticket.py's `if sprint_label := os.environ
+        # .get(...)` truthiness, where "0" is a non-empty — hence truthy —
+        # string). Nothing in production ever sets this var to "0"; it is
+        # either unset, "1" (orchestrator's own process), or a sprint label
+        # (subprocess env).
         monkeypatch.setenv(_ENV, "0")
+        assert run_lock_active() is True
+
+    def test_inactive_when_env_is_empty_string(self, monkeypatch):
+        monkeypatch.setenv(_ENV, "")
         assert run_lock_active() is False
 
 
@@ -280,7 +290,7 @@ class TestSprintLabelMutationGuard:
 
     def test_refuse_message_is_clear(self, locked):
         gc = self._gc()
-        with pytest.raises(gc.SprintRunLockError, match="COMMANDER_SPRINT_RUNNING=1"):
+        with pytest.raises(gc.SprintRunLockError, match="COMMANDER_SPRINT_RUNNING="):
             gc.assign_sprint(123, 57, repo_name=_FAKE_REPO)
 
     def test_assign_sprint_proceeds_when_unlocked(self, unlocked):

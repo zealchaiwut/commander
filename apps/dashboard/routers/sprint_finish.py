@@ -31,11 +31,56 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 router = APIRouter(tags=["sprint_finish"])
 
+_NON_WORK_LABELS_FINISH = {"sprint-summary", "docs", "documentation"}
+
 
 def _server():
     """Deferred import of the monolith — safe at request time, avoids circular import."""
     import server  # noqa: PLC0415
     return server
+
+
+def _finish_rework_tickets(srv, sprint_issues: list[dict]) -> list[dict]:
+    """Work tickets that have NOT reached UAT — shared by finish-preview and the
+    finish POST guard (issue #1696) so "what would be closed unfinished" is
+    computed identically in both places.
+    """
+    out: list[dict] = []
+    for iss in sprint_issues:
+        label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+        if _NON_WORK_LABELS_FINISH & label_names:
+            continue
+        if "UAT" in label_names:
+            continue
+        status = next(
+            (lbl for lbl in sorted(label_names) if lbl in srv._FINISH_SPRINT_STATUS_LABELS and lbl != "UAT"),
+            "queued",
+        )
+        out.append({"number": iss["number"], "title": iss.get("title", ""), "status": status})
+    return out
+
+
+def _finish_sprint_issues(srv, repo: str, label: str) -> list[dict]:
+    """Fetch the sprint issue set for *label* (own issues, or base + all children
+    when *label* is a base sprint) — shared by finish-preview, the finish POST
+    guard, and finish-bg's guard (issue #1696) so all three agree on scope.
+    """
+    base_label = srv._sprint_label_base(label)
+    is_child = srv._is_child_sprint_label(label)
+    if is_child:
+        return srv._get_sprint_issues(repo, label)
+    project_root = srv._project_root_path(repo)
+    sprint_issues = srv._get_sprint_issues(repo, base_label)
+    seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
+    for child_label in srv.children_of(base_label, project_root, project=repo):
+        try:
+            for iss in srv._get_sprint_issues(repo, child_label):
+                if iss["number"] not in seen_nums:
+                    sprint_issues.append(iss)
+                    seen_nums.add(iss["number"])
+        except subprocess.CalledProcessError:
+            pass
+    return sprint_issues
 
 
 @router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview")
@@ -119,15 +164,13 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     except Exception:
         pass
 
-    _NON_WORK_LABELS_FP = {"sprint-summary", "docs", "documentation"}
     all_tickets = []
     uat_tickets = []
-    non_uat_tickets = []
     for iss in sprint_issues:
         label_names = {lbl["name"] for lbl in iss.get("labels", [])}
         number = iss["number"]
         title = iss.get("title", "")
-        if _NON_WORK_LABELS_FP & label_names:
+        if _NON_WORK_LABELS_FINISH & label_names:
             all_tickets.append({"number": number, "title": title, "category": "sprint-summary"})
             continue
         if "UAT" in label_names:
@@ -139,12 +182,16 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
                 "queued",
             )
             all_tickets.append({"number": number, "title": title, "category": status})
-            non_uat_tickets.append({"number": number, "title": title, "status": status})
+    non_uat_tickets = _finish_rework_tickets(srv, sprint_issues)
 
     return {
         "all_tickets": all_tickets,
         "uat_tickets": uat_tickets,
         "non_uat_tickets": non_uat_tickets,
+        # issue #1696: same list as non_uat_tickets, named for what the Merge
+        # Sprint confirmation modal actually warns about — tickets that would
+        # be closed without having reached UAT.
+        "rework_tickets": non_uat_tickets,
         "sprint_pr": sprint_pr,
         "merge_branches": merge_branches,
         "base_label": base_label,
@@ -259,6 +306,9 @@ class FinishSprintBody(BaseModel):
     selected_ticket_numbers: list[int] = []
     merge_pr: bool = False
     sprint_pr_url: Optional[str] = None
+    # issue #1696: soft rework guard — set true only after the confirmation
+    # modal shows the rework ticket list and the human explicitly overrides.
+    confirm_rework: bool = False
 
 
 class BulkCompleteSprintBody(BaseModel):
@@ -301,21 +351,28 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
             )
 
     try:
-        if is_child:
-            sprint_issues = srv._get_sprint_issues(repo, label)
-        else:
-            sprint_issues = srv._get_sprint_issues(repo, base_label)
-            seen_nums: set[int] = {iss["number"] for iss in sprint_issues}
-            for child_label in child_labels:
-                try:
-                    for iss in srv._get_sprint_issues(repo, child_label):
-                        if iss["number"] not in seen_nums:
-                            sprint_issues.append(iss)
-                            seen_nums.add(iss["number"])
-                except subprocess.CalledProcessError:
-                    pass
+        sprint_issues = _finish_sprint_issues(srv, repo, label)
     except subprocess.CalledProcessError as e:
         raise srv._gh_error(e)
+
+    # Soft rework guard (issue #1696): finish previously closed ALL sprint
+    # issues including ones that never reached UAT, with no warning — unlike
+    # bulk-complete/complete-step, which hard-refuse. Never close unfinished
+    # work silently; require an explicit override once the modal has shown
+    # the list. Nothing is merged or closed before this check.
+    rework_tickets = _finish_rework_tickets(srv, sprint_issues)
+    if rework_tickets and not body.confirm_rework:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "rework_tickets_present",
+                "message": (
+                    f"{len(rework_tickets)} ticket(s) have not reached UAT and "
+                    f"will be closed unfinished. Confirm to proceed anyway."
+                ),
+                "rework_tickets": rework_tickets,
+            },
+        )
 
     closed = 0
     moved = 0

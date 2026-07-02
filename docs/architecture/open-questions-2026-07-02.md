@@ -49,6 +49,25 @@ bulk-complete and complete-step refuse on rework. Five paths reach
 "N rework tickets will be closed"; human can override. Never close failed
 work silently.
 
+**IMPLEMENTED (#1696, branch `fix/1686-1698-flow-decisions`), with a routing
+correction:** the guard was originally written against the synchronous
+`POST .../finish` handler in `sprint_finish.py`, but that endpoint turned out
+to be effectively dead — the dashboard UI actually calls
+`POST .../finish-bg` (`routers/finish_progress.py` →
+`finish_progress_service.run_finish_sprint`, a separate background-job
+implementation added later for streaming progress). Added the guard to
+**both**: a shared `_finish_rework_tickets()`/`_finish_sprint_issues()` pair
+in `sprint_finish.py` computes "tickets that haven't reached UAT" once, and
+both `finish_sprint` and `start_finish_sprint_bg` recompute it fresh from
+GitHub (not the client's ticket payload, which carries no label data) before
+merging or closing anything, returning 409 with a structured
+`{code, message, rework_tickets}` body unless `confirm_rework: true` is set.
+`finish-preview` now also returns `rework_tickets` so the modal can warn
+before the user even clicks Merge Sprint. Frontend
+(`finish-modal.js`/`project.html`): warning banner + required override
+checkbox, wired into the request body; error rendering updated for the new
+structured 409 detail shape.
+
 ## Q3 — Orphan settling is button-only
 
 `_github_reconcile_row` can settle an orphaned `running` sprint (PID file

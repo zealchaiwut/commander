@@ -28781,6 +28781,15 @@ document.addEventListener('keydown', function(e) {
       </div>
       <div class="rr-ticket-list" id="fs-ticket-list"></div>
       <div class="fs-actions" id="fs-actions"></div>
+      <!-- issue #1696: soft rework guard — shown only when preview reports
+           tickets that haven't reached UAT. -->
+      <div class="modal-warning hidden" id="fs-rework-warning" style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--amber-bg,rgba(217,119,6,.08));border:1px solid var(--amber,#d97706);font-size:13px">
+        <div id="fs-rework-warning-text" style="color:var(--amber,#d97706);font-weight:600"></div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:400;color:var(--text-secondary)">
+          <input type="checkbox" id="fs-confirm-rework-checkbox">
+          Close these tickets unfinished and proceed anyway
+        </label>
+      </div>
     </div>
     <div class="modal-error hidden" id="fs-error"></div>
     <!-- Progress component slot (issue #929) -->

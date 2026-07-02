@@ -236,15 +236,14 @@ approval gate. A confirmation modal lists exactly what will happen:
 
 ### Settlement paths — five ways to `completed`
 
-As implemented, `completed` is reachable through five paths with
-**inconsistent guards** *(open question — should they converge?)*:
+As implemented, `completed` is reachable through five paths:
 
 | Path | Endpoint / actor | Rework guard |
 |------|------------------|--------------|
-| Merge Sprint (finish) | `POST .../sprints/{label}/finish` | **None** — closes ALL sprint issues, including `needs-rework` ones |
+| Merge Sprint (finish) | `POST .../sprints/{label}/finish-bg` — the actual UI path (streams progress via SSE); the older synchronous `POST .../finish` in `sprint_finish.py` still exists but the dashboard doesn't call it | **Soft (#1696):** 409 with the unfinished-ticket list unless `confirm_rework: true`; human can still override — never closed silently |
 | Bulk complete | `POST .../bulk-complete` | Refuses unless children settled, chain merged, and `_has_rework_tickets` is clean |
-| Complete-step | `POST .../complete-step` — one lineage step, idempotent (merge into immediate parent, close summary, mark completed) | Refuses on rework |
-| Reconcile B2 | `actor="reconcile"` via `_sprint_db_mark_merged_completed` — completes a superseded ancestor once its lineage is verified merged to develop (`_lineage_fully_in_develop`) | Merge-verification guard |
+| Complete-step | `POST .../complete-step` — one lineage step, idempotent (merge into immediate parent, close summary, mark completed) | Refuses on rework (its own merge-or-fail step, `_branch_has_unmerged_commits`) |
+| Reconcile B2 | `actor="reconcile"` via `_sprint_db_mark_merged_completed` — completes a superseded ancestor; each of its three callers (finish, bulk-complete, complete-step) verifies the merge itself before calling it | Whatever the calling endpoint's own guard is (see above) |
 | Legacy `running→completed` edge | Manager-only; retained in the edge table | — |
 
 ## Re-run Rules

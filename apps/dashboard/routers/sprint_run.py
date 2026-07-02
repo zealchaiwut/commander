@@ -836,6 +836,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "tickets": moved,
         "parent": sprint_label,
     })
+    # DB-side lineage link alongside the plan.json copy above (issue #1691) —
+    # best-effort; a failure here must not block the rerun.
+    try:
+        srv.db.set_sprint_immediate_parent(sub_label, project, sprint_label)
+    except Exception:
+        pass
 
     parent_state_path = sprints_dir / f"{sprint_label}-state.json"
     if parent_state_path.exists():

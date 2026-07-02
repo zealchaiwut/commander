@@ -904,6 +904,14 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
+    # issue #1691: `parent_label` (above, in the core DDL) always holds the
+    # BASE label of a rerun chain (self-healed to the sprint-N root — drives
+    # History lineage grouping). Re-run's actual merge topology is child ->
+    # IMMEDIATE parent (e.g. 94.2's immediate parent is 94.1, not 94), and
+    # until now that only lived in plan.json's `parent` field. This column
+    # gives the DB the same information so merge-topology resolution can
+    # prefer it over a disk read.
+    ("immediate_parent", "TEXT"),
 )
 
 
@@ -1774,6 +1782,32 @@ def rename_sprint(old_label: str, new_label: str, project: str | None = None) ->
         conn.execute(
             "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
             (new_label, old_label),
+        )
+        conn.commit()
+
+
+def set_sprint_immediate_parent(label: str, project: str, immediate_parent: str) -> None:
+    """Record the immediate-parent lineage link for a rerun child (issue #1691).
+
+    Distinct from `parent_label` (always the BASE label, self-healed on every
+    transition — drives History grouping): `immediate_parent` is whichever
+    label was actually rerun to create this one (e.g. 94.2's immediate parent
+    is 94.1, not 94) and is what merge-topology resolution should use.
+    Creates a placeholder `draft` row when the child doesn't have one yet
+    (rerun with auto_run=false queues the child before any dispatch) so the
+    lineage link isn't lost while queued; a later `running` transition
+    upgrades that row in place via the existing ON CONFLICT path.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO sprints (label, project, state, created_at, immediate_parent)
+            VALUES (?, ?, 'draft', ?, ?)
+            ON CONFLICT(label, project) DO UPDATE SET
+                immediate_parent = excluded.immediate_parent
+            """,
+            (label, project, _now_iso(), immediate_parent),
         )
         conn.commit()
 

@@ -76,6 +76,17 @@ plan.json `parent` = immediate parent (drives merge topology); DB
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — consolidate into DB**: add `immediate_parent` column beside `parent_label`; rerun writes both; file copies become dual-writes to retire later.
 
+**IMPLEMENTED (#1691, branch `fix/1686-1698-flow-decisions`):** added
+`immediate_parent` to the `sprints` table (additive column, same migration
+idiom as the other run-artifact columns). `db.set_sprint_immediate_parent()`
+writes it from the rerun endpoint (`routers/sprint_run.py`) alongside the
+existing plan.json `parent` write, creating a placeholder `draft` row for
+queued children if none exists yet. The value survives the later `running`
+transition unchanged. Merge-topology resolvers (`_sprint_merge_parent_label`,
+`_merge_steps_for_sprint_chain` in `startup.py`) still read plan.json first —
+switching them to prefer the DB column is follow-up work, not done here, so
+this ticket only adds the column and its writer.
+
 ## Q5 — Two canonical lifecycle read accessors
 
 `apps/dashboard/sprint_state.py` returns `"unknown"` for a missing row;

@@ -123,6 +123,19 @@ implicit `draft`).
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — write a DB row at creation/queue time** so the DB is complete pre-run. (Adjusted for Q1: with `planned`/signoff deprecated, use `draft` at create and at rerun-queue.)
 
+**IMPLEMENTED (#1693, branch `fix/1686-1698-flow-decisions`):** new
+`db.ensure_sprint_draft_row(label, project)` — idempotent `INSERT OR IGNORE`
+of a `draft` row, never clobbering an existing row in any state. Wired into
+sprint creation (`routers/sprints_service.py`) and the `auto_run=false`
+rerun-queue path (`routers/sprint_run.py`), both best-effort alongside their
+existing plan.json writes. The queued-child DB row is deliberately kept at
+`draft` rather than mirroring plan.json's `needs_rework`/`queued` value —
+that value is a display-only hack to make History show a Run button, not a
+real lifecycle transition (no `running` boundary was crossed), and writing
+it into the DB would violate the state machine's actual invariants. A
+never-created sprint still reads as `"unknown"` via `sprint_state.current()`
+until this helper runs; legacy pre-#1693 sprints are unaffected.
+
 ## Q7 — SQLite dual-writer robustness
 
 Server and sprint-manager subprocess both write `commander.db`. `get_conn()`

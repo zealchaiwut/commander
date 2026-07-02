@@ -44,13 +44,14 @@ subsequent tickets. Do not add new call sites that bypass this accessor.
   accessor.
 - **plan.json is still load-bearing** on lifecycle paths: the terminal-label
   redispatch guard trusts a terminal plan.json when no DB row exists
-  (`startup.py` `_reject_terminal_label_redispatch`), rerun roster fallback
-  reads it, the reconcile orphan sweep rewrites it, and **queued rerun children
-  exist only in plan.json** (`state=needs_rework, end_reason=queued`, no DB
-  row) until dispatched — a sub-lifecycle invisible to `sprint_state.current()`.
-- Sprint **creation writes no DB row** — a never-run sprint reads as
-  `unknown`/implicit `draft` (missing row → `draft` inside
-  `transition_sprint_state`, `db.py`).
+  (`startup.py` `_reject_terminal_label_redispatch`), and the reconcile orphan
+  sweep rewrites it.
+- **Fixed (#1693):** sprint creation and the `auto_run=false` rerun-queue path
+  now write a `draft` DB row via `db.ensure_sprint_draft_row()` alongside
+  their plan.json writes, so `sprint_state.current()` sees them immediately
+  instead of relying on the missing-row-implies-draft fallback. That fallback
+  still exists for legacy/pre-#1693 sprints and any other unforeseen gap —
+  it's a safety net now, not the primary path.
 
 ## Problem — Four Competing Truths
 

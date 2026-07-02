@@ -906,6 +906,14 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
                                      end_reason="queued", parent=sprint_label)
         except Exception:
             pass
+        # DB-side draft row (issue #1693) — deliberately kept at `draft`, not
+        # mirroring plan.json's needs_rework/queued display hack: that value
+        # exists only to make History show a Run button and was never a real
+        # lifecycle transition (no `running` boundary was crossed). Best-effort.
+        try:
+            srv.db.ensure_sprint_draft_row(sub_label, project)
+        except Exception:
+            pass
         return result
 
     # Auto-run: dispatch sprint_manager for the sub-sprint

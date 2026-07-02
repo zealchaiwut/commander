@@ -101,6 +101,13 @@ def create_sprint_verified(project: str, sprint_number=None, goal=None, tickets=
             )
         except Exception:
             pass
+        # DB-side draft row alongside the plan.json dual-write (issue #1693) —
+        # best-effort; a failure here must not block sprint creation.
+        try:
+            import db as _db  # noqa: PLC0415
+            _db.ensure_sprint_draft_row(sprint_label, project)
+        except Exception:
+            pass
 
     def _plan_written():
         return srv._sprint_json_path(project_root, sprint_label).exists()

@@ -1786,6 +1786,33 @@ def rename_sprint(old_label: str, new_label: str, project: str | None = None) ->
         conn.commit()
 
 
+def ensure_sprint_draft_row(label: str, project: str) -> None:
+    """Create a `draft` row for *label* if none exists yet (issue #1693).
+
+    Sprint creation and rerun-queue (auto_run=false) previously wrote no DB
+    row at all — a never-run sprint was invisible to `sprint_state.current()`
+    and read only as an *implicit* draft (missing row -> "draft" inside
+    `transition_sprint_state`). That implicit fallback still holds for
+    legacy/pre-#1693 sprints, but new sprints now get a real row from the
+    moment they're queued, so `sprint_state.current()` is a complete picture
+    without relying on the missing-row special case.
+
+    Idempotent and non-destructive: `INSERT OR IGNORE` — if a row already
+    exists in ANY state (e.g. a fast dispatch raced ahead of this call),
+    it is left untouched.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sprints (label, project, state, created_at)
+            VALUES (?, ?, 'draft', ?)
+            """,
+            (label, project, _now_iso()),
+        )
+        conn.commit()
+
+
 def set_sprint_immediate_parent(label: str, project: str, immediate_parent: str) -> None:
     """Record the immediate-parent lineage link for a rerun child (issue #1691).
 

@@ -31,7 +31,7 @@ settlement paths, and deviations):
 | State | Trigger |
 |-------|---------|
 | `draft` | Sprint column created — implicit; no DB row exists until first Run |
-| `planned` | **Never written** — the preflight gate is the plan.json `signoff` field |
+| `planned` | **Deprecated (#1686)** — legacy-read only, canonicalizes to `draft`. The plan.json `signoff` preflight gate is parked (default-disabled); every sprint runs without approval |
 | `running` | `sprint_manager.py` process alive (server writes it at dispatch, manager re-writes after PID lock) |
 | `ready_to_merge` | Clean exit (`end_reason=natural`), or reconcile promotion |
 | `needs_rework` | Ticket failure, crash, user stop, kill, or reconcile demotion |

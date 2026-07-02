@@ -128,17 +128,30 @@ the original design diagram: `running→running` (dual-writer self-edge),
 `running→{ready_to_merge,needs_rework,completed}` requires `actor="manager"`;
 `needs_rework→{ready_to_merge,completed}` requires `actor="reconcile"`.
 
-*(deviation)* **`planned` is never written anywhere.** It exists in the enum
-and edge table only. The "preflight confirmed" gate was instead implemented as
-a **plan.json `signoff` field** with approve/reject endpoints
-(`routers/signoff_service.py`) outside the lifecycle enum — reject dissolves
-the sprint by deleting the GitHub label. *(open question: wire the `planned`
-state or delete it and canonize the signoff field.)*
+**DEPRECATED (#1686, 2026-07-02): `planned` and the sign-off gate are parked.**
+`planned` was never written in practice — the "preflight confirmed" gate was
+instead implemented as a **plan.json `signoff` field** with approve/reject
+endpoints (`routers/signoff_service.py`). Both were too unstable to keep
+supporting and are now parked rather than fixed:
+
+- `planned` removed from `_SPRINT_STATES` (unified) and `LIFECYCLE_STATES`
+  (UI-exposed); kept only in the legacy read bucket, canonicalizing to
+  `draft` via `_LEGACY_LIFECYCLE_MAP`. No storable-edge entry remains — any
+  code path would canonicalize `current` before an edge lookup, so a
+  `"planned"` key in `_LEGAL_SPRINT_EDGES` would be unreachable.
+- The sign-off gate (`config.sprint_signoff_disabled()`) already defaulted to
+  **disabled** — `/api/sprints/{label}/approve|reject` 404, and the run-path
+  guard `_assert_sprint_signed_off` no-ops — so every sprint is runnable
+  without approval unless an operator explicitly re-enables it per machine.
+  No sprint ever needs to pass through `planned`.
+
+Every project's sprint now goes create → `draft` (implicit) → `running`
+directly.
 
 | State | Meaning | Replaces (legacy) |
 |-------|---------|-------------------|
 | `draft` | column exists, tickets being arranged, no preflight — **implicit**: nothing inserts a `draft` row; missing row reads as `draft`/`unknown` | `planning` |
-| `planned` | preflight confirmed, not yet dispatched — **never written in practice**; gate lives in plan.json `signoff` instead | `planning` (auto_run=false) |
+| `planned` | **deprecated (#1686)** — legacy-read only, canonicalizes to `draft` | `planning` (auto_run=false) |
 | `running` | sprint manager process alive | `running` |
 | `ready_to_merge` | run ended, all tickets passed, branch awaiting Merge Sprint | `completed` (pre-merge) |
 | `needs_rework` | run ended badly: ticket failure, crash, orphan-PID, **or user cancel** | `failed`, `cancelled`, `has_rework` |

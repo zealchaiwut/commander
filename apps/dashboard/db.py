@@ -512,23 +512,28 @@ def delete_brief_artifact(scope: str, project: str, date: str) -> None:
 # cache (dual-write) until a later sprint removes them.
 #
 # Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
-# draft / planned / running / ready_to_merge / needs_rework / completed.
-# `planning`, `cancelled`, and `failed` are legacy values kept readable for
-# pre-redesign rows (forward-only migration, no rewrite) — they are never
-# written anew and render through `canonical_lifecycle()`.
+# draft / running / ready_to_merge / needs_rework / completed.
+# `planning`, `planned`, `cancelled`, and `failed` are legacy values kept
+# readable for pre-redesign rows (forward-only migration, no rewrite) — they
+# are never written anew and render through `canonical_lifecycle()`.
+#
+# `planned` was deprecated in issue #1686 alongside the plan.json `signoff`
+# gate — the preflight-confirmation step it modeled was never stabilized.
+# Nothing writes it anymore; any legacy row that carries it displays as
+# `draft`.
 
 _SPRINT_STATES = (
     # unified lifecycle
-    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    "draft", "running", "ready_to_merge", "needs_rework", "completed",
     # legacy, read-only
-    "planning", "cancelled", "failed",
+    "planning", "planned", "cancelled", "failed",
 )
 
 # Canonical lifecycle states exposed to the UI. `partial_finished` is derived
 # at read time from children's states and never stored; `deleted` lives in the
 # sprint_history snapshot table, not in `sprints`.
 LIFECYCLE_STATES = (
-    "draft", "planned", "running", "ready_to_merge", "needs_rework",
+    "draft", "running", "ready_to_merge", "needs_rework",
     "partial_finished", "completed", "deleted",
 )
 
@@ -538,6 +543,7 @@ LIFECYCLE_STATES = (
 # flow auto-merged at end of run, so those sprints are past ready_to_merge).
 _LEGACY_LIFECYCLE_MAP = {
     "planning": "draft",
+    "planned": "draft",
     "complete": "completed",
     "finished": "completed",
     "cancelled": "needs_rework",
@@ -566,8 +572,10 @@ _logger = logging.getLogger("db.sprint_state")
 # requiring a full running start.  The critical guard — requiring actor="manager"
 # for running→terminal — is enforced separately below.
 _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
-    "draft":          frozenset({"planned", "running", "ready_to_merge", "needs_rework", "deleted"}),
-    "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
+    # `current` (below) is always run through canonical_lifecycle() before
+    # this table is consulted, and `planned` canonicalizes to `draft` (#1686
+    # deprecation) — so a `"planned"` key here would be unreachable dead code.
+    "draft":          frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
     "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
     # Derived-only in normal flow; if a legacy row stored this value, allow

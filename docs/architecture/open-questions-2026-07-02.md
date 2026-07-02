@@ -25,6 +25,14 @@ plan.json `signoff` gate are deprecated for now (too hard to stabilize).
 Also deprecate the **advisor** and **brief** features in the same pass.
 Remove/disable rather than wire up; revisit when the platform is stable.
 
+**IMPLEMENTED (#1686, branch `fix/1686-1698-flow-decisions`):** `planned`
+removed from `_SPRINT_STATES`/`LIFECYCLE_STATES`/`_LEGAL_SPRINT_EDGES` in
+`apps/dashboard/db.py`, kept only as a legacy-read value canonicalizing to
+`draft`. Sign-off was already default-disabled via
+`config.sprint_signoff_disabled()` (confirmed, not re-implemented — the
+approve/reject endpoints already 404 and the run-guard already no-ops by
+default). Docs updated in sprint-lifecycle.md and 3_sprint-flow.md.
+
 ## Q2 — Merge Sprint has no rework guard
 
 Plain finish closes ALL sprint issues including `needs-rework` ones;

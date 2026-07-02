@@ -71,8 +71,11 @@ end-of-run via live `gh`.
 
 **Gating:** `COMMANDER_DISABLE_AUTO_RECONCILE=1` kills the background sweep
 only (button still works — intended for non-primary clones); per-project 60 s
-in-process TTL (timestamp recorded *before* the pass, so a failed pass still
-consumes the window); sweep capped at 40 rows; `running / draft / planned /
+in-process TTL, **stamped only after a successful pass** (#1690 — a transient
+failure no longer eats the window); sweep window capped at 40 rows per call
+but **rotates per project** across sweeps (#1690) so a project with more than
+40 eligible rows gets full coverage over successive History loads instead of
+only ever re-checking the same first 40; `running / draft / planned /
 completed / deleted` rows are skipped — only `ready_to_merge / needs_rework /
 failed / cancelled` are re-checked.
 

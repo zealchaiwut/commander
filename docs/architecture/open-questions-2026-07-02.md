@@ -180,6 +180,13 @@ non-final sprints.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — fix (b) TTL-on-success and (c) sweep cursor**; leave (a) flap as self-healing.
 
+**IMPLEMENTED (#1690, branch `fix/1686-1698-flow-decisions`):** (b) and (c)
+both fixed in `routers/sprint_reconcile_service.py` — TTL stamped only after
+a successful pass; per-project rotating cursor over eligible rows so a
+project with >40 eligible terminal sprints gets full coverage across sweeps
+instead of only ever re-checking the first 40. (a) left as-is per the
+recommendation.
+
 ## Q12 — `_lineage_fully_in_develop` has tests but no production caller
 
 Defined in `sprint_reconcile_service.py` for B2 auto-complete of superseded

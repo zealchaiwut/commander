@@ -122,9 +122,14 @@ def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> No
     - CCPROXY_PROFILE → telemetry only: the post-tool hook forwards its own
       env value as ccproxy_profile, which is what flags the run is_ica.
     - Auth: ANTHROPIC_API_KEY stays stripped (never send the metered key at
-      the proxy); a dummy ANTHROPIC_AUTH_TOKEN keeps the CLI off subscription
-      OAuth for this subprocess — the proxy's openai-kind profile ignores
-      inbound auth and attaches its own ICA key upstream.
+      the proxy); CLAUDE_CODE_OAUTH_TOKEN is stripped too — a *valid*
+      subscription OAuth token makes Claude Code authenticate against
+      api.anthropic.com and validate --model there, so an ICA-only model id
+      (e.g. via CCPROXY_FORCE_MODEL) fails with "model may not exist or you may
+      not have access to it" and the run never reaches the proxy. A dummy
+      ANTHROPIC_AUTH_TOKEN then keeps the CLI on the ANTHROPIC_BASE_URL path —
+      the proxy's openai-kind profile ignores inbound auth and attaches its own
+      ICA key upstream.
 
     When a per-role profile (issue #1671) already set CCPROXY_PROFILE, that
     name wins for both the header and the env var.
@@ -137,6 +142,11 @@ def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> No
     sub_env["ANTHROPIC_CUSTOM_HEADERS"] = f"X-CCProxy-Profile: {effective_profile}"
     sub_env["CCPROXY_PROFILE"] = effective_profile
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    # A valid subscription OAuth token outranks ANTHROPIC_BASE_URL: Claude Code
+    # authenticates against api.anthropic.com and the ICA-only model id fails
+    # there. Strip it so the CLI uses the proxy path (issue: ICA coder crashed
+    # with "model may not exist or you may not have access to it").
+    sub_env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     sub_env["ANTHROPIC_AUTH_TOKEN"] = "commander-ica-proxy"
 
 

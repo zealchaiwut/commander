@@ -357,7 +357,12 @@ class TestSprintManagerIntegration:
         }
 
     def test_ica_provider_triggers_preflight(self):
-        """AC1: provider=ica → check_ica_readiness is invoked."""
+        """AC1: provider=ica → check_ica_readiness is invoked.
+
+        The gate reads get_effective_llm_provider (per-run plan.json value >
+        global setting) rather than the global-only _get_llm_provider, so the
+        run-modal ICA choice is preflighted too.
+        """
         import services.sprint_manager.sprint_manager as sm
         from services.sprint_manager.ica_preflight import IcaPreflightError
 
@@ -367,7 +372,7 @@ class TestSprintManagerIntegration:
                 side_effect=IcaPreflightError("ICA not ready: test"),
             ) as mock_check,
             patch(
-                "services.sprint_manager.sprint_manager._get_llm_provider",
+                "services.sprint_manager.sprint_manager.get_effective_llm_provider",
                 return_value="ica",
             ),
         ):
@@ -386,7 +391,7 @@ class TestSprintManagerIntegration:
                 "services.sprint_manager.sprint_manager.check_ica_readiness",
             ) as mock_check,
             patch(
-                "services.sprint_manager.sprint_manager._get_llm_provider",
+                "services.sprint_manager.sprint_manager.get_effective_llm_provider",
                 return_value="anthropic",
             ),
         ):

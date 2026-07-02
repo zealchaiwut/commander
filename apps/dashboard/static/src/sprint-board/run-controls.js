@@ -12,7 +12,7 @@
    _smgmtLingerStart, _smgmtLingerLive, _smgmtRunningViewUpdate,
    _pfCurrentLabel, _pfCurrentRepo, _pfState,
    _pfDagData, _pfWarnings, _pfCycle,
-   _pfFlags, _pfSelectedIds, _pfUseClineFollowups,
+   _pfFlags, _pfSelectedIds, _pfUseClineFollowups, _pfLlmProvider:writable,
    _pfXLSuggestions, _pfStrictXLGate, _pfXLMinutesSaved,
    _smgmtBySprint */
 /* eslint-enable no-unused-vars */
@@ -201,6 +201,7 @@ export function _pfReset() {
   _pfModels = null;
   _pfSelectedIds = new Set();
   _pfUseClineFollowups = false;
+  _pfLlmProvider = 'anthropic';
   _pfXLSuggestions = [];
   _pfStrictXLGate = false;
   _pfXLMinutesSaved = 0;
@@ -220,6 +221,7 @@ export function _pfClose() {
   _pfFlags        = null;
   _pfSelectedIds  = new Set();
   _pfUseClineFollowups = false;
+  _pfLlmProvider  = 'anthropic';
   _pfXLSuggestions = [];
   _pfStrictXLGate = false;
   _pfXLMinutesSaved = 0;
@@ -283,9 +285,28 @@ export function _pfShowSuccess() {
        <span>Use Cline (Sonnet) for follow-up coder fixes — tester stays on Claude</span>
      </label>
    </div>`;
+  // Per-run LLM provider selector. Options in one array so a future provider
+  // (e.g. codex) is a one-line addition. Applies to THIS run only — the modal
+  // resets to anthropic on open/close, so there is nothing to switch back.
+  const providerOptions = [
+    { value: 'anthropic', label: 'Anthropic (subscription)' },
+    { value: 'ica', label: 'IBM ICA (via claude-proxy)' },
+  ];
+  const providerSelectorHtml = `<div class="pf-section pf-provider-section">
+     <label class="pf-cline-label" style="gap:8px">
+       <span>LLM provider for this run:</span>
+       <select id="pf-provider-select" onchange="_pfLlmProvider = this.value"
+         style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+         ${providerOptions.map((o) =>
+           `<option value="${o.value}" ${_pfLlmProvider === o.value ? 'selected' : ''}>${o.label}</option>`
+         ).join('')}
+       </select>
+     </label>
+   </div>`;
   document.getElementById('pf-content').innerHTML =
     `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${modelsHtml}
+     ${providerSelectorHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
      ${xlHtml}
@@ -1219,7 +1240,7 @@ async function _ksStep1Post() {
     const res = await fetch('/api/sprints/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups }),
+      body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups, llm_provider: _pfLlmProvider }),
     });
     if (!res.ok) {
       let detail = await res.text();

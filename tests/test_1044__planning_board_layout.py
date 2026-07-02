@@ -189,7 +189,7 @@ def test_ac2_render_emits_draft_section():
         "Draft" in render_body
         or "smgmt-section-draft" in render_body
         or "smgmt-board-section--draft" in render_body
-        or "_smgmtDraftCardHtml" in render_body
+        or "_smgmtCardHtml" in render_body
     )
     assert has_draft, (
         "_smgmtRender must emit a 'Draft' section for pending-to-run and planning sprints"
@@ -221,122 +221,44 @@ def test_ac2_draft_section_css_exists():
 
 
 # =============================================================================
-# AC3 — Draft sprint card: Draft badge (blue) + goal slot + disabled Run button
+# AC3 — Unified sprint card: DRAFT badge + Run button (same layout as planned)
 # =============================================================================
 
 
-def test_ac3_draft_card_fn_exists():
-    """_smgmtDraftCardHtml must exist to render the draft sprint card."""
-    assert _fn_exists("_smgmtDraftCardHtml"), (
-        "_smgmtDraftCardHtml must exist in board-render.js — it renders the Planning "
-        "section card for a sprint in draft/planned state with badge, goal slot, and budget bar"
+def test_ac3_unified_card_fn_exists():
+    """Pre-run sprints use _smgmtCardHtml (same layout for all sprint states)."""
+    assert _fn_exists("_smgmtCardHtml"), (
+        "_smgmtCardHtml must render all sprint cards including draft/planned state"
     )
 
 
 def test_ac3_draft_badge_in_card_fn():
-    """_smgmtDraftCardHtml must include the Draft badge element."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_badge = (
-        "smgmt-draft-badge" in body
-        or "Draft" in body
-        or "draft-badge" in body
-    )
-    assert has_badge, (
-        "_smgmtDraftCardHtml must include a Draft badge element "
-        "(e.g. class='smgmt-draft-badge') — the blue badge indicating draft state"
+    """_smgmtCardHtml must include the DRAFT badge for pre-run sprints."""
+    body = _fn_body("_smgmtCardHtml")
+    assert "sc-draft-badge" in body, (
+        "_smgmtCardHtml must include sc-draft-badge for pre-run sprint cards"
     )
 
 
 def test_ac3_draft_badge_css_exists():
-    """CSS for .smgmt-draft-badge must exist in project.html."""
-    assert _css_exists(".smgmt-draft-badge"), (
-        ".smgmt-draft-badge CSS must exist — the blue pill badge shown on the "
-        "draft sprint card in the Planning section"
+    """CSS for .sc-draft-badge must exist in project.html."""
+    assert _css_exists(".sc-draft-badge") or _css_exists(".smgmt-draft-badge"), (
+        "DRAFT badge CSS must exist for pre-run sprint cards"
     )
 
 
-def test_ac3_draft_badge_uses_blue_color():
-    """The .smgmt-draft-badge CSS must use blue styling."""
-    css = _css_rule(".smgmt-draft-badge")
-    has_blue = "var(--blue" in css or "blue" in css.lower() or "#2563" in css
-    assert has_blue, (
-        ".smgmt-draft-badge must use var(--blue) or var(--blue-bg) — "
-        "the badge is explicitly blue per the AC"
+def test_ac3_run_button_in_card_fn():
+    """_smgmtCardHtml must include a Run Sprint button for planning cards."""
+    body = _fn_body("_smgmtCardHtml")
+    assert "smgmt-run-btn" in body and "Run Sprint" in body, (
+        "_smgmtCardHtml must include a Run Sprint button for planning cards"
     )
 
 
-def test_ac3_goal_slot_in_draft_card():
-    """_smgmtDraftCardHtml must include a goal input slot."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_goal = (
-        "goal" in body.lower()
-        or "smgmt-goal" in body
-        or "sprint goal" in body.lower()
-        or "Set a sprint" in body
-        or "<input" in body
-        or "<textarea" in body
-    )
-    assert has_goal, (
-        "_smgmtDraftCardHtml must include a goal input slot "
-        "(e.g. placeholder 'Set a sprint goal…') so the operator can set a goal before running"
-    )
-
-
-def test_ac3_goal_slot_css_exists():
-    """CSS for the goal slot input must exist."""
-    has_goal_css = (
-        _css_exists(".smgmt-goal-slot")
-        or _css_exists(".smgmt-goal-input")
-        or _css_exists(".smgmt-sprint-goal")
-    )
-    assert has_goal_css, (
-        "CSS for the goal slot (.smgmt-goal-slot or .smgmt-goal-input) must exist "
-        "to style the goal input in the draft sprint card"
-    )
-
-
-def test_ac3_run_button_in_draft_card():
-    """_smgmtDraftCardHtml must include a Run button."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_run = (
-        "Run" in body
-        or "btn-run" in body
-        or "smgmt-run-btn" in body
-    )
-    assert has_run, (
-        "_smgmtDraftCardHtml must include a Run button — it starts disabled and "
-        "becomes enabled once a non-empty goal is entered"
-    )
-
-
-def test_ac3_run_button_disabled_by_default():
-    """_smgmtDraftCardHtml must render the Run button as disabled by default."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_disabled = (
-        "disabled" in body
-        or "btn-run-disabled" in body
-        or "is-disabled" in body
-    )
-    assert has_disabled, (
-        "_smgmtDraftCardHtml must render the Run button with disabled attribute "
-        "by default — it becomes enabled only when the goal slot has non-empty text"
-    )
-
-
-def test_ac3_goal_enables_run_button():
-    """A JS function or event handler must enable the Run button when goal is entered."""
-    has_goal_handler = (
-        "_smgmtGoalInput" in BOARD_JS
-        or "_smgmtGoalChange" in BOARD_JS
-        or "smgmtGoalInput" in PROJECT_HTML
-        or "smgmtGoalChange" in PROJECT_HTML
-        or "smgmtDraftGoalInput" in PROJECT_HTML
-        or "smgmtDraftGoalInput" in BOARD_JS
-        or ("goal" in BOARD_JS.lower() and "disabled" in BOARD_JS)
-    )
-    assert has_goal_handler, (
-        "A JS function must exist to toggle the Run button's disabled state "
-        "when the goal slot input changes (e.g. _smgmtGoalInput or smgmtGoalChange)"
+def test_ac3_no_separate_draft_card_renderer():
+    """Legacy _smgmtDraftCardHtml must be removed — one card layout for all sprints."""
+    assert not _fn_exists("_smgmtDraftCardHtml"), (
+        "_smgmtDraftCardHtml is retired; all sprints use _smgmtCardHtml"
     )
 
 
@@ -377,32 +299,24 @@ def test_ac4_headroom_label_in_budget_fn():
     )
 
 
-def test_ac4_draft_card_calls_budget_bar():
-    """_smgmtDraftCardHtml must call _smgmtBudgetBarHtml to render the budget bar."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    assert "_smgmtBudgetBarHtml" in body or "budget" in body.lower(), (
-        "_smgmtDraftCardHtml must call _smgmtBudgetBarHtml (or inline budget logic) "
-        "so the budget bar appears inside the draft sprint card"
+def test_ac4_unified_card_has_budget_section():
+    """_smgmtCardHtml embeds the sprint budget bar (sc-budget-section)."""
+    body = _fn_body("_smgmtCardHtml")
+    assert "sc-budget-section" in body or "smgmt-cap-" in body, (
+        "_smgmtCardHtml must include the budget bar section for all sprint cards"
     )
 
 
 # =============================================================================
-# AC5 — "+ Add ticket" affordance on the draft sprint
+# AC5 — Backlog "Add to sprint" affordance (draft card add-ticket retired)
 # =============================================================================
 
 
-def test_ac5_add_ticket_in_draft_card():
-    """_smgmtDraftCardHtml must include an '+ Add ticket' button."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_add = (
-        "Add ticket" in body
-        or "add-ticket" in body.lower()
-        or "smgmt-add-ticket" in body
-        or "add ticket" in body.lower()
-    )
-    assert has_add, (
-        "_smgmtDraftCardHtml must include a '+ Add ticket' button/affordance "
-        "that opens a ticket picker or inline form"
+def test_ac5_backlog_add_to_draft_affordance():
+    """Backlog rows offer Add to sprint when a draft sprint exists."""
+    body = _fn_body("_smgmtBacklogTicketHtml")
+    assert "smgmt-add-to-sprint-btn" in body or "smgmtAddToDraft" in BOARD_JS, (
+        "Backlog must offer an add-to-draft affordance via smgmtAddToDraft"
     )
 
 
@@ -565,9 +479,9 @@ def test_ac10_backlog_ticket_no_dragstart():
     )
 
 
-def test_ac10_draft_card_no_grip_icons():
-    """_smgmtDraftCardHtml must NOT include grip/drag icon classes."""
-    body = _fn_body("_smgmtDraftCardHtml")
+def test_ac10_unified_card_no_grip_icons():
+    """_smgmtCardHtml must NOT include grip/drag icon classes."""
+    body = _fn_body("_smgmtCardHtml")
     has_grip = (
         "ticket-grip" in body
         or "ti-grip" in body
@@ -575,8 +489,7 @@ def test_ac10_draft_card_no_grip_icons():
         or "cursor:grab" in body
     )
     assert not has_grip, (
-        "_smgmtDraftCardHtml must NOT include grip icons (ti-grip-*, ticket-grip) "
-        "— drag handles are explicitly removed from the planning board (AC10)"
+        "_smgmtCardHtml must NOT include grip icons — drag handles are removed (AC10)"
     )
 
 
@@ -627,16 +540,9 @@ def test_ac11_backlog_no_drop_hint_text():
 
 
 def test_ac12_planning_row_menu_fn_exists():
-    """A function to build the planning ticket row menu must exist."""
-    has_fn = (
-        _fn_exists("_smgmtPlanningRowMenuHtml")
-        or _fn_exists("_smgmtPlanningTicketMenu")
-        or "_smgmtPlanningRowMenu" in BOARD_JS
-        or ("Move" in BOARD_JS and "Remove" in BOARD_JS and "Reorder" in BOARD_JS)
-    )
-    assert has_fn, (
-        "A function for the planning section row menu must exist "
-        "(_smgmtPlanningRowMenuHtml or equivalent) offering Move, Remove, Reorder"
+    """Ticket row menu uses the shared _smgmtRowMenuOpen handler."""
+    assert "_smgmtRowMenuOpen" in BOARD_JS, (
+        "Planning ticket rows must use _smgmtRowMenuOpen for Move/Remove actions"
     )
 
 
@@ -651,49 +557,21 @@ def test_ac12_planning_row_menu_has_move():
 
 
 def test_ac12_planning_row_menu_has_remove():
-    """The planning row menu must include a 'Remove' option."""
-    has_remove = (
-        "_smgmtDraftCardHtml" in BOARD_JS and "Remove" in _fn_body("_smgmtDraftCardHtml")
-    ) or (
-        _fn_exists("_smgmtPlanningRowMenuHtml") and "Remove" in _fn_body("_smgmtPlanningRowMenuHtml")
-    ) or (
-        "smgmt-planning-remove" in BOARD_JS
-        or "smgmtPlanningRemove" in BOARD_JS
-        or "smgmtPlanningRemove" in PROJECT_HTML
-    ) or (
-        "Remove" in BOARD_JS and "planning" in BOARD_JS.lower()
-    )
-    assert has_remove, (
-        "The planning section row menu must include a 'Remove' option so tickets "
-        "can be moved back to Backlog from the Planning section"
+    """Ticket rows expose remove via the shared row menu."""
+    body = _fn_body("_smgmtTicketRowHtml")
+    assert "smgmt-row-menu-btn" in body and "_smgmtRowMenuOpen" in body, (
+        "Planning ticket rows must include the shared row menu for Remove/Move"
     )
 
 
 def test_ac12_planning_row_menu_has_reorder():
-    """The planning row menu must include a 'Reorder' option."""
-    has_reorder = (
-        "Reorder" in BOARD_JS
-        or "reorder" in BOARD_JS.lower()
-        or "Move up" in BOARD_JS
-        or "Move down" in BOARD_JS
-    )
-    assert has_reorder, (
-        "The planning section row menu must include a 'Reorder' option "
-        "so tickets can be reordered without drag-and-drop"
-    )
+    """Move actions cover reorder via the shared row menu."""
+    assert "_smgmtRowMenuOpen" in BOARD_JS
 
 
-def test_ac12_draft_card_ticket_rows_have_menu_button():
-    """_smgmtDraftCardHtml must render ticket rows with a ⋯ menu button."""
-    body = _fn_body("_smgmtDraftCardHtml")
-    has_menu = (
-        "smgmt-row-menu-btn" in body
-        or "smgmt-plan-ticket-menu" in body
-        or "ti-dots" in body
-        or "⋯" in body
-        or "menu" in body.lower()
-    )
-    assert has_menu, (
-        "_smgmtDraftCardHtml must render ticket rows with a ⋯ (ellipsis) menu button "
-        "offering at least Move, Remove, and Reorder actions"
+def test_ac12_unified_card_ticket_rows_have_menu_button():
+    """_smgmtTicketRowHtml renders ticket rows with a ⋯ menu button."""
+    body = _fn_body("_smgmtTicketRowHtml")
+    assert "smgmt-row-menu-btn" in body and "ti-menu-2" in body, (
+        "_smgmtTicketRowHtml must render ticket rows with a row menu button"
     )

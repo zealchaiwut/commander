@@ -252,8 +252,15 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `base_sha` | text | Git SHA of the expected base branch at dispatch; nullable (issue #788) |
 | `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
+| `provider` | text | LLM provider identifier for this run (e.g. `ICA`); set from the role's `CCPROXY_PROFILE` at dispatch; nullable (issue #1673) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
+
+The `provider` column drives the **`caching: reduced`** indicator on the live
+board (`project.html`) and run browser (`run_browser.html`): when an agent run's
+provider is `ICA`, the proxy strips prompt-caching headers (full context is
+re-sent each turn), so a yellow badge flags the higher token cost. It surfaces in
+the live snapshot as `coder_provider` and in `/api/runs` as `provider`.
 
 ### sprint_history (issue #805)
 
@@ -369,6 +376,19 @@ Returns ordered per-issue segment data sourced from DB `agent_runs` (no render-t
 > **Contract note (issue #671):** Before this change the endpoint returned HTTP 404 for the `no_data` case.
 > It now always returns HTTP 200. Clients must check `state`, not the HTTP status code.
 > See `docs/features/api.md` for the full response shape reference.
+
+### Settings — LLM provider toggle (issue #1667)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/settings/provider` | Returns `{"provider": "anthropic"\|"ica"}` — the currently active backend (from the global `app_config.llmProvider` setting, default `anthropic`). |
+| `POST` | `/api/settings/provider` | Switches the global LLM provider. Body `{"provider": "anthropic"\|"ica"}`. Validates the value (HTTP 400 if unknown), calls the claude-proxy profile endpoint, then persists `llmProvider`. Returns `{"provider": ..., "ok": true}`. |
+
+**Mechanism.** `POST /api/settings/provider` calls `POST {COMMANDER_PROXY_URL}/profile` with `{"name": "<provider>"}` (default `COMMANDER_PROXY_URL=http://localhost:9090`) to instruct the local claude-proxy to activate the named profile. The new value is persisted to the global `app_config` settings key **only after** the proxy confirms. If the proxy is unreachable or returns non-2xx, the endpoint raises HTTP 503 and does **not** persist — no silent fallback. In-flight agent sessions keep their existing proxy connections; only newly dispatched agents inherit the changed profile. Service logic lives in `apps/dashboard/routers/llm_provider_service.py`.
+
+`llmProvider` is a proxy-controlled field: `PUT /api/settings` rejects it with HTTP 422 (`_PROXY_CONTROLLED_FIELDS` in `settings_service.py`) so the value can only change through the proxy-aware endpoint above. It is registered in `KNOWN_FIELDS` (`services/sprint_manager/settings_schema.py`) as `{"secret": False, "default": "anthropic"}`.
+
+The active provider at sprint start is captured on `SprintState.llm_provider` (read from `app_config.llmProvider`, falling back to `anthropic`), persisted in `state.json`, and exposed in the live snapshot as `llm_provider` so historical/running run views show the provider that was actually in use for that run rather than the current global setting (issue #1670).
 
 ### Sprint file maintenance (issue #735)
 

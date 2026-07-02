@@ -1422,6 +1422,7 @@
   globalThis._pfFlags ??= null;
   globalThis._pfSelectedIds ??= /* @__PURE__ */ new Set();
   globalThis._pfUseClineFollowups ??= false;
+  globalThis._pfLlmProvider ??= "anthropic";
   globalThis._pfXLSuggestions ??= [];
   globalThis._pfStrictXLGate ??= false;
   globalThis._pfXLMinutesSaved ??= 0;
@@ -4017,6 +4018,18 @@ ${listing}`)) {
         `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} sprint ticket${allTickets.length !== 1 ? "s" : ""}</div>`
       );
       actionsEl.innerHTML = actionRows.join("");
+      const reworkTickets = preview.rework_tickets || [];
+      const warningEl = document.getElementById("fs-rework-warning");
+      const warningTextEl = document.getElementById("fs-rework-warning-text");
+      const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+      if (reworkTickets.length > 0) {
+        warningTextEl.textContent = `${reworkTickets.length} ticket${reworkTickets.length !== 1 ? "s" : ""} will be closed unfinished: ` + reworkTickets.map((t) => `#${t.number}`).join(", ");
+        warningEl.classList.remove("hidden");
+        if (reworkCheckbox)
+          reworkCheckbox.checked = false;
+      } else {
+        warningEl.classList.add("hidden");
+      }
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
       if (confirmBtn)
@@ -4035,6 +4048,14 @@ ${listing}`)) {
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
+    const reworkTickets = _fsPreview.rework_tickets || [];
+    const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+    if (reworkTickets.length > 0 && !(reworkCheckbox && reworkCheckbox.checked)) {
+      const errEl = document.getElementById("fs-error");
+      errEl.textContent = "Check the box to confirm closing unfinished tickets, or cancel and re-run them first.";
+      errEl.classList.remove("hidden");
+      return;
+    }
     const allTickets = _fsPreview.all_tickets || [];
     const selectedTickets = allTickets.map((t) => ({
       number: t.number,
@@ -4052,7 +4073,8 @@ ${listing}`)) {
       selected_tickets: selectedTickets,
       merge_pr: !!_fsPreview.sprint_pr,
       sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
-      total: selectedNums.length + 2
+      total: selectedNums.length + 2,
+      confirm_rework: reworkTickets.length > 0 && !!(reworkCheckbox && reworkCheckbox.checked)
     };
     try {
       const res = await fetch(
@@ -4065,7 +4087,9 @@ ${listing}`)) {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${res.status}`);
+        const detail = err.detail;
+        const msg = detail && typeof detail === "object" ? detail.message : detail;
+        throw new Error(msg || `HTTP ${res.status}`);
       }
       await res.json();
       const initialSnap = {
@@ -5468,8 +5492,6 @@ Resolve manually and re-run Bulk complete.`,
         if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
           if (goal)
             goalEl.value = goal;
-          const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-          _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
         } else if (goal) {
           goalEl.textContent = goal;
           goalEl.title = goal;
@@ -6724,65 +6746,6 @@ Resolve manually and re-run Bulk complete.`,
     }).join("");
     return `<div class="smgmt-focus-guide-title">What to do, in order</div>` + stepHtml;
   }
-  function smgmtPlanningRowMenu(event, issueNum, label) {
-    event.stopPropagation();
-    const existing = document.getElementById("smgmt-plan-row-menu");
-    if (existing)
-      existing.remove();
-    const menu = document.createElement("div");
-    menu.id = "smgmt-plan-row-menu";
-    menu.className = "smgmt-ctx-menu smgmt-plan-ctx-menu";
-    menu.setAttribute("role", "menu");
-    menu.innerHTML = [
-      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${issueNum},'${escHtml(label)}',false);document.getElementById('smgmt-plan-row-menu')?.remove()"><i class="ti ti-arrows-move"></i> Move</button>`,
-      `<button class="smgmt-ctx-item smgmt-ctx-item--remove" role="menuitem" onclick="event.stopPropagation();smgmtPlanningRemove(${issueNum},'${escHtml(label)}')"><i class="ti ti-x"></i> Remove</button>`,
-      `<button class="smgmt-ctx-item" role="menuitem" onclick="event.stopPropagation();smgmtPlanningReorder(${issueNum},'${escHtml(label)}')"><i class="ti ti-arrows-up-down"></i> Reorder</button>`
-    ].join("");
-    document.body.appendChild(menu);
-    const rect = event.currentTarget.getBoundingClientRect();
-    menu.style.position = "fixed";
-    menu.style.top = rect.bottom + 4 + "px";
-    menu.style.left = rect.left + "px";
-    menu.style.zIndex = "9999";
-    const close = (e) => {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener("click", close);
-      }
-    };
-    setTimeout(() => document.addEventListener("click", close), 0);
-  }
-  function smgmtPlanningRemove(issueNum, label) {
-    const menu = document.getElementById("smgmt-plan-row-menu");
-    if (menu)
-      menu.remove();
-    if (typeof _smgmtRowMenuOpen === "function") {
-      const fakeEvt = { currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body, stopPropagation() {
-      } };
-      _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
-    }
-  }
-  function smgmtPlanningReorder(issueNum, label) {
-    const menu = document.getElementById("smgmt-plan-row-menu");
-    if (menu)
-      menu.remove();
-    const ticketEl = document.getElementById(`smgmt-ticket-${issueNum}`);
-    if (!ticketEl)
-      return;
-    const container = ticketEl.closest(".smgmt-plan-tickets");
-    if (!container)
-      return;
-    const rows = [...container.querySelectorAll(".smgmt-plan-ticket")];
-    const idx = rows.indexOf(ticketEl);
-    if (idx < 0)
-      return;
-    const choice = window.confirm(
-      `Move #${issueNum} \u2014 OK = move up one row, Cancel = move down one row`
-    );
-    const target = choice ? rows[idx - 1] : rows[idx + 2];
-    if (target)
-      container.insertBefore(ticketEl, choice ? target : target);
-  }
   function smgmtAddToDraft(issueNum, draftLabel) {
     if (!draftLabel)
       return;
@@ -6795,59 +6758,6 @@ Resolve manually and re-run Bulk complete.`,
     };
     if (typeof _smgmtRowMenuOpen === "function") {
       _smgmtRowMenuOpen(fakeEvt, issueNum, null, false);
-    }
-  }
-  var _smgmtGoalSaveTimers = {};
-  function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
-    const btn = document.getElementById(runBtnId);
-    if (!btn)
-      return;
-    if (_smgmtSignoffState(sprintLabel) === "pending") {
-      btn.disabled = true;
-      btn.title = "Approve the sprint plan before running";
-      return;
-    }
-    if (!_smgmtGoalRequired()) {
-      const tickets = _smgmtBySprint && _smgmtBySprint[sprintLabel] || [];
-      const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-      btn.disabled = !canRun;
-      btn.title = canRun ? "" : "No dispatchable tickets \u2014 add tickets from the backlog";
-      return;
-    }
-    const hasGoal = inputEl && inputEl.value.trim().length > 0;
-    btn.disabled = !hasGoal;
-    btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
-  }
-  function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
-    _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
-    if (!sprintLabel)
-      return;
-    const repo = _smgmtRepo();
-    if (!repo)
-      return;
-    clearTimeout(_smgmtGoalSaveTimers[sprintLabel]);
-    _smgmtGoalSaveTimers[sprintLabel] = setTimeout(async () => {
-      try {
-        await fetch("/api/sprints/goal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project: repo,
-            sprint_label: sprintLabel,
-            goal: inputEl.value.trim()
-          })
-        });
-      } catch (_) {
-      }
-    }, 400);
-  }
-  function smgmtOpenTicketPicker(label) {
-    if (typeof _smgmtPlanNextBtn === "function") {
-      _smgmtPlanNextBtn(label);
-    } else {
-      const backlogEl = document.getElementById("smgmt-backlog-pane");
-      if (backlogEl)
-        backlogEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
   function _smgmtUpdateAncestorRow(label, outcome) {
@@ -7032,6 +6942,7 @@ Proceed anyway?`)) {
     _pfModels = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfLlmProvider = "anthropic";
     _pfXLSuggestions = [];
     _pfStrictXLGate = false;
     _pfXLMinutesSaved = 0;
@@ -7050,6 +6961,7 @@ Proceed anyway?`)) {
     _pfFlags = null;
     _pfSelectedIds = /* @__PURE__ */ new Set();
     _pfUseClineFollowups = false;
+    _pfLlmProvider = "anthropic";
     _pfXLSuggestions = [];
     _pfStrictXLGate = false;
     _pfXLMinutesSaved = 0;
@@ -7112,8 +7024,24 @@ Proceed anyway?`)) {
        <span>Use Cline (Sonnet) for follow-up coder fixes \u2014 tester stays on Claude</span>
      </label>
    </div>`;
+    const providerOptions = [
+      { value: "anthropic", label: "Anthropic (subscription)" },
+      { value: "ica", label: "IBM ICA (via claude-proxy)" }
+    ];
+    const providerSelectorHtml = `<div class="pf-section pf-provider-section">
+     <label class="pf-cline-label" style="gap:8px">
+       <span>LLM provider for this run:</span>
+       <select id="pf-provider-select" onchange="_pfLlmProvider = this.value"
+         style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+         ${providerOptions.map(
+      (o) => `<option value="${o.value}" ${_pfLlmProvider === o.value ? "selected" : ""}>${o.label}</option>`
+    ).join("")}
+       </select>
+     </label>
+   </div>`;
     document.getElementById("pf-content").innerHTML = `<p style="font-size:13px;color:var(--text);margin:0;">Ready to run <strong>Sprint ${n}</strong>.</p>
      ${modelsHtml}
+     ${providerSelectorHtml}
      ${clineCheckboxHtml}
      ${warningsHtml}
      ${xlHtml}
@@ -7916,7 +7844,7 @@ Proceed anyway?`)) {
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups })
+        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups, llm_provider: _pfLlmProvider })
       });
       if (!res.ok) {
         let detail = await res.text();
@@ -8337,11 +8265,6 @@ Proceed anyway?`)) {
   globalThis._smgmtAncestorRowHtml = _smgmtAncestorRowHtml;
   globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
   globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
-  globalThis.smgmtDraftGoalInput = smgmtDraftGoalInput;
-  globalThis.smgmtPlanningRowMenu = smgmtPlanningRowMenu;
-  globalThis.smgmtPlanningRemove = smgmtPlanningRemove;
-  globalThis.smgmtPlanningReorder = smgmtPlanningReorder;
-  globalThis.smgmtOpenTicketPicker = smgmtOpenTicketPicker;
   globalThis.smgmtAddToDraft = smgmtAddToDraft;
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;

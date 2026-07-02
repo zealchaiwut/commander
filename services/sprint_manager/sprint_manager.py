@@ -117,6 +117,8 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
     _select_coder_backend,
+    get_effective_llm_provider,
+    get_role_profile,
 )
 
 from services.sprint_manager.failures import (  # noqa: E402,F401
@@ -191,6 +193,10 @@ from services.sprint_manager.state import (  # noqa: E402
     GateResult,
     SprintSummary,
 )
+from services.sprint_manager.ica_preflight import (  # noqa: E402
+    check_ica_readiness,
+    IcaPreflightError,
+)
 
 try:
     # issue #860
@@ -231,6 +237,7 @@ from services.sprint_manager.events import (  # noqa: E402
 from services.sprint_manager.timekeeping import (  # noqa: E402
     _token_window_utc_now,
     _token_window_sums,
+    _token_window_sums_full,
     _utcnow,
     _BANGKOK_TZ,  # noqa: F401
     _bangkok_now,  # noqa: F401
@@ -367,6 +374,20 @@ FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# ── ICA preflight helpers (issue #1668) ──────────────────────────────────────
+
+def _get_llm_provider(eff_repo: Optional[str] = None) -> str:
+    """Return the configured llmProvider ('anthropic' or 'ica'), default 'anthropic'."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting("app_config", project=eff_repo)
+        if isinstance(stored, dict):
+            return stored.get("llmProvider", "anthropic")
+    except Exception:
+        pass
+    return "anthropic"
+
 
 # ── API cost pricing (USD per million tokens) ─────────────────────────────────
 # All agents (coder, tester, preflight) run via Claude Code CLI which is
@@ -567,8 +588,16 @@ def _sprint_db_set_state_sm(
                                           end_reason=fields.get("end_reason"),
                                           ended_at=fields.get("ended_at"),
                                           project=project or "")
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        # Best-effort by design (a DB hiccup must never fail the run), but a
+        # silently lost lifecycle write leaves plan.json's dual-write copy
+        # newer than the "authoritative" DB with nothing to flag it (#1688) —
+        # log so it's at least visible in the run log.
+        structured_log.warn(
+            "sprint_db_state_write_failed",
+            f"DB lifecycle write failed for {label!r} -> {state!r}: {e}",
+            label=label, state=state, project=project, exc=str(e),
+        )
 
 
 def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
@@ -576,8 +605,12 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
     try:
         import db  # apps/dashboard on sys.path (line 142)
         db.set_sprint_ticket_order(label, issue_numbers)
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ticket_order_write_failed",
+            f"DB ticket-order write failed for {label!r}: {e}",
+            label=label, exc=str(e),
+        )
 
 
 def _sprint_db_ingest_run_sm(
@@ -602,8 +635,12 @@ def _sprint_db_ingest_run_sm(
             project=project or state.project or "",
             summary_path=spath,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ingest_failed",
+            f"end-of-run DB ingest failed for {label!r}: {e}",
+            label=label, project=project, exc=str(e),
+        )
 
 
 # ── Per-agent run tracking (issue #764) ──────────────────────────────────────
@@ -636,6 +673,8 @@ def _db_agent_start_sm(
     attempt_kind: Optional[str] = None,
     log_path: Optional[str] = None,
     backend: Optional[str] = None,
+    provider: Optional[str] = None,
+    is_ica: bool = False,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -646,6 +685,8 @@ def _db_agent_start_sm(
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
     `backend` is 'cline' or 'claude-code' (issue #920).
+    `provider` is the LLM provider identifier, e.g. 'ICA' (issue #1673).
+    `is_ica` is True when CCPROXY_PROFILE is set at dispatch time (issue #1672).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -659,9 +700,15 @@ def _db_agent_start_sm(
             log_path=log_path,
             backend=backend,
             project=_CURRENT_RUN_PROJECT,
+            provider=provider,
+            is_ica=is_ica,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_start_write_failed",
+            f"agent_runs open failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _db_update_worktree_shas_sm(
@@ -686,11 +733,15 @@ def _db_agent_finish_sm(
     duration_seconds=None,
     outcome=None,
     total_tokens=None,
+    is_ica: bool = False,
+    cost_usd=None,
 ) -> None:
     """Best-effort close of the open agent_runs row on finish (#764).
 
     `duration_seconds` is the precise monotonic measurement taken by the caller
     so the stored value is within ±2 s of the logged wall-clock time (AC3).
+    `is_ica` and `cost_usd` are written atomically with the finish record
+    for ICA metered-path runs (issue #1672 AC4).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -698,9 +749,40 @@ def _db_agent_finish_sm(
             int(issue_number), sprint_label, agent,
             duration_seconds=None if duration_seconds is None else round(duration_seconds),
             outcome=outcome, total_tokens=total_tokens,
+            is_ica=is_ica, cost_usd=cost_usd,
+        )
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_finish_write_failed",
+            f"agent_runs close failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
+
+
+def _ica_cost_from_tokens(
+    raw_input: int, output: int, cache_read: int, cache_write: int,
+    model_used: Optional[str], repo: Optional[str],
+) -> Optional[float]:
+    """Compute ICA USD cost if a price_map is configured for the project (issue #1672 AC2).
+
+    Returns None when no price_map is available or the model is unknown.
+    Best-effort: never raises.
+    """
+    try:
+        import db as _db_mod  # apps/dashboard on sys.path
+        import settings_repo as _sr
+        stored = _sr.get_setting("app_config", project=repo)
+        price_map = stored.get("price_map") if isinstance(stored, dict) else None
+        return _db_mod._compute_ica_cost_usd(
+            raw_input_tokens=raw_input,
+            output_tokens=output,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            model_name=model_used,
+            price_map=price_map,
         )
     except (Exception, SystemExit):
-        pass
+        return None
 
 
 # Hang detection constants (in seconds)
@@ -784,21 +866,22 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
-                                "subscription rate limit", "rate_limit"]
+
+from services.sprint_manager.api_client import (  # noqa: E402
+    is_retryable_rate_limit as _is_retryable_rate_limit,
+)
 
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
-    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+    """Detect rate-limit / quota-exceeded errors in agent subprocess output.
 
-    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    Delegates to api_client.is_retryable_rate_limit which covers both the
+    Anthropic OAuth subscription shape and ICA/IBM gateway quota-exceeded
+    formats (issue #1669).  The return shape is unchanged so all callers
+    (dispatch.py proxy, handle_post_coder, handle_post_tester) continue to
+    work without modification.
     """
-    lower = output.lower()
-    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
-        return False, None
-    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
-    retry_after = int(m.group(1)) if m else None
-    return True, retry_after
+    return _is_retryable_rate_limit(output)
 
 
 # ── failure categories ────────────────────────────────────────────────────────
@@ -912,12 +995,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
         candidates = [
-            l.strip().removeprefix("origin/") for l in out.strip().splitlines() if l.strip()
+            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
         ]
     if not candidates:
         ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
         if ok and out.strip():
-            candidates = [l.strip().lstrip("* ") for l in out.strip().splitlines() if l.strip()]
+            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -2699,6 +2782,16 @@ class _SprintPreflightResult:
     early_exit: bool = False
 
 
+def _read_active_llm_provider() -> str:
+    """Return the active LLM provider from global settings (issue #1670)."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting_scoped("global", "app_config")
+        return stored.get("llmProvider") or "anthropic"
+    except Exception:
+        return "anthropic"
+
+
 def run_sprint_preflight(
     label: str,
     alert_modes: list,
@@ -2742,6 +2835,10 @@ def run_sprint_preflight(
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
+    # Per-run choice (plan.json llm_provider, written by the run modal) wins
+    # over the global setting — otherwise run rows / cost tagging would
+    # disagree with where the agents were actually routed.
+    _sprint_llm_provider = get_effective_llm_provider(label, cfg, eff_repo)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -2767,6 +2864,31 @@ def run_sprint_preflight(
     base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
         target_branch = sprint_branch
+
+    # ── ICA preflight check (issue #1668) ─────────────────────────────────────
+    # Gate on the EFFECTIVE provider (per-run plan.json > global setting) so a
+    # run-modal ICA selection is preflighted even when the global default is
+    # anthropic, and vice versa.
+    if _sprint_llm_provider == "ica":
+        try:
+            check_ica_readiness()
+        except IcaPreflightError as _pf_err:
+            sys.stdout.write(str(f"[ICA preflight] {_pf_err}") + "\n")
+            _blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            return _SprintPreflightResult(
+                state=_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
@@ -2799,6 +2921,7 @@ def run_sprint_preflight(
                 sprint_number   = sprint_num,
                 project         = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2816,6 +2939,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -2843,6 +2967,7 @@ def run_sprint_preflight(
                 sprint_number = sprint_num,
                 project       = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2860,6 +2985,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -3363,6 +3489,11 @@ def run_sprint_loop(
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
+        # ICA metered-path detection (issue #1672): computed once per ticket since the
+        # profile is a sprint config value and doesn't change between fix rounds.
+        _coder_is_ica  = get_role_profile("coder",  cfg) is not None
+        _tester_is_ica = get_role_profile("tester", cfg) is not None
+
         # -- Bounded fix-loop: coder → tester → gates (issue #618) ──────────────
         # K read from COMMANDER_MAX_FIX_ROUNDS (default 3). _skip_coder path
         # (rerun-tester-direct) runs tester+gates once inside the same loop body
@@ -3406,13 +3537,16 @@ def run_sprint_loop(
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
                 issue_state.coder_routing_reason = _ser_route_reason  # tooltip/sub-label on running pane badge (issue #1427)
                 issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
+                issue_state.coder_provider = get_role_profile("coder", cfg)  # CCPROXY_PROFILE for ICA badge (issue #1673)
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
                     attempt_kind=_next_attempt_kind,
                     log_path=str(_issue_log_path(num, cfg=cfg)),
                     backend=_next_coder_backend,
-                )  # issue #764, #789, #787, #783, #920
+                    provider=issue_state.coder_provider,
+                    is_ica=_coder_is_ica,
+                )  # issue #764, #789, #787, #783, #920, #1673, #1672
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -3474,11 +3608,20 @@ def run_sprint_loop(
                 _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
                 state.total_tokens_in += _ctin
                 state.total_tokens_out += _ctout
+                # ICA cost: compute from the detailed token breakdown (issue #1672 AC2/AC4).
+                _coder_cost_usd: Optional[float] = None
+                if _coder_is_ica:
+                    _cr_in, _cr_out, _cr_cr, _cr_cw, _ = _token_window_sums_full("coder", _coder_utc0)
+                    _coder_cost_usd = _ica_cost_from_tokens(
+                        _cr_in, _cr_out, _cr_cr, _cr_cw, _ser_coder_model, eff_repo,
+                    )
                 _db_agent_finish_sm(  # issue #764: close the run with precise duration
                     num, label, "coder",
                     duration_seconds=_coder_elapsed,
                     outcome="success" if coder_ok else "failed",
                     total_tokens=(_ctin + _ctout) or None,
+                    is_ica=_coder_is_ica,
+                    cost_usd=_coder_cost_usd,
                 )
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 sys.stdout.write(str(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s") + "\n")
@@ -3712,7 +3855,8 @@ def run_sprint_loop(
                 num, label, "tester",
                 risk_tier=_tester_risk, model_used=_tester_model_selected,
                 log_path=str(_issue_log_path(num, cfg=cfg)),
-            )  # issue #764, #790, #783
+                is_ica=_tester_is_ica,
+            )  # issue #764, #790, #783, #1672
             # Record the tester attempt so analytics can count rejections exactly
             # going forward (issue #718).
             issue_state.tester_attempt_count += 1
@@ -3765,11 +3909,20 @@ def run_sprint_loop(
             _ttin, _ttout = _token_window_sums("tester", _tester_utc0)
             state.total_tokens_in += _ttin
             state.total_tokens_out += _ttout
+            # ICA cost for tester (issue #1672 AC2/AC4).
+            _tester_cost_usd: Optional[float] = None
+            if _tester_is_ica:
+                _tr_in, _tr_out, _tr_cr, _tr_cw, _ = _token_window_sums_full("tester", _tester_utc0)
+                _tester_cost_usd = _ica_cost_from_tokens(
+                    _tr_in, _tr_out, _tr_cr, _tr_cw, _tester_model_selected, eff_repo,
+                )
             _db_agent_finish_sm(  # issue #764: close the run with precise duration
                 num, label, "tester",
                 duration_seconds=_tester_elapsed,
                 outcome="pass" if tester_rc == 0 else "fail",
                 total_tokens=(_ttin + _ttout) or None,
+                is_ica=_tester_is_ica,
+                cost_usd=_tester_cost_usd,
             )
             _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
             sys.stdout.write(str(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s") + "\n")
@@ -4716,8 +4869,11 @@ def main() -> None:
             except Exception as e_persist:
                 structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
-    # Write per-sprint brief after documenter (issue #860)
-    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE:
+    # Write per-sprint brief after documenter (issue #860).
+    # Parked/deprecated (issue #1687) — default-off pending platform stability;
+    # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
+    _brief_disabled = os.environ.get("COMMANDER_DISABLE_BRIEF", "1").strip().lower() not in ("0", "false", "no")
+    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
         _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
         _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         _brief_summary_issue_num: Optional[int] = None

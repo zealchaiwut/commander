@@ -40,15 +40,20 @@ class SprintRunLockError(RuntimeError):
 def _refuse_if_sprint_running(action: str) -> None:
     """Refuse non-status label mutations while a sprint run holds the lock.
 
-    During an active sprint run (COMMANDER_SPRINT_RUNNING=1) only status labels
-    may change; sprint-N assignment and sprint-label strips must be frozen
-    (issue #754). Mirrors the existing "refuse if running" guards elsewhere.
-    When the lock is not held this is a no-op, so existing behavior is unchanged.
+    During an active sprint run (COMMANDER_SPRINT_RUNNING set to any non-empty
+    value — the orchestrator sets it to the sprint label, not the literal "1";
+    an exact "1" comparison made this guard inert, issue #1689) only status
+    labels may change; sprint-N assignment and sprint-label strips must be
+    frozen (issue #754). Mirrors the existing "refuse if running" guards
+    elsewhere. When the lock is not held this is a no-op, so existing behavior
+    is unchanged.
     """
-    if os.environ.get("COMMANDER_SPRINT_RUNNING") == "1":
+    lock_value = os.environ.get("COMMANDER_SPRINT_RUNNING", "")
+    if lock_value.strip():
         raise SprintRunLockError(
-            f"Sprint run active (COMMANDER_SPRINT_RUNNING=1): refusing to {action}. "
-            f"Sprint and other non-status labels are frozen until the run ends."
+            f"Sprint run active (COMMANDER_SPRINT_RUNNING={lock_value!r}): "
+            f"refusing to {action}. Sprint and other non-status labels are "
+            f"frozen until the run ends."
         )
 
 

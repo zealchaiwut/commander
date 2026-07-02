@@ -7600,6 +7600,20 @@
     }
     .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
+    .logs-ica-cost { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 5px 20px 5px 44px; }
+    .logs-run-row.expanded .logs-ica-cost:not(:empty) { display: block; }
+    .logs-ica-cost-row {
+      display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .logs-ica-badge {
+      display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 9px;
+      background: var(--blue-bg,rgba(59,130,246,.12)); color: var(--blue); font-weight: 700;
+      font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+    }
+    .logs-ica-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+    .logs-ica-metric i { font-size: 12px; color: var(--text-sub); }
+    .logs-ica-cost-val { color: var(--text); font-weight: 600; }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -8169,6 +8183,15 @@
     }
     .run-head-meta { color: var(--text-sub); }
     .run-head-watchdog { color: var(--text-muted); font-size: 11px; }
+    .provider-badge {
+      display: inline-flex; align-items: center; padding: 1px 7px;
+      border-radius: 999px; border: 1px solid var(--border);
+      font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      font-family: var(--mono); color: var(--text-sub); background: var(--surface-2);
+      flex-shrink: 0;
+    }
+    .provider-badge--ica { color: var(--blue); border-color: var(--blue); background: var(--blue-bg, rgba(59,130,246,.08)); }
+    .provider-badge--anthropic { color: var(--text-sub); }
 
     /* ── Segmented progress gauge (issue #1107) ──────────────────────────────
        Four-segment horizontal bar: done (green) · retrying (amber) ·
@@ -8314,6 +8337,10 @@
       padding: 2px 6px; border-radius: 999px; text-transform: uppercase; }
     .node-backend--cline  { background: var(--green-bg); color: var(--green); }
     .node-backend--claude { background: var(--text-sub); color: var(--bg); opacity: .65; }
+    /* ICA caching-reduced indicator (issue #1673) */
+    .node-caching-badge { flex: 0 0 auto; font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 999px; cursor: help;
+      background: rgba(210,153,34,.15); color: var(--yellow, #e3b341); }
 
     /* State variants — glow is a box-shadow ring, never a side-stripe. */
     .node.queued { opacity: .72; }
@@ -13879,14 +13906,6 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
         </button>
       </li>`);
   }
-  if (conflictsCount > 0) {
-    checklistItems.push(`<li class="mr-checklist-item">
-        <i class="ti ti-square mr-cl-icon" aria-hidden="true"></i>
-        <button class="mr-cl-link" onclick="smgmtApplyDagOrder(${jsLabel})">
-          Resolve ${conflictsCount} file conflict${conflictsCount !== 1 ? 's' : ''}
-        </button>
-      </li>`);
-  }
   if (xlCount > 0) {
     const xlNums = (pfHints && pfHints.xlNumbers) || [];
     checklistItems.push(`<li class="mr-checklist-item">
@@ -13910,7 +13929,6 @@ function _smgmtMiniRailHtml(label, data, pfHints) {
   if (pfHints && pfHints.missingAC > 0) hintParts.push(`${pfHints.missingAC} missing AC`);
   if (pfHints && pfHints.unsized > 0) hintParts.push(`${pfHints.unsized} unsized`);
   if (unestimatedCount > 0) hintParts.push(`${unestimatedCount} unestimated`);
-  if (conflictsCount > 0) hintParts.push(`${conflictsCount} file conflict${conflictsCount > 1 ? 's' : ''}`);
 
   let warn;
   if (hintParts.length > 0) {
@@ -15760,6 +15778,13 @@ function _smgmtGaugeHtml(live) {
   return '<div class="rp-gauge-wrap" id="smgmt-rp-gauge-wrap">' + bar + legend + statRow + '</div>';
 }
 
+function _smgmtProviderBadgeHtml(provider) {
+  if (!provider) return '';
+  const safeProvider = escHtml(provider);
+  const cls = provider === 'ica' ? 'provider-badge--ica' : 'provider-badge--anthropic';
+  return '<span class="provider-badge ' + cls + '" title="LLM provider: ' + safeProvider + '">' + safeProvider + '</span>';
+}
+
 function _smgmtRunHeadHtml(label, live, isLinger) {
   const display = sprintLabelDisplay(label);
   // Elapsed / est-remaining line removed from the running header (#1) — only the
@@ -15785,6 +15810,7 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       <div class="run-head-left">
         <span class="run-head-title">${escHtml(display)}</span>
         ${badge}
+        ${_smgmtProviderBadgeHtml(live && live.llm_provider)}
       </div>
       ${cancelBtn}
     </div>
@@ -16022,6 +16048,10 @@ function _smgmtRailNodeHtml(iss, live) {
     const isCline = iss.coder_backend === 'cline';
     backendBadge = `<span class="node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}">${isCline ? 'CLINE' : 'CLAUDE'}</span>`;
   }
+  // caching: reduced badge (issue #1673): ICA proxy strips prompt caching headers
+  const cachingBadge = iss.coder_provider === 'ICA'
+    ? `<span class="node-caching-badge" title="Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn">caching: reduced</span>`
+    : '';
   let queuedEst = '';
   if (state === 'queued' && iss.minutes) {
     queuedEst = `<span class="node-queued-est">queued · ~${escHtml(String(iss.minutes))}m</span>`;
@@ -16035,7 +16065,7 @@ function _smgmtRailNodeHtml(iss, live) {
     + `<a class="node-num" href="${escHtml(issueUrl)}" target="_blank" rel="noopener"`
     + ` onclick="event.stopPropagation()" title="Open #${num} on GitHub">#${escHtml(String(num))}</a>`
     + `<span class="node-title">${escHtml(iss.title || '')}</span>`
-    + sizePill + agentBadge + backendBadge + fixBadge + timeEl + queuedEst
+    + sizePill + agentBadge + backendBadge + cachingBadge + fixBadge + timeEl + queuedEst
     + `</button>`;
 }
 
@@ -16154,6 +16184,17 @@ function _smgmtRailPatch(label, live) {
       backendEl.className = `node-backend-badge node-backend--${isCline ? 'cline' : 'claude'}`;
       backendEl.textContent = isCline ? 'CLINE' : 'CLAUDE';
     } else if (backendEl) { backendEl.remove(); }
+    // Caching-reduced badge in-place update (issue #1673)
+    let cachingEl = nodeEl.querySelector('.node-caching-badge');
+    if (iss.coder_provider === 'ICA') {
+      if (!cachingEl) {
+        cachingEl = document.createElement('span');
+        cachingEl.className = 'node-caching-badge';
+        cachingEl.title = 'Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn';
+        nodeEl.appendChild(cachingEl);
+      }
+      cachingEl.textContent = 'caching: reduced';
+    } else if (cachingEl) { cachingEl.remove(); }
     let fixEl = nodeEl.querySelector('.node-fix-badge');
     const fr = _smgmtRailFixRound(iss);
     const maxRounds = iss.fix_round_max || (live && live.fix_round_max) || 2;
@@ -17819,8 +17860,9 @@ function _smgmtAiRowHtml(iss, live, isLevelLocked, label) {
     stateStr = 'queued';
   }
 
+  const providerBadge = _smgmtProviderBadgeHtml(live && live.llm_provider);
   const metaHtml = '<div class="ai-row-meta">'
-    + sizePill + fixBadge + agentBadge
+    + sizePill + fixBadge + agentBadge + providerBadge
     + '<span class="ai-row-state">' + escHtml(stateStr) + '</span>'
     + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>'
     + '</div>';
@@ -18031,7 +18073,8 @@ function _smgmtAiPatchRowMeta(metaEl, iss, live) {
       agentBadge = '<span class="ai-row-agent ai-row-agent--tester">TESTER</span>';
     }
   }
-  metaEl.innerHTML = sizePill + fixBadge + agentBadge
+  const providerBadge = _smgmtProviderBadgeHtml(live && live.llm_provider);
+  metaEl.innerHTML = sizePill + fixBadge + agentBadge + providerBadge
     + '<span class="ai-row-state">' + escHtml(_smgmtAiRowStateStr(iss, live)) + '</span>'
     + '<i class="ti ti-chevron-down ai-row-chevron" aria-hidden="true"></i>';
 }
@@ -24992,6 +25035,28 @@ function _gssRender(data) {
       </div>
     </div>
 
+    <div class="gss-card" id="gss-provider-card">
+      <div class="gss-card-head">
+        <i class="ti ti-plug-connected" style="color:var(--text-muted)"></i>
+        <div><div class="gss-card-title">LLM Provider</div><div class="gss-card-sub">Active backend for all dispatched agents — instructs the claude-proxy on change</div></div>
+      </div>
+      <div class="gss-card-body">
+        <div class="gss-row">
+          <div class="gss-label">Active provider<span class="hint">Switches claude-proxy profile; in-flight sessions are unaffected</span></div>
+          <div class="gss-control">
+            <div class="settings-btn-group" id="gss-provider-btns">
+              <button class="settings-btn${(data.llmProvider || 'anthropic') === 'anthropic' ? ' active' : ''}" data-value="anthropic" onclick="_gssSetProvider('anthropic')">Anthropic</button>
+              <button class="settings-btn${data.llmProvider === 'ica' ? ' active' : ''}" data-value="ica" onclick="_gssSetProvider('ica')">ICA</button>
+            </div>
+          </div>
+        </div>
+        <div class="gss-row" id="gss-provider-status" style="display:none">
+          <div class="gss-label"></div>
+          <div class="gss-control"><span id="gss-provider-status-text" style="font-size:13px"></span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="gss-card">
       <div class="gss-card-head">
         <i class="ti ti-lock" style="color:var(--text-muted)"></i>
@@ -25235,6 +25300,42 @@ function openSettingsModal() {
 function _gssHideFeedback() {
   const el = document.getElementById('gss-feedback');
   if (el) { el.textContent = ''; el.className = 'gss-feedback'; }
+}
+
+// ── LLM Provider toggle (issue #1667) ─────────────────────────────────────────
+
+async function _gssSetProvider(provider) {
+  const btns = document.querySelectorAll('#gss-provider-btns .settings-btn');
+  const statusRow = document.getElementById('gss-provider-status');
+  const statusText = document.getElementById('gss-provider-status-text');
+  btns.forEach(b => b.disabled = true);
+  if (statusRow) statusRow.style.display = '';
+  if (statusText) { statusText.style.color = 'var(--text-muted)'; statusText.textContent = 'Switching…'; }
+  try {
+    const resp = await fetch('/api/settings/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    btns.forEach(b => {
+      b.classList.toggle('active', b.dataset.value === data.provider);
+    });
+    if (statusText) { statusText.style.color = 'var(--color-ok, #22c55e)'; statusText.textContent = `Active provider: ${data.provider}`; }
+    if (_gssData) _gssData.llmProvider = data.provider;
+  } catch (err) {
+    if (statusText) { statusText.style.color = 'var(--color-error, #ef4444)'; statusText.textContent = `Error: ${err.message}`; }
+    const prevProvider = (_gssData && _gssData.llmProvider) || 'anthropic';
+    btns.forEach(b => {
+      b.classList.toggle('active', b.dataset.value === prevProvider);
+    });
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
 }
 
 // ── Settings Sync helpers (issue #644) ────────────────────────────────────────
@@ -26029,6 +26130,8 @@ const _logsState = {
   loadingEvents: new Set(),
   ticketStats: {},
   loadingStats: new Set(),
+  icaCost: {},
+  loadingIcaCost: new Set(),
   issues: null,
   viewMode: 'activity',
   pollTimer: null,
@@ -26552,6 +26655,10 @@ function logsRenderTimeline() {
     if (statsEl && _logsState.ticketStats[runId]) {
       statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
     }
+    const icaCostEl = document.getElementById(`logs-ica-cost-${runId}`);
+    if (icaCostEl && _logsState.icaCost[runId]) {
+      icaCostEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
+    }
     const eventsEl = row.querySelector('.logs-run-events');
     if (eventsEl && _logsState.events[runId]) {
       eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
@@ -26582,6 +26689,11 @@ function _logsRunRowHtml(run) {
   <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
     isExpanded && _logsState.ticketStats[run.run_id]
       ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
+      : ''
+  }</div>
+  <div class="logs-ica-cost" id="logs-ica-cost-${escHtml(run.run_id)}">${
+    isExpanded && _logsState.icaCost[run.run_id]
+      ? _logsIcaCostHtml(_logsState.icaCost[run.run_id])
       : ''
   }</div>
   <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
@@ -26628,6 +26740,28 @@ async function _logsFetchTicketStats(sprintLabel, project) {
   } catch (_) { return { tickets: [] }; }
 }
 
+function _logsIcaCostHtml(summary) {
+  if (!summary || !summary.is_ica) return '';
+  const cost = (typeof summary.cost_usd === 'number') ? `$${summary.cost_usd.toFixed(6)}` : '—';
+  const tokens = (typeof summary.total_tokens === 'number') ? summary.total_tokens.toLocaleString() : '—';
+  const runs = summary.run_count || 0;
+  return `<div class="logs-ica-cost-row">` +
+    `<span class="logs-ica-badge">ICA</span>` +
+    `<span class="logs-ica-metric" title="Successful ICA agent runs"><i class="ti ti-robot"></i>${escHtml(String(runs))} runs</span>` +
+    `<span class="logs-ica-metric" title="Total tokens (ICA path)"><i class="ti ti-coin"></i>${escHtml(tokens)}</span>` +
+    `<span class="logs-ica-metric logs-ica-cost-val" title="USD cost (ICA meter rates)"><i class="ti ti-currency-dollar"></i>${escHtml(cost)}</span>` +
+  `</div>`;
+}
+
+async function _logsFetchIcaCost(sprintLabel, project) {
+  try {
+    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ica-cost?project=${encodeURIComponent(project)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return { is_ica: false };
+    return await resp.json();
+  } catch (_) { return { is_ica: false }; }
+}
+
 function _logsEventsHtml(events) {
   const filtered = _logsFilterEvents(events);
   if (filtered.length === 0) {
@@ -26670,6 +26804,20 @@ async function logsToggleRun(headerEl) {
       _logsState.ticketStats[runId] = stats;
       const el = document.getElementById(`logs-stats-${runId}`);
       if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsTicketStatsHtml(stats);
+    });
+  }
+
+  // ICA cost summary (#1672) — fetched once per run, shown only for ICA sprints.
+  if (_logsState.icaCost[runId]) {
+    const icaEl = document.getElementById(`logs-ica-cost-${runId}`);
+    if (icaEl) icaEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
+  } else if (!_logsState.loadingIcaCost.has(runId)) {
+    _logsState.loadingIcaCost.add(runId);
+    _logsFetchIcaCost(sprintLabel, project).then(summary => {
+      _logsState.loadingIcaCost.delete(runId);
+      _logsState.icaCost[runId] = summary;
+      const el = document.getElementById(`logs-ica-cost-${runId}`);
+      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsIcaCostHtml(summary);
     });
   }
 
@@ -28633,6 +28781,15 @@ document.addEventListener('keydown', function(e) {
       </div>
       <div class="rr-ticket-list" id="fs-ticket-list"></div>
       <div class="fs-actions" id="fs-actions"></div>
+      <!-- issue #1696: soft rework guard — shown only when preview reports
+           tickets that haven't reached UAT. -->
+      <div class="modal-warning hidden" id="fs-rework-warning" style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--amber-bg,rgba(217,119,6,.08));border:1px solid var(--amber,#d97706);font-size:13px">
+        <div id="fs-rework-warning-text" style="color:var(--amber,#d97706);font-weight:600"></div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-weight:400;color:var(--text-secondary)">
+          <input type="checkbox" id="fs-confirm-rework-checkbox">
+          Close these tickets unfinished and proceed anyway
+        </label>
+      </div>
     </div>
     <div class="modal-error hidden" id="fs-error"></div>
     <!-- Progress component slot (issue #929) -->

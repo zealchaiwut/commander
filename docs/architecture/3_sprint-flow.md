@@ -14,31 +14,34 @@ BA writes ticket → Coder implements → Tester verifies → UAT sign-off (huma
 |-------|---------------|---------|
 | **Backlog** | Human or BA | GitHub issue with acceptance criteria + UAT steps |
 | **Sprint queue** | Dashboard / human | Issue gets `sprint-N` + `backlog` labels |
-| **In progress** | Coder (Claude Code) | Feature branch, push, label → `SIT` |
-| **SIT** | Tester (Claude Code) | Pytest per AC, merge to develop/sprint branch, label → `UAT` |
-| **UAT** | Human | Sign-off from dashboard; issue closed |
+| **In progress** | Coder (Claude Code) | Feature branch, push. In managed runs the **orchestrator** applies `in-progress` at dispatch and `SIT` after the coder finishes — the agent does not move labels |
+| **SIT** | Tester (Claude Code) | Pytest per AC. In managed runs the **orchestrator** runs gates, merges via `finish_feature.py`, and applies `UAT` itself; the tester does not merge. (Manual `/tester` sessions do merge + label) |
+| **UAT** | Human | Merge Sprint sign-off from dashboard; issues closed **en masse** at Merge Sprint / bulk-complete, not per ticket |
 | **Done** | Human | `develop` → `master` merge (manual) |
 
 Progress UI counts **`done + uat`** as completed work; UAT is surfaced separately as awaiting sign-off.
 
 ## 3.2 Sprint lifecycle
 
-Unified enum (target — see [sprint-lifecycle.md](sprint-lifecycle.md)):
+Unified enum — **implemented**; stored in SQLite `sprints`, read via
+`sprint_state.current()`, written only by `db.transition_sprint_state()`
+(see [sprint-lifecycle.md](sprint-lifecycle.md) for the full edge table,
+settlement paths, and deviations):
 
 | State | Trigger |
 |-------|---------|
-| `draft` | Sprint column created; tickets being arranged |
-| `planned` | Preflight confirmed; not yet dispatched |
-| `running` | `sprint_manager.py` process alive |
-| `ready_to_merge` | All tickets passed; awaiting Merge Sprint |
-| `needs_rework` | Failure, crash, user stop, or partial completion |
-| `partial_finished` | Derived: child sprint exists but not yet `completed` |
-| `completed` | Merge Sprint done; PRs/issues closed |
-| `deleted` | Removed via dashboard |
+| `draft` | Sprint column created — implicit; no DB row exists until first Run |
+| `planned` | **Deprecated (#1686)** — legacy-read only, canonicalizes to `draft`. The plan.json `signoff` preflight gate is parked (default-disabled); every sprint runs without approval |
+| `running` | `sprint_manager.py` process alive (server writes it at dispatch, manager re-writes after PID lock) |
+| `ready_to_merge` | Clean exit (`end_reason=natural`), or reconcile promotion |
+| `needs_rework` | Ticket failure, crash, user stop, kill, or reconcile demotion |
+| `partial_finished` | Derived at read time: child sprint exists but not yet `completed` — never stored |
+| `completed` | Merge Sprint / bulk-complete / complete-step / reconcile-B2 (superseded ancestor) |
+| `deleted` | Removed via dashboard; row deleted, snapshot kept in `sprint_history` |
 
-**Re-run:** always creates a **child sprint** (e.g. `sprint-68.1`); same-label re-dispatch is abolished. Confirmation modal (`rr-modal` in UI) lists tickets before create.
+**Re-run:** always creates a **child sprint** (e.g. `sprint-68.1`); same-label re-dispatch is blocked at the HTTP layer (`_reject_terminal_label_redispatch`). Confirmation modal (`rr-modal` in UI) lists tickets before create. `auto_run=false` queues the child as plan.json only (no DB row) until dispatched.
 
-**Pipeline mode** (opt-in): coder works ticket N+1 while tester validates N — one coder + one tester concurrent; level barrier between DAG levels.
+**Pipeline mode** (opt-in): coder works ahead of the tester with up to `max_coder_slots` concurrent coders (worktree pool, issues #1411/#1412); level barrier between DAG levels.
 
 ## 3.3 Ticket lifecycle & states
 
@@ -53,7 +56,9 @@ Enforced by `services/sprint_manager/state_machine.py` — **only** `transition(
 | `NEEDS_REWORK` | `needs-rework` |
 | `BLOCKED` | `blocked` |
 
-During an active run (`COMMANDER_SPRINT_RUNNING=1`), only status labels may change — sprint labels and all others are frozen (`RUN_MUTABLE_LABELS`).
+During an active run, only status labels may change — sprint labels and all others are frozen (`RUN_MUTABLE_LABELS`). The orchestrator sets `COMMANDER_SPRINT_RUNNING` to the *sprint label* in subprocess envs (and `"1"` in its own process). **Fixed (#1689):** `state_machine.run_lock_active()` and `github_client._refuse_if_sprint_running` now treat any non-empty value as locked, matching `update_ticket.py` — all three guard layers agree.
+
+`transition()` enforces **no transition graph** — any state may jump to any non-pseudo state; correctness rests on call-site discipline (unlike the sprint-level edge table). Pseudo-states `BACKLOG` (no label) and `DONE` exist in the enum without labels.
 
 ## 3.4 Estimation step
 

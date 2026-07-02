@@ -34,6 +34,9 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _resolve_coder_model,
     _resolve_cline_model,
     _effective_coder_backend,
+    apply_ica_agent_env,
+    get_effective_llm_provider,
+    get_role_profile,
 )
 from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
@@ -783,6 +786,9 @@ def _dispatch_coder(
     sub_env = os.environ.copy()
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = dispatch_model  # hook records model_name on token_usage rows
+    _coder_profile = get_role_profile("coder", cfg)
+    if _coder_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _coder_profile
 
     if coder_backend == "cline":
         # Cline headless backend (issue #917).
@@ -816,6 +822,15 @@ def _dispatch_coder(
             full_prompt = _cline_base
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
+        # ICA routing is claude-code only: cline authenticates with the metered
+        # key directly and has no custom-headers channel to the proxy.
+        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+            structured_log.warn(
+                "ica_cline_unrouted",
+                "[coder] llm_provider=ica but backend=cline — cline dispatches "
+                "go direct to the metered Anthropic API, not through ICA",
+                issue_num=issue_num,
+            )
     else:
         # Claude Code (existing default behavior, byte-for-byte unchanged).
         cmd = [
@@ -831,6 +846,10 @@ def _dispatch_coder(
         cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)
+        # Per-run ICA routing: point this agent at claude-proxy (issue #1667
+        # follow-up). Claude-code branch only — cline has its own metered path.
+        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+            apply_ica_agent_env(sub_env, _coder_profile or "ica")
 
     # Build remaining subprocess environment keys.
     if eff_repo:
@@ -1271,6 +1290,13 @@ def _dispatch_tester(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = tester_model  # hook records model_name on token_usage rows
+    _tester_profile = get_role_profile("tester", cfg)
+    if _tester_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _tester_profile
+    # Per-run ICA routing: point this agent at claude-proxy (issue #1667
+    # follow-up), mirroring the coder claude-code branch.
+    if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+        apply_ica_agent_env(sub_env, _tester_profile or "ica")
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:

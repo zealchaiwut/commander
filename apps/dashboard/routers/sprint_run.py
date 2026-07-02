@@ -363,6 +363,9 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             error="invalid sprint label",
         )
         raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+    # Per-run provider (anthropic | ica) — same validation as the global toggle.
+    from routers import llm_provider_service  # noqa: PLC0415
+    llm_provider_service.validate_provider(body.llm_provider)
     if not srv.SPRINT_MANAGER_PATH.exists():
         srv._slog.event(
             "route.error",
@@ -563,6 +566,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             "running",
             started_at=_started_at,
             use_cline_followups=body.use_cline_followups,
+            llm_provider=body.llm_provider,
         )
     except Exception:
         pass
@@ -836,6 +840,12 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         "tickets": moved,
         "parent": sprint_label,
     })
+    # DB-side lineage link alongside the plan.json copy above (issue #1691) —
+    # best-effort; a failure here must not block the rerun.
+    try:
+        srv.db.set_sprint_immediate_parent(sub_label, project, sprint_label)
+    except Exception:
+        pass
 
     parent_state_path = sprints_dir / f"{sprint_label}-state.json"
     if parent_state_path.exists():
@@ -892,12 +902,28 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     if errors:
         result["errors"] = errors
 
+    # The child's plan.json is created fresh (only `parent` is carried) — copy
+    # the parent's per-run llm_provider so a rerun keeps routing through the
+    # same provider instead of silently reverting to anthropic.
+    _parent_plan = srv._read_plan_json(project_root, sprint_label) or {}
+    _parent_provider = _parent_plan.get("llm_provider")
+    _provider_field = {"llm_provider": _parent_provider} if _parent_provider else {}
+
     if not body.auto_run:
         result["queued"] = True
         # Plan is at "draft" — promote so History shows a Run button for this child.
         try:
             srv._plan_json_set_state(project_root, sub_label, "needs_rework",
-                                     end_reason="queued", parent=sprint_label)
+                                     end_reason="queued", parent=sprint_label,
+                                     **_provider_field)
+        except Exception:
+            pass
+        # DB-side draft row (issue #1693) — deliberately kept at `draft`, not
+        # mirroring plan.json's needs_rework/queued display hack: that value
+        # exists only to make History show a Run button and was never a real
+        # lifecycle transition (no `running` boundary was crossed). Best-effort.
+        try:
+            srv.db.ensure_sprint_draft_row(sub_label, project)
         except Exception:
             pass
         return result
@@ -925,7 +951,8 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     try:
         srv._plan_json_set_state(project_root, sub_label, "running",
                                  started_at=_sub_started_at,
-                                 parent=sprint_label)
+                                 parent=sprint_label,
+                                 **_provider_field)
     except Exception:
         pass
     srv._sprint_db_set_state(sub_label, project, "running", started_at=_sub_started_at)

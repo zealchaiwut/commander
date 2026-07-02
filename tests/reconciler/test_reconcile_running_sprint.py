@@ -3,7 +3,11 @@
 AC1: _github_reconcile_row checks manager PID liveness before writing any state change
 AC2: running + live PID → reconciler returns None (no patch proposed)
 AC3: running + dead PID + _has_rework_tickets True → transition to needs_rework or ready_to_merge
-AC4: all reconciler writes go through transition_sprint_state(actor="reconcile")
+AC4: all reconciler writes go through transition_sprint_state; a confirmed-orphan
+     running->terminal settle uses actor="manager" (db.py's edge guard requires it
+     for that specific edge — actor="reconcile" was a silent no-op here for both
+     the sweep AND the per-sprint button until issue #1697). Terminal<->terminal
+     reconcile transitions (promotion/demotion) still use actor="reconcile".
 AC5: guard at line 33 no longer treats running as eligible for re-derivation when PID is alive
 """
 from __future__ import annotations
@@ -109,7 +113,13 @@ def test_dead_pid_settles_state(fresh_db, pid_dir):
 
     assert updated, "reconcile_sprint_label must return True when state changes"
     assert len(transition_calls) == 1, "transition_sprint_state must be called exactly once"
-    assert transition_calls[0]["actor"] == "reconcile", "actor must be 'reconcile'"
+    # issue #1697: running->terminal requires actor="manager" per db.py's edge
+    # guard (_GUARD_FROM={"running"}) — actor="reconcile" here would always be
+    # rejected, silently no-opping every orphan settle.
+    assert transition_calls[0]["actor"] == "manager", (
+        "a confirmed-orphan running->terminal settle must use actor='manager' "
+        "to satisfy db.py's edge guard for that transition"
+    )
     assert transition_calls[0]["state"] in (
         "needs_rework", "ready_to_merge"
     ), "State must settle to needs_rework or ready_to_merge"
@@ -146,8 +156,14 @@ def test_reconcile_uses_transition_sprint_state_not_direct_db(fresh_db, pid_dir)
     ):
         _srs.reconcile_sprint_label(label, "o/r")
 
-    assert "reconcile" in transition_calls, (
-        "reconcile_sprint_label must call transition_sprint_state(actor='reconcile')"
+    # issue #1697: this is the confirmed-orphan (dead PID) running->terminal
+    # case, which requires actor="manager" to satisfy db.py's edge guard —
+    # see the AC4 docstring update above. The point of this test (no direct
+    # db.record_* calls) is unchanged; only the actor value for this specific
+    # scenario is corrected.
+    assert "manager" in transition_calls, (
+        "reconcile_sprint_label must call transition_sprint_state (actor='manager' "
+        "for this confirmed-orphan running->terminal case)"
     )
 
 

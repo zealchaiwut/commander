@@ -124,21 +124,33 @@ def test_b2_does_not_auto_complete_ancestor_when_branch_in_develop(fresh_db, rec
     assert fresh_db.get_sprint("sprint-68")["state"] == "needs_rework"
 
 
-def test_b2_refuses_half_merged_ancestor(fresh_db, reconcile, monkeypatch):
-    """needs_rework base whose work is NOT yet in develop → not promoted."""
+def test_b2_bulk_complete_refuses_half_merged_chain(fresh_db, monkeypatch):
+    """Bulk complete's own chain scan refuses when any hop is unmerged (issue #1694).
+
+    _lineage_fully_in_develop (a single-label, sweep-only helper with zero
+    production callers) was deleted — the real guard bulk-complete relies on
+    is startup._sprint_merge_chain_pending, which checks every hop of the
+    child->parent->develop chain, not just one label against develop.
+    """
+    sys.path.append(str(DASHBOARD_DIR))
+    import startup
+
     _seed_lineage(fresh_db)
-    import server as srv
-    monkeypatch.setattr(srv, "_branch_has_unmerged_commits", lambda *a, **k: True)
-    assert reconcile._lineage_fully_in_develop("sprint-68", "zealchaiwut/perf-coach") is False
+    monkeypatch.setattr(startup, "children_of", lambda *a, **k: ["sprint-68.1", "sprint-68.2"])
+    monkeypatch.setattr(startup, "_branch_has_unmerged_commits", lambda repo, head, base: base == "develop")
+    pending = startup._sprint_merge_chain_pending(Path("/tmp"), "zealchaiwut/perf-coach", "sprint-68")
+    assert any(p.endswith("→ develop") for p in pending)
 
 
-def test_b2_ignores_standalone_needs_rework(fresh_db, reconcile, monkeypatch):
-    """A standalone needs_rework sprint (no lineage) is never auto-completed."""
+def test_b2_needs_rework_to_completed_edge_still_requires_reconcile_actor(fresh_db):
+    """Whatever calls the completing write, only actor='reconcile' may use the B2 edge."""
     fresh_db.record_sprint_start("sprint-70", project="zealchaiwut/perf-coach")
-    import server as srv
-    # even if the branch reads as merged, no children + not a child → refuse
-    monkeypatch.setattr(srv, "_branch_has_unmerged_commits", lambda *a, **k: False)
-    assert reconcile._lineage_fully_in_develop("sprint-70", "zealchaiwut/perf-coach") is False
+    fresh_db.record_sprint_needs_rework("sprint-70", end_reason="ticket-failures")
+    rejected = fresh_db.transition_sprint_state(
+        "sprint-70", "completed", actor="manager", end_reason="lineage-merged",
+    )
+    assert rejected.accepted is False
+    assert fresh_db.get_sprint("sprint-70")["state"] == "needs_rework"
 
 
 def test_b2_needs_rework_to_completed_edge_is_legal_for_reconcile(fresh_db):

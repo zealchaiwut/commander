@@ -31,8 +31,19 @@ def _bkk_midnight_utc() -> str:
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
+    # manager subprocess both write this file concurrently. The rollback
+    # journal (sqlite's default) serializes all writers and blocks readers
+    # during a write; WAL lets readers proceed during a writer's transaction
+    # and cuts lock-contention errors between the two processes. busy_timeout
+    # makes SQLite retry internally for up to 5s on SQLITE_BUSY before
+    # raising, on top of the sqlite3 module's own 5s connect(timeout=...)
+    # retry loop — belt and suspenders since some call sites may not go
+    # through this helper.
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -109,7 +120,14 @@ def init_db():
             )
         """)
         # Migrate existing token_usage tables that lack the new columns (backward compat)
-        for col, coltype in [("agent_role", "TEXT"), ("model_name", "TEXT")]:
+        for col, coltype in [
+            ("agent_role", "TEXT"),
+            ("model_name", "TEXT"),
+            # ICA metered-path columns (issue #1672)
+            ("cache_read_tokens", "INTEGER DEFAULT 0"),
+            ("cache_write_tokens", "INTEGER DEFAULT 0"),
+            ("ccproxy_profile", "TEXT"),
+        ]:
             try:
                 conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} {coltype}")
             except Exception:
@@ -505,23 +523,28 @@ def delete_brief_artifact(scope: str, project: str, date: str) -> None:
 # cache (dual-write) until a later sprint removes them.
 #
 # Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
-# draft / planned / running / ready_to_merge / needs_rework / completed.
-# `planning`, `cancelled`, and `failed` are legacy values kept readable for
-# pre-redesign rows (forward-only migration, no rewrite) — they are never
-# written anew and render through `canonical_lifecycle()`.
+# draft / running / ready_to_merge / needs_rework / completed.
+# `planning`, `planned`, `cancelled`, and `failed` are legacy values kept
+# readable for pre-redesign rows (forward-only migration, no rewrite) — they
+# are never written anew and render through `canonical_lifecycle()`.
+#
+# `planned` was deprecated in issue #1686 alongside the plan.json `signoff`
+# gate — the preflight-confirmation step it modeled was never stabilized.
+# Nothing writes it anymore; any legacy row that carries it displays as
+# `draft`.
 
 _SPRINT_STATES = (
     # unified lifecycle
-    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    "draft", "running", "ready_to_merge", "needs_rework", "completed",
     # legacy, read-only
-    "planning", "cancelled", "failed",
+    "planning", "planned", "cancelled", "failed",
 )
 
 # Canonical lifecycle states exposed to the UI. `partial_finished` is derived
 # at read time from children's states and never stored; `deleted` lives in the
 # sprint_history snapshot table, not in `sprints`.
 LIFECYCLE_STATES = (
-    "draft", "planned", "running", "ready_to_merge", "needs_rework",
+    "draft", "running", "ready_to_merge", "needs_rework",
     "partial_finished", "completed", "deleted",
 )
 
@@ -531,6 +554,7 @@ LIFECYCLE_STATES = (
 # flow auto-merged at end of run, so those sprints are past ready_to_merge).
 _LEGACY_LIFECYCLE_MAP = {
     "planning": "draft",
+    "planned": "draft",
     "complete": "completed",
     "finished": "completed",
     "cancelled": "needs_rework",
@@ -559,8 +583,10 @@ _logger = logging.getLogger("db.sprint_state")
 # requiring a full running start.  The critical guard — requiring actor="manager"
 # for running→terminal — is enforced separately below.
 _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
-    "draft":          frozenset({"planned", "running", "ready_to_merge", "needs_rework", "deleted"}),
-    "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
+    # `current` (below) is always run through canonical_lifecycle() before
+    # this table is consulted, and `planned` canonicalizes to `draft` (#1686
+    # deprecation) — so a `"planned"` key here would be unreachable dead code.
+    "draft":          frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
     "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
     # Derived-only in normal flow; if a legacy row stored this value, allow
@@ -878,6 +904,14 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
+    # issue #1691: `parent_label` (above, in the core DDL) always holds the
+    # BASE label of a rerun chain (self-healed to the sprint-N root — drives
+    # History lineage grouping). Re-run's actual merge topology is child ->
+    # IMMEDIATE parent (e.g. 94.2's immediate parent is 94.1, not 94), and
+    # until now that only lived in plan.json's `parent` field. This column
+    # gives the DB the same information so merge-topology resolution can
+    # prefer it over a disk read.
+    ("immediate_parent", "TEXT"),
 )
 
 
@@ -1337,7 +1371,10 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             worktree_sha     TEXT,
             base_sha         TEXT,
             attempt_kind     TEXT,
-            log_path         TEXT
+            log_path         TEXT,
+            provider         TEXT,
+            is_ica           INTEGER DEFAULT 0,
+            cost_usd         REAL
         )
         """
     )
@@ -1362,6 +1399,13 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         # Owning project (owner/repo). Sprint labels are unique only per repo, so
         # without this a same-numbered sprint in another project mixes in here.
         ("project", "TEXT"),
+        # LLM provider used for this run, e.g. 'ICA' (issue #1673).
+        ("provider", "TEXT"),
+        # ICA metered-path tracking (issue #1672).
+        # is_ica=1 when CCPROXY_PROFILE was set at dispatch time (IBM Cloud metered path).
+        # cost_usd is the pre-computed USD estimate stored atomically at run close.
+        ("is_ica", "INTEGER DEFAULT 0"),
+        ("cost_usd", "REAL"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -1459,6 +1503,8 @@ def record_agent_start(
     log_path: str | None = None,
     backend: str | None = None,
     project: str | None = None,
+    provider: str | None = None,
+    is_ica: bool = False,
 ) -> int | None:
     """Insert an agent_runs row at dispatch time and return its id (issue #764).
 
@@ -1470,6 +1516,8 @@ def record_agent_start(
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
     `backend` is 'cline' or 'claude-code' (issue #920).
+    `provider` is the LLM provider identifier, e.g. 'ICA' (issue #1673).
+    `is_ica` is True when CCPROXY_PROFILE is set (IBM Cloud metered path) (issue #1672).
     Returns the new row id (used to close the exact run) or None on failure.
     """
     started_at = started_at or _now_iso()
@@ -1478,10 +1526,10 @@ def record_agent_start(
         cur = conn.execute(
             "INSERT INTO agent_runs "
             "(issue_number, sprint_label, agent, started_at, risk_tier, model_used, routing_reason, "
-            "worktree_sha, base_sha, attempt_kind, log_path, backend, project) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_sha, base_sha, attempt_kind, log_path, backend, project, provider, is_ica) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(issue_number), sprint_label, agent, started_at, risk_tier, model_used, routing_reason,
-             worktree_sha, base_sha, attempt_kind, log_path, backend, project),
+             worktree_sha, base_sha, attempt_kind, log_path, backend, project, provider, 1 if is_ica else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -1496,6 +1544,8 @@ def record_agent_finish(
     outcome: str | None = None,
     total_tokens: int | None = None,
     run_id: int | None = None,
+    is_ica: bool = False,
+    cost_usd: float | None = None,
 ) -> None:
     """Close the open agent_runs row with finish time, duration and outcome (#764).
 
@@ -1503,7 +1553,9 @@ def record_agent_finish(
     still-open run (finished_at IS NULL) matching issue/sprint/agent is closed.
     `duration_seconds` is used as supplied (the dispatcher passes a precise
     monotonic measurement — issue #764 AC3); when omitted it is computed from the
-    start/finish timestamps. Best-effort: never raises into the sprint loop.
+    start/finish timestamps. `is_ica` and `cost_usd` are written atomically with
+    the finish record for ICA metered-path runs (issue #1672 AC4).
+    Best-effort: never raises into the sprint loop.
     """
     finished_at = finished_at or _now_iso()
     with get_conn() as conn:
@@ -1526,12 +1578,14 @@ def record_agent_finish(
             duration_seconds = _duration_between(row["started_at"], finished_at)
         conn.execute(
             "UPDATE agent_runs SET finished_at = ?, duration_seconds = ?, "
-            "outcome = ?, total_tokens = ? WHERE id = ?",
+            "outcome = ?, total_tokens = ?, is_ica = ?, cost_usd = ? WHERE id = ?",
             (
                 finished_at,
                 None if duration_seconds is None else int(duration_seconds),
                 outcome,
                 None if total_tokens is None else int(total_tokens),
+                1 if is_ica else 0,
+                cost_usd,
                 row["id"],
             ),
         )
@@ -1728,6 +1782,59 @@ def rename_sprint(old_label: str, new_label: str, project: str | None = None) ->
         conn.execute(
             "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
             (new_label, old_label),
+        )
+        conn.commit()
+
+
+def ensure_sprint_draft_row(label: str, project: str) -> None:
+    """Create a `draft` row for *label* if none exists yet (issue #1693).
+
+    Sprint creation and rerun-queue (auto_run=false) previously wrote no DB
+    row at all — a never-run sprint was invisible to `sprint_state.current()`
+    and read only as an *implicit* draft (missing row -> "draft" inside
+    `transition_sprint_state`). That implicit fallback still holds for
+    legacy/pre-#1693 sprints, but new sprints now get a real row from the
+    moment they're queued, so `sprint_state.current()` is a complete picture
+    without relying on the missing-row special case.
+
+    Idempotent and non-destructive: `INSERT OR IGNORE` — if a row already
+    exists in ANY state (e.g. a fast dispatch raced ahead of this call),
+    it is left untouched.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sprints (label, project, state, created_at)
+            VALUES (?, ?, 'draft', ?)
+            """,
+            (label, project, _now_iso()),
+        )
+        conn.commit()
+
+
+def set_sprint_immediate_parent(label: str, project: str, immediate_parent: str) -> None:
+    """Record the immediate-parent lineage link for a rerun child (issue #1691).
+
+    Distinct from `parent_label` (always the BASE label, self-healed on every
+    transition — drives History grouping): `immediate_parent` is whichever
+    label was actually rerun to create this one (e.g. 94.2's immediate parent
+    is 94.1, not 94) and is what merge-topology resolution should use.
+    Creates a placeholder `draft` row when the child doesn't have one yet
+    (rerun with auto_run=false queues the child before any dispatch) so the
+    lineage link isn't lost while queued; a later `running` transition
+    upgrades that row in place via the existing ON CONFLICT path.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO sprints (label, project, state, created_at, immediate_parent)
+            VALUES (?, ?, 'draft', ?, ?)
+            ON CONFLICT(label, project) DO UPDATE SET
+                immediate_parent = excluded.immediate_parent
+            """,
+            (label, project, _now_iso(), immediate_parent),
         )
         conn.commit()
 
@@ -2199,14 +2306,19 @@ def record_token_usage(
     output_tokens: int,
     agent_role: str | None = None,
     model_name: str | None = None,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    ccproxy_profile: str | None = None,
 ) -> None:
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO token_usage
-               (session_id, project, input_tokens, output_tokens, recorded_at, agent_role, model_name)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, project, input_tokens, output_tokens, now, agent_role, model_name),
+               (session_id, project, input_tokens, output_tokens, recorded_at,
+                agent_role, model_name, cache_read_tokens, cache_write_tokens, ccproxy_profile)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, project, input_tokens, output_tokens, now,
+             agent_role, model_name, cache_read_tokens or 0, cache_write_tokens or 0, ccproxy_profile),
         )
         conn.commit()
 
@@ -2228,6 +2340,131 @@ def sum_token_usage_window(agent_role: str, since_utc: str, until_utc: str) -> t
             (agent_role, since_utc, until_utc),
         ).fetchone()
     return (int(row["tin"]), int(row["tout"])) if row else (0, 0)
+
+
+def sum_token_usage_window_full(
+    agent_role: str, since_utc: str, until_utc: str
+) -> tuple[int, int, int, int, bool]:
+    """Return (raw_input, output, cache_read, cache_write, is_ica) for an agent role window.
+
+    Extends sum_token_usage_window with the ICA-specific breakdown (issue #1672).
+    `raw_input` = input_tokens - cache_read_tokens (uncached input only).
+    `is_ica` is True when any row in the window has ccproxy_profile set (i.e. CCPROXY_PROFILE
+    was active during the dispatch). Falls back gracefully when cache columns are absent.
+    """
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                """SELECT
+                       COALESCE(SUM(input_tokens), 0)       AS tin,
+                       COALESCE(SUM(output_tokens), 0)      AS tout,
+                       COALESCE(SUM(cache_read_tokens), 0)  AS tcr,
+                       COALESCE(SUM(cache_write_tokens), 0) AS tcw,
+                       MAX(CASE WHEN ccproxy_profile IS NOT NULL THEN 1 ELSE 0 END) AS has_ica
+                   FROM token_usage
+                   WHERE agent_role = ? AND recorded_at >= ? AND recorded_at <= ?""",
+                (agent_role, since_utc, until_utc),
+            ).fetchone()
+        if row is None:
+            return (0, 0, 0, 0, False)
+        tin = int(row["tin"])
+        tout = int(row["tout"])
+        tcr = int(row["tcr"])
+        tcw = int(row["tcw"])
+        is_ica = bool(row["has_ica"])
+        # raw_input = total input stored (raw + cache_read as sent by hook) minus cache_read
+        raw_input = max(0, tin - tcr)
+        return (raw_input, tout, tcr, tcw, is_ica)
+    except Exception:
+        # Graceful fallback: cache columns may not exist on old DBs
+        tin, tout = sum_token_usage_window(agent_role, since_utc, until_utc)
+        return (tin, tout, 0, 0, False)
+
+
+def _compute_ica_cost_usd(
+    raw_input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
+    model_name: str | None,
+    price_map: dict | None,
+) -> float | None:
+    """Compute ICA USD cost from token breakdown and a price_map (issue #1672 AC2).
+
+    Uses the model's `in` and `out` rates from price_map ($/million tokens).
+    Cache read costs 10% of the input rate; cache write costs 125% of the input rate
+    (standard Anthropic cache pricing ratios, applicable on the ICA metered path).
+    Returns None when price_map is absent or the model is not found in it.
+    """
+    if not price_map or not model_name:
+        return None
+    model_key = (model_name or "").lower()
+    entry = price_map.get(model_key) or price_map.get(model_key.split("-20")[0])
+    if not entry:
+        return None
+    rate_in = float(entry.get("in", 0)) / 1_000_000
+    rate_out = float(entry.get("out", 0)) / 1_000_000
+    rate_cr = rate_in * 0.10   # cache read: 10% of input rate
+    rate_cw = rate_in * 1.25   # cache write: 125% of input rate
+    cost = (
+        raw_input_tokens * rate_in
+        + output_tokens * rate_out
+        + cache_read_tokens * rate_cr
+        + cache_write_tokens * rate_cw
+    )
+    return cost
+
+
+def ica_sprint_cost_summary(
+    sprint_label: str, project: str | None = None
+) -> dict:
+    """Return ICA cost totals for a sprint, read from agent_runs (issue #1672 AC5/AC6).
+
+    Only includes runs where is_ica=1, outcome in ('success','pass'), and cost_usd
+    is not NULL and > 0 (AC7). Returns a dict:
+      {is_ica, run_count, total_tokens, cost_usd}
+    All values are read from the DB — no re-computation at call time (AC6).
+    """
+    # Outcomes that represent successful/completed runs (exclude failed/crashed)
+    _SUCCESS_OUTCOMES = ("success", "pass")
+    try:
+        with get_conn() as conn:
+            _create_agent_runs_table(conn)
+            if project:
+                rows = conn.execute(
+                    """SELECT total_tokens, cost_usd
+                       FROM agent_runs
+                       WHERE sprint_label = ?
+                         AND project = ?
+                         AND is_ica = 1
+                         AND outcome IN ('success', 'pass')
+                         AND cost_usd IS NOT NULL
+                         AND cost_usd > 0""",
+                    (sprint_label, project),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT total_tokens, cost_usd
+                       FROM agent_runs
+                       WHERE sprint_label = ?
+                         AND is_ica = 1
+                         AND outcome IN ('success', 'pass')
+                         AND cost_usd IS NOT NULL
+                         AND cost_usd > 0""",
+                    (sprint_label,),
+                ).fetchall()
+    except Exception:
+        rows = []
+
+    run_count = len(rows)
+    total_tokens = sum(int(r["total_tokens"] or 0) for r in rows)
+    cost_usd = sum(float(r["cost_usd"] or 0.0) for r in rows)
+    return {
+        "is_ica": run_count > 0,
+        "run_count": run_count,
+        "total_tokens": total_tokens,
+        "cost_usd": round(cost_usd, 6),
+    }
 
 
 def get_earliest_token_row_after(after_utc: str | None = None) -> str | None:

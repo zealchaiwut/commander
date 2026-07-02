@@ -36,6 +36,8 @@ globalThis._pfFlags ??= null;
 globalThis._pfSelectedIds ??= new Set();
 // Cline follow-up opt-in (issue #919)
 globalThis._pfUseClineFollowups ??= false;
+// Per-run LLM provider (anthropic | ica) — always defaults back to anthropic
+globalThis._pfLlmProvider ??= "anthropic";
 // XL split suggestions (issue #1424)
 globalThis._pfXLSuggestions ??= [];
 globalThis._pfStrictXLGate ??= false;
@@ -62,6 +64,7 @@ export const SPRINT_BOARD_STATE_KEYS = [
   "_pfFlags",
   "_pfSelectedIds",
   "_pfUseClineFollowups",
+  "_pfLlmProvider",
   "_pfXLSuggestions",
   "_pfStrictXLGate",
   "_pfXLMinutesSaved",

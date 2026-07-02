@@ -17,6 +17,8 @@ Logic failures (test/design/merge-boundary) accumulate context and retry. Infras
 
 **Label rule:** real ticket failure → immediate `needs-rework` via `state_machine.transition()`. Gate failures mid fix-loop stay on `SIT` until fix budget exhausted.
 
+**Waiving a failed ticket** (#1698 / Q10): closing a `needs-rework` ticket without ever giving it `UAT` is the sanctioned way for a human to drop it from a sprint — `_has_rework_tickets` (and rerun's move-eligibility filter) only scan **open** issues, so a closed ticket stops counting as rework by design. This is an explicit human decision, not a bug: if it should still block the sprint, reopen it and the signal comes back.
+
 **Hang redispatch** (#787): first hang redispatches once; second hang escalates. Disable with `COMMANDER_HANG_REDISPATCH_DISABLE=1`.
 
 **Pipeline reject** (#737): tester rejection pushes ticket to front of coder queue; 3-attempt cap → `needs-rework`.
@@ -30,9 +32,19 @@ Stop, cancel, partial completion.
 | User stop / cancel | `needs_rework` (not `cancelled`) | Failed tickets get `needs-rework`; passed tickets keep `UAT` |
 | All tickets pass | `ready_to_merge` | `UAT` on passed tickets |
 | Partial pass + child re-run | `partial_finished` (derived) | Child sprint carries failed tickets |
-| Orphan PID sweep | `needs_rework` | Stale `in-progress`/`SIT` flagged in reconciliation |
+| Orphaned running sprint (PID file present, process dead) | Settled to `needs_rework` **or `ready_to_merge`** depending on whether open rework tickets remain (`end_reason=reconcile-orphan`) | Stale `in-progress`/`SIT` flagged by post-sprint checks (system B) |
 
 `end_reason` (user stop, process lost, coder failed, …) is stored in run log and sprint summary — not as a separate lifecycle enum value.
+
+**Fixed (#1697):** orphan settling now happens on both the auto-reconcile
+sweep and the per-sprint `POST .../reconcile` button. Fixing the sweep's
+skip-list also surfaced that the settle write itself was silently rejected
+in both places — `reconcile_sprint_label` used `actor="reconcile"`, but
+`db.py`'s edge guard requires `actor="manager"` for a
+`running→{ready_to_merge,needs_rework}` transition. It now uses
+`actor="manager"` specifically for the confirmed-orphan case. There is still
+no standalone PID-watchdog pass — settling only happens as part of a
+reconcile sweep or button click, not proactively.
 
 ## 6.3 Process death
 

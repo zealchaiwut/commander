@@ -7577,11 +7577,13 @@ Proceed anyway?`)) {
     const repo = _pfCurrentRepo;
     if (!label || !repo)
       return;
+    const llmProvider = _pfLlmProvider;
+    const useClineFollowups = _pfUseClineFollowups;
     const confirmBtn = document.getElementById("pf-confirm-btn");
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Starting\u2026";
     _pfClose();
-    await smgmtKickoffRun(label, repo);
+    await smgmtKickoffRun(label, repo, { llmProvider, useClineFollowups });
   }
   function _paStepState(state) {
     return state === "fail" ? "failed" : state;
@@ -7766,6 +7768,8 @@ Proceed anyway?`)) {
   var _ksFailedStep = -1;
   var _ksLabel = null;
   var _ksRepo = null;
+  var _ksLlmProvider = "anthropic";
+  var _ksUseClineFollowups = false;
   function _ksInit() {
     const stepsEl = document.getElementById("smgmt-kickoff-steps");
     if (!stepsEl)
@@ -7844,7 +7848,7 @@ Proceed anyway?`)) {
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups, llm_provider: _pfLlmProvider })
+        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _ksUseClineFollowups, llm_provider: _ksLlmProvider })
       });
       if (!res.ok) {
         let detail = await res.text();
@@ -7925,7 +7929,9 @@ Proceed anyway?`)) {
       await loadSprintMgmt(true, label);
     }
   }
-  async function smgmtKickoffRun(label, repo) {
+  async function smgmtKickoffRun(label, repo, opts = {}) {
+    _ksLlmProvider = opts.llmProvider ?? "anthropic";
+    _ksUseClineFollowups = opts.useClineFollowups ?? false;
     _ksShow(label, repo);
     if (!await _ksStep1Post())
       return;

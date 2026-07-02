@@ -1,8 +1,15 @@
 """sync_projects_to_neon.py — one-way sync from projects.json to Neon.
 
-Called at dashboard startup and by POST /api/projects/sync-to-db.
+EXPORT-ONLY (issue #1695): no dashboard/server runtime code imports this
+module. Its only caller is scripts/export_to_neon.py, run manually/offline.
+The "called at dashboard startup / POST /api/projects/sync-to-db" claim
+below is stale — that startup sync and endpoint were removed; projects.json
+is the sole runtime source of truth for the project registry (see
+docs/architecture/1_state-and-source-of-truth.md §1.4). Do not add a new
+runtime import of this module without updating that doc and this docstring.
+
 projects.json remains the runtime source of truth; this module only writes
-to the DB as a backup.
+to the DB as a one-off export.
 
 projects.json schema (relevant fields):
   [

@@ -266,6 +266,27 @@ them wired invites someone to reconnect runtime code against stale docs.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — bless export-only**: docstring + import-guard test preventing dashboard/server imports of `sprint_repo.py`/`models.py`.
 
+**IMPLEMENTED (#1695, branch `fix/1686-1698-flow-decisions`), with a
+correction to the premise:** `models.py` and `neon_db.py` turned out NOT to
+be export-only — both are genuine runtime dependencies of
+`apps/dashboard/{settings_repo,todo_repo}.py`'s settings/todo KV fallback
+when Neon is enabled (`Setting`/`ProjectTodo` ORM classes). Only
+`sprint_repo.py` and `sync_projects_to_neon.py` have zero runtime callers.
+Scope adjusted accordingly:
+
+- `sprint_repo.py`, `sync_projects_to_neon.py`: EXPORT-ONLY docstrings added;
+  also fixed `sync_projects_to_neon.py`'s stale claim of being "called at
+  dashboard startup and by POST /api/projects/sync-to-db" — neither exists
+  anymore.
+- `models.py`, `neon_db.py`: docstrings clarify the split (which ORM
+  classes/paths are runtime-shared vs export-only) instead of falsely
+  claiming export-only status.
+- New `tests/test_neon_export_only.py`: AST-based static scan of every
+  `apps/dashboard/**/*.py` file plus the sprint-manager orchestrator
+  entrypoint, failing if any imports `sprint_repo` or
+  `sync_projects_to_neon`. Verified the guard actually fails when a
+  violation is introduced (mutation test), then reverted clean.
+
 ---
 
 ## Ticket Map (filed 2026-07-02)

@@ -34,11 +34,15 @@ Stop, cancel, partial completion.
 
 `end_reason` (user stop, process lost, coder failed, …) is stored in run log and sprint summary — not as a separate lifecycle enum value.
 
-**Orphan settling is per-sprint-button-only in practice:** the settle logic
-lives in `_github_reconcile_row` for `running` rows, but the auto-reconcile
-sweep skips `running` rows entirely — only `POST .../reconcile` on that sprint
-reaches it. There is no standalone PID-watchdog pass in the reconcile service.
-*(open question: should the sweep settle confirmed orphans automatically?)*
+**Fixed (#1697):** orphan settling now happens on both the auto-reconcile
+sweep and the per-sprint `POST .../reconcile` button. Fixing the sweep's
+skip-list also surfaced that the settle write itself was silently rejected
+in both places — `reconcile_sprint_label` used `actor="reconcile"`, but
+`db.py`'s edge guard requires `actor="manager"` for a
+`running→{ready_to_merge,needs_rework}` transition. It now uses
+`actor="manager"` specifically for the confirmed-orphan case. There is still
+no standalone PID-watchdog pass — settling only happens as part of a
+reconcile sweep or button click, not proactively.
 
 ## 6.3 Process death
 

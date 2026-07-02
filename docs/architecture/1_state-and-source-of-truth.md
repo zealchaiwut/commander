@@ -95,9 +95,13 @@ failed / cancelled` are re-checked.
   Merge Sprint / bulk-complete / complete-step (which use `actor="reconcile"`
   for superseded ancestors after verifying the lineage merged to develop).
 - Orphaned `running` rows (PID file present, process dead) settle to
-  `ready_to_merge`/`needs_rework` with `end_reason=reconcile-orphan` — but
-  because the sweep skips `running` rows, **orphan settling only happens via
-  the per-sprint button** in practice.
+  `ready_to_merge`/`needs_rework` with `end_reason=reconcile-orphan`.
+  **Fixed (#1697):** the sweep now includes `running` rows (only a confirmed
+  orphan is touched; live or PID-absent rows are left alone), and the settle
+  write itself now uses `actor="manager"` — it previously used
+  `actor="reconcile"`, which `db.py`'s edge guard silently rejected for
+  `running→terminal`, so orphan settling had never actually worked via
+  either path.
 
 **Inputs are mirror-backed:** ticket labels + summary issues from the local
 `issues` table; PR merge state inferred from one cached

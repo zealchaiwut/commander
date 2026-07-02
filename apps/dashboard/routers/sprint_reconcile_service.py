@@ -330,11 +330,24 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     patch = _github_reconcile_row(label, _eff_project, row)
     lifecycle_updated = False
     if patch:
-        # AC4 (original): all lifecycle writes go through transition_sprint_state.
+        # Issue #1697: a confirmed-orphan running sprint settles via
+        # running->{ready_to_merge,needs_rework}, which db.py's edge guard
+        # only allows for actor="manager" (running->terminal is otherwise
+        # locked to the live manager process). actor="reconcile" here was a
+        # silent no-op for every orphan case — _github_reconcile_row computed
+        # the right patch, but transition_sprint_state rejected it every
+        # time, for both the sweep AND the per-sprint button, since both call
+        # this same function. The reconciler only reaches this branch after
+        # confirming the manager process that WOULD have made this
+        # transition is dead (_is_manager_pid_alive), so acting with
+        # equivalent authority is the point, not a bypass. All other
+        # reconcile transitions (terminal<->terminal) keep actor="reconcile"
+        # per the original AC4 contract.
+        _actor = "manager" if (row.get("state") or "") == "running" else "reconcile"
         lifecycle_updated = transition_sprint_state(
             label,
             patch["state"],
-            actor="reconcile",
+            actor=_actor,
             end_reason=patch.get("end_reason"),
             project=_eff_project,
         )
@@ -438,13 +451,18 @@ def reconcile_project(project: str, limit: int = 40) -> list[str]:
             continue
         state = row.get("state") or ""
         # Skip states the reconciler can't usefully change:
-        #  • running / draft / planned / planning — not terminal, nothing to settle.
+        #  • draft / planned / planning — not dispatched yet, nothing to settle.
         #  • completed / deleted — FINAL terminal states (completed only ever goes
         #    to deleted; deleted is the end). Re-checking them every History load
         #    burned ~4s on tangled lineages (mostly completed members) with no
-        #    possible state change. Only ready_to_merge / needs_rework / failed can
-        #    still move, so reconcile just those.
-        if state in ("running", "draft", "planned", "planning", "completed", "deleted"):
+        #    possible state change.
+        # `running` IS included (issue #1697): _github_reconcile_row only acts on
+        # a CONFIRMED orphan (PID file present AND that process is dead) — a live
+        # PID or an absent PID file both return None there and the row is left
+        # untouched. Previously orphan settling only ever happened via the
+        # per-sprint Reconcile button because this sweep skipped running rows
+        # outright.
+        if state in ("draft", "planned", "planning", "completed", "deleted"):
             continue
         eligible.append(row)
 

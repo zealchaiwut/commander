@@ -82,6 +82,24 @@ per-sprint Reconcile button reaches that branch.
 **Decision (2026-07-02):** **A — auto-settle confirmed orphans** in the sweep
 (PID-file-present AND process-dead only; PID-file-absent untouched per #1095).
 
+**IMPLEMENTED (#1697, branch `fix/1686-1698-flow-decisions`), which surfaced
+a deeper pre-existing bug:** removing `running` from `reconcile_project`'s
+skip list wasn't enough on its own — `reconcile_sprint_label` always called
+`transition_sprint_state(actor="reconcile")`, but `db.py`'s edge guard
+requires `actor="manager"` for `running→{ready_to_merge,needs_rework}`. That
+meant orphan settling **silently failed even via the per-sprint button** —
+`_github_reconcile_row` computed the right patch, `transition_sprint_state`
+rejected it every time, and "button-only" was actually "neither". Fixed by
+using `actor="manager"` specifically for the confirmed-orphan
+running→terminal edge (the reconciler only reaches that branch after
+confirming the manager process that would have made this transition is
+dead, so acting with equivalent authority is the intent, not a bypass);
+terminal↔terminal reconcile transitions keep `actor="reconcile"` per the
+original contract. Updated `tests/reconciler/test_reconcile_running_sprint.py`
+(two tests asserted the old, silently-broken `actor="reconcile"` expectation
+for this specific case) and manually verified all three PID scenarios via
+`reconcile_project()` directly.
+
 ## Q4 — Three lineage fields
 
 plan.json `parent` = immediate parent (drives merge topology); DB

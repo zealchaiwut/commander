@@ -587,8 +587,16 @@ def _sprint_db_set_state_sm(
                                           end_reason=fields.get("end_reason"),
                                           ended_at=fields.get("ended_at"),
                                           project=project or "")
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        # Best-effort by design (a DB hiccup must never fail the run), but a
+        # silently lost lifecycle write leaves plan.json's dual-write copy
+        # newer than the "authoritative" DB with nothing to flag it (#1688) —
+        # log so it's at least visible in the run log.
+        structured_log.warn(
+            "sprint_db_state_write_failed",
+            f"DB lifecycle write failed for {label!r} -> {state!r}: {e}",
+            label=label, state=state, project=project, exc=str(e),
+        )
 
 
 def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
@@ -596,8 +604,12 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
     try:
         import db  # apps/dashboard on sys.path (line 142)
         db.set_sprint_ticket_order(label, issue_numbers)
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ticket_order_write_failed",
+            f"DB ticket-order write failed for {label!r}: {e}",
+            label=label, exc=str(e),
+        )
 
 
 def _sprint_db_ingest_run_sm(
@@ -622,8 +634,12 @@ def _sprint_db_ingest_run_sm(
             project=project or state.project or "",
             summary_path=spath,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ingest_failed",
+            f"end-of-run DB ingest failed for {label!r}: {e}",
+            label=label, project=project, exc=str(e),
+        )
 
 
 # ── Per-agent run tracking (issue #764) ──────────────────────────────────────
@@ -686,8 +702,12 @@ def _db_agent_start_sm(
             provider=provider,
             is_ica=is_ica,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_start_write_failed",
+            f"agent_runs open failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _db_update_worktree_shas_sm(
@@ -730,8 +750,12 @@ def _db_agent_finish_sm(
             outcome=outcome, total_tokens=total_tokens,
             is_ica=is_ica, cost_usd=cost_usd,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_finish_write_failed",
+            f"agent_runs close failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _ica_cost_from_tokens(

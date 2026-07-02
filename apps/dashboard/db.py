@@ -31,8 +31,19 @@ def _bkk_midnight_utc() -> str:
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
+    # manager subprocess both write this file concurrently. The rollback
+    # journal (sqlite's default) serializes all writers and blocks readers
+    # during a write; WAL lets readers proceed during a writer's transaction
+    # and cuts lock-contention errors between the two processes. busy_timeout
+    # makes SQLite retry internally for up to 5s on SQLITE_BUSY before
+    # raising, on top of the sqlite3 module's own 5s connect(timeout=...)
+    # retry loop — belt and suspenders since some call sites may not go
+    # through this helper.
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 

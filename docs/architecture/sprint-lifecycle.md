@@ -38,9 +38,10 @@ subsequent tickets. Do not add new call sites that bypass this accessor.
 
 **Known gaps in the contract as of 2026-07-02** *(open questions)*:
 
-- A **second accessor** exists at `apps/dashboard/routers/sprint_state.py`
-  returning `None` for a missing row (vs `"unknown"` from
-  `apps/dashboard/sprint_state.py`). One should be removed.
+- **Fixed (#1692):** the duplicate accessor at
+  `apps/dashboard/routers/sprint_state.py` (returned `None` for a missing row
+  vs `"unknown"`) is deleted; `apps/dashboard/sprint_state.py` is now the sole
+  accessor.
 - **plan.json is still load-bearing** on lifecycle paths: the terminal-label
   redispatch guard trusts a terminal plan.json when no DB row exists
   (`startup.py` `_reject_terminal_label_redispatch`), rerun roster fallback

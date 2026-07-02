@@ -99,6 +99,15 @@ sanctioned reader.
 
 **Decision (2026-07-02, PROVISIONAL — auto-adopted ★ recommendation after interactive timeouts; operator may veto):** **A — delete the routers accessor**; migrate callers to `apps/dashboard/sprint_state.py`.
 
+**IMPLEMENTED (#1692, branch `fix/1686-1698-flow-decisions`):** deleted
+`apps/dashboard/routers/sprint_state.py` (it was never a mounted FastAPI
+router despite the location — a plain module). Its one caller
+(`routers/sprint_history_service.py`) migrated to the top-level
+`apps/dashboard/sprint_state.py`, adjusting its `or _normalize_state(...)`
+fallback (which relied on `None` being falsy) to an explicit
+`is None or == "unknown"` check since the canonical accessor returns the
+string `"unknown"`, not `None`, for a missing row.
+
 ## Q6 — Queued rerun children invisible to the DB
 
 `auto_run=false` rerun children exist only as plan.json

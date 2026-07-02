@@ -61,26 +61,35 @@ class TransitionError(Exception):
 
 
 def run_lock_active() -> bool:
-    """True when a sprint run holds the label lock (COMMANDER_SPRINT_RUNNING=1)."""
-    return os.environ.get(_RUN_LOCK_ENV) == "1"
+    """True when a sprint run holds the label lock.
+
+    The orchestrator sets COMMANDER_SPRINT_RUNNING to the *sprint label*
+    (e.g. "sprint-94"), not the literal "1" — an exact "1" comparison here
+    made this guard inert in manager subprocesses (issue #1689). Any
+    non-empty value counts as locked, matching scripts/update_ticket.py's
+    `if sprint_label := os.environ.get("COMMANDER_SPRINT_RUNNING")` check.
+    """
+    return bool(os.environ.get(_RUN_LOCK_ENV, "").strip())
 
 
 def assert_run_mutable(add: Iterable[str], remove: Iterable[str]) -> None:
     """Guard label mutations against the sprint run lock (issue #754).
 
-    When a sprint run is active (COMMANDER_SPRINT_RUNNING=1), every label being
-    added or removed must be in RUN_MUTABLE_LABELS (i.e. a status label). Any
-    non-status label in the add/remove sets raises TransitionError. When the lock
-    is not held this is a no-op, so existing behavior is unchanged.
+    When a sprint run is active (COMMANDER_SPRINT_RUNNING set to any non-empty
+    value — issue #1689), every label being added or removed must be in
+    RUN_MUTABLE_LABELS (i.e. a status label). Any non-status label in the
+    add/remove sets raises TransitionError. When the lock is not held this is
+    a no-op, so existing behavior is unchanged.
     """
     if not run_lock_active():
         return
     touched = frozenset(add) | frozenset(remove)
     illegal = touched - RUN_MUTABLE_LABELS
     if illegal:
+        lock_value = os.environ.get(_RUN_LOCK_ENV, "")
         raise TransitionError(
-            f"Sprint run active ({_RUN_LOCK_ENV}=1): refusing to mutate "
-            f"non-status label(s) {sorted(illegal)}. Only status labels "
+            f"Sprint run active ({_RUN_LOCK_ENV}={lock_value!r}): refusing to "
+            f"mutate non-status label(s) {sorted(illegal)}. Only status labels "
             f"{sorted(RUN_MUTABLE_LABELS)} may change during a run."
         )
 

@@ -1,3 +1,13 @@
+"""Neon-backed sprint/ticket CRUD — EXPORT-ONLY (issue #1695).
+
+SQLite `sprints`/`sprint_ticket_order` (apps/dashboard/db.py) is the
+authoritative runtime store for sprint lifecycle — see
+docs/architecture/1_state-and-source-of-truth.md §1.4. This module has no
+runtime caller; it exists solely for scripts/migrate_sprints_to_neon.py.
+Do not import it from dashboard/server or sprint_manager runtime code
+without first updating that doc and this docstring — see
+tests/test_neon_export_only.py, which asserts the boundary.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone

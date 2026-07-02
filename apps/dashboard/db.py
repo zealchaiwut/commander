@@ -31,8 +31,19 @@ def _bkk_midnight_utc() -> str:
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
+    # manager subprocess both write this file concurrently. The rollback
+    # journal (sqlite's default) serializes all writers and blocks readers
+    # during a write; WAL lets readers proceed during a writer's transaction
+    # and cuts lock-contention errors between the two processes. busy_timeout
+    # makes SQLite retry internally for up to 5s on SQLITE_BUSY before
+    # raising, on top of the sqlite3 module's own 5s connect(timeout=...)
+    # retry loop — belt and suspenders since some call sites may not go
+    # through this helper.
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -512,23 +523,28 @@ def delete_brief_artifact(scope: str, project: str, date: str) -> None:
 # cache (dual-write) until a later sprint removes them.
 #
 # Unified lifecycle (docs/architecture/sprint-lifecycle.md): new writes use
-# draft / planned / running / ready_to_merge / needs_rework / completed.
-# `planning`, `cancelled`, and `failed` are legacy values kept readable for
-# pre-redesign rows (forward-only migration, no rewrite) — they are never
-# written anew and render through `canonical_lifecycle()`.
+# draft / running / ready_to_merge / needs_rework / completed.
+# `planning`, `planned`, `cancelled`, and `failed` are legacy values kept
+# readable for pre-redesign rows (forward-only migration, no rewrite) — they
+# are never written anew and render through `canonical_lifecycle()`.
+#
+# `planned` was deprecated in issue #1686 alongside the plan.json `signoff`
+# gate — the preflight-confirmation step it modeled was never stabilized.
+# Nothing writes it anymore; any legacy row that carries it displays as
+# `draft`.
 
 _SPRINT_STATES = (
     # unified lifecycle
-    "draft", "planned", "running", "ready_to_merge", "needs_rework", "completed",
+    "draft", "running", "ready_to_merge", "needs_rework", "completed",
     # legacy, read-only
-    "planning", "cancelled", "failed",
+    "planning", "planned", "cancelled", "failed",
 )
 
 # Canonical lifecycle states exposed to the UI. `partial_finished` is derived
 # at read time from children's states and never stored; `deleted` lives in the
 # sprint_history snapshot table, not in `sprints`.
 LIFECYCLE_STATES = (
-    "draft", "planned", "running", "ready_to_merge", "needs_rework",
+    "draft", "running", "ready_to_merge", "needs_rework",
     "partial_finished", "completed", "deleted",
 )
 
@@ -538,6 +554,7 @@ LIFECYCLE_STATES = (
 # flow auto-merged at end of run, so those sprints are past ready_to_merge).
 _LEGACY_LIFECYCLE_MAP = {
     "planning": "draft",
+    "planned": "draft",
     "complete": "completed",
     "finished": "completed",
     "cancelled": "needs_rework",
@@ -566,8 +583,10 @@ _logger = logging.getLogger("db.sprint_state")
 # requiring a full running start.  The critical guard — requiring actor="manager"
 # for running→terminal — is enforced separately below.
 _LEGAL_SPRINT_EDGES: dict[str, frozenset[str]] = {
-    "draft":          frozenset({"planned", "running", "ready_to_merge", "needs_rework", "deleted"}),
-    "planned":        frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
+    # `current` (below) is always run through canonical_lifecycle() before
+    # this table is consulted, and `planned` canonicalizes to `draft` (#1686
+    # deprecation) — so a `"planned"` key here would be unreachable dead code.
+    "draft":          frozenset({"running", "ready_to_merge", "needs_rework", "deleted"}),
     "running":        frozenset({"running", "ready_to_merge", "needs_rework", "completed", "deleted"}),
     "ready_to_merge": frozenset({"completed", "needs_rework", "deleted"}),
     # Derived-only in normal flow; if a legacy row stored this value, allow
@@ -885,6 +904,14 @@ _RUN_ARTIFACT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("summary_settled_done", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_uat_count", "INTEGER NOT NULL DEFAULT 0"),
     ("summary_failure_count", "INTEGER NOT NULL DEFAULT 0"),
+    # issue #1691: `parent_label` (above, in the core DDL) always holds the
+    # BASE label of a rerun chain (self-healed to the sprint-N root — drives
+    # History lineage grouping). Re-run's actual merge topology is child ->
+    # IMMEDIATE parent (e.g. 94.2's immediate parent is 94.1, not 94), and
+    # until now that only lived in plan.json's `parent` field. This column
+    # gives the DB the same information so merge-topology resolution can
+    # prefer it over a disk read.
+    ("immediate_parent", "TEXT"),
 )
 
 
@@ -1755,6 +1782,59 @@ def rename_sprint(old_label: str, new_label: str, project: str | None = None) ->
         conn.execute(
             "UPDATE sprint_ticket_order SET label = ? WHERE label = ?",
             (new_label, old_label),
+        )
+        conn.commit()
+
+
+def ensure_sprint_draft_row(label: str, project: str) -> None:
+    """Create a `draft` row for *label* if none exists yet (issue #1693).
+
+    Sprint creation and rerun-queue (auto_run=false) previously wrote no DB
+    row at all — a never-run sprint was invisible to `sprint_state.current()`
+    and read only as an *implicit* draft (missing row -> "draft" inside
+    `transition_sprint_state`). That implicit fallback still holds for
+    legacy/pre-#1693 sprints, but new sprints now get a real row from the
+    moment they're queued, so `sprint_state.current()` is a complete picture
+    without relying on the missing-row special case.
+
+    Idempotent and non-destructive: `INSERT OR IGNORE` — if a row already
+    exists in ANY state (e.g. a fast dispatch raced ahead of this call),
+    it is left untouched.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sprints (label, project, state, created_at)
+            VALUES (?, ?, 'draft', ?)
+            """,
+            (label, project, _now_iso()),
+        )
+        conn.commit()
+
+
+def set_sprint_immediate_parent(label: str, project: str, immediate_parent: str) -> None:
+    """Record the immediate-parent lineage link for a rerun child (issue #1691).
+
+    Distinct from `parent_label` (always the BASE label, self-healed on every
+    transition — drives History grouping): `immediate_parent` is whichever
+    label was actually rerun to create this one (e.g. 94.2's immediate parent
+    is 94.1, not 94) and is what merge-topology resolution should use.
+    Creates a placeholder `draft` row when the child doesn't have one yet
+    (rerun with auto_run=false queues the child before any dispatch) so the
+    lineage link isn't lost while queued; a later `running` transition
+    upgrades that row in place via the existing ON CONFLICT path.
+    """
+    with get_conn() as conn:
+        _create_sprint_lifecycle_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO sprints (label, project, state, created_at, immediate_parent)
+            VALUES (?, ?, 'draft', ?, ?)
+            ON CONFLICT(label, project) DO UPDATE SET
+                immediate_parent = excluded.immediate_parent
+            """,
+            (label, project, _now_iso(), immediate_parent),
         )
         conn.commit()
 

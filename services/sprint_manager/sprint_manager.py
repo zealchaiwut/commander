@@ -587,8 +587,16 @@ def _sprint_db_set_state_sm(
                                           end_reason=fields.get("end_reason"),
                                           ended_at=fields.get("ended_at"),
                                           project=project or "")
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        # Best-effort by design (a DB hiccup must never fail the run), but a
+        # silently lost lifecycle write leaves plan.json's dual-write copy
+        # newer than the "authoritative" DB with nothing to flag it (#1688) —
+        # log so it's at least visible in the run log.
+        structured_log.warn(
+            "sprint_db_state_write_failed",
+            f"DB lifecycle write failed for {label!r} -> {state!r}: {e}",
+            label=label, state=state, project=project, exc=str(e),
+        )
 
 
 def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
@@ -596,8 +604,12 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
     try:
         import db  # apps/dashboard on sys.path (line 142)
         db.set_sprint_ticket_order(label, issue_numbers)
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ticket_order_write_failed",
+            f"DB ticket-order write failed for {label!r}: {e}",
+            label=label, exc=str(e),
+        )
 
 
 def _sprint_db_ingest_run_sm(
@@ -622,8 +634,12 @@ def _sprint_db_ingest_run_sm(
             project=project or state.project or "",
             summary_path=spath,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ingest_failed",
+            f"end-of-run DB ingest failed for {label!r}: {e}",
+            label=label, project=project, exc=str(e),
+        )
 
 
 # ── Per-agent run tracking (issue #764) ──────────────────────────────────────
@@ -686,8 +702,12 @@ def _db_agent_start_sm(
             provider=provider,
             is_ica=is_ica,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_start_write_failed",
+            f"agent_runs open failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _db_update_worktree_shas_sm(
@@ -730,8 +750,12 @@ def _db_agent_finish_sm(
             outcome=outcome, total_tokens=total_tokens,
             is_ica=is_ica, cost_usd=cost_usd,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_finish_write_failed",
+            f"agent_runs close failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _ica_cost_from_tokens(
@@ -4838,8 +4862,11 @@ def main() -> None:
             except Exception as e_persist:
                 structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
-    # Write per-sprint brief after documenter (issue #860)
-    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE:
+    # Write per-sprint brief after documenter (issue #860).
+    # Parked/deprecated (issue #1687) — default-off pending platform stability;
+    # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
+    _brief_disabled = os.environ.get("COMMANDER_DISABLE_BRIEF", "1").strip().lower() not in ("0", "false", "no")
+    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
         _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
         _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         _brief_summary_issue_num: Optional[int] = None

@@ -38,18 +38,20 @@ subsequent tickets. Do not add new call sites that bypass this accessor.
 
 **Known gaps in the contract as of 2026-07-02** *(open questions)*:
 
-- A **second accessor** exists at `apps/dashboard/routers/sprint_state.py`
-  returning `None` for a missing row (vs `"unknown"` from
-  `apps/dashboard/sprint_state.py`). One should be removed.
+- **Fixed (#1692):** the duplicate accessor at
+  `apps/dashboard/routers/sprint_state.py` (returned `None` for a missing row
+  vs `"unknown"`) is deleted; `apps/dashboard/sprint_state.py` is now the sole
+  accessor.
 - **plan.json is still load-bearing** on lifecycle paths: the terminal-label
   redispatch guard trusts a terminal plan.json when no DB row exists
-  (`startup.py` `_reject_terminal_label_redispatch`), rerun roster fallback
-  reads it, the reconcile orphan sweep rewrites it, and **queued rerun children
-  exist only in plan.json** (`state=needs_rework, end_reason=queued`, no DB
-  row) until dispatched — a sub-lifecycle invisible to `sprint_state.current()`.
-- Sprint **creation writes no DB row** — a never-run sprint reads as
-  `unknown`/implicit `draft` (missing row → `draft` inside
-  `transition_sprint_state`, `db.py`).
+  (`startup.py` `_reject_terminal_label_redispatch`), and the reconcile orphan
+  sweep rewrites it.
+- **Fixed (#1693):** sprint creation and the `auto_run=false` rerun-queue path
+  now write a `draft` DB row via `db.ensure_sprint_draft_row()` alongside
+  their plan.json writes, so `sprint_state.current()` sees them immediately
+  instead of relying on the missing-row-implies-draft fallback. That fallback
+  still exists for legacy/pre-#1693 sprints and any other unforeseen gap —
+  it's a safety net now, not the primary path.
 
 ## Problem — Four Competing Truths
 
@@ -128,17 +130,30 @@ the original design diagram: `running→running` (dual-writer self-edge),
 `running→{ready_to_merge,needs_rework,completed}` requires `actor="manager"`;
 `needs_rework→{ready_to_merge,completed}` requires `actor="reconcile"`.
 
-*(deviation)* **`planned` is never written anywhere.** It exists in the enum
-and edge table only. The "preflight confirmed" gate was instead implemented as
-a **plan.json `signoff` field** with approve/reject endpoints
-(`routers/signoff_service.py`) outside the lifecycle enum — reject dissolves
-the sprint by deleting the GitHub label. *(open question: wire the `planned`
-state or delete it and canonize the signoff field.)*
+**DEPRECATED (#1686, 2026-07-02): `planned` and the sign-off gate are parked.**
+`planned` was never written in practice — the "preflight confirmed" gate was
+instead implemented as a **plan.json `signoff` field** with approve/reject
+endpoints (`routers/signoff_service.py`). Both were too unstable to keep
+supporting and are now parked rather than fixed:
+
+- `planned` removed from `_SPRINT_STATES` (unified) and `LIFECYCLE_STATES`
+  (UI-exposed); kept only in the legacy read bucket, canonicalizing to
+  `draft` via `_LEGACY_LIFECYCLE_MAP`. No storable-edge entry remains — any
+  code path would canonicalize `current` before an edge lookup, so a
+  `"planned"` key in `_LEGAL_SPRINT_EDGES` would be unreachable.
+- The sign-off gate (`config.sprint_signoff_disabled()`) already defaulted to
+  **disabled** — `/api/sprints/{label}/approve|reject` 404, and the run-path
+  guard `_assert_sprint_signed_off` no-ops — so every sprint is runnable
+  without approval unless an operator explicitly re-enables it per machine.
+  No sprint ever needs to pass through `planned`.
+
+Every project's sprint now goes create → `draft` (implicit) → `running`
+directly.
 
 | State | Meaning | Replaces (legacy) |
 |-------|---------|-------------------|
 | `draft` | column exists, tickets being arranged, no preflight — **implicit**: nothing inserts a `draft` row; missing row reads as `draft`/`unknown` | `planning` |
-| `planned` | preflight confirmed, not yet dispatched — **never written in practice**; gate lives in plan.json `signoff` instead | `planning` (auto_run=false) |
+| `planned` | **deprecated (#1686)** — legacy-read only, canonicalizes to `draft` | `planning` (auto_run=false) |
 | `running` | sprint manager process alive | `running` |
 | `ready_to_merge` | run ended, all tickets passed, branch awaiting Merge Sprint | `completed` (pre-merge) |
 | `needs_rework` | run ended badly: ticket failure, crash, orphan-PID, **or user cancel** | `failed`, `cancelled`, `has_rework` |
@@ -221,15 +236,14 @@ approval gate. A confirmation modal lists exactly what will happen:
 
 ### Settlement paths — five ways to `completed`
 
-As implemented, `completed` is reachable through five paths with
-**inconsistent guards** *(open question — should they converge?)*:
+As implemented, `completed` is reachable through five paths:
 
 | Path | Endpoint / actor | Rework guard |
 |------|------------------|--------------|
-| Merge Sprint (finish) | `POST .../sprints/{label}/finish` | **None** — closes ALL sprint issues, including `needs-rework` ones |
+| Merge Sprint (finish) | `POST .../sprints/{label}/finish-bg` — the actual UI path (streams progress via SSE); the older synchronous `POST .../finish` in `sprint_finish.py` still exists but the dashboard doesn't call it | **Soft (#1696):** 409 with the unfinished-ticket list unless `confirm_rework: true`; human can still override — never closed silently |
 | Bulk complete | `POST .../bulk-complete` | Refuses unless children settled, chain merged, and `_has_rework_tickets` is clean |
-| Complete-step | `POST .../complete-step` — one lineage step, idempotent (merge into immediate parent, close summary, mark completed) | Refuses on rework |
-| Reconcile B2 | `actor="reconcile"` via `_sprint_db_mark_merged_completed` — completes a superseded ancestor once its lineage is verified merged to develop (`_lineage_fully_in_develop`) | Merge-verification guard |
+| Complete-step | `POST .../complete-step` — one lineage step, idempotent (merge into immediate parent, close summary, mark completed) | Refuses on rework (its own merge-or-fail step, `_branch_has_unmerged_commits`) |
+| Reconcile B2 | `actor="reconcile"` via `_sprint_db_mark_merged_completed` — completes a superseded ancestor; each of its three callers (finish, bulk-complete, complete-step) verifies the merge itself before calling it | Whatever the calling endpoint's own guard is (see above) |
 | Legacy `running→completed` edge | Manager-only; retained in the edge table | — |
 
 ## Re-run Rules
@@ -241,19 +255,30 @@ As implemented, `completed` is reachable through five paths with
   label = one *dashboard* attempt.
 - Every re-run creates the next child sprint (sprint-68 fails → re-run creates
   68.1; no exception for base sprints). With `auto_run=false` the child is
-  **queued, not dispatched**: it exists only as plan.json
-  (`state=needs_rework, end_reason=queued`, no DB row) so History shows Run.
+  **queued, not dispatched**: it exists as plan.json
+  (`state=needs_rework, end_reason=queued`) plus, since #1693, a `draft` DB
+  row (`db.ensure_sprint_draft_row`) so History shows Run and the row is
+  visible to `sprint_state.current()`.
 - Re-run moves tickets by stripping **all** sprint labels found plus stale
   session labels (`_SESSION_STATE_LABELS`, e.g. `code-review`, `sit-away`) —
   not just the parent's label.
-- **Lineage is tracked in three places** *(open question — consolidate?)*:
-  child plan.json `parent` = **immediate** parent (drives merge topology);
-  DB `sprints.parent_label` = **base** label, self-healed on every transition
-  (drives History grouping); parent state.json `rerun_into` = forward pointer.
+- **Lineage is tracked in three places.** Since #1691, the DB also has an
+  `immediate_parent` column (written at rerun alongside `parent_label`), but
+  merge-topology *readers* (`_sprint_merge_parent_label`,
+  `_merge_steps_for_sprint_chain` in `startup.py`) still read plan.json
+  `parent` first — switching them to prefer the DB column is unfinished
+  follow-up work. Today: child plan.json `parent` = **immediate** parent
+  (drives merge topology); DB `sprints.parent_label` = **base** label,
+  self-healed on every transition (drives History grouping); parent
+  state.json `rerun_into` = forward pointer.
 - Before dispatch, a **confirmation modal** lists the tickets that will move
   to the new child. Eligible tickets exclude:
   - the sprint summary issue, and
   - tickets already carrying the `UAT` label (their work is merged on a prior run).
+  - **Closing a ticket is the sanctioned way to waive it** (#1698 / Q10) —
+    a closed, non-UAT ticket isn't eligible to move either (there's nothing
+    left to re-run) and drops out of the rework signal the same way it does
+    for reconcile (see [`1_state-and-source-of-truth.md`](1_state-and-source-of-truth.md)).
 - If no ticket is eligible to move, Re-run is disabled.
 - A sub-sprint is a first-class sprint: its own column, branch, run, history
   row. The only parent linkage is a lineage flag shown on the History pane.

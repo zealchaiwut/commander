@@ -4017,6 +4017,18 @@ ${listing}`)) {
         `<div class="fs-action-row"><i class="ti ti-circle-check"></i> Close all ${allTickets.length} sprint ticket${allTickets.length !== 1 ? "s" : ""}</div>`
       );
       actionsEl.innerHTML = actionRows.join("");
+      const reworkTickets = preview.rework_tickets || [];
+      const warningEl = document.getElementById("fs-rework-warning");
+      const warningTextEl = document.getElementById("fs-rework-warning-text");
+      const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+      if (reworkTickets.length > 0) {
+        warningTextEl.textContent = `${reworkTickets.length} ticket${reworkTickets.length !== 1 ? "s" : ""} will be closed unfinished: ` + reworkTickets.map((t) => `#${t.number}`).join(", ");
+        warningEl.classList.remove("hidden");
+        if (reworkCheckbox)
+          reworkCheckbox.checked = false;
+      } else {
+        warningEl.classList.add("hidden");
+      }
       document.getElementById("fs-loading").classList.add("hidden");
       document.getElementById("fs-content").classList.remove("hidden");
       if (confirmBtn)
@@ -4035,6 +4047,14 @@ ${listing}`)) {
     const parts = repo.split("/");
     const owner = parts[0];
     const repoName = parts.slice(1).join("/");
+    const reworkTickets = _fsPreview.rework_tickets || [];
+    const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+    if (reworkTickets.length > 0 && !(reworkCheckbox && reworkCheckbox.checked)) {
+      const errEl = document.getElementById("fs-error");
+      errEl.textContent = "Check the box to confirm closing unfinished tickets, or cancel and re-run them first.";
+      errEl.classList.remove("hidden");
+      return;
+    }
     const allTickets = _fsPreview.all_tickets || [];
     const selectedTickets = allTickets.map((t) => ({
       number: t.number,
@@ -4052,7 +4072,8 @@ ${listing}`)) {
       selected_tickets: selectedTickets,
       merge_pr: !!_fsPreview.sprint_pr,
       sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
-      total: selectedNums.length + 2
+      total: selectedNums.length + 2,
+      confirm_rework: reworkTickets.length > 0 && !!(reworkCheckbox && reworkCheckbox.checked)
     };
     try {
       const res = await fetch(
@@ -4065,7 +4086,9 @@ ${listing}`)) {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${res.status}`);
+        const detail = err.detail;
+        const msg = detail && typeof detail === "object" ? detail.message : detail;
+        throw new Error(msg || `HTTP ${res.status}`);
       }
       await res.json();
       const initialSnap = {

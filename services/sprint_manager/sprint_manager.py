@@ -4838,8 +4838,11 @@ def main() -> None:
             except Exception as e_persist:
                 structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
-    # Write per-sprint brief after documenter (issue #860)
-    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE:
+    # Write per-sprint brief after documenter (issue #860).
+    # Parked/deprecated (issue #1687) — default-off pending platform stability;
+    # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
+    _brief_disabled = os.environ.get("COMMANDER_DISABLE_BRIEF", "1").strip().lower() not in ("0", "false", "no")
+    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
         _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
         _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         _brief_summary_issue_num: Optional[int] = None

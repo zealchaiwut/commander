@@ -30,9 +30,15 @@ Stop, cancel, partial completion.
 | User stop / cancel | `needs_rework` (not `cancelled`) | Failed tickets get `needs-rework`; passed tickets keep `UAT` |
 | All tickets pass | `ready_to_merge` | `UAT` on passed tickets |
 | Partial pass + child re-run | `partial_finished` (derived) | Child sprint carries failed tickets |
-| Orphan PID sweep | `needs_rework` | Stale `in-progress`/`SIT` flagged in reconciliation |
+| Orphaned running sprint (PID file present, process dead) | Settled to `needs_rework` **or `ready_to_merge`** depending on whether open rework tickets remain (`end_reason=reconcile-orphan`) | Stale `in-progress`/`SIT` flagged by post-sprint checks (system B) |
 
 `end_reason` (user stop, process lost, coder failed, …) is stored in run log and sprint summary — not as a separate lifecycle enum value.
+
+**Orphan settling is per-sprint-button-only in practice:** the settle logic
+lives in `_github_reconcile_row` for `running` rows, but the auto-reconcile
+sweep skips `running` rows entirely — only `POST .../reconcile` on that sprint
+reaches it. There is no standalone PID-watchdog pass in the reconcile service.
+*(open question: should the sweep settle confirmed orphans automatically?)*
 
 ## 6.3 Process death
 

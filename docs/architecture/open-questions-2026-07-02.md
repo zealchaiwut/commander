@@ -20,7 +20,10 @@ approve/reject endpoints.
   the run/sign-off flow.
 - **C Leave as documented wart.**
 
-**Decision:** _______
+**Decision (2026-07-02):** **Park/deprecate BOTH** — `planned` state AND the
+plan.json `signoff` gate are deprecated for now (too hard to stabilize).
+Also deprecate the **advisor** and **brief** features in the same pass.
+Remove/disable rather than wire up; revisit when the platform is stable.
 
 ## Q2 — Merge Sprint has no rework guard
 
@@ -34,7 +37,9 @@ bulk-complete and complete-step refuse on rework. Five paths reach
   manually clear rework first.
 - **C Intended:** human sign-off overrides everything; document only (done).
 
-**Decision:** _______
+**Decision (2026-07-02):** **A — soft guard.** Finish confirmation modal warns
+"N rework tickets will be closed"; human can override. Never close failed
+work silently.
 
 ## Q3 — Orphan settling is button-only
 
@@ -47,7 +52,8 @@ per-sprint Reconcile button reaches that branch.
 - **B Keep button-only** — conservative; a false-positive orphan settle during
   a live run would be bad, and the button exists.
 
-**Decision:** _______
+**Decision (2026-07-02):** **A — auto-settle confirmed orphans** in the sweep
+(PID-file-present AND process-dead only; PID-file-absent untouched per #1095).
 
 ## Q4 — Three lineage fields
 

@@ -924,12 +924,15 @@ export async function _pfConfirm() {
   const label = _pfCurrentLabel;
   const repo  = _pfCurrentRepo;
   if (!label || !repo) return;
+  // Capture the modal's per-run choices BEFORE _pfClose() resets them.
+  const llmProvider = _pfLlmProvider;
+  const useClineFollowups = _pfUseClineFollowups;
   const confirmBtn = document.getElementById('pf-confirm-btn');
   confirmBtn.disabled = true;
   confirmBtn.textContent = 'Starting…';
   _pfClose();
   // Kickoff stepper drives the run from here (issue #932)
-  await smgmtKickoffRun(label, repo);
+  await smgmtKickoffRun(label, repo, { llmProvider, useClineFollowups });
 }
 
 
@@ -1155,6 +1158,12 @@ const KS_STEPS = [
 let _ksFailedStep = -1;
 let _ksLabel = null;
 let _ksRepo  = null;
+// Per-run choices snapshotted at kickoff time. The pre-flight modal's
+// _pfLlmProvider / _pfUseClineFollowups globals are reset by _pfClose() BEFORE
+// the run POST fires, so _pfConfirm captures them here first (issue #1667
+// follow-up: run modal provider pick was silently reverting to anthropic).
+let _ksLlmProvider = 'anthropic';
+let _ksUseClineFollowups = false;
 
 /** Render kickoff steps in pending state. */
 function _ksInit() {
@@ -1240,7 +1249,7 @@ async function _ksStep1Post() {
     const res = await fetch('/api/sprints/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _pfUseClineFollowups, llm_provider: _pfLlmProvider }),
+      body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _ksUseClineFollowups, llm_provider: _ksLlmProvider }),
     });
     if (!res.ok) {
       let detail = await res.text();
@@ -1341,7 +1350,11 @@ async function _ksFinish(label) {
  * run and re-run (via the preflight modal). Shows the Running subview immediately
  * so the stepper is visible while the POST and polls complete (AC1).
  */
-export async function smgmtKickoffRun(label, repo) {
+export async function smgmtKickoffRun(label, repo, opts = {}) {
+  // Snapshot per-run choices; callers that omit opts get the anthropic default
+  // (matches legacy behavior — only _pfConfirm carries a user-picked provider).
+  _ksLlmProvider = opts.llmProvider ?? 'anthropic';
+  _ksUseClineFollowups = opts.useClineFollowups ?? false;
   _ksShow(label, repo);
 
   // Step 1: validate/acquire lock

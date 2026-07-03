@@ -353,6 +353,10 @@ from services.sprint_manager.post_sprint import (  # noqa: E402, F401
     _ESTIMATE_ISSUE_SCRIPT_SM,
 )
 
+from services.sprint_manager.api_client import (
+    is_retryable_rate_limit as _is_retryable_rate_limit,
+)
+
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -866,11 +870,6 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-
-from services.sprint_manager.api_client import (  # noqa: E402
-    is_retryable_rate_limit as _is_retryable_rate_limit,
-)
-
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     """Detect rate-limit / quota-exceeded errors in agent subprocess output.

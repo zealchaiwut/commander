@@ -13,7 +13,7 @@
  */
 
 /* eslint-disable no-unused-vars */
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBacklogTicketDragStart, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtDragLeave, _smgmtDragOver, _smgmtDropOnSprint, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtNextUpLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowClick, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSelectedIssues, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketDragEnd, _smgmtTicketDragStart, _smgmtTicketReorderDragLeave, _smgmtTicketReorderDragOver, _smgmtTicketReorderDrop, _smgmtTicketToSprint, _smgmtToggleSelect, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtUpdateSelectionUI, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, escHtml, sprintLabelDisplay, colorizeLogLine,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, _smgmtSelectedIssues, _smgmtRowClickSelect, escHtml, sprintLabelDisplay, colorizeLogLine,
    _smgmtAnySprintRunning:writable, _smgmtOrderedLabels:writable, _smgmtRunningLabels:writable */
 /* eslint-enable no-unused-vars */
 
@@ -67,18 +67,22 @@ export function _smgmtDorMode() {
 /**
  * Evaluate a single ticket's readiness against the Definition of Ready rules.
  * Returns {ready: boolean, reasons: string[]}.
- * Checks: missing AC, missing test plan, missing estimate, XL-split required.
+ * Checks: missing AC, missing design ref, missing test plan, missing estimate, XL-split required.
  * Runs purely on ticket data already in the board — no fetch calls.
+ * Heading patterns align with ticket_spec._SECTION_PATTERNS (issue #1539).
  */
 export function _smgmtReadinessCheck(ticket) {
   if (!ticket) return { ready: false, reasons: ["invalid ticket"] };
   const reasons = [];
   const body = (ticket.body || "").trim();
 
-  if (!body || !/^##\s+(acceptance criteria|acceptance|ac)/im.test(body)) {
+  if (!body || !/^#{1,6}\s+(acceptance\s+criteria|acceptance)\b/im.test(body)) {
     reasons.push("missing AC");
   }
-  if (!/^##\s+(uat test steps|test plan|test steps)/im.test(body)) {
+  if (!/^#{1,6}\s+(design\s+references?|design\s+refs?)\s*$/im.test(body)) {
+    reasons.push("missing design ref");
+  }
+  if (!/^#{1,6}\s+(uat\s+test\s+steps|test\s+plan)\s*$/im.test(body)) {
     reasons.push("missing test plan");
   }
 
@@ -140,9 +144,10 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   }
 
   try {
-    // Load calibrated size minutes before rendering rollups / budget bars (issue #801).
+    // Pre-warm capacity data concurrently with sprint data — don't block render on it.
+    // The post-DOM-build call at _smgmtEnsureCapData(false) will pick up the result.
     if (typeof _smgmtEnsureCapData === "function") {
-      await _smgmtEnsureCapData();
+      _smgmtEnsureCapData();
     }
 
     // Fetch sprint management data + running sprint status + summaries in parallel
@@ -405,26 +410,6 @@ export function _smgmtRender(data) {
   // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
   _smgmtFinishedLabels = _finishedSet;
 
-  // NEXT UP: lowest label with >= 1 ticket that isn't running or finished (sprint-26 parity)
-  _smgmtNextUpLabel = null;
-  const sortedForNext = [...orderedLabels].sort((a, b) => {
-    const ka = _smgmtSprintLabelSortKey(a);
-    const kb = _smgmtSprintLabelSortKey(b);
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const d = (ka[i] ?? Infinity) - (kb[i] ?? Infinity);
-      if (d !== 0) return d;
-    }
-    return 0;
-  });
-  for (const lbl of sortedForNext) {
-    if (_smgmtRunningLabels.has(lbl)) continue;
-    if (typeof _smgmtIsLinger === "function" && _smgmtIsLinger(lbl)) continue;
-    if (_smgmtFinishedLabels.has(lbl)) continue;
-    if ((bySprint[lbl] || []).length >= 1) {
-      _smgmtNextUpLabel = lbl;
-      break;
-    }
-  }
 
   // ── Planning board layout (issue #1044): inject Focus Guide ─────────────────
   const focusGuideEl = document.getElementById("smgmt-focus-guide");
@@ -434,17 +419,6 @@ export function _smgmtRender(data) {
 
   // ── Categorize sprints into Lineage / Ready to merge / Rework / Running / Draft ─
   const _planStates = data.sprint_plan_states || {};
-  const planningLabel = orderedLabels.find((l) => {
-    if (_smgmtResolvedAncestors.has(l)) return false;
-    if (_smgmtRunningLabels.has(l))     return false;
-    const ps = (_planStates[l] || "").toLowerCase();
-    return ["draft", "planned", "planning"].includes(ps);
-  });
-
-  const _usesDraftCard = (label) => {
-    const ps = (_planStates[label] || "").toLowerCase();
-    return label === planningLabel && ["draft", "planning"].includes(ps);
-  };
 
   const _buildCard = (label) => {
     const tickets = bySprint[label] || [];
@@ -473,13 +447,9 @@ export function _smgmtRender(data) {
       );
     }
 
-    if (_usesDraftCard(label)) {
-      return (
-        `<div class="smgmt-sprint-unit smgmt-planning-unit" id="smgmt-unit-${escHtml(label)}">` +
-        _smgmtDraftCardHtml(label, tickets) +
-        `</div>`
-      );
-    }
+    // Draft/planning sprints render via the same _smgmtCardHtml as planned/running
+    // cards (unified design: budget bar + dispatch-level mini-rail, no sprint-goal
+    // input — the goal field was dropped). Previously they used _smgmtDraftCardHtml.
 
     if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
     // Linger is Running-pane only: on the Board a lingering (just-finished) sprint
@@ -596,9 +566,6 @@ export function _smgmtRender(data) {
   // then lazily fetch budget settings + per-size cost averages and re-render.
   _smgmtRenderAllCapBars();
   _smgmtEnsureCapData(false);
-
-  // Re-inject selection bar if tickets are selected
-  if (_smgmtSelectedIssues.size > 0) _smgmtUpdateSelectionUI();
 
   // Re-apply cached finish cards (DOM was rebuilt), then refresh them from the API (issue #367 parity)
   for (const [lbl, fc] of Object.entries(_smgmtFinishCards)) {
@@ -897,9 +864,9 @@ export function _smgmtOutcomeFromBoard(label, tickets) {
 export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     const tickets = bySprint[label] || [];
-    if (tickets.length === 0) continue;
+    if (tickets.length === 0) return;
     // Populate reverse lookup for reactivity
     for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
     const issueNums = tickets.map((t) => t.number).join(",");
@@ -907,7 +874,7 @@ export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
       const resp = await fetch(
         `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       const estEl = document.getElementById(`smgmt-est-${label}`);
       if (estEl && data.complete && data.total_hours !== null) {
@@ -932,27 +899,27 @@ export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently — leave as "— estimated"
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue;
-    if (_smgmtFinishedLabels.has(label)) continue;
+  await Promise.all(orderedLabels.map(async (label) => {
+    if (_smgmtRunningLabels.has(label)) return;
+    if (_smgmtFinishedLabels.has(label)) return;
     const tickets = bySprint[label] || [];
     const pending = tickets.filter(
       (t) => (t.status || "backlog") === "backlog",
     );
-    if (pending.length < 2) continue;
+    if (pending.length < 2) return;
     // Clear stale entries for this sprint's tickets before repopulating
     for (const t of pending) delete _smgmtConflictsByIssue[t.number];
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       for (const c of data.conflicts || []) {
         if (!_smgmtConflictsByIssue[c.ticket1_id])
@@ -974,26 +941,26 @@ export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
-    if (_smgmtRunningLabels.has(label)) continue;
-    if (_smgmtFinishedLabels.has(label)) continue;
+  await Promise.all(orderedLabels.map(async (label) => {
+    if (_smgmtRunningLabels.has(label)) return;
+    if (_smgmtFinishedLabels.has(label)) return;
     const tickets = bySprint[label] || [];
     const pending = tickets.filter(
       (t) => (t.status || "backlog") === "backlog",
     );
-    if (pending.length < 2) continue;
+    if (pending.length < 2) return;
     for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
     try {
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       if (data.has_cycle) {
         const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
@@ -1020,26 +987,26 @@ export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export async function _smgmtLoadGoals(orderedLabels) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  for (const label of orderedLabels) {
+  await Promise.all(orderedLabels.map(async (label) => {
     const goalEl = document.getElementById(`smgmt-goal-${label}`);
-    if (!goalEl) continue;
+    if (!goalEl) return;
     try {
       const resp = await fetch(
         `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`,
       );
-      if (!resp.ok) continue;
+      if (!resp.ok) return;
       const data = await resp.json();
       const goal = (data.goal || "").trim();
       if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
         if (goal) goalEl.value = goal;
-        const runBtnId = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-        _smgmtSyncDraftRunBtn(label, goalEl, runBtnId);
+        // _smgmtSyncDraftRunBtn was removed when draft cards were retired
+        // (20d60034); the orphaned call is dropped here.
       } else if (goal) {
         goalEl.textContent = goal;
         goalEl.title = goal;
@@ -1048,7 +1015,7 @@ export async function _smgmtLoadGoals(orderedLabels) {
     } catch (_) {
       // fail silently
     }
-  }
+  }));
 }
 
 export function _smgmtOutcomeBandHtml(label, outcome) {
@@ -1471,7 +1438,7 @@ export function _smgmtCardHtml(
                 _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null),
               )
               .join("")
-          : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+          : '';
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       // Tickets re-run into a child sprint (e.g. #572/#574 → sprint-63.1) belong
@@ -1500,7 +1467,7 @@ export function _smgmtCardHtml(
     ticketsContainerHtml =
       tickets.length > 0
         ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("")
-        : '<div class="smgmt-drop-hint">Drop tickets here</div>';
+        : '';
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
@@ -1602,10 +1569,7 @@ export function _smgmtCardHtml(
     : "";
 
   return `
-    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}"
-         ondragover="${isRunning ? "" : `_smgmtDragOver(event, '${escHtml(label)}')`}"
-         ondragleave="${isRunning ? "" : `_smgmtDragLeave(event)`}"
-         ondrop="${isRunning ? "" : `_smgmtDropOnSprint(event, '${escHtml(label)}')`}">
+    <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
       <div class="sc-header smgmt-sprint-header">
         <div class="smgmt-sprint-header-left sc-header-left">
@@ -1681,7 +1645,7 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
   const cardRepo = _smgmtRepo();
 
   if (sourceTickets.length === 0) {
-    return '<div class="smgmt-drop-hint">No tickets in this sprint</div>';
+    return '';
   }
 
   let prevLevel = 0;
@@ -1952,7 +1916,7 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
       <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
       <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
-        ${ticketRowsHtml || '<div class="smgmt-drop-hint">No tickets in this sprint</div>'}
+        ${ticketRowsHtml || ''}
       </div>
       ${renderProgressActivity(
         {
@@ -2127,7 +2091,6 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
         done: "smgmt-status-done",
       }[ticket.status] || "smgmt-status-backlog";
   const statusLabel = hasRework ? "needs rework" : ticket.status || "backlog";
-  const isSelected = _smgmtSelectedIssues.has(ticket.number);
 
   // Outcome icon: green check (done/uat), red X (needs-rework), blue dot (active), gray circle (backlog)
   const _outcomeMap = {
@@ -2187,24 +2150,12 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
   const sk = escHtml(label);
 
   return `
-    <div class="smgmt-ticket${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket" id="smgmt-ticket-${ticket.number}"
          tabindex="-1"
-         draggable="true"
          data-issue="${ticket.number}"
          data-sprint="${sk}"${sizeAttr}
          data-labels="${escHtml(ticketLabelNames)}"
-         ondragstart="_smgmtTicketDragStart(event, ${ticket.number}, '${sk}')"
-         ondragend="_smgmtTicketDragEnd(event)"
-         ondragover="_smgmtTicketReorderDragOver(event)"
-         ondragleave="_smgmtTicketReorderDragLeave(event)"
-         ondrop="_smgmtTicketReorderDrop(event, ${ticket.number}, '${sk}')"
-         onclick="_smgmtRowClick(event, ${ticket.number}, '${sk}')"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
-             onclick="event.stopPropagation()"
-             onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
-      <i class="ti ti-grip-vertical smgmt-ticket-grip"></i>
       ${outcomeIconHtml}
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" draggable="false" onclick="event.stopPropagation()">#${ticket.number}</a>
@@ -2288,7 +2239,7 @@ export function _smgmtRenderBacklog(tickets) {
       _blBacklogAll.length === 0
         ? "No backlog tickets — all caught up"
         : "No tickets match the active filters";
-    ticketsEl.innerHTML = `<div class="smgmt-drop-hint" style="padding:var(--space-3) var(--space-4);text-align:center;">${msg}</div>`;
+    ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
   } else {
     ticketsEl.innerHTML = sorted
       .map((t) => _smgmtBacklogTicketHtml(t, allSprintNums))
@@ -2300,7 +2251,6 @@ export function _smgmtRenderBacklog(tickets) {
 }
 
 export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
-  const isSelected = _smgmtSelectedIssues.has(ticket.number);
   const hasEstimate = _smgmtTicketHasEstimate(ticket);
   const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
   const schedDepHtml = _smgmtSchedDepHtml(ticket);
@@ -2327,15 +2277,18 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
          <i class="ti ti-circle-plus"></i> Add to ${escHtml(sprintLabelDisplay(draftLabel).replace("Sprint ", "S"))}</button>`
     : "";
 
+  const isSelected =
+    typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.has(ticket.number);
+
   return `
-    <div class="smgmt-ticket bl-row${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
+    <div class="smgmt-ticket bl-row bl-row--selectable${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
          data-issue="${ticket.number}"
          data-sprint=""${sizeAttr}
          data-labels="${escHtml(backlogLabelNames)}"
-         onclick="_smgmtRowClick(event, ${ticket.number}, null)"
+         onclick="_smgmtRowClickSelect(event,${ticket.number})"
          oncontextmenu="_smgmtCtxMenuOpen(event,${ticket.number})">
-      <input type="checkbox" class="smgmt-ticket-cb"
-             ${isSelected ? "checked" : ""}
+      <input type="checkbox" class="smgmt-ticket-cb" ${isSelected ? "checked" : ""}
+             title="Select for bulk add to a sprint"
              onclick="event.stopPropagation()"
              onchange="_smgmtToggleSelect(${ticket.number}, this.checked)">
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
@@ -2804,187 +2757,6 @@ export function _smgmtBudgetBarHtml(tickets, capHours = 3) {
 }
 
 /**
- * Render the draft sprint Planning card (issue #1044).
- * Shows: Draft badge, goal slot, disabled Run button, budget bar, ticket rows
- * with per-row ⋯ menu (Move / Remove / Reorder), and "+ Add ticket" button.
- */
-export function _smgmtDraftCardHtml(label, tickets) {
-  const display = sprintLabelDisplay(label);
-  const shortNum = display.replace("Sprint ", "");
-  const budgetBar = _smgmtBudgetBarHtml(tickets);
-  const { totalMin } = _smgmtTicketsEstBreakdown(tickets);
-  const estMeta =
-    tickets.length > 0
-      ? `${tickets.length} ticket${tickets.length !== 1 ? "s" : ""} · ~${_smgmtFmtBudgetHours(totalMin)}`
-      : "0 tickets";
-
-  const ticketRowsHtml = (tickets || [])
-    .map((t) => {
-      const sizeValue = _smgmtTicketSize(t) || "";
-      const sizePill = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
-      const estMins = sizeValue ? `<span class="smgmt-ticket-est">${_sizeMinutes(sizeValue)}m</span>` : "";
-      const readinessBadge = _smgmtReadinessBadgeHtml(t);
-      return (
-        `<div class="smgmt-ticket smgmt-plan-ticket" id="smgmt-ticket-${t.number}"` +
-        ` data-issue="${t.number}" data-sprint="${escHtml(label)}"` +
-        ` onclick="_smgmtRowClick(event,${t.number},'${escHtml(label)}')"` +
-        ` oncontextmenu="_smgmtCtxMenuOpen(event,${t.number})">` +
-        `<a class="smgmt-ticket-num" href="${escHtml(t.url||"#")}" target="_blank"` +
-        ` rel="noopener" onclick="event.stopPropagation()">#${t.number}</a>` +
-        `<span class="smgmt-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>` +
-        sizePill +
-        estMins +
-        readinessBadge +
-        `<button class="smgmt-row-menu-btn smgmt-plan-row-menu" tabindex="0"` +
-        ` title="Ticket actions" aria-haspopup="true"` +
-        ` onclick="event.stopPropagation();smgmtPlanningRowMenu(event,${t.number},'${escHtml(label)}')">` +
-        `<i class="ti ti-dots"></i></button>` +
-        `</div>`
-      );
-    })
-    .join("");
-
-  const goalInputId = `smgmt-goal-${CSS.escape ? CSS.escape(label) : label}`;
-  const runBtnId    = `smgmt-run-btn-${CSS.escape ? CSS.escape(label) : label}`;
-  const signoffPending = _smgmtSignoffState(label) === "pending";
-  const signoffBadge = _smgmtSignoffBadgeHtml(label);
-  const signoffActions = signoffPending ? _smgmtSignoffActionsHtml(label) : "";
-  const canRun = (tickets || []).length >= 1 && _smgmtHasDispatchableTickets(tickets || []);
-  const goalRequired = _smgmtGoalRequired();
-  const dorMode = _smgmtDorMode();
-  const notReady = dorMode === "block" ? _smgmtDorNotReadyTickets(tickets || []) : [];
-  let runDisabled = "";
-  let runTitle = "";
-  if (signoffPending) {
-    runDisabled = "disabled";
-    runTitle = 'title="Approve the sprint plan before running"';
-  } else if (!canRun) {
-    runDisabled = "disabled";
-    runTitle = 'title="No dispatchable tickets — add tickets from the backlog"';
-  } else if (goalRequired) {
-    runDisabled = "disabled";
-    runTitle = 'title="Enter a sprint goal to enable Run"';
-  } else if (dorMode === "block" && notReady.length > 0) {
-    runDisabled = "disabled";
-    const dorTooltip = notReady
-      .map((t) => `#${t.number} (${t.reasons.join(", ")})`)
-      .join("; ");
-    runTitle = `title="Not ready: ${dorTooltip.replace(/"/g, "&quot;")}"`;
-  }
-  const goalPlaceholder = goalRequired
-    ? "Set a sprint goal to run — e.g. 'Milestone burndown + activity cleanup'"
-    : "Optional sprint goal — e.g. 'Milestone burndown + activity cleanup'";
-
-  return (
-    `<div class="smgmt-sprint-card smgmt-draft-card" id="smgmt-card-${escHtml(label)}">` +
-    `<div class="smgmt-card-head">` +
-    `<button class="smgmt-collapse-btn" aria-hidden="true" tabindex="-1" style="visibility:hidden;width:0;padding:0;border:0">` +
-    `<i class="ti ti-chevron-down"></i></button>` +
-    `<span class="smgmt-sprint-name">${escHtml(display)}</span>` +
-    `<span class="smgmt-draft-badge">DRAFT</span>` +
-    signoffBadge +
-    `<span class="smgmt-draft-meta">${escHtml(estMeta)}</span>` +
-    `<div class="smgmt-card-actions">` +
-    `<button class="smgmt-delete-btn" aria-label="Delete sprint" title="Delete sprint"` +
-    ` onclick="smgmtDeleteSprint('${escHtml(label)}')">` +
-    `<i class="ti ti-trash"></i></button>` +
-    signoffActions +
-    `<button class="smgmt-run-btn" id="${escHtml(runBtnId)}" ${runDisabled} ${runTitle}` +
-    ` onclick="smgmtRunSprint('${escHtml(label)}')">` +
-    `<i class="ti ti-player-play"></i> Run Sprint</button>` +
-    `</div>` +
-    `</div>` +
-    `<div class="smgmt-goal-slot smgmt-goal-slot--dashed">` +
-    `<i class="ti ti-flag smgmt-goal-flag" aria-hidden="true"></i>` +
-    `<input class="smgmt-goal-input" id="${escHtml(goalInputId)}" type="text"` +
-    ` placeholder="${escHtml(goalPlaceholder)}"` +
-    ` oninput="smgmtDraftGoalInput(this,'${escHtml(runBtnId)}','${escHtml(label)}')">` +
-    `</div>` +
-    budgetBar +
-    `<div class="smgmt-plan-tickets">` +
-    (ticketRowsHtml || `<div class="smgmt-plan-empty">No tickets yet — add from Backlog below.</div>`) +
-    `</div>` +
-    `<div class="smgmt-add-ticket-row">` +
-    `<button class="smgmt-add-ticket-btn" onclick="smgmtOpenTicketPicker('${escHtml(label)}')">` +
-    `<i class="ti ti-circle-plus"></i> Add ticket</button>` +
-    `<span class="smgmt-add-ticket-hint">or use &lsquo;Add to ${escHtml(shortNum)}&rsquo; on a backlog item below</span>` +
-    `</div>` +
-    `</div>`
-  );
-}
-
-/**
- * Open the planning row menu for a draft sprint ticket.
- * Offers: Move, Remove, Reorder options.
- */
-export function smgmtPlanningRowMenu(event, issueNum, label) {
-  event.stopPropagation();
-  // Build a simple inline menu with Move, Remove, Reorder
-  const existing = document.getElementById("smgmt-plan-row-menu");
-  if (existing) existing.remove();
-
-  const menu = document.createElement("div");
-  menu.id = "smgmt-plan-row-menu";
-  menu.className = "smgmt-ctx-menu smgmt-plan-ctx-menu";
-  menu.setAttribute("role", "menu");
-  menu.innerHTML = [
-    `<button class="smgmt-ctx-item" role="menuitem"` +
-      ` onclick="event.stopPropagation();_smgmtRowMenuOpen(event,${issueNum},'${escHtml(label)}',false);document.getElementById('smgmt-plan-row-menu')?.remove()">` +
-      `<i class="ti ti-arrows-move"></i> Move</button>`,
-    `<button class="smgmt-ctx-item smgmt-ctx-item--remove" role="menuitem"` +
-      ` onclick="event.stopPropagation();smgmtPlanningRemove(${issueNum},'${escHtml(label)}')">` +
-      `<i class="ti ti-x"></i> Remove</button>`,
-    `<button class="smgmt-ctx-item" role="menuitem"` +
-      ` onclick="event.stopPropagation();smgmtPlanningReorder(${issueNum},'${escHtml(label)}')">` +
-      `<i class="ti ti-arrows-up-down"></i> Reorder</button>`,
-  ].join("");
-
-  document.body.appendChild(menu);
-  const rect = event.currentTarget.getBoundingClientRect();
-  menu.style.position = "fixed";
-  menu.style.top  = rect.bottom + 4 + "px";
-  menu.style.left = rect.left   + "px";
-  menu.style.zIndex = "9999";
-
-  const close = (e) => {
-    if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener("click", close); }
-  };
-  setTimeout(() => document.addEventListener("click", close), 0);
-}
-
-/** Remove a ticket from the planning section (moves back to backlog). */
-export function smgmtPlanningRemove(issueNum, label) {
-  const menu = document.getElementById("smgmt-plan-row-menu");
-  if (menu) menu.remove();
-  // Delegate to the existing row menu "move to backlog" path
-  if (typeof _smgmtRowMenuOpen === "function") {
-    // Open the move-to menu filtered for backlog action
-    const fakeEvt = { currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body, stopPropagation() {} };
-    _smgmtRowMenuOpen(fakeEvt, issueNum, label, false);
-  }
-}
-
-/** Reorder a ticket within the planning section using keyboard-accessible prompts. */
-export function smgmtPlanningReorder(issueNum, _label) {
-  const menu = document.getElementById("smgmt-plan-row-menu");
-  if (menu) menu.remove();
-  // Reorder: move ticket up/down using the existing drag-drop order API
-  const ticketEl = document.getElementById(`smgmt-ticket-${issueNum}`);
-  if (!ticketEl) return;
-  const container = ticketEl.closest(".smgmt-plan-tickets");
-  if (!container) return;
-  const rows = [...container.querySelectorAll(".smgmt-plan-ticket")];
-  const idx  = rows.indexOf(ticketEl);
-  if (idx < 0) return;
-  // Simple up/down prompt (keyboard-accessible alternative to drag)
-  const choice = window.confirm(
-    `Move #${issueNum} — OK = move up one row, Cancel = move down one row`
-  );
-  const target = choice ? rows[idx - 1] : rows[idx + 2];
-  if (target) container.insertBefore(ticketEl, choice ? target : target);
-}
-
-/**
  * Add a backlog ticket to the current draft sprint.
  * issueNum: number, draftLabel: sprint label string
  */
@@ -2999,69 +2771,6 @@ export function smgmtAddToDraft(issueNum, draftLabel) {
   };
   if (typeof _smgmtRowMenuOpen === "function") {
     _smgmtRowMenuOpen(fakeEvt, issueNum, null, false);
-  }
-}
-
-/**
- * Enable/disable the Run Sprint button based on whether the goal field has text.
- * Persists the goal to .commander/sprints/<label>-goal.txt (debounced).
- */
-const _smgmtGoalSaveTimers = {};
-
-function _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId) {
-  const btn = document.getElementById(runBtnId);
-  if (!btn) return;
-  if (_smgmtSignoffState(sprintLabel) === "pending") {
-    btn.disabled = true;
-    btn.title = "Approve the sprint plan before running";
-    return;
-  }
-  if (!_smgmtGoalRequired()) {
-    const tickets = (_smgmtBySprint && _smgmtBySprint[sprintLabel]) || [];
-    const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-    btn.disabled = !canRun;
-    btn.title = canRun ? "" : "No dispatchable tickets — add tickets from the backlog";
-    return;
-  }
-  const hasGoal = inputEl && inputEl.value.trim().length > 0;
-  btn.disabled = !hasGoal;
-  btn.title = hasGoal ? "" : "Enter a sprint goal to enable Run";
-}
-
-export function smgmtDraftGoalInput(inputEl, runBtnId, sprintLabel) {
-  _smgmtSyncDraftRunBtn(sprintLabel, inputEl, runBtnId);
-  if (!sprintLabel) return;
-  const repo = _smgmtRepo();
-  if (!repo) return;
-  clearTimeout(_smgmtGoalSaveTimers[sprintLabel]);
-  _smgmtGoalSaveTimers[sprintLabel] = setTimeout(async () => {
-    try {
-      await fetch("/api/sprints/goal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project: repo,
-          sprint_label: sprintLabel,
-          goal: inputEl.value.trim(),
-        }),
-      });
-    } catch (_) {
-      // fail silently — run preflight will catch empty goal
-    }
-  }, 400);
-}
-
-/**
- * Open a ticket picker or inline form to add a ticket to the draft sprint.
- */
-export function smgmtOpenTicketPicker(label) {
-  // For now delegate to the plan-next flow which shows backlog selection
-  if (typeof _smgmtPlanNextBtn === "function") {
-    _smgmtPlanNextBtn(label);
-  } else {
-    // Scroll to and expand the backlog as fallback
-    const backlogEl = document.getElementById("smgmt-backlog-pane");
-    if (backlogEl) backlogEl.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
 

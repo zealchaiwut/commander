@@ -37,6 +37,53 @@ from services.sprint_manager.pipeline import (
 )
 
 
+class ConcurrentStateGuard:
+    """Serializes shared ``SprintState`` mutations across worker threads (issue #1436).
+
+    The role-flexible scheduler (``run_concurrent_level``) runs the coder/tester
+    stage closures *outside* its own scheduling lock, in ``max_coder_slots``
+    worker threads. Those closures perform non-atomic read-modify-writes on the
+    shared ``state.total_tokens_in`` / ``state.total_tokens_out`` counters and
+    call ``state.save(state_path)`` — so concurrent workers can lose token counts
+    (a ``+=`` is a load-add-store the GIL may interleave) and interleave writes
+    to the single state file, corrupting it.
+
+    This guard funnels both the counter RMW (:meth:`add_tokens`) and the state
+    write (:meth:`save`) through ONE lock, but only when ``concurrent`` is true
+    (i.e. ``max_coder_slots > 1``). In single-slot mode it takes no lock at all —
+    zero acquisition overhead and the same behaviour as before the fix.
+    """
+
+    def __init__(self, state, state_path, *, concurrent: bool) -> None:
+        self._state = state
+        self._state_path = state_path
+        self.concurrent = concurrent
+        self._lock = threading.Lock()
+
+    @property
+    def lock(self):
+        """The underlying lock (a context manager) guarding shared-state access."""
+        return self._lock
+
+    def add_tokens(self, tokens_in: int, tokens_out: int) -> None:
+        """Atomically accumulate token counters (locked in concurrent mode)."""
+        if self.concurrent:
+            with self._lock:
+                self._state.total_tokens_in += tokens_in
+                self._state.total_tokens_out += tokens_out
+        else:
+            self._state.total_tokens_in += tokens_in
+            self._state.total_tokens_out += tokens_out
+
+    def save(self) -> None:
+        """Persist the state file, serialized against other writers/RMWs."""
+        if self.concurrent:
+            with self._lock:
+                self._state.save(self._state_path)
+        else:
+            self._state.save(self._state_path)
+
+
 def run_concurrent_level(
     tickets: list,
     code_fn: Callable[[Any, int], StageResult],

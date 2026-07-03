@@ -37,7 +37,6 @@ import dataclasses
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -118,6 +117,8 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     _is_docs_only,  # noqa: F401  re-exported for backward compat
     _resolve_coder_model,
     _select_coder_backend,
+    get_effective_llm_provider,
+    get_role_profile,
 )
 
 from services.sprint_manager.failures import (  # noqa: E402,F401
@@ -141,6 +142,7 @@ try:
         TransitionError as _TransitionError,
         STATE_LABELS as _STATE_LABELS,
         STATUS_LABELS as _STATUS_LABELS,
+        RUN_MUTABLE_LABELS as _SM_RUN_MUTABLE_LABELS,
     )
     _STATE_MACHINE_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):  # pragma: no cover
@@ -149,6 +151,7 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover
     _TransitionError = Exception  # type: ignore[assignment,misc]
     _STATE_LABELS = {}  # type: ignore[assignment]
     _STATUS_LABELS = frozenset()  # type: ignore[assignment]
+    _SM_RUN_MUTABLE_LABELS = None  # type: ignore[assignment]
     _STATE_MACHINE_AVAILABLE = False
 
 try:
@@ -173,29 +176,6 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR   = REPO_ROOT / "scripts"
 
 
-def _git_worktree_root(start: "Path") -> "Path | None":
-    """Return the git toplevel for ``start``, or None if not inside a worktree."""
-    d = start.resolve()
-    for _ in range(25):
-        if (d / ".git").exists():
-            return d
-        if d.parent == d:
-            break
-        d = d.parent
-    return None
-
-
-def _parse_dotenv_value(text: str, key: str) -> Optional[str]:
-    """Return the value for ``key=`` from a dotenv file body, or None."""
-    prefix = f"{key}="
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or not line.startswith(prefix):
-            continue
-        val = line[len(prefix):].strip().strip('"').strip("'")
-        return val or None
-    return None
-
 sys.path.insert(0, str(REPO_ROOT))      # allow `from services.*` imports
 sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv  # noqa: E402
@@ -212,6 +192,10 @@ from services.sprint_manager.state import (  # noqa: E402
     SprintState,
     GateResult,
     SprintSummary,
+)
+from services.sprint_manager.ica_preflight import (  # noqa: E402
+    check_ica_readiness,
+    IcaPreflightError,
 )
 
 try:
@@ -253,6 +237,7 @@ from services.sprint_manager.events import (  # noqa: E402
 from services.sprint_manager.timekeeping import (  # noqa: E402
     _token_window_utc_now,
     _token_window_sums,
+    _token_window_sums_full,
     _utcnow,
     _BANGKOK_TZ,  # noqa: F401
     _bangkok_now,  # noqa: F401
@@ -310,12 +295,17 @@ from services.sprint_manager.label_transitions import (  # noqa: E402, F401
 
 # Worktree/env helpers extracted to worktree.py (issue #1283); re-exported here
 # so all existing call sites within this module remain unmodified.
+# _git_worktree_root, _parse_dotenv_value, _find_crg_bin deduplicated from
+# sprint_manager.py into worktree.py as sole source of truth (issue #1502).
 from services.sprint_manager.worktree import (  # noqa: E402, F401
     _resolve_uat_env_for_tester,
     _worktree_hygiene,
     _crg_update_worktree,
     _stash_to_quarantine,
     _detect_port,
+    _git_worktree_root,
+    _parse_dotenv_value,
+    _find_crg_bin,
 )
 
 # Coder/tester/doctor dispatch helpers extracted to dispatch.py (issues #1285, #1286);
@@ -384,6 +374,20 @@ FINISH_FEATURE_SCRIPT = SCRIPTS_DIR / "finish_feature.py"
 DASHBOARD_API_URL    = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 SPRINTS_DIR          = DASHBOARD_DIR / "sprints"
 ALERTS_DIR           = DASHBOARD_DIR / "alerts"
+
+# ── ICA preflight helpers (issue #1668) ──────────────────────────────────────
+
+def _get_llm_provider(eff_repo: Optional[str] = None) -> str:
+    """Return the configured llmProvider ('anthropic' or 'ica'), default 'anthropic'."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting("app_config", project=eff_repo)
+        if isinstance(stored, dict):
+            return stored.get("llmProvider", "anthropic")
+    except Exception:
+        pass
+    return "anthropic"
+
 
 # ── API cost pricing (USD per million tokens) ─────────────────────────────────
 # All agents (coder, tester, preflight) run via Claude Code CLI which is
@@ -531,6 +535,14 @@ def _plan_json_set_state_sm(
                 existing = {"tickets": raw}
         existing["state"] = state
         existing.update(extra_fields)
+        # A running sprint has no terminal reason. Clear any stale end_reason /
+        # ended_at carried over from a prior queued/draft state, otherwise the
+        # board's running detection treats end_reason-set as "ended" and hides a
+        # genuinely live sprint (sprint-15.3 ran but showed DRAFT/not-running
+        # because its rerun-created plan still carried end_reason="queued").
+        if state == "running":
+            existing.pop("end_reason", None)
+            existing.pop("ended_at", None)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         os.replace(str(tmp), str(path))
@@ -576,8 +588,16 @@ def _sprint_db_set_state_sm(
                                           end_reason=fields.get("end_reason"),
                                           ended_at=fields.get("ended_at"),
                                           project=project or "")
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        # Best-effort by design (a DB hiccup must never fail the run), but a
+        # silently lost lifecycle write leaves plan.json's dual-write copy
+        # newer than the "authoritative" DB with nothing to flag it (#1688) —
+        # log so it's at least visible in the run log.
+        structured_log.warn(
+            "sprint_db_state_write_failed",
+            f"DB lifecycle write failed for {label!r} -> {state!r}: {e}",
+            label=label, state=state, project=project, exc=str(e),
+        )
 
 
 def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None:
@@ -585,8 +605,12 @@ def _sprint_db_set_ticket_order_sm(label: str, issue_numbers: list[int]) -> None
     try:
         import db  # apps/dashboard on sys.path (line 142)
         db.set_sprint_ticket_order(label, issue_numbers)
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ticket_order_write_failed",
+            f"DB ticket-order write failed for {label!r}: {e}",
+            label=label, exc=str(e),
+        )
 
 
 def _sprint_db_ingest_run_sm(
@@ -611,8 +635,12 @@ def _sprint_db_ingest_run_sm(
             project=project or state.project or "",
             summary_path=spath,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_ingest_failed",
+            f"end-of-run DB ingest failed for {label!r}: {e}",
+            label=label, project=project, exc=str(e),
+        )
 
 
 # ── Per-agent run tracking (issue #764) ──────────────────────────────────────
@@ -645,6 +673,8 @@ def _db_agent_start_sm(
     attempt_kind: Optional[str] = None,
     log_path: Optional[str] = None,
     backend: Optional[str] = None,
+    provider: Optional[str] = None,
+    is_ica: bool = False,
 ) -> None:
     """Best-effort open of an agent_runs row at dispatch time (#764).
 
@@ -655,6 +685,8 @@ def _db_agent_start_sm(
     `attempt_kind` is one of 'initial', 'fix_round', or 'hang_continue' (issue #787).
     `log_path` is the absolute path to the issue log file (issue #783).
     `backend` is 'cline' or 'claude-code' (issue #920).
+    `provider` is the LLM provider identifier, e.g. 'ICA' (issue #1673).
+    `is_ica` is True when CCPROXY_PROFILE is set at dispatch time (issue #1672).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -668,9 +700,15 @@ def _db_agent_start_sm(
             log_path=log_path,
             backend=backend,
             project=_CURRENT_RUN_PROJECT,
+            provider=provider,
+            is_ica=is_ica,
         )
-    except (Exception, SystemExit):
-        pass
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_start_write_failed",
+            f"agent_runs open failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
 
 
 def _db_update_worktree_shas_sm(
@@ -695,11 +733,15 @@ def _db_agent_finish_sm(
     duration_seconds=None,
     outcome=None,
     total_tokens=None,
+    is_ica: bool = False,
+    cost_usd=None,
 ) -> None:
     """Best-effort close of the open agent_runs row on finish (#764).
 
     `duration_seconds` is the precise monotonic measurement taken by the caller
     so the stored value is within ±2 s of the logged wall-clock time (AC3).
+    `is_ica` and `cost_usd` are written atomically with the finish record
+    for ICA metered-path runs (issue #1672 AC4).
     """
     try:
         import db  # apps/dashboard on sys.path (line 142)
@@ -707,9 +749,40 @@ def _db_agent_finish_sm(
             int(issue_number), sprint_label, agent,
             duration_seconds=None if duration_seconds is None else round(duration_seconds),
             outcome=outcome, total_tokens=total_tokens,
+            is_ica=is_ica, cost_usd=cost_usd,
+        )
+    except (Exception, SystemExit) as e:
+        structured_log.warn(
+            "sprint_db_agent_finish_write_failed",
+            f"agent_runs close failed for issue #{issue_number} ({agent}) on {sprint_label!r}: {e}",
+            issue_num=issue_number, label=sprint_label, agent=agent, exc=str(e),
+        )
+
+
+def _ica_cost_from_tokens(
+    raw_input: int, output: int, cache_read: int, cache_write: int,
+    model_used: Optional[str], repo: Optional[str],
+) -> Optional[float]:
+    """Compute ICA USD cost if a price_map is configured for the project (issue #1672 AC2).
+
+    Returns None when no price_map is available or the model is unknown.
+    Best-effort: never raises.
+    """
+    try:
+        import db as _db_mod  # apps/dashboard on sys.path
+        import settings_repo as _sr
+        stored = _sr.get_setting("app_config", project=repo)
+        price_map = stored.get("price_map") if isinstance(stored, dict) else None
+        return _db_mod._compute_ica_cost_usd(
+            raw_input_tokens=raw_input,
+            output_tokens=output,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            model_name=model_used,
+            price_map=price_map,
         )
     except (Exception, SystemExit):
-        pass
+        return None
 
 
 # Hang detection constants (in seconds)
@@ -723,9 +796,11 @@ HANG_CHECK_SECS = 5  * 60   # check every 5 minutes
 # All other label additions are deferred to post-run; sprint-N is never
 # removed from a ticket until the sprint run ends.
 # Consolidated from old _RUN_MUTABLE_GITHUB_LABELS constant (issue #506, Wave 1 label protection).
-RUN_MUTABLE_LABELS: frozenset[str] = frozenset({
-    "in-progress", "SIT", "UAT", "needs-rework",
-})
+RUN_MUTABLE_LABELS: frozenset[str] = (
+    _SM_RUN_MUTABLE_LABELS
+    if _SM_RUN_MUTABLE_LABELS is not None
+    else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
+)
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
@@ -791,21 +866,22 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-_RATE_LIMIT_SIGNALS         = ["429", "rate limit", "too many requests",
-                                "subscription rate limit", "rate_limit"]
+
+from services.sprint_manager.api_client import (  # noqa: E402
+    is_retryable_rate_limit as _is_retryable_rate_limit,
+)
 
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
-    """Return (is_rate_limit, retry_after_secs) by inspecting subprocess output.
+    """Detect rate-limit / quota-exceeded errors in agent subprocess output.
 
-    Checks for 429 / rate-limit signals and an optional Retry-After value.
+    Delegates to api_client.is_retryable_rate_limit which covers both the
+    Anthropic OAuth subscription shape and ICA/IBM gateway quota-exceeded
+    formats (issue #1669).  The return shape is unchanged so all callers
+    (dispatch.py proxy, handle_post_coder, handle_post_tester) continue to
+    work without modification.
     """
-    lower = output.lower()
-    if not any(sig in lower for sig in _RATE_LIMIT_SIGNALS):
-        return False, None
-    m = re.search(r"retry.?after[:\s]+(\d+)", output, re.IGNORECASE)
-    retry_after = int(m.group(1)) if m else None
-    return True, retry_after
+    return _is_retryable_rate_limit(output)
 
 
 # ── failure categories ────────────────────────────────────────────────────────
@@ -861,24 +937,6 @@ def _run(*cmd, cwd: Optional[Path] = None, check: bool = True) -> str:
 _CRG_UPDATE_TIMEOUT_SECS = 120
 
 
-def _find_crg_bin(near: Optional[Path] = None) -> Optional[str]:
-    """Return path to code-review-graph CLI if installed, else None."""
-    candidates: list[Path] = []
-    if near is not None:
-        candidates.append(near / "venv" / "bin" / "code-review-graph")
-        for parent in near.parents:
-            if parent.name in ("commander", "dev") or len(candidates) > 6:
-                break
-            candidates.append(parent / "uat" / "venv" / "bin" / "code-review-graph")
-    candidates.append(Path.home() / "dev" / "commander" / "uat" / "venv" / "bin" / "code-review-graph")
-    candidates.append(Path.home() / "dev" / "commander" / "prd" / "venv" / "bin" / "code-review-graph")
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path)
-    found = shutil.which("code-review-graph")
-    return found
-
-
 def _write_runtime_port(worktree_coder: Path, port: int) -> None:
     """Write chosen port to <coder_worktree>/.commander/runtime/port.
 
@@ -925,14 +983,37 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     Prefers the remote tracking ref so we get the current authoritative tip
     (e.g. after a tester's finish_feature.py pushed the final commit) rather
     than a potentially stale local copy.
+
+    When MORE THAN ONE feature/<N>-* branch exists (a stale mismatched-slug
+    leftover next to the real one), pick the branch whose tip commit references
+    ``(issue #N)`` — i.e. the branch that actually carries this issue's work —
+    instead of the alphabetical [0], which could pick the wrong branch and merge
+    unrelated work (the saga's feature/117-display-bangkok-time vs
+    feature/117-chunk-overlap-fix).
     """
+    candidates: list[str] = []
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
-        return out.strip().splitlines()[0].strip().removeprefix("origin/")
-    ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
-    if ok and out.strip():
-        return out.strip().splitlines()[0].strip().lstrip("* ")
-    return None
+        candidates = [
+            ln.strip().removeprefix("origin/") for ln in out.strip().splitlines() if ln.strip()
+        ]
+    if not candidates:
+        ok, out, _ = _try("git", "branch", "--list", f"feature/{issue_num}-*")
+        if ok and out.strip():
+            candidates = [ln.strip().lstrip("* ") for ln in out.strip().splitlines() if ln.strip()]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    for branch in candidates:
+        ref = f"origin/{branch}"
+        ok, _, _ = _try("git", "rev-parse", "--verify", ref)
+        if not ok:
+            ref = branch
+        ok, msg, _ = _try("git", "log", "-1", "--format=%s%n%b", ref)
+        if ok and f"issue #{issue_num}" in (msg or ""):
+            return branch
+    return candidates[0]
 
 
 def _is_branch_merged_into(branch: str, target: str, issue_num: Optional[int] = None) -> bool:
@@ -1306,6 +1387,71 @@ def _revert_to_sit_impl(issue_num: int, gate_name: str, output: str,
         structured_log.warn("github_update_failed", f"failed to post gate failure comment: {e}", issue_num=issue_num, exc=str(e))
 
 
+def _revert_to_sit_aggregate(issue_num: int, failed_results: "list[GateResult]",
+                             total: Optional[int] = None,
+                             repo_name: Optional[str] = None,
+                             repo_root: Optional[Path] = None) -> None:
+    """Revert ONCE for all failing gates: a single comment listing every failure,
+    one sidecar covering them all (so the coder's retry fixes everything in one
+    pass), and one SIT transition. Replaces the per-gate revert now that
+    run_quality_gates runs all gates in a single pass (no early-return).
+    """
+    if not failed_results:
+        return
+    n = len(failed_results)
+    names = ", ".join(r.gate for r in failed_results)
+    denom = f"/{total}" if total else ""
+    parts = [
+        f"❌ **{n}{denom} quality gate(s) failed: {names}**",
+        "Issue reverted to SIT — fix all of the items below in one pass, "
+        "then push; the same single retry re-runs every gate.",
+    ]
+    files_to_inspect: list[str] = []
+    detail_parts: list[str] = []
+    primary_class: Optional[str] = None
+    for r in failed_results:
+        out = r.output or ""
+        truncated = out[:2000] if len(out) > 2000 else out
+        parts.append(f"\n### {r.gate}\n```\n{truncated}\n```")
+        fclass = _GATE_FAILURE_CLASS_MAP.get(r.gate, r.gate)
+        if primary_class is None:
+            primary_class = fclass
+        detail_parts.append(f"[{r.gate}]\n{truncated}")
+        if _FAILURE_PARSING_AVAILABLE:
+            try:
+                failures = parse_failures(r.gate, out)
+                parts.append(build_failure_block(r.gate, failures))
+                files_to_inspect.extend(
+                    f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
+                    for f in failures if f.get("file")
+                )
+            except Exception as e:
+                structured_log.error(
+                    "failure_parsing_error",
+                    f"failure parsing failed for {r.gate}: {e}",
+                    issue_num=issue_num, exc=str(e),
+                )
+
+    record_failure(
+        issue_num,
+        primary_class or "gate",
+        detail="\n\n".join(detail_parts)[:4000],
+        repo_root=repo_root,
+        summary=f"Issue #{issue_num}: {n}{denom} gate(s) failed: {names}",
+        files_to_inspect=sorted(set(files_to_inspect)),
+    )
+    for r in failed_results:
+        _write_gate_failure_record(issue_num, r.gate, r.output or "", repo_root=repo_root)
+
+    _transition_safe(issue_num, _TicketState.SIT, actor="sprint_manager:gate_fail", repo_name=repo_name)
+    try:
+        github_client.add_comment(issue_num, "\n".join(parts), repo_name=repo_name)
+    except Exception as e:
+        structured_log.warn("github_update_failed",
+                            f"failed to post aggregate gate failure comment: {e}",
+                            issue_num=issue_num, exc=str(e))
+
+
 def _post_success_comment(issue_num: int, results: list[GateResult],
                           repo_name: Optional[str] = None,
                           gates_skipped: bool = False,
@@ -1369,6 +1515,25 @@ def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> No
     _run("git", "branch", sprint_branch, parent_sha)
     _run("git", "push", "-u", "origin", sprint_branch)
     sys.stdout.write(str(f"  Sprint branch {sprint_branch!r} created and pushed.") + "\n")
+
+
+def _restore_worktree_branch(wt_root, target_branch: str) -> None:
+    """Restore a shared worktree to target_branch after a rebase recovery attempt.
+
+    The automated rebase recovery (issue #1414) checks out the feature branch in
+    the tester worktree. Issue #1439: that worktree is shared by the next
+    dispatched ticket, so it must always be returned to target_branch — whether
+    the rebase succeeded, conflicted, or raised — and without touching the feature
+    branch's commits. This only switches branches; it never rewrites history.
+    """
+    # If an interrupted rebase is still in progress, abort it first so the
+    # checkout can succeed. A no-op abort (no rebase active) fails harmlessly.
+    _try("git", "rebase", "--abort", cwd=wt_root)
+    ok, _, err = _try("git", "checkout", target_branch, cwd=wt_root)
+    if not ok:
+        sys.stdout.write(str(
+            f"  [rebase] WARNING: could not restore worktree to {target_branch}: {err}"
+        ) + "\n")
 
 
 def _call_finish_feature(
@@ -1459,46 +1624,85 @@ def _call_finish_feature(
         sys.stdout.write(str(f"  [rebase] could not checkout {feature_branch}: {co_err}") + "\n")
         return False, []
 
-    # Attempt a single rebase onto the current target (AC8: only one attempt).
-    ok_rb, rb_out, rb_err = _try(
-        "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
-    )
-    rebase_combined = rb_out + "\n" + rb_err
+    # issue #1439: once we leave target_branch for the feature branch above, the
+    # shared tester worktree must always be returned to target_branch before this
+    # function returns — otherwise the next ticket dispatched into the same
+    # worktree starts from a prior ticket's feature branch. The restore runs in a
+    # `finally` so it executes whether the rebase succeeds, conflicts, or raises.
+    try:
+        # Attempt a single rebase onto the current target (AC8: only one attempt).
+        ok_rb, rb_out, rb_err = _try(
+            "git", "rebase", f"origin/{target_branch}", cwd=wt_root,
+        )
+        rebase_combined = rb_out + "\n" + rb_err
 
-    if not ok_rb:
-        conflict_files = _extract_rebase_conflict_files(rebase_combined)
+        if not ok_rb:
+            conflict_files = _extract_rebase_conflict_files(rebase_combined)
+            sys.stdout.write(str(
+                f"  [rebase] rebase conflict for #{issue_num} in "
+                f"{len(conflict_files)} file(s): {conflict_files}"
+            ) + "\n")
+            _try("git", "rebase", "--abort", cwd=wt_root)
+            return False, conflict_files
+
+        # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
+        sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
+        ok_push, _, push_err = _try(
+            "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
+        )
+        if not ok_push:
+            sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+            return False, []
+
+        # Retry the merge exactly once after the successful rebase (AC8).
         sys.stdout.write(str(
-            f"  [rebase] rebase conflict for #{issue_num} in "
-            f"{len(conflict_files)} file(s): {conflict_files}"
+            f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
         ) + "\n")
-        _try("git", "rebase", "--abort", cwd=wt_root)
-        return False, conflict_files
+        with _develop_merge_guard():
+            result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
+        if result2.stdout:
+            sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
+        if result2.returncode == 0:
+            sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
+            return True, []
 
-    # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
-    sys.stdout.write(str(f"  [rebase] rebased {feature_branch} onto origin/{target_branch} — pushing") + "\n")
-    ok_push, _, push_err = _try(
-        "git", "push", "--force-with-lease", "origin", feature_branch, cwd=wt_root,
-    )
-    if not ok_push:
-        sys.stdout.write(str(f"  [rebase] push of rebased branch failed: {push_err}") + "\n")
+        sys.stdout.write(str(
+            f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
+        ) + "\n")
         return False, []
+    finally:
+        _restore_worktree_branch(wt_root, target_branch)
 
-    # Retry the merge exactly once after the successful rebase (AC8).
-    sys.stdout.write(str(
-        f"  [rebase] retrying finish_feature.py for #{issue_num} after successful rebase"
-    ) + "\n")
-    with _develop_merge_guard():
-        result2 = subprocess.run(cmd, cwd=str(wt_root), capture_output=True, text=True, env=sub_env)
-    if result2.stdout:
-        sys.stdout.write(str(result2.stdout.rstrip()) + "\n")
-    if result2.returncode == 0:
-        sys.stdout.write(str("  [rebase] post-rebase merge completed successfully") + "\n")
-        return True, []
 
-    sys.stdout.write(str(
-        f"  [rebase] post-rebase merge also failed (exit {result2.returncode}) — giving up"
-    ) + "\n")
-    return False, []
+def _apply_in_progress_label(
+    issue_num: int,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply in-progress label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "in-progress"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
+
+
+def _apply_needs_rework_label(
+    issue_num: int,
+    category: str,
+    sprint_label: Optional[str] = None,
+    repo_name: Optional[str] = None,
+) -> None:
+    """Apply needs-rework label via update_ticket.py with COMMANDER_SPRINT_RUNNING injected."""
+    cmd = [sys.executable, str(SCRIPTS_DIR / "update_ticket.py"), "--issue", str(issue_num), "--status", "needs-rework"]
+    if repo_name:
+        cmd += ["--repo", repo_name]
+    sub_env = os.environ.copy()
+    if sprint_label:
+        sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
+    subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
 
 
 # ── documentor integration (issue #103) ──────────────────────────────────────
@@ -1595,11 +1799,30 @@ def handle_post_tester(
         api_url      = None
 
     if tester_exit_code != 0:
-        sys.stdout.write(str(f"  Tester for issue #{issue_num} exited {tester_exit_code} — status: failed") + "\n")
+        sys.stdout.write(str(f"  Tester for issue #{issue_num} exited {tester_exit_code}") + "\n")
         sys.stdout.flush()
-        return (False,
-                f"Issue #{issue_num}: tester exited {tester_exit_code}, skipping gates",
-                FailureCategory.CRASH)
+        # Defensive (flaky `claude -p` exit): the tester sometimes completes the
+        # work — tests pass, feature branch pushed — yet the CLI returns non-zero,
+        # which used to false-CRASH a finished ticket (whole sprints went to
+        # needs_rework on a spurious exit code). Re-check whether the work actually
+        # landed: a `feature/<N>-*` branch on origin, or a merge commit already in
+        # target. Only CRASH when nothing landed; otherwise fall through to the
+        # normal gate+merge flow so the exit code alone can't nuke completed work.
+        # Quality is still enforced — the gates below run regardless.
+        _try("git", "fetch", "--prune", "origin")
+        _exit_fb = _find_feature_branch(issue_num)
+        _work_landed = bool(_exit_fb) or _was_feature_merged_via_log(issue_num, target_branch)
+        if not _work_landed:
+            sys.stdout.write(str(f"  Issue #{issue_num}: tester exited {tester_exit_code} and no feature "
+                f"branch / merge commit found — genuine crash, skipping gates") + "\n")
+            sys.stdout.flush()
+            return (False,
+                    f"Issue #{issue_num}: tester exited {tester_exit_code}, no work landed — skipping gates",
+                    FailureCategory.CRASH)
+        sys.stdout.write(str(f"  Issue #{issue_num}: tester exited {tester_exit_code} BUT feature work is "
+            f"present (branch={_exit_fb or 'merged-in-target'}) — not crashing; running gates") + "\n")
+        sys.stdout.flush()
+        # fall through to the normal post-tester flow (re-fetch + gates + merge below)
 
     # Fetch latest remote state before checking branch presence.  Without this,
     # sprint_manager sees stale remote-tracking refs where the feature branch
@@ -1776,8 +1999,7 @@ def handle_post_tester(
             return True, f"Issue #{issue_num}: all gates passed, merge already done, UAT applied", None
         return True, f"Issue #{issue_num}: all gates passed, merged into {target_branch}, UAT applied", None
     else:
-        failed = next((r for r in results if not r.passed), None)
-        gate_name = failed.gate if failed else "unknown"
+        failed_list = [r for r in results if not r.passed]
         # Map gate name to fine-grained failure category for needs-rework logic
         gate_category_map = {
             "typecheck":     FailureCategory.GATE_FAIL,
@@ -1787,17 +2009,29 @@ def handle_post_tester(
             "merge-preview": FailureCategory.MERGE_CONFLICT,
             "monolith":      FailureCategory.GATE_FAIL,
         }
+        # Aggregate ALL failing gates into ONE revert (comment + sidecar + SIT) so
+        # a single retry fixes everything — including a merge conflict caught in the
+        # same pass — instead of burning one attempt per gate.
+        _revert_to_sit_aggregate(issue_num, failed_list, total=len(results), repo_name=eff_repo)
+        # Category drives the pipeline fix-loop. A code gate (typecheck / lint /
+        # design / pytest / monolith) failing means the coder must fix code, so a
+        # code category wins over merge-preview. merge-preview ALONE → MERGE_CONFLICT,
+        # which preserves the transient-rebase-race free-retry path.
+        _code_order = ["typecheck", "lint", "design", "pytest", "monolith"]
+        primary = next((r for r in failed_list if r.gate in _code_order), failed_list[0])
+        gate_name = primary.gate
         # A gate may override the category for a failure that isn't a code defect
         # (e.g. pytest reports ENV_ERROR when its binary is missing) — honor that
         # so infra failures skip the coder fix-loop + needs-rework.
         gate_category = (
-            getattr(failed, "category", None)
+            getattr(primary, "category", None)
             or gate_category_map.get(gate_name, FailureCategory.GATE_FAIL)
         )
+        names = ", ".join(r.gate for r in failed_list)
         _gate_msg = (
             f"Issue #{issue_num}: gate {gate_name} environment error (test infra missing)"
             if gate_category == FailureCategory.ENV_ERROR
-            else f"Issue #{issue_num}: gate failed ({gate_name})"
+            else f"Issue #{issue_num}: {len(failed_list)}/{len(results)} gates failed: {names}"
         )
         return (False, _gate_msg, gate_category)
 
@@ -1995,6 +2229,7 @@ def _build_design_block(
     issue_num: int,
     eff_repo: Optional[str],
     cwd_path: "Path",
+    issue_body: Optional[str] = None,
 ) -> str:
     """Build a design context block for the coder prompt (issue #1488).
 
@@ -2004,6 +2239,9 @@ def _build_design_block(
 
     Returns '' when DESIGN.md is absent (guard handled by _design_docs_guard).
     Total output is capped at _DESIGN_BLOCK_CAP characters.
+
+    issue_body: when provided, used directly — skips the gh api subprocess call
+    (issue #1541).  Pass None to fall back to the legacy gh fetch.
     """
     design_doc_path = Path(cwd_path) / "DESIGN.md"
     if not design_doc_path.exists():
@@ -2012,18 +2250,30 @@ def _build_design_block(
     design_content = design_doc_path.read_text(encoding="utf-8")
 
     # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
-    issue_body = ""
-    if eff_repo:
-        try:
-            result = subprocess.run(
-                ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                issue_body = data.get("body", "") or ""
-        except Exception:
-            pass
+    # When caller already has the body (issue #1541), skip the subprocess call.
+    if issue_body is None:
+        issue_body = ""
+        if eff_repo:
+            try:
+                result = subprocess.run(
+                    ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    issue_body = data.get("body", "") or ""
+                else:
+                    sys.stdout.write(
+                        f"WARNING: gh fetch failed for issue #{issue_num}"
+                        f" (exit {result.returncode}); falling back to heading index\n"
+                    )
+                    sys.stdout.flush()
+            except Exception as _exc:
+                sys.stdout.write(
+                    f"WARNING: gh fetch error for issue #{issue_num}"
+                    f" ({_exc!r}); falling back to heading index\n"
+                )
+                sys.stdout.flush()
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])
@@ -2043,7 +2293,7 @@ def _build_design_block(
             continue
         doc_name, slug = ref.split("#", 1)
         doc_name = doc_name.strip()
-        slug = slug.strip().lower()
+        slug = _slugify_heading(slug)
 
         if doc_name.strip().lower() != "design.md":
             # Only DESIGN.md is in scope (PRODUCT.md support deferred).
@@ -2380,12 +2630,23 @@ def _issues_from_plan_numbers(
     for num in plan_numbers:
         issue = by_num.get(num)
         if not issue:
+            # A roster ticket that isn't an open issue carrying `label` is dropped.
+            # Log it — silent drops here let a ticket vanish from a run with no
+            # trace (e.g. closed, or its sprint label was stripped/moved).
+            sys.stdout.write(str(f"  [roster] #{num}: not an open issue on '{label}' "
+                f"(closed or missing the sprint label) — skipped") + "\n")
             continue
         labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
-        if _classify(labels_set) in ("uat", "done"):
+        cls = _classify(labels_set)
+        if cls in ("uat", "done"):
             continue
         if _is_dispatchable(labels_set):
             result.append(issue)
+        else:
+            # Non-dispatchable roster ticket — never silently drop it; surface why
+            # so a skipped ticket is visible in the run log instead of vanishing.
+            sys.stdout.write(str(f"  [roster] #{num}: not dispatchable (class={cls}, "
+                f"labels={sorted(labels_set)}) — skipped") + "\n")
     return result
 
 
@@ -2521,6 +2782,16 @@ class _SprintPreflightResult:
     early_exit: bool = False
 
 
+def _read_active_llm_provider() -> str:
+    """Return the active LLM provider from global settings (issue #1670)."""
+    try:
+        import settings_repo as _sr  # noqa: PLC0415
+        stored = _sr.get_setting_scoped("global", "app_config")
+        return stored.get("llmProvider") or "anthropic"
+    except Exception:
+        return "anthropic"
+
+
 def run_sprint_preflight(
     label: str,
     alert_modes: list,
@@ -2564,6 +2835,10 @@ def run_sprint_preflight(
     _run_id = mint_run_id("sprint", _sprint_num_str)
     os.environ["COMMANDER_RUN_ID"] = _run_id
     structured_log.set_context(run_id=_run_id, source="sprint", sprint_label=label, project=eff_repo)
+    # Per-run choice (plan.json llm_provider, written by the run modal) wins
+    # over the global setting — otherwise run rows / cost tagging would
+    # disagree with where the agents were actually routed.
+    _sprint_llm_provider = get_effective_llm_provider(label, cfg, eff_repo)
 
     # AC-2: write PID file and register cleanup handlers
     if not dry_run:
@@ -2589,6 +2864,31 @@ def run_sprint_preflight(
     base_merge_target = _base_sprint_branch(label)
     if target_branch is None:
         target_branch = sprint_branch
+
+    # ── ICA preflight check (issue #1668) ─────────────────────────────────────
+    # Gate on the EFFECTIVE provider (per-run plan.json > global setting) so a
+    # run-modal ICA selection is preflighted even when the global default is
+    # anthropic, and vice versa.
+    if _sprint_llm_provider == "ica":
+        try:
+            check_ica_readiness()
+        except IcaPreflightError as _pf_err:
+            sys.stdout.write(str(f"[ICA preflight] {_pf_err}") + "\n")
+            _blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            return _SprintPreflightResult(
+                state=_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
@@ -2621,6 +2921,7 @@ def run_sprint_preflight(
                 sprint_number   = sprint_num,
                 project         = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2638,6 +2939,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -2665,6 +2967,7 @@ def run_sprint_preflight(
                 sprint_number = sprint_num,
                 project       = eff_repo or "",
                 start_timestamp = _utcnow(),
+                llm_provider    = _sprint_llm_provider,
             )
             return _SprintPreflightResult(
                 state=state, state_path=state_path, summary=summary,
@@ -2682,6 +2985,7 @@ def run_sprint_preflight(
             project         = eff_repo or "",
             start_timestamp = _utcnow(),
             token_budget    = token_budget,
+            llm_provider    = _sprint_llm_provider,
             issues=[
                 IssueState(number=i["number"], title=i["title"], agent_status="queued")
                 for i in raw_issues
@@ -3185,6 +3489,11 @@ def run_sprint_loop(
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url)
 
+        # ICA metered-path detection (issue #1672): computed once per ticket since the
+        # profile is a sprint config value and doesn't change between fix rounds.
+        _coder_is_ica  = get_role_profile("coder",  cfg) is not None
+        _tester_is_ica = get_role_profile("tester", cfg) is not None
+
         # -- Bounded fix-loop: coder → tester → gates (issue #618) ──────────────
         # K read from COMMANDER_MAX_FIX_ROUNDS (default 3). _skip_coder path
         # (rerun-tester-direct) runs tester+gates once inside the same loop body
@@ -3226,14 +3535,18 @@ def run_sprint_loop(
                 _ser_est = _load_estimate(num)
                 _ser_coder_model, _ser_route_reason = _resolve_coder_model(num, cfg, estimate=_ser_est)
                 issue_state.coder_model = _ser_coder_model  # surface size-routed model on the live running pane (bug: coder badge had no model)
+                issue_state.coder_routing_reason = _ser_route_reason  # tooltip/sub-label on running pane badge (issue #1427)
                 issue_state.coder_backend = _effective_coder_backend(label, cfg, _fix_history if _fix_history else None)
+                issue_state.coder_provider = get_role_profile("coder", cfg)  # CCPROXY_PROFILE for ICA badge (issue #1673)
                 _db_agent_start_sm(
                     num, label, "coder",
                     model_used=_ser_coder_model, routing_reason=_ser_route_reason,
                     attempt_kind=_next_attempt_kind,
                     log_path=str(_issue_log_path(num, cfg=cfg)),
                     backend=_next_coder_backend,
-                )  # issue #764, #789, #787, #783, #920
+                    provider=issue_state.coder_provider,
+                    is_ica=_coder_is_ica,
+                )  # issue #764, #789, #787, #783, #920, #1673, #1672
                 _emit_sprint_lifecycle_event(
                     type="ticket_dispatched",
                     target=f"#{num}",
@@ -3251,10 +3564,12 @@ def run_sprint_loop(
                 _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
                 def _on_coder_running(
+                    pid=None,
                     _is=issue_state, _st=state, _sp=state_path, _api=api_url,
                     _lbl=label, _n=num, _sd=_eff_sprints_dir,
                 ) -> None:
                     _is.set_agent_status("coder_running")
+                    _is.coder_pid = pid
                     _neon_ticket_status(_lbl, _n, "running", _sd)
                     _st.save(_sp)
                     _post_sprint_status(_st, api_url=_api)
@@ -3293,11 +3608,20 @@ def run_sprint_loop(
                 _ctin, _ctout = _token_window_sums("coder", _coder_utc0)
                 state.total_tokens_in += _ctin
                 state.total_tokens_out += _ctout
+                # ICA cost: compute from the detailed token breakdown (issue #1672 AC2/AC4).
+                _coder_cost_usd: Optional[float] = None
+                if _coder_is_ica:
+                    _cr_in, _cr_out, _cr_cr, _cr_cw, _ = _token_window_sums_full("coder", _coder_utc0)
+                    _coder_cost_usd = _ica_cost_from_tokens(
+                        _cr_in, _cr_out, _cr_cr, _cr_cw, _ser_coder_model, eff_repo,
+                    )
                 _db_agent_finish_sm(  # issue #764: close the run with precise duration
                     num, label, "coder",
                     duration_seconds=_coder_elapsed,
                     outcome="success" if coder_ok else "failed",
                     total_tokens=(_ctin + _ctout) or None,
+                    is_ica=_coder_is_ica,
+                    cost_usd=_coder_cost_usd,
                 )
                 _coder_m, _coder_s = divmod(int(_coder_elapsed), 60)
                 sys.stdout.write(str(f"  Total time used on coder dispatch: {_coder_m}m {_coder_s}s") + "\n")
@@ -3531,7 +3855,8 @@ def run_sprint_loop(
                 num, label, "tester",
                 risk_tier=_tester_risk, model_used=_tester_model_selected,
                 log_path=str(_issue_log_path(num, cfg=cfg)),
-            )  # issue #764, #790, #783
+                is_ica=_tester_is_ica,
+            )  # issue #764, #790, #783, #1672
             # Record the tester attempt so analytics can count rejections exactly
             # going forward (issue #718).
             issue_state.tester_attempt_count += 1
@@ -3547,9 +3872,11 @@ def run_sprint_loop(
             _post_sprint_status(state, api_url=api_url)
 
             def _on_tester_running(
+                pid=None,
                 _is=issue_state, _st=state, _sp=state_path, _api=api_url
             ) -> None:
                 _is.set_agent_status("tester_running")
+                _is.tester_pid = pid
                 _st.save(_sp)
                 _post_sprint_status(_st, api_url=_api)
 
@@ -3582,11 +3909,20 @@ def run_sprint_loop(
             _ttin, _ttout = _token_window_sums("tester", _tester_utc0)
             state.total_tokens_in += _ttin
             state.total_tokens_out += _ttout
+            # ICA cost for tester (issue #1672 AC2/AC4).
+            _tester_cost_usd: Optional[float] = None
+            if _tester_is_ica:
+                _tr_in, _tr_out, _tr_cr, _tr_cw, _ = _token_window_sums_full("tester", _tester_utc0)
+                _tester_cost_usd = _ica_cost_from_tokens(
+                    _tr_in, _tr_out, _tr_cr, _tr_cw, _tester_model_selected, eff_repo,
+                )
             _db_agent_finish_sm(  # issue #764: close the run with precise duration
                 num, label, "tester",
                 duration_seconds=_tester_elapsed,
                 outcome="pass" if tester_rc == 0 else "fail",
                 total_tokens=(_ttin + _ttout) or None,
+                is_ica=_tester_is_ica,
+                cost_usd=_tester_cost_usd,
             )
             _tester_m, _tester_s = divmod(int(_tester_elapsed), 60)
             sys.stdout.write(str(f"  Total time used on tester dispatch: {_tester_m}m {_tester_s}s") + "\n")
@@ -4533,8 +4869,11 @@ def main() -> None:
             except Exception as e_persist:
                 structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
 
-    # Write per-sprint brief after documenter (issue #860)
-    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE:
+    # Write per-sprint brief after documenter (issue #860).
+    # Parked/deprecated (issue #1687) — default-off pending platform stability;
+    # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
+    _brief_disabled = os.environ.get("COMMANDER_DISABLE_BRIEF", "1").strip().lower() not in ("0", "false", "no")
+    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
         _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
         _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         _brief_summary_issue_num: Optional[int] = None

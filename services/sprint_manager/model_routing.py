@@ -25,10 +25,26 @@ _DEFAULT_CODER_BY_SIZE: dict = {
     "XL": "claude-sonnet-4-6",
 }
 
-# Extensions that mark a path as docs/config (issue #1403).
-_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".json"})
+# Extensions that mark a path as docs/config (issue #1403, #1428).
+_DOCS_PATH_EXTENSIONS = frozenset({".md", ".yaml", ".yml", ".json"})
 # Extensions that mark a path as code — their presence disqualifies docs-only routing.
 _CODE_PATH_EXTENSIONS = frozenset({".py", ".js", ".ts"})
+
+
+def get_role_profile(role: str, cfg: Optional["SprintConfig"]) -> Optional[str]:
+    """Return the CCPROXY_PROFILE override for a given agent role (issue #1671).
+
+    Returns None when cfg is None or when no per-role profile is configured —
+    the caller should then leave CCPROXY_PROFILE unset so the global value
+    from the parent environment is inherited.
+    """
+    if cfg is None:
+        return None
+    if role == "coder":
+        return cfg.coder_profile or None
+    if role == "tester":
+        return cfg.tester_profile or None
+    return None
 
 
 def _plan_json_use_cline_followups(
@@ -44,6 +60,122 @@ def _plan_json_use_cline_followups(
         return bool(raw.get("use_cline_followups", False) if isinstance(raw, dict) else False)
     except Exception:
         return False
+
+
+def _plan_json_llm_provider(
+    sprint_label: str,
+    cfg: Optional["SprintConfig"] = None,
+) -> Optional[str]:
+    """Return the per-run LLM provider from the sprint's plan.json, or None.
+
+    Written by the run modal (POST /api/sprints/run body.llm_provider) and
+    copied to rerun children — mirrors _plan_json_use_cline_followups.
+    """
+    try:
+        path = _plan_json_path(sprint_label, cfg)
+        if not path.exists():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        value = raw.get("llm_provider") if isinstance(raw, dict) else None
+        return str(value) if value else None
+    except Exception:
+        return None
+
+
+def get_effective_llm_provider(
+    sprint_label: Optional[str],
+    cfg: Optional["SprintConfig"],
+    repo: Optional[str] = None,
+) -> str:
+    """Resolve the LLM provider for this run: plan.json > global setting > anthropic.
+
+    The per-run plan.json value (run-modal choice) always wins; the global
+    `llmProvider` setting covers CLI-started/legacy sprints; the final
+    fallback is direct Anthropic.
+    """
+    if sprint_label:
+        per_run = _plan_json_llm_provider(sprint_label, cfg)
+        if per_run:
+            return per_run
+    try:
+        import settings_repo  # noqa: PLC0415 — lazy, mirrors _get_llm_provider
+
+        stored = settings_repo.get_setting("app_config", project=repo) or {}
+        if not isinstance(stored, dict):
+            stored = {}
+        value = stored.get("llmProvider")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    return "anthropic"
+
+
+def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> None:
+    """Route an agent subprocess through claude-proxy to ICA (in place).
+
+    Sets on *sub_env*:
+    - ANTHROPIC_BASE_URL → the local claude-proxy (COMMANDER_PROXY_URL).
+    - ANTHROPIC_CUSTOM_HEADERS → X-CCProxy-Profile, the proxy's per-REQUEST
+      routing signal (a client-side CCPROXY_PROFILE env var never reaches the
+      proxy — only this header or the proxy's own global state do).
+    - CCPROXY_PROFILE → telemetry only: the post-tool hook forwards its own
+      env value as ccproxy_profile, which is what flags the run is_ica.
+    - Auth: ANTHROPIC_API_KEY stays stripped (never send the metered key at
+      the proxy); CLAUDE_CODE_OAUTH_TOKEN is stripped too — a *valid*
+      subscription OAuth token makes Claude Code authenticate against
+      api.anthropic.com and validate --model there, so an ICA-only model id
+      (e.g. via CCPROXY_FORCE_MODEL) fails with "model may not exist or you may
+      not have access to it" and the run never reaches the proxy. A dummy
+      ANTHROPIC_AUTH_TOKEN then keeps the CLI on the ANTHROPIC_BASE_URL path —
+      the proxy's openai-kind profile ignores inbound auth and attaches its own
+      ICA key upstream.
+
+    When a per-role profile (issue #1671) already set CCPROXY_PROFILE, that
+    name wins for both the header and the env var.
+    """
+    import os  # noqa: PLC0415
+
+    effective_profile = sub_env.get("CCPROXY_PROFILE") or profile_name or "ica"
+    proxy_url = os.environ.get("COMMANDER_PROXY_URL", "http://127.0.0.1:8788").rstrip("/")
+    sub_env["ANTHROPIC_BASE_URL"] = proxy_url
+    sub_env["ANTHROPIC_CUSTOM_HEADERS"] = f"X-CCProxy-Profile: {effective_profile}"
+    sub_env["CCPROXY_PROFILE"] = effective_profile
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    # A valid subscription OAuth token outranks ANTHROPIC_BASE_URL: Claude Code
+    # authenticates against api.anthropic.com and the ICA-only model id fails
+    # there. Strip it so the CLI uses the proxy path (issue: ICA coder crashed
+    # with "model may not exist or you may not have access to it").
+    sub_env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    sub_env["ANTHROPIC_AUTH_TOKEN"] = "commander-ica-proxy"
+
+
+# The only model the ICA upstream serves (proxy maps it to
+# global/anthropic.claude-sonnet-4-6). Any other model id 404s upstream,
+# so every ICA-routed dispatch must be pinned to this.
+ICA_FORCED_MODEL = "claude-sonnet-4-6"
+
+
+def apply_provider_env(
+    sub_env: dict,
+    model: str,
+    *,
+    sprint_label: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+    repo: Optional[str] = None,
+    profile_name: Optional[str] = None,
+) -> str:
+    """Apply the effective LLM provider to an agent subprocess env (in place).
+
+    Returns the model the dispatch must use: unchanged for direct Anthropic,
+    ICA_FORCED_MODEL when the effective provider is 'ica' (the ICA upstream
+    only serves claude-sonnet). Callers with no sprint context (dashboard
+    one-shot agents) pass repo only — the global llmProvider setting decides.
+    """
+    if get_effective_llm_provider(sprint_label, cfg, repo) != "ica":
+        return model
+    apply_ica_agent_env(sub_env, profile_name)
+    return ICA_FORCED_MODEL
 
 
 def _effective_coder_backend(

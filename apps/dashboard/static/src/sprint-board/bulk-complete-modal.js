@@ -179,6 +179,33 @@ async function _bcMergeStep(owner, repoName, step) {
   return res.json();
 }
 
+/** Run bulk complete (complete-step chain) for one lineage base; resolves when done. */
+export async function bulkCompleteLineageAndWait(label) {
+  const repo = _smgmtRepo();
+  if (!repo) throw new Error('No project loaded');
+  const parts = repo.split('/');
+  const owner = parts[0];
+  const repoName = parts.slice(1).join('/');
+  const preview = await _bcFetchPreview(owner, repoName, label);
+  const order = (preview.complete_order || []).slice();
+  if (!order.length) throw new Error('Nothing to bulk complete');
+  for (const sLabel of order) {
+    const res = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+    }
+  }
+  return { label, steps: order.length };
+}
+
 export async function _bcConfirm() {
   const repo = _smgmtRepo();
   if (!_bcLabel || !repo || !_bcPreview) return;
@@ -202,6 +229,7 @@ export async function _bcConfirm() {
 
   let doneSteps = 0;
   const totalSteps = order.length + 1; // members + board refresh
+  let failedIdx = 0; // index of the step that threw
 
   _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}…`, {
     progress: true,
@@ -211,8 +239,15 @@ export async function _bcConfirm() {
   });
   _smgmtBoardLog('Starting per-step complete (deepest child first)…', 'step');
 
+  const _onDone = () => {
+    if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
+    loadSprintMgmt().catch(() => {});
+  };
+
   try {
-    for (const sLabel of order) {
+    for (let i = 0; i < order.length; i++) {
+      failedIdx = i;
+      const sLabel = order[i];
       _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
       const res = await fetch(
         `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
@@ -244,27 +279,182 @@ export async function _bcConfirm() {
     _smgmtBoardFinish({
       ok: true,
       message: `✓ ${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`,
-      onDone: () => {
-        // Drop the History ledger cache so the pane reflects the new completed
-        // states on next open instead of serving stale rows.
-        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
-        loadSprintMgmt().catch(() => {});
-      },
+      onDone: _onDone,
     });
   } catch (e) {
     // Keep the overlay open with the error + a Done button so the operator can
-    // read what failed (e.g. a merge conflict) before the board refreshes —
-    // previously the message flashed past. Done unlocks + refreshes.
+    // read what failed (e.g. a merge conflict) before the board refreshes.
     _smgmtBoardLog(`✗ ${e.message}`, 'err');
+    const isConflict = /merge conflict/i.test(e.message);
     _smgmtBoardFinish({
       ok: false,
-      message: 'Stopped: ' + e.message + '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).',
-      onDone: () => {
-        // Drop the History ledger cache so the pane reflects the new completed
-        // states on next open instead of serving stale rows.
-        if (typeof globalThis._histResetLedgerCache === 'function') globalThis._histResetLedgerCache();
-        loadSprintMgmt().catch(() => {});
+      message: 'Stopped: ' + e.message + (isConflict
+        ? '\n\nClick "Resolve with AI" to fix automatically, or resolve manually and re-run.'
+        : '\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped).'),
+      onDone: _onDone,
+    });
+    if (isConflict) {
+      const cinfo = _bcParseConflictInfo(e.message);
+      if (cinfo) {
+        setTimeout(() => {
+          _bcInjectResolveButton(cinfo, owner, repoName, label, order, failedIdx, doneSteps, totalSteps, _onDone);
+        }, 0);
+      }
+    }
+  }
+}
+
+/** Parse head/base branch names from a merge-conflict error message. */
+function _bcParseConflictInfo(msg) {
+  // Matches the child→parent step "Merge sprint-97.5 → sprint-97.4 failed" AND
+  // the base→develop step "Merge sprint-92 → develop failed" (or ASCII >). The
+  // base may be another sprint branch or the integration branch (develop/master)
+  // — without the develop/master alternative the base step got no "Resolve with
+  // AI" button (the last lineage step ships to develop).
+  const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+|develop|master)\s+failed/i);
+  if (!m) return null;
+  const baseRaw = m[2];
+  const base = /^(develop|master)$/i.test(baseRaw) ? baseRaw : `sprint/${baseRaw}`;
+  return { head: `sprint/${m[1]}`, base };
+}
+
+/** Inject a "Resolve with AI" button before the Done button in the board overlay. */
+function _bcInjectResolveButton(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+  const doneEl = document.getElementById('smgmt-op-done');
+  if (!doneEl) return;
+  const existing = document.getElementById('smgmt-op-resolve-ai-btn');
+  if (existing) existing.remove();
+
+  const btn = document.createElement('button');
+  btn.id = 'smgmt-op-resolve-ai-btn';
+  btn.type = 'button';
+  btn.className = 'btn-primary';
+  btn.textContent = '✦ Resolve with AI';
+  btn.style.cssText = 'margin-right:8px;background:var(--violet,#6e56cf);border-color:var(--violet,#6e56cf)';
+  btn.onclick = () => {
+    btn.disabled = true;
+    _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
+  };
+
+  const doneBtn = document.getElementById('smgmt-op-done-btn');
+  if (doneBtn) doneEl.insertBefore(btn, doneBtn);
+  else doneEl.prepend(btn);
+}
+
+/** Take over the board overlay, run the AI resolver, then resume bulk complete. */
+async function _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+  const spinner = document.getElementById('smgmt-move-spinner');
+  const msgEl = document.getElementById('smgmt-move-overlay-msg');
+  const errEl = document.getElementById('smgmt-op-error');
+  const doneEl = document.getElementById('smgmt-op-done');
+  const overlay = document.getElementById('smgmt-move-overlay');
+
+  if (spinner) spinner.style.display = '';
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  if (doneEl) { doneEl.hidden = true; doneEl.innerHTML = ''; }
+  if (overlay) overlay.setAttribute('aria-busy', 'true');
+
+  const startMs = Date.now();
+  const timerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - startMs) / 1000);
+    const mins = Math.floor(secs / 60);
+    const ts = mins > 0 ? `${mins}m ${secs % 60}s` : `${secs}s`;
+    if (msgEl) msgEl.textContent = `Resolving conflicts with AI… (${ts})`;
+  }, 1000);
+  if (msgEl) msgEl.textContent = 'Resolving conflicts with AI… (0s)';
+
+  try {
+    const startRes = await fetch(
+      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-branch-conflict`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ head: cinfo.head, base: cinfo.base }),
       },
+    );
+    if (!startRes.ok) {
+      const err = await startRes.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${startRes.status}`);
+    }
+    const { job_key } = await startRes.json();
+
+    _smgmtBoardLog('AI resolver started…', 'step');
+    await new Promise((resolve, reject) => {
+      const es = new EventSource(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-conflict-stream/${encodeURIComponent(job_key)}`,
+      );
+      es.onmessage = (ev) => {
+        try {
+          const snap = JSON.parse(ev.data);
+          if (snap.ping) return;
+          if (snap.current && snap.status === 'running') _smgmtBoardLog(snap.current, 'step');
+          if (snap.status === 'done') { es.close(); resolve(snap); }
+          else if (snap.status === 'error') { es.close(); reject(new Error(snap.error || 'Resolve failed')); }
+        } catch (_) {}
+      };
+      es.onerror = () => { es.close(); reject(new Error('SSE connection lost')); };
+    });
+
+    clearInterval(timerInterval);
+    if (msgEl) msgEl.textContent = '✓ Resolved — retrying bulk complete…';
+    _smgmtBoardLog('✓ Conflicts resolved — resuming…', 'ok');
+    if (spinner) spinner.style.display = '';
+
+    await _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
+
+  } catch (resolveErr) {
+    clearInterval(timerInterval);
+    _smgmtBoardLog(`✗ AI resolve failed: ${resolveErr.message}`, 'err');
+    _smgmtBoardFinish({
+      ok: false,
+      message: `AI resolution failed: ${resolveErr.message}\n\nResolve manually and re-run Bulk complete.`,
+      onDone,
+    });
+  }
+}
+
+/** Resume the complete-step loop from fromIdx after AI conflict resolution. */
+async function _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
+  try {
+    for (let i = fromIdx; i < order.length; i++) {
+      const sLabel = order[i];
+      _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmed: true }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+      }
+      const sd = await res.json();
+      doneSteps += 1;
+      _smgmtBoardProgress(doneSteps, totalSteps);
+      const into = sd.merged ? ` → merged into ${sd.merged_into}` : '';
+      _smgmtBoardLog(`✓ ${sprintLabelDisplay(sLabel)} completed${into}`, 'ok');
+    }
+
+    _smgmtBoardLog('Refreshing board…', 'step');
+    await loadSprintMgmt();
+    doneSteps += 1;
+    _smgmtBoardProgress(doneSteps, totalSteps);
+    _smgmtBoardLog('✓ Complete finished', 'ok');
+
+    _smgmtBoardFinish({
+      ok: true,
+      message: `✓ ${sprintLabelDisplay(label)} completed — ${order.length} sprint(s) settled.`,
+      onDone,
+    });
+  } catch (e2) {
+    _smgmtBoardLog(`✗ ${e2.message}`, 'err');
+    _smgmtBoardFinish({
+      ok: false,
+      message: 'Stopped: ' + e2.message + '\n\nResolve the conflict, then re-run Bulk complete.',
+      onDone,
     });
   }
 }

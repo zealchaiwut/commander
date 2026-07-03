@@ -10,13 +10,30 @@ success while the DB never changed.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
+
+os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+
+import db as _db_module  # noqa: E402
+
+
+@pytest.fixture
+def fresh_db(tmp_path):
+    db_file = tmp_path / "needs_rework.db"
+    original = _db_module.DB_PATH
+    _db_module.DB_PATH = db_file
+    _db_module.init_db()
+    yield _db_module
+    _db_module.DB_PATH = original
 
 
 def _seed_needs_rework(db, label, project):
@@ -25,8 +42,8 @@ def _seed_needs_rework(db, label, project):
     db.transition_sprint_state(label, "needs_rework", actor="manager", project=project)
 
 
-def test_reconcile_completes_needs_rework_but_manager_cannot():
-    import db
+def test_reconcile_completes_needs_rework_but_manager_cannot(fresh_db):
+    db = fresh_db
 
     proj = "owner/needs-rework-test"
     _seed_needs_rework(db, "sprint-nrw1", proj)
@@ -42,10 +59,10 @@ def test_reconcile_completes_needs_rework_but_manager_cannot():
     assert db.canonical_lifecycle(row["state"]) == "completed"
 
 
-def test_set_state_returns_false_on_rejection():
+def test_set_state_returns_false_on_rejection(fresh_db):
     import startup
-    import db
 
+    db = fresh_db
     proj = "owner/needs-rework-test"
     _seed_needs_rework(db, "sprint-nrw2", proj)
     # manager → rejected → False; reconcile → accepted → True
@@ -63,6 +80,46 @@ def _dual(name, **kw):
         if hasattr(mod, name):
             out.append(patch(f"{mod_name}.{name}", **kw))
     return out
+
+
+def test_mark_merged_completed_uses_manager_for_running(fresh_db):
+    import startup
+
+    db = fresh_db
+    proj = "owner/running-complete-test"
+    db.transition_sprint_state("sprint-run1", "running", actor="manager", project=proj)
+    # reconcile-only path fails on running→completed
+    assert startup._sprint_db_set_state(
+        "sprint-run1", proj, "completed", actor="reconcile",
+    ) is False
+    assert startup._sprint_db_mark_merged_completed("sprint-run1", proj) is True
+    row = db.get_sprint("sprint-run1", project=proj)
+    assert db.canonical_lifecycle(row["state"]) == "completed"
+
+
+def test_mark_merged_completed_uses_reconcile_for_needs_rework(fresh_db):
+    import startup
+
+    db = fresh_db
+    proj = "owner/nrw-complete-test"
+    _seed_needs_rework(db, "sprint-nrw3", proj)
+    assert startup._sprint_db_mark_merged_completed("sprint-nrw3", proj) is True
+    row = db.get_sprint("sprint-nrw3", project=proj)
+    assert db.canonical_lifecycle(row["state"]) == "completed"
+
+
+def test_mark_merged_completed_bootstraps_draft_row(fresh_db):
+    """perf-coach-style sprints with no DB row must still settle after git merge."""
+    import startup
+
+    db = fresh_db
+    proj = "zealchaiwut/perf-coach"
+    assert db.get_sprint("sprint-85.5", project=proj) is None
+    assert startup._sprint_db_mark_merged_completed("sprint-85.5", proj) is True
+    row = db.get_sprint("sprint-85.5", project=proj)
+    assert row is not None
+    assert row["project"] == proj
+    assert db.canonical_lifecycle(row["state"]) == "completed"
 
 
 def test_complete_step_surfaces_silent_db_rejection():
@@ -83,7 +140,7 @@ def test_complete_step_surfaces_silent_db_rejection():
         *_dual("_sprint_merge_parent_label", return_value="sprint-94.3"),
         *_dual("_bulk_complete_collect_issues", return_value=(["sprint-94"], [])),
         *_dual("_plan_json_set_state", return_value=None),
-        *_dual("_sprint_db_set_state", return_value=False),  # silent rejection
+        *_dual("_sprint_db_mark_merged_completed", return_value=False),  # silent rejection
     ]
     for p in patches:
         p.start()

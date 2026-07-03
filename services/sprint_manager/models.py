@@ -1,3 +1,17 @@
+"""Neon ORM models — mixed export-only and runtime-shared (issue #1695).
+
+`Setting` and `ProjectTodo` back the runtime settings/todo KV fallback used
+by apps/dashboard/{settings_repo,todo_repo}.py when Neon is enabled — those
+classes ARE reachable from dashboard runtime and this module is a legitimate
+shared dependency of that path.
+
+`Project`, `ProjectEnvironment`, `Sprint`, `SprintTicket`, and `AgentRun` back
+the export-only sprint/project mirror (services/sprint_manager/sprint_repo.py,
+sync_projects_to_neon.py) — SQLite is the authoritative runtime store for
+that data (docs/architecture/1_state-and-source-of-truth.md §1.4). Do not add
+a dashboard/server runtime caller for those specific classes without updating
+that doc; see tests/test_neon_export_only.py.
+"""
 from sqlalchemy import (
     Boolean,
     Column,

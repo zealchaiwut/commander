@@ -16,7 +16,12 @@ Usage (level-based structured logging, backward compat):
 from __future__ import annotations
 
 import datetime
-import fcntl
+try:
+    import fcntl as _fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _fcntl = None  # type: ignore[assignment]
+    _HAS_FCNTL = False
 import json
 import logging
 import logging.handlers
@@ -220,10 +225,12 @@ def _append_line(path: Path, line: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if _HAS_FCNTL:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
         os.write(fd, line.encode())
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        if _HAS_FCNTL:
+            _fcntl.flock(fd, _fcntl.LOCK_UN)
         os.close(fd)
 
 
@@ -396,12 +403,21 @@ def _rotate_if_needed(path: Path, incoming_len: int, max_bytes: int, backup_coun
         path.rename(path.with_name(f"{path.name}.1"))
 
 
+# Module-level lock for intra-process (thread) serialization of rotate+append.
+# fcntl.flock on .rotate.lock handles inter-process serialization.
+_ROTATE_LOCK = threading.Lock()
+
+
 class _CommanderFileHandler(logging.Handler):
     """stdlib logging handler that resolves .commander/logs at emit time.
 
     Size-rotates each daily file (commander-YYYY-MM-DD.log) using the same bounds
     as prd.log so .commander/logs has an equivalent verified upper bound
     (issue #762): maxBytes default 10_000_000, backupCount default 5.
+
+    The rotate+append sequence is guarded by both a threading.Lock (intra-process)
+    and an fcntl advisory lock on .rotate.lock (inter-process) so concurrent
+    writers never race the rename or drop log lines (issue #818).
     """
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -411,9 +427,23 @@ class _CommanderFileHandler(logging.Handler):
             today = datetime.date.today().isoformat()
             path = log_dir / f"commander-{today}.log"
             msg = self.format(record) + "\n"
-            _rotate_if_needed(path, len(msg.encode()), _log_max_bytes(), _log_backup_count())
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(msg)
+            encoded = msg.encode()
+            with _ROTATE_LOCK:
+                if _HAS_FCNTL:
+                    lock_path = log_dir / ".rotate.lock"
+                    lock_fd = os.open(str(lock_path), os.O_WRONLY | os.O_CREAT, 0o644)
+                    try:
+                        _fcntl.flock(lock_fd, _fcntl.LOCK_EX)
+                        _rotate_if_needed(path, len(encoded), _log_max_bytes(), _log_backup_count())
+                        with open(path, "ab") as f:
+                            f.write(encoded)
+                    finally:
+                        _fcntl.flock(lock_fd, _fcntl.LOCK_UN)
+                        os.close(lock_fd)
+                else:
+                    _rotate_if_needed(path, len(encoded), _log_max_bytes(), _log_backup_count())
+                    with open(path, "ab") as f:
+                        f.write(encoded)
         except OSError as exc:
             print(f"[commander.logging] IO error: {exc}", file=sys.stderr)
 

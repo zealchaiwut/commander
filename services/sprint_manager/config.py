@@ -28,6 +28,11 @@ _WORKTESTER_ROOT = Path(os.environ.get(
 ))
 _DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "http://localhost:8000")
 _SPRINTS_DIR = _DASHBOARD_DIR / "sprints"
+
+# Hard cap on concurrent coder/tester worker slots (mirrors
+# worktree_pool.MAX_SLOTS). The scheduler spawns max_coder_slots worker threads,
+# so clamping here keeps thread count and worktree-pool size aligned (issue #1437).
+MAX_SLOTS = 4
 _ALERTS_DIR = _DASHBOARD_DIR / "alerts"
 
 _DEFAULT_CODER_BY_SIZE: dict = {
@@ -95,6 +100,10 @@ class SprintConfig:
     cline_model: Optional[str] = None
     # Route follow-up tickets to Cline (issue #918) — default off; opt in per sprint
     use_cline_followups: bool = False
+    # Per-role provider profile (issue #1671) — sets CCPROXY_PROFILE in subprocess env.
+    # None means no per-role override; global CCPROXY_PROFILE from parent env is used.
+    coder_profile: Optional[str] = None
+    tester_profile: Optional[str] = None
     # Concurrent coder/tester slot counts (issues #1411, #1415).
     # None means "not configured in sprint.yaml" → sprint manager defaults to 1
     # (existing serial behaviour).  Explicit values override the default.
@@ -303,6 +312,18 @@ def load_config(path: Path) -> "SprintConfig":
         if isinstance(_cline_sub, dict) and _cline_sub.get("model"):
             cline_model = str(_cline_sub["model"])
 
+    # ── per-role provider profile (issue #1671) ──────────────────────────────
+    # agent_config.coder.profile / agent_config.tester.profile → CCPROXY_PROFILE in sub_env.
+    coder_profile: Optional[str] = None
+    tester_profile: Optional[str] = None
+    if isinstance(agent_cfg, dict):
+        _coder_sub_p = agent_cfg.get("coder") or {}
+        if isinstance(_coder_sub_p, dict) and _coder_sub_p.get("profile"):
+            coder_profile = str(_coder_sub_p["profile"])
+        _tester_sub_p = agent_cfg.get("tester") or {}
+        if isinstance(_tester_sub_p, dict) and _tester_sub_p.get("profile"):
+            tester_profile = str(_tester_sub_p["profile"])
+
     # ── max_coder_slots / max_tester_slots (issues #1411, #1415) ──────────────
     # None = not configured in yaml → sprint manager defaults to 1 (serial).
     max_coder_slots: Optional[int] = None
@@ -319,6 +340,10 @@ def load_config(path: Path) -> "SprintConfig":
             max_coder_slots = int(data["max_coder_slots"])
         except (TypeError, ValueError):
             pass
+    # Clamp to the documented hard cap so the worker-thread count spawned by
+    # concurrent_scheduler stays aligned with the worktree-pool size (issue #1437).
+    if max_coder_slots is not None:
+        max_coder_slots = min(max_coder_slots, MAX_SLOTS)
 
     max_tester_slots: Optional[int] = None
     if data.get("max_tester_slots") is not None:
@@ -356,6 +381,8 @@ def load_config(path: Path) -> "SprintConfig":
         coder_backend=coder_backend,
         cline_model=cline_model,
         use_cline_followups=use_cline_followups,
+        coder_profile=coder_profile,
+        tester_profile=tester_profile,
         max_coder_slots=max_coder_slots,
         max_tester_slots=max_tester_slots,
     )

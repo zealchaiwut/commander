@@ -31,10 +31,15 @@ for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR)):
 from services.logging import log as structured_log  # noqa: E402
 from services.sprint_manager.worktree import _git_worktree_root  # noqa: E402
 from services.sprint_manager.model_routing import (  # noqa: E402
+    ICA_FORCED_MODEL,
     _resolve_coder_model,
     _resolve_cline_model,
     _effective_coder_backend,
+    apply_ica_agent_env,
+    get_effective_llm_provider,
+    get_role_profile,
 )
+from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
 from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # noqa: E402
@@ -57,23 +62,6 @@ _DOCTOR_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_CLINE_AUTH_LAST_PROBE: float = 0.0
 _DOCTOR_AUTH_PROBE_TTL: float = 5 * 60  # 5 minutes
 DOCTOR_MIN_DISK_BYTES: int = 1 * 1024 * 1024 * 1024  # 1 GB minimum free space
-
-
-class FailureCategory:
-    """String constants for dispatch failure categories — mirrors sprint_manager.FailureCategory."""
-
-    HANG             = "HANG"
-    CRASH            = "CRASH"
-    GATE_FAIL        = "GATE_FAIL"
-    TESTER_REJECTED  = "TESTER_REJECTED"
-    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
-    CODER_NO_WORK    = "CODER_NO_WORK"
-    MERGE_CONFLICT   = "MERGE_CONFLICT"
-    LINT_FAIL        = "LINT_FAIL"
-    PYTEST_FAIL      = "PYTEST_FAIL"
-    REBASE_CONFLICT  = "REBASE_CONFLICT"
-    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
-    ENV_ERROR        = "ENV_ERROR"
 
 
 # ── sys.modules proxy helper ──────────────────────────────────────────────────
@@ -359,6 +347,45 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
+def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
+    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+
+    Returns the body string on success. On failure (non-zero gh exit or an
+    exception), returns the sentinel "" (empty string, NOT None) and logs the
+    failure at WARN level — so _build_design_block skips its own fallback gh
+    fetch instead of issuing a second subprocess round-trip per ticket
+    (issue #1573). Returns None only when there is no repo to query, preserving
+    the legacy path where _build_design_block performs the fetch itself.
+    """
+    if not eff_repo:
+        return None
+    try:
+        _gh_result = subprocess.run(
+            ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if _gh_result.returncode == 0:
+            return json.loads(_gh_result.stdout).get("body", "") or ""
+        structured_log.warn(
+            "coder_dispatch_issue_body_fetch_failed",
+            f"[coder] gh fetch of issue body failed for issue #{issue_num}"
+            f" (exit {_gh_result.returncode}); passing sentinel to skip re-fetch",
+            issue_num=issue_num,
+            exit_code=_gh_result.returncode,
+            stderr=(_gh_result.stderr or "").strip()[:500],
+        )
+        return ""
+    except Exception as _exc:
+        structured_log.warn(
+            "coder_dispatch_issue_body_fetch_failed",
+            f"[coder] gh fetch of issue body errored for issue #{issue_num}"
+            f" ({_exc}); passing sentinel to skip re-fetch",
+            issue_num=issue_num,
+            error=repr(_exc),
+        )
+        return ""
+
+
 def _build_design_block(*args, **kwargs):
     """Proxy to sprint_manager._build_design_block (issue #1488)."""
     _f = _lookup_in_sm("_build_design_block", _build_design_block)
@@ -617,7 +644,14 @@ def _dispatch_coder(
     # Load estimate early for paths injection (issue #1402) and model routing below.
     _coder_estimate = _load_estimate(issue_num)
     _paths_block = _build_estimate_paths_block(_coder_estimate)
-    _design_block = _build_design_block(issue_num, eff_repo, cwd_path)
+
+    # Fetch issue body once here and pass it to _build_design_block so it can
+    # skip the redundant per-dispatch gh api subprocess call (issue #1541).
+    # On fetch failure the helper returns the "" sentinel (not None) and logs the
+    # failure, so _build_design_block does not issue a second gh call (issue #1573).
+    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(eff_repo, issue_num)
+
+    _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 
     # Build prompt
     if cfg and cfg.coder_prompt_template:
@@ -753,6 +787,9 @@ def _dispatch_coder(
     sub_env = os.environ.copy()
     sub_env.update(_agent_identity_env("coder", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = dispatch_model  # hook records model_name on token_usage rows
+    _coder_profile = get_role_profile("coder", cfg)
+    if _coder_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _coder_profile
 
     if coder_backend == "cline":
         # Cline headless backend (issue #917).
@@ -786,8 +823,29 @@ def _dispatch_coder(
             full_prompt = _cline_base
         cmd = ["cline", "-y", "-m", dispatch_model, full_prompt]
         # Do NOT pop ANTHROPIC_API_KEY — Cline uses it for the metered API.
+        # ICA routing is claude-code only: cline authenticates with the metered
+        # key directly and has no custom-headers channel to the proxy.
+        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+            structured_log.warn(
+                "ica_cline_unrouted",
+                "[coder] llm_provider=ica but backend=cline — cline dispatches "
+                "go direct to the metered Anthropic API, not through ICA",
+                issue_num=issue_num,
+            )
     else:
-        # Claude Code (existing default behavior, byte-for-byte unchanged).
+        # Per-run ICA routing: point this agent at claude-proxy (issue #1667
+        # follow-up). Claude-code branch only — cline has its own metered path.
+        # ICA serves only claude-sonnet, so the dispatch model is pinned to it.
+        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+            apply_ica_agent_env(sub_env, _coder_profile or "ica")
+            if dispatch_model != ICA_FORCED_MODEL:
+                sys.stdout.write(
+                    f"  [ica-model] #{issue_num}: {dispatch_model} → {ICA_FORCED_MODEL} "
+                    f"(ICA serves claude-sonnet only)\n"
+                )
+                dispatch_model = ICA_FORCED_MODEL
+                dispatch_routing_reason = "ica:forced-sonnet"
+                sub_env["CLAUDE_MODEL"] = dispatch_model
         cmd = [
             "claude",
             "--model", dispatch_model,
@@ -851,7 +909,7 @@ def _dispatch_coder(
                 sys.stdout.write(str(f"  [coder] {_cli_name} CLI not found -- stub success") + "\n")
                 if on_running is not None:
                     try:
-                        on_running()
+                        on_running(None)
                     except Exception:
                         pass
                 return True, None
@@ -881,7 +939,7 @@ def _dispatch_coder(
 
         if on_running is not None:
             try:
-                on_running()
+                on_running(proc.pid)
             except Exception:
                 pass
 
@@ -1241,6 +1299,22 @@ def _dispatch_tester(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("tester", issue_num))  # tag hooks/telemetry as the docs prescribe
     sub_env["CLAUDE_MODEL"] = tester_model  # hook records model_name on token_usage rows
+    _tester_profile = get_role_profile("tester", cfg)
+    if _tester_profile is not None:
+        sub_env["CCPROXY_PROFILE"] = _tester_profile
+    # Per-run ICA routing: point this agent at claude-proxy (issue #1667
+    # follow-up), mirroring the coder claude-code branch. ICA serves only
+    # claude-sonnet, so the tester model is pinned to it.
+    if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+        apply_ica_agent_env(sub_env, _tester_profile or "ica")
+        if tester_model != ICA_FORCED_MODEL:
+            sys.stdout.write(
+                f"  [ica-model] tester #{issue_num}: {tester_model} → {ICA_FORCED_MODEL} "
+                f"(ICA serves claude-sonnet only)\n"
+            )
+            tester_model = ICA_FORCED_MODEL
+            cmd[2] = ICA_FORCED_MODEL
+            sub_env["CLAUDE_MODEL"] = ICA_FORCED_MODEL
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:
@@ -1381,7 +1455,7 @@ def _dispatch_tester(
                 sys.stdout.write(str("  [tester] claude CLI not found -- stub success") + "\n")
                 if on_running is not None:
                     try:
-                        on_running()
+                        on_running(None)
                     except Exception:
                         pass
                 return 0, None
@@ -1409,7 +1483,7 @@ def _dispatch_tester(
 
         if on_running is not None:
             try:
-                on_running()
+                on_running(proc.pid)
             except Exception:
                 pass
 

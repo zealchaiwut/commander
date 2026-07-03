@@ -20,6 +20,7 @@ AC items verified:
 """
 from __future__ import annotations
 
+import shutil
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -334,6 +335,14 @@ class TestWorktreeRelease:
         with patch("subprocess.run", side_effect=_success):
             pool.create()
 
+        # subprocess is mocked, so `git worktree add` never makes a real dir;
+        # materialize the slot so acquire()/release() operate on an existing,
+        # healthy worktree and release() runs git clean/checkout rather than
+        # the recreate branch.
+        slot = pool_dir / "slot-0"
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+
         wt = pool.acquire()
 
         with patch("subprocess.run", side_effect=_success) as mock_run:
@@ -554,3 +563,69 @@ class TestWorktreeIsolation:
         # All 3 slots acquired without duplicates
         assert len(acquired) == 3
         assert len(set(acquired)) == 3  # All unique
+
+
+class TestWorktreePoolMissingSlot:
+    """Fix-loop retries must survive a slot directory disappearing mid-sprint."""
+
+    def test_acquire_recreates_missing_slot(self, tmp_path):
+        pool_dir = tmp_path / ".commander" / "runtime" / "worktree-pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        pool = WorktreePool(
+            pool_dir=pool_dir,
+            repo_root=repo_root,
+            base_branch="sprint/sprint-97.4",
+            slots=1,
+        )
+
+        def _mk_slot(path: Path) -> bool:
+            # Mirror the real _create_slot() contract: build the slot and
+            # report success so create() enqueues it (issue #1435).
+            path.mkdir(parents=True, exist_ok=True)
+            (path / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+            return True
+
+        with patch.object(pool, "_create_slot", side_effect=lambda p: _mk_slot(p)):
+            pool.create()
+
+        wt = pool.acquire()
+        shutil.rmtree(wt)
+
+        with patch.object(pool, "_create_slot", side_effect=lambda p: _mk_slot(p)):
+            pool.release(wt)
+            wt2 = pool.acquire()
+
+        assert wt2.is_dir()
+        assert (wt2 / ".git").exists()
+
+    def test_acquire_raises_when_slot_cannot_be_recreated(self, tmp_path):
+        pool_dir = tmp_path / "pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        wt_path = pool_dir / "slot-0"
+        pool = WorktreePool(pool_dir, repo_root, "main", slots=1)
+        pool._free = [wt_path]
+        pool._in_use = set()
+
+        with patch.object(pool, "_ensure_slot_ready", return_value=False):
+            with pytest.raises(RuntimeError, match="could not be recreated"):
+                pool.acquire()
+
+        assert wt_path in pool._free
+        assert pool._in_use == set()
+
+    def test_create_skips_failed_slots(self, tmp_path, capsys):
+        # A slot is "failed" when _create_slot() returns a falsy success flag;
+        # create() must keep those paths out of the free pool (issue #1435).
+        pool_dir = tmp_path / "pool"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir(parents=True)
+        pool = WorktreePool(pool_dir, repo_root, "main", slots=2)
+
+        with patch.object(pool, "_create_slot", return_value=False) as mock_create:
+            pool.create()
+
+        assert mock_create.call_count == 2
+        assert pool._free == []
+        assert "0 slot(s)" in capsys.readouterr().out

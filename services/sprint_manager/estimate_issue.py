@@ -75,27 +75,37 @@ def load_agent_instructions() -> str:
 
 
 def parse_files_to_touch(body: str) -> list:
-    """Extract repo-relative paths from the '## Files to touch' section of an issue body.
+    """Extract repo-relative paths from the '## Files to touch' section.
 
     Returns a deduplicated list of path strings (preserving first-seen order).
     Returns [] when the section is absent or contains no parseable paths.
     """
     in_section = False
+    in_comment = False
     seen: set = set()
     paths: list = []
     for line in body.split("\n"):
         if re.match(r"^#+\s+Files to touch", line, re.IGNORECASE):
             in_section = True
             continue
-        if in_section:
-            if re.match(r"^#", line):
-                break
-            stripped = line.strip()
-            if not stripped or stripped.startswith("<!--") or stripped == "-->":
-                continue
-            if stripped not in seen:
-                seen.add(stripped)
-                paths.append(stripped)
+        if not in_section:
+            continue
+        if re.match(r"^#", line):
+            break
+        stripped = line.strip()
+        # Handle multi-line HTML comments.
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if "<!--" in stripped:
+            if "-->" not in stripped:
+                in_comment = True
+            continue
+        # Collect non-empty paths.
+        if stripped and stripped not in seen:
+            seen.add(stripped)
+            paths.append(stripped)
     return paths
 
 
@@ -195,23 +205,27 @@ Now estimate this issue:
 
 Output ONLY the JSON object. No other text."""
 
-    cmd = [
-        "claude",
-        "--model", "claude-haiku-4-5-20251001",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "-p", prompt,
-    ]
-
     # Strip ANTHROPIC_API_KEY so the claude CLI authenticates via the Claude
     # subscription (keychain) instead of the API key. The configured key has no
     # credit balance, so leaving it set makes claude exit non-zero with
     # "Credit balance is too low" — surfaced upstream as a bogus model_error.
     # Matches how the dashboard strips the key for coder/tester subprocesses.
     _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    from services.sprint_manager.model_routing import apply_provider_env
+    _estimator_model = apply_provider_env(
+        _agent_env, "claude-haiku-4-5-20251001", repo=project,
+    )
+    cmd = [
+        "claude",
+        "--model", _estimator_model,
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "-p", prompt,
+    ]
+
     # Tag hook-recorded token_usage rows with the model (and role, if the
     # launcher didn't already set CLAUDE_AGENT_ROLE).
-    _agent_env["CLAUDE_MODEL"] = "claude-haiku-4-5-20251001"
+    _agent_env["CLAUDE_MODEL"] = _estimator_model
     _agent_env.setdefault("CLAUDE_AGENT_ROLE", "estimator")
     if project:
         _agent_env.setdefault("COMMANDER_PROJECT", project)

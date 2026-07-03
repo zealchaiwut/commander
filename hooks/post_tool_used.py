@@ -48,17 +48,19 @@ import urllib.request
 from pathlib import Path
 
 
-def _read_last_usage_from_transcript(transcript_path: str) -> tuple[int, int]:
+def _read_last_usage_from_transcript(transcript_path: str) -> tuple[int, int, int, int]:
     """Read the most recent token usage from a JSONL transcript file.
 
     Scans the transcript file from the end, finds the last assistant
-    entry with a non-zero usage block, and returns (input_tokens, output_tokens).
-    Returns (0, 0) if no usable entry is found.
+    entry with a non-zero usage block, and returns
+    (total_input, output, cache_read, cache_write).
+    `total_input` = raw_input + cache_read (backward-compat with sum_token_usage_window).
+    Returns (0, 0, 0, 0) if no usable entry is found.
     """
     try:
         path = Path(transcript_path)
         if not path.exists():
-            return 0, 0
+            return 0, 0, 0, 0
 
         # Read the last 200 lines (large enough to catch recent assistant messages)
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -80,18 +82,19 @@ def _read_last_usage_from_transcript(transcript_path: str) -> tuple[int, int]:
 
             input_tokens  = int(usage.get("input_tokens",  0) or 0)
             output_tokens = int(usage.get("output_tokens", 0) or 0)
+            cache_read  = int(usage.get("cache_read_input_tokens",    0) or 0)
+            cache_write = int(usage.get("cache_creation_input_tokens", 0) or 0)
 
-            # Also count cache_read as effective input (they're tokens processed)
-            cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
+            # total_input includes cache_read for backward compat with sum_token_usage_window
             total_input = input_tokens + cache_read
 
             if total_input or output_tokens:
-                return total_input, output_tokens
+                return total_input, output_tokens, cache_read, cache_write
 
     except Exception as exc:
         print(f"[post_tool_used] error reading transcript: {exc}", file=sys.stderr)
 
-    return 0, 0
+    return 0, 0, 0, 0
 
 
 def main():
@@ -102,7 +105,8 @@ def main():
         sys.exit(0)
 
     transcript_path = payload.get("transcript_path") or ""
-    input_tokens, output_tokens = _read_last_usage_from_transcript(transcript_path)
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens = \
+        _read_last_usage_from_transcript(transcript_path)
 
     # AC-4: log to stderr when discarding (does not block Claude)
     if not input_tokens and not output_tokens:
@@ -126,16 +130,22 @@ def main():
     # it the server falls back to the working dir's basename ("uat", "coder"),
     # which can't split cost per project once several projects share a machine.
     project = os.environ.get("COMMANDER_PROJECT") or None
+    # CCPROXY_PROFILE identifies the ICA metered path (issue #1672).
+    # Set by sprint_manager when agent_config.coder.profile / tester.profile is configured.
+    ccproxy_profile = os.environ.get("CCPROXY_PROFILE") or None
 
     event = {
-        "session_id":    session_id,
-        "event_type":    "token_usage",
-        "working_dir":   working_dir,
-        "input_tokens":  input_tokens,
-        "output_tokens": output_tokens,
-        "agent_role":    agent_role,
-        "model_name":    model_name,
-        "project":       project,
+        "session_id":        session_id,
+        "event_type":        "token_usage",
+        "working_dir":       working_dir,
+        "input_tokens":      input_tokens,
+        "output_tokens":     output_tokens,
+        "agent_role":        agent_role,
+        "model_name":        model_name,
+        "project":           project,
+        "cache_read_tokens":  cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "ccproxy_profile":   ccproxy_profile,
     }
 
     try:

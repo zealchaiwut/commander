@@ -9,17 +9,17 @@ AC items verified:
 """
 from __future__ import annotations
 
+import subprocess
 import sys
-import threading
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import services.sprint_manager.sprint_manager as sm
+import services.sprint_manager.sprint_manager as sm  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ class TestAutoMergeOnExitZero:
 
         def track_finish(*a, **kw):
             call_order.append("finish")
-            return True
+            return (True, [])  # (merge_ok, conflict_files)
 
         def track_gates(*a, **kw):
             call_order.append("gates")
@@ -210,7 +210,7 @@ class TestAutoMergeOnExitZero:
         with (
             patch.object(sm, "_find_feature_branch", return_value="feature/1-slug"),
             patch.object(sm, "_is_branch_merged_into", return_value=False),
-            patch.object(sm, "_call_finish_feature", return_value=True) as mock_finish,
+            patch.object(sm, "_call_finish_feature", return_value=(True, [])) as mock_finish,
             patch.object(sm, "_was_feature_merged_via_log", return_value=True),
             patch.object(sm, "_run_quality_gates", return_value=[
                 sm.GateResult(gate="pytest", passed=True, skipped=True),
@@ -284,18 +284,29 @@ class TestFailedOnlyOnNonZeroOrTestFailure:
     """AC-3: handle_post_tester returns failure ONLY for non-zero exit or gate fail."""
 
     def test_nonzero_exit_returns_failure(self):
-        """Tester exit code 1 → (False, ..., CRASH) regardless of branch state."""
-        ok, msg, cat = sm.handle_post_tester(
-            issue_num=10,
-            tester_exit_code=1,
-            skip_gates=False,
-            gate_pytest=True,
-            gate_lint=False,
-            gate_merge_preview=False,
-            gate_typecheck=False,
-            gate_design=False,
-        )
-        assert not ok, "Non-zero exit must return ok=False"
+        """Tester exit code 1 + NO work landed → (False, ..., CRASH).
+
+        Defensive update: a non-zero exit only CRASHes when no feature branch /
+        merge commit exists (genuine crash). When the work landed despite the
+        exit code, handle_post_tester runs gates instead — see
+        TestNonZeroSalvageWhenWorkLanded.
+        """
+        with (
+            patch.object(sm, "_try"),
+            patch.object(sm, "_find_feature_branch", return_value=None),
+            patch.object(sm, "_was_feature_merged_via_log", return_value=False),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=10,
+                tester_exit_code=1,
+                skip_gates=False,
+                gate_pytest=True,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+            )
+        assert not ok, "Non-zero exit with no work landed must return ok=False"
         assert cat == sm.FailureCategory.CRASH
         assert "1" in msg, f"Exit code must appear in message: {msg!r}"
 
@@ -346,17 +357,22 @@ class TestNonZeroBlocksMerge:
 
     @pytest.mark.parametrize("exit_code", [1, 2, 127, -1, -9])
     def test_nonzero_exit_blocks_merge(self, exit_code):
-        """Any non-zero exit code from tester must block merge (ok=False)."""
-        ok, msg, cat = sm.handle_post_tester(
-            issue_num=20,
-            tester_exit_code=exit_code,
-            skip_gates=False,
-            gate_pytest=False,
-            gate_lint=False,
-            gate_merge_preview=False,
-            gate_typecheck=False,
-            gate_design=False,
-        )
+        """Non-zero exit + no work landed must block merge (ok=False, CRASH)."""
+        with (
+            patch.object(sm, "_try"),
+            patch.object(sm, "_find_feature_branch", return_value=None),
+            patch.object(sm, "_was_feature_merged_via_log", return_value=False),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=20,
+                tester_exit_code=exit_code,
+                skip_gates=False,
+                gate_pytest=False,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+            )
         assert not ok, f"Exit code {exit_code} must block merge, but ok=True"
         assert cat == sm.FailureCategory.CRASH
 
@@ -428,18 +444,23 @@ class TestLogOutputIncludesExitCode:
     """AC-5: The summary message from handle_post_tester includes the exit code."""
 
     def test_nonzero_message_includes_exit_code(self):
-        """Non-zero exit: summary message must include the numeric exit code."""
+        """Non-zero exit + no work landed: summary message includes the exit code."""
         for exit_code in [1, 2, 42]:
-            ok, msg, cat = sm.handle_post_tester(
-                issue_num=30,
-                tester_exit_code=exit_code,
-                skip_gates=False,
-                gate_pytest=False,
-                gate_lint=False,
-                gate_merge_preview=False,
-                gate_typecheck=False,
-                gate_design=False,
-            )
+            with (
+                patch.object(sm, "_try"),
+                patch.object(sm, "_find_feature_branch", return_value=None),
+                patch.object(sm, "_was_feature_merged_via_log", return_value=False),
+            ):
+                ok, msg, cat = sm.handle_post_tester(
+                    issue_num=30,
+                    tester_exit_code=exit_code,
+                    skip_gates=False,
+                    gate_pytest=False,
+                    gate_lint=False,
+                    gate_merge_preview=False,
+                    gate_typecheck=False,
+                    gate_design=False,
+                )
             assert not ok
             assert str(exit_code) in msg, (
                 f"Exit code {exit_code} must appear in failure message: {msg!r}"
@@ -493,7 +514,7 @@ class TestFinishFeatureUsesRemoteRef:
     def test_finish_feature_merges_origin_ref(self, tmp_path):
         """finish_feature.py subprocess call must use `origin/<branch>` not `<branch>`."""
         import importlib.util
-        import types
+        import subprocess as _subprocess
 
         ff_path = REPO_ROOT / "scripts" / "finish_feature.py"
         assert ff_path.exists(), f"finish_feature.py not found at {ff_path}"
@@ -506,7 +527,7 @@ class TestFinishFeatureUsesRemoteRef:
         def fake_run(*cmd):
             calls.append(list(cmd))
             if cmd == ("git", "rev-parse", "HEAD"):
-                raise subprocess.CalledProcessError(1, cmd)
+                raise _subprocess.CalledProcessError(1, cmd)
             return ""
 
         def fake_try(*cmd):
@@ -621,3 +642,105 @@ class TestFetchBeforeBranchCheck:
             f"fetch must precede _find_feature_branch; call order: {call_order}"
         )
         assert ok, f"Expected success; msg={msg}"
+
+
+# ---------------------------------------------------------------------------
+# Defensive salvage: flaky `claude -p` exit but the work landed
+# ---------------------------------------------------------------------------
+
+class TestNonZeroSalvageWhenWorkLanded:
+    """A non-zero tester exit must NOT false-CRASH a ticket whose work landed.
+
+    The tester sometimes completes (tests pass, feature branch pushed) yet the
+    CLI returns non-zero. When a `feature/<N>-*` branch is present (or a merge
+    commit is already in target), handle_post_tester runs the quality gates and
+    merges instead of crashing — the gates still protect quality.
+    """
+
+    def _cfg(self, tmp_path):
+        cfg_stub = MagicMock()
+        cfg_stub.worktree_tester = tmp_path / "tester"
+        cfg_stub.worktree_tester_app = tmp_path / "tester" / "apps" / "dashboard"
+        cfg_stub.repo_name = None
+        cfg_stub.api_url = None
+        cfg_stub.documentor_enabled = False
+        cfg_stub.logs_dir = tmp_path / "logs"
+        return cfg_stub
+
+    def test_nonzero_with_branch_present_runs_gates_and_merges(self, tmp_path):
+        """exit=1 + feature branch present + gates pass → ok=True, gates before merge."""
+        call_order: list[str] = []
+
+        def track_finish(*a, **kw):
+            call_order.append("finish")
+            return (True, [])  # (merge_ok, conflict_files)
+
+        def track_gates(*a, **kw):
+            call_order.append("gates")
+            return [sm.GateResult(gate="pytest", passed=True, skipped=False)]
+
+        with (
+            patch.object(sm, "_try"),
+            patch.object(sm, "_find_feature_branch", return_value="feature/30-slug"),
+            patch.object(sm, "_is_branch_merged_into", return_value=False),
+            patch.object(sm, "_is_issue_merged_into_target", return_value=False),
+            patch.object(sm, "_was_feature_merged_via_log", return_value=False),
+            patch.object(sm, "_call_finish_feature", side_effect=track_finish),
+            patch.object(sm, "_run_quality_gates", side_effect=track_gates),
+            patch.object(sm, "_transition_safe"),
+            patch.object(sm, "_post_success_comment"),
+            patch.object(sm, "_post_agent_event"),
+            patch.object(sm, "sidecar_path", return_value=tmp_path / "sidecar.json"),
+            patch.object(sm, "REPO_ROOT", tmp_path),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=30,
+                tester_exit_code=1,
+                skip_gates=False,
+                gate_pytest=True,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+                cfg=self._cfg(tmp_path),
+                target_branch="sprint/sprint-51",
+            )
+
+        assert ok, f"Non-zero exit + work landed + gates pass must succeed; msg={msg}"
+        assert cat is None
+        assert call_order == ["gates", "finish"], (
+            f"gates must run before merge on the salvage path; got {call_order}"
+        )
+
+    def test_nonzero_with_branch_present_but_gates_fail_still_fails(self, tmp_path):
+        """exit=1 + branch present + gate FAIL → still ok=False (quality enforced)."""
+        with (
+            patch.object(sm, "_try"),
+            patch.object(sm, "_find_feature_branch", return_value="feature/31-slug"),
+            patch.object(sm, "_is_branch_merged_into", return_value=False),
+            patch.object(sm, "_is_issue_merged_into_target", return_value=False),
+            patch.object(sm, "_was_feature_merged_via_log", return_value=False),
+            patch.object(sm, "_run_quality_gates", return_value=[
+                sm.GateResult(gate="pytest", passed=False, skipped=False),
+            ]),
+            patch.object(sm, "_revert_to_sit"),
+            patch.object(sm, "_transition_safe"),
+            patch.object(sm, "_post_agent_event"),
+            patch.object(sm, "sidecar_path", return_value=tmp_path / "sidecar.json"),
+            patch.object(sm, "REPO_ROOT", tmp_path),
+        ):
+            ok, msg, cat = sm.handle_post_tester(
+                issue_num=31,
+                tester_exit_code=1,
+                skip_gates=False,
+                gate_pytest=True,
+                gate_lint=False,
+                gate_merge_preview=False,
+                gate_typecheck=False,
+                gate_design=False,
+                cfg=self._cfg(tmp_path),
+                target_branch="sprint/sprint-51",
+            )
+
+        assert not ok, "A failed gate must still block the salvage path"
+        assert cat in (sm.FailureCategory.PYTEST_FAIL, sm.FailureCategory.GATE_FAIL)

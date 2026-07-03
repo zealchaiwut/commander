@@ -1,5 +1,76 @@
 # Changelog
 
+## Sprint 105
+
+ICA-provider awareness pass. Agent roles can now route to a different LLM provider per sprint: `sprint.yaml` `agent_config.coder.profile` / `agent_config.tester.profile` are loaded onto `SprintConfig` and, via the new `get_role_profile()` helper, exported as `CCPROXY_PROFILE` in each role's dispatch subprocess — leaving the variable unset (so the inherited global wins) when no per-role profile is configured (#1671). To make the cost trade-off visible, the coder's resolved profile is captured as `coder_provider` on `IssueState`/the live snapshot and persisted to a new `agent_runs.provider` column at dispatch; when the provider is `ICA`, the live board (`project.html`) and run browser (`run_browser.html`) render a yellow **`caching: reduced`** badge with a tooltip explaining that the ICA proxy strips prompt-caching headers and re-sends full context each turn (#1673). The `/api/runs` payload and `get_sprint_live_snapshot` now surface `provider` / `coder_provider` accordingly.
+
+- [#1671](https://github.com/zealchaiwut/commander/issues/1671) Add per-role LLM provider routing via profile override — 2026-07-01
+- [#1673](https://github.com/zealchaiwut/commander/issues/1673) Show 'caching: reduced' indicator when provider is ICA — 2026-07-01
+
+## Sprint 104
+
+LLM-provider support pass: a global Anthropic/ICA backend toggle, broader rate-limit detection, and run-view provider badges. A new global setting `llmProvider` (`anthropic` | `ica`, default `anthropic`) gates which backend all newly dispatched agents use; it is switched only through the dedicated `POST /api/settings/provider` endpoint, which instructs the local claude-proxy to activate the matching profile (`POST {COMMANDER_PROXY_URL}/profile`, default `http://localhost:9090`) and persists the selection only after the proxy confirms — an unreachable or non-2xx proxy returns HTTP 503 with no silent fallback. `PUT /api/settings` now rejects `llmProvider` (HTTP 422) so the field can only change via the proxy-aware path. The Global Settings screen gains an "LLM Provider" card with Anthropic/ICA buttons and inline switch/error status. In-flight agent sessions keep their existing proxy connections; only the next dispatched agent inherits the change (#1667). Rate-limit/quota detection is extracted into `services/sprint_manager/api_client.py` (`is_retryable_rate_limit`) and extended to recognise ICA/IBM Cloud gateway shapes (`quota_exceeded`, `token_limit_exceeded`, `usage_limit_exceeded`, …) alongside the existing Anthropic OAuth 429 signals; both provider paths funnel into the same retry/backoff logic with no caller changes (#1669). The active provider at sprint start is captured on `SprintState.llm_provider`, persisted in `state.json`, and surfaced in the live snapshot (`llm_provider`) so the running header and per-ticket rows render a provider badge reflecting the backend actually in use for that run, not the current global setting (#1670).
+
+- [#1667](https://github.com/zealchaiwut/commander/issues/1667) Add global LLM provider toggle (Anthropic/ICA) to Commander settings — 2026-06-30
+- [#1669](https://github.com/zealchaiwut/commander/issues/1669) Extend rate-limit detection to handle ICA/IBM gateway error formats — 2026-06-30
+- [#1670](https://github.com/zealchaiwut/commander/issues/1670) Show LLM backend badge on dashboard run views — 2026-06-30
+
+## Sprint 97.2
+
+Follow-up hardening pass (re-run of sprint-97.1/97) covering sprint-manager concurrency, subprocess robustness, the issues mirror, and a few dashboard UI fixes. Concurrency and process safety: `SprintState.save` now serializes writes under a `threading.Lock` and persists atomically via `os.replace()` so concurrent-pipeline runs can't interleave or corrupt `state.json` (#776), and dual active-agent cards now read per-issue `coder_pid`/`tester_pid` instead of a shared field so each card shows the correct PID (#777). Subprocess calls are bounded: deploy/restart helpers (#747) and the stale-branch scan/cleanup `gh` calls (#849) now pass explicit timeouts so a hung child can't wedge the pipeline. Sprint-state correctness: `RUN_MUTABLE_LABELS` now includes `blocked` by importing the canonical constant from `state_machine` (with `_apply_in_progress_label`/`_apply_needs_rework_label` helpers) so a blocked ticket stays mutable mid-run (#814). Issues mirror: `_fetch_issues_conditional` follows the `Link` rel="next" pagination header, fixing the 100-issue cap that silently truncated the mirror (#815). Events/activity API: `agent_runs` duration enrichment is scoped by `sprint_label` so durations no longer bleed across sprints (#820). Deploy config: `GET/PUT /api/projects/{slug}/deploy-config` gains a seed-only-project fallback so newly-seeded projects resolve config instead of 404-ing (#746). Frontend CI commits `package-lock.json` and switches from `npm install` to `npm ci` for reproducible builds (#837). Tooling: `doctor.py` now probes Claude CLI auth via a `-p` empty-prompt call rather than only `--version`, catching authenticated-but-broken setups (#868). Dashboard UI: the History loose-end band and Details now surface all failed reconciliation checks instead of dropping non-`stale_labels` failures (#1154), and ancestor expand/collapse state is restored from `localStorage` on render so it survives reloads (#1155). No new schema or endpoints — internal correctness, robustness, and UI fixes only.
+
+- [#746](https://github.com/zealchaiwut/commander/issues/746) Add seed-only-project fallback to GET/PUT deploy-config — 2026-06-25
+- [#747](https://github.com/zealchaiwut/commander/issues/747) Add timeouts to deploy/restart subprocess calls — 2026-06-25
+- [#776](https://github.com/zealchaiwut/commander/issues/776) Serialize SprintState.save under concurrent pipeline mode — 2026-06-25
+- [#777](https://github.com/zealchaiwut/commander/issues/777) Per-issue coder_pid/tester_pid fixes shared PID on dual agent cards — 2026-06-25
+- [#814](https://github.com/zealchaiwut/commander/issues/814) Add "blocked" to RUN_MUTABLE_LABELS via state_machine constant — 2026-06-25
+- [#815](https://github.com/zealchaiwut/commander/issues/815) Follow Link pagination in issues-mirror sync (fix 100-issue cap) — 2026-06-25
+- [#820](https://github.com/zealchaiwut/commander/issues/820) Scope agent_runs duration enrichment by sprint_label in events API — 2026-06-25
+- [#837](https://github.com/zealchaiwut/commander/issues/837) Commit package-lock.json and use npm ci in frontend CI — 2026-06-25
+- [#849](https://github.com/zealchaiwut/commander/issues/849) Add timeout to gh subprocess calls in stale-branch scan/cleanup — 2026-06-25
+- [#868](https://github.com/zealchaiwut/commander/issues/868) doctor.py claude check: probe auth, not just --version — 2026-06-25
+- [#1154](https://github.com/zealchaiwut/commander/issues/1154) Surface all failed reconciliation checks in loose-end band and Details — 2026-06-25
+- [#1155](https://github.com/zealchaiwut/commander/issues/1155) Restore ancestor expand/collapse state from localStorage on render — 2026-06-25
+## Sprint 99.1
+
+Concurrent-sprint hardening pass. A `ConcurrentStateGuard` (`services/sprint_manager/concurrent_scheduler.py`) wraps all worker-thread read-modify-writes on `SprintState` token counters and `state.save()` calls behind a single lock when `max_coder_slots > 1`, preventing counter drops and interleaved file writes under parallel execution (#1436). A `tester_worktree_guard` context manager (`serialization.py`) serializes every tester task's checkout/rebase/pytest/merge sequence against the single shared tester worktree clone, stopping concurrent tester tasks from colliding on `git index.lock`, crossing feature branches, and cross-contaminating pytest output (#1438). `max_coder_slots` is now clamped to the hard cap of 4 in `load_config` so the worker-thread count and worktree-pool size stay aligned (#1437). Worktree pool no longer re-enqueues a failed slot into the free pool after setup failure, preventing subsequent tasks from drawing a broken slot (#1435). Rebase recovery's rollback path now re-checks out the `develop` branch before releasing the tester worktree, ensuring the clone is not left stranded on a feature branch after a failed rebase (#1439). The live snapshot now carries `active_coder_slots` and `active_tester_slots` alongside the capacity values, wiring up the previously inert multi-lane board view (#1440). Split confirm adds best-effort rollback compensation on partial failure: if a child issue creation fails mid-split, already-created children are closed on GitHub and the response surfaces which numbers need manual cleanup (#1453). The `strip_sprint_label` helper now removes SIT and UAT workflow-state labels in addition to in-progress/backlog ones, preventing stale labels from leaking onto child tickets after a split (#1454). `dispatch._fetch_dispatch_issue_body` is extracted into its own helper that returns an empty-string sentinel on failure (with a WARN log) so `_build_design_block` skips its own fallback fetch instead of silently issuing a second round-trip per ticket (#1573). `repair_sprint_collisions.py`'s `ASSERT_ABSENT` check is scoped to `(label, project)` so a label present in another project does not incorrectly block repair (#1481). Dead `_apply_in_progress_label`/`_apply_needs_rework_label` helpers are removed from `dispatch.py` (#1585). `doctor.py`'s Claude CLI check is split into two gates — a fast binary-reachability probe (`claude --version`) and a documented auth probe (`claude -p "" --output-format json`) that makes a real minimal inference call; the check name and cost note are surfaced to the operator (#1586). The unreachable `except subprocess.TimeoutExpired` handler in `_is_merged` is removed (#1587). `history.js` exports seven previously file-local render helpers (`_histVerbsHtml`, `_histHeadLinksHtml`, `_histHeadActionsHtml`, `_histMetricsHtml`, `_histGanttHtml`, `_histHeadHintsHtml`, `_histPartition`) so they are testable without DOM side effects, and the stale `_smgmtNextUpLabel` global-directive entry is removed from `board-render.js` (#1588, #1574). `smgmtFixOrderViolation` is converted from an async backend-writing function to a synchronous DOM-only reorder, matching the UI-only scope declared by #1422 (#1446). `parse_files_to_touch` now tracks multi-line HTML comment state so lines inside `<!-- … -->` blocks that span multiple lines are not counted as touched files (#1429).
+
+- [#1429](https://github.com/zealchaiwut/commander/issues/1429) parse_files_to_touch mishandles multi-line HTML comments — 2026-06-29
+- [#1435](https://github.com/zealchaiwut/commander/issues/1435) Worktree pool enqueues failed slots into the free pool — 2026-06-29
+- [#1436](https://github.com/zealchaiwut/commander/issues/1436) Concurrent scheduler mutates shared SprintState without a lock — 2026-06-29
+- [#1437](https://github.com/zealchaiwut/commander/issues/1437) max_coder_slots not clamped to hard cap 4 in load_config — 2026-06-29
+- [#1438](https://github.com/zealchaiwut/commander/issues/1438) Concurrent test tasks share a single tester worktree — 2026-06-29
+- [#1439](https://github.com/zealchaiwut/commander/issues/1439) Rebase recovery leaves tester worktree on a feature branch — 2026-06-29
+- [#1440](https://github.com/zealchaiwut/commander/issues/1440) Multi-lane view inert — live snapshot omits max_coder_slots — 2026-06-29
+- [#1446](https://github.com/zealchaiwut/commander/issues/1446) Fix order persists to backend despite #1422 UI-only scope — 2026-06-29
+- [#1453](https://github.com/zealchaiwut/commander/issues/1453) split confirm has no rollback on partial failure — 2026-06-29
+- [#1454](https://github.com/zealchaiwut/commander/issues/1454) child label strip set omits SIT/UAT workflow-state labels — 2026-06-29
+- [#1481](https://github.com/zealchaiwut/commander/issues/1481) Scope ASSERT_ABSENT lookup to (label, project) in repair script — 2026-06-29
+- [#1573](https://github.com/zealchaiwut/commander/issues/1573) dispatch double-fetches issue body on gh failure path (silent swallow) — 2026-06-29
+- [#1574](https://github.com/zealchaiwut/commander/issues/1574) Stale eslint /* global */ entry for now-local _smgmtNextUpLabel — 2026-06-29
+- [#1585](https://github.com/zealchaiwut/commander/issues/1585) Remove or wire up dead _apply_in_progress_label/_apply_needs_rework_label helpers — 2026-06-29
+- [#1586](https://github.com/zealchaiwut/commander/issues/1586) doctor.py claude auth probe performs a real inference round-trip on every run — 2026-06-29
+- [#1587](https://github.com/zealchaiwut/commander/issues/1587) Unreachable except subprocess.TimeoutExpired in _is_merged — 2026-06-29
+- [#1588](https://github.com/zealchaiwut/commander/issues/1588) history.js export/global-comment changes exceed #1154 loose-end-band scope — 2026-06-29
+
+## Sprint 96
+
+Follow-up hardening pass on Sprint 95's Definition-of-Ready plumbing plus assorted sprint-manager code-quality cleanups surfaced by code review. The board readiness check (`_smgmtReadinessCheck`) and the preflight AC detector now use the same anchored heading regexes as the canonical `parse_ticket_spec` (`^#{1,6}\s+…\s*$`), eliminating drift between the frontend and backend parsers, and the board readiness check gains a "missing design ref" reason so DoR coverage matches the Design Refs requirement (#1538, #1539, #1545). Design-ref handling is tightened: slugs are normalized via `_slugify_heading` before lookup so headings with punctuation/casing resolve correctly (#1543), `_build_design_block` now logs a WARNING instead of silently swallowing `gh`-fetch failures (#1540), and coder dispatch fetches the issue body once and passes it into `_build_design_block`, dropping the redundant per-dispatch `gh api` call (#1541). `lint_ticket_spec.py` now exits cleanly with a stderr message instead of a traceback when the `gh` API call fails (#1537). Several silent-drift and robustness fixes: the duplicated `FailureCategory` class in `pipeline.py`/`dispatch.py` is replaced by a single import from `failures.py` (#1511), the `_git_worktree_root`/`_parse_dotenv_value`/`_find_crg_bin` worktree helpers are deduplicated so `worktree.py` is the sole source of truth (#1502), `gates._lookup_in_sm` compares functions by code origin so `importlib.reload(gates)` no longer triggers infinite recursion in cross-test runs (#1500), `children_of` logs a warning on the label-only fallback path (#1498), and the bare `except` in `audit_sprint_collisions._collect_label_projects` is narrowed to `sqlite3.OperationalError` (#1494). No schema, endpoint, or behavior-contract changes — internal correctness and consistency only.
+
+- [#1494](https://github.com/zealchaiwut/commander/issues/1494) Narrow bare except in audit_sprint_collisions._collect_label_projects — 2026-06-24
+- [#1498](https://github.com/zealchaiwut/commander/issues/1498) children_of label-only fallback emits warning (AC#4 gap) — 2026-06-24
+- [#1500](https://github.com/zealchaiwut/commander/issues/1500) Fix gates.py proxy identity check under importlib.reload — 2026-06-24
+- [#1502](https://github.com/zealchaiwut/commander/issues/1502) Deduplicate worktree helper copies into worktree.py — 2026-06-24
+- [#1511](https://github.com/zealchaiwut/commander/issues/1511) Dedupe FailureCategory: import from failures.py in pipeline.py & dispatch.py — 2026-06-24
+- [#1537](https://github.com/zealchaiwut/commander/issues/1537) Handle gh API failure in lint_ticket_spec.py without traceback — 2026-06-24
+- [#1538](https://github.com/zealchaiwut/commander/issues/1538) Add 'missing design ref' reason to DoR readiness check — 2026-06-24
+- [#1539](https://github.com/zealchaiwut/commander/issues/1539) Align board readiness heading patterns with canonical parser — 2026-06-24
+- [#1540](https://github.com/zealchaiwut/commander/issues/1540) Log WARNING on gh-fetch failure in _build_design_block — 2026-06-24
+- [#1541](https://github.com/zealchaiwut/commander/issues/1541) Avoid redundant gh API call per dispatch in _build_design_block — 2026-06-24
+- [#1543](https://github.com/zealchaiwut/commander/issues/1543) Normalize design ref slug via _slugify_heading before lookup — 2026-06-25
+- [#1544](https://github.com/zealchaiwut/commander/issues/1544) Isolate unrelated lint refactors from board readiness work — 2026-06-25
+- [#1545](https://github.com/zealchaiwut/commander/issues/1545) Align frontend AC-detection regex with canonical parser — 2026-06-25
+
 ## Sprint 95
 
 Definition-of-Ready (DoR) plumbing end to end. A single canonical ticket-spec parser (`services/sprint_manager/ticket_spec.py`, `parse_ticket_spec`) becomes the one source of truth for pulling Acceptance Criteria, Design Refs, Test Plan / UAT Steps, and Out of Scope out of an issue body — heading-synonym aware and never-raising — and the preflight router's hand-rolled `"## Acceptance Criteria" in body` check is replaced by it (#1485). A `scripts/lint_ticket_spec.py` CLI reports each section present/missing for an issue (exit 1 if any missing). The Planning board now renders a per-ticket ✓/✗ readiness badge (`_smgmtReadinessCheck`: missing AC, missing test plan, missing estimate, XL-split-required) and gates the Run Sprint button by DoR mode — `block`, `warn`, or `off` — driven by `COMMANDER_DOR_MODE` / the `definition_of_ready_mode` global setting and surfaced to the UI in `/api/environment` (#1487). At coder dispatch the sprint manager injects a DESIGN.md context block built from the ticket's `## Design Refs` (each `DESIGN.md#slug` resolved to its section text, capped at 6000 chars; a compact heading index is injected when no Design Refs are present), warning on unresolved slugs (#1488). The BA agent and the `feature.md` issue template now emit a `## Design Refs` section, and `create_ticket.py` ships a DoR-compliant `TEMPLATE_BODY` so manually-filed tickets start ready (#1489).
@@ -483,3 +554,128 @@ and analytics. No GitHub ticket — shipped directly to `hotfix/board-history-ru
 - #344: [follow-up] app.js: Add timeout to preview endpoint fetch in rerun modal
 - #345: [follow-up] check_neon_connection.py: Consolidate psycopg2 import error handling
 - #346: [follow-up] app.js: Remove unused RERUN_STRIP_LABELS constant
+
+## Sprint 98.1
+
+Follow-up hardening pass (re-run of sprint-98) across the timeline projection, model routing, sprint-label resolution, and frontend design-token/accessibility plumbing. The sprint-timeline `projected_finish` math is corrected: `running_remaining_min` is renamed to `running_remaining` and serial mode now *sums* every running issue's remaining time (both must finish) while pipeline mode takes the *max* (they overlap), fixing an understated finish estimate in serial dispatch (#1167); the `timeline_service` data helpers (`_get_sprint_issues`, `_get_agent_runs`, `_get_settings`, `_get_sprint_row`, `_get_calibration_records`, `_get_launch_issue_order`) now log a WARNING with traceback instead of silently swallowing exceptions (#1169). Coder model routing gains `.yml` in `_DOCS_PATH_EXTENSIONS` so `.yml`-only changes route as docs/config alongside `.yaml`/`.md`/`.json` (#1428), and serial dispatch now sets `issue_state.coder_routing_reason` so the running-pane coder badge shows its routing-reason tooltip (#1427). `rebuild_calibration_cache` threads `DB_PATH` into `_calibration_absorb_state_file` so an explicit cache rebuild uses the SQLite size-label fallback (#1364). Sprint-label resolution is hardened against zombie sprints: `_all_sprint_label_names` now intersects mirror-derived sprint labels against the live `gh` label registry, so a deleted sprint label lingering in stale closed-issue mirror rows no longer resurrects in `/api/sprints` — falling back to the unfiltered mirror only when the live list is empty (gh down / offline) (#1355). The mis-sizing history rebuild (`rebuild_mis_sizing_history`) now logs a WARNING on a `gh issue list` non-zero exit or exception instead of swallowing it, and returns a `labels_fetched` flag in the rebuild response (#1396). On the frontend, the home project badge validates the project color against a fixed palette and falls back to the gray class for non-palette values (#1174); the top-level tab strip's roving tabindex now uses a `_GROUP_CHILDREN` map and a new exported `computeRovingTabindex()` helper so a dropdown-group trigger (manage/planning) stays keyboard-reachable when one of its child tabs is active, fixing the case where no tab was Tab-focusable (#1175); `project.html`'s inline `:root` token block that shadowed the canonical `tokens.css` is removed (only the page-specific `--sidebar-width` remains) (#1200); and impeccable rule suppressions are scoped per-file via `impeccable-disable` comments in `project.html`/`project-todo.js` instead of disabled globally (#1205). The test artifact `.commander/settings_store.json` accidentally committed under #1342 is removed from version control and gitignored (#1359). No schema or endpoint changes — correctness, observability, accessibility, and cleanup only.
+
+- [#1167](https://github.com/zealchaiwut/commander/issues/1167) Fix misleading running_remaining_min name and serial-mode summing in timeline projected_finish — 2026-06-25
+- [#1169](https://github.com/zealchaiwut/commander/issues/1169) Log swallowed exceptions in timeline_service data helpers — 2026-06-25
+- [#1174](https://github.com/zealchaiwut/commander/issues/1174) Home project badge: fall back to default color class for non-palette values — 2026-06-25
+- [#1175](https://github.com/zealchaiwut/commander/issues/1175) Roving tabindex: keep dropdown-group tab focusable via computeRovingTabindex helper — 2026-06-26
+- [#1200](https://github.com/zealchaiwut/commander/issues/1200) Consolidate design tokens — remove inline :root block shadowing tokens.css in project.html — 2026-06-26
+- [#1205](https://github.com/zealchaiwut/commander/issues/1205) Scope impeccable rule suppressions per-file instead of disabling globally — 2026-06-26
+- [#1355](https://github.com/zealchaiwut/commander/issues/1355) Zombie sprints: filter mirror sprint labels against live registry to drop deleted labels — 2026-06-26
+- [#1359](https://github.com/zealchaiwut/commander/issues/1359) Remove accidentally committed .commander/settings_store.json test artifact — 2026-06-26
+- [#1364](https://github.com/zealchaiwut/commander/issues/1364) Thread db_path into rebuild_calibration_cache for SQLite size-label fallback — 2026-06-26
+- [#1396](https://github.com/zealchaiwut/commander/issues/1396) Surface GitHub fetch failures in mis-sizing history rebuild — 2026-06-26
+- [#1427](https://github.com/zealchaiwut/commander/issues/1427) Serial dispatch sets coder_routing_reason for badge tooltip — 2026-06-26
+- [#1428](https://github.com/zealchaiwut/commander/issues/1428) Add .yml to docs-only routing extensions — 2026-06-26
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

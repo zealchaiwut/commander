@@ -52,8 +52,7 @@ def _insert_sprint(label: str, project: str, parent_label: str | None = None) ->
             """
             INSERT INTO sprints (label, project, state, created_at, parent_label)
             VALUES (?, ?, 'running', '2026-01-01T00:00:00Z', ?)
-            ON CONFLICT(label) DO UPDATE SET
-                project = excluded.project,
+            ON CONFLICT(label, project) DO UPDATE SET
                 parent_label = COALESCE(excluded.parent_label, sprints.parent_label)
             """,
             (label, project, parent_label),
@@ -230,10 +229,14 @@ class TestDeriveOutcomeLifecycleProjectScoping:
 # ── AC5: reconcile service passes project to get_sprint_children ──────────────
 
 class TestReconcileServicePassesProject:
-    """AC5: sprint_reconcile_service._lineage_fully_in_develop passes project
-    to get_sprint_children so it doesn't pick up another project's children."""
+    """AC5: get_sprint_children is project-scoped so a reconcile-adjacent lookup
+    doesn't pick up another project's children.
 
-    def test_lineage_fully_in_develop_uses_project_scoped_children(self, tmp_path):
+    (Originally written against sprint_reconcile_service._lineage_fully_in_develop,
+    deleted in issue #1694 as dead code with zero production callers — the
+    underlying project-scoping guarantee this test verifies is unchanged.)"""
+
+    def test_get_sprint_children_is_project_scoped(self, tmp_path):
         # commander child exists; perf-coach has a stray child too
         _insert_sprint("sprint-66.1", _COMMANDER, parent_label=_BASE)
         _insert_sprint("sprint-66.2", _PERF_COACH, parent_label=_BASE)
@@ -313,4 +316,31 @@ class TestFullCrossProjectIndependence:
         projects_in_result = {r.get("project") for r in result["sprints"]}
         assert _PERF_COACH not in projects_in_result, (
             f"perf-coach sprint must not appear in commander's history: {result['sprints']}"
+        )
+
+    def test_perf_coach_never_leaks_via_disk_resolve(self, tmp_path):
+        """perf-coach lifecycle rows must not be reassigned to commander via disk."""
+        _insert_sprint("sprint-77", _PERF_COACH)
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE sprints SET state='needs_rework' WHERE label=? AND project=?",
+                ("sprint-77", _PERF_COACH),
+            )
+            conn.commit()
+
+        sprint_dir = tmp_path / "sprints"
+        sprint_dir.mkdir()
+        (sprint_dir / "sprint-77-plan.json").write_text(
+            '{"project": "zealchaiwut/commander", "state": "needs_rework"}',
+            encoding="utf-8",
+        )
+
+        from routers import sprint_history_service as svc  # noqa: PLC0415
+
+        with patch.object(svc, "_resolve_sprints_search_dirs", return_value=[sprint_dir]):
+            result = svc.get_sprint_history(project=_COMMANDER, active_only=True)
+
+        labels = [r["label"] for r in result["sprints"]]
+        assert "sprint-77" not in labels, (
+            "perf-coach sprint-77 must not appear in commander History"
         )

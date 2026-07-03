@@ -56,6 +56,8 @@ from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
 from .xl_suggestions import router as xl_suggestions_router
 from .sprint_collisions import router as sprint_collisions_router
+from .resolve_conflict import router as resolve_conflict_router
+from .llm_provider import router as llm_provider_router
 
 __all__ = [
     "activity_router",
@@ -108,4 +110,6 @@ __all__ = [
     "mis_sizing_router",
     "xl_suggestions_router",
     "sprint_collisions_router",
+    "resolve_conflict_router",
+    "llm_provider_router",
 ]

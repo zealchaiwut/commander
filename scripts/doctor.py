@@ -26,6 +26,10 @@ Usage::
 
 Exit code is ``0`` only when every check passes; non-zero (``1``) with a
 summary of all failures when any check fails.
+
+Cost note (issue #1586): the Claude auth check issues a minimal Claude API
+(inference) call to validate the OAuth token, so each ``doctor.py`` run
+consumes a little subscription quota. See ``check_claude_cli`` for details.
 """
 from __future__ import annotations
 
@@ -84,12 +88,33 @@ def _run(cmd, timeout: int = DEFAULT_TIMEOUT):
 # ── Individual checks ────────────────────────────────────────────────────────
 
 def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
-    """`claude` CLI is on the service PATH and answers a cheap probe.
+    """`claude` CLI is on the service PATH and its OAuth token is live (issue #868).
 
-    Uses ``claude --version`` — a fast probe that confirms the binary is
-    reachable and runnable, never a full agent run (issue #789 separation).
+    Two-gate check (issue #789 separation — never a full agent run):
+
+    Gate 1 — reachability: ``claude --version`` confirms the binary is installed
+    and executable. Fails immediately with a "CLI not found" message when the
+    binary is absent or crashes.
+
+    Gate 2 — auth probe: ``claude -p "" --output-format json`` exercises the
+    OAuth token with the lightest possible invocation. An auth error here
+    indicates a missing or expired token, not a missing binary, and is reported
+    with a distinct fix message that guides the user to log in.
+
+    Cost note (issue #1586): unlike the sibling ``gh auth status`` check (which
+    is auth-only and makes no API work), this Gate-2 probe issues a *real* —
+    though minimal — model inference round-trip and therefore consumes
+    subscription quota on every ``doctor.py`` run. The check name and the
+    operator-visible status line surface this so the cost is never silent.
+
+    If the ``claude`` CLI ever ships a documented auth-only flag that validates
+    the OAuth token without any inference (issue #1586 AC4), switch Gate 2 to
+    that flag and drop the "minimal inference call" note below. No such flag is
+    documented as of this writing, so the probe — and the note — stay.
     """
-    name = "claude CLI reachable"
+    name = "Claude CLI (auth — makes a minimal inference call)"
+
+    # ── Gate 1: reachability ─────────────────────────────────────────────────
     path = which("claude")
     if not path:
         return _result(
@@ -104,7 +129,7 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             ),
         )
     try:
-        proc = runner(["claude", "--version"])
+        ver_proc = runner(["claude", "--version"])
     except FileNotFoundError:
         return _result(
             name,
@@ -117,17 +142,57 @@ def check_claude_cli(*, which=shutil.which, runner=_run) -> CheckResult:
             False,
             fix=f"`claude --version` timed out (>{DEFAULT_TIMEOUT}s); check the install.",
         )
-    if proc.returncode != 0:
+    if ver_proc.returncode != 0:
         return _result(
             name,
             False,
             fix=(
-                "`claude --version` returned non-zero. Re-authenticate Claude "
-                "Code (`claude` then `/login`) and verify the install."
+                "`claude --version` returned non-zero. Verify the Claude Code "
+                "install and ensure the binary is on the service PATH."
             ),
-            detail=(proc.stderr or "").strip(),
+            detail=(ver_proc.stderr or "").strip(),
         )
-    return _result(name, True, detail=f"{path} ({(proc.stdout or '').strip()})")
+
+    # ── Gate 2: auth probe ───────────────────────────────────────────────────
+    # NOTE (issue #1586): `claude -p "" --output-format json` is a REAL model
+    # inference round-trip, not a pure auth check. It is the lightest possible
+    # invocation, but it still hits the API and consumes subscription quota on
+    # every run. Keep it the lightest call available; switch to an auth-only
+    # flag (and remove this note) if `claude` ever documents one.
+    try:
+        auth_proc = runner(["claude", "-p", "", "--output-format", "json"])
+    except FileNotFoundError:
+        return _result(
+            name,
+            False,
+            fix="Install Claude Code and put `claude` on the service PATH.",
+        )
+    except subprocess.TimeoutExpired:
+        return _result(
+            name,
+            False,
+            fix=f"Claude auth probe timed out (>{DEFAULT_TIMEOUT}s); check network/auth.",
+        )
+    if auth_proc.returncode != 0:
+        return _result(
+            name,
+            False,
+            fix=(
+                "Claude CLI is installed but not authenticated. Run `claude` "
+                "and log in via `/login`, or set CLAUDE_CODE_OAUTH_TOKEN in the "
+                "launchd plist EnvironmentVariables for headless auth."
+            ),
+            detail=((auth_proc.stderr or "") + (auth_proc.stdout or "")).strip(),
+        )
+    return _result(
+        name,
+        True,
+        detail=(
+            f"{path} — reachable and authenticated via a minimal inference "
+            f"probe (consumes a little subscription quota) "
+            f"({(ver_proc.stdout or '').strip()})"
+        ),
+    )
 
 
 def check_gh_cli(*, which=shutil.which, runner=_run) -> CheckResult:
@@ -475,7 +540,6 @@ CHECKS = [
     check_db_path_writable,
     check_plist_path,
     check_headless_tokens,
-    check_headless_gh_token_valid,
 ]
 
 
@@ -543,7 +607,12 @@ def run_doctor() -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Validate this host is ready to run a Commander sprint."
+        description="Validate this host is ready to run a Commander sprint.",
+        epilog=(
+            "Note: the Claude auth check makes a minimal Claude API (inference) "
+            "call to validate the OAuth token, so each run consumes a little "
+            "subscription quota."
+        ),
     )
     parser.add_argument(
         "--json",

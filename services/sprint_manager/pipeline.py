@@ -35,11 +35,25 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+from services.sprint_manager.failures import FailureCategory  # noqa: E402
+from services.sprint_manager.serialization import (  # noqa: E402
+    tester_worktree_guard,
+)
+
 if TYPE_CHECKING:
     from services.sprint_manager.state import IssueState
 
 # Cap on coder attempts per ticket before it is dropped as needs-rework.
 DEFAULT_MAX_ATTEMPTS = 3
+
+# A MERGE_CONFLICT whose signature CHANGES between attempts is almost always a
+# rebase race (a sibling ticket merged and moved the base), not a defect in this
+# ticket's code. Such races get this many FREE retries that do NOT count against
+# the code-fix budget above, so a racing ticket still gets its real coder
+# attempts instead of exhausting on transient conflicts (the #1053 saga: 3
+# attempts all burned by races vs #1049 while its own tests passed). An IDENTICAL
+# repeated conflict is treated as a genuine overlap and exhausts normally.
+MERGE_CONFLICT_FREE_RETRIES = 3
 
 # Kill-switch env var: when truthy, serial mode is forced regardless of any
 # pipeline_mode setting value.
@@ -59,6 +73,7 @@ class StageResult(Enum):
     REJECT = "reject"    # tester only: send back to the coder queue
     FAIL = "fail"        # infra/non-retryable: drop, no rework label
     EXHAUST = "exhaust"  # tester only: consecutive identical failure — finalize needs-rework immediately
+    RETRY_FREE = "retry_free"  # tester only: transient merge-conflict race — requeue WITHOUT counting an attempt
 
 
 def pipeline_mode_enabled(
@@ -165,6 +180,11 @@ def _run_serial(
 
         test_res = test_fn(ticket, attempt)
         result.order.append((ticket, "tester", attempt))
+        if test_res is StageResult.RETRY_FREE:
+            # Transient merge-conflict race — requeue without burning an attempt.
+            attempts[ticket] -= 1
+            work.appendleft(ticket)
+            continue
         _apply_tester_outcome(
             ticket, attempt, test_res, result, work, max_attempts,
             requeue_front=True,
@@ -277,6 +297,11 @@ def _run_pipeline(
                     result.needs_rework.append(ticket)
                     if on_needs_rework:
                         on_needs_rework(ticket)
+                elif test_res is StageResult.RETRY_FREE:
+                    # Transient merge-conflict race — requeue without burning an
+                    # attempt (decrement nets out the next coder pop's increment).
+                    attempts[ticket] -= 1
+                    coder_q.appendleft(ticket)
                 elif test_res is StageResult.REJECT:
                     if attempt >= max_attempts:
                         terminal.add(ticket)
@@ -371,26 +396,6 @@ except (ImportError, ModuleNotFoundError):
 # the moved functions use those names, so we alias them here.
 _StageResult = StageResult
 _run_pipeline_level = run_level
-
-# ── FailureCategory (mirrors sprint_manager.FailureCategory) ─────────────────
-
-
-class FailureCategory:
-    """String constants for dispatch failure categories — mirrors sprint_manager.FailureCategory."""
-
-    HANG             = "HANG"
-    CRASH            = "CRASH"
-    GATE_FAIL        = "GATE_FAIL"
-    TESTER_REJECTED  = "TESTER_REJECTED"
-    RETRY_EXHAUSTED  = "RETRY_EXHAUSTED"
-    CODER_NO_WORK    = "CODER_NO_WORK"
-    MERGE_CONFLICT   = "MERGE_CONFLICT"
-    LINT_FAIL        = "LINT_FAIL"
-    PYTEST_FAIL      = "PYTEST_FAIL"
-    REBASE_CONFLICT  = "REBASE_CONFLICT"
-    # Infra/env failure (e.g. pytest binary missing) — not in _LOGIC_FAILURE_CATEGORIES.
-    ENV_ERROR        = "ENV_ERROR"
-
 
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
@@ -673,6 +678,25 @@ def _run_pipeline_dispatch(
     by_num = {iss.number: iss for iss in state.issues}
     pctx: dict[int, dict] = {}
 
+    # issue #1436: in concurrent mode (max_coder_slots>1) the role-flexible
+    # scheduler runs _coder_stage/_tester_stage in multiple worker threads,
+    # outside its own scheduling lock. Those stages do non-atomic RMW on
+    # state.total_tokens_in/out and call state.save() — racing writers
+    # can drop token counts and interleave the single state-file write. Route
+    # every worker-thread counter mutation and save through one lock via this
+    # guard. Single-slot runs (concurrent=False) take no lock — zero overhead,
+    # identical code path to pre-fix behaviour.
+    from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415
+        ConcurrentStateGuard,
+    )
+    _state_guard = ConcurrentStateGuard(
+        state, state_path, concurrent=state.max_coder_slots > 1,
+    )
+
+    def _save_state() -> None:
+        """Persist sprint state, serialized in concurrent mode (issue #1436)."""
+        _state_guard.save()
+
     def _finalize_skip(num, ist, reason, category, *, tag, gate=False):
         ist.set_agent_status("failed")
         ist.failure_reason = reason
@@ -706,7 +730,7 @@ def _run_pipeline_dispatch(
             gate=gate, sprint_label=label,
         )
         _neon_ticket_status(label, num, "failed", eff_sprints_dir)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     def _coder_stage(num, attempt):
@@ -730,7 +754,7 @@ def _run_pipeline_dispatch(
         ctx["skip_coder"] = skip_coder
 
         ist.set_agent_status("queued")
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
 
         if skip_coder:
@@ -757,14 +781,15 @@ def _run_pipeline_dispatch(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
         _transition_safe(num, _TicketState.IN_PROGRESS, actor="sprint_manager", repo_name=eff_repo)
 
-        def _on_coder_running(_ist=ist):
+        def _on_coder_running(pid=None, _ist=ist):
             _ist.set_agent_status("coder_running")
+            _ist.coder_pid = pid
             _neon_ticket_status(label, num, "running", eff_sprints_dir)
-            state.save(state_path)
+            _save_state()
             _post_sprint_status(state, api_url=api_url)
 
         _stage_coder_t0 = time.monotonic()
@@ -784,8 +809,7 @@ def _run_pipeline_dispatch(
         finally:
             _pool_release(_pipe_pool_slot)
         _ctin, _ctout = _token_window_sums("coder", _stage_coder_utc0)
-        state.total_tokens_in += _ctin
-        state.total_tokens_out += _ctout
+        _state_guard.add_tokens(_ctin, _ctout)
         _db_agent_finish_sm(  # issue #764: one closed row per coder dispatch
             num, label, "coder",
             duration_seconds=time.monotonic() - _stage_coder_t0,
@@ -878,7 +902,7 @@ def _run_pipeline_dispatch(
                             type="ticket_agent_finished", target=f"#{num}", actor="system",
                             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
                         )
-                        state.save(state_path)
+                        _save_state()
                         _post_sprint_status(state, api_url=api_url)
                         return _StageResult.PASS
                     # hang_continue also failed — fall through to _finalize_skip
@@ -907,7 +931,7 @@ def _run_pipeline_dispatch(
             type="ticket_agent_finished", target=f"#{num}", actor="system",
             detail={"agent": "CODER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
         return _StageResult.PASS
 
@@ -925,58 +949,68 @@ def _run_pipeline_dispatch(
             type="ticket_dispatched", target=f"#{num}", actor="system",
             detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
         )
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url)
 
-        def _on_tester_running(_ist=ist):
+        def _on_tester_running(pid=None, _ist=ist):
             _ist.set_agent_status("tester_running")
-            state.save(state_path)
+            _ist.tester_pid = pid
+            _save_state()
             _post_sprint_status(state, api_url=api_url)
 
         _stage_tester_t0 = time.monotonic()
         _stage_tester_utc0 = _token_window_utc_now()
-        tester_rc, hang_category = _dispatch_tester(
-            num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
-            chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
-            on_running=_on_tester_running, sprint_label=label,
-            prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
-        )
-        _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
-        state.total_tokens_in += _ttin
-        state.total_tokens_out += _ttout
-        _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
-            num, label, "tester",
-            duration_seconds=time.monotonic() - _stage_tester_t0,
-            outcome="pass" if tester_rc == 0 else "fail",
-            total_tokens=(_ttin + _ttout) or None,
-        )
-        ist.tester_finished_at = ist.status_changed_at
-        if hang_category == FailureCategory.HANG:
-            _finalize_skip(num, ist, "Tester HANG detected", FailureCategory.HANG, tag="tester hang")
-            return _StageResult.FAIL
-        if hang_category == FailureCategory.RETRY_EXHAUSTED:
-            _finalize_skip(num, ist, "Subscription rate limit exhausted",
-                           FailureCategory.RETRY_EXHAUSTED, tag="rate limit exhausted")
-            return _StageResult.FAIL
+        # issue #1438: concurrent role-flexible slots can run two test_fn tasks at
+        # once, but every tester shares the single cfg.worktree_tester clone (no
+        # tester pool exists yet). Serialize the whole worktree-touching span —
+        # checkout/rebase/pytest (_dispatch_tester) through gates+merge
+        # (handle_post_tester) — so only one tester touches that clone at a time.
+        # This prevents git index.lock errors, cross-branch checkouts, and
+        # cross-contaminated pytest results. The develop_merge_guard acquired
+        # inside handle_post_tester nests safely (always tester-worktree → merge
+        # order) and continues to serialize merges independently.
+        with tester_worktree_guard():
+            tester_rc, hang_category = _dispatch_tester(
+                num, alert_modes, sprint_branch=sprint_branch, repo_name=eff_repo, cfg=cfg,
+                chosen_port=ctx.get("port"), rate_limit_events=state.rate_limit_events,
+                on_running=_on_tester_running, sprint_label=label,
+                prior_failures=ctx["fix_history"] if ctx["fix_history"] else None,
+            )
+            _ttin, _ttout = _token_window_sums("tester", _stage_tester_utc0)
+            _state_guard.add_tokens(_ttin, _ttout)
+            _db_agent_finish_sm(  # issue #764: one closed row per tester dispatch
+                num, label, "tester",
+                duration_seconds=time.monotonic() - _stage_tester_t0,
+                outcome="pass" if tester_rc == 0 else "fail",
+                total_tokens=(_ttin + _ttout) or None,
+            )
+            ist.tester_finished_at = ist.status_changed_at
+            if hang_category == FailureCategory.HANG:
+                _finalize_skip(num, ist, "Tester HANG detected", FailureCategory.HANG, tag="tester hang")
+                return _StageResult.FAIL
+            if hang_category == FailureCategory.RETRY_EXHAUSTED:
+                _finalize_skip(num, ist, "Subscription rate limit exhausted",
+                               FailureCategory.RETRY_EXHAUSTED, tag="rate limit exhausted")
+                return _StageResult.FAIL
 
-        ist.set_agent_status("tester_done")
-        _emit_sprint_lifecycle_event(
-            type="ticket_agent_finished", target=f"#{num}", actor="system",
-            detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
-        )
-        state.save(state_path)
-        _post_sprint_status(state, api_url=api_url)
+            ist.set_agent_status("tester_done")
+            _emit_sprint_lifecycle_event(
+                type="ticket_agent_finished", target=f"#{num}", actor="system",
+                detail={"agent": "TESTER"}, project=eff_repo or label, action_id=run_id,
+            )
+            _save_state()
+            _post_sprint_status(state, api_url=api_url)
 
-        merged, summary_line, gate_category = handle_post_tester(
-            issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
-            gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
-            gate_typecheck=gate_typecheck, gate_design=gate_design,
-            gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
-            target_branch=target_branch,
-            repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
-            gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
-            alert_modes=alert_modes, sprint_label=label,
-        )
+            merged, summary_line, gate_category = handle_post_tester(
+                issue_num=num, tester_exit_code=tester_rc, skip_gates=skip_gates,
+                gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
+                gate_typecheck=gate_typecheck, gate_design=gate_design,
+                gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
+                target_branch=target_branch,
+                repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
+                gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,
+                alert_modes=alert_modes, sprint_label=label,
+            )
         sys.stdout.write(str(f"  {summary_line}") + "\n")
         ctx["summary_line"] = summary_line
         if merged:
@@ -985,10 +1019,31 @@ def _run_pipeline_dispatch(
         category = gate_category or FailureCategory.CRASH
         ctx["category"] = category
         if not ctx.get("skip_coder") and category in _LOGIC_FAILURE_CATEGORIES:
-            record_failure(num, category, detail=summary_line)
-            ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
             _sig = f"{category}:{summary_line[:80]}"
             _last = ctx.get("last_failure_sig")
+            # Transient merge-conflict race: the conflict signature CHANGED since
+            # the last attempt (a sibling merged and moved the base), so this is
+            # not a defect in this ticket's code. Give it a free retry that does
+            # NOT append to fix_history / count against max_attempts, so the
+            # code-fix budget is preserved for genuine failures. Bounded by
+            # MERGE_CONFLICT_FREE_RETRIES; an IDENTICAL repeated conflict (real
+            # overlap) skips this and exhausts via the consecutive check below.
+            if (
+                category == FailureCategory.MERGE_CONFLICT
+                and _sig != _last
+                and ctx.get("conflict_free_retries", 0) < MERGE_CONFLICT_FREE_RETRIES
+            ):
+                ctx["conflict_free_retries"] = ctx.get("conflict_free_retries", 0) + 1
+                ctx["last_failure_sig"] = _sig
+                sys.stdout.write(
+                    f"  [pipeline] #{num}: merge conflict (likely rebase race) — free retry "
+                    f"{ctx['conflict_free_retries']}/{MERGE_CONFLICT_FREE_RETRIES}, "
+                    f"not counting against the fix budget\n"
+                )
+                sys.stdout.flush()
+                return _StageResult.RETRY_FREE
+            record_failure(num, category, detail=summary_line)
+            ctx["fix_history"].append({"attempt": attempt, "category": category, "summary": summary_line})
             ctx["last_failure_sig"] = _sig
             if _sig == _last:
                 sys.stdout.write(
@@ -1023,7 +1078,7 @@ def _run_pipeline_dispatch(
         summary.merged.append(f"#{num}")
         _neon_ticket_status(label, num, "done", eff_sprints_dir,
                             total_tokens=ist.tokens_in + ist.tokens_out)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     def _on_needs_rework(num):
@@ -1051,7 +1106,7 @@ def _run_pipeline_dispatch(
         _transition_safe(num, _TicketState.NEEDS_REWORK, actor="sprint_manager", repo_name=eff_repo)
         _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
         _neon_ticket_status(label, num, "failed", eff_sprints_dir)
-        state.save(state_path)
+        _save_state()
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
     prev_level_idx = -1
@@ -1113,7 +1168,7 @@ def _run_pipeline_dispatch(
 
             def _on_slot_change(_count: int) -> None:
                 state.active_coder_slots = _count
-                state.save(state_path)
+                _save_state()
                 _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
             from services.sprint_manager.concurrent_scheduler import (  # noqa: PLC0415

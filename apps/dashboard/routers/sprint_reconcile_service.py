@@ -24,6 +24,12 @@ _log = logging.getLogger(__name__)
 _RECONCILE_TTL_SECONDS = 60.0
 _last_reconcile_at: dict[str, float] = {}
 
+# Per-project rotating offset into the eligible-rows list for reconcile_project's
+# scan window (issue #1690) — lets a project with more than `limit` eligible
+# terminal sprints get full coverage across sweeps instead of only ever
+# re-checking the same first N.
+_reconcile_cursor: dict[str, int] = {}
+
 _TERMINAL_STATES = frozenset({
     "ready_to_merge", "needs_rework", "completed",
     "cancelled", "failed",  # legacy stored values
@@ -79,47 +85,23 @@ def transition_sprint_state(
     end_reason: str | None = None,
     project: str = "",
 ) -> bool:
-    """Route a reconciler state transition through the DB write layer.
+    """Route a reconciler state transition through the DB state machine.
 
-    All reconciler writes must go through this function so that a future
-    foundation guard can intercept non-owner running→terminal transitions.
-    Returns True when the transition was applied.
+    Delegates to db.transition_sprint_state with the given ``actor`` and returns
+    whether the state machine ACCEPTED the edge.
+
+    The previous version called the record_* helpers, which hardcode
+    actor="manager" and return None — so reconcile-only edges
+    (needs_rework→ready_to_merge / →completed) were silently rejected while this
+    wrapper still returned True. That made reconcile-apply report
+    ``updated=true`` with the state unchanged (e.g. an orphaned-but-merged sprint
+    stuck in needs_rework). Passing the real actor through fixes the promotion,
+    and returning ``accepted`` stops the false-success report.
     """
-    if state == "needs_rework":
-        _db().record_sprint_needs_rework(label, end_reason=end_reason, project=project)
-    elif state == "ready_to_merge":
-        _db().record_sprint_ready_to_merge(label, end_reason=end_reason, project=project)
-    else:
-        _db().record_sprint_finish(label, end_reason=end_reason, project=project)
-    return True
-
-
-def _lineage_fully_in_develop(label: str, project: str) -> bool:
-    """True when *label* is a lineage member whose work is already in develop.
-
-    Used to auto-complete a superseded ancestor (B2). Two conditions:
-      1. The sprint is part of a rerun lineage — it is itself a child
-         (``sprint-N.M``) or it has at least one child row. A standalone
-         needs_rework sprint with no children is a genuine failed run awaiting
-         rerun and must never be auto-completed.
-      2. Its sprint branch has no commits missing from develop — i.e. every
-         commit it produced has merged up the chain into develop.
-
-    Both checks are conservative: a missing repo, a still-open base→develop PR,
-    or any compare error leaves commits "unmerged" and blocks promotion.
-    """
-    if not project:
-        return False
-    try:
-        import server as srv  # noqa: PLC0415 — lazy, avoids import cycle
-    except Exception:
-        return False
-    is_child = srv._is_child_sprint_label(label)
-    has_children = bool(_db().get_sprint_children(label, project=project or None))
-    if not (is_child or has_children):
-        return False
-    branch = srv._sprint_branch_name(label)
-    return not srv._branch_has_unmerged_commits(project, branch, "develop")
+    res = _db().transition_sprint_state(
+        label, state, actor=actor, end_reason=end_reason, project=project,
+    )
+    return bool(getattr(res, "accepted", False))
 
 
 def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
@@ -157,8 +139,14 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
         return {"state": "ready_to_merge", "end_reason": "reconcile-orphan"}
 
     canonical = _db().canonical_lifecycle(stored)
-    # needs_rework→completed is never reconciler-driven: parent/ancestor sprints
-    # stay open until an explicit Merge Sprint or Bulk complete (manager actor).
+    # needs_rework→completed is never driven by THIS background sweep: parent/
+    # ancestor sprints stay open until an explicit Merge Sprint, Bulk complete,
+    # or Complete-step. Those call sites verify the merge themselves (each has
+    # its own _branch_has_unmerged_commits check or a full chain-pending scan)
+    # before invoking startup._sprint_db_mark_merged_completed(actor="reconcile"
+    # or "manager") — that write satisfies the DB edge guard but is not
+    # reconciler-*driven* in the sense of this sweep deciding to complete
+    # anything on its own (issue #1694).
     if has_rework and canonical in ("ready_to_merge", "completed"):
         # A natural successful run end must not be downgraded because GitHub
         # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).
@@ -177,19 +165,17 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
                 pass
         return {"state": "needs_rework", "end_reason": end_reason or "github-reconcile"}
     if not has_rework and canonical == "needs_rework" and stored in ("needs_rework", "failed", "cancelled"):
-        # All tickets settled on GitHub — promote to ready_to_merge when plausible.
-        failed_in_db = False
-        try:
-            import json
-            issues = json.loads(row.get("issues_json") or "[]")
-            failed_in_db = any(
-                (i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason")
-                for i in issues
-            )
-        except Exception:
-            pass
-        if not failed_in_db:
-            return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
+        # GitHub shows no open rework / unfinished work tickets → the sprint's work
+        # has settled, so promote to ready_to_merge.
+        #
+        # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
+        # stale snapshot from the ORIGINAL run and survives even after the failed
+        # ticket was re-run and passed in a child sprint. Trusting it left
+        # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
+        # would_change=false), which disabled Bulk complete. The live GitHub signal
+        # (has_rework) is authoritative; a genuinely-unfinished ticket would still
+        # be open/not-done and keep has_rework True.
+        return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
 
 
@@ -344,11 +330,24 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     patch = _github_reconcile_row(label, _eff_project, row)
     lifecycle_updated = False
     if patch:
-        # AC4 (original): all lifecycle writes go through transition_sprint_state.
+        # Issue #1697: a confirmed-orphan running sprint settles via
+        # running->{ready_to_merge,needs_rework}, which db.py's edge guard
+        # only allows for actor="manager" (running->terminal is otherwise
+        # locked to the live manager process). actor="reconcile" here was a
+        # silent no-op for every orphan case — _github_reconcile_row computed
+        # the right patch, but transition_sprint_state rejected it every
+        # time, for both the sweep AND the per-sprint button, since both call
+        # this same function. The reconciler only reaches this branch after
+        # confirming the manager process that WOULD have made this
+        # transition is dead (_is_manager_pid_alive), so acting with
+        # equivalent authority is the point, not a bypass. All other
+        # reconcile transitions (terminal<->terminal) keep actor="reconcile"
+        # per the original AC4 contract.
+        _actor = "manager" if (row.get("state") or "") == "running" else "reconcile"
         lifecycle_updated = transition_sprint_state(
             label,
             patch["state"],
-            actor="reconcile",
+            actor=_actor,
             end_reason=patch.get("end_reason"),
             project=_eff_project,
         )
@@ -360,23 +359,126 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
     return lifecycle_updated or counts_updated
 
 
+def _parse_sprint_label(label: str) -> tuple[str, tuple[int, ...]]:
+    """'sprint-90.3' → ('sprint-90', (90, 3)). Returns ('', ()) if unparseable."""
+    core = label[len("sprint-"):] if label.startswith("sprint-") else label
+    try:
+        parts = tuple(int(p) for p in core.split("."))
+    except ValueError:
+        return "", ()
+    if not parts:
+        return "", ()
+    return f"sprint-{parts[0]}", parts
+
+
+def _terminalize_superseded_orphans(project: str) -> list[str]:
+    """Terminalize orphan queued rework children that a later sibling has shipped.
+
+    A rework child written at run-end (plan.json state='needs_rework',
+    end_reason='queued') but never dispatched has no DB row and lingers on the
+    board as a phantom (perf-coach 90.3, 91.1). When a LATER child in the same
+    lineage chain has reached 'completed' in the DB, that queued orphan is
+    superseded — mark its plan.json completed/superseded so it stops surfacing.
+    Writes only the orphan's own plan.json; touches no GitHub and no DB.
+    """
+    terminalized: list[str] = []
+    try:
+        import server as srv  # noqa: PLC0415
+        sprints_dir = srv._project_root_path(project) / ".commander" / "sprints"
+    except Exception:
+        return terminalized
+    if not sprints_dir.exists():
+        return terminalized
+
+    db = _db()
+    completed_by_base: dict[str, list[tuple[int, ...]]] = {}
+    for row in db.list_sprints_lifecycle():
+        if project and row.get("project") != project:
+            continue
+        if (row.get("state") or "").lower() != "completed":
+            continue
+        base, parts = _parse_sprint_label(row.get("label") or "")
+        if base:
+            completed_by_base.setdefault(base, []).append(parts)
+
+    for plan_path in sorted(sprints_dir.glob("sprint-*-plan.json")):
+        try:
+            data = json.loads(plan_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if (data.get("state") or "").lower() != "needs_rework":
+            continue
+        if (data.get("end_reason") or "").lower() != "queued":
+            continue
+        label = plan_path.name[: -len("-plan.json")]
+        # Skip if it actually ran (state file) or is tracked in the DB.
+        if (sprints_dir / f"{label}-state.json").exists():
+            continue
+        if db.get_sprint(label, project=project or None):
+            continue
+        base, parts = _parse_sprint_label(label)
+        if not base:
+            continue
+        # Superseded only if a strictly-later sibling in the same lineage completed.
+        if not any(sib > parts for sib in completed_by_base.get(base, [])):
+            continue
+        data["state"] = "completed"
+        data["end_reason"] = "superseded"
+        try:
+            tmp = plan_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(str(tmp), str(plan_path))
+            terminalized.append(label)
+        except Exception:
+            pass
+    return terminalized
+
+
 def reconcile_project(project: str, limit: int = 40) -> list[str]:
     """Reconcile terminal sprints for *project*. Returns labels that were updated."""
     updated: list[str] = []
+    for lbl in _terminalize_superseded_orphans(project):
+        updated.append(lbl)
     rows = _db().list_sprints_lifecycle()
-    checked = 0
+    eligible: list[dict] = []
     for row in rows:
-        if checked >= limit:
-            break
         label = row.get("label") or ""
         if not label:
             continue
         if project and row.get("project") != project:
             continue
         state = row.get("state") or ""
-        if state == "running" or state in ("draft", "planned", "planning"):
+        # Skip states the reconciler can't usefully change:
+        #  • draft / planned / planning — not dispatched yet, nothing to settle.
+        #  • completed / deleted — FINAL terminal states (completed only ever goes
+        #    to deleted; deleted is the end). Re-checking them every History load
+        #    burned ~4s on tangled lineages (mostly completed members) with no
+        #    possible state change.
+        # `running` IS included (issue #1697): _github_reconcile_row only acts on
+        # a CONFIRMED orphan (PID file present AND that process is dead) — a live
+        # PID or an absent PID file both return None there and the row is left
+        # untouched. Previously orphan settling only ever happened via the
+        # per-sprint Reconcile button because this sweep skipped running rows
+        # outright.
+        if state in ("draft", "planned", "planning", "completed", "deleted"):
             continue
-        checked += 1
+        eligible.append(row)
+
+    n = len(eligible)
+    if n == 0:
+        return updated
+
+    # Rotate the scan window per project (issue #1690) so a project with more
+    # than `limit` eligible rows still gets every row reconciled eventually —
+    # a fixed "first N in list order" window let rows past #40 starve forever.
+    start = _reconcile_cursor.get(project, 0) % n
+    window = [eligible[(start + i) % n] for i in range(min(limit, n))]
+    _reconcile_cursor[project] = (start + len(window)) % n
+
+    for row in window:
+        label = row["label"]
         if reconcile_sprint_label(label, project):
             updated.append(label)
     return updated
@@ -606,6 +708,12 @@ def refresh_post_sprint_reconciliations(project: str, limit: int = 40) -> list[s
         state = row.get("state") or ""
         if state == "running" or state in ("draft", "planned", "planning"):
             continue
+        # A completed/deleted sprint that already has a stored reconciliation block
+        # is settled — re-deriving its loose-ends every History load is pure churn
+        # (the ~4s lag on tangled lineages, mostly completed members). Compute it
+        # once (no block yet), then skip. Non-final terminals still refresh.
+        if state in ("completed", "deleted") and (row.get("reconciliation_json") or "").strip():
+            continue
         checked += 1
         if refresh_post_sprint_reconciliation(label, project):
             updated.append(label)
@@ -701,7 +809,6 @@ async def reconcile_project_background(
     last = _last_reconcile_at.get(project)
     if last is not None and (now - last) < _RECONCILE_TTL_SECONDS:
         return  # coalesce rapid history refreshes — within TTL, skip the gh fan-out
-    _last_reconcile_at[project] = now
     lifecycle_updated: list[str] = []
     reconciliation_updated: list[str] = []
 
@@ -714,8 +821,13 @@ async def reconcile_project_background(
     try:
         lifecycle_updated, reconciliation_updated = await asyncio.to_thread(_run_sync)
     except Exception as exc:
+        # Issue #1690: record the timestamp only on success. Stamping it
+        # before the pass ran meant a transient failure (e.g. one gh call
+        # rate-limited) blocked retries for the full 60s window too — now a
+        # failed pass is retried on the very next History load.
         _log.warning("sprint reconcile failed for %s: %s", project, exc)
         return
+    _last_reconcile_at[project] = now
     updated = sorted(set(lifecycle_updated) | set(reconciliation_updated))
     if not updated or broadcast is None:
         return

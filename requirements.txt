@@ -1,5 +1,6 @@
 fastapi>=0.136.1
 uvicorn[standard]>=0.47.0
+sse-starlette>=3.4.4
 python-dotenv>=1.2.0
 python-multipart>=0.0.9
 pytest>=8.0

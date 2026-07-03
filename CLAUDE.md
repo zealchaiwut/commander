@@ -92,6 +92,16 @@ separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 - No new Python dependencies without adding to requirements.txt
 - Frontend: ES modules under `apps/dashboard/static/src/`, bundled via esbuild (`npm run build`). No React/Vue/Svelte — keep vanilla JS. Node/npm is a required dev dependency in every clone.
 
+### Keep lint/export refactors in their own ticket (issue #1588)
+
+Lint-only or testability-only refactors — adding/removing `export` keywords,
+editing eslint `/* global */` comments, renaming for clarity, reordering imports
+— must be filed as a **separate ticket** from feature work, never bundled into a
+feature ticket's diff. The per-ticket diff must match that ticket's acceptance
+criteria so reviewers can verify scope at a glance. If you notice a worthwhile
+lint/export cleanup while implementing a feature, open a follow-up ticket for it
+rather than widening the current diff (this is exactly what #1154 → #1588 did).
+
 ## MCP Servers (available in all sessions)
 
 Three MCP servers are installed at user scope — prefer them over shell fallbacks:

@@ -213,6 +213,8 @@ from routers import (  # noqa: E402
     mis_sizing_router,
     xl_suggestions_router,
     sprint_collisions_router,
+    resolve_conflict_router,
+    llm_provider_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -296,6 +298,8 @@ app.include_router(timeline_router)
 app.include_router(home_milestone_router)
 app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
+app.include_router(resolve_conflict_router)
+app.include_router(llm_provider_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

@@ -175,6 +175,80 @@ function _fsConnectStream(owner, repoName, label) {
   };
 }
 
+/** Run Complete (finish-bg + stream) for one sprint; resolves when done. */
+export function finishSprintAndWait(label) {
+  return new Promise(async (resolve, reject) => {
+    const repo = _smgmtRepo();
+    if (!repo) {
+      reject(new Error('No project loaded'));
+      return;
+    }
+    const parts = repo.split('/');
+    const owner = parts[0];
+    const repoName = parts.slice(1).join('/');
+    try {
+      const prevRes = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-preview`,
+      );
+      if (!prevRes.ok) {
+        const err = await prevRes.json().catch(() => ({}));
+        throw new Error(err.detail || `Preview failed (HTTP ${prevRes.status})`);
+      }
+      const preview = await prevRes.json();
+      if (preview.conflict_error) throw new Error(preview.conflict_error);
+      const allTickets = preview.all_tickets || [];
+      const bgParams = {
+        confirmed: true,
+        move_non_uat_to: preview.next_sprint_label || '',
+        selected_ticket_numbers: allTickets.map((t) => t.number),
+        selected_tickets: allTickets.map((t) => ({
+          number: t.number,
+          title: t.title || `#${t.number}`,
+        })),
+        merge_pr: !!preview.sprint_pr,
+        sprint_pr_url: preview.sprint_pr ? preview.sprint_pr.url : null,
+        total: allTickets.length + 2,
+      };
+      const res = await fetch(
+        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-bg`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bgParams),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(label)}/finish-stream`;
+      const es = new EventSource(url);
+      es.onmessage = (e) => {
+        let snap;
+        try {
+          snap = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (snap.ping) return;
+        if (snap.status === 'done') {
+          es.close();
+          resolve(snap);
+        } else if (snap.status === 'error') {
+          es.close();
+          reject(new Error(snap.error || 'Finish failed'));
+        }
+      };
+      es.onerror = () => {
+        es.close();
+        reject(new Error('Finish stream disconnected'));
+      };
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 /** Retry a failed finish operation using the stored params. */
 export async function _fsRetry() {
   if (!_fsActiveJob) return;
@@ -337,6 +411,22 @@ export async function smgmtFinishSprint(label) {
     );
     actionsEl.innerHTML = actionRows.join("");
 
+    // issue #1696: soft rework guard — warn when tickets haven't reached UAT.
+    const reworkTickets = preview.rework_tickets || [];
+    const warningEl = document.getElementById("fs-rework-warning");
+    const warningTextEl = document.getElementById("fs-rework-warning-text");
+    const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+    if (reworkTickets.length > 0) {
+      warningTextEl.textContent =
+        `${reworkTickets.length} ticket${reworkTickets.length !== 1 ? "s" : ""} ` +
+        `will be closed unfinished: ` +
+        reworkTickets.map((t) => `#${t.number}`).join(", ");
+      warningEl.classList.remove("hidden");
+      if (reworkCheckbox) reworkCheckbox.checked = false;
+    } else {
+      warningEl.classList.add("hidden");
+    }
+
     document.getElementById("fs-loading").classList.add("hidden");
     document.getElementById("fs-content").classList.remove("hidden");
     if (confirmBtn) confirmBtn.disabled = false;
@@ -354,6 +444,17 @@ export async function _fsConfirm() {
   const parts = repo.split("/");
   const owner = parts[0];
   const repoName = parts.slice(1).join("/");
+
+  // issue #1696: soft rework guard — require the override checkbox when the
+  // preview flagged unfinished tickets.
+  const reworkTickets = _fsPreview.rework_tickets || [];
+  const reworkCheckbox = document.getElementById("fs-confirm-rework-checkbox");
+  if (reworkTickets.length > 0 && !(reworkCheckbox && reworkCheckbox.checked)) {
+    const errEl = document.getElementById("fs-error");
+    errEl.textContent = "Check the box to confirm closing unfinished tickets, or cancel and re-run them first.";
+    errEl.classList.remove("hidden");
+    return;
+  }
 
   // Always close every open ticket in the sprint preview (operator can uncheck
   // for visibility, but confirm sends the full set).
@@ -377,6 +478,7 @@ export async function _fsConfirm() {
     merge_pr: !!_fsPreview.sprint_pr,
     sprint_pr_url: _fsPreview.sprint_pr ? _fsPreview.sprint_pr.url : null,
     total: selectedNums.length + 2,
+    confirm_rework: reworkTickets.length > 0 && !!(reworkCheckbox && reworkCheckbox.checked),
   };
 
   try {
@@ -390,7 +492,9 @@ export async function _fsConfirm() {
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+      const detail = err.detail;
+      const msg = detail && typeof detail === "object" ? detail.message : detail;
+      throw new Error(msg || `HTTP ${res.status}`);
     }
     await res.json();
 

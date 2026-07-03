@@ -46,6 +46,19 @@ _develop_merge_lock = threading.Lock()
 # guarded write on the same thread does not self-deadlock.
 _label_transition_lock = threading.RLock()
 
+# Serializes the tester worktree work — checkout / rebase / pytest / merge — so
+# only one tester task touches the single shared ``cfg.worktree_tester`` clone at
+# a time (issue #1438). Role-flexible slots (issue #1413) can pick up two
+# ``test_fn`` tasks concurrently, but there is no per-slot tester worktree pool:
+# every tester operates in the same clone. Concurrent checkouts/rebases there
+# collide on git ``index.lock``, check out each other's feature branches, and
+# cross-contaminate pytest results. Until a tester pool exists, this guard
+# constrains the scheduler to one active tester task at a time. A plain
+# (non-reentrant) Lock: a tester stage never nests inside another tester stage on
+# the same thread, and a second concurrent tester blocks here until the first
+# releases.
+_tester_worktree_lock = threading.Lock()
+
 
 @contextmanager
 def develop_merge_guard():
@@ -59,6 +72,30 @@ def develop_merge_guard():
         yield
     finally:
         _develop_merge_lock.release()
+
+
+@contextmanager
+def tester_worktree_guard():
+    """Serialize a tester task's worktree work (issue #1438).
+
+    Until a per-slot tester worktree pool exists, every tester task shares the
+    single ``cfg.worktree_tester`` clone. This guard constrains the role-flexible
+    scheduler (issue #1413) to one active tester task at a time so concurrent
+    ``test_fn`` tasks cannot collide on git ``index.lock``, check out each other's
+    feature branches, or cross-contaminate pytest output. A second concurrent
+    tester queues here and starts only after the first releases — no task is
+    dropped or deadlocked (AC5).
+
+    Lock-ordering note: ``handle_post_tester`` acquires ``develop_merge_guard``
+    *inside* this guard, so the two locks are always taken in the same order
+    (tester-worktree → merge), never the reverse. They therefore cannot deadlock,
+    and ``develop_merge_guard`` continues to serialize merges independently (AC6).
+    """
+    _tester_worktree_lock.acquire()
+    try:
+        yield
+    finally:
+        _tester_worktree_lock.release()
 
 
 @contextmanager

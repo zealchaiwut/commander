@@ -64,6 +64,11 @@ def advisor_disabled() -> bool:
     return _resolve_disable_flag("COMMANDER_DISABLE_ADVISOR", "disable_advisor")
 
 
+def brief_disabled() -> bool:
+    """Daily/per-sprint brief (issue #839/#860) — parked (#1687), default off."""
+    return _resolve_disable_flag("COMMANDER_DISABLE_BRIEF", "disable_brief")
+
+
 def sprint_planning_disabled() -> bool:
     return _resolve_disable_flag("COMMANDER_DISABLE_PLANNING", "disable_sprint_planning")
 
@@ -92,6 +97,7 @@ def commander_features() -> dict:
     return {
         "signoff": not sprint_signoff_disabled(),
         "advisor": not advisor_disabled(),
+        "brief": not brief_disabled(),
         "planning": not sprint_planning_disabled(),
         "goal_required": not sprint_goal_required_disabled(),
         "definition_of_ready_mode": definition_of_ready_mode(),

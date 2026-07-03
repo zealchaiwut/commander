@@ -46,6 +46,7 @@ from deploy_config_schema import (  # noqa: E402
     merge_for_put as _deploy_merge_for_put,
     build_deploy_config_response as _build_deploy_config_response,
     enrich_local_working_dirs as _deploy_enrich_working_dirs,
+    known_deploy_slugs as _known_deploy_slugs,
 )
 from services.sprint_manager import deploy_actions as _deploy_actions  # noqa: E402
 from services.sprint_manager import deploy_validation as _deploy_validation  # noqa: E402
@@ -58,11 +59,6 @@ try:
 except ImportError:
     _scaffold_data = None  # type: ignore[assignment]
     SCAFFOLD_AVAILABLE = False
-
-try:
-    SYNC_SETTINGS_AVAILABLE = True
-except Exception:
-    SYNC_SETTINGS_AVAILABLE = False
 
 # ── Module-level constants ────────────────────────────────────────────────────
 
@@ -128,6 +124,30 @@ def _resolve_project_slug(slug: str) -> str:
     return matched["repo"]
 
 
+def _resolve_with_seed_fallback(slug: str) -> str:
+    """Resolve slug → owner/repo with a seed-only-project fallback.
+
+    Projects in projects.json resolve normally. Slugs with a seed deploy config
+    but absent from projects.json resolve as 'zealchaiwut/{slug}' (same fallback
+    used in /api/deploy/overview). Any other slug raises HTTPException 404.
+    """
+    from fastapi import HTTPException
+    try:
+        all_projects = projects_module.load_projects()
+    except Exception:
+        all_projects = []
+    matched = next(
+        (p for p in all_projects
+         if p["repo"].split("/")[-1] == slug or p["repo"] == slug),
+        None,
+    )
+    if matched is not None:
+        return matched["repo"]
+    if slug in _known_deploy_slugs():
+        return f"zealchaiwut/{slug}"
+    raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+
+
 def _project_root_path(repo: str) -> Path:
     slug = repo.split("/")[-1] if "/" in repo else repo
     return _PROJECTS_BASE / slug
@@ -154,6 +174,9 @@ def _invalidate_home_cache(slug: str) -> None:
 
 # ── Settings validation helpers ───────────────────────────────────────────────
 
+_PROXY_CONTROLLED_FIELDS: frozenset[str] = frozenset({"llmProvider"})
+
+
 def _validate_settings_body(body: dict) -> None:
     """Validate a PUT settings body. Raises HTTPException 422/400."""
     from fastapi import HTTPException
@@ -164,6 +187,15 @@ def _validate_settings_body(body: dict) -> None:
                 detail=(
                     f"Field '{key}' is a secret and cannot be written via this endpoint. "
                     "Use the dedicated secret management endpoint."
+                ),
+            )
+        if key in _PROXY_CONTROLLED_FIELDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Field '{key}' must be changed via POST /api/settings/provider — "
+                    "it instructs the claude-proxy to switch profiles and cannot be "
+                    "written directly through PUT /api/settings."
                 ),
             )
     unknown = [k for k in body if k not in KNOWN_FIELDS]
@@ -420,7 +452,7 @@ def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
 
 def get_project_deploy_config(slug: str) -> dict:
     """Return per-environment deploy config."""
-    repo = _resolve_project_slug(slug)
+    repo = _resolve_with_seed_fallback(slug)
     stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
     resp = _deploy_config_response(slug, repo, stored)
     _enrich_deploy_readiness(resp)
@@ -429,7 +461,7 @@ def get_project_deploy_config(slug: str) -> dict:
 
 def put_project_deploy_config(slug: str, body: dict) -> dict:
     """Persist a per-environment deploy config override."""
-    repo = _resolve_project_slug(slug)
+    repo = _resolve_with_seed_fallback(slug)
     _validate_deploy_config_body(body)
     current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
     merged = _deploy_merge_for_put(current or {}, body)

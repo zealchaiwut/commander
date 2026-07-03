@@ -3,8 +3,10 @@
 Each test is anchored to a specific acceptance criterion.
 
 AC1  `transition_sprint_state(label, to_state, actor, end_reason=None)` exists in db.py.
-AC2  Legal edges pass: draft→planned→running→{ready_to_merge, needs_rework},
-     ready_to_merge→completed, any→deleted.
+AC2  Legal edges pass: draft→running→{ready_to_merge, needs_rework},
+     ready_to_merge→completed, any→deleted. (`planned` was deprecated in
+     issue #1686 — draft→planned is no longer a legal edge; a legacy row
+     stored as "planned" canonicalizes to "draft" before edge lookup.)
 AC3  Illegal edges are rejected (no DB mutation, rejection result returned).
 AC4  running→{ready_to_merge, needs_rework, completed} with actor!="manager" is rejected;
      DB state remains "running"; rejection is logged.
@@ -74,21 +76,24 @@ def test_ac1_transition_sprint_state_exists():
 
 def test_ac1_transition_result_has_accepted_field(fresh_db):
     _set_state_direct(fresh_db, "sprint-1", "draft")
-    result = fresh_db.transition_sprint_state("sprint-1", "planned", actor="manager")
+    result = fresh_db.transition_sprint_state("sprint-1", "running", actor="manager")
     assert hasattr(result, "accepted"), "TransitionResult must have .accepted"
     assert result.accepted is True
 
 
 # ── AC2: legal edges pass ────────────────────────────────────────────────────
 
-def test_ac2_draft_to_planned(fresh_db):
+def test_ac2_draft_to_planned_is_now_illegal(fresh_db):
+    """`planned` was deprecated (issue #1686) — draft can no longer target it."""
     _set_state_direct(fresh_db, "s", "draft")
     r = fresh_db.transition_sprint_state("s", "planned", actor="manager")
-    assert r.accepted is True
-    assert _get_state(fresh_db, "s") == "planned"
+    assert r.accepted is False
+    assert _get_state(fresh_db, "s") == "draft"
 
 
-def test_ac2_planned_to_running(fresh_db):
+def test_ac2_legacy_planned_row_canonicalizes_to_draft_then_running(fresh_db):
+    """A legacy row stored as "planned" canonicalizes to "draft" for the edge
+    lookup, so draft's legal targets (e.g. running) still apply to it."""
     _set_state_direct(fresh_db, "s", "planned")
     r = fresh_db.transition_sprint_state("s", "running", actor="manager")
     assert r.accepted is True
@@ -254,8 +259,10 @@ def test_ac5_record_sprint_start_routes_through_guard(fresh_db):
 # ── AC6: no new state constants; only LIFECYCLE_STATES / canonical_lifecycle ──
 
 def test_ac6_lifecycle_states_unchanged():
+    # `planned` removed from the UI-exposed enum (issue #1686 deprecation) —
+    # it remains legacy-readable via canonical_lifecycle() only.
     expected = (
-        "draft", "planned", "running", "ready_to_merge", "needs_rework",
+        "draft", "running", "ready_to_merge", "needs_rework",
         "partial_finished", "completed", "deleted",
     )
     assert _db.LIFECYCLE_STATES == expected
@@ -270,8 +277,7 @@ def test_ac6_canonical_lifecycle_still_maps_legacy():
 # ── AC7: comprehensive edge coverage (summary assertions) ────────────────────
 
 LEGAL_TRANSITIONS = [
-    ("draft",          "planned"),
-    ("planned",        "running"),
+    ("draft",          "running"),
     ("running",        "ready_to_merge"),
     ("running",        "needs_rework"),
     ("ready_to_merge", "completed"),
@@ -342,3 +348,23 @@ def test_ac8_no_new_columns_in_sprints(fresh_db):
         "summary_settled_done", "summary_uat_count", "summary_failure_count",
     }
     assert not issue_new_cols, f"new columns added by this issue: {issue_new_cols}"
+
+
+# ── Idempotent same-state no-op (bulk-complete resume) ───────────────────────
+
+def test_same_state_completed_is_idempotent_noop(fresh_db):
+    """Re-completing an already-`completed` sprint is an accepted no-op, not an
+    illegal edge. Guards bulk-complete resume: a prior run may have completed a
+    member; re-running must skip it, not reject `completed→completed` and wedge."""
+    _set_state_direct(fresh_db, "sprint-99", "completed")
+    r = fresh_db.transition_sprint_state("sprint-99", "completed", actor="manager")
+    assert r.accepted is True, f"same-state must be accepted; reason={r.reason!r}"
+    assert _get_state(fresh_db, "sprint-99") == "completed"
+
+
+def test_same_state_noop_does_not_raise_or_change(fresh_db):
+    """needs_rework→needs_rework (and any same-state) is a no-op success too."""
+    _set_state_direct(fresh_db, "sprint-100", "needs_rework")
+    r = fresh_db.transition_sprint_state("sprint-100", "needs_rework", actor="manager")
+    assert r.accepted is True
+    assert _get_state(fresh_db, "sprint-100") == "needs_rework"

@@ -193,15 +193,14 @@ async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
             "created": result.get("created_numbers", []),
             "compensation": result.get("compensation"),
         })
-    if result.get("ok"):
-        try:
-            import server as srv  # noqa: PLC0415
-            await srv.broadcast({
-                "type": "update",
-                "event": {"event_type": "sprint_split", "project": body.project, "label": label},
-            })
-        except Exception:
-            pass
+    try:
+        import server as srv  # noqa: PLC0415
+        await srv.broadcast({
+            "type": "update",
+            "event": {"event_type": "sprint_split", "project": body.project, "label": label},
+        })
+    except Exception:
+        pass
     return result
 
 

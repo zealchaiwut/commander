@@ -149,16 +149,21 @@ def _build_prompt(
 
 def _invoke_agent(prompt: str) -> str:
     """Run the documentor agent via claude -p and return stdout."""
+    # Remove ANTHROPIC_API_KEY so subscription auth is used
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    from services.sprint_manager.model_routing import apply_provider_env
+    model = apply_provider_env(
+        env, "claude-haiku-4-5-20251001",
+        repo=os.environ.get("COMMANDER_PROJECT"),
+    )
     cmd = [
         "claude",
-        "--model", "claude-haiku-4-5-20251001",
+        "--model", model,
         "--dangerously-skip-permissions",
         "-p",
         prompt,
     ]
-    # Remove ANTHROPIC_API_KEY so subscription auth is used
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=180)
         if r.returncode != 0:

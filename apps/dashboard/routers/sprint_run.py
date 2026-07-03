@@ -364,7 +364,11 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         )
         raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
     # Per-run provider (anthropic | ica) — same validation as the global toggle.
+    # Omitted (None) resolves to the global llmProvider setting so the global
+    # toggle is the default and the modal choice is a per-run override.
     from routers import llm_provider_service  # noqa: PLC0415
+    if body.llm_provider is None:
+        body.llm_provider = llm_provider_service.get_provider()["provider"]
     llm_provider_service.validate_provider(body.llm_provider)
     if not srv.SPRINT_MANAGER_PATH.exists():
         srv._slog.event(

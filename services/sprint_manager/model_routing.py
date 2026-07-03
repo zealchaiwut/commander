@@ -137,7 +137,36 @@ def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> No
     sub_env["ANTHROPIC_CUSTOM_HEADERS"] = f"X-CCProxy-Profile: {effective_profile}"
     sub_env["CCPROXY_PROFILE"] = effective_profile
     sub_env.pop("ANTHROPIC_API_KEY", None)
+    sub_env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     sub_env["ANTHROPIC_AUTH_TOKEN"] = "commander-ica-proxy"
+
+
+# The only model the ICA upstream serves (proxy maps it to
+# global/anthropic.claude-sonnet-4-6). Any other model id 404s upstream,
+# so every ICA-routed dispatch must be pinned to this.
+ICA_FORCED_MODEL = "claude-sonnet-4-6"
+
+
+def apply_provider_env(
+    sub_env: dict,
+    model: str,
+    *,
+    sprint_label: Optional[str] = None,
+    cfg: Optional["SprintConfig"] = None,
+    repo: Optional[str] = None,
+    profile_name: Optional[str] = None,
+) -> str:
+    """Apply the effective LLM provider to an agent subprocess env (in place).
+
+    Returns the model the dispatch must use: unchanged for direct Anthropic,
+    ICA_FORCED_MODEL when the effective provider is 'ica' (the ICA upstream
+    only serves claude-sonnet). Callers with no sprint context (dashboard
+    one-shot agents) pass repo only — the global llmProvider setting decides.
+    """
+    if get_effective_llm_provider(sprint_label, cfg, repo) != "ica":
+        return model
+    apply_ica_agent_env(sub_env, profile_name)
+    return ICA_FORCED_MODEL
 
 
 def _effective_coder_backend(

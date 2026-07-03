@@ -178,6 +178,22 @@ def ica_lean_cli_args() -> list[str]:
     return args
 
 
+def _ica_allowed_roles() -> Optional[set[str]]:
+    """Roles allowed to route through ICA (COMMANDER_ICA_ROLES, comma-separated).
+
+    Unset/blank → None, meaning no role restriction (all roles may route).
+    Example: COMMANDER_ICA_ROLES=coder,tester scopes ICA to just those roles;
+    every other role falls back to direct Anthropic even when the effective
+    llmProvider is 'ica'.
+    """
+    import os  # noqa: PLC0415
+
+    raw = os.environ.get("COMMANDER_ICA_ROLES", "").strip()
+    if not raw:
+        return None
+    return {r.strip().lower() for r in raw.split(",") if r.strip()}
+
+
 def apply_provider_env(
     sub_env: dict,
     model: str,
@@ -186,6 +202,7 @@ def apply_provider_env(
     cfg: Optional["SprintConfig"] = None,
     repo: Optional[str] = None,
     profile_name: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> str:
     """Apply the effective LLM provider to an agent subprocess env (in place).
 
@@ -193,8 +210,16 @@ def apply_provider_env(
     ICA_FORCED_MODEL when the effective provider is 'ica' (the ICA upstream
     only serves claude-sonnet). Callers with no sprint context (dashboard
     one-shot agents) pass repo only — the global llmProvider setting decides.
+
+    When COMMANDER_ICA_ROLES is set, only the listed roles route through ICA;
+    other roles (including callers that pass no role) stay on direct Anthropic.
+    The coder/tester dispatch paths in dispatch.py call apply_ica_agent_env
+    directly and are unaffected by this gate.
     """
     if get_effective_llm_provider(sprint_label, cfg, repo) != "ica":
+        return model
+    allowed = _ica_allowed_roles()
+    if allowed is not None and (role or "").lower() not in allowed:
         return model
     apply_ica_agent_env(sub_env, profile_name)
     return ICA_FORCED_MODEL

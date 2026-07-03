@@ -207,7 +207,7 @@ def _call_model(prompt: str) -> Optional[str]:
     # rest of the platform's claude CLI usage.
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     from services.sprint_manager.model_routing import apply_provider_env
-    _model = apply_provider_env(env, MODEL, repo=os.environ.get("COMMANDER_PROJECT"))
+    _model = apply_provider_env(env, MODEL, repo=os.environ.get("COMMANDER_PROJECT"), role="brief")
     try:
         proc = subprocess.run(
             ["claude", "--model", _model, "--dangerously-skip-permissions",

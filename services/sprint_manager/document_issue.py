@@ -155,7 +155,7 @@ def _invoke_agent(prompt: str) -> str:
     from services.sprint_manager.model_routing import apply_provider_env
     model = apply_provider_env(
         env, "claude-haiku-4-5-20251001",
-        repo=os.environ.get("COMMANDER_PROJECT"),
+        repo=os.environ.get("COMMANDER_PROJECT"), role="documenter",
     )
     cmd = [
         "claude",

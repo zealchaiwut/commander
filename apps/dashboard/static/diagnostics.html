@@ -1,343 +1,500 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
-  <!-- impeccable-disable low-contrast, single-font, em-dash-overuse -- pre-existing violations, scoped per-file (issue #1205) -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>System diagnostics — Commander</title>
+  <script>
+    try {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('theme') || 'dark');
+    } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/css/tokens.css">
   <style>
-    /* ── Variables ── */
+    /* ── local tokens ── */
     :root {
-      --bg:           #f9fafb;
-      --surface:      #ffffff;
-      --surface-2:    #f3f4f6;
-      --surface-hover:#f5f6f8;
-      --border:       #e5e7eb;
-      --text:         #111827;
-      --text-muted:   #6b7280;
-      --text-sub:     #9ca3af;
-      --green:        #16a34a;
-      --green-bg:     #dcfce7;
-      --amber:        #d97706;
-      --amber-bg:     #fef3c7;
-      --red:          #dc2626;
-      --red-bg:       #fee2e2;
-      --blue:         #2563eb;
-      --blue-bg:      #dbeafe;
-      --purple:       #7c3aed;
-      --purple-bg:    #ede9fe;
-      --mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+      --nav-h: 52px;
     }
 
-    [data-theme="dark"] {
-      --bg:           #0d0d0d;
-      --surface:      #161616;
-      --surface-2:    #1e1e1e;
-      --surface-hover:#222222;
-      --border:       #2a2a2a;
-      --text:         #e5e7eb;
-      --text-muted:   #9ca3af;
-      --text-sub:     #6b7280;
-      --green:        #22c55e;
-      --green-bg:     rgba(34,197,94,.13);
-      --amber:        #eab308;
-      --amber-bg:     rgba(234,179,8,.13);
-      --red:          #f87171;
-      --red-bg:       rgba(239,68,68,.13);
-      --blue:         #60a5fa;
-      --blue-bg:      rgba(96,165,250,.13);
-      --purple:       #a78bfa;
-      --purple-bg:    rgba(167,139,250,.13);
-    }
-
-    /* ── Reset ── */
+    /* ── reset ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── focus ring (WCAG 2.1 AA) ── */
+    :focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
+
+    /* ── base ── */
     body {
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 14px;
       min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
       display: flex;
       flex-direction: column;
     }
-    button { font-family: inherit; cursor: pointer; }
-    a { color: inherit; text-decoration: none; }
 
-    /* ── Header (app shell) ── */
-    .header {
-      position: sticky; top: 0; z-index: 20;
+    /* ── top nav (matches home.html pattern) ── */
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: var(--z-nav);
+      height: var(--nav-h);
       background: var(--surface);
       border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
       padding: 0 24px;
-      height: 52px;
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      gap: 12px;
       flex-shrink: 0;
     }
-    .header-left { display: flex; align-items: center; gap: 10px; }
-    .brand-mark {
-      width: 28px; height: 28px; border-radius: 7px;
-      background: var(--text);
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; color: var(--surface); font-size: 15px;
-      text-decoration: none;
-    }
-    .header-wordmark { font-size: 15px; font-weight: 700; letter-spacing: -.02em; }
-    .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-
-    .btn-icon {
-      min-width: 44px; min-height: 44px;
-      display: flex; align-items: center; justify-content: center;
-      border: 1px solid var(--border); border-radius: 6px; background: none;
-      color: var(--text-muted); font-size: 15px;
-      transition: background .15s, color .15s;
-    }
-    .btn-icon:hover { background: var(--surface-2); color: var(--text); }
-
-    /* Health icon: pulseDot animation when system is down */
-    @keyframes pulseDot {
-      0%,100% { opacity: 1; transform: scale(1); }
-      50%      { opacity: 0.4; transform: scale(0.9); }
-    }
-    #header-health-icon.health-down {
-      animation: pulseDot 1s ease-in-out infinite;
-    }
-
-    /* Tooltip */
-    [data-tooltip] { position: relative; }
-    [data-tooltip]::after {
-      content: attr(data-tooltip);
-      position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-      background: #1a1a1a; color: #f0f0f0; font-size: 11px; font-weight: 400;
-      padding: 5px 9px; border-radius: 5px; white-space: nowrap;
-      pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 100;
-    }
-    [data-tooltip]:hover::after { opacity: 1; }
-
-    /* ── Page content ── */
-    .page-content {
-      flex: 1;
-      max-width: 1200px;
-      width: 100%;
-      margin: 0 auto;
-      padding: 32px 24px;
+    .top-nav-brand {
       display: flex;
-      flex-direction: column;
-      gap: 24px;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: inherit;
+      flex-shrink: 0;
     }
-
-    /* ── Page heading ── */
-    .page-heading {
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: -.02em;
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      border-radius: var(--radius-lg);
+      background: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--bg);
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .brand-word {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
       color: var(--text);
     }
+    .top-nav-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .top-nav-page {
+      font-size: 13px;
+      color: var(--text-muted);
+      flex: 1;
+    }
+    .top-nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .nav-icon-btn {
+      min-width: 36px;
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 15px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .nav-icon-btn:hover { background: var(--surface-2); color: var(--text); }
+    .nav-icon-btn[aria-current="page"] { color: var(--blue); border-color: var(--blue-bg); background: var(--blue-bg); }
 
-    /* ── Status banner ── */
-    .status-banner {
-      border-radius: 10px;
-      padding: 18px 20px;
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+    #header-health-icon.health-down {
+      animation: pulseDot 1.2s ease-in-out infinite;
+    }
+
+    /* ── page body ── */
+    .page-body {
+      flex: 1;
+      max-width: 960px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── page heading row ── */
+    .page-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
+      gap: 12px;
       flex-wrap: wrap;
     }
-    .status-banner.banner-ok      { background: var(--green-bg); border: 1px solid rgba(22,163,74,.25); }
-    .status-banner.banner-degraded { background: var(--amber-bg); border: 1px solid rgba(217,119,6,.25); }
-    .status-banner.banner-down    { background: var(--red-bg);   border: 1px solid rgba(220,38,38,.25); }
-    .status-banner.banner-unknown { background: var(--surface-2); border: 1px solid var(--border); }
-
-    .banner-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .banner-icon { font-size: 24px; flex-shrink: 0; }
-    .banner-text { min-width: 0; }
-    .banner-label {
-      font-size: 16px;
+    .page-title {
+      font-size: 20px;
       font-weight: 700;
-      line-height: 1.3;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      line-height: 1.2;
+      text-wrap: balance;
     }
-    .banner-label.label-ok       { color: var(--green); }
-    .banner-label.label-degraded { color: var(--amber); }
-    .banner-label.label-down     { color: var(--red); }
-    .banner-label.label-unknown  { color: var(--text-muted); }
-    .banner-timestamp {
+    .page-sub {
       font-size: 12px;
       color: var(--text-muted);
+      font-family: var(--mono);
       margin-top: 3px;
     }
 
-    .banner-right { flex-shrink: 0; }
+    /* ── refresh button ── */
     .btn-refresh {
-      min-width: 44px; min-height: 44px;
-      padding: 0 18px;
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      background: var(--surface);
-      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
       font-size: 13px;
       font-weight: 600;
-      display: flex; align-items: center; gap: 6px;
-      transition: background .15s, opacity .15s;
-    }
-    .btn-refresh:hover { background: var(--surface-2); }
-    .btn-refresh:disabled { opacity: .5; cursor: not-allowed; }
-
-    /* ── Host doctor (issue #828) ── */
-    .doctor-section {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 18px 20px;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      min-height: 36px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
     }
-    .doctor-head {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; flex-wrap: wrap;
-    }
-    .doctor-title { font-size: 14px; font-weight: 700; }
-    .doctor-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    .doctor-results { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-    .doctor-results:empty { display: none; }
-    .doctor-row {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      display: flex; flex-direction: column; gap: 4px;
-    }
-    .doctor-row.is-pass { background: var(--green-bg); border-color: rgba(22,163,74,.25); }
-    .doctor-row.is-fail { background: var(--red-bg);   border-color: rgba(220,38,38,.25); }
-    .doctor-row-top { display: flex; align-items: center; gap: 8px; }
-    .doctor-badge {
-      font-family: var(--mono); font-size: 11px; font-weight: 700;
-      letter-spacing: .03em; flex-shrink: 0;
-    }
-    .doctor-row.is-pass .doctor-badge { color: var(--green); }
-    .doctor-row.is-fail .doctor-badge { color: var(--red); }
-    .doctor-name { font-size: 13px; font-weight: 600; }
-    .doctor-detail { font-size: 12px; color: var(--text-muted); font-family: var(--mono); word-break: break-word; }
-    .doctor-fix { font-size: 12px; color: var(--text); word-break: break-word; }
-    .doctor-fix strong { color: var(--red); }
+    .btn-refresh:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+    .btn-refresh:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-refresh .ti { font-size: 13px; }
+    .btn-refresh.spinning .ti { animation: spin 0.8s linear infinite; }
 
-    /* Unreachable banner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── unreachable banner ── */
     .unreachable-banner {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 16px;
       display: flex;
       align-items: center;
       gap: 10px;
+      padding: 11px 15px;
+      background: var(--amber-bg);
+      border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+      border-radius: var(--radius-xl);
       font-size: 13px;
       color: var(--text-muted);
     }
+    .unreachable-banner .ti { font-size: 14px; color: var(--amber); flex-shrink: 0; }
     .unreachable-banner.hidden { display: none; }
-    .unreachable-banner i { font-size: 16px; color: var(--amber); flex-shrink: 0; }
 
-    /* ── Check card grid ── */
-    .cards-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 16px;
-    }
-    @media (min-width: 768px) {
-      .cards-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (min-width: 1024px) {
-      .cards-grid { grid-template-columns: repeat(3, 1fr); }
-    }
-
-    /* ── Check card ── */
-    .check-card {
+    /* ── status strip (matches home.html status-bar pattern) ── */
+    .status-strip {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px;
+      border-radius: var(--radius-xl);
+      overflow: hidden;
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-      min-height: 44px; /* touch-friendly */
+      align-items: stretch;
     }
-    .check-card-top {
+    .status-main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 16px;
+      border-right: 1px solid var(--border);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-sub);
+    }
+    .status-dot.ok       { background: var(--green); }
+    .status-dot.degraded { background: var(--amber); }
+    .status-dot.down     { background: var(--red); animation: pulseDot 1.2s ease-in-out infinite; }
+    .status-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .status-label.ok       { color: var(--green); }
+    .status-label.degraded { color: var(--amber); }
+    .status-label.down     { color: var(--red); }
+    .status-label.unknown  { color: var(--text-muted); }
+    .status-ts {
+      font-size: 11px;
+      color: var(--text-sub);
+      font-family: var(--mono);
+      margin-left: auto;
+    }
+    @media (pointer: coarse) {
+      .nav-icon-btn { min-width: 44px; min-height: 44px; }
+      .btn-refresh  { min-height: 44px; }
+      .btn-doctor   { min-height: 44px; }
+    }
+
+    /* ── section header (matches home.html sec-hdr) ── */
+    .sec-hdr {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .sec-hdr .ti { color: var(--text-muted); font-size: 15px; }
+    .sec-hdr .count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+      font-weight: 400;
+      margin-left: 2px;
+    }
+
+    /* ── checks list ── */
+    .checks-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .check-row {
       display: flex;
       align-items: flex-start;
-      justify-content: space-between;
       gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      transition: background 0.12s;
     }
-    .check-name {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1.3;
-    }
-    .check-status-indicator {
-      font-size: 28px;
+    .check-row:first-child { border-top: none; }
+    .check-row:hover { background: var(--surface-hover); }
+
+    .check-status-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
       flex-shrink: 0;
-      line-height: 1;
+      margin-top: 1px;
     }
+    .check-status-icon.ok       { background: var(--green-bg); color: var(--green); }
+    .check-status-icon.warn,
+    .check-status-icon.degraded { background: var(--amber-bg); color: var(--amber); }
+    .check-status-icon.down,
+    .check-status-icon.expired,
+    .check-status-icon.missing,
+    .check-status-icon.critical,
+    .check-status-icon.timeout  { background: var(--red-bg); color: var(--red); }
+    .check-status-icon.unknown  { background: var(--surface-2); color: var(--text-sub); }
+
+    .check-body { flex: 1; min-width: 0; }
+    .check-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .check-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      flex-shrink: 0;
+    }
+    .check-badge.ok       { background: var(--green-bg); color: var(--green); }
+    .check-badge.warn,
+    .check-badge.degraded { background: var(--amber-bg); color: var(--amber); }
+    .check-badge.down,
+    .check-badge.expired,
+    .check-badge.missing,
+    .check-badge.critical,
+    .check-badge.timeout  { background: var(--red-bg); color: var(--red); }
+    .check-badge.unknown  { background: var(--surface-2); color: var(--text-sub); }
+
     .check-details {
+      margin-top: 3px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
     }
     .check-detail-line {
-      font-size: 13px;
-      color: var(--text-muted);
-      line-height: 1.4;
-    }
-    .check-hint {
-      margin-top: 4px;
-      padding: 10px 12px;
-      border-radius: 6px;
-      background: var(--red-bg);
-      border: 1px solid rgba(220,38,38,.2);
       font-size: 12px;
-      color: var(--red);
+      color: var(--text-muted);
       font-family: var(--mono);
       line-height: 1.5;
+    }
+    .check-hint {
+      margin-top: 6px;
+      padding: 8px 11px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-family: var(--mono);
+      line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .check-hint.hint-amber {
-      background: var(--amber-bg);
-      border-color: rgba(217,119,6,.2);
-      color: var(--amber);
-    }
+    .check-hint.red   { background: var(--red-bg); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 20%, transparent); }
+    .check-hint.amber { background: var(--amber-bg); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 20%, transparent); }
 
-    /* ── Loading skeleton ── */
-    .skel-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+    /* skeleton shimmer */
     .skel {
       background: var(--surface-2);
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       animation: shimmer 1.5s ease-in-out infinite;
     }
-    .skel-title { height: 18px; width: 60%; }
-    .skel-line  { height: 13px; width: 80%; }
-    .skel-line2 { height: 13px; width: 50%; }
-    @keyframes shimmer {
-      0%,100% { opacity: 1; }
-      50%      { opacity: .5; }
+    .skel-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .skel-row:first-child { border-top: none; }
+    .skel-ic  { width: 28px; height: 28px; border-radius: var(--radius-lg); flex-shrink: 0; }
+    .skel-body { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .skel-title { height: 14px; width: 45%; }
+    .skel-line  { height: 11px; width: 65%; }
+    @keyframes shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    /* ── doctor section ── */
+    .doctor-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .doctor-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .doctor-title-wrap {}
+    .doctor-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .doctor-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-top: 2px;
+    }
+    .doctor-sub code {
+      color: var(--text-muted);
+      font-family: var(--mono);
+    }
+    .btn-doctor {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      min-height: 34px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .btn-doctor:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+    .btn-doctor:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .doctor-results {
+      padding: 8px 0;
+    }
+    .doctor-results:empty { padding: 0; }
+    .doctor-empty {
+      padding: 14px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
     }
 
-    /* ── Debug section ── */
+    .doctor-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      transition: background 0.12s;
+    }
+    .doctor-row:first-child { border-top: none; }
+    .doctor-row:hover { background: var(--surface-hover); }
+
+    .doc-ic {
+      width: 22px;
+      height: 22px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .doc-ic.pass { background: var(--green-bg); color: var(--green); }
+    .doc-ic.fail { background: var(--red-bg); color: var(--red); }
+
+    .doctor-row-body { flex: 1; min-width: 0; }
+    .doctor-check-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .doctor-detail {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-top: 2px;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+    .doctor-fix {
+      font-size: 12px;
+      color: var(--red);
+      margin-top: 3px;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+
+    /* ── debug section ── */
     .debug-section {
-      border: 1px solid var(--border);
-      border-radius: 10px;
       background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
       overflow: hidden;
     }
     .debug-toggle {
       width: 100%;
-      padding: 14px 18px;
+      padding: 13px 16px;
       background: none;
       border: none;
       display: flex;
@@ -348,15 +505,17 @@
       color: var(--text-muted);
       cursor: pointer;
       min-height: 44px;
-      transition: background .15s;
+      transition: background 0.15s, color 0.15s;
     }
-    .debug-toggle:hover { background: var(--surface-hover); }
-    .debug-toggle-chevron { transition: transform .2s ease; font-size: 14px; }
+    .debug-toggle:hover { background: var(--surface-hover); color: var(--text); }
+    .debug-toggle-chevron {
+      font-size: 13px;
+      transition: transform 0.2s ease;
+    }
     .debug-toggle.expanded .debug-toggle-chevron { transform: rotate(180deg); }
 
     .debug-body {
       display: none;
-      padding: 0 18px 18px;
       border-top: 1px solid var(--border);
     }
     .debug-body.open { display: block; }
@@ -364,204 +523,197 @@
     .debug-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
-      padding: 12px 0;
+      padding: 11px 16px;
       border-bottom: 1px solid var(--border);
     }
     .debug-row:last-child { border-bottom: none; }
     .debug-label {
       font-size: 13px;
       color: var(--text-muted);
-      font-weight: 500;
+      min-width: 160px;
+      flex-shrink: 0;
     }
     .debug-value {
+      flex: 1;
       font-size: 12px;
       color: var(--text-sub);
       font-family: var(--mono);
-      max-width: 60%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .btn-copy {
-      min-width: 44px; min-height: 44px;
-      padding: 0 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: none;
-      color: var(--text-muted);
-      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      font-size: 11px;
       font-weight: 600;
-      display: flex; align-items: center; gap: 5px;
-      transition: background .15s, color .15s;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      min-height: 28px;
       flex-shrink: 0;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
     }
     .btn-copy:hover { background: var(--surface-2); color: var(--text); }
     .btn-copy.copied { color: var(--green); border-color: var(--green); }
 
     .debug-json-pre {
-      margin-top: 12px;
+      margin: 0;
+      padding: 12px 16px;
       background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px 14px;
+      border-top: 1px solid var(--border);
       font-family: var(--mono);
       font-size: 11px;
-      line-height: 1.6;
+      line-height: 1.7;
       white-space: pre-wrap;
       word-break: break-all;
-      max-height: 300px;
+      max-height: 280px;
       overflow-y: auto;
       color: var(--text-muted);
     }
 
+    /* ── reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .status-dot.down,
+      #header-health-icon.health-down,
+      .skel { animation: none; }
+      .debug-toggle-chevron,
+      .btn-refresh,
+      .btn-doctor,
+      .btn-copy,
+      .check-row,
+      .doctor-row,
+      .debug-toggle,
+      .nav-icon-btn { transition: none; }
+    }
+
+    /* ── responsive ── */
     @media (max-width: 600px) {
-      .header { padding: 0 16px; }
-      .page-content { padding: 20px 16px; gap: 16px; }
-      .status-banner { padding: 14px 16px; }
-      .banner-label { font-size: 14px; }
+      .page-body { padding: 16px 12px 40px; }
+      .top-nav { padding: 0 16px; }
+      .top-nav-sep, .top-nav-page { display: none; }
+      .debug-label { min-width: 110px; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── App shell header ── -->
-<header class="header">
-  <div class="header-left">
-    <a href="/" class="brand-mark" aria-label="Commander Home">
-      <i class="ti ti-bolt" aria-hidden="true"></i>
-    </a>
-    <span class="header-wordmark">Commander</span>
-  </div>
-  <div class="header-right">
-    <a href="/" class="btn-icon" data-tooltip="Home" aria-label="Home">
-      <i class="ti ti-home"></i>
-    </a>
-    <button class="btn-icon" id="header-health-btn" title="Diagnostics"
-            aria-label="Diagnostics" aria-current="page">
-      <i class="ti ti-heartbeat" id="header-health-icon" style="transition:color .3s;"></i>
+<!-- ── top nav (matches home.html pattern) ── -->
+<nav class="top-nav" aria-label="Commander">
+  <a class="top-nav-brand" href="/" aria-label="Commander home">
+    <span class="brand-mark" aria-hidden="true"><i class="ti ti-bolt"></i></span>
+    <span class="brand-word">Commander</span>
+  </a>
+  <span class="top-nav-sep" aria-hidden="true"></span>
+  <span class="top-nav-page">System diagnostics</span>
+  <div class="top-nav-actions">
+    <a href="/" class="nav-icon-btn" aria-label="Home"><i class="ti ti-home"></i></a>
+    <button class="nav-icon-btn" aria-current="page" aria-label="Diagnostics" title="Diagnostics">
+      <i class="ti ti-heartbeat" id="header-health-icon" style="transition: color 0.3s;"></i>
     </button>
-    <button class="btn-icon" id="theme-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+    <button class="nav-icon-btn" id="theme-btn" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme">
       <i class="ti ti-moon" id="theme-icon"></i>
     </button>
   </div>
-</header>
+</nav>
 
-<!-- ── Page content ── -->
-<main class="page-content">
+<!-- ── page content ── -->
+<main class="page-body">
 
-  <h1 class="page-heading">System diagnostics</h1>
+  <div class="page-head">
+    <div>
+      <div class="page-title">System diagnostics</div>
+      <div class="page-sub" id="page-sub">Checking health data…</div>
+    </div>
+    <button class="btn-refresh" id="refresh-btn" onclick="manualRefresh()" aria-label="Refresh health data">
+      <i class="ti ti-refresh" id="refresh-btn-icon"></i>
+      Refresh
+    </button>
+  </div>
 
-  <!-- Unreachable banner (shown when /api/health is unreachable) -->
+  <!-- unreachable banner -->
   <div class="unreachable-banner hidden" id="unreachable-banner" role="alert">
-    <i class="ti ti-wifi-off"></i>
-    <span>Couldn't reach health endpoint — showing last known status</span>
+    <i class="ti ti-wifi-off" aria-hidden="true"></i>
+    <span>Couldn't reach the health endpoint. Showing last known status.</span>
   </div>
 
-  <!-- Status banner -->
-  <div class="status-banner banner-unknown" id="status-banner" role="status" aria-live="polite">
-    <div class="banner-left">
-      <span class="banner-icon" id="banner-icon">&#8203;</span>
-      <div class="banner-text">
-        <div class="banner-label label-unknown" id="banner-label">Loading…</div>
-        <div class="banner-timestamp" id="banner-timestamp">Fetching health data…</div>
-      </div>
+  <!-- status strip -->
+  <div class="status-strip" id="status-strip" role="status" aria-live="polite">
+    <div class="status-main">
+      <span class="status-dot" id="status-dot"></span>
+      <span class="status-label unknown" id="status-label">Loading…</span>
+      <span class="status-ts" id="status-ts"></span>
     </div>
-    <div class="banner-right">
-      <button class="btn-refresh" id="refresh-btn" onclick="manualRefresh()">
-        <i class="ti ti-refresh" id="refresh-btn-icon"></i>
-        Refresh
-      </button>
     </div>
-  </div>
 
-  <!-- Check cards grid -->
-  <div class="cards-grid" id="cards-grid">
-    <!-- Skeleton placeholders -->
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
+  <!-- checks list -->
+  <section aria-labelledby="checks-heading">
+    <div class="sec-hdr">
+      <i class="ti ti-shield-check" aria-hidden="true"></i>
+      <span id="checks-heading">Health checks</span>
+      <span class="count" id="checks-count"></span>
     </div>
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
+    <div class="checks-list" id="checks-list">
+      <!-- skeleton -->
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
+      <div class="skel-row"><div class="skel skel-ic"></div><div class="skel-body"><div class="skel skel-title"></div><div class="skel skel-line"></div></div></div>
     </div>
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
-    </div>
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
-    </div>
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
-    </div>
-    <div class="skel-card">
-      <div class="skel skel-title"></div>
-      <div class="skel skel-line"></div>
-      <div class="skel skel-line2"></div>
-    </div>
-  </div>
+  </section>
 
-  <!-- Host doctor (issue #828) -->
-  <section class="doctor-section" id="doctor-section" aria-labelledby="doctor-title">
+  <!-- host doctor -->
+  <section class="doctor-section" id="doctor-section" aria-labelledby="doctor-heading">
     <div class="doctor-head">
-      <div>
-        <div class="doctor-title" id="doctor-title">Host doctor</div>
+      <div class="doctor-title-wrap">
+        <div class="doctor-title" id="doctor-heading">Host doctor</div>
         <div class="doctor-sub">Pre-sprint host validation — same checks as <code>python scripts/doctor.py</code></div>
       </div>
-      <button class="btn-refresh" id="doctor-btn" onclick="runDoctor()">
-        <i class="ti ti-stethoscope" id="doctor-btn-icon"></i>
-        Run doctor
+      <button class="btn-doctor" id="doctor-btn" onclick="runDoctor()">
+        <i class="ti ti-stethoscope" id="doctor-btn-icon" aria-hidden="true"></i>
+        Run checks
       </button>
     </div>
     <div class="doctor-results" id="doctor-results" role="status" aria-live="polite"></div>
   </section>
 
-  <!-- Debug section (collapsed by default) -->
+  <!-- debug (collapsed) -->
   <div class="debug-section" id="debug-section">
     <button class="debug-toggle" id="debug-toggle" onclick="toggleDebug()"
             aria-expanded="false" aria-controls="debug-body">
-      <span>Show debug info</span>
-      <i class="ti ti-chevron-down debug-toggle-chevron"></i>
+      <span>Debug info</span>
+      <i class="ti ti-chevron-down debug-toggle-chevron" aria-hidden="true"></i>
     </button>
-    <div class="debug-body" id="debug-body" role="region">
-      <!-- Raw JSON row -->
-      <div class="debug-row">
-        <span class="debug-label">Raw /api/health JSON</span>
-        <button class="btn-copy" id="copy-json-btn" onclick="copyDebugJson()">
-          <i class="ti ti-copy"></i>
-          Copy
-        </button>
-      </div>
-      <!-- Uptime row -->
+    <div class="debug-body" id="debug-body">
       <div class="debug-row">
         <span class="debug-label">Dashboard uptime</span>
         <span class="debug-value" id="debug-uptime">—</span>
-        <button class="btn-copy" id="copy-uptime-btn" onclick="copyText('debug-uptime', 'copy-uptime-btn')">
-          <i class="ti ti-copy"></i>
-          Copy
+        <button class="btn-copy" id="copy-uptime-btn" onclick="copyText('debug-uptime','copy-uptime-btn')">
+          <i class="ti ti-copy" aria-hidden="true"></i> Copy
         </button>
       </div>
-      <!-- Hostname + version row -->
       <div class="debug-row">
-        <span class="debug-label">Mac hostname + version</span>
+        <span class="debug-label">Hostname / version</span>
         <span class="debug-value" id="debug-host">—</span>
-        <button class="btn-copy" id="copy-host-btn" onclick="copyText('debug-host', 'copy-host-btn')">
-          <i class="ti ti-copy"></i>
-          Copy
+        <button class="btn-copy" id="copy-host-btn" onclick="copyText('debug-host','copy-host-btn')">
+          <i class="ti ti-copy" aria-hidden="true"></i> Copy
         </button>
       </div>
-      <!-- Raw JSON viewer -->
-      <pre class="debug-json-pre" id="debug-json-pre">No data yet.</pre>
+      <div class="debug-row">
+        <span class="debug-label">Raw /api/health</span>
+        <span class="debug-value"></span>
+        <button class="btn-copy" id="copy-json-btn" onclick="copyDebugJson()">
+          <i class="ti ti-copy" aria-hidden="true"></i> Copy JSON
+        </button>
+      </div>
+      <pre class="debug-json-pre" id="debug-json-pre" aria-label="Raw health JSON">No data yet.</pre>
     </div>
   </div>
 
@@ -570,33 +722,32 @@
 <script>
   'use strict';
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  let _lastHealthData = null;   // most recent successful /api/health response
-  let _lastPolledAt   = null;   // Date when last poll completed
-  let _refreshTimer   = null;   // setInterval handle for auto-refresh
-  let _debounceTimer  = null;   // setTimeout handle for refresh debounce
-  let _tsInterval     = null;   // setInterval handle for "N seconds ago" ticker
+  // ── state ──────────────────────────────────────────────────────────────────
+  let _lastHealthData = null;
+  let _lastPolledAt   = null;
+  let _refreshTimer   = null;
+  let _debounceTimer  = null;
+  let _tsInterval     = null;
 
-  // ── Theme ──────────────────────────────────────────────────────────────────
+  // ── theme ──────────────────────────────────────────────────────────────────
   (function initTheme() {
-    const saved = localStorage.getItem('commander-theme');
-    if (saved === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
-      const icon = document.getElementById('theme-icon');
-      if (icon) icon.className = 'ti ti-sun';
-    }
+    const saved = localStorage.getItem('theme');
+    const isDark = (saved || 'dark') === 'dark';
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    const icon = document.getElementById('theme-icon');
+    if (icon) icon.className = isDark ? 'ti ti-sun' : 'ti ti-moon';
   })();
 
   function toggleTheme() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const next   = isDark ? 'light' : 'dark';
+    const next = isDark ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('commander-theme', next);
+    localStorage.setItem('theme', next);
     const icon = document.getElementById('theme-icon');
     if (icon) icon.className = isDark ? 'ti ti-moon' : 'ti ti-sun';
   }
 
-  // ── Check name display mapping ─────────────────────────────────────────────
+  // ── check display names ───────────────────────────────────────────────────
   const CHECK_DISPLAY_NAMES = {
     dashboard:        'Dashboard',
     database:         'Database',
@@ -606,70 +757,57 @@
     stuck_sprints:    'Sprint health',
   };
 
-  // ── Recovery hints (hardcoded per check_name) ──────────────────────────────
-  function getRecoveryHint(checkName, checkData) {
-    const status = checkData.status || 'ok';
-    if (status === 'ok') return null;
+  const CHECK_ORDER = ['dashboard', 'database', 'github_auth', 'claude_code_auth', 'disk', 'stuck_sprints'];
 
-    switch (checkName) {
-      case 'github_auth':
-        return { text: 'Run `gh auth login` on the Mac mini', style: 'red' };
-
-      case 'disk': {
-        const pct = checkData.used_pct != null ? checkData.used_pct : null;
-        const hint = 'Free up space: `du -sh ~/Library/Logs/` to find large logs';
-        return { text: hint, style: 'amber' };
-      }
-
-      case 'stuck_sprints': {
-        const stuck = checkData.stuck || [];
-        if (stuck.length > 0) {
-          const lines = stuck.map(s => {
-            const hours = s.hours != null ? s.hours.toFixed(1) : '?';
-            return `Sprint ${s.sprint} has been running with no log activity for ${hours} hours — consider cancelling`;
-          });
-          return { text: lines.join('\n'), style: 'amber' };
-        }
-        return { text: 'A sprint may be stuck — check sprint management', style: 'amber' };
-      }
-
-      case 'claude_code_auth':
-        return { text: 'Claude Code auth check failed — verify Claude Code is installed and authenticated', style: 'red' };
-
-      case 'database':
-        return { text: 'Database error — check dashboard.db permissions or restart the dashboard', style: 'red' };
-
-      case 'dashboard':
-        return { text: 'Dashboard self-check failed — try restarting the dashboard server', style: 'red' };
-
-      default:
-        return null;
-    }
-  }
-
-  // ── Status indicator for a check ──────────────────────────────────────────
-  function getStatusIndicator(status) {
+  // ── status icon per status string ─────────────────────────────────────────
+  function statusIcon(status) {
     switch (status) {
-      case 'ok':      return { symbol: '✓', color: 'var(--green)' };
-      case 'warn':    return { symbol: '⚠', color: 'var(--amber)' };
-      case 'degraded':return { symbol: '⚠', color: 'var(--amber)' };
-      case 'expired': return { symbol: '✕', color: 'var(--red)' };
-      case 'missing': return { symbol: '✕', color: 'var(--red)' };
-      case 'down':    return { symbol: '✕', color: 'var(--red)' };
-      case 'timeout': return { symbol: '✕', color: 'var(--red)' };
-      case 'critical':return { symbol: '✕', color: 'var(--red)' };
-      default:        return { symbol: '?', color: 'var(--text-sub)' };
+      case 'ok':       return 'ti-check';
+      case 'warn':
+      case 'degraded': return 'ti-alert-triangle';
+      case 'expired':
+      case 'missing':
+      case 'down':
+      case 'timeout':
+      case 'critical': return 'ti-x';
+      default:         return 'ti-question-mark';
     }
   }
 
-  // ── Build detail lines from check data ────────────────────────────────────
+  function statusClass(status) {
+    switch (status) {
+      case 'ok':       return 'ok';
+      case 'warn':
+      case 'degraded': return 'warn';
+      case 'expired':
+      case 'missing':
+      case 'down':
+      case 'timeout':
+      case 'critical': return 'down';
+      default:         return 'unknown';
+    }
+  }
+
+  function statusLabel(status) {
+    switch (status) {
+      case 'ok':       return 'OK';
+      case 'warn':     return 'WARN';
+      case 'degraded': return 'DEGRADED';
+      case 'expired':  return 'EXPIRED';
+      case 'missing':  return 'MISSING';
+      case 'down':     return 'DOWN';
+      case 'timeout':  return 'TIMEOUT';
+      case 'critical': return 'CRITICAL';
+      default:         return (status || 'UNKNOWN').toUpperCase();
+    }
+  }
+
+  // ── detail lines per check ────────────────────────────────────────────────
   function buildDetailLines(checkName, checkData) {
     const lines = [];
     const status = checkData.status || 'unknown';
 
-    if (checkData.error) {
-      lines.push('Error: ' + checkData.error);
-    }
+    if (checkData.error) lines.push('Error: ' + checkData.error);
 
     switch (checkName) {
       case 'dashboard':
@@ -685,11 +823,9 @@
         break;
 
       case 'database':
-        if (checkData.path)  lines.push('Path: ' + checkData.path);
-        if (checkData.size_bytes != null) {
-          const kb = (checkData.size_bytes / 1024).toFixed(1);
-          lines.push('Size: ' + kb + ' KB');
-        }
+        if (checkData.path) lines.push('Path: ' + checkData.path);
+        if (checkData.size_bytes != null)
+          lines.push('Size: ' + (checkData.size_bytes / 1024).toFixed(1) + ' KB');
         if (status === 'ok') lines.push('Connection: OK');
         break;
 
@@ -700,144 +836,165 @@
         break;
 
       case 'claude_code_auth':
-        if (checkData.version)  lines.push('Claude Code: ' + checkData.version);
-        if (status === 'ok')    lines.push('Authentication: valid');
+        if (checkData.version)    lines.push('Claude Code: ' + checkData.version);
+        if (status === 'ok')      lines.push('Authentication: valid');
         if (status === 'missing') lines.push('Claude Code not found');
         if (status === 'expired') lines.push('Session expired');
         break;
 
-      case 'disk': {
-        if (checkData.free_gb != null && checkData.total_gb != null) {
-          const free  = checkData.free_gb.toFixed(1);
-          const total = checkData.total_gb.toFixed(1);
-          lines.push(free + ' GB free of ' + total + ' GB');
-        }
-        if (checkData.used_pct != null) {
+      case 'disk':
+        if (checkData.free_gb != null && checkData.total_gb != null)
+          lines.push(checkData.free_gb.toFixed(1) + ' GB free of ' + checkData.total_gb.toFixed(1) + ' GB');
+        if (checkData.used_pct != null)
           lines.push('Used: ' + Math.round(checkData.used_pct) + '%');
-        }
         break;
-      }
 
       case 'stuck_sprints': {
         const stuck = checkData.stuck || [];
-        if (stuck.length === 0) {
-          lines.push('No stuck sprints detected');
-        } else {
-          lines.push(stuck.length + ' sprint(s) appear stuck');
-        }
+        lines.push(stuck.length === 0
+          ? 'No stuck sprints detected'
+          : stuck.length + ' sprint(s) appear stuck');
         break;
       }
     }
 
-    if (lines.length === 0) {
-      lines.push('Status: ' + status);
-    }
-
+    if (lines.length === 0) lines.push('Status: ' + status);
     return lines;
   }
 
-  // ── Render cards ──────────────────────────────────────────────────────────
+  // ── recovery hints ────────────────────────────────────────────────────────
+  function getRecoveryHint(checkName, checkData) {
+    const status = checkData.status || 'ok';
+    if (status === 'ok') return null;
+
+    switch (checkName) {
+      case 'github_auth':
+        return { text: 'Run `gh auth login` on the Mac mini', style: 'red' };
+      case 'disk':
+        return { text: 'Free up space: `du -sh ~/Library/Logs/` to find large logs', style: 'amber' };
+      case 'stuck_sprints': {
+        const stuck = checkData.stuck || [];
+        const lines = stuck.length > 0
+          ? stuck.map(s => `Sprint ${s.sprint} has been running with no log activity for ${(s.hours || 0).toFixed(1)}h — consider cancelling`)
+          : ['A sprint may be stuck — check sprint management'];
+        return { text: lines.join('\n'), style: 'amber' };
+      }
+      case 'claude_code_auth':
+        return { text: 'Verify Claude Code is installed and authenticated', style: 'red' };
+      case 'database':
+        return { text: 'Check dashboard.db permissions or restart the dashboard', style: 'red' };
+      case 'dashboard':
+        return { text: 'Try restarting the dashboard server', style: 'red' };
+      default:
+        return null;
+    }
+  }
+
+  // ── render cards ──────────────────────────────────────────────────────────
   function renderCards(data) {
-    const grid  = document.getElementById('cards-grid');
+    const list = document.getElementById('checks-list');
+    const countEl = document.getElementById('checks-count');
     const checks = data.checks || {};
 
-    // canonical order matching /api/health
-    const ORDER = ['dashboard', 'database', 'github_auth', 'claude_code_auth', 'disk', 'stuck_sprints'];
+    const items = CHECK_ORDER.map(name => ({
+      name,
+      data: checks[name] || { status: 'unknown' },
+    }));
 
-    grid.innerHTML = '';
+    const failCount = items.filter(i => statusClass(i.data.status) === 'down').length;
+    if (countEl) countEl.textContent = failCount > 0 ? failCount + ' failing' : items.length;
 
-    ORDER.forEach(checkName => {
-      const checkData = checks[checkName] || { status: 'unknown' };
-      const status    = checkData.status || 'unknown';
-      const indicator = getStatusIndicator(status);
-      const details   = buildDetailLines(checkName, checkData);
-      const hint      = getRecoveryHint(checkName, checkData);
-      const dispName  = CHECK_DISPLAY_NAMES[checkName] || checkName;
+    list.innerHTML = '';
+    items.forEach(({ name, data: checkData }) => {
+      const status   = checkData.status || 'unknown';
+      const cls      = statusClass(status);
+      const icon     = statusIcon(status);
+      const details  = buildDetailLines(name, checkData);
+      const hint     = getRecoveryHint(name, checkData);
+      const dispName = CHECK_DISPLAY_NAMES[name] || name;
 
-      const card = document.createElement('div');
-      card.className = 'check-card';
-      card.setAttribute('data-check', checkName);
+      const row = document.createElement('div');
+      row.className = 'check-row';
+      row.setAttribute('data-check', name);
 
-      // Card top: name + indicator
-      const cardTop = document.createElement('div');
-      cardTop.className = 'check-card-top';
+      // status icon
+      const ic = document.createElement('div');
+      ic.className = 'check-status-icon ' + cls;
+      ic.innerHTML = '<i class="ti ' + icon + '" aria-hidden="true"></i>';
 
-      const nameEl = document.createElement('div');
-      nameEl.className = 'check-name';
-      nameEl.textContent = dispName;
+      // body
+      const body = document.createElement('div');
+      body.className = 'check-body';
 
-      const indicatorEl = document.createElement('div');
-      indicatorEl.className = 'check-status-indicator';
-      indicatorEl.style.color = indicator.color;
-      indicatorEl.textContent = indicator.symbol;
+      const nameRow = document.createElement('div');
+      nameRow.className = 'check-name';
+      nameRow.innerHTML = escText(dispName) +
+        '<span class="check-badge ' + cls + '">' + statusLabel(status) + '</span>';
 
-      cardTop.appendChild(nameEl);
-      cardTop.appendChild(indicatorEl);
-      card.appendChild(cardTop);
+      body.appendChild(nameRow);
 
-      // Detail lines
       if (details.length > 0) {
-        const detailsEl = document.createElement('div');
-        detailsEl.className = 'check-details';
+        const dw = document.createElement('div');
+        dw.className = 'check-details';
         details.forEach(line => {
-          const lineEl = document.createElement('div');
-          lineEl.className = 'check-detail-line';
-          lineEl.textContent = line;
-          detailsEl.appendChild(lineEl);
+          const d = document.createElement('div');
+          d.className = 'check-detail-line';
+          d.textContent = line;
+          dw.appendChild(d);
         });
-        card.appendChild(detailsEl);
+        body.appendChild(dw);
       }
 
-      // Recovery hint
       if (hint) {
-        const hintEl = document.createElement('div');
-        hintEl.className = 'check-hint' + (hint.style === 'amber' ? ' hint-amber' : '');
-        hintEl.textContent = hint.text;
-        card.appendChild(hintEl);
+        const h = document.createElement('div');
+        h.className = 'check-hint ' + hint.style;
+        h.textContent = hint.text;
+        body.appendChild(h);
       }
 
-      grid.appendChild(card);
+      row.appendChild(ic);
+      row.appendChild(body);
+      list.appendChild(row);
     });
   }
 
-  // ── Banner ────────────────────────────────────────────────────────────────
-  function renderBanner(status) {
-    const banner    = document.getElementById('status-banner');
-    const bannerIcon = document.getElementById('banner-icon');
-    const label     = document.getElementById('banner-label');
+  // ── render status strip ───────────────────────────────────────────────────
+  function renderStatus(status) {
+    const dot   = document.getElementById('status-dot');
+    const label = document.getElementById('status-label');
 
-    // Remove all banner color classes
-    banner.classList.remove('banner-ok', 'banner-degraded', 'banner-down', 'banner-unknown');
-    label.classList.remove('label-ok', 'label-degraded', 'label-down', 'label-unknown');
+    dot.className = 'status-dot ' + statusClass(status);
+    label.className = 'status-label ' + statusClass(status);
+
+    const healthIcon = document.getElementById('header-health-icon');
+    if (healthIcon) {
+      healthIcon.classList.remove('health-down');
+      if (status === 'ok') {
+        healthIcon.style.color = 'var(--green)';
+      } else if (status === 'degraded') {
+        healthIcon.style.color = 'var(--amber)';
+      } else {
+        healthIcon.style.color = 'var(--red)';
+        healthIcon.classList.add('health-down');
+      }
+    }
 
     switch (status) {
       case 'ok':
-        banner.classList.add('banner-ok');
-        label.classList.add('label-ok');
-        bannerIcon.textContent = '✓';
         label.textContent = 'All systems operational';
         break;
       case 'degraded':
-        banner.classList.add('banner-degraded');
-        label.classList.add('label-degraded');
-        bannerIcon.textContent = '⚠';
         label.textContent = 'Degraded — some checks warning';
         break;
       case 'down':
-        banner.classList.add('banner-down');
-        label.classList.add('label-down');
-        bannerIcon.textContent = '✕';
         label.textContent = 'System down — immediate attention needed';
         break;
       default:
-        banner.classList.add('banner-unknown');
-        label.classList.add('label-unknown');
-        bannerIcon.textContent = '?';
         label.textContent = 'Status unknown';
     }
   }
 
-  // ── Timestamp ticker ──────────────────────────────────────────────────────
+  // ── timestamp ticker ──────────────────────────────────────────────────────
   function startTimestampTicker() {
     if (_tsInterval) clearInterval(_tsInterval);
     _tsInterval = setInterval(updateTimestamp, 1000);
@@ -845,33 +1002,24 @@
 
   function updateTimestamp() {
     if (!_lastPolledAt) return;
-    const el   = document.getElementById('banner-timestamp');
+    const el   = document.getElementById('status-ts');
     const secs = Math.round((Date.now() - _lastPolledAt.getTime()) / 1000);
-    el.textContent = 'Updated ' + secs + ' second' + (secs === 1 ? '' : 's') + ' ago';
+    if (el) el.textContent = secs + 's ago';
   }
 
-  // ── Header health icon ────────────────────────────────────────────────────
-  function applyHeaderHealthIcon(status) {
-    const icon = document.getElementById('header-health-icon');
-    if (!icon) return;
-    icon.classList.remove('health-down');
-    if (status === 'ok') {
-      icon.style.color = 'var(--green)';
-    } else if (status === 'degraded') {
-      icon.style.color = 'var(--amber)';
-    } else {
-      icon.style.color = 'var(--red)';
-      icon.classList.add('health-down');
+  function updatePageSub() {
+    const el = document.getElementById('page-sub');
+    if (!el) return;
+    if (_lastPolledAt) {
+      el.textContent = 'Last checked ' + _lastPolledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
   }
 
-  // ── Debug section helpers ─────────────────────────────────────────────────
+  // ── debug section ─────────────────────────────────────────────────────────
   function updateDebugSection(data) {
-    // Raw JSON
     const pre = document.getElementById('debug-json-pre');
     if (pre) pre.textContent = JSON.stringify(data, null, 2);
 
-    // Uptime from dashboard check
     const uptimeEl = document.getElementById('debug-uptime');
     if (uptimeEl) {
       const dash = (data.checks || {}).dashboard || {};
@@ -886,7 +1034,6 @@
       }
     }
 
-    // Host + version from dashboard check
     const hostEl = document.getElementById('debug-host');
     if (hostEl) {
       const dash = (data.checks || {}).dashboard || {};
@@ -897,53 +1044,46 @@
     }
   }
 
-  // ── Fetch health data ─────────────────────────────────────────────────────
+  // ── fetch health ──────────────────────────────────────────────────────────
   async function fetchHealth() {
-    const unreachableBanner = document.getElementById('unreachable-banner');
+    const ub = document.getElementById('unreachable-banner');
     try {
       const resp = await fetch('/api/health');
-      // Accept 200 and 503 (down status)
-      if (!resp.ok && resp.status !== 503) {
-        throw new Error('HTTP ' + resp.status);
-      }
+      if (!resp.ok && resp.status !== 503) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
       _lastHealthData = data;
       _lastPolledAt   = new Date();
 
-      // Hide unreachable banner
-      unreachableBanner.classList.add('hidden');
-
-      renderBanner(data.status);
+      ub.classList.add('hidden');
+      renderStatus(data.status);
       renderCards(data);
-      applyHeaderHealthIcon(data.status);
       updateDebugSection(data);
       updateTimestamp();
+      updatePageSub();
     } catch (err) {
       console.warn('Health fetch failed:', err);
-      // Show unreachable banner
-      unreachableBanner.classList.remove('hidden');
+      ub.classList.remove('hidden');
 
-      // If we have last known data, keep cards visible
       if (_lastHealthData) {
-        renderBanner(_lastHealthData.status);
+        renderStatus(_lastHealthData.status);
         renderCards(_lastHealthData);
-        applyHeaderHealthIcon(_lastHealthData.status);
       } else {
-        // No prior data — show unknown banner, clear skeleton
-        renderBanner('unknown');
-        const grid = document.getElementById('cards-grid');
-        grid.innerHTML = '<div style="grid-column:1/-1;padding:24px;text-align:center;color:var(--text-muted);font-size:13px">Unable to load health data — is the dashboard running?</div>';
+        renderStatus('unknown');
+        const list = document.getElementById('checks-list');
+        list.innerHTML = '<div style="padding:20px 16px;font-size:13px;color:var(--text-muted)">Unable to load health data — is the dashboard running?</div>';
       }
     }
   }
 
-  // ── Manual refresh (debounced 1s) ─────────────────────────────────────────
+  // ── manual refresh (debounced 1s) ─────────────────────────────────────────
   function manualRefresh() {
-    const btn = document.getElementById('refresh-btn');
-    if (_debounceTimer) return; // already debounced
+    const btn  = document.getElementById('refresh-btn');
+    if (_debounceTimer) return;
 
     btn.disabled = true;
+    btn.classList.add('spinning');
     fetchHealth().finally(() => {
+      btn.classList.remove('spinning');
       _debounceTimer = setTimeout(() => {
         _debounceTimer = null;
         if (btn) btn.disabled = false;
@@ -951,60 +1091,68 @@
     });
   }
 
-  // ── Host doctor (issue #828) ──────────────────────────────────────────────
+  // ── host doctor ───────────────────────────────────────────────────────────
   function _doctorRow(check) {
     const row = document.createElement('div');
-    row.className = 'doctor-row ' + (check.ok ? 'is-pass' : 'is-fail');
+    row.className = 'doctor-row';
 
-    const top = document.createElement('div');
-    top.className = 'doctor-row-top';
-    const badge = document.createElement('span');
-    badge.className = 'doctor-badge';
-    badge.textContent = check.ok ? '[PASS]' : '[FAIL]';
-    const name = document.createElement('span');
-    name.className = 'doctor-name';
+    const ic = document.createElement('div');
+    ic.className = 'doc-ic ' + (check.ok ? 'pass' : 'fail');
+    ic.innerHTML = '<i class="ti ' + (check.ok ? 'ti-check' : 'ti-x') + '" aria-hidden="true"></i>';
+
+    const body = document.createElement('div');
+    body.className = 'doctor-row-body';
+
+    const name = document.createElement('div');
+    name.className = 'doctor-check-name';
     name.textContent = check.name;
-    top.appendChild(badge);
-    top.appendChild(name);
-    row.appendChild(top);
+    body.appendChild(name);
 
     if (check.detail) {
-      const detail = document.createElement('div');
-      detail.className = 'doctor-detail';
-      detail.textContent = check.detail;
-      row.appendChild(detail);
+      const d = document.createElement('div');
+      d.className = 'doctor-detail';
+      d.textContent = check.detail;
+      body.appendChild(d);
     }
     if (!check.ok && check.fix) {
-      const fix = document.createElement('div');
-      fix.className = 'doctor-fix';
-      const lbl = document.createElement('strong');
-      lbl.textContent = 'fix: ';
-      fix.appendChild(lbl);
-      fix.appendChild(document.createTextNode(check.fix));
-      row.appendChild(fix);
+      const f = document.createElement('div');
+      f.className = 'doctor-fix';
+      f.textContent = 'Fix: ' + check.fix;
+      body.appendChild(f);
     }
+
+    row.appendChild(ic);
+    row.appendChild(body);
     return row;
   }
 
   async function runDoctor() {
     const btn     = document.getElementById('doctor-btn');
     const results = document.getElementById('doctor-results');
-    btn.disabled = true;
+    btn.disabled  = true;
     results.replaceChildren();
+
     const loading = document.createElement('div');
-    loading.className = 'doctor-detail';
+    loading.className = 'doctor-empty';
     loading.textContent = 'Running host checks…';
     results.appendChild(loading);
+
     try {
       const resp = await fetch('/api/doctor');
       const data = await resp.json();
       results.replaceChildren();
-      (data.checks || []).forEach((c) => results.appendChild(_doctorRow(c)));
+      (data.checks || []).forEach(c => results.appendChild(_doctorRow(c)));
+      if (!(data.checks || []).length) {
+        const em = document.createElement('div');
+        em.className = 'doctor-empty';
+        em.textContent = 'No checks returned.';
+        results.appendChild(em);
+      }
     } catch (err) {
       console.warn('Doctor fetch failed:', err);
       results.replaceChildren();
       const fail = document.createElement('div');
-      fail.className = 'doctor-detail';
+      fail.className = 'doctor-empty';
       fail.textContent = 'Unable to run doctor — is the dashboard running?';
       results.appendChild(fail);
     } finally {
@@ -1012,13 +1160,13 @@
     }
   }
 
-  // ── Auto-refresh ──────────────────────────────────────────────────────────
+  // ── auto-refresh ──────────────────────────────────────────────────────────
   function startAutoRefresh() {
     if (_refreshTimer) clearInterval(_refreshTimer);
     _refreshTimer = setInterval(fetchHealth, 30000);
   }
 
-  // ── Debug toggle ──────────────────────────────────────────────────────────
+  // ── debug toggle ──────────────────────────────────────────────────────────
   function toggleDebug() {
     const toggle = document.getElementById('debug-toggle');
     const body   = document.getElementById('debug-body');
@@ -1026,13 +1174,12 @@
     body.classList.toggle('open', !isOpen);
     toggle.classList.toggle('expanded', !isOpen);
     toggle.setAttribute('aria-expanded', String(!isOpen));
-    // Update label text
-    toggle.querySelector('span').textContent = isOpen ? 'Show debug info' : 'Hide debug info';
+    toggle.querySelector('span').textContent = isOpen ? 'Debug info' : 'Hide debug info';
   }
 
-  // ── Copy helpers ──────────────────────────────────────────────────────────
+  // ── copy helpers ──────────────────────────────────────────────────────────
   async function copyDebugJson() {
-    const btn = document.getElementById('copy-json-btn');
+    const btn  = document.getElementById('copy-json-btn');
     const text = _lastHealthData ? JSON.stringify(_lastHealthData, null, 2) : 'No data';
     await copyToClipboard(text, btn);
   }
@@ -1040,28 +1187,31 @@
   async function copyText(valueElId, btnId) {
     const el  = document.getElementById(valueElId);
     const btn = document.getElementById(btnId);
-    const text = el ? el.textContent : '';
-    await copyToClipboard(text, btn);
+    await copyToClipboard(el ? el.textContent : '', btn);
   }
 
   async function copyToClipboard(text, btn) {
     try {
       await navigator.clipboard.writeText(text);
       if (btn) {
-        const originalHTML = btn.innerHTML;
+        const orig = btn.innerHTML;
         btn.classList.add('copied');
-        btn.innerHTML = '<i class="ti ti-check"></i> Copied';
-        setTimeout(() => {
-          btn.classList.remove('copied');
-          btn.innerHTML = originalHTML;
-        }, 2000);
+        btn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Copied';
+        setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = orig; }, 2000);
       }
     } catch (e) {
       console.warn('Clipboard write failed:', e);
     }
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  // ── util ──────────────────────────────────────────────────────────────────
+  function escText(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  // ── init ──────────────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', () => {
     fetchHealth();
     startAutoRefresh();

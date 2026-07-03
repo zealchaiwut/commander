@@ -278,8 +278,7 @@ class TestAC6ProxyUnavailable:
         import httpx
 
         with patch("apps.dashboard.routers.llm_provider_service.httpx") as mock_httpx:
-            mock_httpx.ConnectError = httpx.ConnectError
-            mock_httpx.TimeoutException = httpx.TimeoutException
+            mock_httpx.RequestError = httpx.RequestError
             mock_httpx.HTTPStatusError = httpx.HTTPStatusError
             mock_httpx.post.side_effect = httpx.ConnectError("refused")
             with pytest.raises(HTTPException) as exc_info:
@@ -293,8 +292,7 @@ class TestAC6ProxyUnavailable:
         import httpx
 
         with patch("apps.dashboard.routers.llm_provider_service.httpx") as mock_httpx:
-            mock_httpx.ConnectError = httpx.ConnectError
-            mock_httpx.TimeoutException = httpx.TimeoutException
+            mock_httpx.RequestError = httpx.RequestError
             mock_httpx.HTTPStatusError = httpx.HTTPStatusError
             bad_response = MagicMock()
             bad_response.raise_for_status.side_effect = httpx.HTTPStatusError(

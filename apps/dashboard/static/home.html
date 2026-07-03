@@ -10,6 +10,16 @@
       document.documentElement.setAttribute(
         'data-theme', localStorage.getItem('theme') || 'dark');
     } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    // Pre-set date picker max to today so it's usable before JS init completes
+    document.addEventListener('DOMContentLoaded', function(){
+      var p = document.getElementById('date-pick');
+      if (p) {
+        var t = new Date();
+        var iso = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+        p.max = iso;
+        p.value = iso;
+      }
+    });
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/css/tokens.css">
@@ -135,6 +145,7 @@
       letter-spacing: -0.02em;
       color: var(--text);
       line-height: 1.1;
+      text-wrap: balance;
     }
     .brief-cover {
       font-size: 12px;
@@ -755,13 +766,16 @@
       .stat-cell { flex: 1 1 50%; min-width: 110px; }
       .top-nav-date-nav { gap: 3px; }
       .brief-date { font-size: 22px; }
+      /* hide the breadcrumb label so nav fits on small screens */
+      .top-nav-sep,
+      .top-nav-page { display: none; }
     }
   </style>
 </head>
 <body>
   <nav class="top-nav" aria-label="Commander">
     <span class="top-nav-brand">Commander</span>
-    <span class="top-nav-sep" aria-hidden="true"></span>
+    <span class="top-nav-sep" aria-hidden="true" role="presentation"></span>
     <span class="top-nav-page" id="top-nav-brief-label">Daily Brief</span>
     <div class="top-nav-date-nav">
       <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:13px"></i></button>

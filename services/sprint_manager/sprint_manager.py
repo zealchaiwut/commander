@@ -1641,7 +1641,6 @@ def _call_finish_feature(
                 f"  [rebase] rebase conflict for #{issue_num} in "
                 f"{len(conflict_files)} file(s): {conflict_files}"
             ) + "\n")
-            _try("git", "rebase", "--abort", cwd=wt_root)
             return False, conflict_files
 
         # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.

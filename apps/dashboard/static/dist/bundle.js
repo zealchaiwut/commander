@@ -7005,7 +7005,7 @@ Proceed anyway?`)) {
       }
       _pfState = "success";
       _pfShowSuccess();
-      _pfStepperAnimate(data);
+      _pfStepperAnimate(data).catch(() => _pfUpdateConfirmBtn());
     } catch (e) {
       if (_pfCurrentLabel !== label)
         return;
@@ -7640,49 +7640,59 @@ Proceed anyway?`)) {
       hideLog: true
     });
   }
+  var AUTOFIX_TIMEOUT_MS = 12e4;
   async function _pfRunAutoFix(label, repo, onLog) {
-    const resp = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
-      { method: "POST" }
-    );
-    if (!resp.ok)
-      throw new Error(`preflight-fix ${resp.status}`);
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "", filled = 0, estimated = 0, errors = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done)
-        break;
-      buf += dec.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop();
-      for (const part of parts) {
-        const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
-        if (!m)
-          continue;
-        if (m[1] === "log") {
-          try {
-            const d = JSON.parse(m[2]);
-            const msg = typeof d === "string" ? d : d.message || String(d);
-            if (onLog)
-              onLog(msg);
-          } catch (_) {
-            if (onLog)
-              onLog(m[2]);
-          }
-        } else if (m[1] === "done") {
-          try {
-            const d = JSON.parse(m[2]);
-            filled = d.filled || 0;
-            estimated = d.estimated || 0;
-            errors = d.errors || [];
-          } catch (_) {
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), AUTOFIX_TIMEOUT_MS);
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+        { method: "POST", signal: controller.signal }
+      );
+      if (!resp.ok)
+        throw new Error(`preflight-fix ${resp.status}`);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", filled = 0, estimated = 0, errors = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done)
+          break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = part.match(/^event:\s*(\S+)\n\s*([\s\S]*)$/);
+          if (!m)
+            continue;
+          if (m[1] === "log") {
+            try {
+              const d = JSON.parse(m[2]);
+              const msg = typeof d === "string" ? d : d.message || String(d);
+              if (onLog)
+                onLog(msg);
+            } catch (_) {
+              if (onLog)
+                onLog(m[2]);
+            }
+          } else if (m[1] === "done") {
+            try {
+              const d = JSON.parse(m[2]);
+              filled = d.filled || 0;
+              estimated = d.estimated || 0;
+              errors = d.errors || [];
+            } catch (_) {
+            }
           }
         }
       }
+      return { filled, estimated, errors };
+    } catch (err) {
+      const isTimeout = err && err.name === "AbortError";
+      throw isTimeout ? new Error("timed out") : err;
+    } finally {
+      clearTimeout(timerId);
     }
-    return { filled, estimated, errors };
   }
   async function _pfStepperAnimate(data) {
     const label = _pfCurrentLabel;
@@ -7705,8 +7715,10 @@ Proceed anyway?`)) {
       }
     };
     const _finishAutofix = (fix) => {
-      const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "";
-      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "";
+      const errCount = fix.errors && fix.errors.length ? fix.errors.length : 0;
+      const errSuffix = errCount > 0 ? ` (${errCount} could not be fixed)` : "";
+      const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated${errSuffix}` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC${errSuffix}` : "";
+      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated${errSuffix}` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated${errSuffix}` : "";
       _pfStepState("ac", fix.filled > 0 ? "fixed" : "pass", acNote);
       _pfStepState("estimates", fix.estimated > 0 ? "fixed" : "pass", estNote);
       _pfShrinkWarnings(fix, missingAc, unestimated);
@@ -7717,9 +7729,11 @@ Proceed anyway?`)) {
       _pfAutofixPending = true;
       _pfStepState("ac", "checking", hasAcIssues ? `Fixing ${missingAc.length} ticket(s)\u2026` : "");
       _pfStepState("estimates", "checking", hasEstIssues ? `Estimating ${unestimated.length} ticket(s)\u2026` : "");
-      _pfRunAutoFix(label, repo, _routeAutofixLog).then(_finishAutofix).catch(() => {
-        _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "");
-        _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "");
+      _pfRunAutoFix(label, repo, _routeAutofixLog).then(_finishAutofix).catch((err) => {
+        const isTimeout = err && err.message === "timed out";
+        const suffix = isTimeout ? " (timed out)" : "";
+        _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC${suffix}` : "");
+        _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated${suffix}` : "");
         _pfAutofixPending = false;
         _pfStepperSummary();
       });

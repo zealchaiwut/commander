@@ -266,8 +266,10 @@ export async function _pfFetch() {
     }
     _pfState = 'success';
     _pfShowSuccess();
-    // Drive the stepper animation with the fetched data (issue #933)
-    _pfStepperAnimate(data);
+    // Drive the stepper animation with the fetched data (issue #933).
+    // .catch ensures a throw inside _pfStepperAnimate always re-enables the Run button
+    // rather than leaving it permanently disabled (issue #982 AC1).
+    _pfStepperAnimate(data).catch(() => _pfUpdateConfirmBtn());
   } catch (e) {
     if (_pfCurrentLabel !== label) return;
     _pfState = 'error';
@@ -1000,47 +1002,60 @@ export function _pfStepState(key, state, note) {
   });
 }
 
+/** Timeout for the preflight-fix fetch + SSE stream (issue #982 AC3). */
+const AUTOFIX_TIMEOUT_MS = 120_000;
+
 /**
  * Call the preflight-fix SSE endpoint and collect summary counts.
  * Auto-fixes missing AC and missing size estimates for the sprint.
+ * Aborts via AbortController if the stream hangs beyond AUTOFIX_TIMEOUT_MS.
  */
 async function _pfRunAutoFix(label, repo, onLog) {
-  const resp = await fetch(
-    `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
-    { method: 'POST' }
-  );
-  if (!resp.ok) throw new Error(`preflight-fix ${resp.status}`);
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '', filled = 0, estimated = 0, errors = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const parts = buf.split('\n\n');
-    buf = parts.pop();
-    for (const part of parts) {
-      const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
-      if (!m) continue;
-      if (m[1] === 'log') {
-        try {
-          const d = JSON.parse(m[2]);
-          const msg = typeof d === 'string' ? d : (d.message || String(d));
-          if (onLog) onLog(msg);
-        } catch (_) {
-          if (onLog) onLog(m[2]);
+  const controller = new AbortController();
+  const timerId = setTimeout(() => controller.abort(), AUTOFIX_TIMEOUT_MS);
+  try {
+    const resp = await fetch(
+      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+      { method: 'POST', signal: controller.signal }
+    );
+    if (!resp.ok) throw new Error(`preflight-fix ${resp.status}`);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', filled = 0, estimated = 0, errors = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const m = part.match(/^event:\s*(\S+)\n\s*([\s\S]*)$/);
+        if (!m) continue;
+        if (m[1] === 'log') {
+          try {
+            const d = JSON.parse(m[2]);
+            const msg = typeof d === 'string' ? d : (d.message || String(d));
+            if (onLog) onLog(msg);
+          } catch (_) {
+            if (onLog) onLog(m[2]);
+          }
+        } else if (m[1] === 'done') {
+          try {
+            const d = JSON.parse(m[2]);
+            filled    = d.filled    || 0;
+            estimated = d.estimated || 0;
+            errors    = d.errors    || [];
+          } catch (_) { /* ignore parse errors */ }
         }
-      } else if (m[1] === 'done') {
-        try {
-          const d = JSON.parse(m[2]);
-          filled    = d.filled    || 0;
-          estimated = d.estimated || 0;
-          errors    = d.errors    || [];
-        } catch (_) { /* ignore parse errors */ }
       }
     }
+    return { filled, estimated, errors };
+  } catch (err) {
+    const isTimeout = err && err.name === 'AbortError';
+    throw isTimeout ? new Error('timed out') : err;
+  } finally {
+    clearTimeout(timerId);
   }
-  return { filled, estimated, errors };
 }
 
 /**
@@ -1070,11 +1085,13 @@ export async function _pfStepperAnimate(data) {
   };
 
   const _finishAutofix = (fix) => {
-    const acNote  = fix.filled    > 0 ? `${fix.filled} acceptance criteria generated`
-                  : hasAcIssues       ? `${missingAc.length} ticket(s) missing AC`
+    const errCount = fix.errors && fix.errors.length ? fix.errors.length : 0;
+    const errSuffix = errCount > 0 ? ` (${errCount} could not be fixed)` : '';
+    const acNote  = fix.filled    > 0 ? `${fix.filled} acceptance criteria generated${errSuffix}`
+                  : hasAcIssues       ? `${missingAc.length} ticket(s) missing AC${errSuffix}`
                   : '';
-    const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated`
-                  : hasEstIssues      ? `${unestimated.length} ticket(s) unestimated`
+    const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated${errSuffix}`
+                  : hasEstIssues      ? `${unestimated.length} ticket(s) unestimated${errSuffix}`
                   : '';
     _pfStepState('ac',        fix.filled    > 0 ? 'fixed' : 'pass', acNote);
     _pfStepState('estimates', fix.estimated > 0 ? 'fixed' : 'pass', estNote);
@@ -1090,9 +1107,11 @@ export async function _pfStepperAnimate(data) {
     _pfStepState('estimates', 'checking', hasEstIssues ? `Estimating ${unestimated.length} ticket(s)…` : '');
     _pfRunAutoFix(label, repo, _routeAutofixLog)
       .then(_finishAutofix)
-      .catch(() => {
-        _pfStepState('ac',        'pass', hasAcIssues  ? `${missingAc.length} ticket(s) missing AC`   : '');
-        _pfStepState('estimates', 'pass', hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : '');
+      .catch((err) => {
+        const isTimeout = err && err.message === 'timed out';
+        const suffix = isTimeout ? ' (timed out)' : '';
+        _pfStepState('ac',        'pass', hasAcIssues  ? `${missingAc.length} ticket(s) missing AC${suffix}`   : '');
+        _pfStepState('estimates', 'pass', hasEstIssues ? `${unestimated.length} ticket(s) unestimated${suffix}` : '');
         _pfAutofixPending = false;
         _pfStepperSummary();
       });

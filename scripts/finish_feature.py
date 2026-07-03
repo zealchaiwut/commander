@@ -21,7 +21,6 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,18 +29,65 @@ _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_DIR))
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402  (deferred: sys.path set above)
 load_dotenv(_DASHBOARD_DIR / ".env")
-import github_client
-from services.run_id import mint_run_id
-from services.logging import log as structured_log
+import github_client  # noqa: E402  (deferred: sys.path set above)
+from services.run_id import mint_run_id  # noqa: E402
+from services.logging import log as structured_log  # noqa: E402
 
 
 def _run(*cmd) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _record_merge_accuracy(issue_num: int, merge_sha: str, repo_root: Path) -> None:
+def _is_true_merge_commit(sha: str, run=None) -> bool:
+    """Return True when `sha` is a true merge commit (issue #1441).
+
+    A true merge commit records two (or more) `parent` lines in its object;
+    a fast-forward or squash commit records exactly one. Detected via
+    `git cat-file -p <sha>`.
+    """
+    run = run or _try
+    ok, out = run("git", "cat-file", "-p", sha)
+    if not ok:
+        return False
+    parent_lines = [ln for ln in out.splitlines() if ln.startswith("parent ")]
+    return len(parent_lines) >= 2
+
+
+def _changed_files_for_merge(merge_sha: str, target: str, run=None) -> list[str]:
+    """Files a merged ticket changed, robust to ff/squash merges (issue #1441).
+
+    True merge commit (two parents): diff the merge against its first parent —
+    this captures the whole feature branch and is the original behavior (AC2).
+
+    ff/squash commit (single parent): `--first-parent` would diff only the tip
+    commit against its lone parent, undercounting the branch. Fall back to
+    diffing `merge_sha` against its merge-base with `target` so every commit on
+    the feature branch is covered (AC3/AC4).
+    """
+    run = run or _try
+    if _is_true_merge_commit(merge_sha, run=run):
+        ok, out = run(
+            "git", "diff-tree", "-r", "--no-commit-id", "--name-only",
+            "--first-parent", merge_sha,
+        )
+    else:
+        sys.stdout.write(
+            f"merge_sha {merge_sha[:8]} is single-parent — using merge-base diff\n"
+        )
+        ok_mb, merge_base = run("git", "merge-base", target, merge_sha)
+        if ok_mb and merge_base:
+            ok, out = run("git", "diff", "--name-only", f"{merge_base}..{merge_sha}")
+        else:
+            # No common ancestor with target — diff against the single parent.
+            ok, out = run("git", "diff", "--name-only", f"{merge_sha}^..{merge_sha}")
+    return [f for f in out.splitlines() if f.strip()] if ok else []
+
+
+def _record_merge_accuracy(
+    issue_num: int, merge_sha: str, repo_root: Path, target: str = "develop"
+) -> None:
     """Record estimator file-prediction accuracy for a merged ticket (issue #1417).
 
     Compares the estimate's files_likely_affected against the files actually
@@ -65,11 +111,9 @@ def _record_merge_accuracy(issue_num: int, merge_sha: str, repo_root: Path) -> N
         est = json.loads(estimates_json.read_text(encoding="utf-8"))
         predicted = est.get("files_likely_affected") or []
 
-        # Get files actually changed by the merge commit vs its first parent.
-        ok, out = _try(
-            "git", "diff-tree", "-r", "--no-commit-id", "--name-only", "--first-parent", merge_sha,
-        )
-        actual = [f for f in out.splitlines() if f.strip()] if ok else []
+        # Get files actually changed by the merge. Robust to ff/squash merges:
+        # a single-parent merge_sha falls back to a merge-base diff (issue #1441).
+        actual = _changed_files_for_merge(merge_sha, target)
 
         accuracy_dir = commander_dir / "estimates" / "accuracy"
         record_accuracy(issue_num, predicted, actual, accuracy_dir)
@@ -177,7 +221,7 @@ def main():
 
     # Record estimator accuracy before pushing / deleting the branch (AC1/AC7).
     if merge_sha:
-        _record_merge_accuracy(args.issue, merge_sha, _REPO_ROOT)
+        _record_merge_accuracy(args.issue, merge_sha, _REPO_ROOT, target)
 
     _run("git", "push", "origin", target)
     sys.stdout.write(str(f"Pushed {target}.") + "\n")
@@ -188,7 +232,7 @@ def main():
     _try("git", "push", "origin", "--delete", branch)
 
     sys.stdout.write(str(f"✅  Merged {branch} into {target}") + "\n")
-    sys.stdout.write(str(f"    Feature branch deleted locally and on origin") + "\n")
+    sys.stdout.write(str("    Feature branch deleted locally and on origin") + "\n")
     # Signal to sprint_manager that merge succeeded; label transitions are
     # handled exclusively by sprint_manager via state_machine.transition().
     sys.stdout.write(str(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}") + "\n")

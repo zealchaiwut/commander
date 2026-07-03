@@ -105,16 +105,20 @@ Body:
 {body or "(no body provided)"}
 """
 
+    # Strip ANTHROPIC_API_KEY so claude authenticates via the Claude subscription
+    # (keychain), not the credit-less API key — same as the estimator/coder/tester.
+    _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    from services.sprint_manager.model_routing import apply_provider_env
+    _ba_model = apply_provider_env(
+        _agent_env, "claude-sonnet-4-6", repo=os.environ.get("COMMANDER_PROJECT"),
+    )
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", _ba_model,
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "-p", prompt,
     ]
-    # Strip ANTHROPIC_API_KEY so claude authenticates via the Claude subscription
-    # (keychain), not the credit-less API key — same as the estimator/coder/tester.
-    _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
     total_attempts = _MAX_RETRIES + 1
     error_type: Optional[str] = None

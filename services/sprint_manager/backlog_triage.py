@@ -96,17 +96,19 @@ def triage_backlog(
         return {"tickets": []}, "no_tickets"
 
     prompt = _build_prompt(tickets)
+    # Strip ANTHROPIC_API_KEY so claude authenticates via the subscription, like
+    # the other agents (see estimate_issue.py).
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    from services.sprint_manager.model_routing import apply_provider_env
+    _triage_model = apply_provider_env(env, _MODEL, repo=project)
     cmd = [
         "claude",
-        "--model", _MODEL,
+        "--model", _triage_model,
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "-p", prompt,
     ]
-    # Strip ANTHROPIC_API_KEY so claude authenticates via the subscription, like
-    # the other agents (see estimate_issue.py).
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    env["CLAUDE_MODEL"] = _MODEL
+    env["CLAUDE_MODEL"] = _triage_model
     env.setdefault("CLAUDE_AGENT_ROLE", "backlog_triage")
     if project:
         env.setdefault("COMMANDER_PROJECT", project)

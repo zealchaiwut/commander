@@ -205,23 +205,27 @@ Now estimate this issue:
 
 Output ONLY the JSON object. No other text."""
 
-    cmd = [
-        "claude",
-        "--model", "claude-haiku-4-5-20251001",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "-p", prompt,
-    ]
-
     # Strip ANTHROPIC_API_KEY so the claude CLI authenticates via the Claude
     # subscription (keychain) instead of the API key. The configured key has no
     # credit balance, so leaving it set makes claude exit non-zero with
     # "Credit balance is too low" — surfaced upstream as a bogus model_error.
     # Matches how the dashboard strips the key for coder/tester subprocesses.
     _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    from services.sprint_manager.model_routing import apply_provider_env
+    _estimator_model = apply_provider_env(
+        _agent_env, "claude-haiku-4-5-20251001", repo=project,
+    )
+    cmd = [
+        "claude",
+        "--model", _estimator_model,
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "-p", prompt,
+    ]
+
     # Tag hook-recorded token_usage rows with the model (and role, if the
     # launcher didn't already set CLAUDE_AGENT_ROLE).
-    _agent_env["CLAUDE_MODEL"] = "claude-haiku-4-5-20251001"
+    _agent_env["CLAUDE_MODEL"] = _estimator_model
     _agent_env.setdefault("CLAUDE_AGENT_ROLE", "estimator")
     if project:
         _agent_env.setdefault("COMMANDER_PROJECT", project)

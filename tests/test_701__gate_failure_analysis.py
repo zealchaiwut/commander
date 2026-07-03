@@ -82,14 +82,15 @@ def _run_sprint_loop(
     def fake_coder(issue_num, alert_modes, sprint_branch="develop",
                    repo_name=None, cfg=None, chosen_port=None,
                    rate_limit_events=None, on_running=None, sprint_label=None,
-                   prior_failures=None):
+                   prior_failures=None, **kwargs):
         if on_running:
             on_running()
         return next(coder_iter)
 
     def fake_tester(issue_num, alert_modes, sprint_branch="develop",
                     repo_name=None, cfg=None, chosen_port=None,
-                    rate_limit_events=None, on_running=None, sprint_label=None):
+                    rate_limit_events=None, on_running=None, sprint_label=None,
+                    **kwargs):
         if on_running:
             on_running()
         return 0, None
@@ -108,7 +109,7 @@ def _run_sprint_loop(
             posted_comments.append({"issue": issue_num, "body": body})
 
     with (
-        patch.object(sm, "_create_sprint_branch", lambda b: None),
+        patch.object(sm, "_create_sprint_branch", lambda b, **kw: None),
         patch.object(sm, "list_backlog_issues",
                      lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
         patch.object(sm, "_dispatch_coder", fake_coder),
@@ -195,13 +196,13 @@ class TestAC1AnalysisPublishedOnExhaustion:
         def fake_coder_crash(issue_num, alert_modes, sprint_branch="develop",
                              repo_name=None, cfg=None, chosen_port=None,
                              rate_limit_events=None, on_running=None,
-                             sprint_label=None, prior_failures=None):
+                             sprint_label=None, prior_failures=None, **kwargs):
             if on_running:
                 on_running()
             return next(coder_iter)
 
         with (
-            patch.object(sm, "_create_sprint_branch", lambda b: None),
+            patch.object(sm, "_create_sprint_branch", lambda b, **kw: None),
             patch.object(sm, "list_backlog_issues",
                          lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
             patch.object(sm, "_dispatch_coder", fake_coder_crash),

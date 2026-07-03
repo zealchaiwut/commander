@@ -9277,6 +9277,725 @@
       .rm-progress-fill { transition: none; }
       .rm-skeleton, .rm-skeleton-line { animation: none; }
     }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       IMPECCABLE REDESIGN LAYER — project page
+       Design-only overrides; preserves all IDs, JS hooks, SSE contracts.
+       Tokens are inherited from tokens.css + dark-mode block above.
+       ═══════════════════════════════════════════════════════════════════════ */
+
+    /* ── Top nav ─────────────────────────────────────────────────────────── */
+    .top-nav {
+      height: 48px;
+      padding: 0 20px;
+      gap: 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .top-nav.env-prd {
+      background: #1d4ed8;
+      border-bottom-color: rgba(0,0,0,.25);
+    }
+
+    .brand-mark {
+      width: 28px; height: 28px;
+      border-radius: 7px;
+      background: var(--text);
+      color: var(--surface);
+      font-size: 15px;
+      transition: opacity .15s;
+    }
+    .brand-mark:hover { opacity: .75; }
+
+    .brand-wordmark {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -.025em;
+      color: var(--text);
+    }
+
+    .env-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .top-nav.env-prd .env-badge {
+      background: rgba(255,255,255,.18);
+      color: rgba(255,255,255,.9);
+      border-color: transparent;
+    }
+
+    /* Global search */
+    .global-search-wrap { max-width: 280px; }
+    .global-search-input {
+      height: 30px;
+      font-size: 12px;
+      border-radius: 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      transition: border-color .15s, background .15s, box-shadow .15s;
+    }
+    .global-search-input:focus {
+      background: var(--surface);
+      border-color: color-mix(in srgb, var(--blue) 55%, var(--border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 12%, transparent);
+    }
+    .global-search-icon { font-size: 14px; color: var(--text-sub); }
+
+    .global-search-dropdown {
+      border-radius: 9px;
+      border-color: var(--border);
+      box-shadow: 0 8px 28px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08);
+    }
+    .global-search-result {
+      font-size: 12.5px;
+      padding: 7px 12px;
+    }
+    .global-search-result:hover { background: var(--surface-2); }
+
+    .btn-icon {
+      width: 30px; height: 30px;
+      border-radius: 7px;
+      border-color: var(--border);
+      font-size: 15px;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .btn-icon:hover {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--text-sub);
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+    }
+
+    .sb-home-link {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 8px 14px;
+      gap: 8px;
+      border-radius: 0;
+      transition: background .12s, color .12s;
+    }
+    .sb-home-link:hover { background: var(--surface-2); color: var(--text); }
+    .sb-home-link .ti { font-size: 15px; color: var(--text-sub); }
+
+    .sb-section-hdr {
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--text-sub);
+      padding: 14px 14px 4px;
+    }
+
+    .sb-proj-item {
+      padding: 6px 14px;
+      font-size: 12.5px;
+      gap: 8px;
+      border-radius: 0;
+      transition: background .1s;
+    }
+    .sb-proj-item:hover:not(.active) { background: var(--surface-2); }
+    .sb-proj-item.active {
+      background: var(--surface-2);
+      box-shadow: inset 3px 0 0 var(--text);
+      font-weight: 600;
+    }
+
+    .sb-icon-badge {
+      width: 20px; height: 20px;
+      border-radius: 5px;
+      font-size: 11px;
+    }
+    .sb-proj-item.active .sb-icon-badge { background: var(--text); }
+
+    .sb-proj-name {
+      font-size: 12.5px;
+    }
+
+    .sb-status-dot.running {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent);
+    }
+
+    .sb-sprint-badge {
+      font-size: 9.5px;
+      padding: 1px 6px 1px 4px;
+    }
+
+    .sb-add-tile {
+      margin: 6px 10px;
+      padding: 6px 14px;
+      font-size: 11.5px;
+      border-radius: 7px;
+      border-style: dashed;
+      border-color: var(--border);
+      color: var(--text-sub);
+      transition: border-color .12s, color .12s, background .12s;
+      width: calc(100% - 20px);
+    }
+    .sb-add-tile:hover {
+      border-color: var(--text-sub);
+      color: var(--text-muted);
+      background: var(--surface-2);
+    }
+
+    /* Settings link in sidebar */
+    .sb-settings-link {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 14px;
+      font-size: 12.5px; font-weight: 500;
+      color: var(--text-muted);
+      background: none; border: none; cursor: pointer;
+      width: 100%; text-align: left;
+      transition: background .12s, color .12s;
+    }
+    .sb-settings-link:hover { background: var(--surface-2); color: var(--text); }
+    .sb-settings-link .ti { font-size: 15px; color: var(--text-sub); }
+
+    .sidebar-footer {
+      padding: 10px 14px;
+      font-size: 10px;
+      color: var(--text-sub);
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Project header ──────────────────────────────────────────────────── */
+    .proj-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: var(--space-4) var(--space-6) 0;
+    }
+
+    .proj-header-icon {
+      width: 28px; height: 28px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+
+    .proj-header-name {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+    }
+
+    .proj-header-gh-link {
+      color: var(--text-sub);
+      font-size: 17px;
+      transition: color .12s;
+    }
+    .proj-header-gh-link:hover { color: var(--text); }
+
+    .proj-header-pill {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+
+    /* Button overrides in header */
+    .btn-ghost {
+      height: 30px;
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 7px;
+      border-color: var(--border);
+      color: var(--text-muted);
+      gap: 4px;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .btn-ghost:hover {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--text-sub);
+    }
+    .btn-ghost .ti { font-size: 13px; }
+
+    .btn-primary {
+      height: 30px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 7px;
+      gap: 4px;
+      background: var(--text);
+      color: var(--surface);
+      border: none;
+      transition: opacity .12s;
+    }
+    .btn-primary:hover { opacity: .82; }
+    .btn-primary .ti { font-size: 13px; }
+
+    /* Auto-refresh pill */
+    .smgmt-ar-pill {
+      display: inline-flex; align-items: center;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      overflow: hidden;
+      gap: 0;
+      transition: border-color .12s;
+    }
+    .smgmt-ar-pill:hover { border-color: var(--text-sub); }
+    .smgmt-ar-pill-refresh, .smgmt-ar-pill-trigger {
+      display: inline-flex; align-items: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted);
+      height: 100%; padding: 0 8px;
+      font-size: 12px; font-weight: 500;
+      transition: background .12s, color .12s;
+    }
+    .smgmt-ar-pill-refresh:hover,
+    .smgmt-ar-pill-trigger:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    .smgmt-ar-pill-sep {
+      width: 1px; height: 16px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .smgmt-ar-menu {
+      border-radius: 9px;
+      border-color: var(--border);
+      box-shadow: 0 6px 22px rgba(0,0,0,.16);
+      padding: 4px;
+      min-width: 120px;
+    }
+    .smgmt-ar-menu-item {
+      padding: 6px 10px;
+      font-size: 12.5px;
+      border-radius: 6px;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .smgmt-ar-menu-item:hover { background: var(--surface-2); }
+    .smgmt-ar-turn-off { color: var(--red); }
+
+    /* Create dropdown */
+    .proj-create-menu {
+      border-radius: 9px;
+      border-color: var(--border);
+      box-shadow: 0 6px 22px rgba(0,0,0,.18);
+      padding: 4px;
+    }
+    .proj-create-item {
+      border-radius: 6px;
+      padding: 8px 10px;
+      gap: 10px;
+    }
+    .proj-create-item > .ti { font-size: 16px; }
+    .proj-create-item strong { font-size: 12.5px; }
+    .proj-create-item small { font-size: 11px; }
+
+    /* ── Sub-tab strip ───────────────────────────────────────────────────── */
+    .sub-tabs {
+      gap: 0;
+      padding: 0;
+      overflow: visible;
+    }
+
+    .stab {
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: var(--space-3) var(--space-2);
+      margin-right: 16px;
+      gap: 5px;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      min-height: 44px;
+      transition: color .12s, border-color .12s, background .12s;
+      white-space: nowrap;
+    }
+    .stab.active {
+      color: var(--text);
+      border-bottom-color: var(--blue);
+      font-weight: 600;
+    }
+    .stab:hover:not(.active):not(.disabled) {
+      color: var(--text);
+      background: var(--surface-2);
+      border-radius: 5px 5px 0 0;
+    }
+    .stab .ti { font-size: 14px; }
+    .stab-soon {
+      font-size: 9px;
+      padding: 1px 5px;
+      letter-spacing: .05em;
+    }
+
+    .stab-dropdown {
+      border-radius: 9px;
+      border-color: var(--border);
+      box-shadow: 0 6px 22px rgba(0,0,0,.15);
+      padding: 4px;
+    }
+    .stab-dropdown .stab {
+      border-radius: 6px;
+      margin-right: 0;
+    }
+
+    /* ── Sprint summary pane ─────────────────────────────────────────────── */
+    .smgmt-summary-pane {
+      border-radius: 9px;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--indigo) 8%, transparent);
+    }
+    [data-theme="dark"] .smgmt-summary-pane {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--indigo) 12%, transparent);
+    }
+    .smgmt-summary-header {
+      border-radius: 9px 9px 0 0;
+    }
+    .smgmt-summary-row {
+      transition: background .1s;
+    }
+
+    /* ── Sprint management toolbar ───────────────────────────────────────── */
+    .smgmt-toolbar { padding: 12px 24px; }
+    .smgmt-toolbar-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -.01em;
+    }
+    .smgmt-content { padding: 0 24px 24px; }
+    .smgmt-label-filter-row { padding: 8px 24px 4px; }
+    .smgmt-filter-bar { padding: 0 24px 8px; }
+
+    /* Label filter chips */
+    .smgmt-lf-chip {
+      font-size: 11.5px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      transition: background .1s, border-color .1s, color .1s;
+    }
+    .smgmt-lf-chip.is-active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+
+    /* Filter input */
+    .smgmt-filter-input {
+      height: 30px;
+      font-size: 12.5px;
+      border-radius: 7px;
+    }
+
+    /* ── Sprint cards ────────────────────────────────────────────────────── */
+    .smgmt-sprint-list { gap: 10px; margin-top: 12px; }
+
+    .smgmt-sprint-card {
+      border-radius: 9px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-color: var(--border);
+      transition: border-color .15s, box-shadow .15s;
+    }
+    /* Hover only on plain unstyled cards — don't override state-specific border colors */
+    .smgmt-sprint-card:not(.smgmt-completed):not(.smgmt-ready-to-merge):not(.smgmt-needs-rework):not(.smgmt-has-rework):not(.smgmt-pending-signoff):not(.smgmt-running-clickable):hover {
+      border-color: var(--text-sub);
+    }
+    .smgmt-sprint-card.smgmt-running-clickable:hover {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 10%, transparent);
+    }
+
+    .smgmt-sprint-header {
+      font-size: 13.5px;
+      font-weight: 700;
+    }
+
+    /* State color rings — full border emphasis, no side stripes */
+    .smgmt-sprint-card.smgmt-completed,
+    .smgmt-sprint-card.smgmt-ready-to-merge {
+      border-color: var(--steel);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--steel) 10%, transparent);
+    }
+    .smgmt-sprint-card.smgmt-needs-rework,
+    .smgmt-sprint-card.smgmt-has-rework {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 10%, transparent);
+    }
+    .smgmt-sprint-card.smgmt-pending-signoff {
+      border-color: var(--purple);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--purple) 10%, transparent);
+    }
+
+    .smgmt-run-btn {
+      height: 28px;
+      padding: 0 11px;
+      font-size: 11px;
+      border-radius: 6px;
+      font-weight: 600;
+      letter-spacing: .01em;
+    }
+
+    .smgmt-progress-bar-fill {
+      background: var(--green);
+      transition: width .4s ease;
+    }
+    .smgmt-progress-label { font-size: 10.5px; }
+
+    .smgmt-sprint-goal-text {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-style: normal;
+      opacity: .8;
+    }
+
+    /* ── Ticket rows ─────────────────────────────────────────────────────── */
+    .smgmt-ticket {
+      padding: 7px 14px;
+      font-size: 12px;
+      transition: background .1s;
+    }
+    .smgmt-ticket:hover { background: var(--surface-2); }
+
+    .smgmt-ticket-num {
+      font-size: 11px;
+      min-width: 38px;
+      color: var(--text-sub);
+    }
+    .smgmt-ticket-num:hover { color: var(--blue); }
+
+    .smgmt-ticket-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .smgmt-ticket-status {
+      font-size: 9.5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: .02em;
+    }
+
+    .smgmt-status-backlog    { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border); }
+    .smgmt-status-in-progress { background: var(--blue-bg); color: var(--blue); }
+    .smgmt-status-sit        { background: var(--amber-bg); color: var(--amber); }
+    .smgmt-status-uat        { background: var(--purple-bg); color: var(--purple); }
+    .smgmt-status-done       { background: color-mix(in srgb, var(--green-bg) 80%, transparent); color: var(--green); }
+
+    /* ── History cards ───────────────────────────────────────────────────── */
+    .hist-card {
+      border-radius: 9px;
+      transition: border-color .12s;
+    }
+    .hist-card.expanded {
+      border-color: color-mix(in srgb, var(--blue) 30%, var(--border));
+    }
+    .hist-child-card { border-radius: 9px; }
+    .hist-child-head { padding: 11px 14px; }
+    .hist-child-title { font-size: 14px; }
+    .hist-card-head { padding: 9px 14px; }
+    .hist-card-title { font-size: 13px; font-weight: 600; }
+
+    .hist-head-btn {
+      height: 24px;
+      padding: 0 8px;
+      font-size: 10.5px;
+      border-radius: 5px;
+      transition: background .1s, border-color .1s;
+    }
+
+    .hist-parent-row { border-radius: 9px; }
+
+    /* Metrics bars */
+    .hist-agent-bar { border-radius: 4px; overflow: hidden; }
+    .split-bar { border-radius: 5px; }
+
+    /* History fold rows */
+    .fold { border-radius: 9px; }
+    .fold-head { padding: 10px 14px; }
+    .fold-title { font-size: 13px; }
+
+    /* Sprint summary outcome chips */
+    .smgmt-outcome-chip { border-radius: 6px; }
+
+    /* ── Status badges ───────────────────────────────────────────────────── */
+    .hist-state {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 5px;
+    }
+
+    .smgmt-state-badge {
+      font-size: 10px;
+      padding: 2px 9px;
+      letter-spacing: .03em;
+    }
+
+    /* ── Issue/ticket rows ───────────────────────────────────────────────── */
+    .ticket-row {
+      padding: 10px 0;
+      transition: background .1s;
+    }
+    .ticket-row:hover { background: var(--surface-2); }
+    .ticket-title { font-size: 12.5px; }
+    .ticket-num { font-size: 11px; color: var(--text-sub); }
+    .ticket-status-pill {
+      font-size: 9.5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    /* ── Modals ──────────────────────────────────────────────────────────── */
+    .modal {
+      border-radius: 12px;
+      border-color: var(--border);
+      box-shadow: 0 16px 48px rgba(0,0,0,.24), 0 4px 12px rgba(0,0,0,.12);
+    }
+    [data-theme="dark"] .modal {
+      box-shadow: 0 16px 48px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.25);
+    }
+
+    /* ── Tab pane padding ────────────────────────────────────────────────── */
+    .tab-pane { padding: 24px; }
+    #pane-sprint-mgmt { padding: 0; }
+
+    /* ── Section headers in tab panes ────────────────────────────────────── */
+    .status-card { border-radius: 9px; }
+    .status-card-hdr { padding: 11px 14px 9px; }
+    .status-card-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+
+    /* ── Deploy tab cards ────────────────────────────────────────────────── */
+    .deploy-card { border-radius: 9px; gap: 10px; }
+    .deploy-card__title { font-size: 14px; }
+    .deploy-btn {
+      border-radius: 7px;
+      font-size: 12.5px;
+      min-height: 32px;
+      padding: 6px 12px;
+    }
+
+    /* ── Settings cards ──────────────────────────────────────────────────── */
+    .proj-settings-card { border-radius: 9px; }
+    .proj-settings-card-head { padding: 12px 14px; }
+    .proj-settings-card-title { font-size: 13.5px; }
+
+    /* ── Notes tab ───────────────────────────────────────────────────────── */
+    .notes-textarea { border-radius: 9px; }
+    .notes-hdr-left h2 { font-size: 17px; font-weight: 700; }
+
+    /* ── Compare sprints tab ─────────────────────────────────────────────── */
+    .cmp-col { border-radius: 9px; }
+    .cmp-col-label { font-size: 15px; }
+
+    /* ── Ticket detail panel ─────────────────────────────────────────────── */
+    .tdp { top: 48px; }
+    .tdp-title { font-size: 14.5px; }
+
+    /* ── Global: empty states ────────────────────────────────────────────── */
+    .empty-state {
+      padding: 48px 24px;
+    }
+    .empty-state i, .empty-state .empty-icon {
+      font-size: 26px;
+      color: var(--text-sub);
+    }
+    .tkt-empty-icon { font-size: 30px; }
+    .tkt-empty-title { font-size: 14px; }
+
+    /* ── Planner-list style data rows (shared pattern) ───────────────────── */
+    .iss-row { padding: 5px 0; }
+    .iss-id { font-size: 11.5px; font-weight: 600; }
+    .iss-title { font-size: 11px; }
+    .iss-chip {
+      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Reconciliation items ────────────────────────────────────────────── */
+    .recon-item { border-radius: 6px; padding: 6px 10px; }
+    .recon-passed-item { border-radius: 5px; }
+    .recon-chip { border-radius: 5px; }
+
+    /* ── Progress bars ───────────────────────────────────────────────────── */
+    .smgmt-progress-bar-wrap { border-radius: 3px; overflow: hidden; }
+    .smgmt-progress-bar-fill { border-radius: 3px; }
+
+    /* ── Skeleton loaders ────────────────────────────────────────────────── */
+    .hist-skeleton-card { border-radius: 9px; }
+
+    /* ── Focus rings ─────────────────────────────────────────────────────── */
+    :focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+
+    /* ── Scrollbar refinement ────────────────────────────────────────────── */
+    .main-area::-webkit-scrollbar { width: 5px; }
+    .main-area::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+    .main-area::-webkit-scrollbar-track { background: transparent; }
+    .main-area { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+    /* ── Sprint sub-nav (Board / Running / History) ─────────────────────── */
+    .subnav { padding: 12px 24px 0; gap: 4px; }
+
+    .subtab {
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 7px;
+      gap: 5px;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .subtab.active {
+      font-weight: 600;
+      border-color: color-mix(in srgb, var(--text) 35%, var(--border));
+    }
+    .subtab:hover:not(.active) { background: var(--surface); border-color: var(--border); }
+
+    .subtab-badge {
+      min-width: 17px; height: 17px;
+      font-size: 10.5px;
+      border-radius: 5px;
+    }
+
+    /* Running sprint head card */
+    .run-head-card {
+      border-radius: 9px;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 12%, transparent),
+                  0 1px 3px rgba(0,0,0,.05);
+    }
+    .run-head-title { font-size: 16px; letter-spacing: -.01em; }
+
+    /* ── Reduced-motion ──────────────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .smgmt-sprint-card,
+      .smgmt-lf-chip,
+      .hist-card,
+      .stab,
+      .sb-proj-item { transition: none !important; }
+    }
+
+    /* ── Mobile adjustments ──────────────────────────────────────────────── */
+    @media (max-width: 699px) {
+      .proj-header { padding: 12px 16px 0; }
+      .smgmt-toolbar { padding: 10px 16px; }
+      .smgmt-content { padding: 0 16px 16px; }
+      .smgmt-label-filter-row,
+      .smgmt-filter-bar { padding-left: 16px; padding-right: 16px; }
+      .tab-pane { padding: 16px; }
+    }
+
   </style>
 </head>
 <body>

@@ -147,6 +147,37 @@ def apply_ica_agent_env(sub_env: dict, profile_name: Optional[str] = None) -> No
 ICA_FORCED_MODEL = "claude-sonnet-4-6"
 
 
+def ica_lean_cli_args() -> list[str]:
+    """Return extra `claude` CLI args that shrink the per-turn MCP payload for
+    ICA-routed dispatches.
+
+    IBM ICA has no prompt caching and a 180s first-token timeout; every MCP
+    server attached at user scope adds its full tool-definition set to every
+    request, which is a fixed cost ICA pays on every turn with no caching to
+    amortize it. `--strict-mcp-config` tells the claude CLI to ignore
+    user/project-scope MCP servers and use only what `--mcp-config` supplies.
+
+    Opt-in via COMMANDER_ICA_LEAN_MCP=1 (default OFF — unset or any other
+    value leaves dispatch behavior unchanged). When on, the default minimal
+    server set is EMPTY (no MCP servers loaded at all). Set
+    COMMANDER_ICA_MCP_JSON to a JSON string or a path to a JSON file (per
+    `--mcp-config` semantics) to allow a minimal server set through instead.
+
+    Returns an empty list when the feature is off, so callers can
+    unconditionally do `cmd += ica_lean_cli_args()`.
+    """
+    import os  # noqa: PLC0415
+
+    if os.environ.get("COMMANDER_ICA_LEAN_MCP") != "1":
+        return []
+
+    args = ["--strict-mcp-config"]
+    mcp_json = os.environ.get("COMMANDER_ICA_MCP_JSON")
+    if mcp_json:
+        args += ["--mcp-config", mcp_json]
+    return args
+
+
 def apply_provider_env(
     sub_env: dict,
     model: str,

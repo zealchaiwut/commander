@@ -38,6 +38,7 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     apply_ica_agent_env,
     get_effective_llm_provider,
     get_role_profile,
+    ica_lean_cli_args,
 )
 from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
@@ -836,7 +837,8 @@ def _dispatch_coder(
         # Per-run ICA routing: point this agent at claude-proxy (issue #1667
         # follow-up). Claude-code branch only — cline has its own metered path.
         # ICA serves only claude-sonnet, so the dispatch model is pinned to it.
-        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+        _is_ica_coder = get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica"
+        if _is_ica_coder:
             apply_ica_agent_env(sub_env, _coder_profile or "ica")
             if dispatch_model != ICA_FORCED_MODEL:
                 sys.stdout.write(
@@ -851,6 +853,8 @@ def _dispatch_coder(
             "--model", dispatch_model,
             "--dangerously-skip-permissions",
         ]
+        if _is_ica_coder:
+            cmd += ica_lean_cli_args()
         coder_persona = _load_agent_persona("coder", cwd_path)
         if coder_persona:
             cmd += ["--append-system-prompt", coder_persona]
@@ -1281,11 +1285,14 @@ def _dispatch_tester(
     )
 
     # Same persona fix as the coder: load the tester subagent for the headless run.
+    _is_ica_tester = get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica"
     cmd = [
         "claude",
         "--model", tester_model,
         "--dangerously-skip-permissions",
     ]
+    if _is_ica_tester:
+        cmd += ica_lean_cli_args()
     tester_persona = _load_agent_persona("tester", cwd_path)
     if tester_persona:
         cmd += ["--append-system-prompt", tester_persona]
@@ -1305,7 +1312,7 @@ def _dispatch_tester(
     # Per-run ICA routing: point this agent at claude-proxy (issue #1667
     # follow-up), mirroring the coder claude-code branch. ICA serves only
     # claude-sonnet, so the tester model is pinned to it.
-    if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+    if _is_ica_tester:
         apply_ica_agent_env(sub_env, _tester_profile or "ica")
         if tester_model != ICA_FORCED_MODEL:
             sys.stdout.write(

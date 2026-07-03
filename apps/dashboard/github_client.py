@@ -574,13 +574,13 @@ def _all_sprint_label_names(repo_name: str) -> set[str]:
     mirror = _mirror_labels(repo_name)
     if mirror is None:
         return live
-    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
     if live:
-        # Live succeeded — only admit mirror labels that also exist live.
-        # Deleted labels linger in stale mirror rows but are absent from live,
-        # so the intersection prevents them from surfacing as zombie sprints.
-        return live | (mirror_sprint & live)
+        # Live succeeded — it is authoritative. By set algebra, live is already
+        # the correct result (A ∪ (B ∩ A) == A). Mirror may have stale labels
+        # absent from live, which we exclude by returning live directly.
+        return live
     # Live is empty (gh down or no sprint labels yet) — fall back to mirror.
+    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
     return mirror_sprint
 
 

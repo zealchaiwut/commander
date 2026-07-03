@@ -144,12 +144,18 @@ def _spawn_preflight_agent(issues_json: str, repo: str, sprint_label: str) -> di
     )
 
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    _model = "claude-haiku-4-5"
+    try:
+        from services.sprint_manager.model_routing import apply_provider_env
+        _model = apply_provider_env(env, _model, repo=repo)
+    except ImportError:
+        pass  # standalone invocation without repo root on sys.path — direct Anthropic
 
     try:
         proc = subprocess.run(
             [
                 "claude",
-                "--model", "claude-haiku-4-5",
+                "--model", _model,
                 "--dangerously-skip-permissions",
                 "-p", prompt,
             ],

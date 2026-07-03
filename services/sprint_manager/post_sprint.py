@@ -35,6 +35,7 @@ from services.sprint_manager.dispatch import (  # noqa: E402
     _load_agent_persona,
     _agent_identity_env,
 )
+from services.sprint_manager.model_routing import apply_provider_env  # noqa: E402
 
 
 # ── sys.modules proxy helper ──────────────────────────────────────────────────
@@ -834,6 +835,12 @@ def _dispatch_documenter(
         structured_log.warn("documenter_git_prep_failed", f"[documenter] git prep failed: {e}", exc=str(e))
 
     documentor_model = cfg.documentor_model if cfg is not None else "claude-sonnet-4-6"
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    documentor_model = apply_provider_env(
+        sub_env, documentor_model,
+        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo,
+    )
     cmd = [
         "claude",
         "--model", documentor_model,
@@ -841,8 +848,6 @@ def _dispatch_documenter(
         "-p", prompt,
     ]
 
-    sub_env = os.environ.copy()
-    sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env["COMMANDER_MERGE_TARGET"] = sprint_branch
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
@@ -1026,6 +1031,12 @@ def _dispatch_reviewer(
         structured_log.warn("reviewer_git_prep_failed", f"[reviewer] git prep failed: {e}", exc=str(e))
 
     reviewer_model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5"
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    reviewer_model = apply_provider_env(
+        sub_env, reviewer_model,
+        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo,
+    )
     cmd = [
         "claude",
         "--model", reviewer_model,
@@ -1033,8 +1044,6 @@ def _dispatch_reviewer(
         "-p", prompt,
     ]
 
-    sub_env = os.environ.copy()
-    sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env.update(_agent_identity_env("reviewer", summary_issue_num))  # issue #719
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
@@ -1149,9 +1158,15 @@ def _dispatch_ba_for_followup(
 
     prompt = _BA_REWRITE_PROMPT.format(issue_num=issue_num, repo=eff_repo)
 
+    sub_env = os.environ.copy()
+    sub_env.pop("ANTHROPIC_API_KEY", None)
+    _ba_model = apply_provider_env(
+        sub_env, "claude-sonnet-4-6",
+        sprint_label=getattr(state, "sprint_label", None), cfg=cfg, repo=eff_repo,
+    )
     cmd = [
         "claude",
-        "--model", "claude-sonnet-4-6",
+        "--model", _ba_model,
         "--dangerously-skip-permissions",
     ]
     ba_persona = _load_agent_persona("ba", cwd_path)
@@ -1159,8 +1174,6 @@ def _dispatch_ba_for_followup(
         cmd += ["--append-system-prompt", ba_persona]
     cmd += ["-p", prompt]
 
-    sub_env = os.environ.copy()
-    sub_env.pop("ANTHROPIC_API_KEY", None)
     sub_env["CLAUDE_AGENT_ROLE"] = "ba"
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo

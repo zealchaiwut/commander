@@ -138,8 +138,13 @@ async def run_resolve_conflict(key: str, repo: str, head: str, base: str) -> Non
         claude_bin = shutil.which("claude") or "/Users/zeal-server/.local/bin/claude"
         prompt = _build_prompt(head, base, clone_dir)
 
+        import os as _os
+        from services.sprint_manager.model_routing import apply_provider_env
+        _env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        _resolver_model = apply_provider_env(_env, "claude-sonnet-4-6", repo=repo)
         cmd = [
             claude_bin,
+            "--model", _resolver_model,
             "--allowedTools", "Bash,Read,Edit,Write",
             "--max-turns", "40",
             "-p", prompt,
@@ -150,6 +155,7 @@ async def run_resolve_conflict(key: str, repo: str, head: str, base: str) -> Non
             cwd=str(clone_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=_env,
         )
 
         async for raw_line in proc.stdout:

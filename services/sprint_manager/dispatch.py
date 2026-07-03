@@ -31,6 +31,7 @@ for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR)):
 from services.logging import log as structured_log  # noqa: E402
 from services.sprint_manager.worktree import _git_worktree_root  # noqa: E402
 from services.sprint_manager.model_routing import (  # noqa: E402
+    ICA_FORCED_MODEL,
     _resolve_coder_model,
     _resolve_cline_model,
     _effective_coder_backend,
@@ -832,7 +833,19 @@ def _dispatch_coder(
                 issue_num=issue_num,
             )
     else:
-        # Claude Code (existing default behavior, byte-for-byte unchanged).
+        # Per-run ICA routing: point this agent at claude-proxy (issue #1667
+        # follow-up). Claude-code branch only — cline has its own metered path.
+        # ICA serves only claude-sonnet, so the dispatch model is pinned to it.
+        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
+            apply_ica_agent_env(sub_env, _coder_profile or "ica")
+            if dispatch_model != ICA_FORCED_MODEL:
+                sys.stdout.write(
+                    f"  [ica-model] #{issue_num}: {dispatch_model} → {ICA_FORCED_MODEL} "
+                    f"(ICA serves claude-sonnet only)\n"
+                )
+                dispatch_model = ICA_FORCED_MODEL
+                dispatch_routing_reason = "ica:forced-sonnet"
+                sub_env["CLAUDE_MODEL"] = dispatch_model
         cmd = [
             "claude",
             "--model", dispatch_model,
@@ -846,10 +859,6 @@ def _dispatch_coder(
         cmd += ["-p", _p_prompt]
         # Claude Code uses subscription auth; strip API key to avoid metered billing.
         sub_env.pop("ANTHROPIC_API_KEY", None)
-        # Per-run ICA routing: point this agent at claude-proxy (issue #1667
-        # follow-up). Claude-code branch only — cline has its own metered path.
-        if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
-            apply_ica_agent_env(sub_env, _coder_profile or "ica")
 
     # Build remaining subprocess environment keys.
     if eff_repo:
@@ -1294,9 +1303,18 @@ def _dispatch_tester(
     if _tester_profile is not None:
         sub_env["CCPROXY_PROFILE"] = _tester_profile
     # Per-run ICA routing: point this agent at claude-proxy (issue #1667
-    # follow-up), mirroring the coder claude-code branch.
+    # follow-up), mirroring the coder claude-code branch. ICA serves only
+    # claude-sonnet, so the tester model is pinned to it.
     if get_effective_llm_provider(sprint_label, cfg, eff_repo) == "ica":
         apply_ica_agent_env(sub_env, _tester_profile or "ica")
+        if tester_model != ICA_FORCED_MODEL:
+            sys.stdout.write(
+                f"  [ica-model] tester #{issue_num}: {tester_model} → {ICA_FORCED_MODEL} "
+                f"(ICA serves claude-sonnet only)\n"
+            )
+            tester_model = ICA_FORCED_MODEL
+            cmd[2] = ICA_FORCED_MODEL
+            sub_env["CLAUDE_MODEL"] = ICA_FORCED_MODEL
     if eff_repo:
         sub_env["COMMANDER_PROJECT"] = eff_repo
     if sprint_label:

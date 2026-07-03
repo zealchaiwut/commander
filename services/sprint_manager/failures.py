@@ -353,6 +353,12 @@ def _generate_gate_failure_analysis(
     # per-agent model config added in #700.
     model = cfg.reviewer_model if cfg is not None else "claude-haiku-4-5-20251001"
     try:
+        import os as _os  # noqa: PLC0415
+        from services.sprint_manager.model_routing import apply_provider_env  # noqa: PLC0415
+        _env = _os.environ.copy()
+        model = apply_provider_env(
+            _env, model, cfg=cfg, repo=_os.environ.get("COMMANDER_PROJECT"),
+        )
         result = subprocess.run(
             [
                 "claude", "-p", prompt,
@@ -362,6 +368,7 @@ def _generate_gate_failure_analysis(
             capture_output=True,
             text=True,
             timeout=60,
+            env=_env,
         )
         if result.returncode == 0:
             data = _extract_analysis_json(result.stdout)

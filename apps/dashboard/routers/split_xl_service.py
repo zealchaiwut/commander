@@ -66,11 +66,15 @@ async def split_preview(repo: str, sprint_label: str, issue_num: int) -> dict:
         'Output ONLY a JSON array of 2-4 objects, each with exactly two string fields: '
         '"title" and "body". No prose, no code fence.'
     )
+    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    from services.sprint_manager.model_routing import apply_provider_env
+    _split_model = apply_provider_env(
+        sub_env, "claude-sonnet-4-6", repo=os.environ.get("COMMANDER_PROJECT"),
+    )
     cmd = [
-        "claude", "--model", "claude-sonnet-4-6",
+        "claude", "--model", _split_model,
         "--dangerously-skip-permissions", "-p", prompt,
     ]
-    sub_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,

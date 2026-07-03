@@ -321,6 +321,11 @@ def _spawn_estimator_agent(
     )
 
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    try:
+        from services.sprint_manager.model_routing import apply_provider_env
+        model = apply_provider_env(env, model, repo=repo)
+    except ImportError:
+        pass  # standalone invocation without repo root on sys.path — direct Anthropic
 
     try:
         proc = subprocess.run(

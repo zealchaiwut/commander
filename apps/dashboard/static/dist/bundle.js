@@ -6973,6 +6973,15 @@ Proceed anyway?`)) {
     _pfShowLoadingActivity("Loading pre-flight checks\u2026");
     const label = _pfCurrentLabel;
     const repo = _pfCurrentRepo;
+    fetch("/api/settings/provider").then((r) => r.ok ? r.json() : null).then((d) => {
+      if (d && d.provider && _pfCurrentLabel === label) {
+        _pfLlmProvider = d.provider;
+        const sel = document.getElementById("pf-provider-select");
+        if (sel)
+          sel.value = d.provider;
+      }
+    }).catch(() => {
+    });
     try {
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
@@ -7848,7 +7857,14 @@ Proceed anyway?`)) {
       const res = await fetch("/api/sprints/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, use_cline_followups: _ksUseClineFollowups, llm_provider: _ksLlmProvider })
+        body: JSON.stringify({
+          project: repo,
+          sprint_label: label,
+          use_cline_followups: _ksUseClineFollowups,
+          // Omit llm_provider when no explicit choice was made — the server then
+          // resolves the global llmProvider setting as the default.
+          ..._ksLlmProvider ? { llm_provider: _ksLlmProvider } : {}
+        })
       });
       if (!res.ok) {
         let detail = await res.text();
@@ -7930,7 +7946,7 @@ Proceed anyway?`)) {
     }
   }
   async function smgmtKickoffRun(label, repo, opts = {}) {
-    _ksLlmProvider = opts.llmProvider ?? "anthropic";
+    _ksLlmProvider = opts.llmProvider ?? null;
     _ksUseClineFollowups = opts.useClineFollowups ?? false;
     _ksShow(label, repo);
     if (!await _ksStep1Post())

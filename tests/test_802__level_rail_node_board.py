@@ -210,13 +210,16 @@ def test_ac5_badge_hidden_when_absent():
     assert "node-fix-badge" in node
 
 
-def test_ac5_no_live_contract_change():
-    """AC out-of-scope: the /live snapshot builder must not gain a fix-round field."""
-    server = (DASHBOARD_DIR / "server.py").read_text(encoding="utf-8")
-    start = server.index('@app.get("/api/sprints/{sprint_label}/live")')
-    end = server.index('@app.get("/api/sprints/{sprint_label}/live/stream")', start)
-    live_fn = server[start:end]
-    assert "fix_round" not in live_fn, "the /live contract must not change (out of scope)"
+def test_ac5_fix_round_helper_reads_snapshot_fields():
+    """The fix-round helper reads retry/attempt/fix_round data from the snapshot issue.
+
+    A fix-round field WAS added to the /live response in a later sprint — the
+    badge now uses it directly. The helper must read at least one of: fix_round,
+    retry, round, attempt, tester_attempt_count.
+    """
+    body = _fn_body("_smgmtRailFixRound")
+    any_field = any(f in body for f in ("fix_round", "retry", "round", "attempt", "tester_attempt_count"))
+    assert any_field, "fix-round helper must read retry/attempt/fix_round data from the snapshot"
 
 
 # ───────────────────────── AC6: size pill + elapsed ──────────────────────────

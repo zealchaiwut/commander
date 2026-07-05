@@ -1,6 +1,6 @@
 /* Commander feature flags — loaded from /api/environment (config.py). */
 
-/** @type {{ signoff?: boolean, advisor?: boolean, planning?: boolean, history_aggregate?: boolean } | null} */
+/** @type {{ signoff?: boolean, advisor?: boolean, planning?: boolean, history_aggregate?: boolean, running_aggregate?: boolean } | null} */
 let _features = null;
 
 export function commanderFeatures() {
@@ -26,6 +26,15 @@ export function planningEnabled() {
  */
 export function historyAggregateEnabled() {
   return commanderFeatures().history_aggregate === true;
+}
+
+/** True when COMMANDER_RUNNING_AGGREGATE is on (issue #1646).
+ *
+ * When enabled the Running tab uses the consolidated GET /api/running endpoint
+ * instead of fanning out per-agent requests, reducing latency and server load.
+ */
+export function runningAggregateEnabled() {
+  return commanderFeatures().running_aggregate === true;
 }
 
 /** Fetch flags and hide disabled UI surfaces. */

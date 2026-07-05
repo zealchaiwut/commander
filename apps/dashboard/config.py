@@ -91,6 +91,17 @@ def history_aggregate_enabled() -> bool:
     return _env_bool("COMMANDER_HISTORY_AGGREGATE", default="0")
 
 
+def running_aggregate_enabled() -> bool:
+    """True when COMMANDER_RUNNING_AGGREGATE=1.
+
+    When enabled the frontend uses the consolidated GET /api/running endpoint
+    (issue #1645 backend) instead of fanning out per-agent requests, reducing
+    latency and server load. Default OFF so the legacy fan-out code path runs
+    as the safe fallback until the flag is explicitly set (issue #1646).
+    """
+    return _env_bool("COMMANDER_RUNNING_AGGREGATE", default="0")
+
+
 def definition_of_ready_mode() -> str:
     """Return the DOR gate mode: 'block', 'warn', or 'off' (default 'off').
 
@@ -117,4 +128,8 @@ def commander_features() -> dict:
         # feed instead of firing per-card /api/sprints/{label}/run-stats calls
         # (issue #1640).  Set COMMANDER_HISTORY_AGGREGATE=1 in .env to enable.
         "history_aggregate": history_aggregate_enabled(),
+        # When True the Running tab uses the consolidated /api/running endpoint
+        # instead of fanning out per-agent requests (issue #1646).
+        # Set COMMANDER_RUNNING_AGGREGATE=1 in .env to enable.
+        "running_aggregate": running_aggregate_enabled(),
     }

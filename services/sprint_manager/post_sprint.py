@@ -839,7 +839,7 @@ def _dispatch_documenter(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     documentor_model = apply_provider_env(
         sub_env, documentor_model,
-        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo,
+        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo, role="documenter",
     )
     cmd = [
         "claude",
@@ -1035,7 +1035,7 @@ def _dispatch_reviewer(
     sub_env.pop("ANTHROPIC_API_KEY", None)
     reviewer_model = apply_provider_env(
         sub_env, reviewer_model,
-        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo,
+        sprint_label=state.sprint_label, cfg=cfg, repo=eff_repo, role="reviewer",
     )
     cmd = [
         "claude",
@@ -1163,6 +1163,7 @@ def _dispatch_ba_for_followup(
     _ba_model = apply_provider_env(
         sub_env, "claude-sonnet-4-6",
         sprint_label=getattr(state, "sprint_label", None), cfg=cfg, repo=eff_repo,
+        role="ba",
     )
     cmd = [
         "claude",

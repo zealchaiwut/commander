@@ -100,7 +100,7 @@ def triage_backlog(
     # the other agents (see estimate_issue.py).
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     from services.sprint_manager.model_routing import apply_provider_env
-    _triage_model = apply_provider_env(env, _MODEL, repo=project)
+    _triage_model = apply_provider_env(env, _MODEL, repo=project, role="triage")
     cmd = [
         "claude",
         "--model", _triage_model,

@@ -3627,9 +3627,11 @@ ${listing}`)) {
       if (typeof _smgmtApplyRerunOptimistic === "function") {
         _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
       }
-      await loadSprintMgmt(true);
+      loadSprintMgmt(true).catch(() => {
+      });
       if (typeof globalThis._histLoadLedger === "function") {
-        await globalThis._histLoadLedger(repo);
+        globalThis._histLoadLedger(repo).catch(() => {
+        });
       }
       _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";

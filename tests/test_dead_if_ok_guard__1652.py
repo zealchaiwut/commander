@@ -161,9 +161,9 @@ def test_dead_if_ok_guard__endpoint_exists(client):
     try:
         r = client.post("/api/sprints/sprint-101/split-xl/999/apply", json={})
         # Should get either a validation error or HTTP error, but not 404
-        assert r.status_code != 404, f"Endpoint returned 404 - endpoint may not exist"
+        assert r.status_code != 404, "Endpoint returned 404 - endpoint may not exist"
         # Typically will be 422 (validation) or 400 (invalid label/data)
-    except Exception as e:
+    except Exception:
         # Connection errors are OK (sprint may not exist in test data)
         # We're just verifying the route is mounted
         pass

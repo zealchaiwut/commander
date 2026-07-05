@@ -40,7 +40,7 @@ def test_split_xl_apply__dead_guard_removed(client):
         func_body = match.group(0)
         # Look for the specific dead guard
         has_dead_guard = 'if result.get("ok"):' in func_body
-        assert not has_dead_guard, f"Dead guard 'if result.get(\"ok\"):' should be removed but found in function"
+        assert not has_dead_guard, "Dead guard 'if result.get(\"ok\"):' should be removed but found in function"
 
 
 def test_split_xl_apply__failure_path_intact(client):

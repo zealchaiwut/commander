@@ -857,11 +857,31 @@ function _histStatsHtml(s) {
   </div>`;
 }
 
+// Seed _histRunStats from inline run_stats on each history row when
+// COMMANDER_HISTORY_AGGREGATE is ON (issue #1640).  Because _histLoadRunStats
+// guards with `if (label in _histRunStats) return;`, pre-populating the cache
+// here makes every subsequent per-card fetch a no-op — zero extra network calls.
+// When the flag is OFF this function is a no-op and the existing lazy-fetch path
+// is completely unchanged.
+function _histSeedRunStatsFromInline(sprints) {
+  if (!(globalThis._commanderFeatures && globalThis._commanderFeatures.history_aggregate === true)) {
+    return;
+  }
+  if (!Array.isArray(sprints)) return;
+  for (const s of sprints) {
+    if (s && s.label && s.run_stats != null && !(s.label in _histRunStats)) {
+      _histRunStats[s.label] = s.run_stats;
+    }
+  }
+}
+
 // Lazily fetch the run-stats aggregation for a sprint the first time its card is
 // expanded; cache it and re-render so the block fills in. Failures leave the
 // label uncached (so a later expand retries) and the wall/token chips still show.
+// When COMMANDER_HISTORY_AGGREGATE is ON, _histSeedRunStatsFromInline has already
+// populated the cache from inline data, so this function returns immediately.
 async function _histLoadRunStats(label) {
-  if (label in _histRunStats) return;   // already fetched (or in flight result)
+  if (label in _histRunStats) return;   // already fetched (or in flight result; or seeded from inline)
   const repo = _cachedFullRepo[_slug];
   try {
     const url = '/api/sprints/' + encodeURIComponent(label) + '/run-stats'
@@ -2243,6 +2263,9 @@ export async function _histLoadLedger(repo, opts) {
       const sprints = data.sprints || [];
       _histLedgerData = sprints;
       globalThis._histLedgerData = sprints;
+      // When COMMANDER_HISTORY_AGGREGATE is ON, seed _histRunStats from the
+      // inline run_stats block on each row so per-card fetches become no-ops.
+      _histSeedRunStatsFromInline(sprints);
       _histLedgerCacheRepo = repo;
       _histLedgerCacheAt = Date.now();
       const histOpen = document.getElementById('smgmt-subview-history')?.classList.contains('show');

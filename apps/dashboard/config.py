@@ -79,6 +79,18 @@ def sprint_goal_required_disabled() -> bool:
     )
 
 
+def history_aggregate_enabled() -> bool:
+    """True when COMMANDER_HISTORY_AGGREGATE=1.
+
+    When enabled the frontend reads inline run_stats already present on each
+    history row (issue #1639 backend) and skips per-card
+    GET /api/sprints/{label}/run-stats fetches, reducing latency and server
+    load. Default OFF so the old per-card fetch path remains until the flag
+    is explicitly set (issue #1640).
+    """
+    return _env_bool("COMMANDER_HISTORY_AGGREGATE", default="0")
+
+
 def definition_of_ready_mode() -> str:
     """Return the DOR gate mode: 'block', 'warn', or 'off' (default 'off').
 
@@ -101,4 +113,8 @@ def commander_features() -> dict:
         "planning": not sprint_planning_disabled(),
         "goal_required": not sprint_goal_required_disabled(),
         "definition_of_ready_mode": definition_of_ready_mode(),
+        # When True the History view reads inline run_stats from the history
+        # feed instead of firing per-card /api/sprints/{label}/run-stats calls
+        # (issue #1640).  Set COMMANDER_HISTORY_AGGREGATE=1 in .env to enable.
+        "history_aggregate": history_aggregate_enabled(),
     }

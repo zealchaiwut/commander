@@ -2139,6 +2139,18 @@ Replace the existing draft (${data.existing_label})?`
     ${splitHtml}
   </div>`;
   }
+  function _histSeedRunStatsFromInline(sprints) {
+    if (!(globalThis._commanderFeatures && globalThis._commanderFeatures.history_aggregate === true)) {
+      return;
+    }
+    if (!Array.isArray(sprints))
+      return;
+    for (const s of sprints) {
+      if (s && s.label && s.run_stats != null && !(s.label in _histRunStats)) {
+        _histRunStats[s.label] = s.run_stats;
+      }
+    }
+  }
   async function _histLoadRunStats(label) {
     if (label in _histRunStats)
       return;
@@ -3290,6 +3302,7 @@ Replace the existing draft (${data.existing_label})?`
         const sprints = data.sprints || [];
         _histLedgerData = sprints;
         globalThis._histLedgerData = sprints;
+        _histSeedRunStatsFromInline(sprints);
         _histLedgerCacheRepo = repo;
         _histLedgerCacheAt = Date.now();
         const histOpen = document.getElementById("smgmt-subview-history")?.classList.contains("show");

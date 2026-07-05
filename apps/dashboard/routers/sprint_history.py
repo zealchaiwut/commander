@@ -4,6 +4,7 @@ A local-only, GitHub-free feed of terminal sprint records for the ledger UI.
 The route is thin; all assembly lives in ``sprint_history_service``. New
 endpoints belong here in ``routers/``, never in ``server.py`` (COMMANDER_GATE_MONOLITH).
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks
@@ -92,11 +93,16 @@ def get_sprint_history(
     (the History pane's default fast view).
     """
     result = sprint_history_service.get_sprint_history(
-        offset=offset, limit=limit, project=project, active_only=active_only,
+        offset=offset,
+        limit=limit,
+        project=project,
+        active_only=active_only,
     )
     if project:
+
         async def _broadcast(data: dict):
             import server as srv  # noqa: PLC0415
+
             await srv.broadcast(data)
 
         background_tasks.add_task(
@@ -122,6 +128,7 @@ _SPRINT_LABEL_RE = _re.compile(r"^sprint-\d+(\.\d+)*$")
 def get_sprint_reconcile_preview(label: str, project: str):
     """Dry-run: return GitHub-vs-DB diff + post-sprint checks for one sprint. No writes."""
     from fastapi import HTTPException  # noqa: PLC0415
+
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     return sprint_reconcile_service.reconcile_preview(label, project)
@@ -136,6 +143,7 @@ class ReconcileSprintBody(BaseModel):
 async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
     """Apply reconcile for one sprint: correct DB lifecycle + local state from GitHub truth."""
     from fastapi import HTTPException  # noqa: PLC0415
+
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     if not body.confirmed:
@@ -144,14 +152,17 @@ async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
     if result.get("updated"):
         try:
             import server as srv  # noqa: PLC0415
-            await srv.broadcast({
-                "type": "update",
-                "event": {
-                    "event_type": "sprint_reconciled",
-                    "project": body.project,
-                    "labels": [label],
-                },
-            })
+
+            await srv.broadcast(
+                {
+                    "type": "update",
+                    "event": {
+                        "event_type": "sprint_reconciled",
+                        "project": body.project,
+                        "labels": [label],
+                    },
+                }
+            )
         except Exception:
             pass
     return result
@@ -164,9 +175,11 @@ async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
 async def split_xl_preview(label: str, issue: int, project: str):
     """Run the BA split agent on an XL ticket; return proposed children. No writes."""
     from fastapi import HTTPException  # noqa: PLC0415
+
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     from . import split_xl_service  # noqa: PLC0415
+
     return await split_xl_service.split_preview(project, label, issue)
 
 
@@ -179,26 +192,38 @@ class SplitXlApplyBody(BaseModel):
 async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
     """Create the child tickets in the sprint + close the XL as not-planned."""
     from fastapi import HTTPException  # noqa: PLC0415
+
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     from . import split_xl_service  # noqa: PLC0415
+
     result = split_xl_service.split_apply(body.project, label, issue, body.children)
     if not result.get("ok"):
         # Surface partial-failure recovery info (created child numbers +
         # compensation outcome) as a structured 500 detail so the UI can tell the
         # user exactly what was created and whether manual cleanup is needed (#1453).
-        raise HTTPException(500, detail={
-            "error": result.get("error"),
-            "partial": result.get("partial", False),
-            "created": result.get("created_numbers", []),
-            "compensation": result.get("compensation"),
-        })
+        raise HTTPException(
+            500,
+            detail={
+                "error": result.get("error"),
+                "partial": result.get("partial", False),
+                "created": result.get("created_numbers", []),
+                "compensation": result.get("compensation"),
+            },
+        )
     try:
         import server as srv  # noqa: PLC0415
-        await srv.broadcast({
-            "type": "update",
-            "event": {"event_type": "sprint_split", "project": body.project, "label": label},
-        })
+
+        await srv.broadcast(
+            {
+                "type": "update",
+                "event": {
+                    "event_type": "sprint_split",
+                    "project": body.project,
+                    "label": label,
+                },
+            }
+        )
     except Exception:
         pass
     return result
@@ -286,7 +311,9 @@ class ClearStaleLabelsResponse(BaseModel):
     errors: list[str] = []
 
 
-@router.post("/api/sprints/{label}/clear-stale-labels", response_model=ClearStaleLabelsResponse)
+@router.post(
+    "/api/sprints/{label}/clear-stale-labels", response_model=ClearStaleLabelsResponse
+)
 def clear_stale_labels(label: str, body: ClearStaleLabelsBody):
     """Remove stale sprint status labels flagged by post-sprint reconciliation."""
     import github_client as gh  # noqa: PLC0415
@@ -299,7 +326,9 @@ def clear_stale_labels(label: str, body: ClearStaleLabelsBody):
         if num is None or not labels:
             continue
         try:
-            gh.update_labels(int(num), add=[], remove=list(labels), repo_name=body.project)
+            gh.update_labels(
+                int(num), add=[], remove=list(labels), repo_name=body.project
+            )
             cleared.append(int(num))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"#{num}: {exc}")

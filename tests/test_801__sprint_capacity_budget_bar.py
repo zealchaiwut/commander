@@ -79,6 +79,13 @@ def client_ctx():
 
     SessionLocal = sessionmaker(bind=engine)
     settings_repo._session_factory = SessionLocal
+    # settings_service imports settings_repo via an unqualified path (sys.path
+    # extended to include services/sprint_manager/), so it may land in
+    # sys.modules['settings_repo'] as a separate object.  Patch that too so the
+    # test's in-memory engine is used for all reads/writes.
+    _sr_unqualified = sys.modules.get('settings_repo')
+    if _sr_unqualified is not None and _sr_unqualified is not settings_repo:
+        _sr_unqualified._session_factory = SessionLocal
 
     from fastapi.testclient import TestClient
     with patch.object(srv.projects_module, "load_projects", return_value=[{"repo": "owner/test-proj"}]):

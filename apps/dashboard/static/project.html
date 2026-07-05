@@ -19910,7 +19910,8 @@ function _smgmtFmtTokens(n) {
   return String(Math.round(n));
 }
 
-/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6). */
+/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6).
+ *  Outer container: <div class="cap" id="smgmt-cap-<label>"> (injected by board-render.js). */
 function _smgmtUpdateCapBar(label) {
   const el = document.getElementById(`smgmt-cap-${label}`);
   if (!el) return;
@@ -19954,7 +19955,7 @@ function _smgmtUpdateCapBar(label) {
 
     let hintClass = 'cap-hint', hintText;
     if (total > budget) {
-      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ${escHtml(fmtDur(total - budget))}</strong>`;
+      hintText = `${escHtml(sizeBreakdown)} — <strong>over budget by ~${escHtml(fmtDur(total - budget))}</strong>`;
       hintClass = 'cap-hint cap-hint--over';
     } else {
       const headroom = budget - total;
@@ -19963,7 +19964,7 @@ function _smgmtUpdateCapBar(label) {
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
-      hintText += ` · ${unestimated} unestimated`;
+      hintText += ` · ${unestimated} unestimated tickets excluded`;
     }
 
     let forecastHtml = '';

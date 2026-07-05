@@ -129,7 +129,10 @@ class TestCacheHit:
         _bc.store_board_cache("owner/repo", _SNAPSHOT_A)
         result1 = _bc.get_board_cache("owner/repo")
         assert result1 is not None
-        time.sleep(0.05)
+        # Simulate time advancing deterministically — no real sleep.
+        # Decrementing expires_at by 1 s has the same effect as waiting 1 s:
+        # the next remaining = (expires_at - now) will be ~1 s smaller.
+        _bc._cache["owner/repo"]["expires_at"] -= 1.0
         result2 = _bc.get_board_cache("owner/repo")
         assert result2 is not None
         _, remaining1 = result1

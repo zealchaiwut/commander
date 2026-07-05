@@ -1,5 +1,6 @@
 """Tests for issue #1652: remove dead if-ok guard in split_xl_apply (runs against UAT)"""
 import os
+from pathlib import Path
 import pytest
 import httpx
 
@@ -11,6 +12,9 @@ if not BASE_URL.startswith("http"):
     raise RuntimeError(
         "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
     )
+
+REPO_ROOT = Path(__file__).parent.parent
+_SPRINT_HISTORY_PY = REPO_ROOT / "apps" / "dashboard" / "routers" / "sprint_history.py"
 
 
 @pytest.fixture
@@ -24,7 +28,7 @@ def client():
 def test_split_xl_apply__dead_guard_removed(client):
     # AC: The dead `if result.get("ok"):` guard at apps/dashboard/routers/sprint_history.py:196 is removed or replaced with an unconditional block
     # Verify via source code inspection: read the file and confirm no `if result.get("ok"):` wraps the broadcast logic
-    with open("/Users/zeal-server/dev/commander/tester/apps/dashboard/routers/sprint_history.py") as f:
+    with open(_SPRINT_HISTORY_PY) as f:
         content = f.read()
 
     # Check that the function exists and the dead guard is gone
@@ -45,7 +49,7 @@ def test_split_xl_apply__dead_guard_removed(client):
 
 def test_split_xl_apply__failure_path_intact(client):
     # AC: The HTTPException(500, ...) raise path remains intact and unchanged
-    with open("/Users/zeal-server/dev/commander/tester/apps/dashboard/routers/sprint_history.py") as f:
+    with open(_SPRINT_HISTORY_PY) as f:
         content = f.read()
 
     # Verify the failure guard still exists and raises HTTPException with the correct detail structure
@@ -69,7 +73,7 @@ def test_split_xl_apply__failure_path_intact(client):
 
 def test_split_xl_apply__success_path_unconditional(client):
     # AC: The success-path logic previously inside the `if result.get("ok"):` block executes unconditionally after the failure guard
-    with open("/Users/zeal-server/dev/commander/tester/apps/dashboard/routers/sprint_history.py") as f:
+    with open(_SPRINT_HISTORY_PY) as f:
         content = f.read()
 
     import re
@@ -99,7 +103,7 @@ def test_split_xl_apply__no_functional_behavior_changes(client):
     # AC: No functional behavior changes — only the dead conditional wrapper is removed
     # This is a structural check: the function should still have the same logic flow,
     # just without the unreachable conditional. Verify via source inspection.
-    with open("/Users/zeal-server/dev/commander/tester/apps/dashboard/routers/sprint_history.py") as f:
+    with open(_SPRINT_HISTORY_PY) as f:
         content = f.read()
 
     import re

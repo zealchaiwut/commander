@@ -13,6 +13,7 @@ from . import sprint_history_service
 from . import sprint_reconcile_service
 from . import stale_branches_service
 from . import run_stats_service
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprint-history"])
 
@@ -154,6 +155,7 @@ async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
             })
         except Exception:
             pass
+    invalidate_board(body.project)
     return result
 
 

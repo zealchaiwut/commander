@@ -92,6 +92,15 @@ def definition_of_ready_mode() -> str:
     return val if val in ("block", "warn", "off") else "off"
 
 
+def board_aggregate_enabled() -> bool:
+    """Return True when the aggregate board endpoint should be used by the frontend.
+
+    Controlled by COMMANDER_BOARD_AGGREGATE env var (1/true/yes → ON, default OFF).
+    Issue #1638.
+    """
+    return _env_bool("COMMANDER_BOARD_AGGREGATE", "0")
+
+
 def commander_features() -> dict:
     """Feature flags exposed to the dashboard UI (/api/environment)."""
     return {
@@ -101,4 +110,5 @@ def commander_features() -> dict:
         "planning": not sprint_planning_disabled(),
         "goal_required": not sprint_goal_required_disabled(),
         "definition_of_ready_mode": definition_of_ready_mode(),
+        "board_aggregate": board_aggregate_enabled(),
     }

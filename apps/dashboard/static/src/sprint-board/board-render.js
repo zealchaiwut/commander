@@ -22,6 +22,155 @@ import { renderProgressActivity } from "../progress-activity.js";
 /** Tracks which labels are resolved ancestors on the current board render. */
 let _smgmtResolvedAncestors = new Set();
 
+/**
+ * Per-label card index from the /api/board aggregate response (issue #1638).
+ * Set to a {label → card} object when the aggregate path is active; null on
+ * the legacy multi-call path. Exposed on window._smgmtAggregateCards so that
+ * inline project.html functions (e.g. _smgmtLoadMiniRail) can short-circuit.
+ */
+let _smgmtAggregateCards = null;
+
+/**
+ * Build a {label → card} index from a /api/board aggregate response.
+ * Lineage chain ancestors are registered under their own label so that
+ * per-sprint loaders can look up every sprint regardless of section.
+ * Exported for unit tests (issue #1638).
+ */
+export function _smgmtBuildAggCards(agg) {
+  const sections = agg.sections || {};
+  const all = [
+    ...(sections.running || []),
+    ...(sections.needs_rework || []),
+    ...(sections.ready_to_merge || []),
+    ...(sections.draft || []),
+    ...(sections.lineage || []),
+  ];
+  const idx = {};
+  for (const card of all) {
+    if (card.label) idx[card.label] = card;
+    // Register lineage chain ancestors — their card is the latest member's card
+    for (const cl of (card.chain || [])) {
+      if (!idx[cl]) idx[cl] = card;
+    }
+  }
+  return idx;
+}
+
+/**
+ * Transform a /api/board aggregate response into the data shape that
+ * _smgmtRender(data) expects (matching /api/sprint-management/issues).
+ * Exported for unit tests (issue #1638).
+ *
+ * Differences from the legacy shape:
+ *  - _aggregateBuckets: {label → bucket} — server-computed; _smgmtCardBucket
+ *    uses this to skip the outcome-cache–based derivation (issue #1638).
+ *  - sprint_plan_states is always {} — bucket comes from _aggregateBuckets.
+ *  - sprint_rerun_into is always {} — collapse is derived from label patterns
+ *    and sprint_parents, same as the legacy path.
+ */
+export function _smgmtAggToRenderData(agg) {
+  const sections = agg.sections || {};
+  const allCards = [
+    ...(sections.running || []),
+    ...(sections.needs_rework || []),
+    ...(sections.ready_to_merge || []),
+    ...(sections.draft || []),
+    ...(sections.lineage || []),
+  ];
+
+  // Lifecycle states that indicate the sprint has had at least one run attempt
+  const _ranStates = new Set([
+    "running", "needs_rework", "ready_to_merge",
+    "partial_finished", "failed", "completed",
+  ]);
+
+  const issues = [];
+  const sprintLabels = new Set();
+  const sprint_has_run = {};
+  const sprint_parents = {};
+  const aggregateBuckets = {};
+
+  const sectionEntries = [
+    ["running", sections.running || []],
+    ["needs_rework", sections.needs_rework || []],
+    ["ready_to_merge", sections.ready_to_merge || []],
+    ["draft", sections.draft || []],
+    ["lineage", sections.lineage || []],
+  ];
+
+  for (const [sectionName, cards] of sectionEntries) {
+    for (const card of cards) {
+      const label = card.label;
+      if (!label) continue;
+
+      sprintLabels.add(label);
+      aggregateBuckets[label] = sectionName;
+      sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+
+      // Tickets with sprint_label set (only for the card's own label)
+      for (const t of (card.tickets || [])) {
+        issues.push({ ...t, sprint_label: label });
+      }
+
+      // Lineage chain: register ancestors and set parent links
+      const chain = card.chain || [];
+      for (let i = 0; i < chain.length; i++) {
+        const cl = chain[i];
+        sprintLabels.add(cl);
+        if (!(cl in aggregateBuckets)) aggregateBuckets[cl] = "lineage";
+        if (!(cl in sprint_has_run)) sprint_has_run[cl] = sprint_has_run[label];
+      }
+      // Link each member to its predecessor as parent (child → parent)
+      for (let i = 1; i < chain.length; i++) {
+        if (!sprint_parents[chain[i]]) sprint_parents[chain[i]] = chain[i - 1];
+      }
+    }
+  }
+
+  // Backlog tickets (no sprint_label)
+  for (const t of ((sections.backlog || {}).tickets || [])) {
+    issues.push({ ...t, sprint_label: null });
+  }
+
+  // Ordered sprint labels (ascending sprint number then sub-index)
+  const order = [...sprintLabels].sort((a, b) => {
+    const ma = String(a).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    const mb = String(b).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    if (!ma || !mb) return String(a).localeCompare(String(b));
+    const na = parseInt(ma[1], 10);
+    const nb = parseInt(mb[1], 10);
+    if (na !== nb) return na - nb;
+    return parseInt(ma[2] || 0, 10) - parseInt(mb[2] || 0, 10);
+  });
+
+  // Unique base sprint integers
+  const sprintNumSet = new Set();
+  for (const l of order) {
+    const m = String(l).match(/^sprint-(\d+)/);
+    if (m) sprintNumSet.add(parseInt(m[1], 10));
+  }
+  const sprints = [...sprintNumSet].sort((a, b) => a - b);
+
+  // Finished sprints: lifecycle_state === "completed"
+  const finished_sprints = allCards
+    .filter((c) => c.lifecycle_state === "completed" && c.label)
+    .map((c) => c.label);
+
+  return {
+    sprints,
+    order,
+    issues,
+    finished_sprints,
+    merged_sprints: [...finished_sprints],
+    sprint_parents,
+    sprint_rerun_into: {},
+    sprint_plan_states: {},
+    sprint_has_run,
+    sprint_signoff: {},
+    _aggregateBuckets: aggregateBuckets,
+  };
+}
+
 /** Sign-off gate state for a sprint label (issue #862): 'pending' | 'approved' | null. */
 function _smgmtSignoffState(label) {
   if (typeof globalThis !== 'undefined' && globalThis._commanderFeatures
@@ -150,60 +299,112 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
       _smgmtEnsureCapData();
     }
 
-    // Fetch sprint management data + running sprint status + summaries in parallel
-    const [resp, runningResp] = await Promise.all([
-      fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-      fetch("/api/sprints/running-all").catch(() => null),
-    ]);
-    if (!resp.ok) {
-      // Surface a GitHub rate-limit failure specifically (status 429 from
-      // _gh_error) so the board says what's wrong instead of "Failed to load".
-      let msg = "Failed to load sprints.";
-      const d = await resp.json().catch(() => null);
-      const detail = d && typeof d.detail === "string" ? d.detail : "";
-      if (resp.status === 429 || /rate limit/i.test(detail)) {
-        msg = detail || "GitHub API rate limit reached — retry shortly.";
-      }
-      throw new Error(msg);
-    }
-    const data = await resp.json();
+    // ── Feature flag: aggregate board endpoint (issue #1638) ─────────────────
+    const _feats = typeof globalThis !== "undefined" ? globalThis._commanderFeatures : null;
+    const _useBoardAggregate = Boolean(_feats && _feats.board_aggregate === true);
 
-    if (_smgmtLiveCacheRepo !== repo) {
-      _smgmtLiveCacheRepo = repo;
-      for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
-    }
+    let data;
 
-    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
-
-    // Update running labels set; start linger when a label drops off running-all.
-    const prevRunning = new Set(_smgmtRunningLabels);
-    _smgmtRunningLabels = new Set();
-    _smgmtAnySprintRunning = false;
-    if (runningResp && runningResp.ok) {
-      const runningData = await runningResp.json();
-      const running = runningData.running || [];
-      running.forEach((r) => {
-        if (r.project === repo) {
-          _smgmtRunningLabels.add(r.sprint_label);
+    if (_useBoardAggregate) {
+      // ── Aggregate path: single fetch to /api/board ──────────────────────────
+      _smgmtAggregateCards = null; // reset before fetch
+      const aggResp = await fetch(
+        "/api/board?project=" + encodeURIComponent(repo),
+      );
+      if (!aggResp.ok) {
+        let msg = "Failed to load board.";
+        const d = await aggResp.json().catch(() => null);
+        const detail = d && typeof d.detail === "string" ? d.detail : "";
+        if (aggResp.status === 429 || /rate limit/i.test(detail)) {
+          msg = detail || "GitHub API rate limit reached — retry shortly.";
         }
-      });
-      // Only block Run Sprint if THIS project has a running sprint
-      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-    }
-
-    for (const label of prevRunning) {
-      if (
-        !_smgmtRunningLabels.has(label) &&
-        typeof _smgmtLingerStart === "function"
-      ) {
-        _smgmtLingerStart(label);
+        throw new Error(msg);
       }
-    }
+      const agg = await aggResp.json();
 
-    // Keep sprint in running UI until /api/sprints/running-all catches up (post-dispatch race).
-    if (optimisticRunningLabel) {
-      _smgmtRunningLabels.add(optimisticRunningLabel);
-      _smgmtAnySprintRunning = true;
+      // Build per-label card index so per-sprint loaders can skip fetches
+      _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+      if (typeof window !== "undefined") window._smgmtAggregateCards = _smgmtAggregateCards;
+
+      if (_smgmtLiveCacheRepo !== repo) {
+        _smgmtLiveCacheRepo = repo;
+        for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
+      }
+      if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
+
+      // Derive running labels from aggregate sections (instead of running-all)
+      const prevRunningAgg = new Set(_smgmtRunningLabels);
+      _smgmtRunningLabels = new Set();
+      _smgmtAnySprintRunning = false;
+      for (const card of ((agg.sections || {}).running || [])) {
+        if (card.label) _smgmtRunningLabels.add(card.label);
+      }
+      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      for (const label of prevRunningAgg) {
+        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label);
+        }
+      }
+      if (optimisticRunningLabel) {
+        _smgmtRunningLabels.add(optimisticRunningLabel);
+        _smgmtAnySprintRunning = true;
+      }
+
+      data = _smgmtAggToRenderData(agg);
+    } else {
+      // ── Legacy path: multi-call fan-out (flag OFF — unchanged) ─────────────
+      _smgmtAggregateCards = null;
+      if (typeof window !== "undefined") window._smgmtAggregateCards = null;
+
+      // Fetch sprint management data + running sprint status + summaries in parallel
+      const [resp, runningResp] = await Promise.all([
+        fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
+        fetch("/api/sprints/running-all").catch(() => null),
+      ]);
+      if (!resp.ok) {
+        // Surface a GitHub rate-limit failure specifically (status 429 from
+        // _gh_error) so the board says what's wrong instead of "Failed to load".
+        let msg = "Failed to load sprints.";
+        const d = await resp.json().catch(() => null);
+        const detail = d && typeof d.detail === "string" ? d.detail : "";
+        if (resp.status === 429 || /rate limit/i.test(detail)) {
+          msg = detail || "GitHub API rate limit reached — retry shortly.";
+        }
+        throw new Error(msg);
+      }
+      data = await resp.json();
+
+      if (_smgmtLiveCacheRepo !== repo) {
+        _smgmtLiveCacheRepo = repo;
+        for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
+      }
+      if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
+
+      // Update running labels set; start linger when a label drops off running-all.
+      const prevRunning = new Set(_smgmtRunningLabels);
+      _smgmtRunningLabels = new Set();
+      _smgmtAnySprintRunning = false;
+      if (runningResp && runningResp.ok) {
+        const runningData = await runningResp.json();
+        const running = runningData.running || [];
+        running.forEach((r) => {
+          if (r.project === repo) {
+            _smgmtRunningLabels.add(r.sprint_label);
+          }
+        });
+        // Only block Run Sprint if THIS project has a running sprint
+        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      }
+      for (const label of prevRunning) {
+        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label);
+        }
+      }
+      // Keep sprint in running UI until /api/sprints/running-all catches up (post-dispatch race).
+      if (optimisticRunningLabel) {
+        _smgmtRunningLabels.add(optimisticRunningLabel);
+        _smgmtAnySprintRunning = true;
+      }
     }
 
     _smgmtRender(data);
@@ -749,6 +950,20 @@ export function _smgmtApplyRerunOptimistic(
 
 /** Bucket a sprint label for board section grouping (issue #1044). */
 export function _smgmtCardBucket(label, planStates) {
+  // Aggregate path (issue #1638): server-computed bucket overrides the outcome-cache logic
+  const aggBuckets = _smgmtData && _smgmtData._aggregateBuckets;
+  if (aggBuckets && label in aggBuckets) {
+    // Running labels may have changed since the aggregate snapshot (SSE)
+    if (_smgmtRunningLabels.has(label)) return "running";
+    const inLingerAgg = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    if (inLingerAgg && !(_smgmtData.sprint_has_run || {})[label]) return "running";
+    const b = aggBuckets[label];
+    if (b === "running" || b === "needs_rework" || b === "ready_to_merge" || b === "draft") {
+      return b;
+    }
+    // "lineage" is not a valid bucket — handled by _smgmtResolvedAncestors; fall through
+  }
+
   if (_smgmtRunningLabels.has(label)) return "running";
   const inLinger =
     typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -864,6 +1079,27 @@ export function _smgmtOutcomeFromBoard(label, tickets) {
 export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
+
+  // Aggregate path (issue #1638): use estimate_hours from inline card data — no fetch
+  if (_smgmtAggregateCards) {
+    await Promise.all(orderedLabels.map(async (label) => {
+      const tickets = bySprint[label] || [];
+      if (tickets.length === 0) return;
+      for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
+      const card = _smgmtAggregateCards[label];
+      if (!card) return;
+      const estEl = document.getElementById(`smgmt-est-${label}`);
+      if (estEl && card.estimate_hours != null) {
+        const h = card.estimate_hours;
+        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+        estEl.textContent = `${display} estimated`;
+      }
+      _smgmtSetSprintTokenEl(label, {});
+    }));
+    return;
+  }
+
+  // Legacy path: fetch /api/estimates/batch per sprint
   await Promise.all(orderedLabels.map(async (label) => {
     const tickets = bySprint[label] || [];
     if (tickets.length === 0) return;
@@ -947,6 +1183,42 @@ export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
 export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
+
+  // Aggregate path (issue #1638): use dep_order from inline card data — no fetch
+  if (_smgmtAggregateCards) {
+    await Promise.all(orderedLabels.map(async (label) => {
+      if (_smgmtRunningLabels.has(label)) return;
+      if (_smgmtFinishedLabels.has(label)) return;
+      const card = _smgmtAggregateCards[label];
+      if (!card || !card.dep_order) return;
+      const tickets = bySprint[label] || [];
+      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+      if (pending.length < 2) return;
+      const depData = card.dep_order;
+      for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+      if (depData.has_cycle) {
+        const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
+        for (const t of pending) {
+          if (cycleSet.has(String(t.number))) {
+            _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+          }
+        }
+      } else {
+        for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
+          const num = parseInt(idStr, 10);
+          _smgmtDepOrderByIssue[num] = {
+            upstream: hint.upstream || [],
+            downstream: hint.downstream || [],
+            inCycle: false,
+          };
+        }
+      }
+      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
+    }));
+    return;
+  }
+
+  // Legacy path: fetch /api/sprints/{label}/dep-order per sprint
   await Promise.all(orderedLabels.map(async (label) => {
     if (_smgmtRunningLabels.has(label)) return;
     if (_smgmtFinishedLabels.has(label)) return;

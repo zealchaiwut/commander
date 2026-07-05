@@ -13568,6 +13568,18 @@ async function _prefetchFullRepo() {
       });
     }
     _hideDashboardUnreachable();
+    // _smgmtShowSubView('history') no-ops when opened before this repo cache
+    // populates (issue: History permanently blank + "History 0" badge, no error,
+    // no retry — reported on a project switch that raced this fetch). Retry now
+    // that the repo is known, if the operator is already on/switches to History
+    // and it never got data.
+    if (
+      _smgmtSubView === 'history' && _cachedFullRepo[_slug]
+      && typeof _histLoadLedger === 'function'
+      && (!globalThis._histLedgerData || !globalThis._histLedgerData.length)
+    ) {
+      _histLoadLedger(_cachedFullRepo[_slug]);
+    }
     return true;
   } catch (e) {
     _renderDashboardLoadError("Can't reach dashboard — is the server running?");

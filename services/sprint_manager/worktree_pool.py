@@ -17,12 +17,21 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 MAX_SLOTS = 4
 DEFAULT_SLOTS = 2
 SLOT_PREFIX = "slot-"
+# acquire() waits for a FREE SLOT, not for a coder's own run — a slot should
+# free up quickly under normal operation. If none frees within this window,
+# something is genuinely stuck (e.g. release() lost a slot) and acquire()
+# raises instead of blocking forever (issue: sprint-102 hung 3+ hours with
+# zero children, zero CPU, and no error — a leaked slot from a release()
+# failure left every subsequent acquire() waiting on a condition nothing would
+# ever notify).
+ACQUIRE_TIMEOUT_SECONDS = 1800
 
 
 def _run(
@@ -209,11 +218,27 @@ class WorktreePool:
     # Slot management
     # ------------------------------------------------------------------
 
-    def acquire(self) -> Path:
-        """Block until a free slot is available, mark it in-use, and return it."""
+    def acquire(self, timeout: float = ACQUIRE_TIMEOUT_SECONDS) -> Path:
+        """Block until a free slot is available, mark it in-use, and return it.
+
+        Raises TimeoutError if no slot frees up within `timeout` seconds — this
+        is a bounded wait for an existing slot to be RELEASED, not for a
+        coder's own run, so it should normally return almost immediately.
+        A silent infinite wait here previously manifested as a sprint hanging
+        for hours with zero CPU and zero child processes and no operator-visible
+        error (a slot leaked by a failing release() is never freed again).
+        """
+        deadline = time.monotonic() + timeout
         with self._cond:
             while not self._free:
-                self._cond.wait()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"worktree pool: no free slot within {timeout}s "
+                        f"({len(self._in_use)} slot(s) stuck in-use) — a prior "
+                        f"release() likely failed to return its slot"
+                    )
+                self._cond.wait(timeout=remaining)
             wt = self._free.pop(0)
             self._in_use.add(wt)
         if not self._ensure_slot_ready(wt):
@@ -228,25 +253,33 @@ class WorktreePool:
         return wt
 
     def release(self, worktree: Path) -> None:
-        """Reset worktree to clean base state and return it to the free pool."""
-        if worktree.is_dir():
-            # Preserve the venv symlink across the clean (-e venv); re-link
-            # defensively in case it was removed, so the next acquire keeps the
-            # shared venv (no rebuild).
-            _run(["git", "clean", "-fdx", "-e", "venv"], cwd=worktree)
-            _run(["git", "checkout", self.base_branch], cwd=worktree)
-            self._link_venv(worktree)
-        else:
-            sys.stdout.write(
-                f"  [worktree-pool] WARNING: slot {worktree.name} missing on release"
-                f" — recreating\n"
-            )
-            self._ensure_slot_ready(worktree)
-        with self._cond:
-            self._in_use.discard(worktree)
-            if worktree not in self._free:
-                self._free.append(worktree)
-            self._cond.notify_all()
+        """Reset worktree to clean base state and return it to the free pool.
+
+        The slot-return (the `with self._cond` block) runs in `finally` so an
+        unexpected exception anywhere in the cleanup can NEVER leak a slot out
+        of circulation — a lost slot means every subsequent acquire() for that
+        slot count blocks, and previously had no timeout to surface it.
+        """
+        try:
+            if worktree.is_dir():
+                # Preserve the venv symlink across the clean (-e venv); re-link
+                # defensively in case it was removed, so the next acquire keeps
+                # the shared venv (no rebuild).
+                _run(["git", "clean", "-fdx", "-e", "venv"], cwd=worktree)
+                _run(["git", "checkout", self.base_branch], cwd=worktree)
+                self._link_venv(worktree)
+            else:
+                sys.stdout.write(
+                    f"  [worktree-pool] WARNING: slot {worktree.name} missing on release"
+                    f" — recreating\n"
+                )
+                self._ensure_slot_ready(worktree)
+        finally:
+            with self._cond:
+                self._in_use.discard(worktree)
+                if worktree not in self._free:
+                    self._free.append(worktree)
+                self._cond.notify_all()
 
     # ------------------------------------------------------------------
     # Startup reconciliation

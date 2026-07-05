@@ -671,5 +671,13 @@ def get_board(project: str):
     except Exception as exc:
         raise HTTPException(400, detail=str(exc))
 
-    from . import board_service  # noqa: PLC0415
-    return board_service.assemble_board(repo)
+    from . import board_cache, board_service  # noqa: PLC0415
+
+    cached = board_cache.get_board_cache(repo)
+    if cached is not None:
+        snapshot, remaining = cached
+        return {**snapshot, "cache": {"hit": True, "ttl_s": round(remaining, 2)}}
+
+    snapshot = board_service.assemble_board(repo)
+    board_cache.store_board_cache(repo, snapshot)
+    return {**snapshot, "cache": {"hit": False, "ttl_s": board_cache.current_ttl()}}

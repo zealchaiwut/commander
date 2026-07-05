@@ -180,9 +180,15 @@ export async function _rrConfirm() {
     if (typeof _smgmtApplyRerunOptimistic === 'function') {
       _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
     }
-    await loadSprintMgmt(true);
+    // The optimistic update above already shows the new sub-sprint — a full
+    // loadSprintMgmt (the board's per-sprint API fan-out, ~5+3N calls) and
+    // _histLoadLedger (triggers the History reconcile sweep) are NOT needed
+    // before proceeding, and awaiting them on a project with many sprints made
+    // this step hang for minutes. Refresh in the background instead; the
+    // periodic poll / next tab visit picks up any drift.
+    loadSprintMgmt(true).catch(() => {});
     if (typeof globalThis._histLoadLedger === 'function') {
-      await globalThis._histLoadLedger(repo);
+      globalThis._histLoadLedger(repo).catch(() => {});
     }
     _rrShowCreateProgress(2, 3, 'Queueing sprint run…', 'running', '');
     const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : 'Sub-sprint';

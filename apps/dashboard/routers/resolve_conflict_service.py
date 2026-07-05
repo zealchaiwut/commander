@@ -141,7 +141,7 @@ async def run_resolve_conflict(key: str, repo: str, head: str, base: str) -> Non
         import os as _os
         from services.sprint_manager.model_routing import apply_provider_env
         _env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        _resolver_model = apply_provider_env(_env, "claude-sonnet-4-6", repo=repo)
+        _resolver_model = apply_provider_env(_env, "claude-sonnet-4-6", repo=repo, role="resolver")
         cmd = [
             claude_bin,
             "--model", _resolver_model,

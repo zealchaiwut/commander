@@ -70,6 +70,7 @@ async def split_preview(repo: str, sprint_label: str, issue_num: int) -> dict:
     from services.sprint_manager.model_routing import apply_provider_env
     _split_model = apply_provider_env(
         sub_env, "claude-sonnet-4-6", repo=os.environ.get("COMMANDER_PROJECT"),
+        role="ba",
     )
     cmd = [
         "claude", "--model", _split_model,

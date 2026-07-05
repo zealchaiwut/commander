@@ -111,6 +111,7 @@ Body:
     from services.sprint_manager.model_routing import apply_provider_env
     _ba_model = apply_provider_env(
         _agent_env, "claude-sonnet-4-6", repo=os.environ.get("COMMANDER_PROJECT"),
+        role="ba",
     )
     cmd = [
         "claude",

@@ -292,7 +292,7 @@ def run_advisor_agent(
     env.pop("ANTHROPIC_API_KEY", None)
     env["CLAUDE_AGENT_ROLE"] = "advisor"
     from services.sprint_manager.model_routing import apply_provider_env
-    model = apply_provider_env(env, model, repo=os.environ.get("COMMANDER_PROJECT"))
+    model = apply_provider_env(env, model, repo=os.environ.get("COMMANDER_PROJECT"), role="advisor")
     cmd = ["claude", "--model", model, "-p", prompt]
 
     try:
@@ -505,7 +505,7 @@ def run_look_ahead_agent(
     env.pop("ANTHROPIC_API_KEY", None)
     env["CLAUDE_AGENT_ROLE"] = "advisor"
     from services.sprint_manager.model_routing import apply_provider_env
-    model = apply_provider_env(env, model, repo=os.environ.get("COMMANDER_PROJECT"))
+    model = apply_provider_env(env, model, repo=os.environ.get("COMMANDER_PROJECT"), role="advisor")
     cmd = ["claude", "--model", model, "-p", prompt]
 
     try:

@@ -213,7 +213,7 @@ Output ONLY the JSON object. No other text."""
     _agent_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     from services.sprint_manager.model_routing import apply_provider_env
     _estimator_model = apply_provider_env(
-        _agent_env, "claude-haiku-4-5-20251001", repo=project,
+        _agent_env, "claude-haiku-4-5-20251001", repo=project, role="estimator",
     )
     cmd = [
         "claude",

@@ -147,7 +147,7 @@ def _spawn_preflight_agent(issues_json: str, repo: str, sprint_label: str) -> di
     _model = "claude-haiku-4-5"
     try:
         from services.sprint_manager.model_routing import apply_provider_env
-        _model = apply_provider_env(env, _model, repo=repo)
+        _model = apply_provider_env(env, _model, repo=repo, role="preflight")
     except ImportError:
         pass  # standalone invocation without repo root on sys.path — direct Anthropic
 

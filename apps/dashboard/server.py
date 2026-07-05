@@ -215,6 +215,7 @@ from routers import (  # noqa: E402
     sprint_collisions_router,
     resolve_conflict_router,
     llm_provider_router,
+    running_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -300,6 +301,7 @@ app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
 app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
+app.include_router(running_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

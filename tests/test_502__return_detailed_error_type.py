@@ -17,13 +17,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from services.sprint_manager.estimate_issue import (
-    _ESTIMATOR_MAX_RETRIES,
+from services.sprint_manager.estimate_issue import (  # noqa: E402
     run_estimator,
 )
 

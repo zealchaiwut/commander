@@ -77,7 +77,14 @@ def _issue_has_estimate(iss: dict, estimates_dir: Path) -> bool:
 
 def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
     """Estimate one issue and apply its size label. Returns True on success."""
-    issue_data = _ei_fetch_issue(issue_num, repo)
+    try:
+        issue_data = _ei_fetch_issue(issue_num, repo)
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        msg = f"Could not fetch issue #{issue_num}: {e}"
+        if stderr:
+            msg += f" — stderr: {stderr}"
+        raise RuntimeError(msg) from e
     estimate, _err = _ei_run_estimator(issue_num, issue_data)
     if not estimate or not estimate.get("size"):
         return False

@@ -82,14 +82,14 @@ def _run_sprint_loop(
     def fake_coder(issue_num, alert_modes, sprint_branch="develop",
                    repo_name=None, cfg=None, chosen_port=None,
                    rate_limit_events=None, on_running=None, sprint_label=None,
-                   prior_failures=None):
+                   prior_failures=None, **kw):
         if on_running:
             on_running()
         return next(coder_iter)
 
     def fake_tester(issue_num, alert_modes, sprint_branch="develop",
                     repo_name=None, cfg=None, chosen_port=None,
-                    rate_limit_events=None, on_running=None, sprint_label=None):
+                    rate_limit_events=None, on_running=None, sprint_label=None, **kw):
         if on_running:
             on_running()
         return 0, None
@@ -108,7 +108,7 @@ def _run_sprint_loop(
             posted_comments.append({"issue": issue_num, "body": body})
 
     with (
-        patch.object(sm, "_create_sprint_branch", lambda b: None),
+        patch.object(sm, "_create_sprint_branch", lambda b, **kw: None),
         patch.object(sm, "list_backlog_issues",
                      lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
         patch.object(sm, "_dispatch_coder", fake_coder),
@@ -125,6 +125,8 @@ def _run_sprint_loop(
         patch.object(sm, "_design_docs_guard", lambda p: None),
         patch.object(sm, "_publish_gate_failure_analyses", fake_publish),
         patch.object(sm.github_client, "add_comment", fake_add_comment),
+        patch.object(sm, "_is_issue_merged_into_target", lambda *a, **kw: False),
+        patch.object(sm, "_prune_stale_local_feature_branch", lambda *a, **kw: None),
     ):
         summary, state = sm.run_sprint(
             label="sprint-99",
@@ -195,13 +197,13 @@ class TestAC1AnalysisPublishedOnExhaustion:
         def fake_coder_crash(issue_num, alert_modes, sprint_branch="develop",
                              repo_name=None, cfg=None, chosen_port=None,
                              rate_limit_events=None, on_running=None,
-                             sprint_label=None, prior_failures=None):
+                             sprint_label=None, prior_failures=None, **kw):
             if on_running:
                 on_running()
             return next(coder_iter)
 
         with (
-            patch.object(sm, "_create_sprint_branch", lambda b: None),
+            patch.object(sm, "_create_sprint_branch", lambda b, **kw: None),
             patch.object(sm, "list_backlog_issues",
                          lambda label, repo_name=None: [{"number": 1, "title": "T"}]),
             patch.object(sm, "_dispatch_coder", fake_coder_crash),
@@ -217,6 +219,8 @@ class TestAC1AnalysisPublishedOnExhaustion:
             patch.object(sm, "_design_docs_guard", lambda p: None),
             patch.object(sm, "_publish_gate_failure_analyses",
                          lambda *a, **kw: publish_calls.append(True)),
+            patch.object(sm, "_is_issue_merged_into_target", lambda *a, **kw: False),
+            patch.object(sm, "_prune_stale_local_feature_branch", lambda *a, **kw: None),
         ):
             sm.run_sprint(
                 label="sprint-99",

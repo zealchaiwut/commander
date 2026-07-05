@@ -217,8 +217,6 @@ def test_controller_not_reused_across_iterations():
 
     # Controller variable is scoped with `const` inside the loop
     # This ensures it cannot be reused across iterations
-    # Pattern: for (...) { ... const controller = ...; ... }
-    loop_body_pattern = r"for\s*\([^)]*\)\s*\{(.*?)\n\s*\}"
 
     # Simpler check: count 'const controller ='
     # If it appears inside loop (which it does from AC1 test), it's scoped per iteration

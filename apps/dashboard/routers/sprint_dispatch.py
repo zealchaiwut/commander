@@ -643,3 +643,33 @@ def get_sprint_management_issues(repo: str):
         "sprint_signoff": sprint_signoff,
         "sprint_has_run": sprint_has_run,
     }
+
+
+# ── Board aggregate endpoint (issue #1636) ────────────────────────────────────
+
+@router.get("/api/board")
+def get_board(project: str):
+    """Server-computed board aggregate — single-pass, mirror + SQLite only.
+
+    Returns the full board payload in one request with zero ``gh`` subprocess
+    calls. All sprint cards include inline lifecycle_state, tickets, mini_rail,
+    dep_order, estimate_hours, and run_stats. Rerun chains collapse to a single
+    lineage entry with a ``chain`` field listing all member labels.
+
+    Response shape::
+
+        {
+          project, generated_at,
+          sections: {running[], needs_rework[], ready_to_merge[], draft[],
+                     lineage[], backlog: {count, tickets[]}},
+          capacity,
+          summaries: {<label>: <summary>}
+        }
+    """
+    try:
+        repo = github_client.get_repo_for_operation(project)
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc))
+
+    from . import board_service  # noqa: PLC0415
+    return board_service.assemble_board(repo)

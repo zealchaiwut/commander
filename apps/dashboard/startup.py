@@ -5036,9 +5036,9 @@ def _open_summary_issues_for_labels(repo: str, labels: list[str]) -> list[dict]:
 def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str) -> tuple[list[str], list[dict]]:
     if not re.match(r"^sprint-\d+$", base_label):
         raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
+    # A base sprint with zero DB children is a clean, single-attempt sprint
+    # (no rework ever needed) — not an error state (issue #1758).
     child_labels = children_of(base_label, project_root)
-    if not child_labels:
-        raise HTTPException(400, detail=f"No child sprints found under {base_label}")
     all_labels = [base_label, *child_labels]
     sprint_issues: list[dict] = []
     seen_nums: set[int] = set()

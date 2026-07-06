@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
-
 import pytest
 
 # ── Path setup ────────────────────────────────────────────────────────────────
@@ -328,7 +326,6 @@ class TestSprintsRouterNewEndpoints:
         text = _src(self._FILE)
         lines = text.splitlines()
         in_func = False
-        disabled_before_invalidate = False
         invalidate_line_num = None
         disabled_line_num = None
         for i, line in enumerate(lines):

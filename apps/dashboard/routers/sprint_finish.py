@@ -439,6 +439,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     srv.github_client.invalidate("open_issues:")
     srv.github_client.invalidate("issues:")
     srv.github_client.invalidate("recent_closed:")
+    invalidate_board(repo)
 
     await srv.broadcast({
         "type": "update",
@@ -739,6 +740,8 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
             srv.github_client.invalidate(_k)
         except Exception:
             pass
+
+    invalidate_board(repo)
 
     return {
         "ok": True,

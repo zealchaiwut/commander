@@ -35,6 +35,8 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Reque
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
+from .board_cache import invalidate_board  # noqa: E402
+
 router = APIRouter(tags=["bulk_tickets"])
 
 
@@ -437,8 +439,10 @@ async def create_ticket_from_draft(
         est_repo = srv.github_client.get_repo_for_operation(project or None)
     except Exception:
         est_repo = None
-    if est_repo and srv._ESTIMATE_ISSUE_SCRIPT.exists():
-        background_tasks.add_task(srv._run_estimator_for_issue, number, est_repo)
+    if est_repo:
+        invalidate_board(est_repo)
+        if srv._ESTIMATE_ISSUE_SCRIPT.exists():
+            background_tasks.add_task(srv._run_estimator_for_issue, number, est_repo)
 
     return {"number": number, "url": url}
 
@@ -949,6 +953,8 @@ async def bulk_post_selected(job_id: str, body: BulkPostSelectedBody):
                 detail={"ticket_ids": _created_ids},
                 action_id=job.get("_action_id") or str(uuid.uuid4()),
             )
+            if _created_ids and job.get("repo"):
+                invalidate_board(job["repo"])
 
     asyncio.create_task(_post_task())
     return {"ok": True}

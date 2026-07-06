@@ -216,6 +216,7 @@ async def split_xl_apply(label: str, issue: int, body: SplitXlApplyBody):
                 "compensation": result.get("compensation"),
             },
         )
+    invalidate_board(body.project)
     try:
         import server as srv  # noqa: PLC0415
 
@@ -342,4 +343,5 @@ def clear_stale_labels(label: str, body: ClearStaleLabelsBody):
         gh.invalidate("open_issues_body:")
         gh.invalidate("open_issues:")
         gh.invalidate("issues:")
+        invalidate_board(body.project)
     return ClearStaleLabelsResponse(cleared=cleared, errors=errors)

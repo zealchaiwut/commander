@@ -1006,6 +1006,17 @@ export function _pfStepState(key, state, note) {
 const AUTOFIX_TIMEOUT_MS = 120_000;
 
 /**
+ * Parse a single SSE frame string ("event: X\ndata: Y") into {type, raw}.
+ * Returns null if the frame does not match the expected format.
+ * Exported for unit testing (issue #1746).
+ */
+export function _parsePfSSEFrame(part) {
+  const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
+  if (!m) return null;
+  return { type: m[1], raw: m[2] };
+}
+
+/**
  * Call the preflight-fix SSE endpoint and collect summary counts.
  * Auto-fixes missing AC and missing size estimates for the sprint.
  * Aborts via AbortController if the stream hangs beyond AUTOFIX_TIMEOUT_MS.
@@ -1029,19 +1040,19 @@ async function _pfRunAutoFix(label, repo, onLog) {
       const parts = buf.split('\n\n');
       buf = parts.pop();
       for (const part of parts) {
-        const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
+        const m = _parsePfSSEFrame(part);
         if (!m) continue;
-        if (m[1] === 'log') {
+        if (m.type === 'log') {
           try {
-            const d = JSON.parse(m[2]);
+            const d = JSON.parse(m.raw);
             const msg = typeof d === 'string' ? d : (d.message || String(d));
             if (onLog) onLog(msg);
           } catch (_) {
-            if (onLog) onLog(m[2]);
+            if (onLog) onLog(m.raw);
           }
-        } else if (m[1] === 'done') {
+        } else if (m.type === 'done') {
           try {
-            const d = JSON.parse(m[2]);
+            const d = JSON.parse(m.raw);
             filled    = d.filled    || 0;
             estimated = d.estimated || 0;
             errors    = d.errors    || [];

@@ -92,6 +92,24 @@ separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 - No new Python dependencies without adding to requirements.txt
 - Frontend: ES modules under `apps/dashboard/static/src/`, bundled via esbuild (`npm run build`). No React/Vue/Svelte — keep vanilla JS. Node/npm is a required dev dependency in every clone.
 
+### AC tests must exercise behavior, not source text (issue #1746)
+
+Acceptance-criteria tests must execute the feature code path and assert observed
+behavior — **source-regex checks do not count as AC coverage.**
+
+**Forbidden patterns:**
+- `assert "symbol_name" in src` — proves the symbol exists in source, not that it works
+- `assert re.search(r"pattern", file_text)` — proves the pattern appears, not that the logic runs
+- Mocking the server object wholesale when the AC says "zero gh calls" — the mock already makes it zero
+
+**Required patterns:**
+- Python behavioral: use `TestClient` or call the actual function with mocked boundaries (e.g. `patch.object(github_client, "repo")` with `side_effect=AssertionError`), then assert the mock was not called
+- Frontend behavioral: use Node `--test` with a `fetch` spy that records URLs; assert which URLs were hit (see `tests/frontend/board-aggregate-flag.test.mjs`)
+- SSE parsers: feed real `event: X\ndata: {json}` frame strings through the exported parsing function and assert parsed values (see `tests/frontend/sse-parser.test.mjs`)
+- Export the minimal pure function needed to make it testable; keep the exported helper next to its call site
+
+**Why:** the #982 SSE autofix regression (results never surfacing) shipped through a green suite of regex checks. A real frame-through-parser test would have failed immediately. (Issue #1746)
+
 ### Keep lint/export refactors in their own ticket (issue #1588)
 
 Lint-only or testability-only refactors — adding/removing `export` keywords,

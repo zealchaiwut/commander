@@ -91,6 +91,7 @@ def approve_issue(request: Request, issue_id: int, repo: Optional[str] = None):
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", method="POST", issue_id=issue_id)
     try:
         github_client.approve_issue(issue_id, repo_name=repo)
+        invalidate_board(github_client.get_repo_for_operation(repo))
         return {"ok": True}
     except subprocess.CalledProcessError as e:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/approve", level="error", issue_id=issue_id, error=str(e))
@@ -102,6 +103,7 @@ def reject_issue(request: Request, issue_id: int, body: RejectBody, repo: Option
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/reject", method="POST", issue_id=issue_id)
     try:
         github_client.reject_issue(issue_id, body.reason, repo_name=repo)
+        invalidate_board(github_client.get_repo_for_operation(repo))
         return {"ok": True}
     except subprocess.CalledProcessError as e:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/reject", level="error", issue_id=issue_id, error=str(e))
@@ -113,6 +115,7 @@ def close_issue_endpoint(request: Request, issue_id: int, repo: Optional[str] = 
     _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/close", method="POST", issue_id=issue_id)
     try:
         github_client.close_issue(issue_id, repo_name=repo)
+        invalidate_board(github_client.get_repo_for_operation(repo))
         return {"ok": True}
     except subprocess.CalledProcessError as e:
         _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/issues/{issue_id}/close", level="error", issue_id=issue_id, error=str(e))

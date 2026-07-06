@@ -15,9 +15,7 @@ import inspect
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -138,6 +136,25 @@ def test_ac3_finally_block_unchanged():
     finally_src = src[finally_pos:]
     assert "_restore_worktree_branch(wt_root, target_branch)" in finally_src, (
         "finally block must still call _restore_worktree_branch(wt_root, target_branch) unchanged (AC3)"
+    )
+
+
+def test_ac3_conflict_section_core_logic_intact():
+    """AC3: Conflict branch still contains file extraction, logging, and return — only the
+    redundant abort was removed, nothing else."""
+    src = inspect.getsource(sm._call_finish_feature)
+    conflict_start = src.find("if not ok_rb:")
+    assert conflict_start >= 0, "conflict branch (if not ok_rb:) must exist"
+    finally_pos = src.find("finally:", conflict_start)
+    conflict_src = src[conflict_start:finally_pos]
+    assert "_extract_rebase_conflict_files" in conflict_src, (
+        "_extract_rebase_conflict_files call removed from conflict branch (AC3)"
+    )
+    assert "sys.stdout.write" in conflict_src, (
+        "sys.stdout.write logging removed from conflict branch (AC3)"
+    )
+    assert "return False" in conflict_src, (
+        "return False removed from conflict branch (AC3)"
     )
 
 

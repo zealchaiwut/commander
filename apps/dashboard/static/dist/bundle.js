@@ -7910,7 +7910,7 @@ Proceed anyway?`)) {
         const parts = buf.split("\n\n");
         buf = parts.pop();
         for (const part of parts) {
-          const m = part.match(/^event:\s*(\S+)\n\s*([\s\S]*)$/);
+          const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
           if (!m)
             continue;
           if (m[1] === "log") {

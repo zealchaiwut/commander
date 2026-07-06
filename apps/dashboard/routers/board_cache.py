@@ -48,7 +48,9 @@ def get_board_cache(project: str) -> Optional[tuple[dict, float]]:
         return None
     now = time.monotonic()
     if now >= entry["expires_at"]:
-        del _cache[project]
+        # pop, not del: GET /api/board runs sync in the threadpool, so two
+        # requests can race past the expiry check for the same project.
+        _cache.pop(project, None)
         return None
     return entry["snapshot"], entry["expires_at"] - now
 

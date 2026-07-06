@@ -21,6 +21,7 @@ from __future__ import annotations
 import glob
 import json
 import sys as _sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -190,6 +191,41 @@ def _read_jsonl_lifecycle_events(
     return results
 
 
+def _ts_to_float(ts: str) -> float:
+    """ISO-8601 string → float epoch seconds for proximity arithmetic."""
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+def _closest_run(runs: list[dict], event_ts: str) -> "dict | None":
+    """Return the run whose finished_at is nearest to event_ts.
+
+    Used by the agent_finished enrichment loop (issue #1003) to avoid the
+    last-write-wins bug when a ticket has multiple coder runs (escalation).
+    Falls back to the last run in list order when no run has finished_at.
+    """
+    if not runs:
+        return None
+    if len(runs) == 1:
+        return runs[0]
+    if not event_ts:
+        return runs[-1]
+    ev_secs = _ts_to_float(event_ts)
+    best: "dict | None" = None
+    best_delta: "float | None" = None
+    for r in runs:
+        fa = r.get("finished_at")
+        if not fa:
+            continue
+        delta = abs(ev_secs - _ts_to_float(str(fa)))
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best = r
+    return best if best is not None else runs[-1]
+
+
 def get_project_events(
     slug: str,
     source: Optional[str] = None,
@@ -297,7 +333,10 @@ def get_project_events(
     # from agent_runs so the Activity tab can show a Duration column. Matched by
     # (issue_number, agent_role, sprint_label) when sprint_label is present in
     # the event detail (#820), or by (issue_number, agent_role) when absent.
-    # issue #920: also enrich with backend from the most recent closed agent_runs row.
+    # issue #920: also enrich with backend from agent_runs.
+    # issue #1003: collect ALL runs per (issue, role, sprint) key and use
+    # finished_at proximity to match each event — avoids last-write-wins
+    # overwrite when a ticket has two coder runs (cline → claude-code escalation).
     _agent_finished = [
         d for d in db_result
         if d.get("type") == "agent_finished" and isinstance(d.get("detail"), dict)
@@ -309,36 +348,36 @@ def get_project_events(
             for d in _agent_finished
             if d["detail"].get("issue_num") is not None
         }
-        _runs_by_key: dict = {}
-        _backend_by_key: dict = {}
+        # List-based collector: (num, role, sprint_label) → [run, ...] ordered by id.
+        _runs_list_by_key: dict = {}
         try:
             for _num, _sl in _issue_sprint_pairs:
                 for _r in db.agent_runs_for_issue(int(_num), sprint_label=_sl):
                     _key = (int(_num), str(_r.get("agent", "")).lower(), _sl)
-                    if _r.get("duration_seconds") is not None:
-                        _runs_by_key[_key] = _r["duration_seconds"]
-                    if _r.get("backend") is not None:
-                        _backend_by_key[_key] = _r["backend"]
+                    if _key not in _runs_list_by_key:
+                        _runs_list_by_key[_key] = []
+                    _runs_list_by_key[_key].append(_r)
         except Exception:
-            _runs_by_key = {}
-            _backend_by_key = {}
+            _runs_list_by_key = {}
         for d in _agent_finished:
             det = d["detail"]
             num = det.get("issue_num")
             role = str(det.get("role", "")).lower()
             sprint_label = det.get("sprint_label")
-            dur = None
+            event_ts = d.get("timestamp", "")
             if num is not None:
-                dur = _runs_by_key.get((int(num), role, sprint_label))
-            if dur is None:
+                runs = _runs_list_by_key.get((int(num), role, sprint_label), [])
+                matched = _closest_run(runs, event_ts)
+                if matched is not None:
+                    if matched.get("duration_seconds") is not None:
+                        d["duration_seconds"] = matched["duration_seconds"]
+                    if matched.get("backend") is not None:
+                        d["backend"] = matched["backend"]
+            # Fallback to the event's own duration field when no agent_run matched
+            if d.get("duration_seconds") is None:
                 dur = det.get("duration")
-            if dur is not None:
-                d["duration_seconds"] = dur
-            # Enrich with backend (issue #920)
-            if num is not None:
-                bk = _backend_by_key.get((int(num), role, sprint_label))
-                if bk is not None:
-                    d["backend"] = bk
+                if dur is not None:
+                    d["duration_seconds"] = dur
 
     # ------------------------------------------------------------------
     # 3. Union, deduplicate, and sort (issue #902)

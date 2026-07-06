@@ -13,13 +13,10 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 
@@ -44,7 +41,7 @@ def _issue(number: int, title: str, labels: list[str]) -> dict:
         "title": title,
         "state": "open",
         "body": "## Acceptance Criteria\n- [ ] AC",
-        "labels": [{"name": l} for l in labels],
+        "labels": [{"name": lbl} for lbl in labels],
         "html_url": f"https://github.com/owner/testrepo/issues/{number}",
     }
 
@@ -117,7 +114,7 @@ def _make_mock_github():
     mock_gc.cached_open_issues_with_body.return_value = list(_ISSUES)
 
     def _classify(iss):
-        label_names = {l["name"] if isinstance(l, dict) else l for l in iss.get("labels", [])}
+        label_names = {lb["name"] if isinstance(lb, dict) else lb for lb in iss.get("labels", [])}
         if label_names & {"in-progress", "sit", "UAT", "UAT-approved", "done", "needs-rework"}:
             return "in-progress"
         return "backlog"
@@ -237,7 +234,8 @@ def test_ac1_goal_is_empty_string_when_no_file(tmp_path):
 
 def test_ac1_goal_reads_from_file(tmp_path):
     """goal is populated from the goal file when it exists (AC1)."""
-    import importlib, importlib.util
+    import importlib
+    import importlib.util
     mock_db = _make_mock_db()
     mock_gc = _make_mock_github()
     mock_ss = _make_mock_sprint_state()
@@ -324,7 +322,8 @@ def test_ac1_conflicts_has_expected_shape(tmp_path):
 def test_ac1_conflicts_entries_have_titles(tmp_path):
     """Conflict entries include ticket1_title and ticket2_title (AC1)."""
     # Create a scenario with shared files by patching estimate reads
-    import importlib, importlib.util
+    import importlib
+    import importlib.util
     mock_db = _make_mock_db()
     mock_gc = _make_mock_github()
     mock_ss = _make_mock_sprint_state()
@@ -437,7 +436,8 @@ def test_ac4_branch_status_not_fetched_via_sprint_run_handler(tmp_path):
     (already zero in the prior test) and by checking board_service never
     imports or calls sprint_run.get_sprint_branch_status.
     """
-    import importlib, importlib.util
+    import importlib
+    import importlib.util
     if "board_service" in sys.modules:
         bs = sys.modules["board_service"]
     else:

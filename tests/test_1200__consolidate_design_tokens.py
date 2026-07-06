@@ -152,3 +152,27 @@ def test_ac4_link_before_inline_styles():
         "tokens.css <link> must appear before the first inline <style> block so it "
         "loads first and inline styles can override only what they need to"
     )
+
+
+# =============================================================================
+# AC5 — Dark-mode values live in tokens.css (not shadowed by inline HTML)
+# =============================================================================
+
+
+def test_ac5_dark_mode_block_in_tokens_css():
+    """[data-theme="dark"] overrides must be defined in tokens.css only."""
+    src = TOKENS_CSS_PATH.read_text(encoding="utf-8")
+    dark_block = re.search(
+        r'\[data-theme\s*=\s*["\']dark["\']\]\s*\{([^}]+)\}', src, re.DOTALL
+    )
+    assert dark_block, (
+        "[data-theme=\"dark\"] block not found in tokens.css — "
+        "dark-mode token overrides must be defined there"
+    )
+
+    dark_content = dark_block.group(1)
+    has_rgba_bg = re.search(r'--\w*-bg\s*:\s*rgba\(', dark_content)
+    assert has_rgba_bg, (
+        "Dark mode block in tokens.css should define rgba-based -bg tokens "
+        "(for transparency in dark mode)"
+    )

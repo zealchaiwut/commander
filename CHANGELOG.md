@@ -1,5 +1,14 @@
 # Changelog
 
+## Sprint 101.9
+
+Follow-up cleanup and hardening pass — no new features, endpoints, or schema. Frontend robustness: the preflight stepper now fails safe. `_pfStepperAnimate(data)` is called with a trailing `.catch(() => _pfUpdateConfirmBtn())` so a throw mid-animation always re-enables the Run button instead of leaving it permanently disabled; the autofix SSE fetch (`_pfRunAutoFix`) is wrapped in an `AbortController` that aborts after a 120s timeout (`AUTOFIX_TIMEOUT_MS`); and autofix outcomes are surfaced in the step notes — errored tickets append `(N could not be fixed)` and a timeout appends `(timed out)` rather than silently reporting a clean pass (#982). Backend/tooling cleanup: the redundant `git rebase --abort` in the `_call_finish_feature` rebase-conflict path is removed — the conflicted worktree is discarded by the caller anyway, so the extra abort was dead work (#1653); the mid-file `api_client` import in `sprint_manager.py` (`is_retryable_rate_limit`) is hoisted into the top-of-file import block for consistent import ordering (#1676). Test housekeeping: the duplicate design-token test file is consolidated into the convention-named `tests/test_1200__consolidate_design_tokens.py`, deleting the older `tests/test_consolidate_design_tokens__1200.py` (#1592).
+
+- [#982](https://github.com/zealchaiwut/commander/issues/982) Preflight stepper hardening: catch _pfStepperAnimate, surface autofix errors, timeout the autofix fetch — 2026-07-06
+- [#1592](https://github.com/zealchaiwut/commander/issues/1592) Remove duplicate test file for #1200 design-token consolidation — 2026-07-06
+- [#1653](https://github.com/zealchaiwut/commander/issues/1653) _call_finish_feature: remove redundant rebase --abort in conflict path — 2026-07-06
+- [#1676](https://github.com/zealchaiwut/commander/issues/1676) Move mid-file api_client import to top-of-file imports in sprint_manager.py — 2026-07-06
+
 ## Sprint 105
 
 ICA-provider awareness pass. Agent roles can now route to a different LLM provider per sprint: `sprint.yaml` `agent_config.coder.profile` / `agent_config.tester.profile` are loaded onto `SprintConfig` and, via the new `get_role_profile()` helper, exported as `CCPROXY_PROFILE` in each role's dispatch subprocess — leaving the variable unset (so the inherited global wins) when no per-role profile is configured (#1671). To make the cost trade-off visible, the coder's resolved profile is captured as `coder_provider` on `IssueState`/the live snapshot and persisted to a new `agent_runs.provider` column at dispatch; when the provider is `ICA`, the live board (`project.html`) and run browser (`run_browser.html`) render a yellow **`caching: reduced`** badge with a tooltip explaining that the ICA proxy strips prompt-caching headers and re-sends full context each turn (#1673). The `/api/runs` payload and `get_sprint_live_snapshot` now surface `provider` / `coder_provider` accordingly.

@@ -35,6 +35,7 @@ export default [
         URL: "readonly",
         URLSearchParams: "readonly",
         TextDecoder: "readonly",
+        AbortController: "readonly",
         EventSource: "readonly",
         location: "readonly",
         navigator: "readonly",

@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 
@@ -45,8 +47,6 @@ def _patch_github(srv, live_sprint_nums, summary_issues):
 
 
 # ── Fixture ──────────────────────────────────────────────────────────────────
-
-import pytest
 
 
 @pytest.fixture()

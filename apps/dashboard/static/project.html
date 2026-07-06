@@ -12277,6 +12277,10 @@ let _smgmtAnySprintRunning = false;
 // Live data cache: sprint label → last live snapshot from /api/sprints/{label}/live
 const _smgmtLiveCache = {};
 let _smgmtLiveCacheRepo = null;
+// Stale-write guard (issue #1745): monotonic counter + per-label last-written seq.
+// Writers claim a seq before their fetch; they skip the store if a newer seq already won.
+let _smgmtLiveCacheSeq = 0;
+const _smgmtLiveCacheWriteSeq = {};
 
 // Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
 const _SMGMT_LINGER_MS = 60 * 60 * 1000;
@@ -19307,6 +19311,9 @@ function _smgmtLivePollRestart() {
 async function _smgmtRunningFirstPaint() {
   const repo = _smgmtRepo();
   if (!repo) { _smgmtLivePollTick(); return; }
+  // Claim a seq before the fetch so a concurrent poll tick that resolves first
+  // will have a higher seq and win the cache slot (issue #1745).
+  const _fpSeq = ++_smgmtLiveCacheSeq;
   try {
     const resp = await fetch(
       `/api/running?project=${encodeURIComponent(repo)}`
@@ -19324,6 +19331,9 @@ async function _smgmtRunningFirstPaint() {
       return;
     }
     const hadLiveIssues = !!(_smgmtLiveCache[label] && _smgmtLiveCache[label].issues && _smgmtLiveCache[label].issues.length);
+    // Stale-write guard: skip if a newer fetch already wrote this slot (issue #1745).
+    if (_fpSeq < (_smgmtLiveCacheWriteSeq[label] || 0)) { _smgmtLivePollTick(); return; }
+    _smgmtLiveCacheWriteSeq[label] = _fpSeq;
     _smgmtLiveCache[label] = data;
     _smgmtLiveHeartbeatAt = Date.now();
     // Full re-render on first dispatch_level data (same logic as _smgmtLivePollTick)
@@ -19371,6 +19381,9 @@ async function _smgmtLivePollTick() {
     }
 
     await Promise.all(Array.from(_smgmtRunningLabels).map(async (label) => {
+      // Claim seq before fetch so we can detect if a concurrent writer (e.g.
+      // a slow first-paint) resolves and writes after us (issue #1745).
+      const _ptSeq = ++_smgmtLiveCacheSeq;
       const resp = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/live?project=${encodeURIComponent(repo)}`
       ).catch(() => null);
@@ -19382,6 +19395,9 @@ async function _smgmtLivePollTick() {
           live.issues = sprintIssueMap[label] || [];
         }
         const hadLiveIssues = !!(_smgmtLiveCache[label]?.issues?.length);
+        // Stale-write guard: skip if a newer fetch already wrote this slot (issue #1745).
+        if (_ptSeq < (_smgmtLiveCacheWriteSeq[label] || 0)) return;
+        _smgmtLiveCacheWriteSeq[label] = _ptSeq;
         _smgmtLiveCache[label] = live;
         _smgmtLiveHeartbeatAt = Date.now();
         // First time we have dispatch_level data: full re-render so the card

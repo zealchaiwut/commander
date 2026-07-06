@@ -20194,10 +20194,13 @@ async function _smgmtBulkReEstRun(issueNums) {
     if (currentEl) currentEl.textContent = `Estimating #${issueNum}…`;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       const resp = await fetch(
         `/api/issues/${issueNum}/estimate?repo=${encodeURIComponent(repo)}&force=true`,
-        { method: 'POST' }
+        { method: 'POST', signal: controller.signal }
       );
+      clearTimeout(timeoutId);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (!data.ok || !data.size) throw new Error('no size returned');

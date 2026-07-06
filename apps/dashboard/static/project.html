@@ -4318,12 +4318,16 @@
     .bl-row { min-width: 0; }
     .bl-row--selectable { cursor: pointer; }
     /* ── Top multi-select action bar (proj-selection-bar) ── */
+    /* position:fixed keeps the bar out of the document flow so it never shifts
+       the board layout when it appears (issue #1748). */
     .proj-selection-bar {
       display: none; align-items: center; gap: 12px;
-      padding: 10px 16px; margin-bottom: 10px;
+      padding: 10px 16px;
       background: var(--blue-bg); border: 1px solid var(--blue); border-radius: 8px;
       font-size: 13px; color: var(--blue); white-space: nowrap; flex-wrap: wrap;
-      position: sticky; top: 6px; z-index: 20; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      width: max-content; max-width: calc(100vw - 32px);
+      z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,.15);
     }
     .proj-selection-bar:not(.hidden) { display: flex; }
     .proj-selection-bar-hint { color: var(--text-muted); }

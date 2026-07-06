@@ -6722,14 +6722,21 @@ Resolve manually and re-run Bulk complete.`,
     }
     const sorted = [...filtered].sort((a, b) => b.number - a.number);
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
-    if (sorted.length === 0) {
-      const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
-    } else {
-      ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+    const hasActiveSelection = typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.size > 0;
+    if (!hasActiveSelection) {
+      if (sorted.length === 0) {
+        const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
+        ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
+      } else {
+        ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+      }
     }
     _blSyncFilterPills();
-    _blUpdateActions();
+    if (typeof _smgmtUpdateSelectionUI === "function") {
+      _smgmtUpdateSelectionUI();
+    } else {
+      _blUpdateActions();
+    }
   }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const hasEstimate = _smgmtTicketHasEstimate(ticket);

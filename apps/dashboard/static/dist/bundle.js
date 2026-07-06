@@ -5448,6 +5448,28 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo)
       return;
+    if (_smgmtAggregateCards) {
+      for (const label of orderedLabels) {
+        if (_smgmtRunningLabels.has(label))
+          continue;
+        if (_smgmtIsFreshRerunSprint(label))
+          continue;
+        if (_smgmtOutcomeCache[label] !== void 0)
+          continue;
+        const card = _smgmtAggregateCards[label];
+        if (!card || card.outcome == null)
+          continue;
+        const outcome = card.outcome;
+        _smgmtOutcomeCache[label] = outcome;
+        const isAncestor = _smgmtResolvedAncestors.has(label);
+        if (isAncestor) {
+          _smgmtUpdateAncestorRow(label, outcome);
+        } else {
+          _smgmtInjectOutcomeBand(label, outcome);
+        }
+      }
+      return;
+    }
     const toFetch = [];
     for (const label of orderedLabels) {
       if (_smgmtRunningLabels.has(label))
@@ -5590,6 +5612,42 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo)
       return;
+    if (_smgmtAggregateCards) {
+      await Promise.all(orderedLabels.map(async (label) => {
+        if (_smgmtRunningLabels.has(label))
+          return;
+        if (_smgmtFinishedLabels.has(label))
+          return;
+        const card = _smgmtAggregateCards[label];
+        if (!card || !card.conflicts)
+          return;
+        const tickets = bySprint[label] || [];
+        const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+        if (pending.length < 2)
+          return;
+        for (const t of pending)
+          delete _smgmtConflictsByIssue[t.number];
+        for (const c of card.conflicts.conflicts || []) {
+          if (!_smgmtConflictsByIssue[c.ticket1_id])
+            _smgmtConflictsByIssue[c.ticket1_id] = [];
+          if (!_smgmtConflictsByIssue[c.ticket2_id])
+            _smgmtConflictsByIssue[c.ticket2_id] = [];
+          _smgmtConflictsByIssue[c.ticket1_id].push({
+            partnerId: c.ticket2_id,
+            partnerTitle: c.ticket2_title,
+            sharedFiles: c.shared_files
+          });
+          _smgmtConflictsByIssue[c.ticket2_id].push({
+            partnerId: c.ticket1_id,
+            partnerTitle: c.ticket1_title,
+            sharedFiles: c.shared_files
+          });
+        }
+        for (const t of pending)
+          _smgmtUpdateConflictBadge(t.number);
+      }));
+      return;
+    }
     await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
         return;
@@ -5725,6 +5783,26 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo)
       return;
+    if (_smgmtAggregateCards) {
+      for (const label of orderedLabels) {
+        const goalEl = document.getElementById(`smgmt-goal-${label}`);
+        if (!goalEl)
+          continue;
+        const card = _smgmtAggregateCards[label];
+        if (!card)
+          continue;
+        const goal = (card.goal || "").trim();
+        if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+          if (goal)
+            goalEl.value = goal;
+        } else if (goal) {
+          goalEl.textContent = goal;
+          goalEl.title = goal;
+          goalEl.style.display = "";
+        }
+      }
+      return;
+    }
     await Promise.all(orderedLabels.map(async (label) => {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
       if (!goalEl)
@@ -5844,6 +5922,21 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo || !_smgmtData)
       return;
+    if (_smgmtAggregateCards) {
+      for (const [label, card] of Object.entries(_smgmtAggregateCards)) {
+        if (!card || !card.finish_card)
+          continue;
+        if (_smgmtIsFreshRerunSprint(label))
+          continue;
+        const cardData = card.finish_card;
+        if (cardData.state === "no_data")
+          continue;
+        const branchData = card.branch_status || { exists: false };
+        _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+        _smgmtRenderFinishCard(label, cardData, branchData, repo);
+      }
+      return;
+    }
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
     await Promise.allSettled(
       order.map(async (label) => {

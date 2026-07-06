@@ -298,6 +298,200 @@ def _build_dep_order(sprint_issues: list[dict], estimates_dir: Path) -> dict:
         return empty
 
 
+# ── Inline helpers for aggregate fields ──────────────────────────────────────
+
+def _read_sprint_goal(project: str, label: str) -> str:
+    """Read sprint goal from .commander/sprints/<label>-goal.txt."""
+    try:
+        path = _sprints_dir(project) / f"{label}-goal.txt"
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    return ""
+
+
+def _build_conflicts_inline(sprint_issues: list[dict], est_dir: Path) -> dict:
+    """Compute conflict pairs with titles. Zero gh calls."""
+    pending = [i for i in sprint_issues if github_client.classify_issue(i) == "backlog"]
+    ticket_files = []
+    for iss in pending:
+        resolved = _resolve_issue_estimate(iss, est_dir)
+        ticket_files.append({
+            "id": iss["number"],
+            "title": iss.get("title", ""),
+            "files": set(resolved["files"]),
+        })
+    conflicts = []
+    for i in range(len(ticket_files)):
+        for j in range(i + 1, len(ticket_files)):
+            a, b = ticket_files[i], ticket_files[j]
+            shared = sorted(a["files"] & b["files"])
+            if shared:
+                conflicts.append({
+                    "ticket1_id": a["id"],
+                    "ticket1_title": a["title"],
+                    "ticket2_id": b["id"],
+                    "ticket2_title": b["title"],
+                    "shared_files": shared,
+                })
+    return {"conflicts": conflicts, "pending_count": len(pending)}
+
+
+def _build_outcome_inline(label: str, project: str, lifecycle_state: str) -> Optional[dict]:
+    """Build outcome payload from DB only. Zero gh/subprocess calls.
+
+    Returns None when the sprint has not run yet. Returns a minimal outcome
+    dict (matching the /api/sprints/{label}/outcome response shape) when the
+    run has been ingested into the DB.
+    """
+    if lifecycle_state == "running":
+        return {"sprint_label": label, "state": "running", "lifecycle": "running"}
+    try:
+        row = db.get_sprint(label, project=project)
+        if not row or not row.get("run_ingested_at"):
+            return None
+        stored_state = row.get("state") or ""
+        lifecycle = db.canonical_lifecycle(stored_state)
+        end_reason = row.get("end_reason") or ""
+        is_cancelled = lifecycle == "needs_rework" and end_reason.startswith("stopped")
+
+        try:
+            issues_raw = json.loads(row.get("issues_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            issues_raw = []
+
+        result_issues = []
+        for iss in issues_raw:
+            tid = iss.get("ticket_id") or iss.get("number")
+            agent = (iss.get("agent_status") or "").lower()
+            fr = iss.get("failure_reason")
+            st = (iss.get("state") or "").lower()
+            if st == "merged" or agent in ("completed", "done"):
+                outcome = "done"
+            elif agent == "failed" or fr:
+                outcome = "failed"
+            else:
+                outcome = "skipped"
+            result_issues.append({
+                "number": tid,
+                "title": iss.get("title", ""),
+                "outcome": outcome,
+            })
+
+        done_count = sum(1 for i in result_issues if i["outcome"] == "done")
+        failed_count = sum(1 for i in result_issues if i["outcome"] == "failed")
+        skipped_count = sum(1 for i in result_issues if i["outcome"] == "skipped")
+
+        if is_cancelled:
+            pane_state, sprint_status = "cancelled", "stopped"
+        elif lifecycle in ("completed", "ready_to_merge"):
+            pane_state, sprint_status = "completed", "completed"
+        else:
+            pane_state, sprint_status = "has_rework", "stopped"
+
+        return {
+            "sprint_label": label,
+            "state": pane_state,
+            "lifecycle": lifecycle,
+            "sprint_status": sprint_status,
+            "end_reason": end_reason or None,
+            "counts": {"done": done_count, "failed": failed_count, "skipped": skipped_count},
+            "wall_clock_secs": row.get("wall_clock_secs") or 0,
+            "ended_at": None,
+            "issues": result_issues,
+            "summary_issue_url": row.get("summary_issue_url"),
+            "summary_issue_num": row.get("summary_issue_num"),
+            "pr_number": row.get("pr_number"),
+        }
+    except Exception:
+        return None
+
+
+def _build_finish_card_inline(label: str, project: str, lifecycle_state: str) -> dict:
+    """Build finish-card payload from DB. Zero gh/subprocess calls.
+
+    Returns a dict matching the /api/sprints/{label}/finish-card response shape.
+    """
+    sprint_number = _sprint_num(label)
+    no_data = {"sprint_label": label, "sprint_number": sprint_number, "state": "no_data"}
+
+    if lifecycle_state == "running":
+        return {"sprint_label": label, "sprint_number": sprint_number, "state": "running"}
+    try:
+        row = db.get_sprint(label, project=project)
+        if not row or not row.get("run_ingested_at"):
+            return no_data
+
+        stored_state = row.get("state") or ""
+        lifecycle = db.canonical_lifecycle(stored_state)
+        end_reason = row.get("end_reason") or ""
+        is_cancelled = lifecycle == "needs_rework" and end_reason.startswith("stopped")
+
+        try:
+            issues_raw = json.loads(row.get("issues_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            issues_raw = []
+
+        done_count = sum(
+            1 for i in issues_raw
+            if (i.get("state") or "").lower() == "merged"
+            or (i.get("agent_status") or "").lower() in ("completed", "done")
+        )
+        failed_count = sum(
+            1 for i in issues_raw
+            if (i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason")
+        )
+        skipped_count = sum(
+            1 for i in issues_raw
+            if (i.get("status") or "").lower() == "skipped"
+            and not ((i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason"))
+        )
+
+        if is_cancelled:
+            card_state, rework_count = "cancelled", 0
+        elif lifecycle in ("needs_rework", "failed"):
+            card_state, rework_count = "has_rework", failed_count
+        else:
+            card_state, rework_count = "completed", 0
+
+        return {
+            "sprint_label": label,
+            "sprint_number": sprint_number,
+            "state": card_state,
+            "lifecycle": lifecycle,
+            "done_count": done_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+            "rework_count": rework_count,
+            "wall_clock_secs": row.get("wall_clock_secs") or 0,
+            "ended_at": None,
+            "summary_issue_url": row.get("summary_issue_url"),
+            "summary_issue_num": row.get("summary_issue_num"),
+        }
+    except Exception:
+        return no_data
+
+
+def _build_branch_status_inline(label: str, project: str) -> dict:
+    """Branch status with zero gh/subprocess calls.
+
+    Aggregate path: branch existence is not checked (returns exists=False).
+    PR info is sourced from the DB row if available.
+    """
+    branch = f"sprint/{label}"
+    base: dict = {"exists": False, "branch": branch}
+    try:
+        row = db.get_sprint(label, project=project)
+        if row and row.get("pr_number"):
+            pr_number = row["pr_number"]
+            base["pr_number"] = pr_number
+            base["pr_url"] = f"https://github.com/{project}/pull/{pr_number}"
+    except Exception:
+        pass
+    return base
+
+
 # ── Sprint card builder ───────────────────────────────────────────────────────
 
 def _build_sprint_card(
@@ -316,6 +510,12 @@ def _build_sprint_card(
     except Exception:
         run_stats = {"label": label, "has_runs": False, "split": [], "tickets": []}
 
+    goal = _read_sprint_goal(project, label)
+    outcome = _build_outcome_inline(label, project, lifecycle_state)
+    conflicts = _build_conflicts_inline(sprint_issues, est_dir)
+    finish_card = _build_finish_card_inline(label, project, lifecycle_state)
+    branch_status = _build_branch_status_inline(label, project)
+
     return {
         "label": label,
         "lifecycle_state": lifecycle_state,
@@ -324,6 +524,11 @@ def _build_sprint_card(
         "dep_order": dep_order,
         "estimate_hours": estimate_hours,
         "run_stats": run_stats,
+        "goal": goal,
+        "outcome": outcome,
+        "conflicts": conflicts,
+        "finish_card": finish_card,
+        "branch_status": branch_status,
     }
 
 

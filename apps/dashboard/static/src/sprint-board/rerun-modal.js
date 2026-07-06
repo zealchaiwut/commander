@@ -90,7 +90,10 @@ export function _rrSelectAll(checked) {
 
 export async function smgmtRerunSprint(label) {
   const repo = _smgmtRepo();
-  if (!repo) return;
+  if (!repo) {
+    _smgmtShowToast('No project loaded — please refresh and try again.', 'warning');
+    return;
+  }
 
   _rrLabel = label;
   _rrVersionedLabel = null;
@@ -203,12 +206,14 @@ export async function _rrConfirm() {
     }
     _rrClose();
   } catch (e) {
-    _rrShowCreateProgress(0, 3, '', 'error', e.message || 'Failed to create re-run sprint');
+    const errMsg = e.message || 'Failed to create re-run sprint';
+    _rrShowCreateProgress(0, 3, '', 'error', errMsg);
     const errEl = document.getElementById('rr-error');
-    errEl.textContent = 'Failed to re-run sprint: ' + e.message;
+    errEl.textContent = 'Failed to re-run sprint: ' + errMsg;
     errEl.classList.remove('hidden');
     document.getElementById('rr-loading').classList.add('hidden');
     document.getElementById('rr-content').classList.remove('hidden');
+    _smgmtShowToast('Re-run failed: ' + errMsg, 'error');
     if (confirmBtn) {
       confirmBtn.disabled = false;
       confirmBtn.textContent = _rrVersionedLabel

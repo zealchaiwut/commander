@@ -35,6 +35,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 
 import github_client  # noqa: E402
 from services.logging import log as _slog  # noqa: E402
+from .board_cache import invalidate_board  # noqa: E402
 
 router = APIRouter(tags=["issues"])
 
@@ -195,4 +196,5 @@ async def add_sprint_label(issue_id: int, body: SprintLabelBody):
             detail={"label": _from_sprint},
             action_id=action_id,
         )
+    invalidate_board(github_client.get_repo_for_operation(body.project))
     return {"ok": True}

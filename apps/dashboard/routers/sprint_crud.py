@@ -32,6 +32,7 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 import db          # noqa: E402
 import github_client  # noqa: E402
+from .board_cache import invalidate_board  # noqa: E402
 
 router = APIRouter(tags=["sprint_crud"])
 
@@ -95,6 +96,7 @@ async def create_sprint_label(body: SprintCreateBody):
         detail={"sprint_name": sprint_label},
         action_id=str(uuid.uuid4()),
     )
+    invalidate_board(body.project)
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -167,6 +169,7 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
     except Exception:
         pass
 
+    invalidate_board(body.project)
     return {"ok": True, "old_label": sprint_label, "new_label": new_label}
 
 
@@ -413,6 +416,7 @@ def delete_sprint(sprint_label: str, project: str):
     for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
         github_client.invalidate(_ck)
 
+    invalidate_board(project)
     result: dict = {
         "deleted_label": sprint_label,
         "unlabelled_count": unlabelled_count,

@@ -26,6 +26,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db  # noqa: E402
 import github_client  # noqa: E402
 from routers.logs_service import broadcast  # noqa: E402
+from .board_cache import invalidate_board  # noqa: E402
 
 router = APIRouter()
 
@@ -183,4 +184,5 @@ async def assign_sprint_label(body: SprintAssignBody):
         )
 
     await broadcast({"type": "update", "event": {"event_type": "sprint_plan_update"}})
+    invalidate_board(github_client.get_repo_for_operation())
     return {"ok": True}

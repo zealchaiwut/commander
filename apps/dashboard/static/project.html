@@ -14895,6 +14895,24 @@ async function _smgmtLoadMiniRail(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
   const gen = ++_smgmtMiniRailGen;
+
+  // Aggregate path (issue #1638): use mini_rail from inline card data — no preview-dag fetch
+  const aggCards = window._smgmtAggregateCards;
+  if (aggCards) {
+    await Promise.all(orderedLabels.map(async (label) => {
+      if (gen !== _smgmtMiniRailGen) return;
+      if (_smgmtRunningLabels.has(label)) return;
+      const card = aggCards[label];
+      if (!card || !card.mini_rail) return;
+      const tickets = bySprint[label] || [];
+      if (tickets.length < 1) return;
+      const pfHints = _preflightEnabled() ? _smgmtPreflightHints(tickets) : null;
+      _smgmtInjectMiniRail(label, card.mini_rail, pfHints, tickets);
+    }));
+    return;
+  }
+
+  // Legacy path: fetch /api/sprints/{label}/preview-dag per sprint
   await Promise.all(orderedLabels.map(async (label) => {
     if (gen !== _smgmtMiniRailGen) return;
     if (_smgmtRunningLabels.has(label)) return;

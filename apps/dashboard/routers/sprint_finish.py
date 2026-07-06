@@ -31,6 +31,8 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 router = APIRouter(tags=["sprint_finish"])
 
+from .board_cache import invalidate_board  # noqa: E402
+
 _NON_WORK_LABELS_FINISH = {"sprint-summary", "docs", "documentation"}
 
 
@@ -603,6 +605,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
         action_id=str(uuid.uuid4()),
     )
 
+    invalidate_board(repo)
     result: dict = {
         "closed": closed,
         "completed": completed,

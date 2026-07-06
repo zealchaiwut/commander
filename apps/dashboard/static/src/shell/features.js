@@ -37,6 +37,11 @@ export function runningAggregateEnabled() {
   return commanderFeatures().running_aggregate === true;
 }
 
+/** True when COMMANDER_BOARD_AGGREGATE flag is on (issue #1638). */
+export function boardAggregateEnabled() {
+  return commanderFeatures().board_aggregate === true;
+}
+
 /** Fetch flags and hide disabled UI surfaces. */
 export async function loadCommanderFeatures() {
   try {

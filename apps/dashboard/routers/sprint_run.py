@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from . import sprint_run_service
 from .sprint_run_service import SprintMgmtRunBody, SprintRerunV2Body
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprint_run"])
 
@@ -610,6 +611,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         detail={"sprint_id": body.sprint_label},
         action_id=str(uuid.uuid4()),
     )
+    invalidate_board(body.project)
     return {
         "ok": True,
         "sprint_label": body.sprint_label,
@@ -731,6 +733,7 @@ def kill_sprint(sprint_label: str, project: str):
         detail={"sprint_id": sprint_label},
         action_id=str(uuid.uuid4()),
     )
+    invalidate_board(project)
     return {"ok": True}
 
 
@@ -879,6 +882,7 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
         },
         action_id=str(uuid.uuid4()),
     )
+    invalidate_board(project)
 
     if stripped_labels:
         print(

@@ -115,6 +115,15 @@ def definition_of_ready_mode() -> str:
     return val if val in ("block", "warn", "off") else "off"
 
 
+def board_aggregate_enabled() -> bool:
+    """Return True when the aggregate board endpoint should be used by the frontend.
+
+    Controlled by COMMANDER_BOARD_AGGREGATE env var (1/true/yes → ON, default OFF).
+    Issue #1638.
+    """
+    return _env_bool("COMMANDER_BOARD_AGGREGATE", "0")
+
+
 def commander_features() -> dict:
     """Feature flags exposed to the dashboard UI (/api/environment)."""
     return {
@@ -132,4 +141,5 @@ def commander_features() -> dict:
         # instead of fanning out per-agent requests (issue #1646).
         # Set COMMANDER_RUNNING_AGGREGATE=1 in .env to enable.
         "running_aggregate": running_aggregate_enabled(),
+        "board_aggregate": board_aggregate_enabled(),
     }

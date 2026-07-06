@@ -109,6 +109,7 @@ import {
   _smgmtBuildAggCards,
   _smgmtAggToRenderData,
   _smgmtCardBucket,
+  loadSprintMgmt,
 } from '../../apps/dashboard/static/src/sprint-board/board-render.js';
 
 
@@ -358,4 +359,126 @@ test('_smgmtCardBucket: falls through to legacy path when no _aggregateBuckets',
   } finally {
     globalThis._smgmtData = orig;
   }
+});
+
+
+// ── AC3 (issue #1746): fetch-spy tests for flag ON vs OFF ────────────────────
+// The prior AC7/AC8 tests were source-regex checks; these exercise the actual
+// loadSprintMgmt() fetch path so a flag-bypass bug will fail the suite.
+
+// Stub _smgmtRender so DOM write doesn't blow up in Node
+globalThis._smgmtRender = _noop;
+
+// Provide a fake smgmt-sprint-list element so loadSprintMgmt doesn't early-return
+const _fakeListEl = { innerHTML: '' };
+globalThis.document = {
+  getElementById: (id) => id === 'smgmt-sprint-list' ? _fakeListEl : null,
+  querySelector: () => null,
+};
+
+/** Build a minimal fake aggregate response */
+function _fakeAggResponse() {
+  return {
+    project: 'owner/repo',
+    generated_at: new Date().toISOString(),
+    sections: { running: [], needs_rework: [], ready_to_merge: [], draft: [], lineage: [], backlog: { count: 0, tickets: [] } },
+    capacity: { budget_minutes: 180, size_minutes: { S: 5, M: 15, L: 30, XL: 60 } },
+    summaries: {},
+  };
+}
+
+/** Build a minimal fake legacy response (sprint-management/issues shape) */
+function _fakeLegacyResponse() {
+  return {
+    sprints: {}, order: [], issues: [], finished_sprints: [], merged_sprints: [],
+    sprint_parents: {}, sprint_rerun_into: {}, sprint_plan_states: {}, sprint_has_run: {}, sprint_signoff: {},
+  };
+}
+
+/** Install a fetch spy that returns canned responses by URL prefix */
+function _installFetchSpy(routes) {
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    for (const [prefix, body] of routes) {
+      if (String(url).startsWith(prefix)) {
+        return {
+          ok: true,
+          json: async () => body,
+          body: { getReader: () => ({ read: async () => ({ done: true }) }) },
+        };
+      }
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+  return calls;
+}
+
+test('fetch-spy: flag ON calls only /api/board (single fetch)', async () => {
+  // Set up repo + flag
+  const repo = 'owner/fetchtest';
+  globalThis._slug = 'fetchtest';
+  globalThis._cachedFullRepo = { fetchtest: repo };
+  globalThis._commanderFeatures = { board_aggregate: true };
+  // Stub loaders called after render (they check _smgmtAggregateCards and bail)
+  globalThis._smgmtLoadEstimates = _noop;
+  globalThis._smgmtLoadConflicts = _noop;
+  globalThis._smgmtLoadDepOrder = _noop;
+  globalThis._smgmtLoadMiniRail = _noop;
+
+  const fetchCalls = _installFetchSpy([
+    ['/api/board', _fakeAggResponse()],
+  ]);
+
+  await loadSprintMgmt(true, null);
+
+  const boardCalls = fetchCalls.filter(u => u.startsWith('/api/board'));
+  const legacyCalls = fetchCalls.filter(u =>
+    u.includes('/api/sprint-management') || u.includes('/api/sprints/running-all')
+  );
+
+  assert.equal(boardCalls.length, 1, 'flag ON: must make exactly one /api/board call');
+  assert.equal(legacyCalls.length, 0, 'flag ON: must make zero legacy per-sprint calls');
+});
+
+test('fetch-spy: flag OFF calls legacy endpoints, not /api/board', async () => {
+  const repo = 'owner/fetchtest2';
+  globalThis._slug = 'fetchtest2';
+  globalThis._cachedFullRepo = { fetchtest2: repo };
+  globalThis._commanderFeatures = { board_aggregate: false };
+
+  const fetchCalls = _installFetchSpy([
+    ['/api/sprint-management/issues', _fakeLegacyResponse()],
+    ['/api/sprints/running-all', []],
+  ]);
+
+  await loadSprintMgmt(true, null);
+
+  const boardCalls = fetchCalls.filter(u => u.startsWith('/api/board'));
+  const legacyCalls = fetchCalls.filter(u => u.includes('/api/sprint-management'));
+
+  assert.equal(boardCalls.length, 0, 'flag OFF: must make zero /api/board calls');
+  assert.ok(legacyCalls.length >= 1, 'flag OFF: must call legacy /api/sprint-management endpoint');
+});
+
+test('fetch-spy: toggling flag from ON to OFF changes fetch target', async () => {
+  const repo = 'owner/fetchtest3';
+  globalThis._slug = 'fetchtest3';
+  globalThis._cachedFullRepo = { fetchtest3: repo };
+
+  // First call with flag ON
+  globalThis._commanderFeatures = { board_aggregate: true };
+  const onCalls = _installFetchSpy([['/api/board', _fakeAggResponse()]]);
+  await loadSprintMgmt(true, null);
+  assert.ok(onCalls.some(u => u.startsWith('/api/board')), 'flag ON must hit /api/board');
+
+  // Second call with flag OFF
+  globalThis._commanderFeatures = { board_aggregate: false };
+  const offCalls = _installFetchSpy([
+    ['/api/sprint-management/issues', _fakeLegacyResponse()],
+    ['/api/sprints/running-all', []],
+  ]);
+  await loadSprintMgmt(true, null);
+  assert.ok(!offCalls.some(u => u.startsWith('/api/board')), 'flag OFF must not hit /api/board');
+  assert.ok(offCalls.some(u => u.includes('/api/sprint-management')), 'flag OFF must hit legacy endpoint');
 });

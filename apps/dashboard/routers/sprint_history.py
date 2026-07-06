@@ -70,6 +70,9 @@ class SprintHistoryItem(BaseModel):
     post_sprint: SprintHistoryPostSprint | None = None
     issues: list[SprintHistoryIssue] = []
     failed_tickets: list[SprintHistoryFailedTicket] = []
+    # Inline run-stats block (issue #1639): eliminates per-card /run-stats
+    # round-trips. Same fields as GET /api/sprints/{label}/run-stats.
+    run_stats: dict | None = None
 
 
 class SprintHistoryResponse(BaseModel):

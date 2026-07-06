@@ -19286,10 +19286,60 @@ function _smgmtLivePollRestart() {
 
   // Poll every 2 seconds for banner + Running-tab rail/metrics updates
   _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
-  // Kick off immediately
-  _smgmtLivePollTick();
+  // Kick off immediately — use single /api/running snapshot for first paint when flag ON (issue #1647)
+  if (window._commanderFeatures && window._commanderFeatures.running_aggregate === true) {
+    _smgmtRunningFirstPaint();
+  } else {
+    _smgmtLivePollTick();
+  }
   // Periodic timeline re-fetch (every 10 min) for size/estimate drift.
   _smgmtTimelineRefreshId = setInterval(_smgmtTimelineRefreshTick, _SMGMT_TIMELINE_REFRESH_MS);
+}
+
+/** First-paint for the Running view via single /api/running snapshot (flag=ON, issue #1647).
+ *
+ * When COMMANDER_RUNNING_AGGREGATE is ON this replaces the immediate
+ * _smgmtLivePollTick() kick-off with a single GET /api/running call.
+ * The 2-second poll continues unchanged after this returns — subsequent ticks
+ * use the standard /api/sprint-status + /api/sprints/{label}/live fan-out.
+ * Falls back to _smgmtLivePollTick() on any error or 404.
+ */
+async function _smgmtRunningFirstPaint() {
+  const repo = _smgmtRepo();
+  if (!repo) { _smgmtLivePollTick(); return; }
+  try {
+    const resp = await fetch(
+      `/api/running?project=${encodeURIComponent(repo)}`
+    ).catch(() => null);
+    if (!resp || !resp.ok) {
+      // 404 (no running sprint) or network error — fall back to normal tick
+      _smgmtLivePollTick();
+      return;
+    }
+    const data = await resp.json();
+    const label = data && data.sprint_label;
+    if (!label || !_smgmtRunningLabels.has(label)) {
+      // Snapshot mismatch — fall back so the normal tick resolves state
+      _smgmtLivePollTick();
+      return;
+    }
+    const hadLiveIssues = !!(_smgmtLiveCache[label] && _smgmtLiveCache[label].issues && _smgmtLiveCache[label].issues.length);
+    _smgmtLiveCache[label] = data;
+    _smgmtLiveHeartbeatAt = Date.now();
+    // Full re-render on first dispatch_level data (same logic as _smgmtLivePollTick)
+    if (!hadLiveIssues && data.issues && data.issues.length > 0 && _smgmtData) {
+      _smgmtRender(_smgmtData);
+    } else {
+      _smgmtLivePatch(label, data);
+    }
+    _sprintProgressRender();
+    if (_snavPanelOpen) _snavRenderPanel();
+    _smgmtRunningViewUpdate(label, data);
+    if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, data);
+  } catch (_) {
+    // Fall back to normal tick on any unexpected error
+    _smgmtLivePollTick();
+  }
 }
 
 /** Fetch live data for all running sprints and patch in place. */

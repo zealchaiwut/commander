@@ -1441,6 +1441,18 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
 
     _finalize_issues(window, search_dirs, title_map=title_map, ran_by_label=ran_by_label)
 
+    # Inline run-stats into every history row — single in-process pass, no
+    # HTTP self-calls (issue #1639 AC1–AC4). Calls the run_stats compute unit
+    # directly so the frontend makes zero per-card /run-stats round-trips.
+    from . import run_stats_service as _run_stats_svc  # noqa: PLC0415
+    for r in window:
+        _label = r.get("label") or ""
+        _project = (r.get("project") or "") or None
+        try:
+            r["run_stats"] = _run_stats_svc.sprint_run_stats(_label, project=_project)
+        except Exception:
+            r["run_stats"] = None
+
     for r in window:
         r.pop("_sort_key", None)
         r.pop("_source", None)

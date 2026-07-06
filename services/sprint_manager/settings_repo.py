@@ -183,6 +183,31 @@ def _load(raw: Any) -> Any:
     return raw
 
 
+def _ensure_session_schema(session) -> None:
+    """Create the settings table if it does not yet exist in the session's DB.
+
+    Used when a new in-memory engine (e.g., in tests) is wired via
+    _session_factory but its schema was never initialised.  We intentionally
+    omit the non-constant DEFAULT on updated_at so the CREATE succeeds on
+    SQLite ≥ 3.37 which rejects datetime('now') as a column default.
+    """
+    try:
+        session.execute(text(
+            "CREATE TABLE IF NOT EXISTS settings ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " scope TEXT NOT NULL,"
+            " project TEXT,"
+            " key TEXT NOT NULL,"
+            " value TEXT NOT NULL,"
+            " updated_at TEXT,"
+            " UNIQUE(scope, project, key)"
+            ")"
+        ))
+        session.commit()
+    except Exception:
+        pass
+
+
 def get_setting(key: str, project: Optional[str] = None) -> Any:
     """Return the setting value for *key*, optionally merged with a project override.
 
@@ -202,31 +227,42 @@ def get_setting(key: str, project: Optional[str] = None) -> Any:
         if proj_val is None:
             return global_val
         return {**global_val, **proj_val}
-    with session_cm as session:
-        global_row = session.execute(
-            text(
-                "SELECT value FROM settings"
-                " WHERE scope = 'global' AND project IS NULL AND key = :key"
-            ),
-            {"key": key},
-        ).fetchone()
-        global_val: dict = _load(global_row[0]) if global_row else {}
+    try:
+        with session_cm as session:
+            _ensure_session_schema(session)
+            global_row = session.execute(
+                text(
+                    "SELECT value FROM settings"
+                    " WHERE scope = 'global' AND project IS NULL AND key = :key"
+                ),
+                {"key": key},
+            ).fetchone()
+            global_val: dict = _load(global_row[0]) if global_row else {}
 
+            if project is None:
+                return global_val
+
+            project_row = session.execute(
+                text(
+                    "SELECT value FROM settings"
+                    " WHERE scope = 'project' AND project = :proj AND key = :key"
+                ),
+                {"proj": project, "key": key},
+            ).fetchone()
+
+            if project_row is None:
+                return global_val
+
+            return {**global_val, **_load(project_row[0])}
+    except Exception:
+        store = _fallback_read_all()
+        global_val = store.get(_fkey("global", None, key), {})
         if project is None:
             return global_val
-
-        project_row = session.execute(
-            text(
-                "SELECT value FROM settings"
-                " WHERE scope = 'project' AND project = :proj AND key = :key"
-            ),
-            {"proj": project, "key": key},
-        ).fetchone()
-
-        if project_row is None:
+        proj_val = store.get(_fkey("project", project, key))
+        if proj_val is None:
             return global_val
-
-        return {**global_val, **_load(project_row[0])}
+        return {**global_val, **proj_val}
 
 
 def get_setting_scoped(scope: str, key: str, project: Optional[str] = None) -> Any:
@@ -237,16 +273,20 @@ def get_setting_scoped(scope: str, key: str, project: Optional[str] = None) -> A
     session_cm = _try_open_session()
     if session_cm is None:
         return _fallback_read_all().get(_fkey(scope, project, key), {})
-    with session_cm as session:
-        row = session.execute(
-            text(
-                "SELECT value FROM settings"
-                " WHERE scope = :scope AND key = :key"
-                " AND (project = :project OR (project IS NULL AND :project IS NULL))"
-            ),
-            {"scope": scope, "key": key, "project": project},
-        ).fetchone()
-        return _load(row[0]) if row else {}
+    try:
+        with session_cm as session:
+            _ensure_session_schema(session)
+            row = session.execute(
+                text(
+                    "SELECT value FROM settings"
+                    " WHERE scope = :scope AND key = :key"
+                    " AND (project = :project OR (project IS NULL AND :project IS NULL))"
+                ),
+                {"scope": scope, "key": key, "project": project},
+            ).fetchone()
+            return _load(row[0]) if row else {}
+    except Exception:
+        return _fallback_read_all().get(_fkey(scope, project, key), {})
 
 
 def delete_setting(
@@ -262,16 +302,23 @@ def delete_setting(
             if store.pop(_fkey(scope, project, key), None) is not None:
                 _fallback_write_all(store)
         return
-    with session_cm as session:
-        session.execute(
-            text(
-                "DELETE FROM settings"
-                " WHERE scope = :scope AND key = :key"
-                " AND (project = :project OR (project IS NULL AND :project IS NULL))"
-            ),
-            {"scope": scope, "key": key, "project": project},
-        )
-        session.commit()
+    try:
+        with session_cm as session:
+            _ensure_session_schema(session)
+            session.execute(
+                text(
+                    "DELETE FROM settings"
+                    " WHERE scope = :scope AND key = :key"
+                    " AND (project = :project OR (project IS NULL AND :project IS NULL))"
+                ),
+                {"scope": scope, "key": key, "project": project},
+            )
+            session.commit()
+    except Exception:
+        with _fallback_lock:
+            store = _fallback_read_all()
+            if store.pop(_fkey(scope, project, key), None) is not None:
+                _fallback_write_all(store)
 
 
 def set_setting(
@@ -298,29 +345,36 @@ def set_setting(
             store[_fkey(scope, project, key)] = value
             _fallback_write_all(store)
         return
-    with session_cm as session:
-        existing = session.execute(
-            text(
-                "SELECT id FROM settings"
-                " WHERE scope = :scope AND key = :key"
-                " AND (project = :project OR (project IS NULL AND :project IS NULL))"
-            ),
-            {"scope": scope, "key": key, "project": project},
-        ).fetchone()
+    try:
+        with session_cm as session:
+            _ensure_session_schema(session)
+            existing = session.execute(
+                text(
+                    "SELECT id FROM settings"
+                    " WHERE scope = :scope AND key = :key"
+                    " AND (project = :project OR (project IS NULL AND :project IS NULL))"
+                ),
+                {"scope": scope, "key": key, "project": project},
+            ).fetchone()
 
-        if existing:
-            session.execute(
-                text(
-                    "UPDATE settings SET value = :val, updated_at = :now WHERE id = :id"
-                ),
-                {"val": serialized, "now": now, "id": existing[0]},
-            )
-        else:
-            session.execute(
-                text(
-                    "INSERT INTO settings (scope, project, key, value)"
-                    " VALUES (:scope, :project, :key, :val)"
-                ),
-                {"scope": scope, "project": project, "key": key, "val": serialized},
-            )
-        session.commit()
+            if existing:
+                session.execute(
+                    text(
+                        "UPDATE settings SET value = :val, updated_at = :now WHERE id = :id"
+                    ),
+                    {"val": serialized, "now": now, "id": existing[0]},
+                )
+            else:
+                session.execute(
+                    text(
+                        "INSERT INTO settings (scope, project, key, value)"
+                        " VALUES (:scope, :project, :key, :val)"
+                    ),
+                    {"scope": scope, "project": project, "key": key, "val": serialized},
+                )
+            session.commit()
+    except Exception:
+        with _fallback_lock:
+            store = _fallback_read_all()
+            store[_fkey(scope, project, key)] = value
+            _fallback_write_all(store)

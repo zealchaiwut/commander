@@ -30,7 +30,6 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_DIR), str(_SCRIPTS_DIR)):
 # ── Service imports ───────────────────────────────────────────────────────────
 
 import projects as projects_module  # noqa: E402
-import settings_repo as _settings_repo  # noqa: E402
 from settings_schema import (  # noqa: E402
     APP_CONFIG_KEY,
     SECRET_FIELDS,
@@ -107,6 +106,15 @@ def _server():
     """Deferred import of the monolith — safe at request time."""
     import server  # noqa: PLC0415
     return server
+
+
+def _sr():
+    """Return the active settings_repo instance via the server module.
+
+    Accessing via _server()._settings_repo lets tests patch srv._settings_repo
+    without a double-import identity mismatch.
+    """
+    return _server()._settings_repo
 
 
 # ── Shared helpers (mirrored from server.py to avoid circular import) ─────────
@@ -243,24 +251,24 @@ def _apply_project_identity_defaults(resp: dict, repo: str, proj_override: dict)
 def delete_project_settings(slug: str) -> dict:
     """Clear the project-level settings override; returns effective settings."""
     repo = _resolve_project_slug(slug)
-    _settings_repo.delete_setting("project", APP_CONFIG_KEY, project=repo)
+    _sr().delete_setting("project", APP_CONFIG_KEY, project=repo)
     _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    effective = _sr().get_setting(APP_CONFIG_KEY, project=repo)
     return build_effective_response(effective)
 
 
 def get_global_settings() -> dict:
     """Return effective global settings."""
-    stored = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    stored = _sr().get_setting_scoped("global", APP_CONFIG_KEY)
     return build_effective_response(stored)
 
 
 def put_global_settings(body: dict) -> dict:
     """Persist a global settings override."""
     _validate_settings_body(body)
-    current = _settings_repo.get_setting_scoped("global", APP_CONFIG_KEY)
+    current = _sr().get_setting_scoped("global", APP_CONFIG_KEY)
     merged = {**current, **body}
-    _settings_repo.set_setting("global", APP_CONFIG_KEY, merged)
+    _sr().set_setting("global", APP_CONFIG_KEY, merged)
     _propagate_models_to_sprint_yaml(body)
     return build_effective_response(merged)
 
@@ -268,8 +276,8 @@ def put_global_settings(body: dict) -> dict:
 def get_project_settings(slug: str) -> dict:
     """Return effective project settings (project overrides merged over global)."""
     repo = _resolve_project_slug(slug)
-    proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-    stored = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    proj_override = _sr().get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
+    stored = _sr().get_setting(APP_CONFIG_KEY, project=repo)
     resp = build_effective_response(stored)
     return _apply_project_identity_defaults(resp, repo, proj_override)
 
@@ -278,9 +286,9 @@ def put_project_settings(slug: str, body: dict) -> dict:
     """Persist a project-level settings override."""
     repo = _resolve_project_slug(slug)
     _validate_settings_body(body)
-    current_project_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
+    current_project_override = _sr().get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
     merged = {**current_project_override, **body}
-    _settings_repo.set_setting("project", APP_CONFIG_KEY, merged, project=repo)
+    _sr().set_setting("project", APP_CONFIG_KEY, merged, project=repo)
     model_cfg = {k: v for k, v in body.items() if k in _AGENT_MODEL_KEYS and v}
     coder_backend = body.get("coder_backend") if "coder_backend" in body else None
     if model_cfg or coder_backend is not None:
@@ -309,7 +317,7 @@ def put_project_settings(slug: str, body: dict) -> dict:
     if display_patch:
         projects_module.save_project_display_fields(repo, **display_patch)
     _invalidate_home_cache(slug)
-    effective = _settings_repo.get_setting(APP_CONFIG_KEY, project=repo)
+    effective = _sr().get_setting(APP_CONFIG_KEY, project=repo)
     resp = build_effective_response(effective)
     return _apply_project_identity_defaults(resp, repo, merged)
 
@@ -404,7 +412,7 @@ def _enrich_deploy_readiness(config: dict) -> None:
 
 def _merged_deploy_config(slug: str, repo: str) -> dict:
     """Return seed-merged stored deploy config (raw, secrets intact)."""
-    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    stored = _sr().get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
     return _deploy_merge_seed(_deploy_seed_for(slug), stored or {})
 
 
@@ -421,7 +429,7 @@ def _deploy_config_response(slug: str, repo: str, stored: dict) -> dict:
 def get_project_deploy_config(slug: str) -> dict:
     """Return per-environment deploy config."""
     repo = _resolve_project_slug(slug)
-    stored = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    stored = _sr().get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
     resp = _deploy_config_response(slug, repo, stored)
     _enrich_deploy_readiness(resp)
     return resp
@@ -431,9 +439,9 @@ def put_project_deploy_config(slug: str, body: dict) -> dict:
     """Persist a per-environment deploy config override."""
     repo = _resolve_project_slug(slug)
     _validate_deploy_config_body(body)
-    current = _settings_repo.get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
+    current = _sr().get_setting_scoped("project", DEPLOY_CONFIG_KEY, project=repo)
     merged = _deploy_merge_for_put(current or {}, body)
-    _settings_repo.set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
+    _sr().set_setting("project", DEPLOY_CONFIG_KEY, merged, project=repo)
     return _deploy_config_response(slug, repo, merged)
 
 

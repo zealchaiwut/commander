@@ -19910,8 +19910,12 @@ function _smgmtFmtTokens(n) {
   return String(Math.round(n));
 }
 
-/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6).
- *  Outer container: <div class="cap" id="smgmt-cap-<label>"> (injected by board-render.js). */
+/** Return the HTML for the capacity bar container injected per sprint pane. */
+function _smgmtCapContainerHtml(label) {
+  return `<div class="cap" id="smgmt-cap-${escHtml(label)}"></div>`;
+}
+
+/** Render the capacity budget bar for one sprint pane. Never throws (AC5/AC6). */
 function _smgmtUpdateCapBar(label) {
   const el = document.getElementById(`smgmt-cap-${label}`);
   if (!el) return;
@@ -19964,7 +19968,7 @@ function _smgmtUpdateCapBar(label) {
     }
     hintText += ' · budget in Project Settings · calibrated minutes';
     if (unestimated > 0) {
-      hintText += ` · ${unestimated} unestimated tickets excluded`;
+      hintText += ` · ${unestimated} unestimated excluded`;
     }
 
     let forecastHtml = '';

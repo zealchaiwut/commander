@@ -59,7 +59,7 @@ def test_split_xl_apply__failure_path_intact(client):
         func_body = match.group(0)
         # Check for the failure path
         has_failure_guard = 'if not result.get("ok"):' in func_body
-        has_http_exception = 'raise HTTPException(500,' in func_body
+        has_http_exception = bool(re.search(r'raise HTTPException\(\s*500,', func_body))
         has_detail_structure = (
             '"error": result.get("error")' in func_body
             and '"partial": result.get("partial"' in func_body

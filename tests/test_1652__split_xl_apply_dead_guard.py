@@ -161,6 +161,14 @@ def test_ac4_success_returns_full_result(monkeypatch):
     assert result == ok
 
 
+def test_ac4_label_validation_preserved():
+    """AC4: label validation guard (_SPRINT_LABEL_RE.match) is still present."""
+    src = inspect.getsource(sprint_history.split_xl_apply)
+    assert "_SPRINT_LABEL_RE.match(label)" in src, (
+        "Label validation missing from split_xl_apply — functional regression from dead-guard removal"
+    )
+
+
 def test_ac4_broadcast_failure_does_not_suppress_result(monkeypatch):
     """AC4: if broadcast raises, the result is still returned (exception is swallowed)."""
     monkeypatch.setattr(split_xl_service, "split_apply", lambda *a, **k: _ok_result())

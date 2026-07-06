@@ -120,3 +120,34 @@ def test_ac5_no_other_imports_moved():
             f"Expected import of '{symbol}' from '{module}' to remain in top "
             f"block (first {_IMPORT_BLOCK_END_LINE} lines) but it was not found there."
         )
+
+
+# ── merged from test_import_reorganization__1676.py (dedupe #1742) ───────────
+
+def test_is_retryable_rate_limit_callable():
+    """AC4: _is_retryable_rate_limit is accessible as a callable attribute."""
+    import services.sprint_manager.sprint_manager as sm
+    assert hasattr(sm, "_is_retryable_rate_limit"), (
+        "_is_retryable_rate_limit not found in sprint_manager module"
+    )
+    assert callable(sm._is_retryable_rate_limit), (
+        "_is_retryable_rate_limit exists but is not callable"
+    )
+
+
+def test_api_client_module_importable():
+    """AC4: api_client module itself is importable without circular dependencies."""
+    from services.sprint_manager import api_client
+    assert hasattr(api_client, "is_retryable_rate_limit"), (
+        "is_retryable_rate_limit not found in api_client module"
+    )
+
+
+def test_is_rate_limit_error_works():
+    """AC4: _is_rate_limit_error still works after import reorganization."""
+    from services.sprint_manager.sprint_manager import _is_rate_limit_error
+    assert _is_rate_limit_error("Some normal error") == (False, None)
+    result_429, _ = _is_rate_limit_error("Error: 429 rate limit exceeded")
+    assert result_429 is True
+    result_quota, _ = _is_rate_limit_error("quota_exceeded: Usage limit exceeded")
+    assert result_quota is True

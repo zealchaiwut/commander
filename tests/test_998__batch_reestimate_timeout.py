@@ -15,6 +15,27 @@ PROJECT_HTML = (
 )
 
 
+def _fn_body(name: str, src: str | None = None) -> str:
+    """Return the brace-balanced body of a JS function in the HTML source."""
+    if src is None:
+        src = PROJECT_HTML.read_text(encoding="utf-8")
+    pattern = rf"function {re.escape(name)}\s*\([^)]*\)\s*\{{"
+    match = re.search(pattern, src)
+    if not match:
+        raise ValueError(f"Function {name!r} not found")
+    start = match.end() - 1
+    depth = 0
+    body_start = start + 1
+    for i in range(body_start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth < 0:
+                return src[body_start:i]
+    raise ValueError(f"Unmatched braces in {name}")
+
+
 def _src() -> str:
     return PROJECT_HTML.read_text(encoding="utf-8")
 
@@ -162,4 +183,60 @@ def test_settimeout_inside_for_loop():
     loop_body = loop_region_match.group(1)
     assert "setTimeout" in loop_body, (
         "setTimeout not found inside the for loop body — timeout is not per-request"
+    )
+
+
+# ── merged from test_batch_reestimate_timeout__998.py (dedupe #1742) ─────────
+
+def test_30_second_timeout_value():
+    """AC1 — 30-second (30000ms) timeout must be set on the AbortController."""
+    body = _fn_body("_smgmtBulkReEstRun")
+    assert "setTimeout(() => controller.abort(), 30000)" in body or \
+           "setTimeout(()=>controller.abort(),30000)" in body.replace(" ", ""), (
+        "30-second (30000ms) timeout not found in _smgmtBulkReEstRun — per-request timeout missing"
+    )
+
+
+def test_successful_response_processed_normally():
+    """AC4 — successful responses check resp.ok and parse via resp.json()."""
+    body = _fn_body("_smgmtBulkReEstRun")
+    assert "resp.ok" in body and "resp.json()" in body, (
+        "resp.ok / resp.json() not found — successful estimate results won't be processed"
+    )
+
+
+def test_full_request_lifecycle_ordering():
+    """AC5 — lifecycle order: create controller → set timeout → fetch with signal
+    → clear timeout on success → push failed in catch."""
+    body = _fn_body("_smgmtBulkReEstRun")
+    pos1 = body.find("const controller = new AbortController();")
+    assert pos1 >= 0, "Step 1: controller creation"
+    pos2 = body.find("const timeoutId = setTimeout(", pos1)
+    assert pos2 >= 0, "Step 2: timeout set"
+    pos3 = body.find("signal: controller.signal", pos2)
+    assert pos3 >= 0, "Step 3: signal passed to fetch"
+    pos4 = body.find("clearTimeout(timeoutId)", pos3)
+    assert pos4 >= 0, "Step 4: timeout cleared on success"
+    pos5 = body.find("_bulkReEst.failed.push(issueNum)", pos4)
+    assert pos5 >= 0, "Step 5: failed push in catch"
+    assert pos1 < pos2 < pos3 < pos4 < pos5, (
+        "Lifecycle order must be: create → timeout → fetch → clear → catch"
+    )
+
+
+def test_batch_state_reset_each_run():
+    """AC5 — _bulkReEst is reset at the start of each run so controllers don't leak."""
+    src = _src()
+    assert "_bulkReEst = { running: true, done: 0, total" in src or \
+           "_bulkReEst={running:true,done:0,total" in src.replace(" ", ""), (
+        "_bulkReEst must be reset at the start of each batch run"
+    )
+
+
+def test_loop_exits_early_on_running_false():
+    """AC2 — loop must break when _bulkReEst.running is set false (user abort)."""
+    body = _fn_body("_smgmtBulkReEstRun")
+    assert "if (!_bulkReEst.running) break" in body or \
+           "if(!_bulkReEst.running)break" in body.replace(" ", ""), (
+        "Loop must exit early when _bulkReEst.running is false"
     )

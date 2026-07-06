@@ -358,6 +358,7 @@ def _generate_gate_failure_analysis(
         _env = _os.environ.copy()
         model = apply_provider_env(
             _env, model, cfg=cfg, repo=_os.environ.get("COMMANDER_PROJECT"),
+            role="reviewer",
         )
         result = subprocess.run(
             [

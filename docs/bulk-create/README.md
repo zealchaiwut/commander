@@ -87,3 +87,5 @@ separated by `---` exactly as the splitter expects.
 - [2026-07-03-1-dead-code-purge.md](2026-07-03-1-dead-code-purge.md) — delete dead files/endpoints, last 'planned'-state writer, archive orphaned one-shot scripts
 - [2026-07-03-2-frontend-call-reduction.md](2026-07-03-2-frontend-call-reduction.md) — visibility guard, timer dedup, SSE-driven board, home N+1 batch (26→8 calls/min idle)
 - [2026-07-03-3-github-mirror-routing.md](2026-07-03-3-github-mirror-routing.md) — route mirror-bypassing gh call sites through the issues/milestones mirror
+- [2026-07-03-4-aggregate-coherence.md](2026-07-03-4-aggregate-coherence.md) — SSE invalidation push, shared aggregate cache, api-volume observability, call-budget harness, flag cutover, cache-inventory doc
+- [2026-07-03-5-mobile-nav-modals.md](2026-07-03-5-mobile-nav-modals.md) — mobile 390px fixes: swipeable tab strip, modal height cap, 44px touch targets, horizontal-overflow purge, deploy pane

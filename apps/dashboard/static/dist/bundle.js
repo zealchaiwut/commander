@@ -2139,6 +2139,18 @@ Replace the existing draft (${data.existing_label})?`
     ${splitHtml}
   </div>`;
   }
+  function _histSeedRunStatsFromInline(sprints) {
+    if (!(globalThis._commanderFeatures && globalThis._commanderFeatures.history_aggregate === true)) {
+      return;
+    }
+    if (!Array.isArray(sprints))
+      return;
+    for (const s of sprints) {
+      if (s && s.label && s.run_stats != null && !(s.label in _histRunStats)) {
+        _histRunStats[s.label] = s.run_stats;
+      }
+    }
+  }
   async function _histLoadRunStats(label) {
     if (label in _histRunStats)
       return;
@@ -3290,6 +3302,7 @@ Replace the existing draft (${data.existing_label})?`
         const sprints = data.sprints || [];
         _histLedgerData = sprints;
         globalThis._histLedgerData = sprints;
+        _histSeedRunStatsFromInline(sprints);
         _histLedgerCacheRepo = repo;
         _histLedgerCacheAt = Date.now();
         const histOpen = document.getElementById("smgmt-subview-history")?.classList.contains("show");
@@ -3627,9 +3640,11 @@ ${listing}`)) {
       if (typeof _smgmtApplyRerunOptimistic === "function") {
         _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
       }
-      await loadSprintMgmt(true);
+      loadSprintMgmt(true).catch(() => {
+      });
       if (typeof globalThis._histLoadLedger === "function") {
-        await globalThis._histLoadLedger(repo);
+        globalThis._histLoadLedger(repo).catch(() => {
+        });
       }
       _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
@@ -4717,6 +4732,118 @@ Resolve manually and re-run Bulk complete.`,
 
   // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
+  var _smgmtAggregateCards = null;
+  function _smgmtBuildAggCards(agg) {
+    const sections = agg.sections || {};
+    const all = [
+      ...sections.running || [],
+      ...sections.needs_rework || [],
+      ...sections.ready_to_merge || [],
+      ...sections.draft || [],
+      ...sections.lineage || []
+    ];
+    const idx = {};
+    for (const card of all) {
+      if (card.label)
+        idx[card.label] = card;
+      for (const cl of card.chain || []) {
+        if (!idx[cl])
+          idx[cl] = card;
+      }
+    }
+    return idx;
+  }
+  function _smgmtAggToRenderData(agg) {
+    const sections = agg.sections || {};
+    const allCards = [
+      ...sections.running || [],
+      ...sections.needs_rework || [],
+      ...sections.ready_to_merge || [],
+      ...sections.draft || [],
+      ...sections.lineage || []
+    ];
+    const _ranStates = /* @__PURE__ */ new Set([
+      "running",
+      "needs_rework",
+      "ready_to_merge",
+      "partial_finished",
+      "failed",
+      "completed"
+    ]);
+    const issues = [];
+    const sprintLabels = /* @__PURE__ */ new Set();
+    const sprint_has_run = {};
+    const sprint_parents = {};
+    const aggregateBuckets = {};
+    const sectionEntries = [
+      ["running", sections.running || []],
+      ["needs_rework", sections.needs_rework || []],
+      ["ready_to_merge", sections.ready_to_merge || []],
+      ["draft", sections.draft || []],
+      ["lineage", sections.lineage || []]
+    ];
+    for (const [sectionName, cards] of sectionEntries) {
+      for (const card of cards) {
+        const label = card.label;
+        if (!label)
+          continue;
+        sprintLabels.add(label);
+        aggregateBuckets[label] = sectionName;
+        sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+        for (const t of card.tickets || []) {
+          issues.push({ ...t, sprint_label: label });
+        }
+        const chain = card.chain || [];
+        for (let i = 0; i < chain.length; i++) {
+          const cl = chain[i];
+          sprintLabels.add(cl);
+          if (!(cl in aggregateBuckets))
+            aggregateBuckets[cl] = "lineage";
+          if (!(cl in sprint_has_run))
+            sprint_has_run[cl] = sprint_has_run[label];
+        }
+        for (let i = 1; i < chain.length; i++) {
+          if (!sprint_parents[chain[i]])
+            sprint_parents[chain[i]] = chain[i - 1];
+        }
+      }
+    }
+    for (const t of (sections.backlog || {}).tickets || []) {
+      issues.push({ ...t, sprint_label: null });
+    }
+    const order = [...sprintLabels].sort((a, b) => {
+      const ma = String(a).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      const mb = String(b).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      if (!ma || !mb)
+        return String(a).localeCompare(String(b));
+      const na = parseInt(ma[1], 10);
+      const nb = parseInt(mb[1], 10);
+      if (na !== nb)
+        return na - nb;
+      return parseInt(ma[2] || 0, 10) - parseInt(mb[2] || 0, 10);
+    });
+    const sprintNumSet = /* @__PURE__ */ new Set();
+    for (const l of order) {
+      const m = String(l).match(/^sprint-(\d+)/);
+      if (m)
+        sprintNumSet.add(parseInt(m[1], 10));
+    }
+    const sprints = [...sprintNumSet].sort((a, b) => a - b);
+    const finished_sprints = allCards.filter((c) => c.lifecycle_state === "completed" && c.label).map((c) => c.label);
+    return {
+      sprints,
+      order,
+      issues,
+      finished_sprints,
+      merged_sprints: [...finished_sprints],
+      sprint_parents,
+      sprint_rerun_into: {},
+      sprint_plan_states: {},
+      sprint_has_run,
+      sprint_signoff: {},
+      _aggregateBuckets: aggregateBuckets
+    };
+  }
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
       return null;
@@ -4796,48 +4923,99 @@ Resolve manually and re-run Bulk complete.`,
       if (typeof _smgmtEnsureCapData === "function") {
         _smgmtEnsureCapData();
       }
-      const [resp, runningResp] = await Promise.all([
-        fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-        fetch("/api/sprints/running-all").catch(() => null)
-      ]);
-      if (!resp.ok) {
-        let msg = "Failed to load sprints.";
-        const d = await resp.json().catch(() => null);
-        const detail = d && typeof d.detail === "string" ? d.detail : "";
-        if (resp.status === 429 || /rate limit/i.test(detail)) {
-          msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
-        }
-        throw new Error(msg);
-      }
-      const data = await resp.json();
-      if (_smgmtLiveCacheRepo !== repo) {
-        _smgmtLiveCacheRepo = repo;
-        for (const k of Object.keys(_smgmtLiveCache))
-          delete _smgmtLiveCache[k];
-      }
-      if (typeof _smgmtLingerRestore === "function")
-        _smgmtLingerRestore(repo);
-      const prevRunning = new Set(_smgmtRunningLabels);
-      _smgmtRunningLabels = /* @__PURE__ */ new Set();
-      _smgmtAnySprintRunning = false;
-      if (runningResp && runningResp.ok) {
-        const runningData = await runningResp.json();
-        const running = runningData.running || [];
-        running.forEach((r) => {
-          if (r.project === repo) {
-            _smgmtRunningLabels.add(r.sprint_label);
+      const _feats = typeof globalThis !== "undefined" ? globalThis._commanderFeatures : null;
+      const _useBoardAggregate = Boolean(_feats && _feats.board_aggregate === true);
+      let data;
+      if (_useBoardAggregate) {
+        _smgmtAggregateCards = null;
+        const aggResp = await fetch(
+          "/api/board?project=" + encodeURIComponent(repo)
+        );
+        if (!aggResp.ok) {
+          let msg = "Failed to load board.";
+          const d = await aggResp.json().catch(() => null);
+          const detail = d && typeof d.detail === "string" ? d.detail : "";
+          if (aggResp.status === 429 || /rate limit/i.test(detail)) {
+            msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
           }
-        });
-        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-      }
-      for (const label of prevRunning) {
-        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
-          _smgmtLingerStart(label);
+          throw new Error(msg);
         }
-      }
-      if (optimisticRunningLabel) {
-        _smgmtRunningLabels.add(optimisticRunningLabel);
-        _smgmtAnySprintRunning = true;
+        const agg = await aggResp.json();
+        _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+        if (typeof window !== "undefined")
+          window._smgmtAggregateCards = _smgmtAggregateCards;
+        if (_smgmtLiveCacheRepo !== repo) {
+          _smgmtLiveCacheRepo = repo;
+          for (const k of Object.keys(_smgmtLiveCache))
+            delete _smgmtLiveCache[k];
+        }
+        if (typeof _smgmtLingerRestore === "function")
+          _smgmtLingerRestore(repo);
+        const prevRunningAgg = new Set(_smgmtRunningLabels);
+        _smgmtRunningLabels = /* @__PURE__ */ new Set();
+        _smgmtAnySprintRunning = false;
+        for (const card of (agg.sections || {}).running || []) {
+          if (card.label)
+            _smgmtRunningLabels.add(card.label);
+        }
+        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+        for (const label of prevRunningAgg) {
+          if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+            _smgmtLingerStart(label);
+          }
+        }
+        if (optimisticRunningLabel) {
+          _smgmtRunningLabels.add(optimisticRunningLabel);
+          _smgmtAnySprintRunning = true;
+        }
+        data = _smgmtAggToRenderData(agg);
+      } else {
+        _smgmtAggregateCards = null;
+        if (typeof window !== "undefined")
+          window._smgmtAggregateCards = null;
+        const [resp, runningResp] = await Promise.all([
+          fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
+          fetch("/api/sprints/running-all").catch(() => null)
+        ]);
+        if (!resp.ok) {
+          let msg = "Failed to load sprints.";
+          const d = await resp.json().catch(() => null);
+          const detail = d && typeof d.detail === "string" ? d.detail : "";
+          if (resp.status === 429 || /rate limit/i.test(detail)) {
+            msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
+          }
+          throw new Error(msg);
+        }
+        data = await resp.json();
+        if (_smgmtLiveCacheRepo !== repo) {
+          _smgmtLiveCacheRepo = repo;
+          for (const k of Object.keys(_smgmtLiveCache))
+            delete _smgmtLiveCache[k];
+        }
+        if (typeof _smgmtLingerRestore === "function")
+          _smgmtLingerRestore(repo);
+        const prevRunning = new Set(_smgmtRunningLabels);
+        _smgmtRunningLabels = /* @__PURE__ */ new Set();
+        _smgmtAnySprintRunning = false;
+        if (runningResp && runningResp.ok) {
+          const runningData = await runningResp.json();
+          const running = runningData.running || [];
+          running.forEach((r) => {
+            if (r.project === repo) {
+              _smgmtRunningLabels.add(r.sprint_label);
+            }
+          });
+          _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+        }
+        for (const label of prevRunning) {
+          if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+            _smgmtLingerStart(label);
+          }
+        }
+        if (optimisticRunningLabel) {
+          _smgmtRunningLabels.add(optimisticRunningLabel);
+          _smgmtAnySprintRunning = true;
+        }
       }
       _smgmtRender(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
@@ -5219,6 +5397,18 @@ Resolve manually and re-run Bulk complete.`,
     }
   }
   function _smgmtCardBucket(label, planStates) {
+    const aggBuckets = _smgmtData && _smgmtData._aggregateBuckets;
+    if (aggBuckets && label in aggBuckets) {
+      if (_smgmtRunningLabels.has(label))
+        return "running";
+      const inLingerAgg = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+      if (inLingerAgg && !(_smgmtData.sprint_has_run || {})[label])
+        return "running";
+      const b = aggBuckets[label];
+      if (b === "running" || b === "needs_rework" || b === "ready_to_merge" || b === "draft") {
+        return b;
+      }
+    }
     if (_smgmtRunningLabels.has(label))
       return "running";
     const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -5341,6 +5531,26 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo)
       return;
+    if (_smgmtAggregateCards) {
+      await Promise.all(orderedLabels.map(async (label) => {
+        const tickets = bySprint[label] || [];
+        if (tickets.length === 0)
+          return;
+        for (const t of tickets)
+          _smgmtTicketToSprint[t.number] = label;
+        const card = _smgmtAggregateCards[label];
+        if (!card)
+          return;
+        const estEl = document.getElementById(`smgmt-est-${label}`);
+        if (estEl && card.estimate_hours != null) {
+          const h = card.estimate_hours;
+          const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+          estEl.textContent = `${display} estimated`;
+        }
+        _smgmtSetSprintTokenEl(label, {});
+      }));
+      return;
+    }
     await Promise.all(orderedLabels.map(async (label) => {
       const tickets = bySprint[label] || [];
       if (tickets.length === 0)
@@ -5426,6 +5636,44 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo)
       return;
+    if (_smgmtAggregateCards) {
+      await Promise.all(orderedLabels.map(async (label) => {
+        if (_smgmtRunningLabels.has(label))
+          return;
+        if (_smgmtFinishedLabels.has(label))
+          return;
+        const card = _smgmtAggregateCards[label];
+        if (!card || !card.dep_order)
+          return;
+        const tickets = bySprint[label] || [];
+        const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+        if (pending.length < 2)
+          return;
+        const depData = card.dep_order;
+        for (const t of pending)
+          delete _smgmtDepOrderByIssue[t.number];
+        if (depData.has_cycle) {
+          const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
+          for (const t of pending) {
+            if (cycleSet.has(String(t.number))) {
+              _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+            }
+          }
+        } else {
+          for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
+            const num = parseInt(idStr, 10);
+            _smgmtDepOrderByIssue[num] = {
+              upstream: hint.upstream || [],
+              downstream: hint.downstream || [],
+              inCycle: false
+            };
+          }
+        }
+        for (const t of pending)
+          _smgmtUpdateDepOrderBadge(t.number);
+      }));
+      return;
+    }
     await Promise.all(orderedLabels.map(async (label) => {
       if (_smgmtRunningLabels.has(label))
         return;

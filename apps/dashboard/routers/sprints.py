@@ -20,6 +20,7 @@ from . import brief
 from . import scheduler
 from . import sprints_service
 from . import todos
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprints"])
 
@@ -72,7 +73,9 @@ def get_sprint_goal(project: str, sprint: str):
 @router.post("/api/sprints/goal")
 def save_sprint_goal(body: SprintGoalBody):
     """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
-    return sprints_service.save_sprint_goal(body.project, body.sprint_label, body.goal)
+    result = sprints_service.save_sprint_goal(body.project, body.sprint_label, body.goal)
+    invalidate_board(body.project)
+    return result
 
 
 @router.get("/api/sprints/order")

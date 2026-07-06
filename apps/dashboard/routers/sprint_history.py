@@ -14,6 +14,7 @@ from . import sprint_history_service
 from . import sprint_reconcile_service
 from . import stale_branches_service
 from . import run_stats_service
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprint-history"])
 
@@ -70,6 +71,9 @@ class SprintHistoryItem(BaseModel):
     post_sprint: SprintHistoryPostSprint | None = None
     issues: list[SprintHistoryIssue] = []
     failed_tickets: list[SprintHistoryFailedTicket] = []
+    # Inline run-stats block (issue #1639): eliminates per-card /run-stats
+    # round-trips. Same fields as GET /api/sprints/{label}/run-stats.
+    run_stats: dict | None = None
 
 
 class SprintHistoryResponse(BaseModel):
@@ -165,6 +169,7 @@ async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
             )
         except Exception:
             pass
+    invalidate_board(body.project)
     return result
 
 

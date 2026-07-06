@@ -6351,6 +6351,7 @@ async def _run_single_ba_ticket(
     from services.sprint_manager.model_routing import apply_provider_env
     _ba_model = apply_provider_env(
         sub_env, "claude-sonnet-4-6", repo=os.environ.get("COMMANDER_PROJECT"),
+        role="ba",
     )
     cmd = [
         "claude",

@@ -200,6 +200,7 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
     except Exception:
         pass
 
+    invalidate_board(body.project)
     return {"ok": True}
 
 
@@ -227,6 +228,7 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
         db.set_sprint_ticket_order(sprint_label, body)
     except Exception:
         pass
+    invalidate_board(project)
     return {"ok": True}
 
 
@@ -298,6 +300,7 @@ async def delete_empty_sprints(body: SprintDeleteBody):
             errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
 
     github_client.invalidate("sprints:")
+    invalidate_board(body.project)
     result: dict = {"ok": True, "deleted": deleted}
     if errors:
         result["errors"] = errors
@@ -363,6 +366,7 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
             errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
 
     github_client.invalidate("sprints:")
+    invalidate_board(body.project)
     result: dict = {"ok": True, "deleted": deleted}
     if errors:
         result["errors"] = errors

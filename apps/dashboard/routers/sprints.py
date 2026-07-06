@@ -87,7 +87,9 @@ def get_sprint_order(project: str):
 @router.post("/api/sprints/order")
 def save_sprint_order(project: str, body: SprintOrderBody):
     """Persist sprint display order for a project slug."""
-    return sprints_service.save_sprint_order(project, body.order)
+    result = sprints_service.save_sprint_order(project, body.order)
+    invalidate_board(project)
+    return result
 
 
 @router.post("/api/sprints/plan-next")
@@ -102,7 +104,9 @@ def plan_next_sprint(body: PlanNextSprintBody):
     """
     if config.sprint_planning_disabled():
         raise HTTPException(404, detail="Sprint planning is disabled")
-    return sprints_service.plan_next_sprint(body.project, body.replace)
+    result = sprints_service.plan_next_sprint(body.project, body.replace)
+    invalidate_board(body.project)
+    return result
 
 
 @router.get("/api/sprints/pending-signoff")

@@ -12282,6 +12282,159 @@ let _smgmtLiveCacheRepo = null;
 let _smgmtLiveCacheSeq = 0;
 const _smgmtLiveCacheWriteSeq = {};
 
+// ── SSE-driven board updates (issue #1777) ───────────────────────────────────
+// The sprint board is driven by the per-sprint SSE stream (/live/stream) rather
+// than a 2-second REST poll. The SSE stream emits `snapshot` events (full live
+// data) and `log_line` events (dispatch + per-issue logs keyed by issue_num).
+// On disconnect, a slow fallback poll (≥15 s) via /api/running keeps the board
+// fresh and attempts SSE reconnect on each tick.
+let _smgmtSseEs = null;       // EventSource instance when connected
+let _smgmtSseLabel = null;    // Sprint label the SSE is streaming
+let _smgmtSseFallbackId = null;  // fallback setInterval ID when SSE is offline
+const _SMGMT_SSE_FALLBACK_MS = 15000;  // ≥15 s fallback poll interval (AC6)
+
+/** Connect (or reconnect) the SSE stream for a running sprint. */
+function _smgmtSseConnect(label, repo) {
+  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
+  _smgmtSseLabel = label;
+  const url = '/api/sprints/' + encodeURIComponent(label)
+    + '/live/stream?project=' + encodeURIComponent(repo);
+  const es = new EventSource(url);
+  _smgmtSseEs = es;
+
+  es.addEventListener('snapshot', function(ev) {
+    try { _smgmtSseHandleSnapshot(label, JSON.parse(ev.data)); } catch (_) {}
+  });
+
+  es.addEventListener('log_line', function(ev) {
+    try { _smgmtSseHandleLogLine(label, JSON.parse(ev.data)); } catch (_) {}
+  });
+
+  es.addEventListener('complete', function() {
+    _smgmtSseEs = null;
+    _smgmtSseLabel = null;
+    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+  });
+
+  es.onerror = function() {
+    _smgmtSseEs = null;
+    _smgmtSseLabel = null;
+    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+  };
+}
+
+/** Disconnect SSE and stop the fallback poll. */
+function _smgmtSseDisconnect() {
+  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
+  _smgmtSseLabel = null;
+  _smgmtSseFallbackStop();
+}
+
+/** Stop the fallback poll (called when SSE reconnects). */
+function _smgmtSseFallbackStop() {
+  if (_smgmtSseFallbackId !== null) { clearInterval(_smgmtSseFallbackId); _smgmtSseFallbackId = null; }
+}
+
+/** Start the ≥15 s fallback poll. Polls /api/running and attempts SSE reconnect. */
+function _smgmtSseStartFallback(label, repo) {
+  _smgmtSseFallbackStop();
+  _smgmtSseFallbackId = setInterval(async function() {
+    if (_smgmtSseEs) { _smgmtSseFallbackStop(); return; }  // SSE came back
+    // Attempt SSE reconnect first
+    _smgmtSseConnect(label, repo);
+    // Also poll /api/running for a board state snapshot during the outage
+    try {
+      const resp = await fetch('/api/running?project=' + encodeURIComponent(repo));
+      if (resp && resp.ok) {
+        const live = await resp.json();
+        if (live && live.sprint_label) _smgmtSseHandleSnapshot(live.sprint_label, live);
+      }
+    } catch (_) {}
+  }, _SMGMT_SSE_FALLBACK_MS);
+}
+
+/** Handle a 'snapshot' event from the SSE stream. Updates board metrics in place. */
+function _smgmtSseHandleSnapshot(label, live) {
+  if (_smgmtSseEs) _smgmtSseFallbackStop();  // SSE is live → stop fallback poll
+  const _seq = ++_smgmtLiveCacheSeq;
+  if (_seq < (_smgmtLiveCacheWriteSeq[label] || 0)) return;
+  _smgmtLiveCacheWriteSeq[label] = _seq;
+  const hadLiveIssues = !!(_smgmtLiveCache[label] && _smgmtLiveCache[label].issues && _smgmtLiveCache[label].issues.length);
+  _smgmtLiveCache[label] = live;
+  _smgmtLiveHeartbeatAt = Date.now();
+  if (!hadLiveIssues && live.issues && live.issues.length > 0 && _smgmtData) {
+    _smgmtRender(_smgmtData);
+  } else {
+    _smgmtLivePatch(label, live);
+  }
+  _sprintProgressRender();
+  if (_snavPanelOpen) _snavRenderPanel();
+  _smgmtRunningViewUpdate(label, live);
+  if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, live);
+}
+
+/** Handle a 'log_line' event from the SSE stream.
+ *  Routes orchestrator lines to the inspector, per-issue lines to worker lanes. */
+function _smgmtSseHandleLogLine(label, entry) {
+  // Update the progress activity log (same as _smgmtLiveLogPatch)
+  if (typeof updateProgressActivityLog === 'function') {
+    updateProgressActivityLog('running-' + label, [entry], colorizeLogLine);
+  }
+
+  // Route per-issue log lines to worker lane containers (AC5)
+  if (entry.issue_num != null) {
+    const el = document.getElementById('smgmt-worker-log-' + entry.issue_num);
+    if (el) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'worker-log-line';
+      div.innerHTML = safe;
+      // Replace placeholder if present
+      const placeholder = el.querySelector('.worker-lane-log-msg');
+      if (placeholder) placeholder.remove();
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+      // Cap at 40 lines
+      while (el.children.length >= 40) el.removeChild(el.firstChild);
+      el.appendChild(div);
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  // Feed orchestrator lines to the inspector log when tab is 'orchestrator' (AC4)
+  if (_smgmtInspectorPollId === null && entry.issue_num == null) {
+    const bodyEl = document.getElementById('smgmt-inspector-log');
+    if (bodyEl && _smgmtInspectorTab === 'orchestrator') {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = safe;
+      const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 8;
+      bodyEl.appendChild(div);
+      if (atBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
+  }
+
+  // Feed per-issue lines to the inspector when that issue's tab is active (AC4)
+  if (_smgmtInspectorPollId === null && entry.issue_num != null) {
+    const bodyEl = document.getElementById('smgmt-inspector-log');
+    if (bodyEl && _smgmtInspectorTab === entry.issue_num) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = safe;
+      const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 8;
+      bodyEl.appendChild(div);
+      if (atBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
+  }
+}
+
 // Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
 const _SMGMT_LINGER_MS = 60 * 60 * 1000;
 const _smgmtLingerLabels = new Map();
@@ -17453,8 +17606,12 @@ function _smgmtLanesUpdate(label, live) {
   if (maxCoder > 1 && activeCoders.length > 1) {
     // Multi-slot mode: per-worker lanes with live log tails (issue #1416, AC4/AC6)
     lanesEl.innerHTML = _smgmtWorkerLanesHtml(label, live);
-    const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
-    _smgmtWorkerLogFetch(label, repo, activeCoders);
+    // When SSE is connected, per-worker logs arrive via keyed log_line events
+    // (_smgmtSseHandleLogLine) — do NOT fire REST calls (issue #1777 AC5).
+    if (!_smgmtSseEs) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      _smgmtWorkerLogFetch(label, repo, activeCoders);
+    }
   } else {
     // Single-slot mode: existing two-lane coder/tester view unchanged (AC5)
     const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
@@ -18317,11 +18474,17 @@ function _smgmtInspectorFeed(ticket, label) {
   _smgmtInspectorStreamRestart();
 }
 
-/** (Re)start the streaming poll for the active log tab. */
+/** (Re)start the streaming poll for the active log tab.
+ *  When the SSE stream is live, log lines arrive via _smgmtSseHandleLogLine
+ *  so the 5 s poll is unnecessary (AC4).  Only start the poll in fallback mode. */
 function _smgmtInspectorStreamRestart() {
   if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  // Always do one initial fetch for the current log content.
   _smgmtInspectorStreamTick();
-  _smgmtInspectorPollId = visibilityInterval(_smgmtInspectorStreamTick, 5000);
+  // Only start the recurring 5 s poll when SSE is not connected (fallback mode).
+  if (!_smgmtSseEs) {
+    _smgmtInspectorPollId = visibilityInterval(_smgmtInspectorStreamTick, 5000);
+  }
 }
 
 /** Switch the active log tab and restart streaming. */
@@ -19272,8 +19435,8 @@ function _smgmtLivePatch(label, live) {
 /** Start or restart the live polling loop for any running sprints. */
 // #3: re-fetch the running-pane timeline every 10 min so size/estimate drift
 // (a ticket runs shorter/longer than the first render) is reflected without the
-// operator reloading. The 2s live poll only patches; the timeline is otherwise
-// rendered once on pane entry.
+// operator reloading. SSE snapshot events handle the 5s updates; the timeline is
+// rendered once on pane entry and refreshed every 10 min.
 let _smgmtTimelineRefreshId = null;
 const _SMGMT_TIMELINE_REFRESH_MS = 600000; // 10 minutes
 function _smgmtTimelineRefreshTick() {
@@ -19299,15 +19462,24 @@ function _smgmtLivePollRestart() {
     clearInterval(_smgmtTimelineRefreshId);
     _smgmtTimelineRefreshId = null;
   }
+  // Disconnect any existing SSE before reconnecting (issue #1777)
+  _smgmtSseDisconnect();
 
   if (_smgmtRunningLabels.size === 0) {
     _smgmtLingerPollRestart();
     return;
   }
 
-  // Poll every 2 seconds for banner + Running-tab rail/metrics updates
-  _smgmtLivePollId = visibilityInterval(_smgmtLivePollTick, 2000);
-  // Kick off immediately — use single /api/running snapshot for first paint when flag ON (issue #1647)
+  // Connect SSE stream — replaces the 2s REST poll for live board updates (issue #1777 AC2).
+  // The SSE stream emits 'snapshot' events every ~5 s and 'log_line' events in real time.
+  const _sseLabel = Array.from(_smgmtRunningLabels)[0];
+  const _sseRepo = _smgmtRepo();
+  if (_sseLabel && _sseRepo) {
+    _smgmtSseConnect(_sseLabel, _sseRepo);
+  }
+
+  // First paint: use /api/running snapshot when flag ON (issue #1647), else single live poll tick.
+  // This provides immediate board state before the first SSE snapshot arrives.
   if (window._commanderFeatures && window._commanderFeatures.running_aggregate === true) {
     _smgmtRunningFirstPaint();
   } else {

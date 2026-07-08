@@ -15,8 +15,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 _STATIC = Path(__file__).resolve().parent.parent / "apps" / "dashboard" / "static"
 _PROJECT_HTML = _STATIC / "project.html"
 _FEATURES_JS = _STATIC / "src" / "shell" / "features.js"
@@ -77,14 +75,24 @@ class TestAC2FlagBranch:
         assert "_smgmtLivePollTick()" in PROJECT_HTML
 
     def test_branch_structure_is_if_else(self):
-        """The branch must be an if/else so exactly one path runs per call."""
-        # Find the relevant section in _smgmtLivePollRestart
+        """The branch must be an if/else so exactly one path runs per call.
+
+        Issue #1777 removed the 2s setInterval; the anchor is now _smgmtSseConnect
+        (SSE replaces polling).  The if/else for the running_aggregate flag still
+        controls which first-paint path runs.
+        """
+        # Find the first-paint if/else section within _smgmtLivePollRestart.
+        # Anchor on the specific CALL SITE (_smgmtSseConnect(_sseLabel, ...) — not
+        # the function definition) through to _smgmtTimelineRefreshId.
         poll_section = re.search(
-            r"_smgmtLivePollId = setInterval\(_smgmtLivePollTick.*?_smgmtTimelineRefreshId",
+            r"_smgmtSseConnect\(_sse.*?_smgmtTimelineRefreshId",
             PROJECT_HTML,
             re.DOTALL,
         )
-        assert poll_section is not None, "_smgmtLivePollRestart interval section not found"
+        assert poll_section is not None, (
+            "_smgmtLivePollRestart: expected _smgmtSseConnect(_sse... _smgmtTimelineRefreshId "
+            "section not found (issue #1777 replaced 2s poll with SSE)"
+        )
         section_text = poll_section.group(0)
         assert "_smgmtRunningFirstPaint()" in section_text
         assert "_smgmtLivePollTick()" in section_text
@@ -161,14 +169,20 @@ class TestAC4FallbackOnError:
 
 
 # ---------------------------------------------------------------------------
-# AC-5: 2-second interval always wired (setInterval not gated on flag)
+# AC-5 (updated for issue #1777): 2s poll replaced by SSE; fallback is ≥15 s
 # ---------------------------------------------------------------------------
 
-class TestAC5IntervalAlwaysSet:
-    """AC-5: setInterval(_smgmtLivePollTick, 2000) runs regardless of flag."""
+class TestAC5IntervalReplacedBySSE:
+    """AC-5 (revised): The 2s setInterval is replaced by SSE-driven updates per issue #1777.
 
-    def test_setinterval_not_inside_flag_branch(self):
-        """The setInterval call must come BEFORE the flag check in _smgmtLivePollRestart."""
+    Issue #1777 AC2 explicitly removes visibilityInterval(_smgmtLivePollTick, 2000)
+    from _smgmtLivePollRestart and wires an SSE stream instead. The fallback poll
+    uses _SMGMT_SSE_FALLBACK_MS (≥ 15 s) when the stream is offline.
+    """
+
+    def test_setinterval_removed_from_live_poll_restart(self):
+        """The 2s setInterval must NOT be unconditionally wired in _smgmtLivePollRestart.
+        SSE replaces it (issue #1777 AC2)."""
         poll_restart_match = re.search(
             r"function _smgmtLivePollRestart\(\)(.*?)^}",
             PROJECT_HTML,
@@ -176,16 +190,31 @@ class TestAC5IntervalAlwaysSet:
         )
         assert poll_restart_match is not None
         fn_body = poll_restart_match.group(1)
-
-        interval_pos = fn_body.find("setInterval(_smgmtLivePollTick, 2000)")
-        flag_check_pos = fn_body.find("window._commanderFeatures")
-        assert interval_pos != -1, "setInterval not found in _smgmtLivePollRestart"
-        assert flag_check_pos != -1, "flag check not found in _smgmtLivePollRestart"
-        # setInterval must appear before the flag check
-        assert interval_pos < flag_check_pos, (
-            "setInterval should be before the flag branch "
-            f"(interval_pos={interval_pos}, flag_check_pos={flag_check_pos})"
+        # The 2s poll must NOT appear unconditionally
+        assert "visibilityInterval(_smgmtLivePollTick, 2000)" not in fn_body, (
+            "The 2s _smgmtLivePollTick setInterval must be removed from "
+            "_smgmtLivePollRestart — SSE replaces it per issue #1777 AC2."
         )
+
+    def test_sse_connect_wired_in_live_poll_restart(self):
+        """_smgmtSseConnect must be called inside _smgmtLivePollRestart."""
+        poll_restart_match = re.search(
+            r"function _smgmtLivePollRestart\(\)(.*?)^}",
+            PROJECT_HTML,
+            re.DOTALL | re.MULTILINE,
+        )
+        assert poll_restart_match is not None
+        fn_body = poll_restart_match.group(1)
+        assert "_smgmtSseConnect(" in fn_body, (
+            "_smgmtLivePollRestart must call _smgmtSseConnect() to wire "
+            "the SSE stream (replaces removed 2s poll)"
+        )
+
+    def test_fallback_interval_is_at_least_15s(self):
+        """The SSE fallback poll interval must be ≥ 15000 ms (AC6 of issue #1777)."""
+        m = re.search(r"_SMGMT_SSE_FALLBACK_MS\s*=\s*(\d+)", PROJECT_HTML)
+        assert m is not None, "_SMGMT_SSE_FALLBACK_MS constant not defined"
+        assert int(m.group(1)) >= 15000
 
 
 # ---------------------------------------------------------------------------

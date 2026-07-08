@@ -956,6 +956,56 @@
     }
   }
 
+  // apps/dashboard/static/src/shell/visibility.js
+  var _viHandles = /* @__PURE__ */ new Map();
+  var _viIdSeq = 1e6;
+  function visibilityInterval(fn, delay) {
+    const fakeId = ++_viIdSeq;
+    let realId = null;
+    function stop() {
+      if (realId === null)
+        return;
+      clearInterval(realId);
+      realId = null;
+    }
+    function onVisChange() {
+      if (typeof document === "undefined")
+        return;
+      if (document.hidden) {
+        stop();
+      } else {
+        stop();
+        fn();
+        realId = setInterval(fn, delay);
+      }
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisChange);
+      if (!document.hidden) {
+        realId = setInterval(fn, delay);
+      }
+    }
+    _viHandles.set(fakeId, { stop, onVisChange });
+    return fakeId;
+  }
+  function installVisibilityGuard() {
+    if (typeof window === "undefined")
+      return;
+    const _orig = window.clearInterval.bind(window);
+    window.clearInterval = (id) => {
+      if (_viHandles.has(id)) {
+        const { stop, onVisChange } = _viHandles.get(id);
+        stop();
+        if (typeof document !== "undefined") {
+          document.removeEventListener("visibilitychange", onVisChange);
+        }
+        _viHandles.delete(id);
+      } else {
+        _orig(id);
+      }
+    };
+  }
+
   // apps/dashboard/static/src/settings/cleanup.js
   var CLN_PA_ID = "ps-cln-pa";
   var _psCleanupConfirmFn = null;
@@ -8697,10 +8747,13 @@ Proceed anyway?`)) {
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
   root.loadCommanderFeatures = loadCommanderFeatures;
+  root.visibilityInterval = visibilityInterval;
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
+  globalThis.visibilityInterval = visibilityInterval;
+  installVisibilityGuard();
   root.sprintCleanupPreview = sprintCleanupPreview;
   root.sprintCleanupConfirm = sprintCleanupConfirm;
   root.testFilesCleanupPreview = testFilesCleanupPreview;

@@ -86,8 +86,6 @@ FORMERLY_SERVER_ROUTES = [
     # analytics
     ("GET", "/api/projects/{slug}/analytics/metrics"),
     ("GET", "/api/projects/{slug}/analytics/calibration"),
-    # reports
-    ("POST", "/api/reports/daily"),
     # finish card
     ("GET", "/api/sprints/{sprint_label}/finish-card"),
     # tickets (draft/create)
@@ -276,7 +274,6 @@ class TestRoutersExist:
         "estimates",
         "calibration",
         "metrics",
-        "reports",
         "finish_card",
         "deploy",
         "mis_sizing",

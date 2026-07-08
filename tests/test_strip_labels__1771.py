@@ -11,7 +11,6 @@ These tests verify the cleanup and label-strip behavior via the HTTP API.
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -114,7 +113,7 @@ def test_no_remaining_imports_of_split_ticket_service():
     if result.returncode == 0:
         # Some matches were found; all are active imports (^ anchors at line start)
         lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-        assert not lines, f"Found active imports of split_ticket_service:\n" + "\n".join(lines)
+        assert not lines, "Found active imports of split_ticket_service:\n" + "\n".join(lines)
 
 
 # AC7 — _STRIP_LABELS constant includes SIT and UAT.

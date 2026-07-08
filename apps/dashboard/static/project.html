@@ -3083,6 +3083,8 @@
     }
     @media (max-width: 480px) {
       .smgmt-sprint-header { flex-direction: column; align-items: flex-start; }
+      /* AC5/#1768: right cluster wraps beneath the title on narrow viewports */
+      .smgmt-sprint-header-right { flex-wrap: wrap; }
     }
     /* ── Action buttons ── */
     .smgmt-run-btn {
@@ -10010,6 +10012,12 @@
       .stab-group { position: static; }
       .sub-tabs { overflow-x: auto; scrollbar-width: none; }
       .sub-tabs::-webkit-scrollbar { display: none; }
+      /* AC1–AC2/#1768: clamp page-level horizontal scrollWidth to the viewport */
+      body { overflow-x: hidden; }
+      /* AC4/#1768: subnav pill row wraps so it does not widen the page */
+      .subnav { flex-wrap: wrap; }
+      /* AC6/#1768: allow create/auto-refresh cluster to shrink on very narrow bars */
+      .proj-header-actions { flex-shrink: 1; }
     }
 
   </style>

@@ -15,8 +15,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 _STATIC = Path(__file__).resolve().parent.parent / "apps" / "dashboard" / "static"
 _PROJECT_HTML = _STATIC / "project.html"
 _FEATURES_JS = _STATIC / "src" / "shell" / "features.js"

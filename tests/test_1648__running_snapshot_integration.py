@@ -29,8 +29,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Path setup — make dashboard modules importable
 # ---------------------------------------------------------------------------
@@ -126,8 +124,6 @@ class TestComprehensiveNoGitHubCalls:
 
         public_names = self._all_public_github_functions()
         assert public_names, "Expected at least one public function in github_client"
-
-        spy_results: dict[str, bool] = {}
 
         def _make_spy(fn_name: str):
             def _spy(*args, **kwargs):

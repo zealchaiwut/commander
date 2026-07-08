@@ -19,8 +19,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DASHBOARD = _REPO_ROOT / "apps" / "dashboard"
 _ROUTERS = _DASHBOARD / "routers"
@@ -268,7 +266,6 @@ class TestAC4InspectorPollGuarded:
         # If visibilityInterval is present, it must be inside a guard block
         if "visibilityInterval(_smgmtInspectorStreamTick, 5000)" in body:
             # The interval call must be guarded by a check on _smgmtSseEs
-            idx_interval = body.find("visibilityInterval(_smgmtInspectorStreamTick, 5000)")
             idx_sse_check = body.find("_smgmtSseEs")
             assert idx_sse_check != -1, (
                 "visibilityInterval is present but there is no _smgmtSseEs guard"

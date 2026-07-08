@@ -13644,7 +13644,24 @@ async function init() {
 
   // Start API loads before tab wiring so a bundle hiccup can't block data fetch.
   const homePromise = loadHomeData(false);
-  const prefetchPromise = _prefetchFullRepo();
+  // Populate _cachedFullRepo from /api/home (already has repo field) so we
+  // avoid the duplicate /api/projects prefetch (issue #1778 AC6). Fall back to
+  // _prefetchFullRepo() only when home data is unavailable.
+  const prefetchPromise = homePromise.then(() => {
+    if (!_homeData) return _prefetchFullRepo();
+    (_homeData.projects || []).forEach(p => {
+      const s = (p.repo || '').split('/').pop();
+      if (s && p.repo) _cachedFullRepo[s] = p.repo;
+    });
+    if (
+      _smgmtSubView === 'history' && _cachedFullRepo[_slug]
+      && typeof _histLoadLedger === 'function'
+      && (!globalThis._histLedgerData || !globalThis._histLedgerData.length)
+    ) {
+      _histLoadLedger(_cachedFullRepo[_slug]);
+    }
+    return true;
+  });
 
   // Activate the correct tab without pushing history (already set above)
   if (typeof switchTab === 'function') switchTab(tab, false);

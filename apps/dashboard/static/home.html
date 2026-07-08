@@ -883,19 +883,6 @@
 
   async function init(){
     if (_deckRedirect()) return;
-    try {
-      const home = await (await fetch('/api/home')).json();
-      (home.projects || []).forEach(p => {
-        if (!p.slug) return;
-        if (p.repo) _repoBySlug[p.slug] = p.repo;
-        _projBySlug[p.slug] = {
-          name: p.name || p.slug,
-          icon: p.icon || 'ti-folder',
-          color: p.color || p.icon_color || 'gray',
-        };
-      });
-    } catch(_) {}
-
     const url = new URL(window.location.href);
     const d = url.searchParams.get('date');
     await loadBrief(d);
@@ -941,6 +928,19 @@
     const decisions = brief.decisions || [];
     const projects = brief.projects || [];
 
+    // Populate project metadata from enriched brief before rendering so
+    // renderProjectsShell can merge artifact + live slugs (issue #1778 AC1/AC5).
+    projects.forEach(p => {
+      const slug = p.project;
+      if (!slug) return;
+      if (p.repo) _repoBySlug[slug] = p.repo;
+      _projBySlug[slug] = {
+        name: p.name || slug,
+        icon: p.icon || 'ti-folder',
+        color: p.color || 'gray',
+      };
+    });
+
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
@@ -951,13 +951,48 @@
     html += renderSuggestedNext(brief.suggested_next || []);
     root.innerHTML = html;
 
-    projects.forEach(p => loadProjectSummary(p.project, date));
+    // Populate brief summary from embedded data; fall back to per-project fetch
+    // only when the field was not embedded (issue #1778 AC1/AC5).
     projects.forEach(p => {
-      const slug = p.project;
-      const el = document.getElementById('todo-' + slug);
-      if (el && window.CommanderTodo) CommanderTodo.mount(el, slug);
+      const el = document.getElementById('sum-' + p.project);
+      if (!el) return;
+      if (p.briefSummary != null) {
+        el.textContent = p.briefSummary || 'No summary available.';
+      } else {
+        loadProjectSummary(p.project, date);
+      }
     });
-    projects.forEach(p => loadMilestone(p.project, p.repo));
+
+    // Populate milestone badge from embedded data (issue #1778 AC1/AC5).
+    projects.forEach(p => {
+      if (p.milestone === undefined) {
+        loadMilestone(p.project, p.repo);
+        return;
+      }
+      const m = p.milestone;
+      const el = document.getElementById('ms-' + p.project);
+      if (!el || !m || !m.label) return;
+      const name = m.title || 'Milestone';
+      el.querySelector('.pb-ms-name').textContent = name;
+      el.querySelector('.pb-ms-count').textContent = m.label;
+      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
+      el.classList.add('show');
+    });
+
+    // Batch-load todos and mount with preloaded data (issue #1778 AC1/AC3/AC4).
+    if (projects.length && window.CommanderTodo) {
+      const slugs = projects.map(p => p.project).filter(Boolean);
+      let todosMap = {};
+      try {
+        const tr = await fetch('/api/todos?projects=' + slugs.map(encodeURIComponent).join(','));
+        if (tr.ok) todosMap = await tr.json();
+      } catch(_) {}
+      projects.forEach(p => {
+        const slug = p.project;
+        const el = document.getElementById('todo-' + slug);
+        if (el) CommanderTodo.mount(el, slug, { preloadedData: todosMap[slug] || [] });
+      });
+    }
   }
 
   async function loadMilestone(slug, repo){

@@ -9,6 +9,7 @@ Run with: pytest tests/test_gh_auth_poll_and_api_cache__1779.py -v --tb=short
 """
 import json
 import os
+import socket
 
 import httpx
 import pytest
@@ -22,9 +23,26 @@ elif _uat_port:
 else:
     BASE_URL = None
 
+
+def _is_reachable(url: str, timeout: float = 2.0) -> bool:
+    """TCP-probe the host:port; returns False on any error."""
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        port = p.port or (443 if p.scheme == "https" else 80)
+        with socket.create_connection((p.hostname or "localhost", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+_uat_reachable = _is_reachable(BASE_URL) if BASE_URL else False
+
 _requires_uat = pytest.mark.skipif(
-    BASE_URL is None,
-    reason="UAT_BASE_URL / UAT_PORT not set — skipping UAT-level HTTP tests",
+    not _uat_reachable,
+    reason="UAT server not reachable — skipping UAT-level HTTP tests",
 )
 
 
@@ -32,6 +50,22 @@ _requires_uat = pytest.mark.skipif(
 def client():
     with httpx.Client(base_url=BASE_URL or "http://localhost:8001", timeout=10.0) as c:
         yield c
+
+
+@pytest.fixture
+def clean_ttl(client):
+    """Restore history_cache_ttl_min to a valid integer around tests that mutate it."""
+    client.put(
+        "/api/settings",
+        content=json.dumps({"history_cache_ttl_min": 5}),
+        headers={"Content-Type": "application/json"},
+    )
+    yield
+    client.put(
+        "/api/settings",
+        content=json.dumps({"history_cache_ttl_min": 5}),
+        headers={"Content-Type": "application/json"},
+    )
 
 
 # -- AC3: /api/environment is fetched at most once per page session -----------
@@ -96,7 +130,7 @@ def test_ac5_settings_endpoint_accessible(client):
 
 
 @_requires_uat
-def test_ac5_settings_has_expected_fields(client):
+def test_ac5_settings_has_expected_fields(client, clean_ttl):
     """AC5-AC6: /api/settings returns expected structure."""
     r = client.get("/api/settings")
     assert r.status_code == 200
@@ -109,7 +143,7 @@ def test_ac5_settings_has_expected_fields(client):
 # -- AC6: /api/settings cache is invalidated after a successful PUT -----------
 
 @_requires_uat
-def test_ac6_settings_put_accepts_updates(client):
+def test_ac6_settings_put_accepts_updates(client, clean_ttl):
     """AC6: PUT /api/settings accepts valid update payloads."""
     r = client.get("/api/settings")
     assert r.status_code == 200
@@ -136,7 +170,7 @@ def test_ac6_settings_put_accepts_updates(client):
 
 
 @_requires_uat
-def test_ac6_settings_put_invalid_payload(client):
+def test_ac6_settings_put_invalid_payload(client, clean_ttl):
     """AC6: PUT /api/settings rejects invalid payloads gracefully."""
     payload = {"history_cache_ttl_min": "not_a_number"}
 
@@ -153,7 +187,7 @@ def test_ac6_settings_put_invalid_payload(client):
 # -- AC7: No stale-settings regression ----------------------------------------
 
 @_requires_uat
-def test_ac7_settings_read_reflects_written_value(client):
+def test_ac7_settings_read_reflects_written_value(client, clean_ttl):
     """AC7: After writing a setting, a subsequent read returns the new value."""
     r = client.get("/api/settings")
     assert r.status_code == 200

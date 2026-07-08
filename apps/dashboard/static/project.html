@@ -10018,6 +10018,15 @@
       .subnav { flex-wrap: wrap; }
       /* AC6/#1768: allow create/auto-refresh cluster to shrink on very narrow bars */
       .proj-header-actions { flex-shrink: 1; }
+      /* ── Deploy tab mobile (issue #1769) ── */
+      /* AC5: collapse multi-column grid to single column so cards never overflow */
+      .deploy-grid { grid-template-columns: 1fr; }
+      /* AC6: stack action buttons vertically, full-width, ≥44px touch target */
+      .deploy-card__actions { flex-direction: column; }
+      .deploy-btn { min-height: 44px; width: 100%; justify-content: center; }
+      /* AC7: inline confirm dialog stacks so both buttons fit without clipping */
+      .deploy-card__confirm { flex-direction: column; }
+      .deploy-card__confirm-msg { min-width: 0; }
     }
 
   </style>

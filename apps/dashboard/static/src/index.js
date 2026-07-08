@@ -33,6 +33,7 @@ import {
 } from "./progress-host.js";
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
 import { loadCommanderFeatures } from './shell/features.js';
+import { visibilityInterval, installVisibilityGuard } from './shell/visibility.js';
 import {
   sprintCleanupPreview,
   sprintCleanupConfirm,
@@ -74,10 +75,13 @@ root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
 root.loadCommanderFeatures = loadCommanderFeatures;
+root.visibilityInterval = visibilityInterval;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
+globalThis.visibilityInterval = visibilityInterval;
+installVisibilityGuard();
 
 // Project Settings cleanup (issue #735 / #808)
 root.sprintCleanupPreview = sprintCleanupPreview;

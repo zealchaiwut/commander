@@ -10023,8 +10023,9 @@
 <script>
   // Environment indicator (#5): colour the top nav blue + show the port when this
   // dashboard is the PRD instance; leave grey for UAT. Default grey on any error.
-  (function () {
-    fetch('/api/environment').then(function (r) { return r.json(); }).then(function (d) {
+  // Runs in DOMContentLoaded so getEnvironment() (from bundle.js) is available.
+  document.addEventListener('DOMContentLoaded', function () {
+    getEnvironment().then(function (d) {
       var env = (d && d.environment ? String(d.environment) : '').toLowerCase();
       var port = (d && d.port) ? String(d.port) : '';
       var nav = document.querySelector('.top-nav');
@@ -10050,7 +10051,7 @@
         }
       }
     }).catch(function () { /* leave the default grey bar */ });
-  })();
+  });
 </script>
 
 <!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
@@ -11963,6 +11964,7 @@ async function settingsSetHistoryTtl(min) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ history_cache_ttl_min: n }),
     });
+    invalidateSettings();
   } catch (_) { /* applied locally regardless */ }
 }
 
@@ -12566,13 +12568,10 @@ async function updateSidebarFooter() {
   const footer = document.getElementById('sidebar-footer');
   if (!footer) return;
   try {
-    const resp = await fetch('/api/version', { cache: 'no-store' });
-    if (resp.ok) {
-      const data = await resp.json();
-      const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
-      footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
-      return;
-    }
+    const data = await getVersion();
+    const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
+    footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
+    return;
   } catch (_) { /* fall through */ }
   footer.textContent = 'v unknown';
 }
@@ -25949,9 +25948,7 @@ async function globalSettingsLoad() {
   _gssHideFeedback();
   gssGhAuthLoad().catch(() => {});
   try {
-    const resp = await fetch('/api/settings');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await getSettings();
     _gssRender(data);
     const ttl = Number(data.history_cache_ttl_min) || 5;
     settingsUpdateHistTtlBtns(ttl);
@@ -25963,8 +25960,6 @@ async function globalSettingsLoad() {
 }
 
 // ── Global Settings — GitHub CLI auth (device / token login) ─────────────────
-
-let _gssGhAuthPollTimer = null;
 
 function _gssGhAuthEsc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -26020,10 +26015,7 @@ function gssGhAuthRenderLog(job) {
 }
 
 function gssGhAuthStopPoll() {
-  if (_gssGhAuthPollTimer) {
-    clearInterval(_gssGhAuthPollTimer);
-    _gssGhAuthPollTimer = null;
-  }
+  stopGhAuthPoll();
 }
 
 async function gssGhAuthPollOnce() {
@@ -26043,9 +26035,7 @@ async function gssGhAuthPollOnce() {
 }
 
 function gssGhAuthStartPoll() {
-  gssGhAuthStopPoll();
-  gssGhAuthPollOnce();
-  _gssGhAuthPollTimer = setInterval(gssGhAuthPollOnce, 600);
+  startGhAuthPoll(gssGhAuthPollOnce);
 }
 
 async function gssGhAuthLoad() {
@@ -26354,6 +26344,7 @@ async function _gssSave() {
     });
     localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
     _gssData = updated;
+    invalidateSettings();
     if (typeof loadCommanderFeatures === 'function') {
       await loadCommanderFeatures();
     }
@@ -31622,9 +31613,7 @@ async function projSettingsLoad() {
 
 async function _psUpdateBranchHints() {
   try {
-    const resp = await fetch('/api/settings');
-    if (!resp.ok) return;
-    const global = await resp.json();
+    const global = await getSettings();
     const setHint = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.textContent = 'global default: ' + (val || '—');
@@ -31679,10 +31668,10 @@ async function _psSaveScheduledTime() {
 async function _psUpdateInheritNotice(slug) {
   // Fetch global settings to compare
   try {
-    const [globalResp] = await Promise.all([fetch('/api/settings')]);
-    if (!globalResp.ok) return;
-    const global = await globalResp.json();
-    const proj = await (await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`)).json();
+    const [global, proj] = await Promise.all([
+      getSettings(),
+      fetch(`/api/projects/${encodeURIComponent(slug)}/settings`).then(r => r.json()),
+    ]);
 
     const estimationKeys = ['estimation_s_minutes','estimation_m_minutes','estimation_l_minutes',
                             'estimation_xl_minutes','estimation_buffer_pct','estimation_thin_ac_buffer_pct'];

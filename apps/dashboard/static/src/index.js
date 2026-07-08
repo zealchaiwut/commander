@@ -34,6 +34,8 @@ import {
 import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
 import { loadCommanderFeatures } from './shell/features.js';
 import { visibilityInterval, installVisibilityGuard } from './shell/visibility.js';
+import { getEnvironment, getVersion, getSettings, invalidateSettings } from './api.js';
+import { GH_AUTH_POLL_INTERVAL_MS, startGhAuthPoll, stopGhAuthPoll } from './device-login.js';
 import {
   sprintCleanupPreview,
   sprintCleanupConfirm,
@@ -106,3 +108,21 @@ globalThis.psCleanupModalConfirm = psCleanupModalConfirm;
 globalThis._psCleanupModalClose = _psCleanupModalClose;
 globalThis._psCleanupPaneClose = _psCleanupPaneClose;
 globalThis._psCleanupPaneConfirm = _psCleanupPaneConfirm;
+
+// Stable-endpoint cache helpers (issue #1779)
+root.getEnvironment = getEnvironment;
+root.getVersion = getVersion;
+root.getSettings = getSettings;
+root.invalidateSettings = invalidateSettings;
+globalThis.getEnvironment = getEnvironment;
+globalThis.getVersion = getVersion;
+globalThis.getSettings = getSettings;
+globalThis.invalidateSettings = invalidateSettings;
+
+// Device-login poll manager (issue #1779)
+root.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+root.startGhAuthPoll = startGhAuthPoll;
+root.stopGhAuthPoll = stopGhAuthPoll;
+globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+globalThis.startGhAuthPoll = startGhAuthPoll;
+globalThis.stopGhAuthPoll = stopGhAuthPoll;

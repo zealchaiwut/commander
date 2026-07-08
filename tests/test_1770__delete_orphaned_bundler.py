@@ -18,6 +18,7 @@ def test_no_references_to_build_frontend_bundle():
     result = subprocess.run(
         ["grep", "-r", "build_frontend_bundle", ".",
          "--exclude-dir=.git", "--exclude-dir=.pytest_cache", "--exclude-dir=.code-review-graph",
+         "--exclude-dir=.ruff_cache", "--exclude-dir=node_modules",
          "--exclude=*.pyc", "--exclude=__pycache__"],
         capture_output=True,
         text=True,
@@ -26,7 +27,7 @@ def test_no_references_to_build_frontend_bundle():
     lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
     real_refs = [
         line for line in lines
-        if line and not line.startswith("./tests/") and not line.startswith("./docs/")
+        if line and not line.startswith("./tests/") and not line.startswith("./docs/") and not line.startswith("Binary file")
     ]
     assert len(real_refs) == 0, f"Found unexpected references to build_frontend_bundle: {real_refs}"
 

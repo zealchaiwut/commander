@@ -348,29 +348,61 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
-def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
-    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+def _mirror_issue_body(
+    repo: str,
+    issue_num: int,
+    runner=None,
+    sync_ts: Optional[str] = None,
+) -> Optional[str]:
+    """Return issue body from the mirror, falling back to a live gh api fetch.
 
-    Returns the body string on success. On failure (non-zero gh exit or an
-    exception), returns the sentinel "" (empty string, NOT None) and logs the
-    failure at WARN level — so _build_design_block skips its own fallback gh
-    fetch instead of issuing a second subprocess round-trip per ticket
-    (issue #1573). Returns None only when there is no repo to query, preserving
-    the legacy path where _build_design_block performs the fetch itself.
+    Falls back to live fetch when:
+    - The mirror has no record for this issue (miss).
+    - The mirror record has no body field.
+    - sync_ts is provided and the mirror record's updated_at predates it
+      (stale-hit guard: the record predates the start-of-dispatch mirror-sync
+      timestamp, so a fresh fetch is required — issue #1782).
+
+    On live-fetch success returns the body string (may be "").
+    On live-fetch failure returns "" (sentinel — distinguishes "attempted but
+    failed" from "no repo to query").
+    Returns None only when repo is falsy (no repo to query).
     """
-    if not eff_repo:
+    if not repo:
         return None
+
+    # Try mirror first (zero gh quota cost).
+    _mirror = None
     try:
-        _gh_result = subprocess.run(
-            ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+        import github_client as _gc  # lazy: _DASHBOARD_DIR already on sys.path
+        _mirror = _gc._mirror_issue(repo, issue_num)
+    except Exception:
+        pass
+
+    if _mirror is not None:
+        _body = _mirror.get("body")
+        if _body is not None:
+            if sync_ts:
+                _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
+                if _record_ts >= sync_ts:
+                    return _body  # fresh mirror hit
+                # else stale: record predates sync_ts — fall through to live fetch
+            else:
+                return _body  # no stale check → use mirror
+
+    # Live fetch fallback (miss or stale).
+    _run = runner if runner is not None else subprocess.run
+    try:
+        _gh_result = _run(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
             capture_output=True, text=True, timeout=30,
         )
         if _gh_result.returncode == 0:
             return json.loads(_gh_result.stdout).get("body", "") or ""
         structured_log.warn(
-            "coder_dispatch_issue_body_fetch_failed",
-            f"[coder] gh fetch of issue body failed for issue #{issue_num}"
-            f" (exit {_gh_result.returncode}); passing sentinel to skip re-fetch",
+            "mirror_issue_body_fetch_failed",
+            f"[mirror] gh fetch of issue body failed for issue #{issue_num}"
+            f" (exit {_gh_result.returncode})",
             issue_num=issue_num,
             exit_code=_gh_result.returncode,
             stderr=(_gh_result.stderr or "").strip()[:500],
@@ -378,13 +410,27 @@ def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optio
         return ""
     except Exception as _exc:
         structured_log.warn(
-            "coder_dispatch_issue_body_fetch_failed",
-            f"[coder] gh fetch of issue body errored for issue #{issue_num}"
-            f" ({_exc}); passing sentinel to skip re-fetch",
+            "mirror_issue_body_fetch_failed",
+            f"[mirror] gh fetch of issue body errored for issue #{issue_num}"
+            f" ({_exc})",
             issue_num=issue_num,
             error=repr(_exc),
         )
         return ""
+
+
+def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
+    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+
+    Reads from the local issues mirror first (issue #1782), falling back to a
+    live gh api subprocess call only on a mirror miss. On fetch failure returns
+    "" (sentinel) so _build_design_block skips its own fallback gh fetch
+    (issue #1573). Returns None only when eff_repo is empty/None, preserving
+    the legacy path where _build_design_block performs the fetch itself.
+    """
+    if not eff_repo:
+        return None
+    return _mirror_issue_body(eff_repo, issue_num)
 
 
 def _build_design_block(*args, **kwargs):

@@ -137,16 +137,48 @@ def extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def fetch_issue(issue_num: int, repo: str) -> dict:
-    """Fetch issue details from GitHub via REST (gh api).
+def fetch_issue(issue_num: int, repo: str, runner=None) -> dict:
+    """Fetch issue details, preferring the local mirror over a live gh api call.
+
+    Reads from the local issues mirror first (issue #1782), falling back to gh
+    api (REST) only when the mirror has no record or the record lacks a body.
+    Write paths (gh issue comment, gh issue edit) are unchanged.
 
     `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
     shares and exhausts during estimation bursts; REST has a separate budget.
     """
-    result = subprocess.run(
-        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
-        capture_output=True, text=True, check=True,
-    )
+    # Try mirror first (zero gh quota cost).
+    try:
+        _dash_dir = str(Path(__file__).parent.parent.parent / "apps" / "dashboard")
+        if _dash_dir not in sys.path:
+            sys.path.insert(0, _dash_dir)
+        import github_client as _gc_est  # lazy import; dashboard dir on path
+        _mirror = _gc_est._mirror_issue(repo, issue_num)
+        if _mirror is not None and _mirror.get("body") is not None:
+            _labels = _mirror.get("labels") or []
+            return {
+                "number": _mirror.get("number") or issue_num,
+                "title": _mirror.get("title", ""),
+                "body": _mirror.get("body") or "",
+                "labels": [
+                    {"name": lbl.get("name", "") if isinstance(lbl, dict) else str(lbl)}
+                    for lbl in _labels
+                ],
+            }
+    except Exception:
+        pass  # mirror unavailable — fall through to live fetch
+
+    # Live fetch fallback.
+    if runner is not None:
+        result = runner(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+            capture_output=True, text=True,
+        )
+    else:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+            capture_output=True, text=True, check=True,
+        )
     raw = json.loads(result.stdout)
     return {
         "number": raw.get("number"),

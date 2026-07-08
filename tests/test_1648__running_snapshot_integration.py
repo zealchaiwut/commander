@@ -243,17 +243,18 @@ class TestFlagOnFirstPaintFetchCount:
 # Gap 3: Poll continuation — setInterval is not gated by the flag
 # ---------------------------------------------------------------------------
 
-class TestPollContinuesIndependentOfFlag:
-    """The 2-second live poll must be established regardless of the feature flag.
+class TestSSEReplacesPoll:
+    """Issue #1777: SSE stream replaces the 2-second poll in _smgmtLivePollRestart.
 
-    _smgmtLivePollRestart() must wire setInterval BEFORE the flag branch so
-    the poll keeps ticking even when _smgmtRunningFirstPaint() handles first paint.
-    (This is the corrected behaviour per the triage note: the Running tab uses
-    a 2-second poll, NOT an SSE connection.)
+    The old contract (Gap 3 / AC-5 of #1647) said the 2s setInterval was always
+    wired.  Issue #1777 explicitly removes it (AC2) and replaces it with an SSE
+    connection that emits snapshot events every ~5 s.  The fallback slow poll
+    (≥ 15 s) only activates when the SSE stream is offline.
     """
 
-    def test_setinterval_precedes_flag_branch(self):
-        """setInterval(_smgmtLivePollTick, 2000) must appear before the flag check."""
+    def test_2s_setinterval_removed_from_live_poll_restart(self):
+        """setInterval(_smgmtLivePollTick, 2000) must NOT be in _smgmtLivePollRestart.
+        Issue #1777 removes the 2s poll — SSE delivers board updates instead."""
         restart_match = re.search(
             r"function _smgmtLivePollRestart\(\)(.*?)^\}",
             PROJECT_HTML,
@@ -261,21 +262,13 @@ class TestPollContinuesIndependentOfFlag:
         )
         assert restart_match is not None, "_smgmtLivePollRestart not found"
         body = restart_match.group(1)
-
-        interval_pos = body.find("setInterval(_smgmtLivePollTick, 2000)")
-        flag_pos = body.find("running_aggregate")
-
-        assert interval_pos != -1, "setInterval(_smgmtLivePollTick, 2000) not found"
-        assert flag_pos != -1, "'running_aggregate' flag check not found"
-        assert interval_pos < flag_pos, (
-            "setInterval must be set BEFORE the flag branch so the poll is always active "
-            f"(interval_pos={interval_pos}, flag_pos={flag_pos})"
+        assert "visibilityInterval(_smgmtLivePollTick, 2000)" not in body, (
+            "The 2s _smgmtLivePollTick interval must be removed per issue #1777 AC2 "
+            "— SSE-driven snapshot events replace it."
         )
 
-    def test_live_poll_tick_still_wired_when_flag_on(self):
-        """Even with the flag ON, _smgmtLivePollTick must remain in the interval."""
-        # setInterval always wires _smgmtLivePollTick; first-paint is a one-shot
-        # initial call, not a replacement for the ongoing poll.
+    def test_sse_connect_in_live_poll_restart(self):
+        """_smgmtLivePollRestart must call _smgmtSseConnect instead of setInterval."""
         restart_match = re.search(
             r"function _smgmtLivePollRestart\(\)(.*?)^\}",
             PROJECT_HTML,
@@ -283,17 +276,22 @@ class TestPollContinuesIndependentOfFlag:
         )
         assert restart_match is not None
         body = restart_match.group(1)
-        # Both the setInterval and the conditional first-paint call must coexist
-        assert "setInterval(_smgmtLivePollTick, 2000)" in body
+        assert "_smgmtSseConnect(" in body, (
+            "_smgmtLivePollRestart must call _smgmtSseConnect() — SSE replaces the 2s poll"
+        )
+        assert "running_aggregate" in body, (
+            "_smgmtLivePollRestart must still branch on running_aggregate flag "
+            "for first-paint (existing AC of #1647)"
+        )
         assert "_smgmtRunningFirstPaint()" in body
 
-    def test_no_sse_eventsource_in_running_tab_path(self):
-        """The Running tab uses a 2-second poll, not an EventSource/SSE connection.
+    def test_first_paint_still_present(self):
+        """_smgmtRunningFirstPaint() must still be called for the flag-ON first-paint path."""
+        assert "_smgmtRunningFirstPaint()" in PROJECT_HTML
 
-        Per triage note on #1647: the Running tab has NO EventSource — asserting
-        that _smgmtRunningFirstPaint() does not open an EventSource is correct
-        behaviour documentation.
-        """
+    def test_eventsource_not_in_first_paint(self):
+        """_smgmtRunningFirstPaint itself must NOT open an EventSource.
+        SSE is wired by _smgmtSseConnect in _smgmtLivePollRestart, not inside first-paint."""
         fn_body_match = re.search(
             r"async function _smgmtRunningFirstPaint\(\)(.*?)^\}",
             PROJECT_HTML,
@@ -301,8 +299,7 @@ class TestPollContinuesIndependentOfFlag:
         )
         assert fn_body_match is not None
         fn_body = fn_body_match.group(0)
-        assert "EventSource" not in fn_body, (
-            "_smgmtRunningFirstPaint() must not open an EventSource — "
-            "the Running tab uses a 2-second poll, not SSE"
+        assert "new EventSource" not in fn_body, (
+            "_smgmtRunningFirstPaint() must not open an EventSource directly — "
+            "SSE is managed by _smgmtSseConnect"
         )
-        assert "new EventSource" not in fn_body

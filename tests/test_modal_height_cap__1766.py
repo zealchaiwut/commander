@@ -2,7 +2,6 @@
 import os
 import pytest
 import httpx
-import json
 
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.
@@ -11,6 +10,20 @@ if not BASE_URL.startswith("http"):
     raise RuntimeError(
         "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
     )
+
+
+def _uat_available() -> bool:
+    try:
+        httpx.get(BASE_URL + "/", timeout=2.0)
+        return True
+    except httpx.ConnectError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _uat_available(),
+    reason=f"UAT server not available at {BASE_URL}",
+)
 
 
 @pytest.fixture

@@ -115,15 +115,31 @@ def _guard_sprint_labels(
 # ── label transition functions ────────────────────────────────────────────────
 
 def _get_issue_labels(issue_num: int, repo_name: Optional[str] = None) -> set[str]:
-    """Re-fetch current labels for an issue via gh CLI."""
+    """Re-fetch current labels via mirror or REST (not GraphQL, issue #1783).
+
+    Tries the DB mirror first (zero gh subprocess calls); falls back to the
+    REST endpoint ``gh api repos/{repo}/issues/{N}`` (counts against REST quota,
+    not the scarcer 5000/hr GraphQL budget).
+    """
     r = _r(repo_name)
+    _gc = _sm_attr("github_client", github_client)
+    try:
+        mirror_issue = _gc._mirror_issue(r, issue_num)
+        if mirror_issue is not None:
+            return {
+                lbl["name"] for lbl in mirror_issue.get("labels", [])
+                if isinstance(lbl, dict) and lbl.get("name")
+            }
+    except Exception:
+        pass
+    # REST fallback (not GraphQL)
     try:
         out = subprocess.run(
-            ["gh", "issue", "view", str(issue_num), "--repo", r, "--json", "labels"],
+            ["gh", "api", f"repos/{r}/issues/{issue_num}"],
             capture_output=True, text=True, check=True,
         )
         data = json.loads(out.stdout)
-        return {lbl["name"] for lbl in data.get("labels", [])}
+        return {lbl["name"] for lbl in data.get("labels", []) if lbl.get("name")}
     except Exception:
         return set()
 

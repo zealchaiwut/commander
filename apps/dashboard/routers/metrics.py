@@ -1,5 +1,7 @@
 from __future__ import annotations
 import json
+import logging
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -13,8 +15,12 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import db  # noqa: E402
 import github_client  # noqa: E402
 import projects as projects_module  # noqa: E402
+
+logger = logging.getLogger(__name__)
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 
 _PROJECTS_BASE = Path.home() / "dev"
 
@@ -48,8 +54,31 @@ def _sprint_json_read(path):
     return {}
 
 
+def _bulk_rework_from_mirror(repo: str) -> dict[str, int] | None:
+    """Single mirror pass: {sprint_label: rework_count} across all sprints.
+
+    Returns None when the mirror is empty so the caller can fall back to gh.
+    """
+    try:
+        all_issues = db.get_mirrored_issues(repo)
+    except Exception:
+        return None
+    if not all_issues:
+        return None
+    counts: dict[str, int] = {}
+    for iss in all_issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if "needs-rework" not in labels:
+            continue
+        for lbl_name in labels:
+            if _SPRINT_LABEL_RE.match(lbl_name):
+                counts[lbl_name] = counts.get(lbl_name, 0) + 1
+                break
+    return counts
+
+
 def _count_rework_tickets(sprint_label: str, project: str) -> int:
-    """Return number of open issues in the sprint carrying needs-rework label."""
+    """Fallback: live gh call to count needs-rework issues for a single sprint."""
     try:
         r = github_client.get_repo_for_operation(project)
         result = subprocess.run(
@@ -124,11 +153,15 @@ def get_sprint_metrics(request: Request):
 
     results = []
     seen_paths: set[Path] = set()
+    _rework_cache: dict[str, dict[str, int] | None] = {}
 
     for proj in all_projects:
         repo = proj.get("repo", "")
         if not repo:
             continue
+
+        if repo not in _rework_cache:
+            _rework_cache[repo] = _bulk_rework_from_mirror(repo)
 
         project_root = _project_root_path(repo)
         sprints_dir = _commander_dir(project_root) / "sprints"
@@ -182,6 +215,12 @@ def get_sprint_metrics(request: Request):
             total_tokens = tokens_in + tokens_out
             token_estimate = total_tokens if total_tokens > 0 else None
 
+            rework_by_sprint = _rework_cache.get(repo)
+            if rework_by_sprint is not None:
+                needs_rework_count = rework_by_sprint.get(sprint_label_val, 0)
+            else:
+                needs_rework_count = _count_rework_tickets(sprint_label_val, project_val)
+
             results.append({
                 "sprint_label": sprint_label_val,
                 "project": project_val,
@@ -191,7 +230,7 @@ def get_sprint_metrics(request: Request):
                     "done": done_count,
                     "failed": failed_count,
                     "skipped": skipped_count,
-                    "needs_rework": 0,
+                    "needs_rework": needs_rework_count,
                 },
                 "agent_dispatch_counts": {
                     "coder": coder_count,

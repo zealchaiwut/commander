@@ -1,9 +1,9 @@
 # Frontend API-Call Reduction — Polling, Timers, N+1
 
 **Date:** 2026-07-03
-**Sprint label:** NEW
+**Sprint label:** sprint-110
 **Default labels:** frontend, performance
-**Status:** drafted
+**Status:** posted
 
 Source: 2026-07-03 four-agent full review (frontend call-pattern audit against
 develop @ 7520d393). Measured steady-state: project page ~26 calls/min idle,
@@ -58,3 +58,8 @@ AC must cover: login poll interval 2s and login flow still completes; environmen
 
 | # | Title | Size |
 |---|-------|------|
+| 1775 | Pause dashboard polling when tab is hidden | L |
+| 1776 | Deduplicate 30s refresh loops and remove dead running-all fetch | L |
+| 1777 | Drive sprint board from SSE stream; drop snapshot polling | L |
+| 1778 | Batch home-page API fan-out: 17 requests → 3-4 | L |
+| 1779 | Reduce gh-auth poll frequency and cache stable config endpoints | L |

@@ -1,9 +1,9 @@
 # Aggregate Coherence — Invalidation Push, Shared Cache, Observability, Flag Cutover
 
 **Date:** 2026-07-03
-**Sprint label:** NEW
+**Sprint label:** sprint-112
 **Default labels:** backend, performance
-**Status:** drafted
+**Status:** posted
 
 Source: 2026-07-03 gap analysis of the API-refactor arc (sprint-102 board
 aggregate, sprint-103 running/history snapshots, plus the 2026-07-03-1..3
@@ -73,3 +73,9 @@ AC must cover: every cache layer present in code at merge time has a row; preced
 
 | # | Title | Size |
 |---|-------|------|
+| 1785 | Broadcast board_invalidated over SSE for live client refresh | — |
+| 1786 | Extract shared aggregate-cache helper; move /api/home out of startup.py | — |
+| 1787 | Add API call-volume and cache-hit observability endpoint | XL |
+| 1788 | Add shared call-count-budget test harness | — |
+| 1789 | Cut over aggregate flags and delete legacy fan-out paths | L |
+| 1790 | Add cache inventory and invalidation-contract table to architecture docs | L |

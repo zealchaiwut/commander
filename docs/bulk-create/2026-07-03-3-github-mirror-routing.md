@@ -1,9 +1,9 @@
 # GitHub API Quota — Route Bypass Call Sites Through the Mirror
 
 **Date:** 2026-07-03
-**Sprint label:** NEW
+**Sprint label:** sprint-111
 **Default labels:** backend, performance
-**Status:** drafted
+**Status:** posted
 
 Source: 2026-07-03 four-agent full review (GitHub API volume audit against
 develop @ 7520d393). The core client is already well-optimized: the 60s
@@ -64,3 +64,8 @@ AC must cover: exactly one list_milestones definition; mirror hit issues zero gh
 
 | # | Title | Size |
 |---|-------|------|
+| 1780 | Route analytics routers through issues mirror | XL |
+| 1781 | Read reconcile roster from mirror, cut calls to ≤1 | L |
+| 1782 | Read issue bodies from mirror instead of per-ticket gh api fetches | L |
+| 1783 | Move latest_active_sprint and label reads off GraphQL | L |
+| 1784 | Back list_milestones with mirror; cache PR lookups | L |

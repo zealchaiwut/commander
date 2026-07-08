@@ -1,9 +1,9 @@
 # Dead Code & Dead Endpoint Purge
 
 **Date:** 2026-07-03
-**Sprint label:** NEW
+**Sprint label:** sprint-109
 **Default labels:** cleanup
-**Status:** drafted
+**Status:** posted
 
 Source: 2026-07-03 four-agent full review (API surface map + dead-code sweep,
 read-only, against develop @ 7520d393). This batch deletes code with zero
@@ -60,3 +60,8 @@ AC must cover: scripts/ contains only referenced-or-documented scripts; archive 
 
 | # | Title | Size |
 |---|-------|------|
+| 1770 | Delete orphaned and broken build_frontend_bundle.py | S |
+| 1771 | Remove orphan split_ticket_service.py, anchor test to live path | M |
+| 1772 | Remove three dead API endpoints and orphaned helpers | M |
+| 1773 | Remove last writer of deprecated 'planned' lifecycle state | M |
+| 1774 | Archive six orphaned one-shot scripts from scripts/ | M |

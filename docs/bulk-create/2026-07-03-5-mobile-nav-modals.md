@@ -1,9 +1,9 @@
 # Mobile Compatibility — Nav Tab Strip, Sprint/Deploy/Settings Reach, Modal Overflow
 
 **Date:** 2026-07-03
-**Sprint label:** NEW
+**Sprint label:** sprint-108
 **Default labels:** frontend, bug
-**Status:** drafted
+**Status:** posted
 
 Source: 2026-07-03 mobile review — live browser test at a true 390×844 viewport
 against the running dashboard (project page, Tailscale) plus a code audit of
@@ -67,3 +67,8 @@ AC must cover: entering Deploy via the Manage▾ dropdown at 390px renders envir
 
 | # | Title | Size |
 |---|-------|------|
+| 1765 | Fix sub-tab strip scroll on mobile (390px) | M |
+| 1766 | Cap modal height to prevent off-screen overflow on mobile | M |
+| 1767 | Expand touch targets to 44px on mobile for key controls | M |
+| 1768 | Fix horizontal overflow on mobile viewports ≤430px | M |
+| 1769 | Fix stuck Deploy loader and mobile-responsive cards at 430px | L |

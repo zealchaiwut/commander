@@ -843,11 +843,30 @@
     const group = document.getElementById("stab-group-" + name);
     const isOpen = group.classList.contains("open");
     closeAllStabDropdowns();
-    if (!isOpen)
+    if (!isOpen) {
       group.classList.add("open");
+      if (window.innerWidth <= 430) {
+        const trigger = group.querySelector(".stab-trigger");
+        const dropdown = group.querySelector(".stab-dropdown");
+        if (trigger && dropdown) {
+          const rect = trigger.getBoundingClientRect();
+          dropdown.style.setProperty("position", "fixed");
+          dropdown.style.setProperty("top", rect.bottom + 2 + "px");
+          dropdown.style.setProperty("left", rect.left + "px");
+        }
+      }
+    }
   }
   function closeAllStabDropdowns() {
-    document.querySelectorAll(".stab-group.open").forEach((g) => g.classList.remove("open"));
+    document.querySelectorAll(".stab-group.open").forEach((g) => {
+      g.classList.remove("open");
+      const dropdown = g.querySelector(".stab-dropdown");
+      if (dropdown) {
+        dropdown.style.removeProperty("position");
+        dropdown.style.removeProperty("top");
+        dropdown.style.removeProperty("left");
+      }
+    });
   }
   document.addEventListener("click", closeAllStabDropdowns);
   var _subTabsEl = document.getElementById("sub-tabs");

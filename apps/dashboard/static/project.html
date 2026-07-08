@@ -9996,6 +9996,21 @@
       .tab-pane { padding: 16px; }
     }
 
+    /* ── Mobile-S sub-tab scroll ≤430px (issue #1765) ───────────────────── */
+    /* At 390px the strip (~410px) overflows the viewport (~358px available).
+       Fix: scroll the strip inside .sub-tabs, hiding the scrollbar.
+       Dropdowns must stay unclipped: removing position:relative from .stab-group
+       and adding it to .sub-tabs-row lifts the dropdown's containing block above
+       the scroll container (.sub-tabs), so overflow on .sub-tabs cannot clip them. */
+    @media (max-width: 430px) {
+      .brand-wordmark { display: none; }
+      .proj-header { padding-left: var(--space-4); padding-right: var(--space-4); }
+      .sub-tabs-row { position: relative; }
+      .stab-group { position: static; }
+      .sub-tabs { overflow-x: auto; scrollbar-width: none; }
+      .sub-tabs::-webkit-scrollbar { display: none; }
+    }
+
   </style>
 </head>
 <body>

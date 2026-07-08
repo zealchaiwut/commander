@@ -14,7 +14,6 @@ AC7: Existing unit/integration tests pass without modification
 import py_compile
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -126,8 +125,6 @@ def test_ac3_handler_signatures_preserved():
 def test_ac4_branch_status_not_in_server():
     """AC4: @app.get branch-status is no longer in server.py."""
     source = SERVER_PATH.read_text(encoding="utf-8")
-    import re
-    # Look for @app.get decorator lines containing 'branch-status'
     lines = source.splitlines()
     violations = [
         ln for ln in lines

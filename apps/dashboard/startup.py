@@ -2662,8 +2662,10 @@ def _sprint_signoff_set_approved(
 ) -> None:
     """Record approval in plan.json and clear the pending gate.
 
-    Also lifts the lifecycle state out of `draft` to `planned` so the sprint
-    reads as ready-to-run once the gate is cleared (AC5).
+    Ensures the lifecycle state is the sanctioned post-#1686 "draft" value so
+    the sprint reads as ready-to-run once the gate is cleared.  Writing
+    "planned" here is forbidden — it was deprecated in #1686 and nothing may
+    emit it anew (#1773).
     """
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["signoff"] = {
@@ -2672,7 +2674,7 @@ def _sprint_signoff_set_approved(
         "approved_at": approved_at,
     }
     if existing.get("state") in (None, "draft"):
-        existing["state"] = "planned"
+        existing["state"] = "draft"
     _write_plan_json(project_root, sprint_label, existing)
 
 

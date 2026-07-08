@@ -42,6 +42,10 @@ import {
   installVisibilityGuard,
 } from "./shell/visibility.js";
 import {
+  snavNavStatusFetch,
+  snavNavStatusCacheClear,
+} from "./shell/snav-cache.js";
+import {
   getEnvironment,
   getVersion,
   getSettings,
@@ -94,11 +98,15 @@ root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
 root.loadCommanderFeatures = loadCommanderFeatures;
 root.visibilityInterval = visibilityInterval;
+root.snavNavStatusFetch = snavNavStatusFetch;
+root.snavNavStatusCacheClear = snavNavStatusCacheClear;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.visibilityInterval = visibilityInterval;
+globalThis.snavNavStatusFetch = snavNavStatusFetch;
+globalThis.snavNavStatusCacheClear = snavNavStatusCacheClear;
 installVisibilityGuard();
 
 // Project Settings cleanup (issue #735 / #808)

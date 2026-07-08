@@ -42,10 +42,10 @@ def test_pause_polling_on_tab_hidden__project_html_uses_visibility(client):
     r = client.get("/project.html")
     assert r.status_code == 200
 
-    # Verify all 6 project.html pollers use visibilityInterval
+    # Verify project.html pollers use visibilityInterval.
+    # Issue #1776 merged the two separate 30s timers (sidebar + snav) into one.
     html = r.text
-    assert "visibilityInterval(() => loadHomeData(true), 30000);" in html  # sidebar
-    assert "visibilityInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);" in html  # home
+    assert "visibilityInterval(() => { loadHomeData(true); snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000)" in html  # merged loop
     assert "visibilityInterval(_smgmtLivePollTick, 2000);" in html  # live board poll
     assert "visibilityInterval(_smgmtInspectorStreamTick, 5000);" in html  # inspector poll
     assert "visibilityInterval(logsFetchRuns, 15000);" in html  # logs poll

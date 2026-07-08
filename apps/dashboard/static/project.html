@@ -12730,7 +12730,6 @@ async function updateSidebarFooter() {
 }
 
 // ── Load home data ────────────────────────────────────────────────────────────
-let _sidebarRefreshTimer = null;
 let _dashboardReconnectTimer = null;
 let _dashboardLoadFailed = false;
 
@@ -12808,10 +12807,7 @@ async function _retryDashboardLoad() {
 
 async function loadHomeData(silent) {
   try {
-    const [resp, runningResp] = await Promise.all([
-      fetch('/api/home'),
-      fetch('/api/sprints/running-all').catch(() => null),
-    ]);
+    const resp = await fetch('/api/home');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     _homeData = data;
@@ -12825,21 +12821,12 @@ async function loadHomeData(silent) {
     // Re-apply all sprint status badges after sidebar rebuild
     if (_snavState) _snavUpdateSidebarBadge();
     Object.entries(_snavStateBySlug).forEach(([slug, state]) => _snavRenderSidebarBadge(slug, state));
-    _snavRefreshAll();
   } catch (err) {
     if (!silent) {
       console.warn('Home data unavailable:', err);
       _renderDashboardLoadError('Home data unavailable — is the server running?');
     }
   }
-}
-
-/** Patch sidebar running-count badges in-place from /api/sprints/running-all data.
- *  Called after loadSprintMgmt so counts update at the sprint-mgmt refresh rate. */
-
-function startSidebarRefresh() {
-  if (_sidebarRefreshTimer) clearInterval(_sidebarRefreshTimer);
-  _sidebarRefreshTimer = visibilityInterval(() => loadHomeData(true), 30000);
 }
 
 // ── Dependency chip parser (issue #432) ──────────────────────────────────────
@@ -13845,14 +13832,12 @@ async function init() {
   ]);
   if (typeof _smgmtArInit === 'function') _smgmtArInit();
 
-  // Start 30s sidebar refresh
-  startSidebarRefresh();
-
-  // Sprint status pill (GitHub-backed) — initial load + 30s refresh
+  // Single merged 30s refresh loop: home data + sprint nav + milestones (issue #1776).
+  // window.__refreshIntervals exposes the handle for DevTools diagnostics (UAT step 3).
   snavRefresh();
   _snavRefreshAll();
   _milestoneRefresh();
-  visibilityInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
+  window.__refreshIntervals = [visibilityInterval(() => { loadHomeData(true); snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000)];
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -14107,6 +14092,7 @@ function _projConnectSse() {
       _sprintProgressStore = null;
       if (typeof _sprintProgressFetch === 'function') _sprintProgressFetch().catch(() => {});
       if (typeof snavRefresh === 'function') snavRefresh();
+      if (typeof loadHomeData === 'function') loadHomeData(true).catch(() => {});
       if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
       if (typeof _histLoadLedger === 'function') _histLoadLedger(repo, { force: true });
     } catch (_) {}
@@ -26738,9 +26724,7 @@ async function snavRefresh() {
   const repo = _snavRepo();
   if (!repo) return;
   try {
-    const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
-    if (!res.ok) return;
-    _snavState = await res.json();
+    _snavState = await snavNavStatusFetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
     // issue #864: surface the sign-off indicator from the brief's waiting_on_you
     // list (DB lifecycle ready_to_merge). Best-effort — degrades to no dot if the
     // brief is unavailable (e.g. on a traveling machine without local sprint DB).
@@ -31164,8 +31148,7 @@ async function statusRefresh() {
   let navErr = false, issuesErr = false;
 
   const fetches = [
-    fetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    snavNavStatusFetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
       .then(d => { navData = d; })
       .catch(() => { navErr = true; }),
     fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo))

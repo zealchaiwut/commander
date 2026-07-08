@@ -2,7 +2,8 @@
 
 AC1: routers/sprint_run.py exists and registers all moved routes via an APIRouter
 AC2: Routes moved: GET .../branch-status, GET .../rerun/preview, GET .../rerun-preview
-     (the POST rerun/deploy/promote/reports/daily routes are explicitly Out of Scope per issue)
+     (POST rerun/deploy/promote routes are Out of Scope per issue #1262;
+      the daily-report POST route was removed entirely in issue #1772)
 AC3: All moved routes return identical responses as before the refactor
 AC4: No sprint-run read/preview routes remain defined in server.py (no @app.get decorator
      for the moved slugs)

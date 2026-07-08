@@ -219,7 +219,6 @@ from routers import (  # noqa: E402
     pages_router,
     project_branches_router,
     projects_router,
-    reports_router,
     roadmap_router,
     runs_router,
     settings_router,
@@ -271,7 +270,6 @@ app.include_router(mis_sizing_router)
 app.include_router(xl_suggestions_router)
 app.include_router(sprint_collisions_router)
 app.include_router(projects_router)
-app.include_router(reports_router)
 app.include_router(roadmap_router)
 app.include_router(runs_router)
 # scheduler_router is mounted via routers/sprints.py (rides the already-mounted

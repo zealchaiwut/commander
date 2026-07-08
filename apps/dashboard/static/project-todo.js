@@ -700,6 +700,12 @@
     var st = getState(project);
     if (st.panels.indexOf(container) < 0) st.panels.push(container);
 
+    if (opts.preloadedData != null) {
+      // AC4 (issue #1778): use pre-fetched todos to skip the per-project fetch.
+      st.items = opts.preloadedData;
+      renderAll(project);
+      return;
+    }
     fetchList(project).then(function (items) {
       if (items !== null) st.items = items;
       renderAll(project);

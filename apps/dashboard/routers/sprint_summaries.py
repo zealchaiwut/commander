@@ -31,6 +31,7 @@ _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in sys.path:
     sys.path.insert(0, str(_DASHBOARD_ROOT))
 
+import db  # noqa: E402
 import github_client  # noqa: E402
 import projects as projects_module  # noqa: E402
 
@@ -458,17 +459,26 @@ def get_sprint_summaries(project: str):
     sprint_label_re = re.compile(r"^sprint-(\d+)(?:\.(\d+))?$")
 
     try:
-        result = subprocess.run(
-            [
-                "gh", "issue", "list", "--repo", repo,
-                "--label", "sprint-summary",
-                "--state", "open",
-                "--json", "number,title,labels,state,url,createdAt",
-                "--limit", "200",
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-        open_issues: list[dict] = json.loads(result.stdout or "[]") if result.returncode == 0 else []
+        mirrored = db.get_mirrored_issues(repo, state="open")
+        if mirrored:
+            open_issues = [
+                iss for iss in mirrored
+                if any(lbl["name"] == "sprint-summary" for lbl in iss.get("labels", []))
+            ]
+        else:
+            result = subprocess.run(
+                [
+                    "gh", "issue", "list", "--repo", repo,
+                    "--label", "sprint-summary",
+                    "--state", "open",
+                    "--json", "number,title,labels,state,url,createdAt",
+                    "--limit", "200",
+                ],
+                capture_output=True, text=True, timeout=15,
+            )
+            open_issues = (
+                json.loads(result.stdout or "[]") if result.returncode == 0 else []
+            )
     except Exception:
         open_issues = []
 

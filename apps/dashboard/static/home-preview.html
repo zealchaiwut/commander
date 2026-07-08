@@ -851,6 +851,7 @@
   </div>
 </div>
 
+<script src="/static/visibility.js"></script>
 <script>
   // ── State ──────────────────────────────────────────────────────────────────
   let _homeData = null;
@@ -1545,9 +1546,9 @@
   document.addEventListener('DOMContentLoaded', () => {
     loadHomeData();
     loadStaleDocs();
-    setInterval(loadStaleDocs, 60000);
+    visibilityInterval(loadStaleDocs, 60000);
     pollHealth();
-    setInterval(pollHealth, 30000);
+    visibilityInterval(pollHealth, 30000);
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') closeAddProjectModal();
     });

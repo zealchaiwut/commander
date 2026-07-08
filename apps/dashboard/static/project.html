@@ -12687,7 +12687,7 @@ async function loadHomeData(silent) {
 
 function startSidebarRefresh() {
   if (_sidebarRefreshTimer) clearInterval(_sidebarRefreshTimer);
-  _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
+  _sidebarRefreshTimer = visibilityInterval(() => loadHomeData(true), 30000);
 }
 
 // ── Dependency chip parser (issue #432) ──────────────────────────────────────
@@ -13683,7 +13683,7 @@ async function init() {
   snavRefresh();
   _snavRefreshAll();
   _milestoneRefresh();
-  setInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
+  visibilityInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -18304,7 +18304,7 @@ function _smgmtInspectorFeed(ticket, label) {
 function _smgmtInspectorStreamRestart() {
   if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
   _smgmtInspectorStreamTick();
-  _smgmtInspectorPollId = setInterval(_smgmtInspectorStreamTick, 5000);
+  _smgmtInspectorPollId = visibilityInterval(_smgmtInspectorStreamTick, 5000);
 }
 
 /** Switch the active log tab and restart streaming. */
@@ -19289,7 +19289,7 @@ function _smgmtLivePollRestart() {
   }
 
   // Poll every 2 seconds for banner + Running-tab rail/metrics updates
-  _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
+  _smgmtLivePollId = visibilityInterval(_smgmtLivePollTick, 2000);
   // Kick off immediately — use single /api/running snapshot for first paint when flag ON (issue #1647)
   if (window._commanderFeatures && window._commanderFeatures.running_aggregate === true) {
     _smgmtRunningFirstPaint();
@@ -27009,7 +27009,7 @@ function logsInit() {
   _logsApplyQueryParams();
 
   if (!_logsState.pollTimer) {
-    _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
+    _logsState.pollTimer = visibilityInterval(logsFetchRuns, 15000);
   }
 }
 
@@ -30966,12 +30966,12 @@ let _statusRefreshId = null;
 async function statusInit() {
   if (_statusRefreshId !== null) return; // already running
   if (_statusLoaded) {
-    _statusRefreshId = setInterval(statusRefresh, 60000);
+    _statusRefreshId = visibilityInterval(statusRefresh, 60000);
     return;
   }
   _statusLoaded = true;
   await statusRefresh();
-  _statusRefreshId = setInterval(statusRefresh, 60000);
+  _statusRefreshId = visibilityInterval(statusRefresh, 60000);
 }
 
 async function statusRefresh() {

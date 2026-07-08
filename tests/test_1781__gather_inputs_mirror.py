@@ -14,9 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -148,7 +146,7 @@ def test_ac2_summary_issues_sourced_from_mirror():
     )
     # The summary issue has the sprint-summary label
     si = next(iss for iss in result["summary_issues"] if iss.get("number") == 9000)
-    label_names = [l.get("name") if isinstance(l, dict) else l for l in si.get("labels", [])]
+    label_names = [lbl.get("name") if isinstance(lbl, dict) else lbl for lbl in si.get("labels", [])]
     assert "sprint-summary" in label_names
 
 
@@ -252,7 +250,7 @@ def test_ac5_fallback_when_mirror_returns_empty_list():
         return r
 
     with patch("subprocess.run", side_effect=fake_subprocess_run):
-        result = rec.gather_inputs_via_gh(
+        rec.gather_inputs_via_gh(
             sprint_label=sprint_label,
             repo="owner/repo",
             pr_url=None,

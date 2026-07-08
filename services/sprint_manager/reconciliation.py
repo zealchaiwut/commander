@@ -349,8 +349,8 @@ def gather_inputs_via_gh(
         for iss in mirror:
             labels = iss.get("labels") or []
             label_names = [
-                (l.get("name") if isinstance(l, dict) else l)
-                for l in labels
+                (lbl.get("name") if isinstance(lbl, dict) else lbl)
+                for lbl in labels
             ]
             if sprint_label in label_names:
                 summary_issues.append({

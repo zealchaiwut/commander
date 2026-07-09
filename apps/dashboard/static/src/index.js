@@ -31,11 +31,27 @@ import {
   getProgressActivityPayload,
   BOARD_OVERLAY_PA_ID,
 } from "./progress-host.js";
-import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
-import { loadCommanderFeatures } from './shell/features.js';
-import { visibilityInterval, installVisibilityGuard } from './shell/visibility.js';
-import { getEnvironment, getVersion, getSettings, invalidateSettings } from './api.js';
-import { GH_AUTH_POLL_INTERVAL_MS, startGhAuthPoll, stopGhAuthPoll } from './device-login.js';
+import {
+  switchTab,
+  toggleStabDropdown,
+  closeAllStabDropdowns,
+} from "./shell/tabs.js";
+import { loadCommanderFeatures } from "./shell/features.js";
+import {
+  visibilityInterval,
+  installVisibilityGuard,
+} from "./shell/visibility.js";
+import {
+  getEnvironment,
+  getVersion,
+  getSettings,
+  invalidateSettings,
+} from "./api.js";
+import {
+  GH_AUTH_POLL_INTERVAL_MS,
+  startGhAuthPoll,
+  stopGhAuthPoll,
+} from "./device-login.js";
 import {
   sprintCleanupPreview,
   sprintCleanupConfirm,
@@ -48,7 +64,7 @@ import {
   _psCleanupModalClose,
   _psCleanupPaneClose,
   _psCleanupPaneConfirm,
-} from './settings/cleanup.js';
+} from "./settings/cleanup.js";
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call

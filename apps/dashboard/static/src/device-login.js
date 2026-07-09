@@ -13,12 +13,18 @@ let _timer = null;
  * GH_AUTH_POLL_INTERVAL_MS milliseconds.
  */
 export function startGhAuthPoll(pollFn) {
-  if (_timer != null) { clearInterval(_timer); _timer = null; }
+  if (_timer != null) {
+    clearInterval(_timer);
+    _timer = null;
+  }
   pollFn();
   _timer = setInterval(pollFn, GH_AUTH_POLL_INTERVAL_MS);
 }
 
 /** Stop the active poll timer, if any. Safe to call when idle. */
 export function stopGhAuthPoll() {
-  if (_timer != null) { clearInterval(_timer); _timer = null; }
+  if (_timer != null) {
+    clearInterval(_timer);
+    _timer = null;
+  }
 }

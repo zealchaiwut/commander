@@ -207,6 +207,16 @@ def _validate_settings_body(body: dict) -> None:
                 f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}"
             ),
         )
+    for key, value in body.items():
+        meta = KNOWN_FIELDS.get(key)
+        if meta is None or meta.get("secret"):
+            continue
+        default = meta["default"]
+        if type(default) is int and value is not None and type(value) is not int:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Field '{key}' must be an integer, got {type(value).__name__!r}.",
+            )
     if "coder_backend" in body and body["coder_backend"] not in _VALID_CODER_BACKENDS:
         raise HTTPException(
             status_code=400,

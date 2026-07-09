@@ -1,171 +1,143 @@
-"""Tests for issue #1786: extract shared aggregate-cache helper (runs against UAT)"""
-import os
-import pytest
-import httpx
-import json
+"""Tests for issue #1786: extract shared aggregate-cache helper.
+
+These tests exercise the aggregate_cache module's public API directly and
+verify integration with board_cache and home_service — no live server needed.
+
+AC coverage:
+  AC1  aggregate_cache.py exposes get/store/invalidate/get_stats with CacheMeta
+  AC2  hit/miss counters increment on each get() call
+  AC4  board_cache.invalidate_board delegates home eviction to aggregate_cache
+  AC7  home_service.home_project_data response contains required fields
+"""
+from __future__ import annotations
+
+import sys
 import time
+from pathlib import Path
+from unittest.mock import patch
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
+_ROUTERS_ROOT = _DASHBOARD_ROOT / "routers"
+
+for _p in (str(_DASHBOARD_ROOT), str(_ROUTERS_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import aggregate_cache as _ac  # noqa: E402
+import board_cache as _bc  # noqa: E402
 
 
-# Resolved from UAT .env at runtime; see tester skill Step 0.
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
-if not BASE_URL.startswith("http"):
-    raise RuntimeError(
-        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
-    )
+def _reset():
+    _ac._store.clear()
+    _ac._hits.clear()
+    _ac._misses.clear()
+    _bc._cache.clear()
 
 
-@pytest.fixture
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
-        yield c
+# ── AC1: public API contract ───────────────────────────────────────────────────
+
+def test_aggregate_cache_public_api_symbols_exist():
+    assert callable(_ac.get)
+    assert callable(_ac.store)
+    assert callable(_ac.invalidate)
+    assert callable(_ac.get_stats)
+    assert _ac.CacheMeta is not None
 
 
-# --- Acceptance Criteria ---
-
-def test_aggregate_cache__helper_exists_with_public_api(client):
-    # AC: aggregate_cache.py exists and exposes per-project keying, configurable TTL,
-    # invalidate(project_slug), and the cache helper is used internally
-    # Test: /api/home endpoint works and returns successful responses
-    r1 = client.get("/api/home")
-    assert r1.status_code == 200
-    data1 = r1.json()
-    assert "projects" in data1
-    # Projects should be returned
-    assert isinstance(data1["projects"], list)
+def test_store_and_get_roundtrip():
+    _reset()
+    _ac.store("org/repo", "home", {"k": "v"}, ttl_s=30.0)
+    result = _ac.get("org/repo", "home")
+    assert result is not None
+    data, meta = result
+    assert data == {"k": "v"}
+    assert meta.hit is True
+    assert isinstance(meta.ttl_s, int)
 
 
-def test_aggregate_cache__hit_miss_counters_incremented(client):
-    # AC: hit/miss counters are incremented and readable (internal instrumentation)
-    # Test: multiple /api/home requests work without error (counter increments happen internally)
-    r1 = client.get("/api/home")
-    assert r1.status_code == 200
-
-    # Immediately re-request (within TTL) — counter should increment
-    r2 = client.get("/api/home")
-    assert r2.status_code == 200
-
-    # Both responses should have same structure
-    data1 = r1.json()
-    data2 = r2.json()
-    assert data1.get("projects") == data2.get("projects")
+def test_cache_miss_returns_none():
+    _reset()
+    assert _ac.get("org/missing", "home") is None
 
 
-def test_aggregate_cache__board_uses_helper(client):
-    # AC: board cache uses aggregate_cache
-    # Test: /api/board endpoint returns data successfully
-    r = client.get("/api/board", params={"project": "zealchaiwut/commander"})
-    assert r.status_code == 200
-    data = r.json()
-    # Board should have sprints and other board-specific fields
-    assert isinstance(data, dict)
-    assert "sprints" in data or "columns" in data or data
+def test_ttl_expiry_returns_none():
+    _reset()
+    _ac.store("org/repo", "home", {"x": 1}, ttl_s=30.0)
+    _ac._store[("org/repo", "home")]["expires_at"] = time.monotonic() - 0.001
+    assert _ac.get("org/repo", "home") is None
 
 
-def test_aggregate_cache__home_response_shape_matches(client):
-    # AC: /api/home response shape is byte-identical (snapshot or field-by-field assertion)
-    # Test: verify required fields are present and have correct types
-    r = client.get("/api/home")
-    assert r.status_code == 200
-    data = r.json()
-
-    # Required top-level fields
-    assert "projects" in data
-    assert isinstance(data["projects"], list)
-
-    # Each project should have required fields
-    if data["projects"]:
-        proj = data["projects"][0]
-        required_fields = ["name", "slug", "repo", "status", "uat_count", "backlog_count"]
-        for field in required_fields:
-            assert field in proj, f"Missing field: {field}"
-
-        # Verify types
-        assert isinstance(proj["name"], str)
-        assert isinstance(proj["slug"], str)
-        assert isinstance(proj["repo"], str)
-        assert isinstance(proj["status"], str)
-        assert isinstance(proj["uat_count"], int)
-        assert isinstance(proj["backlog_count"], int)
+def test_invalidate_clears_entry():
+    _reset()
+    _ac.store("org/repo", "home", {"x": 1}, ttl_s=30.0)
+    _ac.invalidate("org/repo", "home")
+    assert _ac.get("org/repo", "home") is None
 
 
-def test_aggregate_cache__cross_project_isolation(client):
-    # AC: invalidating project A's cache does not evict project B's cache
-    # Test: call /api/home twice to populate cache for all projects
-    r1 = client.get("/api/home")
-    assert r1.status_code == 200
-    data1 = r1.json()
+# ── AC2: counters ──────────────────────────────────────────────────────────────
 
-    # Wait a moment to ensure we're within same TTL window
-    time.sleep(0.1)
-
-    # Second request should see cache hits for projects (or at least not be affected by cross-project invalidation)
-    r2 = client.get("/api/home")
-    assert r2.status_code == 200
-    data2 = r2.json()
-
-    # Both should have same number of projects
-    assert len(data1.get("projects", [])) == len(data2.get("projects", []))
+def test_hit_counter_increments():
+    _reset()
+    _ac.store("org/repo", "home", {}, ttl_s=30.0)
+    before = _ac.get_stats()["hits"].get("home", 0)
+    _ac.get("org/repo", "home")
+    assert _ac.get_stats()["hits"]["home"] == before + 1
 
 
-def test_aggregate_cache__startup_removed_lines_decreased(client):
-    # AC: startup.py net line count decreases
-    # Test: just verify the server starts and /api/home works (if startup.py is broken, server won't run)
-    r = client.get("/api/home")
-    assert r.status_code == 200
+def test_miss_counter_increments():
+    _reset()
+    before = _ac.get_stats()["misses"].get("home", 0)
+    _ac.get("org/no-project", "home")
+    assert _ac.get_stats()["misses"]["home"] == before + 1
 
 
-def test_aggregate_cache__no_adhoc_dicts_introduced(client):
-    # AC: no new per-endpoint ad-hoc dicts introduced; all routing through shared helper
-    # Test: call multiple cache-dependent endpoints and verify consistent cache metadata structure
-    r_home = client.get("/api/home")
-    assert r_home.status_code == 200
-
-    # The /api/board endpoint should also use the shared cache
-    r_board = client.get("/api/board", params={"project": "zealchaiwut/commander"})
-    assert r_board.status_code == 200
-
-    # Both endpoints should work without errors
-    assert isinstance(r_home.json(), dict)
-    assert isinstance(r_board.json(), dict)
+def test_get_stats_size_reflects_stored_entries():
+    _reset()
+    _ac.store("org/a", "home", {}, ttl_s=30.0)
+    _ac.store("org/b", "home", {}, ttl_s=30.0)
+    assert _ac.get_stats()["size"] == 2
 
 
-def test_aggregate_cache__cache_ttl_configurable(client):
-    # AC: configurable TTL is exposed (internal, tested by cache working correctly)
-    # Test: make requests and verify caching mechanism is functioning
-    r1 = client.get("/api/home")
-    assert r1.status_code == 200
+# ── AC4: board_cache delegates home eviction to aggregate_cache ────────────────
 
-    # Within the TTL window, second request should return consistent data
-    import time
-    time.sleep(0.5)
-    r2 = client.get("/api/home")
-    assert r2.status_code == 200
+def test_board_invalidate_also_evicts_home_via_aggregate_cache():
+    """invalidate_board must call aggregate_cache.invalidate for the home namespace."""
+    _reset()
+    project = "org/my-project"
+    _ac.store(project, "home", {"name": "x"}, ttl_s=30.0)
+    assert _ac.get(project, "home") is not None
 
-    # Both requests should succeed
-    assert r1.json() is not None
-    assert r2.json() is not None
+    _bc.invalidate_board(project)
+
+    assert _ac.get(project, "home") is None
 
 
-def test_aggregate_cache__home_field_types_consistent(client):
-    # AC: home response payload types and nesting identical
-    # Test: verify optional fields (sprint_running, last_sprint) have consistent types when present
-    r = client.get("/api/home")
-    assert r.status_code == 200
-    data = r.json()
+def test_board_invalidate_does_not_affect_other_projects():
+    _reset()
+    _ac.store("org/proj-a", "home", {"n": "a"}, ttl_s=30.0)
+    _ac.store("org/proj-b", "home", {"n": "b"}, ttl_s=30.0)
 
-    if data.get("projects"):
-        proj = data["projects"][0]
+    _bc.invalidate_board("org/proj-a")
 
-        # Optional fields should have consistent types when present
-        if "sprint_running" in proj:
-            assert isinstance(proj["sprint_running"], dict)
-            if proj["sprint_running"]:
-                assert "label" in proj["sprint_running"]
-                assert "elapsed_sec" in proj["sprint_running"]
+    assert _ac.get("org/proj-b", "home") is not None
 
-        if "last_sprint" in proj:
-            assert isinstance(proj["last_sprint"], dict)
-            if proj["last_sprint"]:
-                assert "sprint_num" in proj["last_sprint"]
-                assert "date" in proj["last_sprint"]
-                assert "status" in proj["last_sprint"]
+
+# ── AC7: home_service response shape ──────────────────────────────────────────
+
+def test_home_project_data_returns_required_fields():
+    import home_service as _hs
+    _reset()
+
+    proj = {"repo": "org/test-proj", "name": "test-proj", "icon": "ti-folder", "color": "gray"}
+
+    with (
+        patch("github_client.list_all_open_issues", return_value=[]),
+        patch("github_client.classify_issue", return_value="backlog"),
+    ):
+        result = _hs.home_project_data(proj, running_sprints=[], sprint_statuses={})
+
+    for field in ("name", "slug", "repo", "status", "uat_count", "backlog_count"):
+        assert field in result, f"Missing field: {field}"
+    assert "cache" in result
+    assert result["cache"]["hit"] is False

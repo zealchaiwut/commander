@@ -3,7 +3,6 @@
 Routes owned by this module:
   GET    /api/alerts
   POST   /api/alerts
-  DELETE /api/alerts/{idx}
   POST   /api/docs-freshness/check
   GET    /api/docs-freshness/warnings
   DELETE /api/docs-freshness/warnings/{warning_id}
@@ -94,13 +93,6 @@ def get_alerts():
         a for a in _alerts
         if not (_test_pat.search(a.get("title", "")) or _test_pat.search(a.get("body", "")))
     ]
-
-
-@router.delete("/api/alerts/{idx}")
-def dismiss_alert(idx: int):
-    if 0 <= idx < len(_alerts):
-        _alerts.pop(idx)
-    return {"ok": True, "count": len(_alerts)}
 
 
 # ── Docs freshness routes ─────────────────────────────────────────────────────

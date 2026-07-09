@@ -13,6 +13,7 @@ Public API::
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from typing import Any, Optional
@@ -64,5 +65,17 @@ def store_board_cache(project: str, snapshot: dict) -> None:
 
 
 def invalidate_board(project: str) -> None:
-    """Evict only *project*'s entry; all other projects are untouched."""
+    """Evict *project*'s cache entry and broadcast board_invalidated over SSE (issue #1785)."""
     _cache.pop(project, None)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no event loop — sync test context, skip broadcast
+    try:
+        from .logs_service import broadcast as _bc  # noqa: PLC0415
+    except ImportError:
+        try:
+            from logs_service import broadcast as _bc  # type: ignore[no-redef]  # noqa: PLC0415
+        except ImportError:
+            return
+    loop.create_task(_bc({"type": "board_invalidated", "project": project}))

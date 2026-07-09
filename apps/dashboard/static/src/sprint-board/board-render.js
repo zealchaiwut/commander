@@ -936,7 +936,7 @@ function _smgmtHasLedgerRun(label) {
   return Boolean((_smgmtData?.sprint_has_run || {})[label]);
 }
 
-export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
+export async function _smgmtFetchMissingOutcomes(orderedLabels, _bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
 

@@ -4,10 +4,9 @@
  * run-stats — fed by GET /api/sprints/history (local-only).
  */
 /* global escHtml, sprintLabelDisplay, _slug, _cachedFullRepo, _smgmtAnySprintRunning,
-          _smgmtBySprint, _smgmtUpdateSubnav, _smgmtRepo, smgmtFinishSprint,
-          smgmtDeleteSprint, _nextSprintSublabel, finishSprintAndWait,
+          _smgmtBySprint, _smgmtUpdateSubnav, _nextSprintSublabel, finishSprintAndWait,
           bulkCompleteLineageAndWait,
-          _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog,
+          _smgmtBoardLock, _smgmtBoardProgress, _smgmtBoardLog,
           _smgmtBoardFinish, loadSprintMgmt, CSS */
 
 // Lifecycle states that require the human (sprint-lifecycle redesign):
@@ -371,7 +370,6 @@ function _histSprintFailed(s) {
 
 function _histFailedBlockHtml(s) {
   if (!_histSprintFailed(s)) return '';
-  const state = (s.lifecycle_state || '').toLowerCase();
   const failed = Array.isArray(s.failed_tickets) ? s.failed_tickets : [];
   const sprintReason = s.failure_reason || s.end_reason;
   if (!failed.length && !sprintReason) return '';

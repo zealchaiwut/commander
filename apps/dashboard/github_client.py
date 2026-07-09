@@ -625,7 +625,6 @@ def list_merged_sprint_branches(repo_name: str | None = None) -> set[str]:
     return _cached(key, fetch)
 
 
-
 def list_open_issues_for_planning(repo_name: str | None = None,
                                   limit: int = 300) -> list[dict]:
     """Open issues with the fields the sprint planner needs (issue #861).

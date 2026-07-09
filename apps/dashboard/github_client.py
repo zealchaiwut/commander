@@ -758,11 +758,27 @@ def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:
     r = _r(repo_name)
     key = f"latest_sprint:{r}"
     def fetch():
+        # Mirror-first path: group_issues_by_sprint is a single O(n) pass with
+        # zero gh subprocess calls when the DB mirror is populated (issue #1783).
+        grouped = group_issues_by_sprint(r)
+        if grouped is not None:
+            active: set[int] = set()
+            for sprint_num, issues in grouped.items():
+                for issue in issues:
+                    if issue.get("state") == "open":
+                        active.add(sprint_num)
+                        break
+            if active:
+                return max(active)
+            sprints = list_sprints(r)
+            return sprints[-1] if sprints else None
+
+        # Mirror unavailable — fall back to gh issue list (GraphQL).
         open_issues = _json(
             "issue", "list", "--repo", r,
             "--state", "open", "--json", "labels", "--limit", "500",
         )
-        active: set[int] = set()
+        active = set()
         for issue in open_issues:
             for lbl in issue.get("labels", []):
                 m = SPRINT_RE.match(lbl["name"])

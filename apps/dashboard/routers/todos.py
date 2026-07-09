@@ -184,3 +184,25 @@ def delete_todo_attachment(project: str, todo_id: int, filename: str):
     if not todo_attachment_repo.delete_attachment(project, todo_id, filename):
         raise HTTPException(status_code=404, detail="Attachment not found")
     return Response(status_code=204)
+
+
+# ── batch endpoint (issue #1778 AC3) ─────────────────────────────────────────
+# Separate router so the full path /api/todos is declared without inheriting
+# the /api/projects prefix from the per-project router above.
+
+batch_router = APIRouter(tags=["todos-batch"])
+
+
+@batch_router.get("/api/todos", response_model=dict[str, list[TodoOut]])
+def batch_list_todos(projects: str = "") -> dict:
+    """Return todos for multiple project slugs in one request (issue #1778 AC3).
+
+    ``projects`` is a comma-separated list of slugs. Unknown slugs are included
+    with an empty list so callers don't need to distinguish "not fetched" from
+    "has no todos".
+    """
+    slugs = [s.strip() for s in projects.split(",") if s.strip()]
+    result: dict[str, list] = {}
+    for slug in slugs:
+        result[slug] = [_todo_out(t) for t in todo_repo.list_todos(slug)]
+    return result

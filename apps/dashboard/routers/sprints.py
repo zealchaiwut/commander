@@ -35,6 +35,10 @@ router.include_router(brief.router)
 # so include_router mounts the routes unchanged without growing server.py.
 router.include_router(todos.router)
 
+# Batch todos endpoint (issue #1778 AC3) — separate router so the full path
+# /api/todos is declared without inheriting the /api/projects prefix.
+router.include_router(todos.batch_router)
+
 # Scheduled overnight sprint queue endpoints (issue #863) ride on this
 # already-mounted router for the same reason — scheduler declares full
 # ``/api/scheduler/*`` paths and carries no prefix, so include_router mounts the

@@ -16,6 +16,11 @@ from typing import Optional
 from config import TEST_GITHUB_REPO
 
 _logger = logging.getLogger(__name__)
+
+try:
+    import api_volume as _api_volume
+except ImportError:
+    _api_volume = None  # type: ignore[assignment]
 _GH_DEBUG = os.environ.get("COMMANDER_GH_API_DEBUG", "").strip() == "1"
 # gh subcommands that route through GraphQL (shared 5000/hr budget).
 _GH_GRAPHQL_SUBCMDS = frozenset({
@@ -188,7 +193,11 @@ def _ttl_for(key: str) -> float:
 def _cached(key: str, fn):
     now = time.monotonic()
     if key in _cache and now - _cache[key][0] < _ttl_for(key):
+        if _api_volume:
+            _api_volume.record_gc_hit()
         return _cache[key][1]
+    if _api_volume:
+        _api_volume.record_gc_miss()
     val = fn()
     _cache[key] = (now, val)
     return val
@@ -227,12 +236,16 @@ def _log_gh_call(gh_args: tuple[str, ...]) -> None:
 
 def _json(*args) -> object:
     _log_gh_call(args)
+    if _api_volume:
+        _api_volume.record_gh_subprocess()
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 
 
 def _run(*args) -> str:
     _log_gh_call(args)
+    if _api_volume:
+        _api_volume.record_gh_subprocess()
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return r.stdout.strip()
 
@@ -264,6 +277,8 @@ def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
             if any(lbl.get("name") == sprint_label for lbl in i.get("labels", []))
         ]
         return [{"column": classify_issue(i), **i} for i in issues]
+    if _api_volume:
+        _api_volume.record_mirror_fallback()
     key = f"issues:{r}:{sprint}"
     def fetch():
         issues = _json(

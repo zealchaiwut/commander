@@ -113,7 +113,10 @@ def static_dashboard_url():
 def agent_browser_available():
     """Skip agent-browser tests when the CLI or Chrome is not set up."""
     if not _abr.is_available():
-        pytest.skip("agent-browser CLI not available (install: npm i -g agent-browser && agent-browser install)")
+        pytest.skip(
+            "agent-browser CLI not available "
+            "(install: npm i -g agent-browser && agent-browser install)"
+        )
 
 
 def agent_browser_open(url: str) -> None:

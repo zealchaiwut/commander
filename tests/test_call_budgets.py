@@ -25,9 +25,7 @@ from __future__ import annotations
 
 import re
 import sys
-import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 

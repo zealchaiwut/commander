@@ -58,6 +58,7 @@ from .sprint_collisions import router as sprint_collisions_router
 from .resolve_conflict import router as resolve_conflict_router
 from .llm_provider import router as llm_provider_router
 from .running import router as running_router
+from .api_volume import router as api_volume_router
 
 __all__ = [
     "activity_router",
@@ -112,4 +113,5 @@ __all__ = [
     "resolve_conflict_router",
     "llm_provider_router",
     "running_router",
+    "api_volume_router",
 ]

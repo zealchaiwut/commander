@@ -18,6 +18,12 @@ import os
 import time
 from typing import Any, Optional
 
+# api_volume lives in apps/dashboard — same dir that's on sys.path at runtime
+try:
+    import api_volume as _api_volume
+except ImportError:
+    _api_volume = None  # type: ignore[assignment]
+
 # ── TTL ───────────────────────────────────────────────────────────────────────
 
 def current_ttl() -> int:
@@ -46,13 +52,19 @@ def get_board_cache(project: str) -> Optional[tuple[dict, float]]:
     """
     entry = _cache.get(project)
     if entry is None:
+        if _api_volume:
+            _api_volume.record_board_miss()
         return None
     now = time.monotonic()
     if now >= entry["expires_at"]:
         # pop, not del: GET /api/board runs sync in the threadpool, so two
         # requests can race past the expiry check for the same project.
         _cache.pop(project, None)
+        if _api_volume:
+            _api_volume.record_board_miss()
         return None
+    if _api_volume:
+        _api_volume.record_board_hit()
     return entry["snapshot"], entry["expires_at"] - now
 
 

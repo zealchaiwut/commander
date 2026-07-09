@@ -3158,3 +3158,45 @@ export function _smgmtUpdateAncestorRow(label, outcome) {
     }
   }
 }
+
+
+// ── SSE board_invalidated handler (issue #1785) ───────────────────────────────
+
+let _boardSseTimer = null;
+let _boardSsePending = false;
+
+function _boardSseFireRefetch() {
+  _boardSseTimer = null;
+  loadSprintMgmt(true);
+}
+
+/**
+ * Handle a `board_invalidated` SSE event (issue #1785).
+ *
+ * When the board-aggregate flag is ON and the tab is visible, schedules a
+ * debounced refetch of `/api/board` (≥ 2 s). Rapid events collapse to one
+ * request; events while the tab is hidden are deferred until the tab shows.
+ * Exported for unit tests.
+ */
+export function _boardSseOnInvalidated(_project) {
+  if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate) return;
+  if (typeof document !== "undefined" && document.hidden) {
+    _boardSsePending = true;
+    return;
+  }
+  if (_boardSseTimer !== null) clearTimeout(_boardSseTimer);
+  _boardSseTimer = setTimeout(_boardSseFireRefetch, 2000);
+}
+
+/**
+ * Called when the tab becomes visible — fires a deferred board refetch if a
+ * `board_invalidated` arrived while the tab was hidden (issue #1785).
+ * Exported for unit tests.
+ */
+export function _boardSseOnVisible() {
+  if (!_boardSsePending) return;
+  _boardSsePending = false;
+  if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate) return;
+  if (_boardSseTimer !== null) clearTimeout(_boardSseTimer);
+  _boardSseTimer = setTimeout(_boardSseFireRefetch, 2000);
+}

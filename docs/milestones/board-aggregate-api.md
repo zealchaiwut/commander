@@ -132,6 +132,27 @@ hours, run/outcome stats. No follow-up per-sprint fetch.
 - Mutations (run/move/reconcile/bulk-complete) reflect within one TTL or
   immediately via invalidation.
 
+## SSE invalidation precedence (issue #1785)
+
+Live clients receive board state updates through two complementary mechanisms:
+
+| Mechanism | When it fires | Latency |
+|---|---|---|
+| **SSE-pushed invalidation** (`board_invalidated` event) | Immediately after any board-mutating write (API route or mirror sync) | < 1 s to emit; ≥ 2 s client debounce |
+| **TTL expiry** | After the cache TTL elapses without a write | ≤ TTL (default 8 s) |
+| **Manual refresh** | User reloads the page or triggers refresh | Immediate |
+
+**Precedence rule:** SSE-pushed invalidation **wins** over TTL — a `board_invalidated`
+event clears the server cache instantly, so the next client request sees fresh data
+regardless of how much TTL remains. The TTL is the *fallback ceiling* for clients
+that reconnect or miss an event; it ensures staleness is bounded even without SSE.
+Manual refresh always bypasses both (forces a cache miss on the next fetch).
+
+Clients with the `board_aggregate` flag ON maintain a ≥ 2 s debounce on the
+`board_invalidated` event so a burst of rapid mutations collapses into a single
+`/api/board` refetch. Tabs hidden during a mutation catch up with one refetch
+the next time they become visible.
+
 ## Out of scope
 - History + Running tabs (separate milestones; reuse this pattern).
 - The running nav pill.

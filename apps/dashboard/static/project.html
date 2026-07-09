@@ -14121,6 +14121,11 @@ function _projConnectSse() {
   es.onmessage = (ev) => {
     try {
       const data = JSON.parse(ev.data);
+      // board_invalidated: SSE-pushed cache invalidation (issue #1785)
+      if (data.type === 'board_invalidated') {
+        if (typeof _boardSseOnInvalidated === 'function') _boardSseOnInvalidated(data.project);
+        return;
+      }
       if (data.type !== 'update' || !data.event) return;
       const et = data.event.event_type;
       if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
@@ -14135,6 +14140,12 @@ function _projConnectSse() {
     } catch (_) {}
   };
 }
+
+// Tab-visibility handler: fire a deferred board refetch if a board_invalidated
+// arrived while the tab was hidden (issue #1785).
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden && typeof _boardSseOnVisible === 'function') _boardSseOnVisible();
+});
 
 
 

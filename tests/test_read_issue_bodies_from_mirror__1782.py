@@ -5,7 +5,7 @@ import sys
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 import pytest
 
 # Add dashboard and services to path for imports
@@ -255,7 +255,7 @@ def test_read_issue_bodies_from_mirror__mirror_miss_one_fetch(mock_mirror_with_i
 
     # Trigger fallback (simulate one gh fetch)
     import subprocess as sp
-    result = sp.run(
+    sp.run(
         ["gh", "api", f"repos/{repo}/issues/{missing_issue_num}"],
         capture_output=True, text=True
     )

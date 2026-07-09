@@ -143,7 +143,7 @@ def test_ac5_signature_unchanged():
 def test_ac6_state_machine_importable():
     """AC6: state_machine imports cleanly after the label_transitions change."""
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
-        TicketState, TransitionError, STATE_LABELS, STATUS_LABELS, transition,
+        TicketState, STATE_LABELS, STATUS_LABELS, transition,
     )
     assert callable(transition)
     assert TicketState.IN_PROGRESS in STATE_LABELS
@@ -246,14 +246,12 @@ def test_ac7_get_issue_labels_rest_call_uses_api_subcommand():
         with patch("subprocess.run", side_effect=checking_subprocess):
             lt._get_issue_labels(555, "owner/repo")
 
-    assert len(api_calls) >= 1, f"Expected REST 'gh api' call, got none"
+    assert len(api_calls) >= 1, "Expected REST 'gh api' call, got none"
 
 
 def test_ac7_no_new_graphql_in_latest_active_sprint_on_mirror_hit():
     """AC7: latest_active_sprint makes zero GraphQL subprocess calls when mirror populated."""
     import github_client as gc  # noqa: E402
-
-    from services.sprint_manager import label_transitions  # noqa: E402
 
     grouped = {97: [{"number": 1, "state": "open", "labels": [{"name": "sprint-97"}]}]}
     graphql_calls: list = []

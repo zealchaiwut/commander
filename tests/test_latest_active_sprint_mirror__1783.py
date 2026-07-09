@@ -2,7 +2,7 @@
 import os
 import pytest
 import httpx
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import json
 import subprocess
 import sys
@@ -30,7 +30,7 @@ def test_latest_active_sprint__derives_from_mirror_not_graphql():
     When the mirror is populated, latest_active_sprint makes zero gh subprocess calls."""
     # Import github_client from the feature branch
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'dashboard'))
-    from github_client import latest_active_sprint, group_issues_by_sprint
+    from github_client import latest_active_sprint
 
     # Mock the mirror to have sprints 97 (open) and 98 (all closed)
     mock_mirror_data = [
@@ -79,6 +79,7 @@ def test_latest_active_sprint__fallback_when_mirror_empty():
     """AC: latest_active_sprint falls back to the existing gh issue list GraphQL path
     only when the mirror is empty/unpopulated."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'dashboard'))
+    import github_client as _gc
     from github_client import latest_active_sprint
 
     # Mock an empty mirror
@@ -94,7 +95,8 @@ def test_latest_active_sprint__fallback_when_mirror_empty():
             }
         ]
 
-        result = latest_active_sprint("zealchaiwut/commander")
+        _gc.invalidate()  # Clear cache to prevent cross-test interference
+        latest_active_sprint("zealchaiwut/commander")
 
         # Should use the GraphQL fallback
         mock_json.assert_called_once()
@@ -107,7 +109,8 @@ def test_latest_active_sprint__parity_with_gh_path():
     """AC: A parity test confirms latest_active_sprint returns the same sprint label
     against a fixture mirror as the legacy gh path returns against the same fixture data."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'dashboard'))
-    from github_client import latest_active_sprint, SPRINT_RE
+    import github_client as _gc
+    from github_client import latest_active_sprint
 
     # Fixture: same data, two paths
     fixture_data = [
@@ -119,6 +122,7 @@ def test_latest_active_sprint__parity_with_gh_path():
     # Path 1: via mirror (expected path in new code)
     with patch("github_client._mirror_issues") as mock_mirror:
         mock_mirror.return_value = fixture_data
+        _gc.invalidate()
         mirror_result = latest_active_sprint("zealchaiwut/commander")
 
     # Path 2: via gh (legacy, what we're testing parity against)
@@ -127,6 +131,7 @@ def test_latest_active_sprint__parity_with_gh_path():
         mock_mirror.return_value = None  # Trigger fallback
         mock_json.return_value = fixture_data
 
+        _gc.invalidate()
         gh_result = latest_active_sprint("zealchaiwut/commander")
 
     # Both paths should return the same active sprint (highest number with open issue)
@@ -156,7 +161,7 @@ def test_get_issue_labels__no_gh_view_call():
         return original_run(cmd, *args, **kwargs)
 
     with patch("subprocess.run", side_effect=track_run):
-        result = _get_issue_labels(123, "zealchaiwut/commander")
+        _get_issue_labels(123, "zealchaiwut/commander")
 
         # Check that if any gh call was made, it's a REST call (contains "api"), not "issue view"
         issue_view_calls = [c for c in gh_calls if "issue" in c and "view" in c]
@@ -211,7 +216,7 @@ def test_state_machine_transitions_unchanged():
     try:
         from services.sprint_manager import state_machine
         # If import succeeds, the module structure is intact
-        assert hasattr(state_machine, 'apply_label'), "state_machine should have apply_label"
+        assert hasattr(state_machine, 'transition'), "state_machine should have transition"
     except ImportError as e:
         pytest.fail(f"state_machine module import failed: {e}")
 
@@ -219,7 +224,7 @@ def test_state_machine_transitions_unchanged():
 def test_no_new_graphql_calls_in_latest_active_sprint():
     """AC: No new GraphQL calls are introduced by either change."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'apps', 'dashboard'))
-    from github_client import latest_active_sprint, _GH_GRAPHQL_SUBCMDS
+    from github_client import _GH_GRAPHQL_SUBCMDS
 
     # Verify that _GH_GRAPHQL_SUBCMDS is still properly defined
     assert ("issue", "list") in _GH_GRAPHQL_SUBCMDS, "GraphQL subcommands should include ('issue', 'list')"

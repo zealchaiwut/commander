@@ -333,6 +333,6 @@ def test_ac4_parity_empty_result():
             with patch.object(gc, "list_sprints", return_value=[]):
                 graphql_result = gc.latest_active_sprint("owner/repo")
 
-    assert mirror_result == graphql_result == None, (
+    assert mirror_result is None and graphql_result is None, (
         f"Parity broken on empty: mirror={mirror_result}, graphql={graphql_result}"
     )

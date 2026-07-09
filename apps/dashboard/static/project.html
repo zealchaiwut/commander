@@ -3083,6 +3083,8 @@
     }
     @media (max-width: 480px) {
       .smgmt-sprint-header { flex-direction: column; align-items: flex-start; }
+      /* AC5/#1768: right cluster wraps beneath the title on narrow viewports */
+      .smgmt-sprint-header-right { flex-wrap: wrap; }
     }
     /* ── Action buttons ── */
     .smgmt-run-btn {
@@ -3835,6 +3837,7 @@
       border: 1px solid var(--border);
       z-index: 101;
       display: flex; flex-direction: column;
+      max-height: calc(100dvh - 32px); overflow: hidden;
       box-shadow: 0 8px 32px rgba(0,0,0,.12);
     }
     .modal.hidden { display: none; }
@@ -3851,7 +3854,7 @@
       border-radius: 4px;
     }
     .modal-close:hover { color: var(--text); }
-    .modal-body { padding: 20px; overflow-y: auto; }
+    .modal-body { padding: 20px; flex: 1 1 auto; overflow-y: auto; min-height: 0; }
     .modal-footer {
       display: flex; align-items: center; justify-content: flex-end; gap: 8px;
       padding: 14px 20px;
@@ -4518,8 +4521,8 @@
     .smgmt-sort-menu-divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
     /* "Move to" modal options */
-    .mt-modal { min-width: 320px; max-width: 420px; }
-    .hs-modal { min-width: 360px; max-width: 520px; }
+    .mt-modal { width: min(420px, calc(100vw - 32px)); }
+    .hs-modal { width: min(520px, calc(100vw - 32px)); }
     .hs-plan {
       margin: 10px 0 0; padding: 10px 12px;
       border: 1px solid var(--border); border-radius: 8px;
@@ -7939,6 +7942,10 @@
       .bl-add-header-btn { min-height: 44px; }
       .bl-select { min-height: 44px; }
       .smgmt-bulk-est-btn { min-height: 44px; }
+      /* Key controls: 44×44 CSS px minimum (WCAG 2.5.5 / Apple/Google HIG). */
+      .smgmt-run-btn { min-height: 44px; min-width: 44px; }
+      .modal-close { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      .btn-icon { width: 44px; height: 44px; }
     }
 
     /* ── Toast notifications (issue #426) ── */
@@ -9996,6 +10003,36 @@
       .tab-pane { padding: 16px; }
     }
 
+    /* ── Mobile-S sub-tab scroll ≤430px (issue #1765) ───────────────────── */
+    /* At 390px the strip (~410px) overflows the viewport (~358px available).
+       Fix: scroll the strip inside .sub-tabs, hiding the scrollbar.
+       Dropdowns must stay unclipped: removing position:relative from .stab-group
+       and adding it to .sub-tabs-row lifts the dropdown's containing block above
+       the scroll container (.sub-tabs), so overflow on .sub-tabs cannot clip them. */
+    @media (max-width: 430px) {
+      .brand-wordmark { display: none; }
+      .proj-header { padding-left: var(--space-4); padding-right: var(--space-4); }
+      .sub-tabs-row { position: relative; }
+      .stab-group { position: static; }
+      .sub-tabs { overflow-x: auto; scrollbar-width: none; }
+      .sub-tabs::-webkit-scrollbar { display: none; }
+      /* AC1–AC2/#1768: clamp page-level horizontal scrollWidth to the viewport */
+      body { overflow-x: hidden; }
+      /* AC4/#1768: subnav pill row wraps so it does not widen the page */
+      .subnav { flex-wrap: wrap; }
+      /* AC6/#1768: allow create/auto-refresh cluster to shrink on very narrow bars */
+      .proj-header-actions { flex-shrink: 1; }
+      /* ── Deploy tab mobile (issue #1769) ── */
+      /* AC5: collapse multi-column grid to single column so cards never overflow */
+      .deploy-grid { grid-template-columns: 1fr; }
+      /* AC6: stack action buttons vertically, full-width, ≥44px touch target */
+      .deploy-card__actions { flex-direction: column; }
+      .deploy-btn { min-height: 44px; width: 100%; justify-content: center; }
+      /* AC7: inline confirm dialog stacks so both buttons fit without clipping */
+      .deploy-card__confirm { flex-direction: column; }
+      .deploy-card__confirm-msg { min-width: 0; }
+    }
+
   </style>
 </head>
 <body>
@@ -10023,8 +10060,9 @@
 <script>
   // Environment indicator (#5): colour the top nav blue + show the port when this
   // dashboard is the PRD instance; leave grey for UAT. Default grey on any error.
-  (function () {
-    fetch('/api/environment').then(function (r) { return r.json(); }).then(function (d) {
+  // Runs in DOMContentLoaded so getEnvironment() (from bundle.js) is available.
+  document.addEventListener('DOMContentLoaded', function () {
+    getEnvironment().then(function (d) {
       var env = (d && d.environment ? String(d.environment) : '').toLowerCase();
       var port = (d && d.port) ? String(d.port) : '';
       var nav = document.querySelector('.top-nav');
@@ -10050,7 +10088,7 @@
         }
       }
     }).catch(function () { /* leave the default grey bar */ });
-  })();
+  });
 </script>
 
 <!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
@@ -11963,6 +12001,7 @@ async function settingsSetHistoryTtl(min) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ history_cache_ttl_min: n }),
     });
+    invalidateSettings();
   } catch (_) { /* applied locally regardless */ }
 }
 
@@ -12282,6 +12321,159 @@ let _smgmtLiveCacheRepo = null;
 let _smgmtLiveCacheSeq = 0;
 const _smgmtLiveCacheWriteSeq = {};
 
+// ── SSE-driven board updates (issue #1777) ───────────────────────────────────
+// The sprint board is driven by the per-sprint SSE stream (/live/stream) rather
+// than a 2-second REST poll. The SSE stream emits `snapshot` events (full live
+// data) and `log_line` events (dispatch + per-issue logs keyed by issue_num).
+// On disconnect, a slow fallback poll (≥15 s) via /api/running keeps the board
+// fresh and attempts SSE reconnect on each tick.
+let _smgmtSseEs = null;       // EventSource instance when connected
+let _smgmtSseLabel = null;    // Sprint label the SSE is streaming
+let _smgmtSseFallbackId = null;  // fallback setInterval ID when SSE is offline
+const _SMGMT_SSE_FALLBACK_MS = 15000;  // ≥15 s fallback poll interval (AC6)
+
+/** Connect (or reconnect) the SSE stream for a running sprint. */
+function _smgmtSseConnect(label, repo) {
+  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
+  _smgmtSseLabel = label;
+  const url = '/api/sprints/' + encodeURIComponent(label)
+    + '/live/stream?project=' + encodeURIComponent(repo);
+  const es = new EventSource(url);
+  _smgmtSseEs = es;
+
+  es.addEventListener('snapshot', function(ev) {
+    try { _smgmtSseHandleSnapshot(label, JSON.parse(ev.data)); } catch (_) {}
+  });
+
+  es.addEventListener('log_line', function(ev) {
+    try { _smgmtSseHandleLogLine(label, JSON.parse(ev.data)); } catch (_) {}
+  });
+
+  es.addEventListener('complete', function() {
+    _smgmtSseEs = null;
+    _smgmtSseLabel = null;
+    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+  });
+
+  es.onerror = function() {
+    _smgmtSseEs = null;
+    _smgmtSseLabel = null;
+    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+  };
+}
+
+/** Disconnect SSE and stop the fallback poll. */
+function _smgmtSseDisconnect() {
+  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
+  _smgmtSseLabel = null;
+  _smgmtSseFallbackStop();
+}
+
+/** Stop the fallback poll (called when SSE reconnects). */
+function _smgmtSseFallbackStop() {
+  if (_smgmtSseFallbackId !== null) { clearInterval(_smgmtSseFallbackId); _smgmtSseFallbackId = null; }
+}
+
+/** Start the ≥15 s fallback poll. Polls /api/running and attempts SSE reconnect. */
+function _smgmtSseStartFallback(label, repo) {
+  _smgmtSseFallbackStop();
+  _smgmtSseFallbackId = setInterval(async function() {
+    if (_smgmtSseEs) { _smgmtSseFallbackStop(); return; }  // SSE came back
+    // Attempt SSE reconnect first
+    _smgmtSseConnect(label, repo);
+    // Also poll /api/running for a board state snapshot during the outage
+    try {
+      const resp = await fetch('/api/running?project=' + encodeURIComponent(repo));
+      if (resp && resp.ok) {
+        const live = await resp.json();
+        if (live && live.sprint_label) _smgmtSseHandleSnapshot(live.sprint_label, live);
+      }
+    } catch (_) {}
+  }, _SMGMT_SSE_FALLBACK_MS);
+}
+
+/** Handle a 'snapshot' event from the SSE stream. Updates board metrics in place. */
+function _smgmtSseHandleSnapshot(label, live) {
+  if (_smgmtSseEs) _smgmtSseFallbackStop();  // SSE is live → stop fallback poll
+  const _seq = ++_smgmtLiveCacheSeq;
+  if (_seq < (_smgmtLiveCacheWriteSeq[label] || 0)) return;
+  _smgmtLiveCacheWriteSeq[label] = _seq;
+  const hadLiveIssues = !!(_smgmtLiveCache[label] && _smgmtLiveCache[label].issues && _smgmtLiveCache[label].issues.length);
+  _smgmtLiveCache[label] = live;
+  _smgmtLiveHeartbeatAt = Date.now();
+  if (!hadLiveIssues && live.issues && live.issues.length > 0 && _smgmtData) {
+    _smgmtRender(_smgmtData);
+  } else {
+    _smgmtLivePatch(label, live);
+  }
+  _sprintProgressRender();
+  if (_snavPanelOpen) _snavRenderPanel();
+  _smgmtRunningViewUpdate(label, live);
+  if (!_smgmtIsLinger(label)) _smgmtRunHeadPatch(label, live);
+}
+
+/** Handle a 'log_line' event from the SSE stream.
+ *  Routes orchestrator lines to the inspector, per-issue lines to worker lanes. */
+function _smgmtSseHandleLogLine(label, entry) {
+  // Update the progress activity log (same as _smgmtLiveLogPatch)
+  if (typeof updateProgressActivityLog === 'function') {
+    updateProgressActivityLog('running-' + label, [entry], colorizeLogLine);
+  }
+
+  // Route per-issue log lines to worker lane containers (AC5)
+  if (entry.issue_num != null) {
+    const el = document.getElementById('smgmt-worker-log-' + entry.issue_num);
+    if (el) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'worker-log-line';
+      div.innerHTML = safe;
+      // Replace placeholder if present
+      const placeholder = el.querySelector('.worker-lane-log-msg');
+      if (placeholder) placeholder.remove();
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+      // Cap at 40 lines
+      while (el.children.length >= 40) el.removeChild(el.firstChild);
+      el.appendChild(div);
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  // Feed orchestrator lines to the inspector log when tab is 'orchestrator' (AC4)
+  if (_smgmtInspectorPollId === null && entry.issue_num == null) {
+    const bodyEl = document.getElementById('smgmt-inspector-log');
+    if (bodyEl && _smgmtInspectorTab === 'orchestrator') {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = safe;
+      const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 8;
+      bodyEl.appendChild(div);
+      if (atBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
+  }
+
+  // Feed per-issue lines to the inspector when that issue's tab is active (AC4)
+  if (_smgmtInspectorPollId === null && entry.issue_num != null) {
+    const bodyEl = document.getElementById('smgmt-inspector-log');
+    if (bodyEl && _smgmtInspectorTab === entry.issue_num) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      const colorize = typeof colorizeLogLine === 'function' ? colorizeLogLine : null;
+      const safe = colorize ? colorize(entry.message || '', repo) : escHtml(entry.message || '');
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = safe;
+      const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 8;
+      bodyEl.appendChild(div);
+      if (atBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
+  }
+}
+
 // Post-run linger: keep Running pane + board card (greyscaled) for 1h after finish.
 const _SMGMT_LINGER_MS = 60 * 60 * 1000;
 const _smgmtLingerLabels = new Map();
@@ -12566,19 +12758,15 @@ async function updateSidebarFooter() {
   const footer = document.getElementById('sidebar-footer');
   if (!footer) return;
   try {
-    const resp = await fetch('/api/version', { cache: 'no-store' });
-    if (resp.ok) {
-      const data = await resp.json();
-      const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
-      footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
-      return;
-    }
+    const data = await getVersion();
+    const sha = data.git_sha && data.git_sha !== 'unknown' ? data.git_sha.slice(0, 7) : 'unknown';
+    footer.textContent = `v ${data.branch}@${sha} built ${data.build_timestamp}`;
+    return;
   } catch (_) { /* fall through */ }
   footer.textContent = 'v unknown';
 }
 
 // ── Load home data ────────────────────────────────────────────────────────────
-let _sidebarRefreshTimer = null;
 let _dashboardReconnectTimer = null;
 let _dashboardLoadFailed = false;
 
@@ -12656,10 +12844,7 @@ async function _retryDashboardLoad() {
 
 async function loadHomeData(silent) {
   try {
-    const [resp, runningResp] = await Promise.all([
-      fetch('/api/home'),
-      fetch('/api/sprints/running-all').catch(() => null),
-    ]);
+    const resp = await fetch('/api/home');
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     _homeData = data;
@@ -12673,21 +12858,12 @@ async function loadHomeData(silent) {
     // Re-apply all sprint status badges after sidebar rebuild
     if (_snavState) _snavUpdateSidebarBadge();
     Object.entries(_snavStateBySlug).forEach(([slug, state]) => _snavRenderSidebarBadge(slug, state));
-    _snavRefreshAll();
   } catch (err) {
     if (!silent) {
       console.warn('Home data unavailable:', err);
       _renderDashboardLoadError('Home data unavailable — is the server running?');
     }
   }
-}
-
-/** Patch sidebar running-count badges in-place from /api/sprints/running-all data.
- *  Called after loadSprintMgmt so counts update at the sprint-mgmt refresh rate. */
-
-function startSidebarRefresh() {
-  if (_sidebarRefreshTimer) clearInterval(_sidebarRefreshTimer);
-  _sidebarRefreshTimer = setInterval(() => loadHomeData(true), 30000);
 }
 
 // ── Dependency chip parser (issue #432) ──────────────────────────────────────
@@ -13644,7 +13820,24 @@ async function init() {
 
   // Start API loads before tab wiring so a bundle hiccup can't block data fetch.
   const homePromise = loadHomeData(false);
-  const prefetchPromise = _prefetchFullRepo();
+  // Populate _cachedFullRepo from /api/home (already has repo field) so we
+  // avoid the duplicate /api/projects prefetch (issue #1778 AC6). Fall back to
+  // _prefetchFullRepo() only when home data is unavailable.
+  const prefetchPromise = homePromise.then(() => {
+    if (!_homeData) return _prefetchFullRepo();
+    (_homeData.projects || []).forEach(p => {
+      const s = (p.repo || '').split('/').pop();
+      if (s && p.repo) _cachedFullRepo[s] = p.repo;
+    });
+    if (
+      _smgmtSubView === 'history' && _cachedFullRepo[_slug]
+      && typeof _histLoadLedger === 'function'
+      && (!globalThis._histLedgerData || !globalThis._histLedgerData.length)
+    ) {
+      _histLoadLedger(_cachedFullRepo[_slug]);
+    }
+    return true;
+  });
 
   // Activate the correct tab without pushing history (already set above)
   if (typeof switchTab === 'function') switchTab(tab, false);
@@ -13676,14 +13869,12 @@ async function init() {
   ]);
   if (typeof _smgmtArInit === 'function') _smgmtArInit();
 
-  // Start 30s sidebar refresh
-  startSidebarRefresh();
-
-  // Sprint status pill (GitHub-backed) — initial load + 30s refresh
+  // Single merged 30s refresh loop: home data + sprint nav + milestones (issue #1776).
+  // window.__refreshIntervals exposes the handle for DevTools diagnostics (UAT step 3).
   snavRefresh();
   _snavRefreshAll();
   _milestoneRefresh();
-  setInterval(() => { snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000);
+  window.__refreshIntervals = [visibilityInterval(() => { loadHomeData(true); snavRefresh(); _snavRefreshAll(); _milestoneRefresh(); }, 30000)];
 
   // Update toolbar sticky top based on actual header height
   _smgmtUpdateToolbarTop();
@@ -13938,6 +14129,7 @@ function _projConnectSse() {
       _sprintProgressStore = null;
       if (typeof _sprintProgressFetch === 'function') _sprintProgressFetch().catch(() => {});
       if (typeof snavRefresh === 'function') snavRefresh();
+      if (typeof loadHomeData === 'function') loadHomeData(true).catch(() => {});
       if (typeof loadSprintMgmt === 'function') loadSprintMgmt(true);
       if (typeof _histLoadLedger === 'function') _histLoadLedger(repo, { force: true });
     } catch (_) {}
@@ -17436,8 +17628,12 @@ function _smgmtLanesUpdate(label, live) {
   if (maxCoder > 1 && activeCoders.length > 1) {
     // Multi-slot mode: per-worker lanes with live log tails (issue #1416, AC4/AC6)
     lanesEl.innerHTML = _smgmtWorkerLanesHtml(label, live);
-    const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
-    _smgmtWorkerLogFetch(label, repo, activeCoders);
+    // When SSE is connected, per-worker logs arrive via keyed log_line events
+    // (_smgmtSseHandleLogLine) — do NOT fire REST calls (issue #1777 AC5).
+    if (!_smgmtSseEs) {
+      const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
+      _smgmtWorkerLogFetch(label, repo, activeCoders);
+    }
   } else {
     // Single-slot mode: existing two-lane coder/tester view unchanged (AC5)
     const doneOpen = !!(document.getElementById('smgmt-lanes-done-fold')
@@ -18300,11 +18496,17 @@ function _smgmtInspectorFeed(ticket, label) {
   _smgmtInspectorStreamRestart();
 }
 
-/** (Re)start the streaming poll for the active log tab. */
+/** (Re)start the streaming poll for the active log tab.
+ *  When the SSE stream is live, log lines arrive via _smgmtSseHandleLogLine
+ *  so the 5 s poll is unnecessary (AC4).  Only start the poll in fallback mode. */
 function _smgmtInspectorStreamRestart() {
   if (_smgmtInspectorPollId !== null) { clearInterval(_smgmtInspectorPollId); _smgmtInspectorPollId = null; }
+  // Always do one initial fetch for the current log content.
   _smgmtInspectorStreamTick();
-  _smgmtInspectorPollId = setInterval(_smgmtInspectorStreamTick, 5000);
+  // Only start the recurring 5 s poll when SSE is not connected (fallback mode).
+  if (!_smgmtSseEs) {
+    _smgmtInspectorPollId = visibilityInterval(_smgmtInspectorStreamTick, 5000);
+  }
 }
 
 /** Switch the active log tab and restart streaming. */
@@ -19255,8 +19457,8 @@ function _smgmtLivePatch(label, live) {
 /** Start or restart the live polling loop for any running sprints. */
 // #3: re-fetch the running-pane timeline every 10 min so size/estimate drift
 // (a ticket runs shorter/longer than the first render) is reflected without the
-// operator reloading. The 2s live poll only patches; the timeline is otherwise
-// rendered once on pane entry.
+// operator reloading. SSE snapshot events handle the 5s updates; the timeline is
+// rendered once on pane entry and refreshed every 10 min.
 let _smgmtTimelineRefreshId = null;
 const _SMGMT_TIMELINE_REFRESH_MS = 600000; // 10 minutes
 function _smgmtTimelineRefreshTick() {
@@ -19282,15 +19484,24 @@ function _smgmtLivePollRestart() {
     clearInterval(_smgmtTimelineRefreshId);
     _smgmtTimelineRefreshId = null;
   }
+  // Disconnect any existing SSE before reconnecting (issue #1777)
+  _smgmtSseDisconnect();
 
   if (_smgmtRunningLabels.size === 0) {
     _smgmtLingerPollRestart();
     return;
   }
 
-  // Poll every 2 seconds for banner + Running-tab rail/metrics updates
-  _smgmtLivePollId = setInterval(_smgmtLivePollTick, 2000);
-  // Kick off immediately — use single /api/running snapshot for first paint when flag ON (issue #1647)
+  // Connect SSE stream — replaces the 2s REST poll for live board updates (issue #1777 AC2).
+  // The SSE stream emits 'snapshot' events every ~5 s and 'log_line' events in real time.
+  const _sseLabel = Array.from(_smgmtRunningLabels)[0];
+  const _sseRepo = _smgmtRepo();
+  if (_sseLabel && _sseRepo) {
+    _smgmtSseConnect(_sseLabel, _sseRepo);
+  }
+
+  // First paint: use /api/running snapshot when flag ON (issue #1647), else single live poll tick.
+  // This provides immediate board state before the first SSE snapshot arrives.
   if (window._commanderFeatures && window._commanderFeatures.running_aggregate === true) {
     _smgmtRunningFirstPaint();
   } else {
@@ -25932,9 +26143,7 @@ async function globalSettingsLoad() {
   _gssHideFeedback();
   gssGhAuthLoad().catch(() => {});
   try {
-    const resp = await fetch('/api/settings');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await getSettings();
     _gssRender(data);
     const ttl = Number(data.history_cache_ttl_min) || 5;
     settingsUpdateHistTtlBtns(ttl);
@@ -25946,8 +26155,6 @@ async function globalSettingsLoad() {
 }
 
 // ── Global Settings — GitHub CLI auth (device / token login) ─────────────────
-
-let _gssGhAuthPollTimer = null;
 
 function _gssGhAuthEsc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -26003,10 +26210,7 @@ function gssGhAuthRenderLog(job) {
 }
 
 function gssGhAuthStopPoll() {
-  if (_gssGhAuthPollTimer) {
-    clearInterval(_gssGhAuthPollTimer);
-    _gssGhAuthPollTimer = null;
-  }
+  stopGhAuthPoll();
 }
 
 async function gssGhAuthPollOnce() {
@@ -26026,9 +26230,7 @@ async function gssGhAuthPollOnce() {
 }
 
 function gssGhAuthStartPoll() {
-  gssGhAuthStopPoll();
-  gssGhAuthPollOnce();
-  _gssGhAuthPollTimer = setInterval(gssGhAuthPollOnce, 600);
+  startGhAuthPoll(gssGhAuthPollOnce);
 }
 
 async function gssGhAuthLoad() {
@@ -26337,6 +26539,7 @@ async function _gssSave() {
     });
     localStorage.setItem(SM_STORAGE_KEY, JSON.stringify(lsModels));
     _gssData = updated;
+    invalidateSettings();
     if (typeof loadCommanderFeatures === 'function') {
       await loadCommanderFeatures();
     }
@@ -26558,9 +26761,7 @@ async function snavRefresh() {
   const repo = _snavRepo();
   if (!repo) return;
   try {
-    const res = await fetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
-    if (!res.ok) return;
-    _snavState = await res.json();
+    _snavState = await snavNavStatusFetch(`/api/sprint-nav-status?repo=${encodeURIComponent(repo)}`);
     // issue #864: surface the sign-off indicator from the brief's waiting_on_you
     // list (DB lifecycle ready_to_merge). Best-effort — degrades to no dot if the
     // brief is unavailable (e.g. on a traveling machine without local sprint DB).
@@ -27009,7 +27210,7 @@ function logsInit() {
   _logsApplyQueryParams();
 
   if (!_logsState.pollTimer) {
-    _logsState.pollTimer = setInterval(logsFetchRuns, 15000);
+    _logsState.pollTimer = visibilityInterval(logsFetchRuns, 15000);
   }
 }
 
@@ -30966,12 +31167,12 @@ let _statusRefreshId = null;
 async function statusInit() {
   if (_statusRefreshId !== null) return; // already running
   if (_statusLoaded) {
-    _statusRefreshId = setInterval(statusRefresh, 60000);
+    _statusRefreshId = visibilityInterval(statusRefresh, 60000);
     return;
   }
   _statusLoaded = true;
   await statusRefresh();
-  _statusRefreshId = setInterval(statusRefresh, 60000);
+  _statusRefreshId = visibilityInterval(statusRefresh, 60000);
 }
 
 async function statusRefresh() {
@@ -30984,8 +31185,7 @@ async function statusRefresh() {
   let navErr = false, issuesErr = false;
 
   const fetches = [
-    fetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    snavNavStatusFetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
       .then(d => { navData = d; })
       .catch(() => { navErr = true; }),
     fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo))
@@ -31605,9 +31805,7 @@ async function projSettingsLoad() {
 
 async function _psUpdateBranchHints() {
   try {
-    const resp = await fetch('/api/settings');
-    if (!resp.ok) return;
-    const global = await resp.json();
+    const global = await getSettings();
     const setHint = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.textContent = 'global default: ' + (val || '—');
@@ -31662,10 +31860,10 @@ async function _psSaveScheduledTime() {
 async function _psUpdateInheritNotice(slug) {
   // Fetch global settings to compare
   try {
-    const [globalResp] = await Promise.all([fetch('/api/settings')]);
-    if (!globalResp.ok) return;
-    const global = await globalResp.json();
-    const proj = await (await fetch(`/api/projects/${encodeURIComponent(slug)}/settings`)).json();
+    const [global, proj] = await Promise.all([
+      getSettings(),
+      fetch(`/api/projects/${encodeURIComponent(slug)}/settings`).then(r => r.json()),
+    ]);
 
     const estimationKeys = ['estimation_s_minutes','estimation_m_minutes','estimation_l_minutes',
                             'estimation_xl_minutes','estimation_buffer_pct','estimation_thin_ac_buffer_pct'];

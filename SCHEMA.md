@@ -561,6 +561,17 @@ lists **every active coder** as its own entry in `active_agents` (previously a
 single coder slot), so the project page can render a multi-lane running view
 (issue #1416).
 
+**SSE-driven board (issue #1777).** The per-sprint stream
+`GET /api/sprints/{label}/live/stream` (`routers/sprint_live.py`) now emits a
+`snapshot` event carrying the full live-snapshot JSON — once on connect and then
+every ~5 s (every 10 half-second ticks) — alongside the existing `log_line` and
+`complete` events. This lets the sprint board and inspector bootstrap and refresh
+metrics entirely from the stream, replacing the prior 2 s `/api/sprint-status` +
+`/api/sprints/{label}/live` REST poll. On SSE disconnect the board falls back to
+the sprint-103 `/api/running` slow poll (≥ 15 s) and resumes stream-driven updates
+on reconnect. Steady-state outbound polling for a running sprint drops from
+~60 calls/min to ≤ 4.
+
 **Estimator file-prediction accuracy (issue #1417).** On each merge,
 `finish_feature.py` compares the ticket estimate's `files_likely_affected`
 against the files the merge commit actually changed (`git diff-tree
@@ -603,7 +614,7 @@ block per tracked project from these endpoints.
 | `POST` | `/api/brief/summary/regenerate` | Clear the stored home recap and re-invoke the model |
 | `GET` | `/api/projects/{slug}/brief/daily` | Stored (or lazily generated) daily brief artifact for a project |
 | `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Rebuild and re-store the project daily brief, advancing the timestamp |
-| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact |
+| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact. Each entry in `brief.projects` is enriched (issue #1778) with `repo`, `name`, `icon`, `color`, `briefSummary`, and `milestone` so the home page renders in one request instead of 1+N |
 | `POST` | `/api/brief/daily/regenerate` | Rebuild and re-store the home daily roll-up, advancing the timestamp |
 
 ### Project To-Dos (issue #843)
@@ -622,6 +633,7 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 | `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
 | `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
 | `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
+| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.

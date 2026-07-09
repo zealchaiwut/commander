@@ -723,16 +723,27 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     return payload
 
 
+_SNAPSHOT_EVERY_N = 10  # emit snapshot every N half-second ticks (~5 s)
+
+
+def _find_issue_log(log_dir: Path, issue_num: int) -> Optional[Path]:
+    """Return sprint-issue-<N>.log path if it exists in log_dir."""
+    p = log_dir / f"sprint-issue-{issue_num}.log"
+    return p if p.exists() else None
+
+
 @router.get("/api/sprints/{sprint_label}/live/stream")
 async def get_sprint_live_stream(sprint_label: str, project: str, request: Request):
     """SSE endpoint that streams incremental log-line events as they occur.
 
-    Events emitted:
+    Events emitted (issue #1777):
+    - event: snapshot   data: <full live snapshot JSON>  (on connect + every ~5 s)
     - event: log_line   data: {"timestamp": "...", "type": "...", "message": "..."}
+                             optional "issue_num": N for per-worker routing (AC5)
     - event: complete   data: {"reason": "stopped"}   (when sprint ends)
-    - keepalive comment every 15 s while idle
 
-    Data source: tails the most recent sprint-run-<label>-*.log file.
+    Data source: tails the most recent sprint-run-<label>-*.log file for
+    orchestrator log_line events, plus sprint-issue-N.log for per-issue events.
     """
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
@@ -759,7 +770,35 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
         except OSError:
             file_size = 0
 
+        # Start tailing from the current end (only new lines going forward).
         current_offset = file_size
+
+        # Emit initial snapshot so the board can bootstrap without a separate REST call.
+        try:
+            snap = get_sprint_live_snapshot(sprint_label, project)
+            yield f"event: snapshot\ndata: {json.dumps(snap)}\n\n"
+        except Exception:
+            pass
+
+        # Track per-issue log files: {issue_num: current_offset}
+        issue_log_offsets: dict[int, int] = {}
+
+        # Seed per-issue log tracking from the initial snapshot's issues list.
+        try:
+            _seed_snap = get_sprint_live_snapshot(sprint_label, project)
+            for iss in (_seed_snap.get("issues") or []):
+                num = iss.get("number")
+                if num is not None:
+                    p = _find_issue_log(log_dir, num)
+                    if p is not None:
+                        try:
+                            issue_log_offsets[num] = p.stat().st_size
+                        except OSError:
+                            issue_log_offsets[num] = 0
+        except Exception:
+            pass
+
+        snapshot_tick = 0
 
         while True:
             if await request.is_disconnected():
@@ -767,6 +806,7 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
 
             is_running = srv._is_sprint_running(project_root, sprint_label)
 
+            # ── Tail orchestrator/dispatch log ────────────────────────────────
             try:
                 file_size = log_path.stat().st_size
             except OSError:
@@ -784,6 +824,47 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
                     for entry in parsed:
                         yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
                 except OSError:
+                    pass
+
+            # ── Tail per-issue log files (issue #1777 AC5) ───────────────────
+            for num, i_offset in list(issue_log_offsets.items()):
+                i_path = log_dir / f"sprint-issue-{num}.log"
+                try:
+                    i_size = i_path.stat().st_size
+                except OSError:
+                    continue
+                if i_size > i_offset:
+                    try:
+                        with open(i_path, "r", encoding="utf-8", errors="replace") as fh:
+                            fh.seek(i_offset)
+                            new_text = fh.read(i_size - i_offset)
+                        issue_log_offsets[num] = i_size
+                        new_lines = new_text.splitlines()
+                        parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
+                        for entry in parsed:
+                            entry["issue_num"] = num
+                            yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
+                    except OSError:
+                        pass
+
+            # ── Periodic snapshot for board metric refresh (AC3, AC8) ────────
+            snapshot_tick += 1
+            if snapshot_tick >= _SNAPSHOT_EVERY_N:
+                snapshot_tick = 0
+                try:
+                    snap = get_sprint_live_snapshot(sprint_label, project)
+                    yield f"event: snapshot\ndata: {json.dumps(snap)}\n\n"
+                    # Register any newly-started issue logs
+                    for iss in (snap.get("issues") or []):
+                        num = iss.get("number")
+                        if num is not None and num not in issue_log_offsets:
+                            p = _find_issue_log(log_dir, num)
+                            if p is not None:
+                                try:
+                                    issue_log_offsets[num] = p.stat().st_size
+                                except OSError:
+                                    issue_log_offsets[num] = 0
+                except Exception:
                     pass
 
             if not is_running:

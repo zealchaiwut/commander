@@ -719,6 +719,7 @@
 
 </main>
 
+<script src="/static/visibility.js"></script>
 <script>
   'use strict';
 
@@ -1163,7 +1164,7 @@
   // ── auto-refresh ──────────────────────────────────────────────────────────
   function startAutoRefresh() {
     if (_refreshTimer) clearInterval(_refreshTimer);
-    _refreshTimer = setInterval(fetchHealth, 30000);
+    _refreshTimer = visibilityInterval(fetchHealth, 30000);
   }
 
   // ── debug toggle ──────────────────────────────────────────────────────────

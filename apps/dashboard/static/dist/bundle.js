@@ -940,6 +940,30 @@
     };
   }
 
+  // apps/dashboard/static/src/shell/snav-cache.js
+  var _snavNavStatusCache = {};
+  var _SNAV_NAV_STATUS_TTL = 15e3;
+  async function snavNavStatusFetch(url) {
+    const cached = _snavNavStatusCache[url];
+    if (cached && Date.now() - cached.ts < _SNAV_NAV_STATUS_TTL) {
+      return cached.data;
+    }
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    _snavNavStatusCache[url] = { data, ts: Date.now() };
+    return data;
+  }
+  function snavNavStatusCacheClear(url) {
+    if (url) {
+      delete _snavNavStatusCache[url];
+    } else {
+      for (const k of Object.keys(_snavNavStatusCache)) {
+        delete _snavNavStatusCache[k];
+      }
+    }
+  }
+
   // apps/dashboard/static/src/api.js
   var _envPromise = null;
   var _versionPromise = null;
@@ -8163,11 +8187,15 @@ Proceed anyway?`)) {
   root.closeAllStabDropdowns = closeAllStabDropdowns;
   root.loadCommanderFeatures = loadCommanderFeatures;
   root.visibilityInterval = visibilityInterval;
+  root.snavNavStatusFetch = snavNavStatusFetch;
+  root.snavNavStatusCacheClear = snavNavStatusCacheClear;
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.visibilityInterval = visibilityInterval;
+  globalThis.snavNavStatusFetch = snavNavStatusFetch;
+  globalThis.snavNavStatusCacheClear = snavNavStatusCacheClear;
   installVisibilityGuard();
   root.sprintCleanupPreview = sprintCleanupPreview;
   root.sprintCleanupConfirm = sprintCleanupConfirm;

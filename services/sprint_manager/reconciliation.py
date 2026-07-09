@@ -299,8 +299,22 @@ def gather_inputs_via_gh(
     repo: Optional[str],
     pr_url: Optional[str],
     ticket_numbers: Optional[list[int]] = None,
+    *,
+    mirror_reader: Optional[Callable] = None,
 ) -> dict:
     """Collect reconciliation inputs from GitHub. Best-effort; never raises.
+
+    When *mirror_reader* is supplied (or the built-in ``github_client`` mirror
+    is available), the ticket roster and summary issues are read from the local
+    issues mirror instead of calling ``gh issue list`` and ``gh issue view`` per
+    ticket.  The mirror may be up to 60 s stale — this staleness is acceptable
+    for end-of-sprint reconciliation because the label transitions that matter
+    (e.g. UAT vs. in-progress) occurred before the sprint finished.  Only the
+    PR merge-state check makes a live subprocess call (≤1 total).
+
+    When the mirror is unpopulated (empty or absent) the function falls back to
+    the original ``gh issue list`` + per-ticket ``gh issue view`` path and
+    produces an identical ``{summary_issues, pr_info, tickets}`` dict.
 
     Returns ``{"summary_issues", "pr_info", "tickets"}`` ready to feed
     :func:`run_reconciliation`. Any GitHub failure degrades to empty data so the
@@ -312,16 +326,62 @@ def gather_inputs_via_gh(
 
     repo_args = (["--repo", repo] if repo else [])
 
-    # 1) Summary issue(s) carrying this sprint's label (open or closed).
-    issues = _gh_json(
-        "issue", "list", *repo_args,
-        "--label", sprint_label, "--state", "all",
-        "--json", "number,title,labels", "--limit", "100",
-    )
-    if isinstance(issues, list):
-        summary_issues = issues
+    # Resolve mirror_reader: use the injected callable, or try a dynamic import.
+    _reader = mirror_reader
+    if _reader is None and repo:
+        try:
+            import github_client as _gh_client  # noqa: PLC0415
+            _reader = _gh_client._mirror_issues
+        except Exception:
+            _reader = None
 
-    # 2) Sprint PR merge status + conflicting files when unmerged.
+    # Attempt mirror-backed reads (zero gh issue subprocess calls).
+    mirror: Optional[list[dict]] = None
+    if _reader is not None and repo:
+        try:
+            mirror = _reader(repo)
+        except Exception:
+            mirror = None
+
+    if mirror:
+        # Mirror is populated — read all issue data from it without subprocess calls.
+        tnums = {int(n) for n in (ticket_numbers or [])}
+        for iss in mirror:
+            labels = iss.get("labels") or []
+            label_names = [
+                (lbl.get("name") if isinstance(lbl, dict) else lbl)
+                for lbl in labels
+            ]
+            if sprint_label in label_names:
+                summary_issues.append({
+                    "number": iss.get("number"),
+                    "title": iss.get("title") or "",
+                    "labels": labels,
+                })
+            num = iss.get("number")
+            if num is not None and int(num) in tnums:
+                tickets.append({"number": num, "labels": labels})
+    else:
+        # Fallback: original gh-CLI path (N+1 calls for issue data).
+
+        # 1) Summary issue(s) carrying this sprint's label (open or closed).
+        issues = _gh_json(
+            "issue", "list", *repo_args,
+            "--label", sprint_label, "--state", "all",
+            "--json", "number,title,labels", "--limit", "100",
+        )
+        if isinstance(issues, list):
+            summary_issues = issues
+
+        # 3) Sprint tickets and their current status labels.
+        for num in (ticket_numbers or []):
+            iss = _gh_json(
+                "issue", "view", str(num), *repo_args, "--json", "number,labels",
+            )
+            if isinstance(iss, dict):
+                tickets.append(iss)
+
+    # 2) Sprint PR merge status + conflicting files when unmerged (always live).
     pr_number = _pr_number_from_url(pr_url)
     if pr_number is not None:
         pr = _gh_json(
@@ -340,13 +400,5 @@ def gather_inputs_via_gh(
                         f.get("path") for f in (pr.get("files") or []) if f.get("path")
                     ]
             pr_info = info
-
-    # 3) Sprint tickets and their current status labels.
-    for num in (ticket_numbers or []):
-        iss = _gh_json(
-            "issue", "view", str(num), *repo_args, "--json", "number,labels",
-        )
-        if isinstance(iss, dict):
-            tickets.append(iss)
 
     return {"summary_issues": summary_issues, "pr_info": pr_info, "tickets": tickets}

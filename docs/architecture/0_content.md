@@ -4,7 +4,7 @@ This is the index for the architecture documentation set. Sections are ordered b
 
 | # | Section | Notes |
 |---|---------|-------|
-| 1 | [State & source-of-truth model](1_state-and-source-of-truth.md) | The foundation — read first |
+| 1 | [State & source-of-truth model](1_state-and-source-of-truth.md) | The foundation — read first · includes [cache inventory](1_state-and-source-of-truth.md#13a-cache-inventory--invalidation-contract) (§1.3a) |
 | 2 | [App / Dashboard architecture](2_app-dashboard-architecture.md) | Priority · **decision record partial** (2.3b pending) |
 | 3 | [Sprint flow (work flow)](3_sprint-flow.md) | Priority — includes sprint & ticket lifecycle |
 | 4 | [Agents](4_agents.md) | Priority · **decision record partial** (4a/4b landed; 4d/4e partial; 4c/4f open) |

@@ -22,14 +22,14 @@ export function planningEnabled() {
 /** Fetch flags and hide disabled UI surfaces. */
 export async function loadCommanderFeatures() {
   try {
-    const res = await fetch('/api/environment', { cache: 'no-store' });
+    const res = await fetch("/api/environment", { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     _features = data.features || {};
   } catch {
     _features = { signoff: false, advisor: false, planning: false };
   }
-  const root = typeof window !== 'undefined' ? window : globalThis;
+  const root = typeof window !== "undefined" ? window : globalThis;
   root._commanderFeatures = _features;
   applyFeatureFlags();
   return _features;
@@ -37,25 +37,25 @@ export async function loadCommanderFeatures() {
 
 function _hide(el) {
   if (!el) return;
-  el.classList.add('hidden');
-  el.setAttribute('aria-hidden', 'true');
+  el.classList.add("hidden");
+  el.setAttribute("aria-hidden", "true");
 }
 
 export function applyFeatureFlags() {
   if (!advisorEnabled()) {
-    _hide(document.getElementById('stab-advisor'));
-    _hide(document.getElementById('pane-advisor'));
+    _hide(document.getElementById("stab-advisor"));
+    _hide(document.getElementById("pane-advisor"));
   }
   if (!planningEnabled()) {
-    _hide(document.getElementById('smgmt-plan-next-btn'));
-    _hide(document.getElementById('hnav-milestone'));
+    _hide(document.getElementById("smgmt-plan-next-btn"));
+    _hide(document.getElementById("hnav-milestone"));
   }
   if (!signoffEnabled()) {
-    _hide(document.getElementById('snav-signoff'));
+    _hide(document.getElementById("snav-signoff"));
   }
   // Hide Planning nav when both advisor and plan-next are off (Roadmap stays via Manage if needed).
   if (!advisorEnabled() && !planningEnabled()) {
-    const group = document.getElementById('stab-group-planning');
-    if (group) group.style.display = 'none';
+    const group = document.getElementById("stab-group-planning");
+    if (group) group.style.display = "none";
   }
 }

@@ -20,9 +20,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
 _ROUTERS_ROOT = _DASHBOARD_ROOT / "routers"
 
-for _p in (str(_DASHBOARD_ROOT), str(_ROUTERS_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# _DASHBOARD_ROOT must come before _ROUTERS_ROOT so 'import projects' resolves
+# to apps/dashboard/projects.py (has PROJECTS_FILE), not routers/projects.py.
+if str(_DASHBOARD_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DASHBOARD_ROOT))
+if str(_ROUTERS_ROOT) not in sys.path:
+    sys.path.append(str(_ROUTERS_ROOT))
 
 import aggregate_cache as _ac  # noqa: E402
 import board_cache as _bc  # noqa: E402

@@ -222,13 +222,39 @@ export function toggleStabDropdown(name, e) {
   const group = document.getElementById("stab-group-" + name);
   const isOpen = group.classList.contains("open");
   closeAllStabDropdowns();
-  if (!isOpen) group.classList.add("open");
+  if (!isOpen) {
+    group.classList.add("open");
+    // At ≤430px, .sub-tabs { overflow-x: auto } forces overflow-y: auto (CSS
+    // spec forbids overflow-x:auto + overflow-y:visible), which clips the
+    // absolutely-positioned .stab-dropdown even though its containing block
+    // (.sub-tabs-row) is above the scroll container. Fix: position the dropdown
+    // as fixed using the trigger's viewport rect so it escapes the clip edge.
+    if (window.innerWidth <= 430) {
+      const trigger = group.querySelector(".stab-trigger");
+      const dropdown = group.querySelector(".stab-dropdown");
+      if (trigger && dropdown) {
+        const rect = trigger.getBoundingClientRect();
+        dropdown.style.setProperty("position", "fixed");
+        dropdown.style.setProperty("top", rect.bottom + 2 + "px");
+        dropdown.style.setProperty("left", rect.left + "px");
+      }
+    }
+  }
 }
 
 export function closeAllStabDropdowns() {
   document
     .querySelectorAll(".stab-group.open")
-    .forEach((g) => g.classList.remove("open"));
+    .forEach((g) => {
+      g.classList.remove("open");
+      // Reset any inline position styles set by the mobile fixed-position fix.
+      const dropdown = g.querySelector(".stab-dropdown");
+      if (dropdown) {
+        dropdown.style.removeProperty("position");
+        dropdown.style.removeProperty("top");
+        dropdown.style.removeProperty("left");
+      }
+    });
 }
 
 document.addEventListener("click", closeAllStabDropdowns);

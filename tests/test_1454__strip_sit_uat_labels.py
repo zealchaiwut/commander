@@ -6,6 +6,9 @@ That strip set originally omitted the downstream workflow-state labels `SIT` and
 `UAT`, so splitting a ticket already carrying a stage label produced a child
 mislabeled into a downstream column. Each test below maps to one acceptance
 criterion.
+
+Issue #1771: re-anchored import from the deleted orphan `split_ticket_service`
+to the live `split_xl_service` path; added AC test exercising `split_apply()`.
 """
 from __future__ import annotations
 
@@ -19,7 +22,8 @@ for _p in (str(REPO_ROOT), str(DASHBOARD_DIR), str(SERVICES_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from routers.split_ticket_service import _STRIP_LABELS, build_child_labels  # noqa: E402
+from routers.split_xl_service import _STRIP_LABELS, build_child_labels  # noqa: E402
+from apps.dashboard.routers import split_xl_service  # noqa: E402
 
 
 # AC1 — _STRIP_LABELS includes SIT and UAT in addition to the existing entries.
@@ -64,3 +68,94 @@ def test_backlog_parent_happy_path_unchanged():
     assert set(child) == {"enhancement", "backend", "sprint-99.1"}
     assert "size-XL" not in child
     assert "SIT" not in child and "UAT" not in child
+
+
+# ── Live path tests (issue #1771) ────────────────────────────────────────────
+
+
+class _FakeGH:
+    """Minimal github_client fake for testing split_apply() label inheritance."""
+
+    def __init__(self, parent_labels=None):
+        self._parent_labels = parent_labels or []
+        self._next_number = 7000
+        self.created: list[tuple[str, list]] = []  # (title, labels) pairs
+        self.closed = []
+        self.assigned = []
+
+    def get_issue(self, issue_number, repo_name=None):
+        return {
+            "number": issue_number,
+            "labels": [{"name": lbl} for lbl in self._parent_labels],
+        }
+
+    def create_label(self, name, color, description="", repo_name=None):
+        pass
+
+    def create_issue(self, title, body, labels, repo_name=None):
+        self._next_number += 1
+        self.created.append((title, list(labels)))
+        return self._next_number, f"https://github.com/o/r/issues/{self._next_number}"
+
+    def add_comment(self, issue_id, body, repo_name=None):
+        pass
+
+    def assign_sprint(self, issue_id, sprint_num, repo_name=None):
+        self.assigned.append(issue_id)
+
+    def close_issue(self, issue_id, repo_name=None, reason=None):
+        self.closed.append(issue_id)
+
+    def invalidate(self, prefix=""):
+        pass
+
+
+class _FakeServer:
+    def __init__(self, gh):
+        self.github_client = gh
+
+
+def _two_children():
+    return [
+        {"title": "Child A", "body": "## AC\n- do A"},
+        {"title": "Child B", "body": "## AC\n- do B"},
+    ]
+
+
+# AC6 (live path) — split_apply() does not put SIT on child tickets even when
+# the parent issue carries SIT.
+def test_split_apply_does_not_inherit_sit(monkeypatch):
+    gh = _FakeGH(parent_labels=["enhancement", "SIT", "sprint-99.1"])
+    monkeypatch.setattr(split_xl_service, "_server", lambda: _FakeServer(gh))
+    result = split_xl_service.split_apply("o/r", "sprint-99.1", 200, _two_children())
+    assert result["ok"] is True
+    for _title, labels in gh.created:
+        assert "SIT" not in labels, f"child ticket must not carry SIT; got labels {labels}"
+
+
+# AC7 (live path) — split_apply() does not put UAT on child tickets even when
+# the parent issue carries UAT.
+def test_split_apply_does_not_inherit_uat(monkeypatch):
+    gh = _FakeGH(parent_labels=["enhancement", "UAT", "sprint-99.1"])
+    monkeypatch.setattr(split_xl_service, "_server", lambda: _FakeServer(gh))
+    result = split_xl_service.split_apply("o/r", "sprint-99.1", 200, _two_children())
+    assert result["ok"] is True
+    for _title, labels in gh.created:
+        assert "UAT" not in labels, f"child ticket must not carry UAT; got labels {labels}"
+
+
+# AC8 (live path) — split_apply() strips both SIT and UAT when parent has both,
+# while preserving non-lifecycle labels and adding split-child.
+def test_split_apply_strips_sit_and_uat_preserves_custom_labels(monkeypatch):
+    gh = _FakeGH(parent_labels=["enhancement", "backend", "SIT", "UAT", "size-XL", "sprint-99.1"])
+    monkeypatch.setattr(split_xl_service, "_server", lambda: _FakeServer(gh))
+    result = split_xl_service.split_apply("o/r", "sprint-99.1", 200, _two_children())
+    assert result["ok"] is True
+    for _title, labels in gh.created:
+        assert "SIT" not in labels
+        assert "UAT" not in labels
+        assert "size-XL" not in labels
+        assert "split-child" in labels
+        assert "sprint-99.1" in labels
+        assert "enhancement" in labels
+        assert "backend" in labels

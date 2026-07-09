@@ -1,6 +1,6 @@
 /* Commander feature flags — loaded from /api/environment (config.py). */
 
-/** @type {{ signoff?: boolean, advisor?: boolean, planning?: boolean, history_aggregate?: boolean, running_aggregate?: boolean } | null} */
+/** @type {{ signoff?: boolean, advisor?: boolean, planning?: boolean } | null} */
 let _features = null;
 
 export function commanderFeatures() {
@@ -17,29 +17,6 @@ export function advisorEnabled() {
 
 export function planningEnabled() {
   return commanderFeatures().planning === true;
-}
-
-/** True when COMMANDER_HISTORY_AGGREGATE is on (issue #1640).
- *
- * When enabled the History view reads inline run_stats from the history
- * feed and skips per-card /api/sprints/{label}/run-stats network calls.
- */
-export function historyAggregateEnabled() {
-  return commanderFeatures().history_aggregate === true;
-}
-
-/** True when COMMANDER_RUNNING_AGGREGATE is on (issue #1646).
- *
- * When enabled the Running tab uses the consolidated GET /api/running endpoint
- * instead of fanning out per-agent requests, reducing latency and server load.
- */
-export function runningAggregateEnabled() {
-  return commanderFeatures().running_aggregate === true;
-}
-
-/** True when COMMANDER_BOARD_AGGREGATE flag is on (issue #1638). */
-export function boardAggregateEnabled() {
-  return commanderFeatures().board_aggregate === true;
 }
 
 /** Fetch flags and hide disabled UI surfaces. */

@@ -58,7 +58,7 @@ export function _smgmtBuildAggCards(agg) {
 
 /**
  * Transform a /api/board aggregate response into the data shape that
- * _smgmtRender(data) expects (matching /api/sprint-management/issues).
+ * _smgmtRender(data) expects.
  * Exported for unit tests (issue #1638).
  *
  * Differences from the legacy shape:
@@ -299,114 +299,51 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
       _smgmtEnsureCapData();
     }
 
-    // ── Feature flag: aggregate board endpoint (issue #1638) ─────────────────
-    const _feats = typeof globalThis !== "undefined" ? globalThis._commanderFeatures : null;
-    const _useBoardAggregate = Boolean(_feats && _feats.board_aggregate === true);
-
-    let data;
-
-    if (_useBoardAggregate) {
-      // ── Aggregate path: single fetch to /api/board ──────────────────────────
-      _smgmtAggregateCards = null; // reset before fetch
-      const aggResp = await fetch(
-        "/api/board?project=" + encodeURIComponent(repo),
-      );
-      if (!aggResp.ok) {
-        let msg = "Failed to load board.";
-        const d = await aggResp.json().catch(() => null);
-        const detail = d && typeof d.detail === "string" ? d.detail : "";
-        if (aggResp.status === 429 || /rate limit/i.test(detail)) {
-          msg = detail || "GitHub API rate limit reached — retry shortly.";
-        }
-        throw new Error(msg);
+    // Aggregate path: single fetch to /api/board (issue #1789 cutover)
+    _smgmtAggregateCards = null; // reset before fetch
+    const aggResp = await fetch(
+      "/api/board?project=" + encodeURIComponent(repo),
+    );
+    if (!aggResp.ok) {
+      let msg = "Failed to load board.";
+      const d = await aggResp.json().catch(() => null);
+      const detail = d && typeof d.detail === "string" ? d.detail : "";
+      if (aggResp.status === 429 || /rate limit/i.test(detail)) {
+        msg = detail || "GitHub API rate limit reached — retry shortly.";
       }
-      const agg = await aggResp.json();
+      throw new Error(msg);
+    }
+    const agg = await aggResp.json();
 
-      // Build per-label card index so per-sprint loaders can skip fetches
-      _smgmtAggregateCards = _smgmtBuildAggCards(agg);
-      if (typeof window !== "undefined") window._smgmtAggregateCards = _smgmtAggregateCards;
+    // Build per-label card index so per-sprint loaders can skip fetches
+    _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+    if (typeof window !== "undefined") window._smgmtAggregateCards = _smgmtAggregateCards;
 
-      if (_smgmtLiveCacheRepo !== repo) {
-        _smgmtLiveCacheRepo = repo;
-        for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
-      }
-      if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
+    if (_smgmtLiveCacheRepo !== repo) {
+      _smgmtLiveCacheRepo = repo;
+      for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
+    }
+    if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
 
-      // Derive running labels from aggregate sections (instead of running-all)
-      const prevRunningAgg = new Set(_smgmtRunningLabels);
-      _smgmtRunningLabels = new Set();
-      _smgmtAnySprintRunning = false;
-      for (const card of ((agg.sections || {}).running || [])) {
-        if (card.label) _smgmtRunningLabels.add(card.label);
-      }
-      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-      for (const label of prevRunningAgg) {
-        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
-          _smgmtLingerStart(label);
-        }
-      }
-      if (optimisticRunningLabel) {
-        _smgmtRunningLabels.add(optimisticRunningLabel);
-        _smgmtAnySprintRunning = true;
-      }
-
-      data = _smgmtAggToRenderData(agg);
-    } else {
-      // ── Legacy path: multi-call fan-out (flag OFF — unchanged) ─────────────
-      _smgmtAggregateCards = null;
-      if (typeof window !== "undefined") window._smgmtAggregateCards = null;
-
-      // Fetch sprint management data + running sprint status + summaries in parallel
-      const [resp, runningResp] = await Promise.all([
-        fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-        fetch("/api/sprints/running-all").catch(() => null),
-      ]);
-      if (!resp.ok) {
-        // Surface a GitHub rate-limit failure specifically (status 429 from
-        // _gh_error) so the board says what's wrong instead of "Failed to load".
-        let msg = "Failed to load sprints.";
-        const d = await resp.json().catch(() => null);
-        const detail = d && typeof d.detail === "string" ? d.detail : "";
-        if (resp.status === 429 || /rate limit/i.test(detail)) {
-          msg = detail || "GitHub API rate limit reached — retry shortly.";
-        }
-        throw new Error(msg);
-      }
-      data = await resp.json();
-
-      if (_smgmtLiveCacheRepo !== repo) {
-        _smgmtLiveCacheRepo = repo;
-        for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
-      }
-      if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
-
-      // Update running labels set; start linger when a label drops off running-all.
-      const prevRunning = new Set(_smgmtRunningLabels);
-      _smgmtRunningLabels = new Set();
-      _smgmtAnySprintRunning = false;
-      if (runningResp && runningResp.ok) {
-        const runningData = await runningResp.json();
-        const running = runningData.running || [];
-        running.forEach((r) => {
-          if (r.project === repo) {
-            _smgmtRunningLabels.add(r.sprint_label);
-          }
-        });
-        // Only block Run Sprint if THIS project has a running sprint
-        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-      }
-      for (const label of prevRunning) {
-        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
-          _smgmtLingerStart(label);
-        }
-      }
-      // Keep sprint in running UI until /api/sprints/running-all catches up (post-dispatch race).
-      if (optimisticRunningLabel) {
-        _smgmtRunningLabels.add(optimisticRunningLabel);
-        _smgmtAnySprintRunning = true;
+    // Derive running labels from aggregate sections
+    const prevRunningAgg = new Set(_smgmtRunningLabels);
+    _smgmtRunningLabels = new Set();
+    _smgmtAnySprintRunning = false;
+    for (const card of ((agg.sections || {}).running || [])) {
+      if (card.label) _smgmtRunningLabels.add(card.label);
+    }
+    _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+    for (const label of prevRunningAgg) {
+      if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+        _smgmtLingerStart(label);
       }
     }
+    if (optimisticRunningLabel) {
+      _smgmtRunningLabels.add(optimisticRunningLabel);
+      _smgmtAnySprintRunning = true;
+    }
 
+    const data = _smgmtAggToRenderData(agg);
     _smgmtRender(data);
 
     // Hydrate Run-on-schedule toggles for approved cards (issue #863).
@@ -1003,69 +940,21 @@ export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Aggregate path (issue #1744): consume inline outcome from /api/board card — no fetch
-  if (_smgmtAggregateCards) {
-    for (const label of orderedLabels) {
-      if (_smgmtRunningLabels.has(label)) continue;
-      if (_smgmtIsFreshRerunSprint(label)) continue;
-      if (_smgmtOutcomeCache[label] !== undefined) continue;
-      const card = _smgmtAggregateCards[label];
-      if (!card || card.outcome == null) continue;
-      const outcome = card.outcome;
-      _smgmtOutcomeCache[label] = outcome;
-      const isAncestor = _smgmtResolvedAncestors.has(label);
-      if (isAncestor) {
-        _smgmtUpdateAncestorRow(label, outcome);
-      } else {
-        _smgmtInjectOutcomeBand(label, outcome);
-      }
-    }
-    return;
-  }
-
-  const toFetch = [];
   for (const label of orderedLabels) {
     if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtIsFreshRerunSprint(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
-    // Resolved ancestors always ran; skip the ledger check for them (issue #1043).
-    if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label)) continue;
-    toFetch.push(label);
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card || card.outcome == null) continue;
+    const outcome = card.outcome;
+    _smgmtOutcomeCache[label] = outcome;
+    const isAncestor = _smgmtResolvedAncestors.has(label);
+    if (isAncestor) {
+      _smgmtUpdateAncestorRow(label, outcome);
+    } else {
+      _smgmtInjectOutcomeBand(label, outcome);
+    }
   }
-  await Promise.all(
-    toFetch.map(async (label) => {
-      const isAncestor = _smgmtResolvedAncestors.has(label);
-      const previewQs = isAncestor ? "&preview=1" : "";
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}${previewQs}`,
-        );
-        if (resp.ok) {
-          const outcome = await resp.json();
-          _smgmtOutcomeCache[label] = outcome;
-          if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, outcome);
-          } else {
-            _smgmtInjectOutcomeBand(label, outcome);
-          }
-          return;
-        }
-        const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-        _smgmtOutcomeCache[label] = fallback;
-        if (isAncestor && fallback) {
-          _smgmtUpdateAncestorRow(label, fallback);
-        } else if (isAncestor) {
-          _smgmtUpdateAncestorRow(label, null);
-        }
-      } catch (_) {
-        const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-        _smgmtOutcomeCache[label] = fallback;
-        if (isAncestor) {
-          _smgmtUpdateAncestorRow(label, fallback || null);
-        }
-      }
-    }),
-  );
 }
 
 /** Build a minimal outcome snapshot from board tickets (GitHub label columns). */
@@ -1101,61 +990,19 @@ export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Aggregate path (issue #1638): use estimate_hours from inline card data — no fetch
-  if (_smgmtAggregateCards) {
-    await Promise.all(orderedLabels.map(async (label) => {
-      const tickets = bySprint[label] || [];
-      if (tickets.length === 0) return;
-      for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
-      const card = _smgmtAggregateCards[label];
-      if (!card) return;
-      const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (estEl && card.estimate_hours != null) {
-        const h = card.estimate_hours;
-        const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
-        estEl.textContent = `${display} estimated`;
-      }
-      _smgmtSetSprintTokenEl(label, {});
-    }));
-    return;
-  }
-
-  // Legacy path: fetch /api/estimates/batch per sprint
   await Promise.all(orderedLabels.map(async (label) => {
     const tickets = bySprint[label] || [];
     if (tickets.length === 0) return;
-    // Populate reverse lookup for reactivity
     for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
-    const issueNums = tickets.map((t) => t.number).join(",");
-    try {
-      const resp = await fetch(
-        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (estEl && data.complete && data.total_hours !== null) {
-        const h = data.total_hours;
-        const display = Number.isInteger(h)
-          ? `${h}h`
-          : `${parseFloat(h.toFixed(1))}h`;
-        estEl.textContent = `${display} estimated`;
-      }
-      _smgmtSetSprintTokenEl(label, data);
-      // Cache per-issue size/confidence and update visible rows
-      if (data.issues) {
-        for (const [numStr, est] of Object.entries(data.issues)) {
-          _estDataCache[parseInt(numStr, 10)] = est;
-        }
-        for (const t of tickets) {
-          _smgmtUpdateEstimateBadge(t.number);
-        }
-        _smgmtUpdateColRollup(label, tickets);
-        _smgmtUpdateCapacityGauge(label);
-      }
-    } catch (_) {
-      // fail silently — leave as "— estimated"
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card) return;
+    const estEl = document.getElementById(`smgmt-est-${label}`);
+    if (estEl && card.estimate_hours != null) {
+      const h = card.estimate_hours;
+      const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
+      estEl.textContent = `${display} estimated`;
     }
+    _smgmtSetSprintTokenEl(label, {});
   }));
 }
 
@@ -1163,74 +1010,30 @@ export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Aggregate path (issue #1744): consume inline conflicts from /api/board card — no fetch
-  if (_smgmtAggregateCards) {
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label)) return;
-      if (_smgmtFinishedLabels.has(label)) return;
-      const card = _smgmtAggregateCards[label];
-      if (!card || !card.conflicts) return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
-      if (pending.length < 2) return;
-      for (const t of pending) delete _smgmtConflictsByIssue[t.number];
-      for (const c of card.conflicts.conflicts || []) {
-        if (!_smgmtConflictsByIssue[c.ticket1_id])
-          _smgmtConflictsByIssue[c.ticket1_id] = [];
-        if (!_smgmtConflictsByIssue[c.ticket2_id])
-          _smgmtConflictsByIssue[c.ticket2_id] = [];
-        _smgmtConflictsByIssue[c.ticket1_id].push({
-          partnerId: c.ticket2_id,
-          partnerTitle: c.ticket2_title,
-          sharedFiles: c.shared_files,
-        });
-        _smgmtConflictsByIssue[c.ticket2_id].push({
-          partnerId: c.ticket1_id,
-          partnerTitle: c.ticket1_title,
-          sharedFiles: c.shared_files,
-        });
-      }
-      for (const t of pending) _smgmtUpdateConflictBadge(t.number);
-    }));
-    return;
-  }
-
   await Promise.all(orderedLabels.map(async (label) => {
     if (_smgmtRunningLabels.has(label)) return;
     if (_smgmtFinishedLabels.has(label)) return;
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card || !card.conflicts) return;
     const tickets = bySprint[label] || [];
-    const pending = tickets.filter(
-      (t) => (t.status || "backlog") === "backlog",
-    );
+    const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
     if (pending.length < 2) return;
-    // Clear stale entries for this sprint's tickets before repopulating
     for (const t of pending) delete _smgmtConflictsByIssue[t.number];
-    try {
-      const resp = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      for (const c of data.conflicts || []) {
-        if (!_smgmtConflictsByIssue[c.ticket1_id])
-          _smgmtConflictsByIssue[c.ticket1_id] = [];
-        if (!_smgmtConflictsByIssue[c.ticket2_id])
-          _smgmtConflictsByIssue[c.ticket2_id] = [];
-        _smgmtConflictsByIssue[c.ticket1_id].push({
-          partnerId: c.ticket2_id,
-          partnerTitle: c.ticket2_title,
-          sharedFiles: c.shared_files,
-        });
-        _smgmtConflictsByIssue[c.ticket2_id].push({
-          partnerId: c.ticket1_id,
-          partnerTitle: c.ticket1_title,
-          sharedFiles: c.shared_files,
-        });
-      }
-      for (const t of pending) _smgmtUpdateConflictBadge(t.number);
-    } catch (_) {
-      // fail silently
+    for (const c of card.conflicts.conflicts || []) {
+      if (!_smgmtConflictsByIssue[c.ticket1_id]) _smgmtConflictsByIssue[c.ticket1_id] = [];
+      if (!_smgmtConflictsByIssue[c.ticket2_id]) _smgmtConflictsByIssue[c.ticket2_id] = [];
+      _smgmtConflictsByIssue[c.ticket1_id].push({
+        partnerId: c.ticket2_id,
+        partnerTitle: c.ticket2_title,
+        sharedFiles: c.shared_files,
+      });
+      _smgmtConflictsByIssue[c.ticket2_id].push({
+        partnerId: c.ticket1_id,
+        partnerTitle: c.ticket1_title,
+        sharedFiles: c.shared_files,
+      });
     }
+    for (const t of pending) _smgmtUpdateConflictBadge(t.number);
   }));
 }
 
@@ -1238,81 +1041,34 @@ export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Aggregate path (issue #1638): use dep_order from inline card data — no fetch
-  if (_smgmtAggregateCards) {
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label)) return;
-      if (_smgmtFinishedLabels.has(label)) return;
-      const card = _smgmtAggregateCards[label];
-      if (!card || !card.dep_order) return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
-      if (pending.length < 2) return;
-      const depData = card.dep_order;
-      for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
-      if (depData.has_cycle) {
-        const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
-        for (const t of pending) {
-          if (cycleSet.has(String(t.number))) {
-            _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
-          }
-        }
-      } else {
-        for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
-          const num = parseInt(idStr, 10);
-          _smgmtDepOrderByIssue[num] = {
-            upstream: hint.upstream || [],
-            downstream: hint.downstream || [],
-            inCycle: false,
-          };
-        }
-      }
-      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
-    }));
-    return;
-  }
-
-  // Legacy path: fetch /api/sprints/{label}/dep-order per sprint
   await Promise.all(orderedLabels.map(async (label) => {
     if (_smgmtRunningLabels.has(label)) return;
     if (_smgmtFinishedLabels.has(label)) return;
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card || !card.dep_order) return;
     const tickets = bySprint[label] || [];
-    const pending = tickets.filter(
-      (t) => (t.status || "backlog") === "backlog",
-    );
+    const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
     if (pending.length < 2) return;
+    const depData = card.dep_order;
     for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
-    try {
-      const resp = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (data.has_cycle) {
-        const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
-        for (const t of pending) {
-          if (cycleSet.has(String(t.number))) {
-            _smgmtDepOrderByIssue[t.number] = {
-              upstream: [],
-              downstream: [],
-              inCycle: true,
-            };
-          }
-        }
-      } else {
-        for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
-          const num = parseInt(idStr, 10);
-          _smgmtDepOrderByIssue[num] = {
-            upstream: hint.upstream || [],
-            downstream: hint.downstream || [],
-            inCycle: false,
-          };
+    if (depData.has_cycle) {
+      const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
+      for (const t of pending) {
+        if (cycleSet.has(String(t.number))) {
+          _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
         }
       }
-      for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
-    } catch (_) {
-      // fail silently
+    } else {
+      for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
+        const num = parseInt(idStr, 10);
+        _smgmtDepOrderByIssue[num] = {
+          upstream: hint.upstream || [],
+          downstream: hint.downstream || [],
+          inCycle: false,
+        };
+      }
     }
+    for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
   }));
 }
 
@@ -1320,48 +1076,20 @@ export async function _smgmtLoadGoals(orderedLabels) {
   const repo = _smgmtRepo();
   if (!repo) return;
 
-  // Aggregate path (issue #1744): consume inline goal from /api/board card — no fetch
-  if (_smgmtAggregateCards) {
-    for (const label of orderedLabels) {
-      const goalEl = document.getElementById(`smgmt-goal-${label}`);
-      if (!goalEl) continue;
-      const card = _smgmtAggregateCards[label];
-      if (!card) continue;
-      const goal = (card.goal || "").trim();
-      if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-        if (goal) goalEl.value = goal;
-      } else if (goal) {
-        goalEl.textContent = goal;
-        goalEl.title = goal;
-        goalEl.style.display = "";
-      }
-    }
-    return;
-  }
-
-  await Promise.all(orderedLabels.map(async (label) => {
+  for (const label of orderedLabels) {
     const goalEl = document.getElementById(`smgmt-goal-${label}`);
-    if (!goalEl) return;
-    try {
-      const resp = await fetch(
-        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const goal = (data.goal || "").trim();
-      if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-        if (goal) goalEl.value = goal;
-        // _smgmtSyncDraftRunBtn was removed when draft cards were retired
-        // (20d60034); the orphaned call is dropped here.
-      } else if (goal) {
-        goalEl.textContent = goal;
-        goalEl.title = goal;
-        goalEl.style.display = "";
-      }
-    } catch (_) {
-      // fail silently
+    if (!goalEl) continue;
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card) continue;
+    const goal = (card.goal || "").trim();
+    if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+      if (goal) goalEl.value = goal;
+    } else if (goal) {
+      goalEl.textContent = goal;
+      goalEl.title = goal;
+      goalEl.style.display = "";
     }
-  }));
+  }
 }
 
 export function _smgmtOutcomeBandHtml(label, outcome) {
@@ -3171,15 +2899,13 @@ function _boardSseFireRefetch() {
 }
 
 /**
- * Handle a `board_invalidated` SSE event (issue #1785).
+ * Handle a `board_invalidated` SSE event (issue #1785 / #1789 cutover).
  *
- * When the board-aggregate flag is ON and the tab is visible, schedules a
- * debounced refetch of `/api/board` (≥ 2 s). Rapid events collapse to one
- * request; events while the tab is hidden are deferred until the tab shows.
- * Exported for unit tests.
+ * When the tab is visible, schedules a debounced refetch of `/api/board` (≥ 2 s).
+ * Rapid events collapse to one request; events while the tab is hidden are
+ * deferred until the tab shows. Exported for unit tests.
  */
 export function _boardSseOnInvalidated(_project) {
-  if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate) return;
   if (typeof document !== "undefined" && document.hidden) {
     _boardSsePending = true;
     return;
@@ -3196,7 +2922,6 @@ export function _boardSseOnInvalidated(_project) {
 export function _boardSseOnVisible() {
   if (!_boardSsePending) return;
   _boardSsePending = false;
-  if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate) return;
   if (_boardSseTimer !== null) clearTimeout(_boardSseTimer);
   _boardSseTimer = setTimeout(_boardSseFireRefetch, 2000);
 }

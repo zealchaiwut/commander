@@ -15,6 +15,30 @@ import tempfile
 
 _SPLIT_TIMEOUT = 180  # seconds for the BA agent
 
+# Per-ticket lifecycle state — never inherited by children. Covers size buckets,
+# the estimate marker, and every workflow-stage label (in-progress → SIT → UAT)
+# so a child always starts clean and earns its own stage via the re-estimate flow.
+_STRIP_LABELS = frozenset({
+    "size-S", "size-M", "size-L", "size-XL", "estimated", "in-progress", "SIT", "UAT"
+})
+
+
+def build_child_labels(parent_labels: list[str], sprint_label: str) -> list[str]:
+    """Return labels for a child issue: parent labels minus lifecycle/size/state.
+
+    Keeps the sprint label, enhancement, and any custom labels. Always strips
+    size-*, estimated, in-progress, SIT, and UAT so children get fresh estimates
+    and start in a clean backlog/planning state.
+    """
+    result = []
+    for lbl in parent_labels:
+        if lbl in _STRIP_LABELS:
+            continue
+        result.append(lbl)
+    if sprint_label and sprint_label not in result:
+        result.append(sprint_label)
+    return result
+
 
 def _server():
     import server  # noqa: PLC0415
@@ -205,12 +229,21 @@ def split_apply(repo: str, sprint_label: str, issue_num: int, children: list[dic
     except Exception:
         pass
 
+    # Fetch parent labels once; strip lifecycle/stage labels via build_child_labels().
+    try:
+        parent_issue = gh.get_issue(issue_num, repo_name=repo) or {}
+        raw = parent_issue.get("labels") or []
+        parent_label_names = [lbl["name"] if isinstance(lbl, dict) else lbl for lbl in raw]
+    except Exception:
+        parent_label_names = []
+    child_labels = build_child_labels(parent_label_names, sprint_label) + ["split-child"]
+
     created: list[dict] = []
     for c in children:
         title = c["title"].strip()[:240]
         body = (c.get("body") or "").strip() + f"\n\n_Split from #{issue_num}._"
         try:
-            number, url = gh.create_issue(title, body, [sprint_label, "split-child"], repo_name=repo)
+            number, url = gh.create_issue(title, body, child_labels, repo_name=repo)
             created.append({"number": number, "url": url, "title": title})
         except Exception as exc:
             # Partial: child(ren) before this one already exist on GitHub.

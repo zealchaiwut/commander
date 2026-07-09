@@ -59,6 +59,9 @@ class FakeGH:
         self.assigned = []
         self.labels = []
 
+    def get_issue(self, issue_number, repo_name=None):
+        return {"number": issue_number, "labels": []}
+
     def create_label(self, name, color, description="", repo_name=None):
         self.labels.append(name)
 

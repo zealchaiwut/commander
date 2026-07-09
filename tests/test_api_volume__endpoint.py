@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent

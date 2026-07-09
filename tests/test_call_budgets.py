@@ -43,7 +43,10 @@ _SPRINT_SUMMARIES = _ROUTERS / "sprint_summaries.py"
 
 for _p in (str(_DASHBOARD), str(_ROUTERS)):
     if _p not in sys.path:
-        sys.path.insert(0, _p)
+        # append, not insert: _DASHBOARD must precede _ROUTERS so that
+        # `import api_volume` finds apps/dashboard/api_volume.py (counter module)
+        # before apps/dashboard/routers/api_volume.py (FastAPI router).
+        sys.path.append(_p)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -119,21 +122,17 @@ class TestBoardLoadBudget:
     """Budget: board page makes exactly 1 aggregate call when flag is ON."""
 
     def test_board_render_js_has_single_aggregate_fetch_path(self):
-        """board-render.js loadSprintMgmt() issues exactly 1 /api/board fetch
-        when the board_aggregate flag is ON.
+        """board-render.js loadSprintMgmt() issues exactly 1 /api/board fetch.
 
-        Structural enforcement: the aggregate code path has a single
-        /api/board fetch and no per-sprint fallback loop inside that branch.
-        This mirrors the fetch-spy verification in board-aggregate-flag.test.mjs.
+        Structural enforcement: the aggregate code path has a single /api/board
+        fetch and no per-sprint fallback loop.  Issue #1789 cut over the flag
+        unconditionally — the flag itself no longer exists; the aggregate path
+        is the only path.
         """
         src = _read(_BOARD_RENDER)
         # The single aggregate fetch exists
         assert "/api/board" in src, (
             "board-render.js must contain /api/board fetch for the aggregate path"
-        )
-        # The aggregate flag gates a single-call branch
-        assert "_useBoardAggregate" in src or "board_aggregate" in src, (
-            "board-render.js must gate the single-fetch path on the board_aggregate flag"
         )
         # Aggregate cards index (built from the single response) must exist
         assert "_smgmtAggregateCards" in src, (
@@ -141,15 +140,19 @@ class TestBoardLoadBudget:
         )
 
     def test_board_render_aggregate_path_has_no_per_sprint_loop(self):
-        """The aggregate fetch branch must NOT loop over sprint labels to make
-        per-sprint API calls — the single /api/board response includes all sprints.
+        """The aggregate path must NOT make per-sprint API calls.
+
+        Issue #1789 deleted the legacy /api/sprint-management/issues fan-out
+        path entirely — there is now only a single /api/board fetch and no
+        per-sprint fallback loop at all.
         """
         src = _read(_BOARD_RENDER)
-        # The aggregate path returns early / skips the estimates+dep-order loop
+        # The aggregate card index must be used
         assert "_smgmtAggregateCards" in src
-        # The legacy per-sprint calls still exist but are in the else branch
-        assert "/api/sprint-management/issues" in src, (
-            "legacy endpoint must exist for the flag-OFF branch"
+        # The legacy per-sprint fan-out endpoint must be gone (deleted in #1789)
+        assert "/api/sprint-management/issues" not in src, (
+            "legacy /api/sprint-management/issues fan-out was deleted in #1789 — "
+            "board-render.js must use only /api/board (single aggregate call)"
         )
 
     def test_board_load_budget_with_fixture(self, call_budget_fixture):

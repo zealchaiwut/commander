@@ -4,6 +4,9 @@ Module-level dict keyed by fully-qualified ``owner/repo`` strings. TTL
 defaults to 8 s and is overridable via the ``BOARD_CACHE_TTL_S`` env var
 without code changes.
 
+Uses aggregate_cache (issue #1786) to co-invalidate the home cache on every
+board eviction so mutation hooks need only call ``invalidate_board``.
+
 Public API::
 
     get_board_cache(project: str) -> tuple[dict, float] | None
@@ -13,11 +16,33 @@ Public API::
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Any, Optional
 
+# aggregate_cache lives in apps/dashboard/ (parent of this routers/ package).
+# Force it to position 0 so `import api_volume` resolves to
+# apps/dashboard/api_volume.py, not apps/dashboard/routers/api_volume.py,
+# even when tests insert the routers dir first.
+_DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
+_dashboard_s = str(_DASHBOARD_ROOT)
+try:
+    sys.path.remove(_dashboard_s)
+except ValueError:
+    pass
+sys.path.insert(0, _dashboard_s)
+
+# api_volume lives in apps/dashboard — same dir that's on sys.path at runtime
+try:
+    import api_volume as _api_volume
+except ImportError:
+    _api_volume = None  # type: ignore[assignment]
+
 # ── TTL ───────────────────────────────────────────────────────────────────────
+
 
 def current_ttl() -> int:
     """Return the configured TTL in seconds (read from env on every call).
@@ -45,13 +70,19 @@ def get_board_cache(project: str) -> Optional[tuple[dict, float]]:
     """
     entry = _cache.get(project)
     if entry is None:
+        if _api_volume:
+            _api_volume.record_board_miss()
         return None
     now = time.monotonic()
     if now >= entry["expires_at"]:
         # pop, not del: GET /api/board runs sync in the threadpool, so two
         # requests can race past the expiry check for the same project.
         _cache.pop(project, None)
+        if _api_volume:
+            _api_volume.record_board_miss()
         return None
+    if _api_volume:
+        _api_volume.record_board_hit()
     return entry["snapshot"], entry["expires_at"] - now
 
 
@@ -64,5 +95,26 @@ def store_board_cache(project: str, snapshot: dict) -> None:
 
 
 def invalidate_board(project: str) -> None:
-    """Evict only *project*'s entry; all other projects are untouched."""
+    """Evict *project*'s cache entry and broadcast board_invalidated over SSE (issue #1785).
+
+    Also evicts the home-cache entry for the same project so sprint mutations
+    invalidate both caches from a single call site (issue #1786).
+    """
     _cache.pop(project, None)
+    try:
+        import aggregate_cache as _agg  # noqa: PLC0415
+        _agg.invalidate(project, "home")
+    except Exception:
+        pass
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no event loop — sync test context, skip broadcast
+    try:
+        from .logs_service import broadcast as _bc  # noqa: PLC0415
+    except ImportError:
+        try:
+            from logs_service import broadcast as _bc  # type: ignore[no-redef]  # noqa: PLC0415
+        except ImportError:
+            return
+    loop.create_task(_bc({"type": "board_invalidated", "project": project}))

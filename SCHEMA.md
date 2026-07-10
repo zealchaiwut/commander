@@ -491,6 +491,18 @@ script directly, so the button and the command never drift apart.
 |---|---|---|
 | `GET` | `/api/doctor` | Run the pre-sprint host doctor and return its structured report. Shape: `{"ok": bool, "exit_code": int, "checks": [...], "failures": [...]}`. `ok`/`exit_code` reflect whether every check passed; each check carries its name, PASS/FAIL status, and remediation text |
 
+### Debug — API call-volume & cache-hit observability (issue #1787)
+
+In-process counters for tuning API traffic and cache effectiveness, backed by
+`apps/dashboard/api_volume.py`. All counters are module-level integers that
+reset on process restart — no persistence, no DB, no locks beyond the GIL.
+Request paths are counted by a `server.py` HTTP middleware using the matched
+route template (path params normalized, e.g. `/api/sprints/{label}/live`).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/debug/api-volume` | Self-documenting snapshot of in-process observability counters. Query param `n` (default 20) caps the number of top request paths returned. Returns `uptime_seconds`, `top_paths` (`[{path, count}]` sorted descending), `cache_stats` (`github_client` and `board_cache` hit/miss with computed `hit_rate`, plus `mirror_fallback` count of live `gh` calls made when the local issues mirror was absent), and `gh_subprocess_total` (every `gh` CLI invocation since start). Each block carries an inline `_doc` string |
+
 ### Sprint Workspace — Board / Running / History (issues #798–#810)
 
 The Sprint tab is split into three sub-views (Board / Running / History). These
@@ -571,6 +583,17 @@ metrics entirely from the stream, replacing the prior 2 s `/api/sprint-status` +
 the sprint-103 `/api/running` slow poll (≥ 15 s) and resumes stream-driven updates
 on reconnect. Steady-state outbound polling for a running sprint drops from
 ~60 calls/min to ≤ 4.
+
+**SSE board invalidation (issue #1785).** `invalidate_board(project)`
+(`routers/board_cache.py`) now, besides evicting the project's board-cache entry,
+broadcasts a `{"type": "board_invalidated", "project": <slug>}` message over the
+project SSE stream (via `logs_service.broadcast`; skipped cleanly when no asyncio
+loop is running, e.g. sync test contexts). The issues-mirror sync loop
+(`github_events_sync.py`) calls `invalidate_board(repo)` only when a mirror sync
+returns HTTP 200 (rows actually changed) — a 304 no-change poll broadcasts
+nothing. The project page handles the event by refetching the board, deferring the
+refetch when the event arrives while the tab is hidden and flushing it on the next
+`visibilitychange` back to visible.
 
 **Estimator file-prediction accuracy (issue #1417).** On each merge,
 `finish_feature.py` compares the ticket estimate's `files_likely_affected`

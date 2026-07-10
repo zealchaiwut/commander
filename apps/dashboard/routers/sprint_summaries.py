@@ -144,9 +144,10 @@ def get_home():
     all_open_by_repo: dict[str, list[dict]] = {}
     proj_data_list: list[dict] = []
 
+    from home_service import home_project_data as _home_project_data  # noqa: PLC0415
     for proj in projs:
         repo = proj["repo"]
-        data = srv._home_project_data(proj, running_sprints)
+        data = _home_project_data(proj, running_sprints, srv._sprint_statuses)
         proj_data_list.append(data)
         try:
             all_open_by_repo[repo] = github_client.list_all_open_issues(repo_name=repo)

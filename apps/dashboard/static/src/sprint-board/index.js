@@ -74,6 +74,8 @@ import {
   _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
   _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
   smgmtAddToDraft,
+  // SSE board_invalidated handler (issue #1785)
+  _boardSseOnInvalidated, _boardSseOnVisible,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -198,6 +200,10 @@ globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
 globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
 
 globalThis.smgmtAddToDraft = smgmtAddToDraft;
+
+// SSE board_invalidated handler (issue #1785)
+globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
+globalThis._boardSseOnVisible = _boardSseOnVisible;
 
 // Run-on-schedule toggle (issue #863)
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;

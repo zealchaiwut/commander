@@ -40,9 +40,59 @@ import settings_repo as _settings_repo  # noqa: E402
 
 sys.modules["services.sprint_manager.settings_repo"] = _settings_repo
 
+import subprocess as _subprocess  # noqa: E402
+
 import pytest  # noqa: E402
 
 import services.sprint_manager.agent_browser_runner as _abr  # noqa: E402
+
+
+# ── Call budget fixture (issue #1788) ──────────────────────────────────────────
+
+class _BudgetHelper:
+    """Return value of call_budget_fixture.
+
+    Tracks gh subprocess calls and arbitrary HTTP call counts recorded by tests.
+
+    Usage::
+
+        def test_my_endpoint(call_budget_fixture):
+            # ... drive the endpoint via TestClient ...
+            call_budget_fixture.assert_zero_gh()
+            call_budget_fixture.assert_call_budget("/api/board", 1)
+    """
+
+    def __init__(self) -> None:
+        self._gh_calls: list[list] = []
+        self._http_calls: list[str] = []
+
+    def _record_gh(self, args: list) -> None:
+        self._gh_calls.append(list(args))
+
+    def record_http(self, url: str) -> None:
+        """Record a URL as an observed HTTP call (for manual budget tracking)."""
+        self._http_calls.append(url)
+
+    def assert_zero_gh(self) -> None:
+        """Assert no gh subprocess calls were made since the fixture was created."""
+        assert self._gh_calls == [], (
+            f"Expected 0 gh subprocess calls, got {len(self._gh_calls)}: "
+            f"{self._gh_calls}"
+        )
+
+    def assert_call_budget(self, path_pattern: str, max_calls: int) -> None:
+        """Assert the number of recorded HTTP calls matching path_pattern is ≤ max_calls.
+
+        Usage::
+
+            call_budget_fixture.record_http("/api/board?project=owner/repo")
+            call_budget_fixture.assert_call_budget("/api/board", 1)
+        """
+        matching = [u for u in self._http_calls if path_pattern in u]
+        assert len(matching) <= max_calls, (
+            f"Call budget exceeded for '{path_pattern}': "
+            f"expected ≤ {max_calls}, got {len(matching)} calls: {matching}"
+        )
 
 
 @pytest.fixture(scope="module")
@@ -63,7 +113,10 @@ def static_dashboard_url():
 def agent_browser_available():
     """Skip agent-browser tests when the CLI or Chrome is not set up."""
     if not _abr.is_available():
-        pytest.skip("agent-browser CLI not available (install: npm i -g agent-browser && agent-browser install)")
+        pytest.skip(
+            "agent-browser CLI not available "
+            "(install: npm i -g agent-browser && agent-browser install)"
+        )
 
 
 def agent_browser_open(url: str) -> None:
@@ -77,6 +130,38 @@ def agent_browser_find(selector: str) -> str:
     rc, out, err = _abr.run_cli(["find", selector], timeout=30)
     assert rc == 0, f"agent-browser find {selector!r} failed: {err}"
     return out
+
+
+@pytest.fixture
+def call_budget_fixture(monkeypatch) -> _BudgetHelper:
+    """Shared call-count-budget test harness (issue #1788).
+
+    Monkeypatches subprocess so gh CLI calls are tracked. Exposes
+    assert_zero_gh() and assert_call_budget(path_pattern, max_calls).
+
+    Usage::
+
+        def test_board_zero_gh(call_budget_fixture):
+            # drive the board endpoint via TestClient ...
+            call_budget_fixture.assert_zero_gh()
+    """
+    helper = _BudgetHelper()
+    original_run = _subprocess.run
+    original_popen = _subprocess.Popen
+
+    def _patched_run(args, **kwargs):
+        if isinstance(args, (list, tuple)) and args and args[0] == "gh":
+            helper._record_gh(list(args))
+        return original_run(args, **kwargs)
+
+    def _patched_popen(args, **kwargs):
+        if isinstance(args, (list, tuple)) and args and args[0] == "gh":
+            helper._record_gh(list(args))
+        return original_popen(args, **kwargs)
+
+    monkeypatch.setattr(_subprocess, "run", _patched_run)
+    monkeypatch.setattr(_subprocess, "Popen", _patched_popen)
+    return helper
 
 
 @pytest.fixture(autouse=True)

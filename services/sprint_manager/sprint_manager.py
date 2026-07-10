@@ -2785,6 +2785,7 @@ class _SprintPreflightResult:
     pipeline_on: bool
     start_time: float
     early_exit: bool = False
+    rerun_dispatch_error: bool = False
 
 
 def _read_active_llm_provider() -> str:
@@ -2920,7 +2921,21 @@ def run_sprint_preflight(
             if d["action"] != "skip"
         ]
         if not raw_issues:
-            sys.stdout.write(str("No issues to dispatch for this re-run (all skipped).") + "\n")
+            # AC-3 (issue #1827): when the rerun endpoint confirmed all_moved=True,
+            # 0 dispatchable tickets is a dispatch error — not a quiet no-op.
+            _is_dispatch_error = bool(
+                rerun_manifest.get("all_moved")
+                and rerun_manifest.get("decisions")
+            )
+            if _is_dispatch_error:
+                _missing = [d["issue_num"] for d in rerun_manifest.get("decisions", [])]
+                sys.stdout.write(str(
+                    f"ERROR: rerun manifest reported all_moved=True for "
+                    f"{len(_missing)} ticket(s) but none are dispatchable. "
+                    f"Missing: {', '.join(f'#{n}' for n in _missing)}"
+                ) + "\n")
+            else:
+                sys.stdout.write(str("No issues to dispatch for this re-run (all skipped).") + "\n")
             state = SprintState(
                 sprint_label    = label,
                 sprint_number   = sprint_num,
@@ -2936,6 +2951,7 @@ def run_sprint_preflight(
                 eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
                 dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
                 start_time=time.monotonic(), early_exit=True,
+                rerun_dispatch_error=_is_dispatch_error,
             )
 
         state = SprintState(

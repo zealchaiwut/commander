@@ -183,7 +183,7 @@ class SprintCreateDeps:
     def ticket_labels_applied(self) -> bool:
         for issue in self.tickets:
             labels = {l.get("name") for l in
-                      self.github_client.get_issue(issue, repo_name=self.repo).get("labels", [])}
+                      self.github_client.get_issue_live(issue, repo_name=self.repo).get("labels", [])}
             if self.label_name not in labels:
                 return False
         return True

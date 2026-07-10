@@ -381,6 +381,20 @@ def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     )
 
 
+def get_issue_live(issue_number: int, repo_name: str | None = None) -> dict:
+    """Fetch a single issue from live GitHub, bypassing the SQLite mirror.
+
+    Use this only in write-verify paths where the mirror may not have refreshed
+    yet (e.g. sprint-creation label verification — issue #1822).  Normal read
+    paths should use get_issue() to stay within the zero-quota model.
+    """
+    r = _r(repo_name)
+    return _json(
+        "issue", "view", str(issue_number), "--repo", r,
+        "--json", "number,title,labels,assignees,state,stateReason,url,body,createdAt,updatedAt",
+    )
+
+
 def ensure_sprint_label(sprint_num: int, repo_name: str | None = None) -> None:
     """Create sprint-N label if it doesn't exist (colour #0075ca)."""
     r = _r(repo_name)

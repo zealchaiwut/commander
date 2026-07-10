@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -156,7 +156,7 @@ class TestRunSprintPreflightUsesImmediateParent:
             "Child sprint must branch off its immediate parent, not the root sprint branch."
         )
         # The root branch must NOT appear as the 'off' target
-        lines = [l for l in out.splitlines() if "dry-run" in l and "would create sprint branch" in l]
+        lines = [ln for ln in out.splitlines() if "dry-run" in ln and "would create sprint branch" in ln]
         for line in lines:
             assert "sprint/sprint-5.1" in line, (
                 f"Dry-run line must name the immediate parent. Got: {line}"
@@ -180,7 +180,7 @@ class TestRunSprintPreflightUsesImmediateParent:
         coder_dir = tmp_path / "coder"
         coder_dir.mkdir()
         out = self._run_preflight_dry_run("sprint-5", sprints_dir, coder_dir, capsys)
-        dryrun_lines = [l for l in out.splitlines() if "dry-run" in l and "would create" in l]
+        dryrun_lines = [ln for ln in out.splitlines() if "dry-run" in ln and "would create" in ln]
         assert dryrun_lines, f"Expected dry-run branch creation log. Got:\n{out}"
         assert "develop" in dryrun_lines[0], (
             f"Base sprint must branch off develop. Got: {dryrun_lines[0]}"

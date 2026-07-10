@@ -23,10 +23,17 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-# aggregate_cache lives in apps/dashboard/ (parent of this routers/ package)
+# aggregate_cache lives in apps/dashboard/ (parent of this routers/ package).
+# Force it to position 0 so `import api_volume` resolves to
+# apps/dashboard/api_volume.py, not apps/dashboard/routers/api_volume.py,
+# even when tests insert the routers dir first.
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
-if str(_DASHBOARD_ROOT) not in sys.path:
-    sys.path.insert(0, str(_DASHBOARD_ROOT))
+_dashboard_s = str(_DASHBOARD_ROOT)
+try:
+    sys.path.remove(_dashboard_s)
+except ValueError:
+    pass
+sys.path.insert(0, _dashboard_s)
 
 # api_volume lives in apps/dashboard — same dir that's on sys.path at runtime
 try:

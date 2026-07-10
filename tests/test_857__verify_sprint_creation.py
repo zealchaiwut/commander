@@ -297,6 +297,9 @@ class FakeGH:
     def get_issue(self, issue_number, repo_name=None):
         return {"labels": [{"name": n} for n in self.applied.get(issue_number, set())]}
 
+    def get_issue_live(self, issue_number, repo_name=None):
+        return self.get_issue(issue_number, repo_name)
+
     def update_labels(self, issue_id, add, remove, repo_name=None):
         s = self.applied.setdefault(issue_id, set())
         for a in add:
@@ -380,7 +383,7 @@ def project_html() -> str:
 def _ns_submit_handler(html: str) -> str:
     start = html.find("getElementById('ns-submit-btn').addEventListener")
     assert start >= 0, "New Sprint submit handler not found"
-    end = html.find("Ghost confirm modal wiring", start)
+    end = html.find("New Ticket modal wiring", start)
     assert end > start
     return html[start:end]
 

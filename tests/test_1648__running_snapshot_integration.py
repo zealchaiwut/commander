@@ -168,7 +168,7 @@ class TestComprehensiveNoGitHubCalls:
 # ---------------------------------------------------------------------------
 
 class TestFlagOnFirstPaintFetchCount:
-    """_smgmtRunningFirstPaint() must issue exactly ONE fetch() call, not a fan-out."""
+    """_smgmtRunningFirstPaint() issues exactly ONE fetch() call (no fan-out), always."""
 
     def _extract_first_paint_fn(self) -> str:
         """Extract the body of _smgmtRunningFirstPaint() from project.html."""
@@ -213,26 +213,6 @@ class TestFlagOnFirstPaintFetchCount:
             "_smgmtRunningFirstPaint() appears to call /api/sprints/* — unexpected fan-out"
         )
 
-    def test_flag_check_gates_first_paint_call(self):
-        """The first-paint path is only taken when running_aggregate feature flag is ON."""
-        # The flag branch lives in _smgmtLivePollRestart, not inside _smgmtRunningFirstPaint
-        # itself — confirm the flag check and the first-paint call are both present in the HTML
-        assert "running_aggregate" in PROJECT_HTML
-        assert "_smgmtRunningFirstPaint()" in PROJECT_HTML
-        # They should appear in the same function body (_smgmtLivePollRestart)
-        restart_match = re.search(
-            r"function _smgmtLivePollRestart\(\)(.*?)^\}",
-            PROJECT_HTML,
-            re.DOTALL | re.MULTILINE,
-        )
-        assert restart_match is not None, "_smgmtLivePollRestart not found in project.html"
-        restart_body = restart_match.group(1)
-        assert "running_aggregate" in restart_body, (
-            "Flag check 'running_aggregate' not found inside _smgmtLivePollRestart()"
-        )
-        assert "_smgmtRunningFirstPaint()" in restart_body, (
-            "_smgmtRunningFirstPaint() call not found inside _smgmtLivePollRestart()"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -275,14 +255,10 @@ class TestSSEReplacesPoll:
         assert "_smgmtSseConnect(" in body, (
             "_smgmtLivePollRestart must call _smgmtSseConnect() — SSE replaces the 2s poll"
         )
-        assert "running_aggregate" in body, (
-            "_smgmtLivePollRestart must still branch on running_aggregate flag "
-            "for first-paint (existing AC of #1647)"
-        )
         assert "_smgmtRunningFirstPaint()" in body
 
     def test_first_paint_still_present(self):
-        """_smgmtRunningFirstPaint() must still be called for the flag-ON first-paint path."""
+        """_smgmtRunningFirstPaint() must still be called from _smgmtLivePollRestart."""
         assert "_smgmtRunningFirstPaint()" in PROJECT_HTML
 
     def test_eventsource_not_in_first_paint(self):

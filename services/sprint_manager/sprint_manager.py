@@ -1482,11 +1482,17 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
 # gates.py (issue #1281); re-imported above via the gates import block.
 
 
-def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> None:
+def _create_sprint_branch(
+    sprint_branch: str,
+    parent_ref: str = "develop",
+    fallback_ref: str = "",
+) -> None:
     """Create sprint/<label> off parent_ref and push to origin (idempotent).
 
     Base sprints (sprint-N) are created off develop; child sprints (sprint-N.M)
-    off the base sprint branch (sprint/sprint-N). See sprint-lifecycle.md.
+    off their immediate parent sub-sprint branch (from plan.json ``parent``).
+    If ``parent_ref`` cannot be resolved on origin and ``fallback_ref`` is
+    provided, falls back to ``fallback_ref`` with a WARN. See sprint-lifecycle.md.
     """
     # Check if branch already exists on remote
     ok, _, _ = _try("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{sprint_branch}")
@@ -1507,11 +1513,20 @@ def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> No
     if not ok or not parent_sha:
         ok, parent_sha, _ = _try("git", "rev-parse", parent_ref)
     if not ok or not parent_sha:
-        structured_log.warn(
-            "sprint_branch_sha_resolve_failed",
-            f"could not resolve {parent_ref!r} SHA — using HEAD for sprint branch",
-        )
-        parent_sha = "HEAD"
+        if fallback_ref:
+            structured_log.warn(
+                "sprint_branch_parent_missing",
+                f"parent branch {parent_ref!r} not found on origin — falling back to {fallback_ref!r}",
+            )
+            ok, parent_sha, _ = _try("git", "rev-parse", f"origin/{fallback_ref}")
+            if not ok or not parent_sha:
+                ok, parent_sha, _ = _try("git", "rev-parse", fallback_ref)
+        if not ok or not parent_sha:
+            structured_log.warn(
+                "sprint_branch_sha_resolve_failed",
+                f"could not resolve {parent_ref!r} SHA — using HEAD for sprint branch",
+            )
+            parent_sha = "HEAD"
     _run("git", "branch", sprint_branch, parent_sha)
     _run("git", "push", "-u", "origin", sprint_branch)
     sys.stdout.write(str(f"  Sprint branch {sprint_branch!r} created and pushed.") + "\n")
@@ -2862,8 +2877,10 @@ def run_sprint_preflight(
         sys.stdout.write(str(f"  api-url:      {cfg.api_url}") + "\n")
 
     # Determine the sprint branch name and per-ticket merge target.
-    # Child sprint branches (sprint/sprint-N.M) are created off the base branch;
-    # per-ticket merges land on THIS sprint's branch (gates fail → no merge).
+    # Child sprint branches (sprint/sprint-N.M) are created off their immediate
+    # parent sub-sprint branch (plan.json ``parent``), falling back to the root
+    # sprint branch when no parent is recorded; per-ticket merges land on THIS
+    # sprint's branch (gates fail → no merge).
     # Passing --target-branch develop explicitly is still supported as a
     # deliberate override (AC-5 of issue #269).
     sprint_branch = _sprint_branch_for_label(label)
@@ -3045,13 +3062,18 @@ def run_sprint_preflight(
 
     # Create sprint branch (idempotent). Skip when merging directly into develop.
     if target_branch != "develop":
-        parent_ref = base_merge_target if _is_child_sprint_label(label) else "develop"
+        if _is_child_sprint_label(label):
+            parent_ref = _immediate_parent_branch(label, cfg)
+            fallback_ref = base_merge_target if parent_ref != base_merge_target else ""
+        else:
+            parent_ref = "develop"
+            fallback_ref = ""
         if dry_run:
             sys.stdout.write(str(
                 f"  [dry-run] would create sprint branch {sprint_branch!r} off {parent_ref}"
             ) + "\n")
         else:
-            _create_sprint_branch(sprint_branch, parent_ref=parent_ref)
+            _create_sprint_branch(sprint_branch, parent_ref=parent_ref, fallback_ref=fallback_ref)
     else:
         sys.stdout.write(str(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.") + "\n")
 

@@ -4,6 +4,9 @@ Module-level dict keyed by fully-qualified ``owner/repo`` strings. TTL
 defaults to 8 s and is overridable via the ``BOARD_CACHE_TTL_S`` env var
 without code changes.
 
+Uses aggregate_cache (issue #1786) to co-invalidate the home cache on every
+board eviction so mutation hooks need only call ``invalidate_board``.
+
 Public API::
 
     get_board_cache(project: str) -> tuple[dict, float] | None
@@ -15,8 +18,22 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Any, Optional
+
+# aggregate_cache lives in apps/dashboard/ (parent of this routers/ package).
+# Force it to position 0 so `import api_volume` resolves to
+# apps/dashboard/api_volume.py, not apps/dashboard/routers/api_volume.py,
+# even when tests insert the routers dir first.
+_DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
+_dashboard_s = str(_DASHBOARD_ROOT)
+try:
+    sys.path.remove(_dashboard_s)
+except ValueError:
+    pass
+sys.path.insert(0, _dashboard_s)
 
 # api_volume lives in apps/dashboard — same dir that's on sys.path at runtime
 try:
@@ -25,6 +42,7 @@ except ImportError:
     _api_volume = None  # type: ignore[assignment]
 
 # ── TTL ───────────────────────────────────────────────────────────────────────
+
 
 def current_ttl() -> int:
     """Return the configured TTL in seconds (read from env on every call).
@@ -77,8 +95,17 @@ def store_board_cache(project: str, snapshot: dict) -> None:
 
 
 def invalidate_board(project: str) -> None:
-    """Evict *project*'s cache entry and broadcast board_invalidated over SSE (issue #1785)."""
+    """Evict *project*'s cache entry and broadcast board_invalidated over SSE (issue #1785).
+
+    Also evicts the home-cache entry for the same project so sprint mutations
+    invalidate both caches from a single call site (issue #1786).
+    """
     _cache.pop(project, None)
+    try:
+        import aggregate_cache as _agg  # noqa: PLC0415
+        _agg.invalidate(project, "home")
+    except Exception:
+        pass
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

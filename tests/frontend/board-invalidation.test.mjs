@@ -1,10 +1,9 @@
 /**
  * Frontend behavioral tests for board_invalidated SSE handler (issue #1785).
  *
- * AC4: flag ON, tab visible → board_invalidated event triggers debounce timer ≥ 2 s
+ * AC4: tab visible → board_invalidated event triggers debounce timer ≥ 2 s
  * AC5: visibility guard — no timer while tab hidden; fires once on tab-show
  * AC6: rapid events within debounce window cancel the previous timer (no storm)
- * AC7: flag OFF → no timer registered on board_invalidated
  *
  * Run with: node --test tests/frontend/board-invalidation.test.mjs
  */
@@ -292,34 +291,3 @@ test('AC6: rapid board_invalidated events result in exactly one pending timer (d
   }
 });
 
-
-// ── AC7: flag OFF → no listener behavior ─────────────────────────────────────
-
-test('AC7: board_invalidated with flag OFF does not set any timer', () => {
-  const ft = _installFakeTimers();
-  try {
-    globalThis._commanderFeatures = { board_aggregate: false };
-    globalThis.document.hidden = false;
-
-    _boardSseOnInvalidated('owner/repo');
-
-    assert.equal(ft.timers.length, 0, 'flag OFF must not register any timer');
-  } finally {
-    ft.restore();
-  }
-});
-
-test('AC7: board_invalidated with no feature flags object does not set any timer', () => {
-  const ft = _installFakeTimers();
-  try {
-    globalThis._commanderFeatures = null;
-    globalThis.document.hidden = false;
-
-    _boardSseOnInvalidated('owner/repo');
-
-    assert.equal(ft.timers.length, 0, 'null features must not register any timer');
-  } finally {
-    ft.restore();
-    globalThis._commanderFeatures = {};
-  }
-});

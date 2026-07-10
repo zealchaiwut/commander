@@ -2053,7 +2053,9 @@ Replace the existing draft (${data.existing_label})?`
       return;
     _histExpanded.add(label);
     _histRenderLedger(_histLedgerData);
-    const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
+    const el = document.querySelector(
+      `.hist-card[data-label="${CSS.escape(label)}"]`
+    );
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -2230,7 +2232,13 @@ Replace the existing draft (${data.existing_label})?`
     if (wall != null)
       chips.push(_histStatChip("ti-clock", "wall", _histFmtSecs(wall)));
     if (hasRuns) {
-      chips.push(_histStatChip("ti-robot", "agent time", _histFmtSecs(stats.agent_total_seconds)));
+      chips.push(
+        _histStatChip(
+          "ti-robot",
+          "agent time",
+          _histFmtSecs(stats.agent_total_seconds)
+        )
+      );
     }
     if (tokens != null) {
       let tokVal = _histFmtTokens(tokens);
@@ -2244,34 +2252,44 @@ Replace the existing draft (${data.existing_label})?`
       if (stats.fix_round_count > 0) {
         const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
         const word = stats.fix_round_count === 1 ? "fix round" : "fix rounds";
-        chips.push(_histStatChip(
-          "ti-refresh",
-          "",
-          stats.fix_round_count + " " + word + (refs ? " (" + refs + ")" : ""),
-          "stat-chip--fix"
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-refresh",
+            "",
+            stats.fix_round_count + " " + word + (refs ? " (" + refs + ")" : ""),
+            "stat-chip--fix"
+          )
+        );
       }
       if (stats.slowest_ticket) {
-        chips.push(_histStatChip(
-          "ti-hourglass-low",
-          "slowest",
-          "#" + stats.slowest_ticket.ticket + " \xB7 " + _histFmtSecs(stats.slowest_ticket.seconds)
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-hourglass-low",
+            "slowest",
+            "#" + stats.slowest_ticket.ticket + " \xB7 " + _histFmtSecs(stats.slowest_ticket.seconds)
+          )
+        );
       }
       if (stats.parallel_saved_seconds != null) {
-        chips.push(_histStatChip(
-          "ti-arrows-split",
-          "parallel saved",
-          "~" + _histFmtSecs(stats.parallel_saved_seconds)
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-arrows-split",
+            "parallel saved",
+            "~" + _histFmtSecs(stats.parallel_saved_seconds)
+          )
+        );
       }
       if (stats.coder_backend_split && stats.coder_backend_split.cline_count > 0) {
         const bs = stats.coder_backend_split;
         const parts = [];
         if (bs.cline_count > 0)
-          parts.push("cline: " + bs.cline_count + " \xB7 " + _histFmtSecs(bs.cline_seconds));
+          parts.push(
+            "cline: " + bs.cline_count + " \xB7 " + _histFmtSecs(bs.cline_seconds)
+          );
         if (bs.claude_code_count > 0)
-          parts.push("claude-code: " + bs.claude_code_count + " \xB7 " + _histFmtSecs(bs.claude_code_seconds));
+          parts.push(
+            "claude-code: " + bs.claude_code_count + " \xB7 " + _histFmtSecs(bs.claude_code_seconds)
+          );
         if (parts.length)
           chips.push(_histStatChip("ti-server", "backend", parts.join(" | ")));
       }
@@ -2280,12 +2298,14 @@ Replace the existing draft (${data.existing_label})?`
         const reason = failed ? String(failed.failure_reason || "") : "";
         const crashAgent = /tester/i.test(reason) ? "tester" : "coder";
         const tail = reason ? " \xB7 " + reason.split("\n")[0].slice(0, 40) : "";
-        chips.push(_histStatChip(
-          "ti-alert-triangle",
-          "crash",
-          "#" + stats.crash.ticket + " \xB7 " + crashAgent + tail,
-          "stat-chip--crash"
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-alert-triangle",
+            "crash",
+            "#" + stats.crash.ticket + " \xB7 " + crashAgent + tail,
+            "stat-chip--crash"
+          )
+        );
       }
     }
     const splitHtml = hasRuns ? _histSplitBarHtml(stats) : "";
@@ -2295,9 +2315,6 @@ Replace the existing draft (${data.existing_label})?`
   </div>`;
   }
   function _histSeedRunStatsFromInline(sprints) {
-    if (!(globalThis._commanderFeatures && globalThis._commanderFeatures.history_aggregate === true)) {
-      return;
-    }
     if (!Array.isArray(sprints))
       return;
     for (const s of sprints) {
@@ -2371,9 +2388,7 @@ Replace the existing draft (${data.existing_label})?`
       } else if (doc.status === "failed") {
         body = '<span class="ps-skipped">Documenter failed</span>';
       } else if ((doc.files_touched || []).length) {
-        body = (doc.files_touched || []).map(
-          (f) => `<code class="ps-file">${escHtml(String(f))}</code>`
-        ).join("");
+        body = (doc.files_touched || []).map((f) => `<code class="ps-file">${escHtml(String(f))}</code>`).join("");
         if (doc.commit_sha) {
           body += `<div class="ps-meta">Commit ${escHtml(String(doc.commit_sha).slice(0, 8))}</div>`;
         }
@@ -2403,9 +2418,13 @@ Replace the existing draft (${data.existing_label})?`
         }
         const counts = [];
         if (rev.blockers)
-          counts.push(rev.blockers + " blocker" + (rev.blockers !== 1 ? "s" : ""));
+          counts.push(
+            rev.blockers + " blocker" + (rev.blockers !== 1 ? "s" : "")
+          );
         if (rev.suggestions)
-          counts.push(rev.suggestions + " suggestion" + (rev.suggestions !== 1 ? "s" : ""));
+          counts.push(
+            rev.suggestions + " suggestion" + (rev.suggestions !== 1 ? "s" : "")
+          );
         if (rev.nits)
           counts.push(rev.nits + " nit" + (rev.nits !== 1 ? "s" : ""));
         if (counts.length)
@@ -2547,14 +2566,18 @@ Replace the existing draft (${data.existing_label})?`
     const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
     const chips = [];
     if (wall != null)
-      chips.push(`<span class="hist-metric-chip">wall ${_histFmtSecs(wall)}</span>`);
+      chips.push(
+        `<span class="hist-metric-chip">wall ${_histFmtSecs(wall)}</span>`
+      );
     if (hasRuns) {
       chips.push(
         `<span class="hist-metric-chip">agent time ${_histFmtSecs(stats.agent_total_seconds)}</span>`
       );
     }
     if (tokens != null) {
-      chips.push(`<span class="hist-metric-chip">tokens ${_histFmtTokens(tokens)}</span>`);
+      chips.push(
+        `<span class="hist-metric-chip">tokens ${_histFmtTokens(tokens)}</span>`
+      );
     }
     if (hasRuns && stats.fix_round_count > 0) {
       const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
@@ -2582,7 +2605,9 @@ Replace the existing draft (${data.existing_label})?`
     const rows = tickets.map((t) => {
       const dur = Math.max(0, (t.end || 0) - (t.start || 0));
       const fixN = (t.segments || []).filter((seg) => seg.fix_round).length;
-      let durLabel = _histFmtSecs(dur || t.segments?.reduce((n, seg) => n + (seg.duration || 0), 0));
+      let durLabel = _histFmtSecs(
+        dur || t.segments?.reduce((n, seg) => n + (seg.duration || 0), 0)
+      );
       if (fixN)
         durLabel += " \xB7 fix";
       const segs = (t.segments || []).map((seg) => {
@@ -2904,7 +2929,9 @@ Replace the existing draft (${data.existing_label})?`
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
       const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-      const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
+      const childDisplay = sprintLabelDisplay(
+        _histNextChildLabel(rawLabel)
+      ).replace("Sprint ", "");
       return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
@@ -3064,7 +3091,13 @@ Replace the existing draft (${data.existing_label})?`
         g.children.push(s);
       g.order = Math.min(g.order, i);
     }
-    const _UNSETTLED = /* @__PURE__ */ new Set(["needs_rework", "failed", "cancelled", "ready_to_merge", "running"]);
+    const _UNSETTLED = /* @__PURE__ */ new Set([
+      "needs_rework",
+      "failed",
+      "cancelled",
+      "ready_to_merge",
+      "running"
+    ]);
     const _groupUnsettled = (g) => [g.baseSprint, ...g.children || []].filter(Boolean).some((s) => _UNSETTLED.has((s.lifecycle_state || "").toLowerCase()));
     groupOrder.sort((a, b) => {
       const ua = _groupUnsettled(byBase.get(a)) ? 0 : 1;
@@ -3075,7 +3108,9 @@ Replace the existing draft (${data.existing_label})?`
     });
     return groupOrder.map((baseLabel) => {
       const g = byBase.get(baseLabel);
-      g.children.sort((a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub);
+      g.children.sort(
+        (a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub
+      );
       return { baseLabel, baseSprint: g.baseSprint, children: g.children };
     });
   }
@@ -3210,7 +3245,12 @@ Replace the existing draft (${data.existing_label})?`
         accN += 1;
       }
     });
-    return { done, failed, avgAcc: accN ? accSum / accN : null, count: group.length };
+    return {
+      done,
+      failed,
+      avgAcc: accN ? accSum / accN : null,
+      count: group.length
+    };
   }
   function _histFoldAggHtml(group) {
     const a = _histFoldAgg(group);
@@ -3262,7 +3302,9 @@ Replace the existing draft (${data.existing_label})?`
       btn.disabled = true;
     }
     try {
-      const resp = await fetch("/scan-stale-branches?repo=" + encodeURIComponent(repo));
+      const resp = await fetch(
+        "/scan-stale-branches?repo=" + encodeURIComponent(repo)
+      );
       if (resp.ok) {
         const data = await resp.json();
         _histStaleBySprint = data.by_sprint || {};
@@ -3285,16 +3327,21 @@ Replace the existing draft (${data.existing_label})?`
     const s = (_histLedgerData || []).find((x) => x.label === label);
     if (!s || !s.reconciliation)
       return;
-    const staleCheck = (s.reconciliation.checks || []).find((c) => !c.ok && c.name === "stale_labels");
+    const staleCheck = (s.reconciliation.checks || []).find(
+      (c) => !c.ok && c.name === "stale_labels"
+    );
     if (!staleCheck)
       return;
     const tickets = Array.isArray(staleCheck.tickets) ? staleCheck.tickets : [];
     try {
-      const resp = await fetch("/api/sprints/" + encodeURIComponent(label) + "/clear-stale-labels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, tickets })
-      });
+      const resp = await fetch(
+        "/api/sprints/" + encodeURIComponent(label) + "/clear-stale-labels",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: repo, tickets })
+        }
+      );
       if (resp.ok) {
         await _histLoadLedger2();
       }
@@ -3509,7 +3556,9 @@ Replace the existing draft (${data.existing_label})?`
     return _nextSprintSublabel(parentLabel);
   }
   function _histBulkSignOffTargets(sprints) {
-    const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+    const groups = _histGroupSprints(sprints || []).filter(
+      _histGroupHasActionable
+    );
     const targets = [];
     const skipLabels = /* @__PURE__ */ new Set();
     for (const g of groups) {
@@ -3554,9 +3603,11 @@ Replace the existing draft (${data.existing_label})?`
       const disp = sprintLabelDisplay(t.label);
       return t.kind === "bulk" ? `${disp} (bulk complete lineage)` : disp;
     }).join("\n");
-    if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
+    if (!confirm(
+      `Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
 
-${listing}`)) {
+${listing}`
+    )) {
       return;
     }
     if (typeof finishSprintAndWait !== "function") {
@@ -3583,7 +3634,9 @@ ${listing}`)) {
       try {
         if (kind === "bulk") {
           if (typeof bulkCompleteLineageAndWait !== "function") {
-            throw new Error("Bulk complete helper unavailable \u2014 refresh the page.");
+            throw new Error(
+              "Bulk complete helper unavailable \u2014 refresh the page."
+            );
           }
           await bulkCompleteLineageAndWait(label);
         } else {
@@ -3598,7 +3651,10 @@ ${listing}`)) {
       } catch (e) {
         failed = { label, message: e.message || String(e) };
         if (typeof _smgmtBoardLog === "function") {
-          _smgmtBoardLog(`\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`, "err");
+          _smgmtBoardLog(
+            `\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`,
+            "err"
+          );
         }
         break;
       }
@@ -5078,100 +5134,48 @@ Resolve manually and re-run Bulk complete.`,
       if (typeof _smgmtEnsureCapData === "function") {
         _smgmtEnsureCapData();
       }
-      const _feats = typeof globalThis !== "undefined" ? globalThis._commanderFeatures : null;
-      const _useBoardAggregate = Boolean(_feats && _feats.board_aggregate === true);
-      let data;
-      if (_useBoardAggregate) {
-        _smgmtAggregateCards = null;
-        const aggResp = await fetch(
-          "/api/board?project=" + encodeURIComponent(repo)
-        );
-        if (!aggResp.ok) {
-          let msg = "Failed to load board.";
-          const d = await aggResp.json().catch(() => null);
-          const detail = d && typeof d.detail === "string" ? d.detail : "";
-          if (aggResp.status === 429 || /rate limit/i.test(detail)) {
-            msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
-          }
-          throw new Error(msg);
+      _smgmtAggregateCards = null;
+      const aggResp = await fetch(
+        "/api/board?project=" + encodeURIComponent(repo)
+      );
+      if (!aggResp.ok) {
+        let msg = "Failed to load board.";
+        const d = await aggResp.json().catch(() => null);
+        const detail = d && typeof d.detail === "string" ? d.detail : "";
+        if (aggResp.status === 429 || /rate limit/i.test(detail)) {
+          msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
         }
-        const agg = await aggResp.json();
-        _smgmtAggregateCards = _smgmtBuildAggCards(agg);
-        if (typeof window !== "undefined")
-          window._smgmtAggregateCards = _smgmtAggregateCards;
-        if (_smgmtLiveCacheRepo !== repo) {
-          _smgmtLiveCacheRepo = repo;
-          for (const k of Object.keys(_smgmtLiveCache))
-            delete _smgmtLiveCache[k];
-        }
-        if (typeof _smgmtLingerRestore === "function")
-          _smgmtLingerRestore(repo);
-        const prevRunningAgg = new Set(_smgmtRunningLabels);
-        _smgmtRunningLabels = /* @__PURE__ */ new Set();
-        _smgmtAnySprintRunning = false;
-        for (const card of (agg.sections || {}).running || []) {
-          if (card.label)
-            _smgmtRunningLabels.add(card.label);
-        }
-        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-        for (const label of prevRunningAgg) {
-          if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
-            _smgmtLingerStart(label);
-          }
-        }
-        if (optimisticRunningLabel) {
-          _smgmtRunningLabels.add(optimisticRunningLabel);
-          _smgmtAnySprintRunning = true;
-        }
-        data = _smgmtAggToRenderData(agg);
-      } else {
-        _smgmtAggregateCards = null;
-        if (typeof window !== "undefined")
-          window._smgmtAggregateCards = null;
-        const [resp, runningResp] = await Promise.all([
-          fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-          fetch("/api/sprints/running-all").catch(() => null)
-        ]);
-        if (!resp.ok) {
-          let msg = "Failed to load sprints.";
-          const d = await resp.json().catch(() => null);
-          const detail = d && typeof d.detail === "string" ? d.detail : "";
-          if (resp.status === 429 || /rate limit/i.test(detail)) {
-            msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
-          }
-          throw new Error(msg);
-        }
-        data = await resp.json();
-        if (_smgmtLiveCacheRepo !== repo) {
-          _smgmtLiveCacheRepo = repo;
-          for (const k of Object.keys(_smgmtLiveCache))
-            delete _smgmtLiveCache[k];
-        }
-        if (typeof _smgmtLingerRestore === "function")
-          _smgmtLingerRestore(repo);
-        const prevRunning = new Set(_smgmtRunningLabels);
-        _smgmtRunningLabels = /* @__PURE__ */ new Set();
-        _smgmtAnySprintRunning = false;
-        if (runningResp && runningResp.ok) {
-          const runningData = await runningResp.json();
-          const running = runningData.running || [];
-          running.forEach((r) => {
-            if (r.project === repo) {
-              _smgmtRunningLabels.add(r.sprint_label);
-            }
-          });
-          _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
-        }
-        for (const label of prevRunning) {
-          if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
-            _smgmtLingerStart(label);
-          }
-        }
-        if (optimisticRunningLabel) {
-          _smgmtRunningLabels.add(optimisticRunningLabel);
-          _smgmtAnySprintRunning = true;
+        throw new Error(msg);
+      }
+      const agg = await aggResp.json();
+      _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+      if (typeof window !== "undefined")
+        window._smgmtAggregateCards = _smgmtAggregateCards;
+      if (_smgmtLiveCacheRepo !== repo) {
+        _smgmtLiveCacheRepo = repo;
+        for (const k of Object.keys(_smgmtLiveCache))
+          delete _smgmtLiveCache[k];
+      }
+      if (typeof _smgmtLingerRestore === "function")
+        _smgmtLingerRestore(repo);
+      const prevRunningAgg = new Set(_smgmtRunningLabels);
+      _smgmtRunningLabels = /* @__PURE__ */ new Set();
+      _smgmtAnySprintRunning = false;
+      for (const card of (agg.sections || {}).running || []) {
+        if (card.label)
+          _smgmtRunningLabels.add(card.label);
+      }
+      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      for (const label of prevRunningAgg) {
+        if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
+          _smgmtLingerStart(label);
         }
       }
+      if (optimisticRunningLabel) {
+        _smgmtRunningLabels.add(optimisticRunningLabel);
+        _smgmtAnySprintRunning = true;
+      }
+      const data = _smgmtAggToRenderData(agg);
       _smgmtRender(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
         _smgmtHydrateSchedToggles(repo);
@@ -5206,7 +5210,9 @@ Resolve manually and re-run Bulk complete.`,
     return m && m[2] ? parseInt(m[2], 10) : 0;
   }
   function _smgmtChildrenForParent(parentLabel, parents, order) {
-    const fromMeta = (order || []).filter((l) => (parents || {})[l] === parentLabel);
+    const fromMeta = (order || []).filter(
+      (l) => (parents || {})[l] === parentLabel
+    );
     const fromLabel = _smgmtSprintSubIndex(parentLabel) === 0 ? (order || []).filter(
       (l) => l !== parentLabel && _smgmtSprintBaseLabel(l) === parentLabel && _smgmtSprintSubIndex(l) > 0
     ) : [];
@@ -5240,7 +5246,9 @@ Resolve manually and re-run Bulk complete.`,
     return [...members].sort(_smgmtCompareSprintLabels)[members.length - 1];
   }
   function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
-    return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+    return Boolean(
+      _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order)
+    );
   }
   function _smgmtShouldCollapseToLineage(label, parents, rerunInto, order) {
     if (_smgmtShouldCollapseParent(label, parents, rerunInto, order))
@@ -5285,7 +5293,12 @@ Resolve manually and re-run Bulk complete.`,
     const _rerunInto = data.sprint_rerun_into || {};
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      if (_smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
+      if (_smgmtShouldCollapseToLineage(
+        label,
+        _sprintParents,
+        _rerunInto,
+        orderedLabelsRaw
+      )) {
         const latest = _smgmtLatestLineageLabel(
           _smgmtSprintBaseLabel(label),
           _sprintParents,
@@ -5316,7 +5329,11 @@ Resolve manually and re-run Bulk complete.`,
     _smgmtFinishedLabels = _finishedSet;
     const focusGuideEl = document.getElementById("smgmt-focus-guide");
     if (focusGuideEl) {
-      focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
+      focusGuideEl.innerHTML = _smgmtFocusGuideHtml(
+        data,
+        orderedLabels,
+        bySprint
+      );
     }
     const _planStates = data.sprint_plan_states || {};
     const _buildCard = (label) => {
@@ -5356,8 +5373,12 @@ Resolve manually and re-run Bulk complete.`,
       );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     };
-    const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
-    const otherLabels = orderedLabels.filter((l) => !_smgmtResolvedAncestors.has(l));
+    const lineageLabels = orderedLabels.filter(
+      (l) => _smgmtResolvedAncestors.has(l)
+    );
+    const otherLabels = orderedLabels.filter(
+      (l) => !_smgmtResolvedAncestors.has(l)
+    );
     const mergeLabels = [];
     const reworkLabels = [];
     const runningLabels = [];
@@ -5378,12 +5399,18 @@ Resolve manually and re-run Bulk complete.`,
       if (!labels.length)
         return "Lineage";
       const first = sprintLabelDisplay(labels[0]).replace("Sprint ", "");
-      const last = sprintLabelDisplay(labels[labels.length - 1]).replace("Sprint ", "");
+      const last = sprintLabelDisplay(labels[labels.length - 1]).replace(
+        "Sprint ",
+        ""
+      );
       return first === last ? `Lineage ${first}` : `Lineage ${first} \u2192 ${last}`;
     };
     let cards = "";
     if (lineageLabels.length > 0) {
-      cards += sectionLabel(lineageRangeLabel(lineageLabels), "smgmt-section-lineage");
+      cards += sectionLabel(
+        lineageRangeLabel(lineageLabels),
+        "smgmt-section-lineage"
+      );
       cards += `<div class="smgmt-board-section smgmt-board-section--lineage">`;
       cards += lineageLabels.map(_buildCard).join("");
       cards += `</div>`;
@@ -5599,33 +5626,10 @@ Resolve manually and re-run Bulk complete.`,
   function _smgmtHasLedgerRun(label) {
     return Boolean((_smgmtData?.sprint_has_run || {})[label]);
   }
-  async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
+  async function _smgmtFetchMissingOutcomes(orderedLabels, _bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    if (_smgmtAggregateCards) {
-      for (const label of orderedLabels) {
-        if (_smgmtRunningLabels.has(label))
-          continue;
-        if (_smgmtIsFreshRerunSprint(label))
-          continue;
-        if (_smgmtOutcomeCache[label] !== void 0)
-          continue;
-        const card = _smgmtAggregateCards[label];
-        if (!card || card.outcome == null)
-          continue;
-        const outcome = card.outcome;
-        _smgmtOutcomeCache[label] = outcome;
-        const isAncestor = _smgmtResolvedAncestors.has(label);
-        if (isAncestor) {
-          _smgmtUpdateAncestorRow(label, outcome);
-        } else {
-          _smgmtInjectOutcomeBand(label, outcome);
-        }
-      }
-      return;
-    }
-    const toFetch = [];
     for (const label of orderedLabels) {
       if (_smgmtRunningLabels.has(label))
         continue;
@@ -5633,89 +5637,31 @@ Resolve manually and re-run Bulk complete.`,
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
-      if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label))
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card || card.outcome == null)
         continue;
-      toFetch.push(label);
+      const outcome = card.outcome;
+      _smgmtOutcomeCache[label] = outcome;
+      const isAncestor = _smgmtResolvedAncestors.has(label);
+      if (isAncestor) {
+        _smgmtUpdateAncestorRow(label, outcome);
+      } else {
+        _smgmtInjectOutcomeBand(label, outcome);
+      }
     }
-    await Promise.all(
-      toFetch.map(async (label) => {
-        const isAncestor = _smgmtResolvedAncestors.has(label);
-        const previewQs = isAncestor ? "&preview=1" : "";
-        try {
-          const resp = await fetch(
-            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}${previewQs}`
-          );
-          if (resp.ok) {
-            const outcome = await resp.json();
-            _smgmtOutcomeCache[label] = outcome;
-            if (isAncestor) {
-              _smgmtUpdateAncestorRow(label, outcome);
-            } else {
-              _smgmtInjectOutcomeBand(label, outcome);
-            }
-            return;
-          }
-          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-          _smgmtOutcomeCache[label] = fallback;
-          if (isAncestor && fallback) {
-            _smgmtUpdateAncestorRow(label, fallback);
-          } else if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, null);
-          }
-        } catch (_) {
-          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-          _smgmtOutcomeCache[label] = fallback;
-          if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, fallback || null);
-          }
-        }
-      })
-    );
-  }
-  function _smgmtOutcomeFromBoard(label, tickets) {
-    if (!tickets || tickets.length === 0)
-      return null;
-    const issues = tickets.map((t) => {
-      const labelNames = (t.labels || []).map((l) => l.name);
-      let outcome = "skipped";
-      if (labelNames.includes("UAT-approved") || t.status === "done")
-        outcome = "done";
-      else if (labelNames.includes("needs-rework") || labelNames.includes("need-rework"))
-        outcome = "failed";
-      else if (t.status === "uat")
-        outcome = "uat";
-      else if (t.status === "sit" || t.status === "in-progress")
-        outcome = "skipped";
-      return { number: t.number, title: t.title || "", outcome };
-    });
-    const counts = { done: 0, failed: 0, skipped: 0, uat: 0 };
-    for (const iss of issues) {
-      const k = iss.outcome === "uat" ? "uat" : iss.outcome;
-      if (counts[k] !== void 0)
-        counts[k] += 1;
-    }
-    return {
-      sprint_label: label,
-      partial: true,
-      state: "partial",
-      lifecycle: "unknown",
-      counts,
-      wall_clock_secs: 0,
-      issues
-    };
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    if (_smgmtAggregateCards) {
-      await Promise.all(orderedLabels.map(async (label) => {
+    await Promise.all(
+      orderedLabels.map(async (label) => {
         const tickets = bySprint[label] || [];
         if (tickets.length === 0)
           return;
         for (const t of tickets)
           _smgmtTicketToSprint[t.number] = label;
-        const card = _smgmtAggregateCards[label];
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
         if (!card)
           return;
         const estEl = document.getElementById(`smgmt-est-${label}`);
@@ -5725,59 +5671,26 @@ Resolve manually and re-run Bulk complete.`,
           estEl.textContent = `${display} estimated`;
         }
         _smgmtSetSprintTokenEl(label, {});
-      }));
-      return;
-    }
-    await Promise.all(orderedLabels.map(async (label) => {
-      const tickets = bySprint[label] || [];
-      if (tickets.length === 0)
-        return;
-      for (const t of tickets)
-        _smgmtTicketToSprint[t.number] = label;
-      const issueNums = tickets.map((t) => t.number).join(",");
-      try {
-        const resp = await fetch(
-          `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
-        );
-        if (!resp.ok)
-          return;
-        const data = await resp.json();
-        const estEl = document.getElementById(`smgmt-est-${label}`);
-        if (estEl && data.complete && data.total_hours !== null) {
-          const h = data.total_hours;
-          const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
-          estEl.textContent = `${display} estimated`;
-        }
-        _smgmtSetSprintTokenEl(label, data);
-        if (data.issues) {
-          for (const [numStr, est] of Object.entries(data.issues)) {
-            _estDataCache[parseInt(numStr, 10)] = est;
-          }
-          for (const t of tickets) {
-            _smgmtUpdateEstimateBadge(t.number);
-          }
-          _smgmtUpdateColRollup(label, tickets);
-          _smgmtUpdateCapacityGauge(label);
-        }
-      } catch (_) {
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    if (_smgmtAggregateCards) {
-      await Promise.all(orderedLabels.map(async (label) => {
+    await Promise.all(
+      orderedLabels.map(async (label) => {
         if (_smgmtRunningLabels.has(label))
           return;
         if (_smgmtFinishedLabels.has(label))
           return;
-        const card = _smgmtAggregateCards[label];
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
         if (!card || !card.conflicts)
           return;
         const tickets = bySprint[label] || [];
-        const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+        const pending = tickets.filter(
+          (t) => (t.status || "backlog") === "backlog"
+        );
         if (pending.length < 2)
           return;
         for (const t of pending)
@@ -5800,66 +5713,26 @@ Resolve manually and re-run Bulk complete.`,
         }
         for (const t of pending)
           _smgmtUpdateConflictBadge(t.number);
-      }));
-      return;
-    }
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label))
-        return;
-      if (_smgmtFinishedLabels.has(label))
-        return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter(
-        (t) => (t.status || "backlog") === "backlog"
-      );
-      if (pending.length < 2)
-        return;
-      for (const t of pending)
-        delete _smgmtConflictsByIssue[t.number];
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
-        );
-        if (!resp.ok)
-          return;
-        const data = await resp.json();
-        for (const c of data.conflicts || []) {
-          if (!_smgmtConflictsByIssue[c.ticket1_id])
-            _smgmtConflictsByIssue[c.ticket1_id] = [];
-          if (!_smgmtConflictsByIssue[c.ticket2_id])
-            _smgmtConflictsByIssue[c.ticket2_id] = [];
-          _smgmtConflictsByIssue[c.ticket1_id].push({
-            partnerId: c.ticket2_id,
-            partnerTitle: c.ticket2_title,
-            sharedFiles: c.shared_files
-          });
-          _smgmtConflictsByIssue[c.ticket2_id].push({
-            partnerId: c.ticket1_id,
-            partnerTitle: c.ticket1_title,
-            sharedFiles: c.shared_files
-          });
-        }
-        for (const t of pending)
-          _smgmtUpdateConflictBadge(t.number);
-      } catch (_) {
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    if (_smgmtAggregateCards) {
-      await Promise.all(orderedLabels.map(async (label) => {
+    await Promise.all(
+      orderedLabels.map(async (label) => {
         if (_smgmtRunningLabels.has(label))
           return;
         if (_smgmtFinishedLabels.has(label))
           return;
-        const card = _smgmtAggregateCards[label];
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
         if (!card || !card.dep_order)
           return;
         const tickets = bySprint[label] || [];
-        const pending = tickets.filter((t) => (t.status || "backlog") === "backlog");
+        const pending = tickets.filter(
+          (t) => (t.status || "backlog") === "backlog"
+        );
         if (pending.length < 2)
           return;
         const depData = card.dep_order;
@@ -5869,7 +5742,11 @@ Resolve manually and re-run Bulk complete.`,
           const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
           for (const t of pending) {
             if (cycleSet.has(String(t.number))) {
-              _smgmtDepOrderByIssue[t.number] = { upstream: [], downstream: [], inCycle: true };
+              _smgmtDepOrderByIssue[t.number] = {
+                upstream: [],
+                downstream: [],
+                inCycle: true
+              };
             }
           }
         } else {
@@ -5884,103 +5761,30 @@ Resolve manually and re-run Bulk complete.`,
         }
         for (const t of pending)
           _smgmtUpdateDepOrderBadge(t.number);
-      }));
-      return;
-    }
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label))
-        return;
-      if (_smgmtFinishedLabels.has(label))
-        return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter(
-        (t) => (t.status || "backlog") === "backlog"
-      );
-      if (pending.length < 2)
-        return;
-      for (const t of pending)
-        delete _smgmtDepOrderByIssue[t.number];
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
-        );
-        if (!resp.ok)
-          return;
-        const data = await resp.json();
-        if (data.has_cycle) {
-          const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
-          for (const t of pending) {
-            if (cycleSet.has(String(t.number))) {
-              _smgmtDepOrderByIssue[t.number] = {
-                upstream: [],
-                downstream: [],
-                inCycle: true
-              };
-            }
-          }
-        } else {
-          for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
-            const num = parseInt(idStr, 10);
-            _smgmtDepOrderByIssue[num] = {
-              upstream: hint.upstream || [],
-              downstream: hint.downstream || [],
-              inCycle: false
-            };
-          }
-        }
-        for (const t of pending)
-          _smgmtUpdateDepOrderBadge(t.number);
-      } catch (_) {
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadGoals(orderedLabels) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    if (_smgmtAggregateCards) {
-      for (const label of orderedLabels) {
-        const goalEl = document.getElementById(`smgmt-goal-${label}`);
-        if (!goalEl)
-          continue;
-        const card = _smgmtAggregateCards[label];
-        if (!card)
-          continue;
-        const goal = (card.goal || "").trim();
-        if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-          if (goal)
-            goalEl.value = goal;
-        } else if (goal) {
-          goalEl.textContent = goal;
-          goalEl.title = goal;
-          goalEl.style.display = "";
-        }
-      }
-      return;
-    }
-    await Promise.all(orderedLabels.map(async (label) => {
+    for (const label of orderedLabels) {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
       if (!goalEl)
-        return;
-      try {
-        const resp = await fetch(
-          `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
-        );
-        if (!resp.ok)
-          return;
-        const data = await resp.json();
-        const goal = (data.goal || "").trim();
-        if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-          if (goal)
-            goalEl.value = goal;
-        } else if (goal) {
-          goalEl.textContent = goal;
-          goalEl.title = goal;
-          goalEl.style.display = "";
-        }
-      } catch (_) {
+        continue;
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card)
+        continue;
+      const goal = (card.goal || "").trim();
+      if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+        if (goal)
+          goalEl.value = goal;
+      } else if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = "";
       }
-    }));
+    }
   }
   function _smgmtOutcomeBandHtml(label, outcome) {
     const st = outcome.sprint_status;
@@ -6181,11 +5985,7 @@ Resolve manually and re-run Bulk complete.`,
     }
     return "";
   }
-  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set([
-    "UAT",
-    "UAT-approved",
-    "released"
-  ]);
+  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set(["UAT", "UAT-approved", "released"]);
   function _smgmtHasDispatchableTickets(tickets) {
     return tickets.some((t) => {
       const names = (t.labels || []).map((l) => l.name);
@@ -6209,11 +6009,9 @@ Resolve manually and re-run Bulk complete.`,
     if (isFreshRerun)
       outcome = null;
     const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
-    const planBlocksPostRun = [
-      "planned",
-      "draft",
-      "planning"
-    ].includes(planState);
+    const planBlocksPostRun = ["planned", "draft", "planning"].includes(
+      planState
+    );
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const hasLedgerRun = _smgmtHasLedgerRun(label);
@@ -6301,12 +6099,16 @@ Resolve manually and re-run Bulk complete.`,
         try {
           Object.keys(_smgmtBySprint || {}).forEach((cl) => {
             if (cl !== label && cl.startsWith(label + ".")) {
-              (_smgmtBySprint[cl] || []).forEach((t) => _movedToChild.add(t.number));
+              (_smgmtBySprint[cl] || []).forEach(
+                (t) => _movedToChild.add(t.number)
+              );
             }
           });
         } catch (_) {
         }
-        const issueList = (outcome.issues || []).filter((i) => !_movedToChild.has(i.number));
+        const issueList = (outcome.issues || []).filter(
+          (i) => !_movedToChild.has(i.number)
+        );
         ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
           issueList,
           label,
@@ -7077,7 +6879,11 @@ Resolve manually and re-run Bulk complete.`,
       statusText = "Pending";
       statusCls = "slp-pending";
     }
-    const carrySummary = _smgmtAncestorCarrySummary(outcome || null, rerunInto, mergeState);
+    const carrySummary = _smgmtAncestorCarrySummary(
+      outcome || null,
+      rerunInto,
+      mergeState
+    );
     const durationHtml = outcome && outcome.wall_clock_secs != null && outcome.wall_clock_secs > 0 ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>` : "";
     let ticketsHtml;
     if (outcome === void 0) {
@@ -7209,7 +7015,10 @@ Resolve manually and re-run Bulk complete.`,
         priority: "low"
       });
     } else {
-      steps.push({ text: "No draft sprint yet \u2014 create one to start planning.", priority: "low" });
+      steps.push({
+        text: "No draft sprint yet \u2014 create one to start planning.",
+        priority: "low"
+      });
     }
     const resolved = [];
     for (const label of lineageLabels) {
@@ -7287,8 +7096,6 @@ Resolve manually and re-run Bulk complete.`,
     loadSprintMgmt2(true);
   }
   function _boardSseOnInvalidated(_project) {
-    if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate)
-      return;
     if (typeof document !== "undefined" && document.hidden) {
       _boardSsePending = true;
       return;
@@ -7301,8 +7108,6 @@ Resolve manually and re-run Bulk complete.`,
     if (!_boardSsePending)
       return;
     _boardSsePending = false;
-    if (!globalThis._commanderFeatures || !globalThis._commanderFeatures.board_aggregate)
-      return;
     if (_boardSseTimer !== null)
       clearTimeout(_boardSseTimer);
     _boardSseTimer = setTimeout(_boardSseFireRefetch, 2e3);

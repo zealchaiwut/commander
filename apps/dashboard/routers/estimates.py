@@ -77,6 +77,32 @@ def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     )
 
 
+def _get_uat_numbers(project: str, repo: str) -> set[int]:
+    """Return issue numbers carrying the UAT label; mirror first, gh fallback."""
+    try:
+        mirrored = db.get_mirrored_issues(repo)
+        if mirrored:
+            return {
+                iss["number"] for iss in mirrored
+                if any(lbl["name"] == "UAT" for lbl in iss.get("labels", []))
+            }
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo,
+             "--state", "all", "--label", "UAT",
+             "--json", "number",
+             "--limit", "200"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            return {i["number"] for i in (json.loads(r.stdout) or [])}
+    except Exception:
+        pass
+    return set()
+
+
 # ── Plan JSON helpers ─────────────────────────────────────────────────────────
 
 def _sprint_plan_path(project_root: Path, sprint_label: str) -> Path:
@@ -863,18 +889,10 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if failed_nums:
         try:
             repo = github_client.get_repo_for_operation(project)
-            r = subprocess.run(
-                ["gh", "issue", "list", "--repo", repo,
-                 "--state", "all", "--label", "UAT",
-                 "--json", "number",
-                 "--limit", "200"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if r.returncode == 0:
-                uat_nums = {i["number"] for i in (json.loads(r.stdout) or [])}
-                for ri in result_issues:
-                    if ri["outcome"] == "failed" and ri["number"] in uat_nums:
-                        ri["outcome"] = "done"
+            uat_nums = _get_uat_numbers(project, repo)
+            for ri in result_issues:
+                if ri["outcome"] == "failed" and ri["number"] in uat_nums:
+                    ri["outcome"] = "done"
         except Exception:
             pass
 

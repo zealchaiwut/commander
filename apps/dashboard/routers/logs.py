@@ -18,6 +18,8 @@ import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
+from services.logging import log as _slog
+
 from . import logs_service
 from .logs_service import AgentEvent, TokenUsageEvent
 
@@ -27,7 +29,7 @@ router = APIRouter(tags=["logs"])
 @router.post("/api/agent-event")
 async def receive_event(request: Request, event: AgentEvent):
     request_id = getattr(request.state, "request_id", None)
-    logs_service._slog.event(
+    _slog.event(
         "route.entry",
         project="dashboard",
         request_id=request_id,

@@ -354,7 +354,7 @@ from services.sprint_manager.post_sprint import (  # noqa: E402, F401
     _ESTIMATE_ISSUE_SCRIPT_SM,
 )
 
-from services.sprint_manager.api_client import (
+from services.sprint_manager.api_client import (  # noqa: E402
     is_retryable_rate_limit as _is_retryable_rate_limit,
 )
 

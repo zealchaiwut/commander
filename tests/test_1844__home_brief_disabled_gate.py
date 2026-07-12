@@ -76,6 +76,9 @@ def test_ac1_summary_skipped_when_brief_disabled():
 
     summary_mock = MagicMock(return_value={"summary": "AI-generated text"})
 
+    # Patch on the router module object so the already-resolved reference in
+    # _enrich_home_artifact sees the mock (patching the source module directly
+    # would leave the router's bound reference unchanged).
     with patch.object(brief_router, "config") as mock_cfg, \
          patch.object(brief_router, "brief_summary") as mock_bs, \
          patch.object(brief_router, "_projects_module") as mock_proj:

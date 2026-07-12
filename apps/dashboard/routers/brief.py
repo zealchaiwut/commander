@@ -20,7 +20,6 @@ import projects as _projects_module
 from . import brief_artifact
 from . import brief_service
 from . import brief_summary
-from . import home_milestone_service
 
 router = APIRouter(tags=["brief"])
 
@@ -255,9 +254,9 @@ def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
 def _enrich_home_artifact(artifact: dict) -> None:
     """Embed per-project metadata into the home artifact's project entries.
 
-    Adds ``repo``, ``name``, ``icon``, ``color``, ``briefSummary``, and
-    ``milestone`` to each entry in ``artifact["brief"]["projects"]`` so the
-    home page can render with one HTTP request instead of 1+N (issue #1778 AC2).
+    Adds ``repo``, ``name``, ``icon``, ``color``, and ``briefSummary`` to each
+    entry in ``artifact["brief"]["projects"]`` so the home page can render with
+    one HTTP request instead of 1+N (issue #1778 AC2).
     """
     brief = artifact.get("brief")
     if not brief:
@@ -285,18 +284,14 @@ def _enrich_home_artifact(artifact: dict) -> None:
             p["briefSummary"] = (summary or {}).get("summary", "")
         except Exception:
             p["briefSummary"] = ""
-        try:
-            p["milestone"] = home_milestone_service.active_milestone_progress(repo) if repo else None
-        except Exception:
-            p["milestone"] = None
 
 
 @router.get("/api/brief/daily", response_model=DailyArtifact)
 def get_home_daily_brief(date: Optional[str] = None):
     """Return the home roll-up artifact enriched with per-project metadata.
 
-    Embeds ``briefSummary``, ``milestone``, ``repo``, ``name``, ``icon``,
-    and ``color`` so the home page needs only this one call (issue #1778 AC2).
+    Embeds ``briefSummary``, ``repo``, ``name``, ``icon``, and ``color`` so the
+    home page needs only this one call (issue #1778 AC2).
     """
     artifact = brief_artifact.get_or_create_home_artifact(date=date)
     if artifact.get("available"):

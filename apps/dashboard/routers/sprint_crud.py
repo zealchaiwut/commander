@@ -83,6 +83,7 @@ async def create_sprint_label(body: SprintCreateBody):
     sprints_service; a failed step surfaces as a loud, step-named HTTP error.
     """
     from routers import sprints_service  # noqa: PLC0415 — deferred (router import cycle)
+    from services.sprint_manager.sprint_creation import SprintCreationError  # noqa: PLC0415
     srv = _server()
     try:
         sprint_label = sprints_service.create_sprint_verified(

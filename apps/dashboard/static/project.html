@@ -4321,12 +4321,16 @@
     .bl-row { min-width: 0; }
     .bl-row--selectable { cursor: pointer; }
     /* ── Top multi-select action bar (proj-selection-bar) ── */
+    /* position:fixed keeps the bar out of the document flow so it never shifts
+       the board layout when it appears (issue #1748). */
     .proj-selection-bar {
       display: none; align-items: center; gap: 12px;
-      padding: 10px 16px; margin-bottom: 10px;
+      padding: 10px 16px;
       background: var(--blue-bg); border: 1px solid var(--blue); border-radius: 8px;
       font-size: 13px; color: var(--blue); white-space: nowrap; flex-wrap: wrap;
-      position: sticky; top: 6px; z-index: 20; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      width: max-content; max-width: calc(100vw - 32px);
+      z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,.15);
     }
     .proj-selection-bar:not(.hidden) { display: flex; }
     .proj-selection-bar-hint { color: var(--text-muted); }
@@ -21946,6 +21950,10 @@ let _smgmtMoveModalIssues = [];    // non-empty ⇒ bulk move via selection bar
  *  and ghost code call — it was removed with the drag/ghost code (71ee6310) but
  *  still referenced, so the move modal threw ReferenceError and did nothing. */
 function _smgmtGhostComputeNextFree() {
+  // Prefer the authoritative next sprint number from the board API response
+  const fromData = _smgmtData && _smgmtData.placeholder_sprint;
+  if (fromData) return fromData;
+  // Fallback: max base number across active board data and finished labels + 1
   const nums = [];
   const collect = (lbl) => {
     const m = /^sprint-(\d+)/.exec(lbl || '');
@@ -21954,6 +21962,7 @@ function _smgmtGhostComputeNextFree() {
   Object.keys(_smgmtBySprint || {}).forEach(collect);
   (_smgmtOrderedLabels || []).forEach(collect);
   ((_smgmtData && _smgmtData.order) || []).forEach(collect);
+  (_smgmtFinishedLabels || new Set()).forEach(collect);
   return (nums.length ? Math.max(...nums) : 0) + 1;
 }
 
@@ -22087,36 +22096,41 @@ async function _smgmtMoveModalPick(targetLabel, isNew) {
   const repo      = _smgmtRepo();
   const targetNum = targetLabel ? parseInt(targetLabel.split('-')[1], 10) : null;
 
-  // Optimistic move
-  if (_smgmtData) {
+  // Optimistic move only for existing sprints — for isNew skip (real label unknown yet)
+  if (!isNew && _smgmtData) {
     const iss = _smgmtData.issues.find(i => i.number === issueNum);
     if (iss) iss.sprint = targetNum;
     _smgmtRender(_smgmtData);
   }
 
   _smgmtBoardLock();
+  let effectiveTargetLabel = targetLabel;
   try {
     if (isNew) {
+      // No sprint_number — let backend pick the correct next free number
       const createRes = await fetch('/api/sprints/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, sprint_number: targetNum }),
+        body: JSON.stringify({ project: repo }),
       });
-      if (!createRes.ok && createRes.status !== 409) {
+      if (!createRes.ok) {
         const d = await createRes.json().catch(() => ({}));
         throw new Error(d.detail || 'HTTP ' + createRes.status);
       }
+      const createData = await createRes.json();
+      effectiveTargetLabel = createData.sprint_label;
     }
     const res = await fetch(`/api/issues/${issueNum}/sprint-label`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sprint_label: targetLabel || 'backlog', project: repo }),
+      body: JSON.stringify({ sprint_label: effectiveTargetLabel || 'backlog', project: repo }),
     });
     if (!res.ok) throw new Error(await res.text());
     await loadSprintMgmt();
-    _smgmtShowToast(`#${issueNum} moved to ${targetLabel ? 'Sprint ' + targetNum : 'Backlog'}`);
+    const effectiveNum = effectiveTargetLabel ? parseInt(effectiveTargetLabel.split('-')[1], 10) : null;
+    _smgmtShowToast(`#${issueNum} moved to ${effectiveTargetLabel ? 'Sprint ' + effectiveNum : 'Backlog'}`);
   } catch (e) {
-    if (_smgmtData) {
+    if (!isNew && _smgmtData) {
       const iss = _smgmtData.issues.find(i => i.number === issueNum);
       if (iss) iss.sprint = fromLabel ? parseInt(fromLabel.split('-')[1], 10) : null;
       _smgmtRender(_smgmtData);
@@ -22132,15 +22146,18 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
   const repo = _smgmtRepo();
   if (!repo || nums.length === 0) return;
 
-  const sprintLabel = targetLabel || 'backlog';
-  const dest = sprintLabel === 'backlog'
+  // sprintLabel / dest may be updated after the backend creates the sprint.
+  let sprintLabel = targetLabel || 'backlog';
+  let dest = sprintLabel === 'backlog'
     ? 'Backlog'
     : `Sprint ${sprintLabel.split('-')[1]}`;
-  const targetNum = sprintLabel === 'backlog'
-    ? null
-    : parseInt(sprintLabel.split('-')[1], 10);
 
-  if (_smgmtData) {
+  // Optimistic update only for moves to existing sprints — skip for isNew
+  // because the real sprint label is not yet known.
+  if (!isNew && _smgmtData) {
+    const targetNum = sprintLabel === 'backlog'
+      ? null
+      : parseInt(sprintLabel.split('-')[1], 10);
     nums.forEach(n => {
       const iss = _smgmtData.issues.find(i => i.number === n);
       if (iss) iss.sprint = targetNum;
@@ -22152,15 +22169,21 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
   _smgmtBoardLock(`Moving ${nums.length} issue${nums.length !== 1 ? 's' : ''} to ${dest}…`);
   try {
     if (isNew) {
+      // Let the backend assign the correct next sprint number — do NOT send
+      // sprint_number so stale labels from old lineages don't cause a 409
+      // that was previously swallowed silently.
       const createRes = await fetch('/api/sprints/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: repo, sprint_number: targetNum }),
+        body: JSON.stringify({ project: repo }),
       });
-      if (!createRes.ok && createRes.status !== 409) {
+      if (!createRes.ok) {
         const d = await createRes.json().catch(() => ({}));
         throw new Error(d.detail || 'HTTP ' + createRes.status);
       }
+      const createData = await createRes.json();
+      sprintLabel = createData.sprint_label;
+      dest = `Sprint ${sprintLabel.split('-')[1]}`;
     }
     const changes = nums.map(n => ({ issue_num: n, sprint_label: sprintLabel }));
     const res = await fetch('/api/sprints/batch-labels', {

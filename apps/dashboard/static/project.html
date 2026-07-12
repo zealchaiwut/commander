@@ -941,6 +941,31 @@
     }
     .status-inflight-arrow { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
     .status-none-msg { font-size: 13px; color: var(--text-sub); font-style: italic; padding: 4px 0; }
+    .status-card--wide { grid-column: span 2; }
+    @media (max-width: 780px) { .status-card--wide { grid-column: span 1; } }
+    .status-tokens-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .status-tokens-table th {
+      text-align: left; padding: 4px 8px 6px 0; font-size: 10px;
+      font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--text-sub); border-bottom: 1px solid var(--border);
+    }
+    .status-tokens-table td {
+      padding: 7px 8px 7px 0; color: var(--text);
+      border-bottom: 1px solid var(--border); vertical-align: middle;
+    }
+    .status-tokens-table tr:last-child td { border-bottom: none; }
+    .status-tokens-table td:last-child,
+    .status-tokens-table th:last-child { text-align: right; padding-right: 0; }
+    .status-tokens-num {
+      font-family: var(--mono); font-variant-numeric: tabular-nums;
+      color: var(--text-muted); font-size: 11px;
+    }
+    .status-tokens-link {
+      color: var(--text); text-decoration: none;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+      max-width: 340px;
+    }
+    .status-tokens-link:hover { color: var(--blue); text-decoration: underline; }
     .status-last-updated {
       font-size: 11px; color: var(--text-sub); text-align: right; margin-top: 16px;
     }
@@ -11090,6 +11115,22 @@
                     <span class="status-card-title"><i class="ti ti-rocket"></i>Active Sprint</span>
                   </div>
                   <div class="status-card-body" id="status-sprint-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-cpu"></i>Tokens by Agent</span>
+                  </div>
+                  <div class="status-card-body" id="status-tokens-agent-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card status-card--wide">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-flame"></i>Top Tickets by Tokens</span>
+                  </div>
+                  <div class="status-card-body" id="status-tokens-ticket-body">
                     <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
                   </div>
                 </div>
@@ -30816,8 +30857,8 @@ async function statusRefresh() {
   const btn = document.getElementById('status-refresh-btn');
   if (btn) btn.classList.add('spinning');
 
-  let navData = null, issuesData = null, goalData = null;
-  let navErr = false, issuesErr = false;
+  let navData = null, issuesData = null, goalData = null, costData = null;
+  let navErr = false, issuesErr = false, costErr = false;
 
   const fetches = [
     snavNavStatusFetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
@@ -30827,6 +30868,10 @@ async function statusRefresh() {
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { issuesData = d; })
       .catch(() => { issuesErr = true; }),
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/analytics/cost')
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(d => { costData = d; })
+      .catch(() => { costErr = true; }),
   ];
   await Promise.all(fetches);
 
@@ -30840,6 +30885,8 @@ async function statusRefresh() {
 
   const issues = issuesData ? (issuesData.issues || []) : null;
   _statusRenderSprint(navData, goalData, navErr);
+  _statusRenderTokensByAgent(costData ? (costData.by_agent || []) : null, costErr);
+  _statusRenderTokensByTicket(costData ? (costData.by_ticket || []) : null, repo, costErr);
   _statusRenderLabels(issues, issuesErr);
   _statusRenderActivity(issues, issuesErr);
   _statusRenderInflight(issues, issuesErr);
@@ -30868,6 +30915,47 @@ function _statusRenderSprint(navData, goalData, err) {
       <span class="status-sprint-state ${stateClass}">${stateLabel}</span>
     </div>
     <div class="status-sprint-goal">${goal}</div>`;
+}
+
+function _statusRenderTokensByAgent(rows, err) {
+  const el = document.getElementById('status-tokens-agent-body');
+  if (!el) return;
+  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
+    return;
+  }
+  let html = '<table class="status-tokens-table"><thead><tr><th>Agent</th><th>Tokens</th></tr></thead><tbody>';
+  for (const row of rows) {
+    const agent = escHtml(row.agent || '—');
+    const tokens = Number(row.total_tokens || 0).toLocaleString();
+    html += `<tr><td>${agent}</td><td class="status-tokens-num">${tokens}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function _statusRenderTokensByTicket(rows, repo, err) {
+  const el = document.getElementById('status-tokens-ticket-body');
+  if (!el) return;
+  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
+    return;
+  }
+  const baseUrl = repo ? 'https://github.com/' + repo + '/issues/' : '#';
+  let html = '<table class="status-tokens-table"><thead><tr><th>Issue</th><th>Tokens</th></tr></thead><tbody>';
+  for (const row of rows) {
+    const num = row.issue_number;
+    const tokens = Number(row.total_tokens || 0).toLocaleString();
+    const href = escHtml(baseUrl + num);
+    html += `<tr>
+      <td><a class="status-tokens-link" href="${href}" target="_blank" rel="noopener noreferrer">#${num}</a></td>
+      <td class="status-tokens-num">${tokens}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 const _STATUS_COL_COLORS = {

@@ -972,9 +972,22 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
+    # Write a rerun manifest so sprint_manager uses the exact moved ticket list
+    # instead of querying GitHub (which is eventually consistent and may lag label
+    # edits by seconds, causing the manager to dispatch a stale subset — issue #1827).
+    _moved_set = set(moved)
+    _manifest_decisions = [d for d in to_move if d["issue_num"] in _moved_set]
+    _manifest_path = sprints_dir / f"{sub_label}-rerun-manifest.json"
+    _manifest_path.write_text(
+        json.dumps({"decisions": _manifest_decisions, "all_moved": all_moved}),
+        encoding="utf-8",
+    )
+    _spawn_argv = srv._sprint_manager_argv(sub_label, project, project_root)
+    _spawn_argv += ["--rerun-manifest", str(_manifest_path)]
+
     try:
         proc = sprint_run_service.spawn_sprint_process(
-            srv._sprint_manager_argv(sub_label, project, project_root),
+            _spawn_argv,
             cwd=str(coder_path),
             env=stripped_env,
             log_path=run_log_path,

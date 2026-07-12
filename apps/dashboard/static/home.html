@@ -447,31 +447,6 @@
       50% { box-shadow: 0 0 0 5px var(--green-bg); }
     }
 
-    /* milestone indicator */
-    .pb-milestone {
-      display: none;
-      margin-left: auto;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-      padding: 3px 9px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      background: transparent;
-      color: var(--text-muted);
-      font-size: 12px;
-      max-width: 44%;
-      transition: border-color 0.12s, color 0.12s;
-    }
-    /* Milestones hidden per operator request — remove .show override to restore */
-    .pb-milestone.show { display: none; }
-    .pb-milestone .ti { font-size: 12px; flex-shrink: 0; }
-    .pb-ms-name { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pb-milestone:hover { border-color: var(--blue); color: var(--blue); }
-    .pb-milestone:hover .pb-ms-name { color: var(--blue); }
-    .pb-ms-count { font-family: var(--mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
-    .pb-milestone + .pbstatus { margin-left: 8px; }
-
     /* collapse toggle */
     .pb-bottom-toggle {
       width: 24px;
@@ -753,7 +728,6 @@
       .dec-act,
       .open-proj,
       .add-proj,
-      .pb-milestone,
       .pbname-go,
       .pb-bottom-toggle,
       .planner-link,
@@ -974,22 +948,6 @@
       }
     });
 
-    // Populate milestone badge from embedded data (issue #1778 AC1/AC5).
-    projects.forEach(p => {
-      if (p.milestone === undefined) {
-        loadMilestone(p.project, p.repo);
-        return;
-      }
-      const m = p.milestone;
-      const el = document.getElementById('ms-' + p.project);
-      if (!el || !m || !m.label) return;
-      const name = m.title || 'Milestone';
-      el.querySelector('.pb-ms-name').textContent = name;
-      el.querySelector('.pb-ms-count').textContent = m.label;
-      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
-      el.classList.add('show');
-    });
-
     // Batch-load todos and mount with preloaded data (issue #1778 AC1/AC3/AC4).
     if (projects.length && window.CommanderTodo) {
       const slugs = projects.map(p => p.project).filter(Boolean);
@@ -1004,22 +962,6 @@
         if (el) CommanderTodo.mount(el, slug, { preloadedData: todosMap[slug] || [] });
       });
     }
-  }
-
-  async function loadMilestone(slug, repo){
-    const el = document.getElementById('ms-' + slug);
-    if (!el || !repo) return;
-    try {
-      const r = await fetch('/api/home/milestone?repo=' + encodeURIComponent(repo));
-      if (!r.ok) return;
-      const m = await r.json();
-      if (!m || !m.label) return;
-      const name = m.title || 'Milestone';
-      el.querySelector('.pb-ms-name').textContent = name;
-      el.querySelector('.pb-ms-count').textContent = m.label;
-      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
-      el.classList.add('show');
-    } catch(_) {}
   }
 
   // ── brief header ──────────────────────────────────────────────────────────
@@ -1365,13 +1307,6 @@
       <div class="pbrief${_bottomHidden(slug) ? ' hide-bottom' : ''}" data-slug="${esc(slug)}">
         <div class="pbrief-head">
           ${_projectTitleLinkHtml(slug)}
-          <a class="pb-milestone" id="ms-${esc(slug)}" href="/project/${esc(slug)}/roadmap"
-             title="Active milestone — open Roadmap"
-             aria-label="Active milestone progress, open Roadmap tab">
-            <i class="ti ti-flag-3"></i>
-            <span class="pb-ms-name"></span>
-            <span class="pb-ms-count"></span>
-          </a>
           ${_cardMeta(p)}
           ${_statusPill(p)}
           <button class="pb-bottom-toggle" title="Hide/show shipped detail and to-do"

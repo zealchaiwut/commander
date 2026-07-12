@@ -24,7 +24,6 @@ for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from routers import brief as brief_router_mod
 from routers.brief import _enrich_home_artifact
 
 
@@ -87,7 +86,7 @@ def test_1845__ac1_milestone_dom_stub_removed():
 
 def test_1845__ac2_enrichment_no_milestone_key():
     """AC2: _enrich_home_artifact must not add a 'milestone' key to project entries."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
 
     artifact = {
         "available": True,

@@ -40,7 +40,7 @@ export function evlIsErrorEvent(ev) {
   const type = ev.type || "";
   if (type === "ticket_failed") return true;
   if (type === "agent_finished") {
-    const st = ((ev.detail || {}).status) || "";
+    const st = (ev.detail || {}).status || "";
     return st === "error" || st === "timed_out";
   }
   return false;

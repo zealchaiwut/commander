@@ -174,3 +174,16 @@ globalThis.logsWriteLastVisit = logsWriteLastVisit;
 globalThis.evlIsErrorEvent = evlIsErrorEvent;
 globalThis.logsCountNewErrors = logsCountNewErrors;
 globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+
+// Logs view control helpers (issue #1858)
+import {
+  shouldAutoLoadRaw,
+  pickAutoSprintLabel,
+  logsToolbarVisibility,
+} from "./logs-view-controls.js";
+root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+root.pickAutoSprintLabel = pickAutoSprintLabel;
+root.logsToolbarVisibility = logsToolbarVisibility;
+globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+globalThis.logsToolbarVisibility = logsToolbarVisibility;

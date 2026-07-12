@@ -8851,6 +8851,28 @@ Proceed anyway?`)) {
     return base + "?limit=200";
   }
 
+  // apps/dashboard/static/src/logs-view-controls.js
+  function shouldAutoLoadRaw(viewMode, rawLines, runCount) {
+    return viewMode === "raw" && rawLines === null && runCount > 0;
+  }
+  function pickAutoSprintLabel(runs, filterSprint) {
+    if (filterSprint)
+      return filterSprint;
+    return runs[0] && runs[0].sprint_label || null;
+  }
+  function logsToolbarVisibility(mode) {
+    const isActivity = mode === "activity";
+    const isRaw = mode === "raw";
+    return {
+      agentSelect: isActivity,
+      sourceSelect: isActivity,
+      severitySeg: isActivity,
+      rawLevelSelect: isRaw,
+      sprintSelect: true,
+      searchInput: true
+    };
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -8932,5 +8954,11 @@ Proceed anyway?`)) {
   globalThis.evlIsErrorEvent = evlIsErrorEvent;
   globalThis.logsCountNewErrors = logsCountNewErrors;
   globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+  root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  root.pickAutoSprintLabel = pickAutoSprintLabel;
+  root.logsToolbarVisibility = logsToolbarVisibility;
+  globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+  globalThis.logsToolbarVisibility = logsToolbarVisibility;
 })();
 //# sourceMappingURL=bundle.js.map

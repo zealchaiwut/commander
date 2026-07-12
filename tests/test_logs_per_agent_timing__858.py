@@ -132,11 +132,14 @@ def test_logs_per_agent_timing__data_first_level_no_drilldown(client):
 
 
 def test_logs_per_agent_timing__visually_consistent_with_batch(client):
-    # AC7: timing/error fields use the same design-contract classes as the
-    # failure batch (scoped .logs-ticket-* strip, red failure pill) — no ad-hoc
-    # styling. Confirms layout consistency rather than a duplicate failure block.
-    for cls in (".logs-ticket-stats", ".logs-ticket-row",
-                ".logs-ticket-metric", ".logs-ticket-fail-class"):
-        assert cls in PROJECT_HTML, f"missing design-contract class {cls}"
-    # Failure detail rendered once, inside the per-ticket row (not duplicated).
-    assert len(re.findall(r"logs-ticket-fail-class", PROJECT_HTML)) >= 1
+    # AC7 (updated by #1850): the Logs Timeline (Runs) view and its per-ticket
+    # stats strip were removed in issue #1850 — the ticket-stats API still works
+    # (tested above) but the .logs-ticket-* CSS classes no longer appear in the
+    # HTML since the run-row renderer was deleted. The /ticket-stats endpoint
+    # remains for backward-compatible access.
+    assert "_logsFetchTicketStats" in PROJECT_HTML, (
+        "_logsFetchTicketStats helper must still exist for the API endpoint"
+    )
+    assert "/ticket-stats" in PROJECT_HTML, (
+        "/ticket-stats API URL must still appear in the JS"
+    )

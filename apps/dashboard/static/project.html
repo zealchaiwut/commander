@@ -7525,67 +7525,6 @@
     .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
     .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
     @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
-    .logs-run-row { border-bottom: 1px solid var(--border); }
-    .logs-run-header {
-      display: flex; align-items: center; gap: 10px; padding: 10px 20px;
-      cursor: pointer; transition: background .12s; user-select: none;
-    }
-    .logs-run-header:hover { background: var(--surface-hover); }
-    .logs-run-chevron { color: var(--text-sub); font-size: 12px; transition: transform .15s; flex-shrink: 0; }
-    .logs-run-row.expanded .logs-run-chevron { transform: rotate(90deg); }
-    .logs-run-id {
-      font-family: var(--mono); font-size: 12px; color: var(--text); font-weight: 600;
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .logs-run-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
-    .logs-status-badge {
-      display: inline-flex; align-items: center; padding: 2px 8px;
-      border-radius: 10px; font-size: 11px; font-weight: 600;
-    }
-    .logs-status-badge.success { background: var(--green-bg); color: var(--green); }
-    .logs-status-badge.partial { background: var(--amber-bg); color: var(--amber); }
-    .logs-status-badge.unknown { background: var(--surface-2); color: var(--text-muted); }
-    .logs-run-events {
-      display: none; background: var(--bg); border-top: 1px solid var(--border);
-      max-height: 400px; overflow-y: auto;
-      font-family: var(--mono); font-size: 11px; line-height: 1.7;
-      padding: 8px 20px 8px 44px;
-    }
-    .logs-run-row.expanded .logs-run-events { display: block; }
-    /* Per-ticket timing / token / failure strip (#858) */
-    .logs-ticket-stats { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 6px 20px 6px 44px; }
-    .logs-run-row.expanded .logs-ticket-stats:not(:empty) { display: block; }
-    .logs-ticket-row {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px;
-      padding: 5px 0; border-bottom: 1px solid var(--border);
-      font-size: 11px; color: var(--text-muted);
-    }
-    .logs-ticket-row:last-child { border-bottom: none; }
-    .logs-ticket-num { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 52px; }
-    .logs-ticket-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-    .logs-ticket-metric i { font-size: 12px; color: var(--text-sub); }
-    .logs-ticket-fail { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-    .logs-ticket-fail-class {
-      display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px;
-      background: var(--red-bg); color: var(--red); font-weight: 600;
-      font-family: var(--mono); font-size: 10px; letter-spacing: .02em;
-    }
-    .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
-    .logs-ica-cost { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 5px 20px 5px 44px; }
-    .logs-run-row.expanded .logs-ica-cost:not(:empty) { display: block; }
-    .logs-ica-cost-row {
-      display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px;
-      font-size: 11px; color: var(--text-muted);
-    }
-    .logs-ica-badge {
-      display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 9px;
-      background: var(--blue-bg,rgba(59,130,246,.12)); color: var(--blue); font-weight: 700;
-      font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
-    }
-    .logs-ica-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-    .logs-ica-metric i { font-size: 12px; color: var(--text-sub); }
-    .logs-ica-cost-val { color: var(--text); font-weight: 600; }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -7601,10 +7540,6 @@
     .logs-live-dot {
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
-    }
-    @media (max-width: 600px) {
-      .logs-run-id { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .logs-ticket-fail { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-wrap: nowrap; }
     }
     /* ── Events Activity Log (issue #633) ── */
     .evl-bundle-row { border-bottom: 1px solid var(--border); }
@@ -7871,16 +7806,14 @@
 
     /* Suppress all Logs tab motion when user prefers reduced motion */
     @media (prefers-reduced-motion: reduce) {
-      .logs-chip, .logs-view-btn, .logs-run-header,
+      .logs-chip, .logs-view-btn,
       .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
-      .evl-chevron, .logs-run-chevron, .logs-live-dot,
+      .evl-chevron, .logs-live-dot,
       .logs-skeleton-row { transition: none !important; animation: none !important; }
     }
 
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
-      .logs-run-header { padding: 10px 12px; }
-      .logs-run-events { padding: 8px 12px 8px 28px; }
       .logs-raw-stream { padding: 8px 12px; }
       .logs-search-wrap { max-width: 100%; }
     }
@@ -10646,10 +10579,6 @@
                         aria-selected="true" onclick="logsSetView('activity')">
                   <i class="ti ti-activity"></i> Activity
                 </button>
-                <button class="logs-seg-btn" id="logs-view-timeline" role="tab"
-                        aria-selected="false" onclick="logsSetView('timeline')">
-                  <i class="ti ti-list-tree"></i> Runs
-                </button>
                 <button class="logs-seg-btn" id="logs-view-raw" role="tab"
                         aria-selected="false" onclick="logsSetView('raw')">
                   <i class="ti ti-terminal-2"></i> Raw
@@ -10707,9 +10636,6 @@
           </div>
           <!-- Body -->
           <div class="logs-body">
-            <div id="logs-timeline" class="hidden">
-              <div class="logs-empty" id="logs-empty">Loading runs…</div>
-            </div>
             <div id="logs-raw" class="hidden">
               <div class="logs-raw-stream" id="logs-raw-stream">
                 <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
@@ -27219,27 +27145,12 @@ async function logsFetchRuns() {
     if (_logsState.filter.issue && _logsState.viewMode === 'raw') {
       logsLoadRawView();
     }
-
-    if (!_logsLoaded || existingIds.size === 0) {
-      logsRenderTimeline();
-      _logsAutoExpandFirst();
-    } else if (added.length > 0) {
-      for (const run of added) {
-        _logsAppendRunRow(run);
-      }
-    }
-
-    const emptyEl = document.getElementById('logs-empty');
-    if (emptyEl && newRuns.length === 0) {
-      emptyEl.textContent = 'No sprint runs found for this project.';
-    }
   } catch (_) {}
 }
 
 function _logsApplyFilters() {
   if (_logsState.viewMode === 'activity') evlRender();
   else if (_logsState.viewMode === 'raw') _logsRenderRawStream();
-  else logsRenderTimeline();
 }
 
 function logsFilterSprintSelect(sel) {
@@ -27326,52 +27237,34 @@ function logsOnSearch(value) {
 }
 
 function logsSetView(mode) {
+  if (mode === 'timeline') {
+    switchTab('sprint-mgmt');
+    _smgmtShowSubView('history');
+    return;
+  }
   _logsState.viewMode = mode;
-  const timelineEl = document.getElementById('logs-timeline');
   const rawEl      = document.getElementById('logs-raw');
   const activityEl = document.getElementById('logs-activity');
   const sevSeg     = document.getElementById('logs-severity-seg');
   const rawLvlSel  = document.getElementById('logs-filter-raw-level');
-  const segBtns = ['activity', 'timeline', 'raw'];
+  const segBtns = ['activity', 'raw'];
   segBtns.forEach(function(m) {
-    var btn = document.getElementById('logs-view-' + (m === 'timeline' ? 'timeline' : m));
+    var btn = document.getElementById('logs-view-' + m);
     if (btn) {
       var on = mode === m;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     }
   });
-  timelineEl?.classList.toggle('hidden', mode !== 'timeline');
   rawEl?.classList.toggle('hidden', mode !== 'raw');
   activityEl?.classList.toggle('hidden', mode !== 'activity');
   sevSeg?.classList.toggle('hidden', mode !== 'activity');
   rawLvlSel?.classList.toggle('hidden', mode === 'activity');
   if (mode === 'raw')      logsLoadRawView();
   if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
-  else if (mode === 'timeline') logsRenderTimeline();
 }
 
 function _logsRepo() { return _projectData ? _projectData.repo : (_smgmtRepo() || ''); }
-
-function _logsFilteredRuns() {
-  let runs = _logsState.runs;
-  const q = _logsState.search;
-  const sprint = _logsState.filter.sprint;
-  if (sprint) runs = runs.filter(r => r.sprint_label === sprint);
-  if (q) runs = runs.filter(r => r.run_id.toLowerCase().includes(q) || r.sprint_label.toLowerCase().includes(q));
-  return [...runs].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
-}
-
-/** Auto-expand the newest run so the default view shows content, not just headers. */
-function _logsAutoExpandFirst() {
-  if (_logsState.expanded.size > 0) return;
-  const runs = _logsFilteredRuns();
-  if (runs.length === 0) return;
-  const header = document.querySelector(
-    `[data-run-id="${CSS.escape(runs[0].run_id)}"] .logs-run-header`
-  );
-  if (header) logsToggleRun(header);
-}
 
 function _logsClassifyLine(raw) {
   const s = String(raw || '').trim();
@@ -27401,69 +27294,6 @@ function _logsFilterEvents(events) {
   return (events || []).filter(_logsRunEventMatches);
 }
 
-function logsRenderTimeline() {
-  const container = document.getElementById('logs-timeline');
-  if (!container) return;
-  const runs = _logsFilteredRuns();
-  if (runs.length === 0) {
-    container.innerHTML = `<div class="logs-empty">${
-      _logsState.runs.length === 0 ? 'No sprint runs found.' : 'No runs match current filters.'
-    }</div>`;
-    return;
-  }
-  container.innerHTML = runs.map(_logsRunRowHtml).join('');
-  for (const runId of _logsState.expanded) {
-    const row = container.querySelector(`[data-run-id="${CSS.escape(runId)}"]`);
-    if (!row) continue;
-    row.classList.add('expanded');
-    const statsEl = row.querySelector('.logs-ticket-stats');
-    if (statsEl && _logsState.ticketStats[runId]) {
-      statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
-    }
-    const icaCostEl = document.getElementById(`logs-ica-cost-${runId}`);
-    if (icaCostEl && _logsState.icaCost[runId]) {
-      icaCostEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
-    }
-    const eventsEl = row.querySelector('.logs-run-events');
-    if (eventsEl && _logsState.events[runId]) {
-      eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
-    }
-  }
-}
-
-function _logsRunRowHtml(run) {
-  const startDt = new Date(run.start_time);
-  const startStr = startDt.toLocaleDateString() + ' ' +
-    startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const badge = `<span class="logs-status-badge ${escHtml(run.outcome)}">${escHtml(run.outcome)}</span>`;
-  const isExpanded = _logsState.expanded.has(run.run_id);
-  const eventsContent = isExpanded && _logsState.events[run.run_id]
-    ? _logsEventsHtml(_logsState.events[run.run_id])
-    : '<div class="logs-empty" style="padding:6px 0;font-size:11px">Loading events…</div>';
-
-  return `<div class="logs-run-row${isExpanded ? ' expanded' : ''}" data-run-id="${escHtml(run.run_id)}" data-sprint="${escHtml(run.sprint_label)}" data-project="${escHtml(run.project)}">
-  <div class="logs-run-header" onclick="logsToggleRun(this)">
-    <i class="ti ti-chevron-right logs-run-chevron"></i>
-    <span class="logs-run-id">${escHtml(run.run_id)}</span>
-    <div class="logs-run-meta">
-      <span>${escHtml(startStr)}</span>
-      <span>${run.ticket_count} ticket${run.ticket_count !== 1 ? 's' : ''}</span>
-      ${badge}
-    </div>
-  </div>
-  <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
-    isExpanded && _logsState.ticketStats[run.run_id]
-      ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
-      : ''
-  }</div>
-  <div class="logs-ica-cost" id="logs-ica-cost-${escHtml(run.run_id)}">${
-    isExpanded && _logsState.icaCost[run.run_id]
-      ? _logsIcaCostHtml(_logsState.icaCost[run.run_id])
-      : ''
-  }</div>
-  <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
-</div>`;
-}
 
 // Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
 // dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
@@ -27624,18 +27454,6 @@ function _logsParseLines(lines) {
     entries.push({ timestamp: '—', type, message: s });
   }
   return entries;
-}
-
-function _logsAppendRunRow(run) {
-  const timeline = document.getElementById('logs-timeline');
-  if (!timeline) return;
-  const emptyEl = timeline.querySelector('.logs-empty');
-  if (emptyEl) emptyEl.remove();
-  const filteredRuns = _logsFilteredRuns();
-  if (!filteredRuns.find(r => r.run_id === run.run_id)) return;
-  const div = document.createElement('div');
-  div.innerHTML = _logsRunRowHtml(run);
-  timeline.insertBefore(div.firstElementChild, timeline.firstChild);
 }
 
 async function logsLoadRawView() {

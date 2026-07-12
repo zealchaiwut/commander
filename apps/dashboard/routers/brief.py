@@ -29,7 +29,7 @@ def _require_brief_enabled() -> None:
         raise HTTPException(404, detail="Brief is disabled")
 
 
-# ── response models ───────────────────────────────────────────────────────────
+# ── response models ──────────────────────────────────────────────────────────
 
 class CurrentTicket(BaseModel):
     issue_number: Optional[int] = None
@@ -97,7 +97,8 @@ class RanOvernightEntry(BaseModel):
 
 
 class SuggestedNextItem(BaseModel):
-    """One advisor suggestion or look-ahead entry for the brief (issue #884)."""
+    """One advisor suggestion or look-ahead entry for the brief
+    (issue #884)."""
     text: str = ""
     type: str = "suggestion"  # "suggestion" | "look_ahead"
     slug: str = ""
@@ -184,7 +185,7 @@ class DailyArtifact(BaseModel):
     message: Optional[str] = None
 
 
-# ── routes ────────────────────────────────────────────────────────────────────
+# ── routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
 def get_project_brief(slug: str, date: Optional[str] = None):
@@ -198,12 +199,15 @@ def get_home_brief(date: Optional[str] = None):
     return brief_service.build_home_brief(date=date)
 
 
-# ── LLM summary (issue #840) ──────────────────────────────────────────────────
+# ── LLM summary (issue #840) ─────────────────────────────────────────────────
 # Kept separate from the structured-brief routes above so brief assembly stays
 # LLM-free (#839 AC5). The summary path generates+caches a Haiku narrative and
 # always falls back to a deterministic templated string (never 5xx — AC6).
 
-@router.get("/api/projects/{slug}/brief/summary", response_model=ProjectSummary)
+@router.get(
+    "/api/projects/{slug}/brief/summary",
+    response_model=ProjectSummary,
+)
 def get_project_brief_summary(slug: str, date: Optional[str] = None):
     """Return the cached (or freshly generated) summary for a project brief."""
     _require_brief_enabled()
@@ -215,7 +219,8 @@ def get_project_brief_summary(slug: str, date: Optional[str] = None):
 def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
     """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
     _require_brief_enabled()
-    return brief_summary.get_or_create_project_summary(slug, date=date, force=True)
+    return brief_summary.get_or_create_project_summary(
+        slug, date=date, force=True)
 
 
 @router.get("/api/brief/summary", response_model=HomeSummary)
@@ -232,11 +237,11 @@ def regenerate_home_brief_summary(date: Optional[str] = None):
     return brief_summary.get_or_create_home_summary(date=date, force=True)
 
 
-# ── daily artifact store (issue #841) ─────────────────────────────────────────
+# ── daily artifact store (issue #841) ────────────────────────────────────────
 # Persist the full daily brief per (project, date) so it is generated once and
 # served instantly thereafter. The current day is lazily generated on first
-# load; past dates are served from the store, with a clear empty state when none
-# was ever stored (never a recompute, never a 5xx).
+# load; past dates are served from the store, with a clear empty
+# state when none was ever stored (never a recompute, never a 5xx).
 
 @router.get("/api/projects/{slug}/brief/daily", response_model=DailyArtifact)
 def get_project_daily_brief(slug: str, date: Optional[str] = None):
@@ -248,7 +253,8 @@ def get_project_daily_brief(slug: str, date: Optional[str] = None):
              response_model=DailyArtifact)
 def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
     """Rebuild and re-store the daily brief, advancing the timestamp (AC7)."""
-    return brief_artifact.get_or_create_project_artifact(slug, date=date, force=True)
+    return brief_artifact.get_or_create_project_artifact(
+        slug, date=date, force=True)
 
 
 def _enrich_home_artifact(artifact: dict) -> None:
@@ -283,7 +289,8 @@ def _enrich_home_artifact(artifact: dict) -> None:
             p["briefSummary"] = ""
         else:
             try:
-                summary = brief_summary.get_or_create_project_summary(slug, date=date)
+                summary = brief_summary.get_or_create_project_summary(
+                    slug, date=date)
                 p["briefSummary"] = (summary or {}).get("summary", "")
             except Exception:
                 p["briefSummary"] = ""

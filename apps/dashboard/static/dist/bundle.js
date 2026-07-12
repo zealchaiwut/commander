@@ -688,7 +688,7 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["logs", "deploy", "metrics", "bulk-create"],
+    manage: ["logs", "deploy", "bulk-create"],
     planning: [
       "timeline",
       "compare",
@@ -701,7 +701,7 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
@@ -745,6 +745,7 @@
     const _topLevelTabs = [
       "sprint-mgmt",
       "tickets",
+      "metrics",
       "manage",
       "planning",
       "settings"

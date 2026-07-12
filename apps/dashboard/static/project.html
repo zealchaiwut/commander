@@ -11237,6 +11237,30 @@
               <div id="metrics-tokens-wrap"><canvas id="metrics-tokens-chart" style="width:100%;height:220px;"></canvas></div>
             </div>
           </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-rosette-discount-check"></i>
+              <div>
+                <div class="anl-card-title">First-Pass Rate per Sprint</div>
+                <div class="anl-card-sub">share of tickets tester accepted on the first try</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-fpr-wrap"><canvas id="metrics-fpr-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-refresh-alert"></i>
+              <div>
+                <div class="anl-card-title">Rework Rate per Sprint</div>
+                <div class="anl-card-sub">share of tickets tester rejected at least once</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-rpr-wrap"><canvas id="metrics-rpr-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -30621,10 +30645,66 @@ document.addEventListener('keydown', function(e) {
     _renderDuration(data);
   }
 
+  // Per-sprint first-pass rate line chart (issue #1848).
+  function _renderFpr(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('fpr', 'No data available'); return; }
+    _resetCanvas('fpr');
+    const c = _colors();
+    if (_charts.fpr) _charts.fpr.destroy();
+    const opts = _chartOpts(v => Math.round(v * 100) + '%');
+    opts.scales.y.max = 1;
+    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
+    _charts.fpr = new Chart(
+      document.getElementById('metrics-fpr-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'First-pass rate', data: data.map(d => d.first_pass_rate || 0),
+            borderColor: c.green, backgroundColor: c.green + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
+  // Per-sprint rework rate line chart (issue #1848).
+  function _renderRpr(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('rpr', 'No data available'); return; }
+    _resetCanvas('rpr');
+    const c = _colors();
+    if (_charts.rpr) _charts.rpr.destroy();
+    const opts = _chartOpts(v => Math.round(v * 100) + '%');
+    opts.scales.y.max = 1;
+    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
+    _charts.rpr = new Chart(
+      document.getElementById('metrics-rpr-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Rework rate', data: data.map(d => d.rework_rate || 0),
+            borderColor: c.orange, backgroundColor: c.orange + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
   // Render the loaded series: velocity/failure/duration from /api/metrics/sprints,
-  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859).
-  function _renderLoaded() { _renderAll(_metricsData); _renderTokens(_tokensData); }
+  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859),
+  // first-pass/rework-per-sprint from delivery-health endpoint (issue #1848).
+  function _renderLoaded() {
+    _renderAll(_metricsData);
+    _renderTokens(_tokensData);
+    _renderFpr(_bySprintData);
+    _renderRpr(_bySprintData);
+  }
   function _tableLoaded() { _tableFallback(_metricsData); _tableTokens(_tokensData); }
+
+  let _bySprintData = null;
 
   // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
   // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
@@ -30634,7 +30714,7 @@ document.addEventListener('keydown', function(e) {
       return;
     }
 
-    ['velocity', 'failure', 'duration', 'tokens'].forEach(k => {
+    ['velocity', 'failure', 'duration', 'tokens', 'fpr', 'rpr'].forEach(k => {
       const w = document.getElementById('metrics-' + k + '-wrap');
       if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
     });
@@ -30658,6 +30738,18 @@ document.addEventListener('keydown', function(e) {
     } catch (e) {
       _tokensData = [];
       _showMsg('tokens', 'Failed to load tokens');
+    }
+
+    // Per-sprint first-pass/rework series from delivery-health endpoint (issue #1848).
+    try {
+      const dhRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics');
+      if (!dhRes.ok) throw new Error('HTTP ' + dhRes.status);
+      const dh = await dhRes.json();
+      _bySprintData = Array.isArray(dh.by_sprint) ? dh.by_sprint : [];
+    } catch (e) {
+      _bySprintData = [];
+      _showMsg('fpr', 'Failed to load data');
+      _showMsg('rpr', 'Failed to load data');
     }
 
     _metricsLoaded = true;

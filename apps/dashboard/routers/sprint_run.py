@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from . import sprint_run_service
 from .sprint_run_service import SprintMgmtRunBody, SprintRerunV2Body
 from .board_cache import invalidate_board
+from . import brief_invalidation
 
 router = APIRouter(tags=["sprint_run"])
 
@@ -612,6 +613,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         action_id=str(uuid.uuid4()),
     )
     invalidate_board(body.project)
+    brief_invalidation.invalidate_home_brief_today()
     return {
         "ok": True,
         "sprint_label": body.sprint_label,

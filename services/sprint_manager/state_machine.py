@@ -226,6 +226,12 @@ def transition(
     raise TransitionError(last_error or "Transition failed after all retries")
 
 
+def _brief_today() -> str:
+    """Return today's UTC date string. Seam — patched in tests (issue #1854)."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _write_ticket_status(
     issue: int,
     status: str,
@@ -261,3 +267,15 @@ def _write_ticket_status(
             )
         else:
             sys.stdout.write(str(msg) + "\n")
+
+    # Brief cache invalidation (fire-and-forget, issue #1854).
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _dash_dir = _Path(__file__).parent.parent.parent / "apps" / "dashboard"
+        if str(_dash_dir) not in _sys.path:
+            _sys.path.insert(0, str(_dash_dir))
+        import db  # noqa: PLC0415
+        db.delete_brief_artifact("home", "", _brief_today())
+    except Exception:
+        pass

@@ -117,8 +117,8 @@ async def project_slug_no_tab(slug: str):
 
 @router.get("/project/{slug}/analytics")
 async def project_slug_analytics(slug: str):
-    """Retired standalone analytics page — redirect to in-chrome Analytics tab."""
-    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
+    """Retired standalone analytics page — permanent redirect to in-chrome Analytics tab."""
+    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=301)
 
 
 @router.get("/project/{slug}/{tab}")

@@ -8050,8 +8050,14 @@
     .metric-card.is-empty .metric-val,
     .metric-card.is-empty .metric-sub,
     .metric-card.is-empty .bar,
-    .metric-card.is-empty .breakdown { display: none; }
+    .metric-card.is-empty .breakdown,
+    .metric-card.is-empty .mrw-list { display: none; }
     .metric-card.is-empty .metric-empty { display: block; }
+    .mrw-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
+    .mrw-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .mrw-link { font-family: var(--mono); font-weight: 600; color: var(--blue); text-decoration: none; }
+    .mrw-link:hover { text-decoration: underline; }
+    .mrw-count { font-size: 11px; color: var(--text-sub); font-family: var(--mono); }
     .src-note { font-size: 11px; color: var(--text-sub); font-family: var(--mono); line-height: 1.6; padding-top: 10px; }
     /* ── Analytics page (mirrors analytics mock) ── */
     .anl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -11073,22 +11079,15 @@
               <div class="metric-sub" id="thr-sub"></div>
               <div class="metric-empty">No data for this period</div>
             </div>
-            <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
-              <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
-              <div class="metric-val"><span id="cps-val">—</span></div>
-              <div class="breakdown" id="cps-breakdown"></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
-              <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
-              <div class="metric-val"><span id="cpt-val">—</span></div>
-              <div class="metric-sub" id="cpt-sub"></div>
-              <div class="metric-empty">No data for this period</div>
+            <div class="metric-card" id="card-most-reworked" role="region" aria-label="Most reworked tickets">
+              <div class="metric-label"><i class="ti ti-repeat" style="font-size:13px"></i> Most reworked tickets</div>
+              <ol class="mrw-list" id="mrw-list" aria-label="Most reworked tickets ranked list"></ol>
+              <div class="metric-empty">No rework data for this period</div>
             </div>
           </div>
           <div class="src-note" aria-label="Data source note">
             sources: first-pass/rework from sprint state (tester_attempt_count) ·
-            durations from coder/tester timestamps · cost from token_usage × model price ·
+            durations from coder/tester timestamps ·
             throughput from sprint state files
           </div>
         </div>
@@ -30629,16 +30628,16 @@ document.addEventListener('keydown', function(e) {
 // ── Analytics delivery-health cards (#648, ported from the retired analytics page) ──
 (function () {
   function _anlSet(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
-  function _anlFmt$(v) { return '$' + (v || 0).toFixed(2); }
   function _anlFmtMin(m) { m = m || 0; return m < 60 ? Math.round(m) + 'm' : (m / 60).toFixed(1) + 'h'; }
   function _anlPct(r) { return Math.round((r || 0) * 100); }
 
   function _anlClear() {
     ['fpr-val','fpr-sub','rwr-val','rwr-sub','dur-val','dur-breakdown',
-     'thr-val','thr-sub','cps-val','cps-breakdown','cpt-val','cpt-sub'].forEach(id => {
+     'thr-val','thr-sub'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '—';
     });
     ['fpr-bar','rwr-bar'].forEach(id => { const el = document.getElementById(id); if (el) el.style.width = '0%'; });
+    const mrwEl = document.getElementById('mrw-list'); if (mrwEl) mrwEl.innerHTML = '';
     document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.remove('is-empty'));
   }
 
@@ -30648,7 +30647,7 @@ document.addEventListener('keydown', function(e) {
 
   function _anlRender(d) {
     const fpr = d.first_pass_rate || {}, rwr = d.rework_rate || {}, dur = d.avg_duration || {};
-    const thr = d.throughput || {}, cost = d.cost || {}, ps = cost.per_sprint || {}, pt = cost.per_ticket || {};
+    const thr = d.throughput || {};
     if ((fpr.total_completed || 0) <= 0) { _anlEmpty(); return; }
 
     const fprPct = _anlPct(fpr.rate);
@@ -30669,14 +30668,21 @@ document.addEventListener('keydown', function(e) {
     _anlSet('thr-val', (thr.avg_tickets_per_sprint || 0).toFixed(1));
     _anlSet('thr-sub', _anlFmtMin(thr.avg_sprint_length_minutes || 0) + ' avg sprint length');
 
-    _anlSet('cps-val', _anlFmt$(ps.total));
-    const byRole = ps.by_role || {};
-    const cpsEl = document.getElementById('cps-breakdown');
-    if (cpsEl) cpsEl.innerHTML = ['coder','tester','estimator'].map(r => '<span>' + r + ' ' + _anlFmt$(byRole[r]) + '</span>').join(' · ');
-
-    _anlSet('cpt-val', _anlFmt$(pt.avg));
-    const rwCost = pt.rework_cost_annotation || 0;
-    _anlSet('cpt-sub', rwCost > 0 ? 'rework adds ~' + _anlFmt$(rwCost) + '/ticket on rejected ones' : '');
+    const mrwItems = Array.isArray(d.most_reworked) ? d.most_reworked : [];
+    const mrwEl = document.getElementById('mrw-list');
+    if (mrwEl) {
+      if (mrwItems.length === 0) {
+        mrwEl.innerHTML = '';
+        const card = document.getElementById('card-most-reworked');
+        if (card) card.classList.add('is-empty');
+      } else {
+        const repo = (_projectData && _projectData.repo) ? _projectData.repo : null;
+        mrwEl.innerHTML = mrwItems.map(function (e) {
+          const href = repo ? 'https://github.com/' + repo + '/issues/' + e.number : '#';
+          return '<li class="mrw-item"><a href="' + href + '" target="_blank" rel="noopener" class="mrw-link">#' + e.number + '</a><span class="mrw-count">' + e.rejections + ' rejection' + (e.rejections !== 1 ? 's' : '') + '</span></li>';
+        }).join('');
+      }
+    }
   }
 
   // Scope → query string (shared by metrics + calibration). Reads #scope-days.

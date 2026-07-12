@@ -94,17 +94,19 @@ export async function smgmtRerunSprint(label) {
 
   _rrLabel = label;
   _rrVersionedLabel = null;
-
-  document.getElementById('rr-modal-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-  _rrShowPreviewLoading('Loading preview…');
-  document.getElementById('rr-content').classList.add('hidden');
-  document.getElementById('rr-error').classList.add('hidden');
-  document.getElementById('rr-error').textContent = '';
-  const confirmBtn = document.getElementById('rr-confirm-btn');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint and run'; }
+  // Open the modal FIRST — everything below (including a preview fetch) can
+  // throw, and a click must never silently no-op (issue #1754).
   _rrOpen();
 
   try {
+    document.getElementById('rr-modal-title').textContent = `Re-run ${sprintLabelDisplay(label)}?`;
+    _rrShowPreviewLoading('Loading preview…');
+    document.getElementById('rr-content').classList.add('hidden');
+    document.getElementById('rr-error').classList.add('hidden');
+    document.getElementById('rr-error').textContent = '';
+    const confirmBtn = document.getElementById('rr-confirm-btn');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Create sprint and run'; }
+
     const res = await fetch(
       `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
     );
@@ -140,6 +142,9 @@ export async function smgmtRerunSprint(label) {
     const errEl = document.getElementById('rr-error');
     errEl.textContent = 'Failed to load preview: ' + e.message;
     errEl.classList.remove('hidden');
+    if (typeof _smgmtShowToast === 'function') {
+      _smgmtShowToast('Re-run preview failed: ' + e.message);
+    }
   }
 }
 

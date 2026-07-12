@@ -182,6 +182,7 @@
     }
     .stat-v.g { color: var(--green); }
     .stat-v.a { color: var(--amber); }
+    .stat-v.r { color: var(--red); }
     .stat-l {
       font-size: 12px;
       color: var(--text-muted);
@@ -827,8 +828,12 @@
   }
 
   function _bottomHidden(slug){
-    try { return localStorage.getItem('pb_hide_bottom_' + slug) === '1'; }
-    catch(_){ return false; }
+    try {
+      const v = localStorage.getItem('pb_hide_bottom_' + slug);
+      if (v === null) return true; // first visit: default to hidden
+      return v === '1';
+    }
+    catch(_){ return true; }
   }
   function toggleBottom(slug){
     const card = document.querySelector('.pbrief[data-slug="' + (window.CSS && CSS.escape ? CSS.escape(slug) : slug) + '"]');
@@ -925,9 +930,14 @@
     }
 
     const brief = (artifact && artifact.brief) || {};
-    const gk = brief.global_kpis || {};
     const decisions = brief.decisions || [];
     const projects = brief.projects || [];
+    const ranOvernight = brief.ran_overnight || [];
+    const overnight_failures = ranOvernight.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
+    const gk = Object.assign({}, brief.global_kpis || {}, { overnight_failures });
 
     // Populate project metadata from enriched brief before rendering so
     // renderProjectsShell can merge artifact + live slugs (issue #1778 AC1/AC5).
@@ -945,7 +955,7 @@
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
-    html += renderRanOvernight(brief.ran_overnight || []);
+    html += renderRanOvernight(ranOvernight);
     html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
@@ -1046,8 +1056,13 @@
   // ── KPI strip ─────────────────────────────────────────────────────────────
   function renderKpis(gk){
     const n = v => (v == null ? 0 : v);
+    const failures = n(gk.overnight_failures);
+    const failCell = failures > 0
+      ? `<div class="stat-cell"><span class="stat-v r">${failures}</span><span class="stat-l">Failed</span></div>`
+      : '';
     return `
     <div class="status-bar">
+      ${failCell}
       <div class="stat-cell"><span class="stat-v g">${n(gk.sprints_shipped)}</span><span class="stat-l">Sprints shipped</span></div>
       <div class="stat-cell"><span class="stat-v">${n(gk.tickets_done)}</span><span class="stat-l">Tickets done</span></div>
       <div class="stat-cell"><span class="stat-v">${n(gk.in_progress)}</span><span class="stat-l">In progress</span></div>
@@ -1066,7 +1081,13 @@
 
   function renderRanOvernight(list){
     if (!list || !list.length) return '';
-    const rows = list.map(e => {
+    const _ORDER = {failure: 0, partial: 1, success: 2};
+    const sorted = [...list].sort((a, b) => {
+      const oa = _ORDER[String(a.outcome || '').toLowerCase()] ?? 1;
+      const ob = _ORDER[String(b.outcome || '').toLowerCase()] ?? 1;
+      return oa - ob;
+    });
+    const rows = sorted.map(e => {
       const outcome = String(e.outcome || '').toLowerCase();
       const cls = ['success','failure','partial'].includes(outcome) ? outcome : 'partial';
       const ic = outcome === 'success' ? 'ti-circle-check'
@@ -1083,18 +1104,24 @@
           <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:11px"></i></a>
         </div>`;
     });
+    // Failures and partials must never be hidden — keep them all visible
+    const neverHide = sorted.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
     return `
     <div class="sec">
       <div class="sec-hdr"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
-      ${_briefCollapsibleRows(rows, 'ran')}
+      ${_briefCollapsibleRows(rows, 'ran', neverHide)}
     </div>`;
   }
 
-  function _briefCollapsibleRows(rowsArr, id){
-    if (rowsArr.length <= 3) return `<div class="planner-list">${rowsArr.join('')}</div>`;
-    const head = rowsArr.slice(0, 3).join('');
-    const rest = rowsArr.slice(3).join('');
-    const n = rowsArr.length - 3;
+  function _briefCollapsibleRows(rowsArr, id, neverHide){
+    const threshold = Math.max(3, neverHide || 0);
+    if (rowsArr.length <= threshold) return `<div class="planner-list">${rowsArr.join('')}</div>`;
+    const head = rowsArr.slice(0, threshold).join('');
+    const rest = rowsArr.slice(threshold).join('');
+    const n = rowsArr.length - threshold;
     return `<div class="planner-list">${head}</div>
       <div class="planner-list planner-more" id="${id}-more" style="display:none">${rest}</div>
       <button type="button" class="planner-see-more" id="${id}-btn" onclick="_briefToggleMore('${id}', ${n})">See ${n} more <i class="ti ti-chevron-down"></i></button>`;
@@ -1354,6 +1381,7 @@
 
         <div class="pb-grid">
           <div class="pb-cell pb-cell-summary">
+            ${_statusLine(p)}
             <div class="pb-summary">
               <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
               <div class="pb-sum-body">
@@ -1361,7 +1389,6 @@
                 <div class="pb-sum-text" id="sum-${esc(slug)}">${summaryLoadingHtml()}</div>
               </div>
             </div>
-            ${_statusLine(p)}
           </div>
           <div class="pb-cell pb-cell-todo">
             <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>

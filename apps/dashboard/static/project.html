@@ -27330,7 +27330,8 @@ async function logsFetchRuns() {
       const sprintSel = document.getElementById('logs-filter-sprint');
       if (sprintSel) sprintSel.value = _logsState.filter.sprint;
     }
-    if (_logsState.filter.issue && _logsState.viewMode === 'raw') {
+    if (_logsState.viewMode === 'raw' &&
+        (_logsState.filter.issue || _logsState.rawLines === null)) {
       logsLoadRawView();
     }
   } catch (_) {}
@@ -27448,6 +27449,8 @@ function logsSetView(mode) {
   activityEl?.classList.toggle('hidden', mode !== 'activity');
   sevSeg?.classList.toggle('hidden', mode !== 'activity');
   rawLvlSel?.classList.toggle('hidden', mode === 'activity');
+  document.getElementById('logs-filter-agent')?.classList.toggle('hidden', mode !== 'activity');
+  document.getElementById('logs-filter-source')?.classList.toggle('hidden', mode !== 'activity');
   if (mode === 'raw')      logsLoadRawView();
   if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
 }

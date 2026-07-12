@@ -6,7 +6,8 @@
     const d = ev.detail || {};
     if (d.sprint_label) return d.sprint_label;
     if (d.sprint_id) return d.sprint_id;
-    if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target) return ev.target;
+    if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target)
+      return ev.target;
     return null;
   }
   function _isRunError(ev) {

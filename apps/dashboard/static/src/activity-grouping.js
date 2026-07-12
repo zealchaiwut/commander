@@ -5,7 +5,7 @@
  * Exposed on window.evlGroupEventsByRun via bundle entry (index.js).
  */
 
-const _SPRINT_TYPE_PREFIX = 'sprint_';
+const _SPRINT_TYPE_PREFIX = "sprint_";
 
 /** Extract the primary sprint label from an event, or null if none. */
 function _evlGetSprintLabel(ev) {
@@ -16,16 +16,17 @@ function _evlGetSprintLabel(ev) {
   if (d.sprint_id) return d.sprint_id;
   // For sprint lifecycle events (sprint_run, sprint_started, …) the target IS
   // the sprint label. Guard to avoid treating PR/issue numbers as sprint labels.
-  if ((ev.type || '').startsWith(_SPRINT_TYPE_PREFIX) && ev.target) return ev.target;
+  if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target)
+    return ev.target;
   return null;
 }
 
 function _isRunError(ev) {
-  const type = ev.type || '';
-  if (type === 'ticket_failed') return true;
-  if (type === 'agent_finished') {
-    const st = (ev.detail || {}).status || '';
-    return st === 'error' || st === 'timed_out';
+  const type = ev.type || "";
+  if (type === "ticket_failed") return true;
+  if (type === "agent_finished") {
+    const st = (ev.detail || {}).status || "";
+    return st === "error" || st === "timed_out";
   }
   return false;
 }
@@ -56,7 +57,7 @@ export function evlGroupEventsByRun(events) {
     const sl = _evlGetSprintLabel(ev);
 
     if (sl) {
-      const key = 'sprint:' + sl;
+      const key = "sprint:" + sl;
       if (!map[key]) {
         map[key] = {
           key,
@@ -76,19 +77,19 @@ export function evlGroupEventsByRun(events) {
         g.hasErrors = true;
         g.errorCount += 1;
       }
-      if (ev.type === 'sprint_finished') {
+      if (ev.type === "sprint_finished") {
         const d = ev.detail || {};
         const failed = d.failed || 0;
-        g.outcome = failed > 0 ? 'failed' : 'completed';
+        g.outcome = failed > 0 ? "failed" : "completed";
       }
     } else {
-      const ts = ev.timestamp || '';
-      const dayKey = ts.substring(0, 10) || 'unknown';
-      const key = 'other:' + dayKey;
+      const ts = ev.timestamp || "";
+      const dayKey = ts.substring(0, 10) || "unknown";
+      const key = "other:" + dayKey;
       if (!map[key]) {
         map[key] = {
           key,
-          sprint_label: '',
+          sprint_label: "",
           isOther: true,
           dayKey,
           events: [],
@@ -102,5 +103,5 @@ export function evlGroupEventsByRun(events) {
     }
   }
 
-  return order.map(k => map[k]);
+  return order.map((k) => map[k]);
 }

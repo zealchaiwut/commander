@@ -3673,6 +3673,7 @@ def _compute_analytics_metrics(project_root: Path,
     sprint_ticket_counts: list[int] = []
     sprint_lengths: list[float] = []
     by_sprint: list[dict] = []
+    issue_rejections: list[dict] = []
 
     # Token counts are sourced from the status files (model_name is joined from
     # the token_usage table below for pricing only).
@@ -3728,6 +3729,11 @@ def _compute_analytics_metrics(project_root: Path,
                     rework_count += 1
                     if rejections >= 2:
                         rework_2plus += 1
+
+                if rejections > 0:
+                    issue_num = issue.get("number")
+                    if issue_num is not None:
+                        issue_rejections.append({"number": issue_num, "rejections": rejections})
 
                 # Coder duration
                 coder_start = issue.get("coder_started_at")
@@ -3855,6 +3861,8 @@ def _compute_analytics_metrics(project_root: Path,
         round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
     )
 
+    most_reworked = sorted(issue_rejections, key=lambda x: x["rejections"], reverse=True)[:5]
+
     return {
         "first_pass_rate": {
             "rate": round(first_pass_rate, 4),
@@ -3891,6 +3899,7 @@ def _compute_analytics_metrics(project_root: Path,
                 "rework_cost_annotation": rework_cost_annotation,
             },
         },
+        "most_reworked": most_reworked,
         "by_sprint": by_sprint,
     }
 

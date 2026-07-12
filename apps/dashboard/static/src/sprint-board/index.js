@@ -13,6 +13,9 @@
 import './state.js';
 
 import {
+  _sHealthBuildHtml, _sHealthStripRender, sprintHealthStripInit,
+} from './health-strip.js';
+import {
   smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
 } from './plan-next.js';
 import {
@@ -235,3 +238,8 @@ globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
 globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;
+
+// Delivery-health stat strip (issue #1849)
+globalThis._sHealthBuildHtml = _sHealthBuildHtml;
+globalThis._sHealthStripRender = _sHealthStripRender;
+globalThis.sprintHealthStripInit = sprintHealthStripInit;

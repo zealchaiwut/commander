@@ -8110,6 +8110,14 @@
     .anl-panel.show { display: flex; }
     /* Sprint sub-nav: Board / Running / History (issue #798) */
     .subnav { display: flex; align-items: center; gap: 6px; padding: 14px 20px 0; }
+    /* Delivery-health stat strip (issue #1849) */
+    #sprint-health-strip { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; padding: 6px 20px 8px; border-top: 1px solid var(--border); background: var(--surface-2, rgba(0,0,0,.03)); font-size: 12px; color: var(--text-sub); }
+    #sprint-health-strip[hidden] { display: none; }
+    #sprint-health-strip .shs-stat { display: inline-flex; align-items: baseline; gap: 4px; }
+    #sprint-health-strip .shs-val { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+    #sprint-health-strip .shs-label { font-size: 11px; color: var(--text-muted); }
+    #sprint-health-strip .shs-see-more { margin-left: auto; font-size: 11px; color: var(--link, #3b82f6); text-decoration: none; white-space: nowrap; }
+    #sprint-health-strip .shs-see-more:hover { text-decoration: underline; }
     .subtab { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
     .subtab.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
     .subtab:hover:not(.active) { background: var(--surface); }
@@ -10339,6 +10347,8 @@
               </button>
             </div>
           </nav>
+          <!-- Delivery-health stat strip (issue #1849) — hidden until data loads -->
+          <div id="sprint-health-strip" hidden aria-label="Delivery health summary"></div>
         </div>
 
         <!-- Board sub-view (default) -->
@@ -30826,9 +30836,12 @@ document.addEventListener('keydown', function(e) {
   window.anlFetchDeliveryHealth = function () {
     if (!_slug) return;
     _anlClear();
-    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics' + _anlScopeQS())
+    // Reuse data already cached by the stat strip when no scope filter is active (AC4 issue #1849)
+    const qs = _anlScopeQS();
+    if (!qs && window._anlHealthData) { _anlRender(window._anlHealthData); return; }
+    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics' + qs)
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(_anlRender)
+      .then(function (d) { window._anlHealthData = d; _anlRender(d); })
       .catch(err => { console.error('Analytics delivery-health fetch failed:', err); _anlEmpty(); });
   };
 

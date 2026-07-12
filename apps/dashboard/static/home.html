@@ -780,6 +780,7 @@
     <div class="top-nav-date-nav">
       <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:13px"></i></button>
       <button class="nav-btn today" onclick="gotoToday()" id="today-btn">Today</button>
+      <button class="nav-btn" id="refresh-btn" onclick="refreshBrief()">Refresh</button>
       <span class="date-pick-wrap">
         <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:12px"></i></button>
         <input type="date" id="date-pick" aria-label="Pick a date" max="" onchange="onDatePick(event)">
@@ -1409,6 +1410,13 @@
     _go(fmtIso(dt));
   }
   function gotoToday(){ _go(null); }
+  async function refreshBrief(){
+    const b = document.getElementById('refresh-btn');
+    if (b) b.disabled = true;
+    try { await fetch('/api/brief/daily/regenerate', {method:'POST'}); } catch(_) {}
+    if (b) b.disabled = false;
+    loadBrief(_curDate);
+  }
   function onDatePick(ev){
     const v = ev.target.value;
     if (v) _go(v);

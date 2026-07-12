@@ -113,6 +113,28 @@ def _sprint_progress_file_path(project: str) -> Optional[Path]:
     return srv._commander_dir(project_root) / "runtime" / "sprint-progress.json"
 
 
+_PROGRESS_CACHE_MAX_AGE_SECONDS = 180
+
+
+def _is_progress_cache_fresh(cached: dict) -> bool:
+    """True if a persisted sprint-progress entry is young enough to trust (issue #1866).
+
+    Missing/unparseable ``fetched_at`` is treated as stale (fail closed) so a
+    malformed or pre-#1866 cache entry doesn't get trusted indefinitely.
+    """
+    fetched_at = cached.get("fetched_at")
+    if not fetched_at:
+        return False
+    try:
+        ts = datetime.fromisoformat(fetched_at)
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    return 0 <= age < _PROGRESS_CACHE_MAX_AGE_SECONDS
+
+
 def _persist_sprint_progress(project: str, data: dict) -> None:
     """Write sprint progress data atomically to .commander/runtime/sprint-progress.json."""
     path = _sprint_progress_file_path(project)
@@ -302,11 +324,15 @@ def get_sprint_progress(project: str = "", repo: str = ""):
         return result
 
     # ── 2. Try persisted file ────────────────────────────────────────────────
+    # Only trusted while fresh (issue #1866) — once a project goes idle (no
+    # sprint_manager running to refresh tier 1), an unbounded-age cache here
+    # would serve a frozen snapshot forever, long after the sprint it
+    # describes actually finished on GitHub.
     progress_path = _sprint_progress_file_path(key_project)
     if progress_path and progress_path.exists():
         try:
             cached = json.loads(progress_path.read_text(encoding="utf-8"))
-            if cached.get("has_sprint"):
+            if cached.get("has_sprint") and _is_progress_cache_fresh(cached):
                 return cached
         except (OSError, json.JSONDecodeError):
             pass
@@ -320,10 +346,19 @@ def get_sprint_progress(project: str = "", repo: str = ""):
     if not gh_data.get("has_sprint"):
         return {"has_sprint": False}
 
+    gh_state = gh_data.get("state", "running")
+    if gh_state == "finished":
+        # A completed sprint has no "in-progress" work to show — remove the
+        # pill entirely rather than freeze it on a stale "running" snapshot
+        # (issue #1866). _persist_sprint_progress writes this too, so tier 2's
+        # has_sprint guard skips it on the next read instead of re-serving it.
+        result = {"has_sprint": False, "fetched_at": datetime.now(timezone.utc).isoformat()}
+        _persist_sprint_progress(key_project, result)
+        return result
+
     sprint_num = gh_data.get("sprint", 0)
     gh_total = gh_data.get("total") or 0
     gh_done = _settled_done_from_columns(gh_total, gh_data.get("columns", {}))
-    gh_state = gh_data.get("state", "running")
 
     result = {
         "has_sprint": True,

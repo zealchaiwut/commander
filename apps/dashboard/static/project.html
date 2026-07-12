@@ -30931,7 +30931,7 @@ document.addEventListener('keydown', function(e) {
     });
 
     try {
-      const res = await fetch('/api/metrics/sprints');
+      const res = await fetch('/api/metrics/sprints?project=' + encodeURIComponent(_slug));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       _metricsData = await res.json();
     } catch (e) {

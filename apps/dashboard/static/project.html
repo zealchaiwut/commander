@@ -10195,7 +10195,12 @@
                 aria-selected="false" tabindex="-1" onclick="switchTab('tickets')">
           <i class="ti ti-list"></i>Issues
         </button>
-        <!-- Manage: Logs + Deploy + Analytics -->
+        <!-- Analytics: promoted to top-level tab (issue #1856) -->
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" tabindex="-1" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-bar"></i>Analytics
+        </button>
+        <!-- Manage: Logs + Deploy -->
         <div class="stab-group" id="stab-group-manage">
           <button class="stab stab-trigger" type="button" id="stab-manage-trigger"
                   aria-haspopup="true" aria-expanded="false" tabindex="-1"
@@ -10211,10 +10216,6 @@
             <button class="stab" role="menuitem" id="stab-deploy"
                     aria-selected="false" onclick="switchTab('deploy')">
               <i class="ti ti-rocket"></i>Deploy
-            </button>
-            <button class="stab" role="menuitem" id="stab-metrics"
-                    aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-bar"></i>Analytics
             </button>
           </div>
         </div>
@@ -11017,18 +11018,18 @@
 
         <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
         <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
-          <button class="anl-tab-btn active" id="anl-tab-calibration" role="tab"
-                  aria-selected="true" onclick="anlShowTab('calibration')">Calibration</button>
+          <button class="anl-tab-btn active" id="anl-tab-metrics" role="tab"
+                  aria-selected="true" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
+                  aria-selected="false" onclick="anlShowTab('calibration')">Calibration</button>
           <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
                   aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
           <button class="anl-tab-btn" id="anl-tab-status" role="tab"
                   aria-selected="false" onclick="anlShowTab('status')">Status</button>
-          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
-                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
         </div>
 
         <!-- Calibration panel -->
-        <div class="anl-panel show" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
+        <div class="anl-panel" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
           <div class="anl-card">
             <div class="anl-card-head">
               <i class="ti ti-target-arrow"></i>
@@ -11079,8 +11080,8 @@
           </div>
         </div>
 
-        <!-- Metrics panel (delivery-health, #648) -->
-        <div class="anl-panel" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
+        <!-- Metrics panel (delivery-health, #648) — default active sub-tab (issue #1856) -->
+        <div class="anl-panel show" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
           <div class="metric-grid" id="metric-grid">
             <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
               <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
@@ -12130,6 +12131,9 @@ function parseUrl() {
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
             : (rawTab === 'calibration')      ? 'calibration'
             : (rawTab === 'status')           ? 'status'
+            // 'metrics' / 'analytics' resolve to the Analytics tab (issue #1856)
+            : (rawTab === 'metrics')          ? 'metrics'
+            : (rawTab === 'analytics')        ? 'metrics'
             : (rawTab === 'notes')            ? 'notes'
             : (rawTab === 'settings')         ? 'settings'
             : (rawTab === 'global-settings')  ? 'global-settings'
@@ -30885,9 +30889,9 @@ document.addEventListener('keydown', function(e) {
     else window.anlFetchCalibration();
   };
 
-  // Override metricsInit: Analytics tab opens on Calibration (first tab) and lazy-loads data.
+  // Override metricsInit: Analytics tab opens on Metrics (delivery-health cards) sub-tab (issue #1856).
   window.metricsInit = function () {
-    window.anlShowTab('calibration');
+    window.anlShowTab('metrics');
   };
 }());
 

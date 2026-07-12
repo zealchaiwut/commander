@@ -29,7 +29,8 @@ globalThis.window = { addEventListener: () => {} };
 const { computeRovingTabindex } =
   await import("../../apps/dashboard/static/src/shell/tabs.js");
 
-const TOP_LEVEL = ["sprint-mgmt", "tickets", "manage", "planning", "settings"];
+// metrics was promoted to a top-level tab (issue #1856) and is no longer a manage child.
+const TOP_LEVEL = ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"];
 
 function assertExactlyOneZero(map, context) {
   const zeros = Object.entries(map).filter(([, v]) => v === 0);
@@ -90,10 +91,12 @@ test("AC2: deploy active → manage trigger gets 0, others get -1", () => {
   assertExactlyOneZero(map, "tab=deploy");
 });
 
-test("AC2: metrics active → manage trigger gets 0, others get -1", () => {
+// metrics was promoted to a top-level tab (issue #1856) — it now owns its own tabIndex=0 slot.
+test("metrics active → metrics button gets 0, manage trigger gets -1", () => {
   const map = computeRovingTabindex("metrics", false);
-  assert.equal(map["manage"], 0, "manage should be 0 when metrics is active");
-  assertAllMinusOne(map, "manage");
+  assert.equal(map["metrics"], 0, "metrics itself should be 0 when metrics is active (top-level tab)");
+  assert.equal(map["manage"], -1, "manage must be -1 when metrics is active (metrics left the manage group)");
+  assertAllMinusOne(map, "metrics");
   assertExactlyOneZero(map, "tab=metrics");
 });
 

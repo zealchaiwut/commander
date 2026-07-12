@@ -16,7 +16,7 @@
 // can assign tabIndex=0 to the group trigger without relying on .active class
 // state being set first (fixes issue #1175).
 const _GROUP_CHILDREN = {
-  manage: ["logs", "deploy", "metrics", "bulk-create"],
+  manage: ["logs", "deploy", "bulk-create"],
   planning: [
     "timeline",
     "compare",
@@ -35,7 +35,7 @@ const _GROUP_CHILDREN = {
  */
 export function computeRovingTabindex(tab, onGlobalSettings) {
   return Object.fromEntries(
-    ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+    ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
       const ownsTab =
         !onGlobalSettings &&
         (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
@@ -89,6 +89,7 @@ export function switchTab(tab, pushHistory) {
   const _topLevelTabs = [
     "sprint-mgmt",
     "tickets",
+    "metrics",
     "manage",
     "planning",
     "settings",

@@ -7827,6 +7827,28 @@
     }
     .evl-error-btn--action:hover { background: var(--amber-bg); }
 
+    /* ── Logs nav error badge (issue #1857) ── */
+    .logs-nav-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 16px; height: 16px;
+      background: var(--red); color: #fff;
+      border-radius: 8px; font-size: 10px; font-weight: 700;
+      padding: 0 4px; margin: 0 3px 0 1px; line-height: 1; flex-shrink: 0;
+    }
+    .logs-nav-badge.hidden { display: none; }
+    .evl-since-banner {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 16px; font-size: 12px; color: var(--text-sub);
+      border-bottom: 1px solid var(--border); background: var(--surface-2);
+    }
+    .evl-since-banner i { font-size: 13px; flex-shrink: 0; }
+    .evl-since-banner-link {
+      color: var(--blue); background: none; border: none;
+      cursor: pointer; font-size: 12px; padding: 0;
+      text-decoration: underline; white-space: nowrap;
+    }
+    .evl-since-banner-link:hover { text-decoration: none; }
+
     /* ── Branch cleanup controls (issue #634) ── */
     .evl-stale-banner-inner {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -10206,6 +10228,7 @@
                   aria-haspopup="true" aria-expanded="false" tabindex="-1"
                   onclick="toggleStabDropdown('manage', event)">
             <i class="ti ti-tool"></i>Manage
+            <span id="logs-nav-badge" class="logs-nav-badge hidden" aria-label="unread error events"></span>
             <i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" role="menu">
@@ -10704,6 +10727,7 @@
             </div>
             <div id="logs-activity">
               <div id="evl-stale-banner" class="hidden"></div>
+              <div id="evl-since-banner" class="hidden"></div>
               <div class="evl-list" id="evl-list">
                 <div class="logs-skeleton" id="evl-skeleton">
                   <div class="logs-skeleton-row"></div>
@@ -12811,6 +12835,9 @@ async function loadHomeData(silent) {
     const projects = data.projects || [];
     _projectData = projects.find(p => p.slug === _slug) || null;
 
+    // Populate error badge when returning to a non-Logs tab (issue #1857)
+    if (_activeTab !== 'logs') _logsBadgeFetch().catch(() => {});
+
     buildSidebar(projects);
     updateProjectHeader(_projectData);
     _hideDashboardUnreachable();
@@ -14083,6 +14110,14 @@ function _projConnectSse() {
       }
       if (data.type !== 'update' || !data.event) return;
       const et = data.event.event_type;
+      // Increment error badge when an error event arrives while not on Logs tab (issue #1857)
+      if (_activeTab !== 'logs' && typeof window.evlIsErrorEvent === 'function') {
+        const sseEv = { type: et, detail: { status: data.event.status } };
+        if (window.evlIsErrorEvent(sseEv)) {
+          _logsBadgeCount++;
+          _logsUpdateNavBadge(_logsBadgeCount);
+        }
+      }
       if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
       const repo = _cachedFullRepo[_slug];
       if (!repo) return;
@@ -27118,6 +27153,7 @@ const _logsState = {
 };
 let _logsLoaded = false;
 let _logsSearchTimer = null;
+let _logsBadgeCount = 0;
 
 /** Build a Logs-tab URL filtered to one sprint issue (raw per-issue log view). */
 function _logsIssueLogUrl(issueNum, sprintLabel) {
@@ -27159,6 +27195,22 @@ function logsInit() {
 
   if (!_logsLoaded) {
     _logsLoaded = true;
+    // Capture last-visit timestamp before overwriting it (used by evlFetch)
+    _evlState.sinceTs = typeof window.logsReadLastVisit === 'function'
+      ? window.logsReadLastVisit(_slug) : null;
+    // Pre-apply error severity filter when badge shows unseen errors
+    if (_logsBadgeCount > 0) {
+      _logsState.filter.severity = 'error';
+      document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+        var on = b.dataset.level === 'error';
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    // Clear badge and stamp last-visit as seen
+    _logsBadgeCount = 0;
+    _logsUpdateNavBadge(0);
+    if (typeof window.logsWriteLastVisit === 'function') window.logsWriteLastVisit(_slug);
     _logsPopulateRawLevelDropdown();
     logsFetchRuns();
     logsSyncGitHub();
@@ -27195,6 +27247,69 @@ function logsDestroy() {
     _logsState.pollTimer = null;
   }
   _logsDisconnectLive();
+}
+
+// ── Error badge helpers (issue #1857) ────────────────────────────────────────
+
+function _logsUpdateNavBadge(count) {
+  var badge = document.getElementById('logs-nav-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function _logsUpdateSinceBanner() {
+  var banner = document.getElementById('evl-since-banner');
+  if (!banner) return;
+  if (!_evlState.sinceMode || !_evlState.sinceTs) {
+    banner.className = 'hidden';
+    banner.innerHTML = '';
+    return;
+  }
+  var dt = '';
+  try { dt = new Date(_evlState.sinceTs).toLocaleString(); } catch (_) { dt = _evlState.sinceTs; }
+  banner.className = 'evl-since-banner';
+  banner.innerHTML = '<i class="ti ti-clock"></i>'
+    + '<span>Showing events since ' + escHtml(dt) + '</span>'
+    + '<button class="evl-since-banner-link" onclick="evlFetchFull()">Show full history</button>';
+}
+
+async function _logsBadgeFetch() {
+  if (!_projectData) return;
+  var since = typeof window.logsReadLastVisit === 'function'
+    ? window.logsReadLastVisit(_slug) : null;
+  if (!since) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); return; }
+  var slug = (_projectData.repo || '').split('/').pop();
+  try {
+    var url = typeof window.buildEvlFetchUrl === 'function'
+      ? window.buildEvlFetchUrl(slug, since)
+      : '/api/projects/' + encodeURIComponent(slug) + '/events?since=' + encodeURIComponent(since) + '&limit=50';
+    var resp = await fetch(url);
+    var events = resp.ok ? await resp.json() : [];
+    var count = typeof window.logsCountNewErrors === 'function'
+      ? window.logsCountNewErrors(events) : 0;
+    _logsBadgeCount = count;
+    _logsUpdateNavBadge(count);
+  } catch (_) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); }
+}
+
+async function evlFetchFull() {
+  _evlState.sinceTs = null;
+  _evlState.sinceMode = false;
+  _logsState.filter.severity = 'all';
+  document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+    var on = b.dataset.level === 'all';
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  _logsUpdateSinceBanner();
+  _evlState.events = null;
+  _evlState.loading = false;
+  await evlFetch();
 }
 
 async function logsFetchRuns() {
@@ -27733,6 +27848,8 @@ const _evlState = {
   loading: false,
   staleBranches: new Set(),
   sprintFeatMap: {},
+  sinceMode: false,   // true when current events were fetched with a since= constraint
+  sinceTs: null,      // the since= timestamp used for this Logs session (captured before overwrite)
 };
 
 function _evlEffectChip(ev) {
@@ -28027,17 +28144,35 @@ async function evlFetch() {
   if (emEl) emEl.classList.add('hidden');
 
   const slug = (_projectData.repo || '').split('/').pop();
+  const since = _evlState.sinceTs;
   try {
-    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/events?limit=200`);
+    var url = typeof window.buildEvlFetchUrl === 'function'
+      ? window.buildEvlFetchUrl(slug, since)
+      : ('/api/projects/' + encodeURIComponent(slug) + '/events?limit=200');
+    const resp = await fetch(url);
     _evlState.events = resp.ok ? await resp.json() : [];
+    _evlState.sinceMode = !!since;
   } catch (_) {
     _evlState.events = [];
+    _evlState.sinceMode = false;
+  }
+
+  // Auto-apply error filter when since-mode has errors and no filter was manually set
+  if (_evlState.sinceMode && _evlState.events.some(_evlIsError)
+      && _logsState.filter.severity === 'all') {
+    _logsState.filter.severity = 'error';
+    document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+      var on = b.dataset.level === 'error';
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   await evlFetchStaleBranches();
   _evlState.loading = false;
   _logsPopulateSprintDropdown();
   _logsPopulateRawLevelDropdown();
+  _logsUpdateSinceBanner();
   if (_logsState.viewMode === 'activity') evlRender();
 }
 

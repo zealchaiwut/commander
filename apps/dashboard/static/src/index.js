@@ -155,3 +155,22 @@ globalThis.stopGhAuthPoll = stopGhAuthPoll;
 // Activity feed run-grouping helper (issue #1853)
 root.evlGroupEventsByRun = evlGroupEventsByRun;
 globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+
+// Logs error badge helpers (issue #1857)
+import {
+  logsReadLastVisit,
+  logsWriteLastVisit,
+  evlIsErrorEvent,
+  logsCountNewErrors,
+  buildEvlFetchUrl,
+} from "./logs-error-badge.js";
+root.logsReadLastVisit = logsReadLastVisit;
+root.logsWriteLastVisit = logsWriteLastVisit;
+root.evlIsErrorEvent = evlIsErrorEvent;
+root.logsCountNewErrors = logsCountNewErrors;
+root.buildEvlFetchUrl = buildEvlFetchUrl;
+globalThis.logsReadLastVisit = logsReadLastVisit;
+globalThis.logsWriteLastVisit = logsWriteLastVisit;
+globalThis.evlIsErrorEvent = evlIsErrorEvent;
+globalThis.logsCountNewErrors = logsCountNewErrors;
+globalThis.buildEvlFetchUrl = buildEvlFetchUrl;

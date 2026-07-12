@@ -8811,6 +8811,46 @@ Proceed anyway?`)) {
   globalThis._sHealthStripRender = _sHealthStripRender;
   globalThis.sprintHealthStripInit = sprintHealthStripInit2;
 
+  // apps/dashboard/static/src/logs-error-badge.js
+  function logsErrorBadgeKey(slug) {
+    return "commander_logs_last_visit_" + slug;
+  }
+  function logsReadLastVisit(slug) {
+    try {
+      return typeof localStorage !== "undefined" && localStorage.getItem(logsErrorBadgeKey(slug)) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function logsWriteLastVisit(slug) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(logsErrorBadgeKey(slug), (/* @__PURE__ */ new Date()).toISOString());
+      }
+    } catch (_) {
+    }
+  }
+  function evlIsErrorEvent(ev) {
+    const type = ev.type || "";
+    if (type === "ticket_failed")
+      return true;
+    if (type === "agent_finished") {
+      const st = (ev.detail || {}).status || "";
+      return st === "error" || st === "timed_out";
+    }
+    return false;
+  }
+  function logsCountNewErrors(events) {
+    return events.filter(evlIsErrorEvent).length;
+  }
+  function buildEvlFetchUrl(slug, sinceTs) {
+    const base = "/api/projects/" + encodeURIComponent(slug) + "/events";
+    if (sinceTs) {
+      return base + "?since=" + encodeURIComponent(sinceTs) + "&limit=200";
+    }
+    return base + "?limit=200";
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -8882,5 +8922,15 @@ Proceed anyway?`)) {
   globalThis.stopGhAuthPoll = stopGhAuthPoll;
   root.evlGroupEventsByRun = evlGroupEventsByRun;
   globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+  root.logsReadLastVisit = logsReadLastVisit;
+  root.logsWriteLastVisit = logsWriteLastVisit;
+  root.evlIsErrorEvent = evlIsErrorEvent;
+  root.logsCountNewErrors = logsCountNewErrors;
+  root.buildEvlFetchUrl = buildEvlFetchUrl;
+  globalThis.logsReadLastVisit = logsReadLastVisit;
+  globalThis.logsWriteLastVisit = logsWriteLastVisit;
+  globalThis.evlIsErrorEvent = evlIsErrorEvent;
+  globalThis.logsCountNewErrors = logsCountNewErrors;
+  globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
 })();
 //# sourceMappingURL=bundle.js.map

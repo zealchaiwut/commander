@@ -9,6 +9,7 @@
  * Follow-on tickets extract additional self-contained blocks into static/src/
  * and import them here.
  */
+import { evlGroupEventsByRun } from "./activity-grouping.js";
 import {
   colorizeLogLine,
   escapeLogHtml,
@@ -150,3 +151,7 @@ root.stopGhAuthPoll = stopGhAuthPoll;
 globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
 globalThis.startGhAuthPoll = startGhAuthPoll;
 globalThis.stopGhAuthPoll = stopGhAuthPoll;
+
+// Activity feed run-grouping helper (issue #1853)
+root.evlGroupEventsByRun = evlGroupEventsByRun;
+globalThis.evlGroupEventsByRun = evlGroupEventsByRun;

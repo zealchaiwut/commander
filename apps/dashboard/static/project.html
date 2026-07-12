@@ -7621,6 +7621,35 @@
       border-top: 1px solid var(--border);
     }
     .evl-day-head:first-child { border-top: none; }
+    /* Sprint-run group headers (issue #1853) */
+    .evl-run-group { border-top: 1px solid var(--border); }
+    .evl-run-group:first-child { border-top: none; }
+    .evl-run-head {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+    }
+    .evl-run-head:hover { background: var(--surface-hover); }
+    .evl-run-head:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .evl-run-head--error { border-left: 3px solid var(--red); }
+    .evl-run-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
+    .evl-run-group.expanded .evl-run-chevron { transform: rotate(90deg); }
+    .evl-run-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .evl-run-err-badge {
+      background: var(--red-bg); color: var(--red);
+      border: 1px solid var(--red); border-radius: 4px;
+      padding: 1px 6px; font-size: 11px; font-weight: 600; flex-shrink: 0;
+    }
+    .evl-run-summary { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: auto; }
+    .evl-run-outcome {
+      font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+    }
+    .evl-run-outcome--completed { background: var(--green-bg); color: var(--green); }
+    .evl-run-outcome--failed { background: var(--red-bg); color: var(--red); }
+    .evl-run-body { display: none; }
+    .evl-run-group.expanded .evl-run-body { display: block; }
+    .evl-run-body > .evl-log-row:first-child { border-top: none; }
     .evl-log-row {
       display: flex; align-items: flex-start; gap: 11px; padding: 8px 16px;
       border-top: 1px solid var(--border); transition: background .1s;
@@ -28462,7 +28491,6 @@ function evlRenderTimeline(events) {
   if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
 
   var visible = events.filter(function(e) { return _evlMatchesFilter(e); });
-
   if (visible.length === 0) return '<div class="logs-empty">No events</div>';
 
   // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
@@ -28480,34 +28508,18 @@ function evlRenderTimeline(events) {
   }
   _evlState.sprintFeatMap = sprintFeatMap;
 
-  var byDay = [];
-  var dayMap = {};
-
-  for (var i = 0; i < events.length; i++) {
-    var e = events[i];
-    var ts = e.timestamp || '';
-    var dayKey = ts.substring(0, 10);
-    if (!dayMap[dayKey]) {
-      dayMap[dayKey] = [];
-      byDay.push({ key: dayKey, ts: ts, events: dayMap[dayKey] });
-    }
-    dayMap[dayKey].push(e);
-  }
+  // Group events by sprint run (issue #1853)
+  var groups = evlGroupEventsByRun(events);
 
   var html = '';
-  for (var j = 0; j < byDay.length; j++) {
-    var bucket = byDay[j];
-    var visibleInDay = bucket.events.filter(function(e) {
-      return _evlMatchesFilter(e);
-    });
-    if (visibleInDay.length === 0) continue;
+  for (var g = 0; g < groups.length; g++) {
+    var group = groups[g];
 
-    html += '<div class="evl-day-head">' + escHtml(_evlDayLabel(bucket.ts)) + '</div>';
-
+    // Compress visible events in this group (dedup consecutive identical rows)
     var compressed = [];
     var lastSig = null;
-    for (var k = 0; k < bucket.events.length; k++) {
-      var evK = bucket.events[k];
+    for (var k = 0; k < group.events.length; k++) {
+      var evK = group.events[k];
       if (!_evlMatchesFilter(evK)) continue;
       var sigK = _evlDedupSignature(evK);
       if (sigK === lastSig && compressed.length > 0) {
@@ -28517,12 +28529,14 @@ function evlRenderTimeline(events) {
         lastSig = sigK;
       }
     }
+    if (compressed.length === 0) continue;
 
+    // Build event rows HTML
+    var rowsHtml = '';
     for (var c = 0; c < compressed.length; c++) {
       var item = compressed[c];
       var ev = item.ev;
       var dupN = item.count;
-
       var timePart = (ev.timestamp || '').substring(11, 16);
       var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
       var badgeCls = _evlBadgeCls(badgeLabel);
@@ -28537,21 +28551,56 @@ function evlRenderTimeline(events) {
       var dupBadge = dupN > 1 ? '<span class="evl-dup-badge" title="' + dupN + ' identical events">×' + dupN + '</span>' : '';
       var errChev = isErr ? '<i class="ti ti-chevron-down evl-error-chev"></i>' : '';
       var clickAttr = isErr ? ' onclick="evlToggleErrorRow(this)"' : '';
-
-      html += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
+      rowsHtml += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
         + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '"' + clickAttr + '>'
         + '<span class="lr-time">' + escHtml(timePart) + '</span>'
         + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
         + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
-        + dupBadge
-        + durPill
-        + errChev
-        + errPanel
+        + dupBadge + durPill + errChev + errPanel
+        + '</div>';
+    }
+
+    if (group.isOther) {
+      // Dashboard / other: day-header, no collapse
+      var dayLabel = group.dayKey
+        ? 'Dashboard / other · ' + _evlDayLabel(group.dayKey + 'T00:00:00')
+        : 'Dashboard / other';
+      html += '<div class="evl-day-head">' + escHtml(dayLabel) + '</div>';
+      html += rowsHtml;
+    } else {
+      // Sprint run: collapsible group header
+      var isExpanded = group.hasErrors;  // error runs start expanded
+      var outcomeHtml = '';
+      if (group.outcome === 'completed') {
+        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--completed">completed</span>';
+      } else if (group.outcome === 'failed') {
+        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--failed">failed</span>';
+      }
+      var errBadge = group.errorCount > 0
+        ? '<span class="evl-run-err-badge">' + group.errorCount + ' error' + (group.errorCount !== 1 ? 's' : '') + '</span>'
+        : '';
+      var summary = compressed.length + ' event' + (compressed.length !== 1 ? 's' : '');
+      var headCls = 'evl-run-head' + (group.errorCount > 0 ? ' evl-run-head--error' : '');
+      html += '<div class="evl-run-group' + (isExpanded ? ' expanded' : '') + '">'
+        + '<div class="' + headCls + '" role="button" tabindex="0"'
+        + ' onclick="evlToggleRunGroup(this.parentNode)"'
+        + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \')evlToggleRunGroup(this.parentNode)">'
+        + '<i class="ti ti-chevron-right evl-run-chevron"></i>'
+        + '<span class="evl-run-label">' + escHtml(sprintLabelDisplay(group.sprint_label)) + '</span>'
+        + outcomeHtml
+        + errBadge
+        + '<span class="evl-run-summary">' + escHtml(summary) + '</span>'
+        + '</div>'
+        + '<div class="evl-run-body">' + rowsHtml + '</div>'
         + '</div>';
     }
   }
 
   return html || '<div class="logs-empty">No events</div>';
+}
+
+function evlToggleRunGroup(groupEl) {
+  if (groupEl) groupEl.classList.toggle('expanded');
 }
 
 // ── Branch cleanup helpers (issue #634) ──────────────────────────────────────

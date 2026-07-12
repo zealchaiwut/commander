@@ -13802,10 +13802,6 @@ async function init() {
   const _todoDockPanel = document.getElementById('todo-dock-panel');
   if (_todoDockPanel && window.CommanderTodo) CommanderTodo.mount(_todoDockPanel, slug);
 
-  // Wire analytics page link now that slug is known
-  const _anlPageLink = document.getElementById('stab-analytics-page');
-  if (_anlPageLink) _anlPageLink.href = '/project/' + encodeURIComponent(slug) + '/analytics';
-
   initTheme();
   updateSidebarFooter();
   checkGhAuthStatus().catch(() => {});

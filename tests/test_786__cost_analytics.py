@@ -3,12 +3,12 @@
 AC coverage:
   AC1  — returns token totals aggregated by sprint, by ticket, and by agent,
           plus per-size averages (joined from estimates)
-  AC2  — response includes a 30-day trend series (one data point per day)
+  AC2  — (trend_30d removed in issue #1846 — tests removed)
   AC3  — per-size token averages are machine-readable in the API response
-  AC4  — cost tab appears under Analytics in the frontend (HTML check)
+  AC4  — (analytics.html deleted in issue #1846 — tests removed)
   AC5  — sprint totals, top-10 most expensive tickets, and per-agent token
           split are displayed (shape checks)
-  AC6  — tokens-per-size table visible in the Cost tab (HTML check)
+  AC6  — (analytics.html deleted in issue #1846 — tests removed)
   AC7  — dollar estimate column hidden when no price map configured
   AC8  — dollar estimate column with "estimate" badge when price map configured
   AC9  — no prices hardcoded; all $ estimates derive from user-editable price map
@@ -249,41 +249,6 @@ class TestResponseShape:
 
 
 # ---------------------------------------------------------------------------
-# AC2 — 30-day trend series
-# ---------------------------------------------------------------------------
-
-class TestTrendSeries:
-    def test_trend_30d_present(self, tmp_path):
-        db = _mk_db(tmp_path)
-        data = _call(tmp_path, db).json()
-        assert "trend_30d" in data
-        assert isinstance(data["trend_30d"], list)
-
-    def test_trend_entry_has_date_and_tokens(self, tmp_path):
-        db = _mk_db(tmp_path)
-        _insert_run(db, 1, "sprint-1", "coder", 1000, started_at="2026-06-10T10:00:00")
-        entries = _call(tmp_path, db).json()["trend_30d"]
-        assert any("date" in e and "tokens" in e for e in entries)
-
-    def test_trend_excludes_older_than_30_days(self, tmp_path):
-        db = _mk_db(tmp_path)
-        _insert_run(db, 1, "sprint-1", "coder", 9999, started_at="2020-01-01T00:00:00")
-        _insert_run(db, 2, "sprint-1", "coder", 100, started_at="2026-06-10T10:00:00")
-        entries = _call(tmp_path, db).json()["trend_30d"]
-        total = sum(e["tokens"] for e in entries)
-        assert total < 9000
-
-    def test_trend_groups_by_day(self, tmp_path):
-        db = _mk_db(tmp_path)
-        _insert_run(db, 1, "sprint-1", "coder", 500, started_at="2026-06-10T08:00:00")
-        _insert_run(db, 2, "sprint-1", "coder", 300, started_at="2026-06-10T18:00:00")
-        entries = _call(tmp_path, db).json()["trend_30d"]
-        jun10 = [e for e in entries if e.get("date") == "2026-06-10"]
-        assert len(jun10) == 1
-        assert jun10[0]["tokens"] == 800
-
-
-# ---------------------------------------------------------------------------
 # AC3 — per-size token averages machine-readable
 # ---------------------------------------------------------------------------
 
@@ -444,61 +409,6 @@ class TestNoPricesHardcoded:
         low_cost = sum(s.get("cost_usd") or 0 for s in data_low["by_sprint"])
         high_cost = sum(s.get("cost_usd") or 0 for s in data_high["by_sprint"])
         assert high_cost >= low_cost
-
-
-# ---------------------------------------------------------------------------
-# AC4 — cost tab appears under Analytics in the frontend
-# ---------------------------------------------------------------------------
-
-class TestFrontendCostTab:
-    def _html(self) -> str:
-        path = DASHBOARD_DIR / "static" / "analytics.html"
-        return path.read_text(encoding="utf-8")
-
-    def test_cost_tab_button_exists(self):
-        html = self._html()
-        assert "tab-cost" in html
-
-    def test_cost_panel_exists(self):
-        html = self._html()
-        assert "panel-cost" in html
-
-    def test_cost_tab_has_cost_label(self):
-        html = self._html()
-        assert "Cost" in html
-
-
-# ---------------------------------------------------------------------------
-# AC6 — tokens-per-size table visible in Cost tab
-# ---------------------------------------------------------------------------
-
-class TestFrontendPerSizeTable:
-    def _html(self) -> str:
-        path = DASHBOARD_DIR / "static" / "analytics.html"
-        return path.read_text(encoding="utf-8")
-
-    def test_per_size_section_in_cost_panel(self):
-        html = self._html()
-        panel_start = html.find("panel-cost")
-        assert panel_start != -1, "panel-cost not found in analytics.html"
-        panel_html = html[panel_start:panel_start + 15000]
-        # Tokens-per-size table must appear inside the cost panel
-        assert (
-            "per_size_avg_tokens" in panel_html
-            or "per-size" in panel_html
-            or "Tokens per size" in panel_html
-            or "Tokens by size" in panel_html
-        )
-
-    def test_size_labels_in_cost_panel(self):
-        html = self._html()
-        panel_start = html.find("panel-cost")
-        assert panel_start != -1, "panel-cost not found in analytics.html"
-        panel_html = html[panel_start:panel_start + 15000]
-        assert any(
-            f">{sz}<" in panel_html or f">{sz} " in panel_html or f'"{sz}"' in panel_html
-            for sz in ("S", "M", "L", "XL")
-        )
 
 
 # ---------------------------------------------------------------------------

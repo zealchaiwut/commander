@@ -7525,37 +7525,6 @@
     .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
     .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
     @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
-    /* Logs › Issues view */
-    .logs-issue-group { border-bottom: 1px solid var(--border); }
-    .logs-issue-group-label {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 20px; background: var(--surface-2);
-      font-size: 12px; font-weight: 700; color: var(--text-muted);
-      position: sticky; top: 0; z-index: 1;
-    }
-    .logs-issue-group-count {
-      font-weight: 600; color: var(--text-sub);
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 999px; padding: 0 7px; font-size: 11px;
-    }
-    .logs-issue-row {
-      display: flex; align-items: center; gap: 10px; width: 100%;
-      padding: 9px 20px; background: none; border: none; border-top: 1px solid var(--border);
-      cursor: pointer; text-align: left; font-family: inherit; transition: background .12s;
-    }
-    .logs-issue-row:first-of-type { border-top: none; }
-    .logs-issue-row:hover { background: var(--surface-hover); }
-    .logs-issue-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
-    .logs-issue-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
-    .logs-issue-title {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 13px; color: var(--text);
-    }
-    .logs-issue-action {
-      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
-      font-size: 12px; font-weight: 600; color: var(--blue); opacity: 0; transition: opacity .12s;
-    }
-    .logs-issue-row:hover .logs-issue-action { opacity: 1; }
     .logs-run-row { border-bottom: 1px solid var(--border); }
     .logs-run-header {
       display: flex; align-items: center; gap: 10px; padding: 10px 20px;
@@ -7902,7 +7871,7 @@
 
     /* Suppress all Logs tab motion when user prefers reduced motion */
     @media (prefers-reduced-motion: reduce) {
-      .logs-chip, .logs-view-btn, .logs-issue-row, .logs-run-header,
+      .logs-chip, .logs-view-btn, .logs-run-header,
       .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
       .evl-chevron, .logs-run-chevron, .logs-live-dot,
       .logs-skeleton-row { transition: none !important; animation: none !important; }
@@ -10745,49 +10714,6 @@
                   <div class="logs-skeleton-row"></div>
                 </div>
                 <div class="logs-empty hidden" id="evl-empty">No events</div>
-              </div>
-            </div>
-            <!-- Search panel (issue #785) -->
-            <div id="logs-search-pane" class="hidden">
-              <div class="lsr-form" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);align-items:flex-end">
-                <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:140px">
-                  <label class="lsr-label" for="logs-search-q">Keyword</label>
-                  <input type="text" id="logs-search-q" class="lsr-input" placeholder="substring to find…" autocomplete="off" onkeydown="if(event.key==='Enter')logsSearchSubmit()">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:90px">
-                  <label class="lsr-label" for="lsr-sprint">Sprint</label>
-                  <input type="text" id="lsr-sprint" class="lsr-input" placeholder="sprint-59">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:80px">
-                  <label class="lsr-label" for="lsr-issue">Issue #</label>
-                  <input type="number" id="lsr-issue" class="lsr-input" placeholder="785" min="1">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;min-width:80px">
-                  <label class="lsr-label" for="lsr-agent">Agent</label>
-                  <select id="lsr-agent" class="lsr-input">
-                    <option value="">Any</option>
-                    <option value="coder">coder</option>
-                    <option value="tester">tester</option>
-                    <option value="dispatch">dispatch</option>
-                  </select>
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;min-width:80px">
-                  <label class="lsr-label" for="lsr-level">Level</label>
-                  <select id="lsr-level" class="lsr-input">
-                    <option value="">Any</option>
-                    <option value="INFO">INFO</option>
-                    <option value="WARN">WARN</option>
-                    <option value="ERROR">ERROR</option>
-                    <option value="FAIL">FAIL</option>
-                  </select>
-                </div>
-                <button class="btn-sm btn-primary" onclick="logsSearchSubmit()">
-                  <i class="ti ti-search"></i> Search
-                </button>
-              </div>
-              <div id="lsr-status" class="hidden" style="padding:4px 12px;font-size:11px;color:var(--text-sub)"></div>
-              <div id="lsr-results" style="overflow-y:auto;flex:1">
-                <div class="logs-empty lsr-empty hidden" id="lsr-empty">No matches found.</div>
               </div>
             </div>
           </div>
@@ -27366,7 +27292,6 @@ function logsOnSearch(value) {
 }
 
 function logsSetView(mode) {
-  if (mode === 'issues' || mode === 'search') mode = 'activity';
   _logsState.viewMode = mode;
   const timelineEl = document.getElementById('logs-timeline');
   const rawEl      = document.getElementById('logs-raw');
@@ -27392,219 +27317,7 @@ function logsSetView(mode) {
   else if (mode === 'timeline') logsRenderTimeline();
 }
 
-// ── Logs › Search view (issue #785) ─────────────────────────────────────────
-
-const _lsrState = { loading: false, lastQuery: null };
-
-async function logsSearchSubmit() {
-  const q       = document.getElementById('logs-search-q')?.value.trim() || '';
-  const sprint  = document.getElementById('lsr-sprint')?.value.trim() || '';
-  const issue   = document.getElementById('lsr-issue')?.value.trim() || '';
-  const agent   = document.getElementById('lsr-agent')?.value || '';
-  const level   = document.getElementById('lsr-level')?.value || '';
-
-  if (!q && !sprint && !issue && !agent && !level) {
-    const statusEl = document.getElementById('lsr-status');
-    if (statusEl) { statusEl.textContent = 'Enter at least one search field.'; statusEl.classList.remove('hidden'); }
-    return;
-  }
-
-  const params = new URLSearchParams();
-  if (q)      params.set('q', q);
-  if (sprint) params.set('sprint', sprint);
-  if (issue)  params.set('issue', issue);
-  if (agent)  params.set('agent', agent);
-  if (level)  params.set('level', level);
-  if (_projectData?.repo) params.set('project', _projectData.repo);
-
-  const statusEl  = document.getElementById('lsr-status');
-  const resultsEl = document.getElementById('lsr-results');
-  const emptyEl   = document.getElementById('lsr-empty');
-
-  if (statusEl) { statusEl.textContent = 'Searching…'; statusEl.classList.remove('hidden'); }
-  if (resultsEl) resultsEl.querySelectorAll('.lsr-result, .lsr-truncation').forEach(e => e.remove());
-  if (emptyEl) emptyEl.classList.add('hidden');
-  _lsrState.loading = true;
-
-  try {
-    const resp = await fetch(`/api/logs/search?${params}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    _lsrRenderResults(data, q);
-  } catch (err) {
-    if (statusEl) statusEl.textContent = `Search error: ${err.message}`;
-  } finally {
-    _lsrState.loading = false;
-  }
-}
-
-function _lsrRenderResults(data, q) {
-  const statusEl  = document.getElementById('lsr-status');
-  const resultsEl = document.getElementById('lsr-results');
-  const emptyEl   = document.getElementById('lsr-empty');
-
-  const matches = data.matches || [];
-  const ms = data.query_ms ?? 0;
-
-  if (statusEl) {
-    let msg = `${data.total ?? matches.length} match${(data.total ?? matches.length) !== 1 ? 'es' : ''}`;
-    if (data.capped) msg += ' (showing first 500)';
-    if (data.timed_out) msg += ' — search timed out, results may be partial';
-    msg += ` · ${ms} ms`;
-    statusEl.textContent = msg;
-    statusEl.classList.remove('hidden');
-  }
-
-  if (matches.length === 0) {
-    if (emptyEl) emptyEl.classList.remove('hidden');
-    return;
-  }
-
-  if (!resultsEl) return;
-  const frag = document.createDocumentFragment();
-
-  for (const m of matches) {
-    const div = document.createElement('div');
-    div.className = 'lsr-result';
-    div.dataset.lineOffset = m.line_offset ?? 0;
-    div.dataset.file = m.file || '';
-    div.dataset.sprint = m.sprint || '';
-    const metaParts = [];
-    if (m.sprint) metaParts.push(`<span class="lsr-badge">${escHtml(m.sprint)}</span>`);
-    if (m.issue)  metaParts.push(`<span class="lsr-badge">#${escHtml(String(m.issue))}</span>`);
-    if (m.agent)  metaParts.push(`<span class="lsr-badge">${escHtml(m.agent)}</span>`);
-    metaParts.push(`<span style="color:var(--text-sub);font-size:10px">line ${(m.line_offset ?? 0) + 1}</span>`);
-    const highlighted = q ? escHtml(m.text || '').replace(
-      new RegExp(escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-      s => `<mark>${s}</mark>`
-    ) : escHtml(m.text || '');
-    div.innerHTML = `<div class="lsr-result-meta">${metaParts.join('')}</div><div class="lsr-result-text">${highlighted}</div>`;
-    div.onclick = () => _lsrOpenResult(m);
-    frag.appendChild(div);
-  }
-
-  if (data.capped) {
-    const trunc = document.createElement('div');
-    trunc.className = 'lsr-truncation';
-    trunc.textContent = 'Results capped at 500. Narrow your search to see more.';
-    frag.appendChild(trunc);
-  }
-
-  resultsEl.appendChild(frag);
-}
-
-function _lsrOpenResult(match) {
-  // Switch to Raw view, filter to the sprint containing this result, then
-  // scroll to the matching line_offset.
-  const sprint = match.sprint;
-  const lineOffset = match.line_offset ?? 0;
-
-  if (sprint) {
-    _logsState.filter.sprint = sprint;
-    const sel = document.getElementById('logs-filter-sprint');
-    if (sel) sel.value = sprint;
-  }
-
-  logsSetView('raw');
-  // After the raw log loads, scroll to the matching line
-  _lsrScrollToLine(lineOffset);
-}
-
-async function _lsrScrollToLine(lineOffset) {
-  // logsLoadRawView is async; wait briefly for it to finish then scroll
-  const streamEl = document.getElementById('logs-raw-stream');
-  if (!streamEl) return;
-
-  // Poll until content changes from placeholder
-  let attempts = 0;
-  while (attempts < 20) {
-    await new Promise(r => setTimeout(r, 150));
-    const lines = streamEl.querySelectorAll('.logs-raw-line');
-    if (lines.length > 1) {
-      const target = lines[lineOffset] || lines[lines.length - 1];
-      if (target) {
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        target.style.background = 'var(--yellow-bg, #fef9c3)';
-        setTimeout(() => { target.style.background = ''; }, 2500);
-      }
-      return;
-    }
-    attempts++;
-  }
-}
-
-// ── Logs › Issues view: browse per-issue logs without typing ─────────────────
 function _logsRepo() { return _projectData ? _projectData.repo : (_smgmtRepo() || ''); }
-
-async function _logsLoadIssues() {
-  const repo = _logsRepo();
-  if (!repo) return;
-  // Reuse the board's already-loaded issue list when available
-  if (_smgmtData && Array.isArray(_smgmtData.issues)) {
-    _logsState.issues = _smgmtData.issues;
-    _logsRenderIssues();
-    return;
-  }
-  try {
-    const resp = await fetch(`/api/sprint-management/issues?repo=${encodeURIComponent(repo)}`);
-    _logsState.issues = resp.ok ? ((await resp.json()).issues || []) : [];
-  } catch (_) { _logsState.issues = []; }
-  _logsRenderIssues();
-}
-
-function _logsIssueStatusBadge(iss) {
-  const hasRework = (iss.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
-  const cls = hasRework ? 'smgmt-status-need-rework' : ({
-    'backlog':     'smgmt-status-backlog',
-    'in-progress': 'smgmt-status-in-progress',
-    'sit':         'smgmt-status-sit',
-    'uat':         'smgmt-status-uat',
-    'done':        'smgmt-status-done',
-  }[iss.status] || 'smgmt-status-backlog');
-  const label = hasRework ? 'needs rework' : (iss.status || 'backlog');
-  return `<span class="smgmt-ticket-status ${cls}">${escHtml(label)}</span>`;
-}
-
-function _logsRenderIssues() {
-  const container = document.getElementById('logs-issues');
-  if (!container) return;
-  if (_logsState.issues === null) {
-    container.innerHTML = `<div class="logs-empty">Loading issues…</div>`;
-    return;
-  }
-  const dispatched = _logsState.issues.filter(i => i.sprint_label);
-  const q = _logsState.search;
-  let issues = dispatched;
-  if (q) issues = issues.filter(i => String(i.number).includes(q) || (i.title || '').toLowerCase().includes(q));
-  if (issues.length === 0) {
-    container.innerHTML = `<div class="logs-empty">${
-      dispatched.length === 0
-        ? 'No dispatched issues yet — per-issue logs appear here after a sprint runs.'
-        : 'No issues match your filter.'
-    }</div>`;
-    return;
-  }
-  const groups = {};
-  issues.forEach(i => { (groups[i.sprint_label] = groups[i.sprint_label] || []).push(i); });
-  const labels = Object.keys(groups).sort((a, b) => sprintLabelCompare(b, a)); // newest sprint first
-  const repo = _logsRepo();
-  let html = '';
-  for (const label of labels) {
-    const rows = groups[label].sort((a, b) => b.number - a.number).map(i =>
-      `<button class="logs-issue-row" onclick="openLvIssueLog(${i.number}, '${escHtml(label)}', '${escHtml(repo)}')">
-        <span class="logs-issue-num">#${i.number}</span>
-        <span class="logs-issue-title" title="${escHtml(i.title)}">${escHtml(i.title)}</span>
-        ${_logsIssueStatusBadge(i)}
-        <span class="logs-issue-action"><i class="ti ti-file-text"></i> View log</span>
-      </button>`
-    ).join('');
-    html += `<div class="logs-issue-group">
-      <div class="logs-issue-group-label">${escHtml(sprintLabelDisplay(label))} <span class="logs-issue-group-count">${groups[label].length}</span></div>
-      ${rows}
-    </div>`;
-  }
-  container.innerHTML = html;
-}
 
 function _logsFilteredRuns() {
   let runs = _logsState.runs;

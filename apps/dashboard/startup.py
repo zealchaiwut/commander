@@ -1732,149 +1732,21 @@ def _parse_summary_file(path: Path) -> dict:
     }
 
 
-# ── home aggregated endpoint (#216) ──────────────────────────────────────────
-
-_home_cache: dict[str, tuple[float, dict]] = {}
-_HOME_CACHE_TTL = 30.0
-
+# ── home aggregated endpoint (#216) ── delegated to home_service (issue #1786)
 
 def _invalidate_home_cache(slug: str) -> None:
-    """Drop cached /api/home payload for *slug* after identity-changing settings writes."""
-    _home_cache.pop(f"home:{slug}", None)
-
-
-def _project_identity_for_home(repo: str, proj: dict, slug: str) -> dict[str, str]:
-    """Resolve icon/color/display name for home payloads (settings override projects.json)."""
-    icon = proj.get("icon", "ti-folder")
-    color = proj.get("color", "gray")
-    name = proj.get("name", slug)
+    """Drop cached /api/home payload for *slug* — delegates to home_service."""
     try:
-        proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-        if proj_override.get("icon"):
-            icon = proj_override["icon"]
-        if proj_override.get("color"):
-            color = proj_override["color"]
-        if proj_override.get("display_name"):
-            name = proj_override["display_name"]
+        from home_service import invalidate_home_by_slug  # noqa: PLC0415
+        invalidate_home_by_slug(slug)
     except Exception:
         pass
-    return {"name": name, "icon": icon, "color": color}
 
 
 def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
-    """Compute per-project home data, cached 30 s per project slug.
-
-    On any GitHub fetch error, returns an idle sentinel with 0 counts so the
-    overall endpoint still returns 200.
-    """
-    repo = proj["repo"]
-    slug = repo.split("/")[-1]
-    identity = _project_identity_for_home(repo, proj, slug)
-    name = identity["name"]
-    icon = identity["icon"]
-    color = identity["color"]
-
-    cache_key = f"home:{slug}"
-    now = time.monotonic()
-    cached = _home_cache.get(cache_key)
-    if cached and now - cached[0] < _HOME_CACHE_TTL:
-        return cached[1]
-
-    def _idle() -> dict:
-        sentinel: dict = {
-            "name": name, "slug": slug, "repo": repo, "icon": icon, "color": color,
-            "status": "idle", "uat_count": 0, "backlog_count": 0,
-            "last_activity_at": None,
-        }
-        _home_cache[cache_key] = (now, sentinel)
-        return sentinel
-
-    try:
-        all_open = github_client.list_all_open_issues(repo_name=repo)
-    except Exception:
-        return _idle()
-
-    proj_running = [r for r in running_sprints if r["project"] == repo]
-    sprint_running_field: dict | None = None
-    if proj_running:
-        r0 = proj_running[0]
-        status_data = _sprint_statuses.get((r0["project"], r0["sprint_label"]), {})
-        start_ts = status_data.get("start_timestamp")
-        elapsed_sec = 0
-        if start_ts:
-            try:
-                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
-                elapsed_sec = int((datetime.now(timezone.utc) - start_dt).total_seconds())
-            except Exception:
-                pass
-        sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
-
-    uat_issues = [i for i in all_open if any(lbl["name"] == "UAT" for lbl in i.get("labels", []))]
-    backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
-
-    # The durable SQLite sprints table (issue #757) is authoritative for the
-    # running check, so the PID-based scan above is sufficient. The former Neon
-    # supplement was removed in issue #758.
-    if proj_running:
-        status = "running"
-    elif uat_issues:
-        status = "uat-pending"
-    else:
-        status = "idle"
-
-    last_activity_at: str | None = None
-    issue_timestamps = [i.get("updatedAt") for i in all_open if i.get("updatedAt")]
-    if issue_timestamps:
-        last_activity_at = max(issue_timestamps)
-
-    last_sprint_data: dict | None = None
-    seen_dirs: set[str] = set()
-    for sprints_dir in [
-        _commander_dir(_project_root_path(repo)) / "sprints",
-        SPRINTS_DIR,
-    ]:
-        key_str = str(sprints_dir.resolve())
-        if not sprints_dir.exists() or key_str in seen_dirs:
-            continue
-        seen_dirs.add(key_str)
-        summary_files = sorted(
-            sprints_dir.glob("*-summary-*.md"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if summary_files and last_sprint_data is None:
-            try:
-                meta = _parse_summary_file(summary_files[0])
-                if meta.get("date"):
-                    sprint_ts = meta["date"] + "T00:00:00Z"
-                    if last_activity_at is None or sprint_ts > last_activity_at:
-                        last_activity_at = sprint_ts
-                last_sprint_data = {
-                    "sprint_num": meta.get("sprint_num"),
-                    "date": meta.get("date"),
-                    "status": meta.get("status"),
-                }
-            except Exception:
-                pass
-
-    result: dict = {
-        "name": name,
-        "slug": slug,
-        "repo": repo,
-        "icon": icon,
-        "color": color,
-        "status": status,
-        "uat_count": len(uat_issues),
-        "backlog_count": len(backlog_issues),
-        "last_activity_at": last_activity_at,
-    }
-    if sprint_running_field is not None:
-        result["sprint_running"] = sprint_running_field
-    if last_sprint_data is not None:
-        result["last_sprint"] = last_sprint_data
-
-    _home_cache[cache_key] = (now, result)
-    return result
+    """Per-project home payload — delegates to home_service (issue #1786)."""
+    from home_service import home_project_data  # noqa: PLC0415
+    return home_project_data(proj, running_sprints, _sprint_statuses)
 
 
 def _home_activity_feed(

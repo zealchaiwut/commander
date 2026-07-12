@@ -132,6 +132,83 @@ open-set reconcile.
 disk `-status.json`/`-state.json` files. Orphan-PID detection settles lost
 processes per the rules above.
 
+## 1.3a Cache inventory & invalidation contract
+
+Commander runs five cache layers in production, each with distinct TTLs and 
+invalidation triggers. With the board, aggregate, nav-status, and client-side 
+session caches added since the earliest 30s/60s layer, there is no single 
+authoritative statement of the caching model. This section documents every 
+cache present in the codebase and the precedence rules for invalidation.
+
+> **CRITICAL CAVEAT:** All in-memory caches assume **a single `uvicorn` worker 
+> process**. Deployments with `--workers N` will break cache coherence — each 
+> worker gets its own in-memory `_cache` dict and invalidation signals from 
+> one worker will not reach the others. Do not use `--workers > 1` in any 
+> environment where multi-worker coherence is needed.
+
+### Cache inventory
+
+| Layer Name | Location | Cache Key | TTL | Invalidation Trigger(s) | Staleness Contract | Added-By |
+|-----------|----------|-----------|-----|-------------------------|-------------------|----------|
+| **GitHub client 30s** | `apps/dashboard/github_client.py:32, :188` | `<operation>:<repo>:<args>` (e.g., `issues:owner/repo:5`) | 30s base (see TTL prefixes below) | SSE broadcast `github_invalidate`; `github_client.invalidate(prefix)` call | Board/nav callers accept 30s staleness for issue/PR data; reconcile uses live GitHub | #756 |
+| **GitHub client label 300s** | `apps/dashboard/github_client.py:170` | `labels:<repo>`, `sprint_labels:<repo>`, `sprint_labels_live:<repo>`, `sprints:<repo>` | 300s | `create_label()` explicitly invalidates; SSE broadcast | Board shows 300s stale label names (acceptable, label operations rare) | — |
+| **GitHub summary 120s** | `apps/dashboard/github_client.py:177` | `summary_issues:<repo>` | 120s | SSE broadcast `github_invalidate`; end-of-sprint summary issue creation | Board/history calls accept 120s stale summary data | — |
+| **Issues mirror (DB, ETag 304)** | `apps/dashboard/github_events_sync.py:239` | GitHub issues per repo, ETags in `sync_state` table | 60s (ETag polling window; 304 = zero quota) | Bootstrap crawl up to 5000 issues; 60s periodic sync; open-set reconcile every ~20 sweeps (~20 min) | All reads see ≤60s stale issue data (except closed issues in 100-row window wait ~20 min) | #756 |
+| **Board per-project** | `apps/dashboard/routers/board_cache.py:38` | `{owner/repo}` (fully-qualified repo) | Env `BOARD_CACHE_TTL_S` (default 8s, min 1s) | `invalidate_board(project)` call; SSE broadcast `board_invalidated` | Board surface shows stale ticket state for up to 8s after label change; clients hear `board_invalidated` over SSE to force refresh | #1642, #1785 |
+| **Nav status 15s (client)** | `apps/dashboard/static/src/shell/snav-cache.js:10` | URL (e.g., `/api/sprint-nav-status?repo=...`) | 15s | Manual via `snavNavStatusCacheClear(url)` or page reload | Nav pill / sprint status shows max 15s stale data (shorter than both the 30s and 60s refresh loops) | #1776 |
+| **Home project data 30s** | `apps/dashboard/startup.py:1737, :1777` | `home:<project-slug>` | 30s | None — TTL-only expiry; no explicit invalidation | Home page shows max 30s stale counts (running status, UAT count, backlog count) | — |
+| **PR merged branches 30s** | `apps/dashboard/github_client.py:589` | `merged_branches:<repo>` | 30s (via `_cached()`) | SSE broadcast `github_invalidate` prefix match | Board "shipped" detection uses max 30s stale PR merge state | — |
+| **API session memos** | `apps/dashboard/static/src/api.js:7` | In-memory JS promise references | Session-scoped (page lifetime) | `invalidateSettings()` (explicit), page reload | Frontend re-uses same `/api/version`, `/api/environment`, `/api/settings` response within page load; invalidate forces refetch | #1779 |
+| **Calibration cache file** | `apps/dashboard/calibration_cache_service.py:286` | `<commander-root>/calibration_cache.json` | Durable disk file; processed set prevents re-intake | Sprint manager refreshes incrementally (deduped by `processed` list) | Offline modeling uses cached sprint state files; no live invalidation | — |
+
+### Cache TTL prefixes in github_client
+
+The `_TTL_BY_PREFIX` dict (line 170–178 of `github_client.py`) sets per-prefix 
+TTLs. Any key matching a prefix gets the longer TTL instead of the 30s base:
+
+```python
+_TTL_BY_PREFIX = {
+    "labels:": 300.0,
+    "sprint_labels:": 300.0,
+    "sprint_labels_live:": 300.0,
+    "sprints:": 300.0,
+    "summary_issues:": 120.0,
+}
+```
+
+No prefix match → 30s.
+
+### Invalidation precedence
+
+When multiple invalidation signals apply, apply them in this order:
+
+1. **SSE `github_invalidate` broadcast** takes precedence over TTL — clients that 
+   hear `github_invalidate` should clear affected cache keys immediately, do not 
+   wait for expiry.
+2. **Explicit `github_client.invalidate(prefix)` calls** bypass TTL and clear 
+   all keys starting with the prefix.
+3. **TTL expiry** — when both SSE and explicit invalidation are absent, cache 
+   entry expires when `now - cache_time > ttl_for(key)`.
+4. **Manual refresh** (user action on board, "Force Refresh") bypasses both SSE 
+   and TTL, clearing caches and fetching fresh.
+
+### SSE invalidation broadcast
+
+When a ticket label changes (state machine transition, bulk assign, etc.), 
+callers invoke `github_client.invalidate(prefix)` to evict stale cache entries 
+and broadcast `github_invalidate` over SSE so connected clients force-refresh 
+without waiting for TTL. The board and nav listeners stop polling and clear 
+their in-memory copies on receipt.
+
+Example flow:
+```
+1. User assigns ticket in SIT → state_machine.transition() → 
+2. github_client.invalidate("issues:") to drop stale issue data →
+3. broadcast({"type": "github_invalidate", "prefix": "issues:"}) →
+4. Browser client receives github_invalidate → clears board/nav cache entries 
+   starting with "issues:" → re-fetches board
+```
+
 ## 1.4 Neon — export target, not a runtime store
 
 Status as of 2026-07-02: **no runtime code path reads or writes Neon sprint

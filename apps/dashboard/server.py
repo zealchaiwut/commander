@@ -191,6 +191,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 from routers import (  # noqa: E402
+    api_volume_router,
     activity_router,
     advisor_router,
     analytics_router,
@@ -247,6 +248,7 @@ from routers.bulk_tickets import _get_bulk_job  # noqa: E402
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 
+app.include_router(api_volume_router)
 app.include_router(pages_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
@@ -316,6 +318,20 @@ async def add_api_no_cache_headers(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def _count_request_paths(request: Request, call_next):
+    response = await call_next(request)
+    route = request.scope.get("route")
+    path = (
+        route.path
+        if (route is not None and hasattr(route, "path"))
+        else request.url.path
+    )
+    import api_volume as _av  # noqa: PLC0415
+    _av.record_request(path)
     return response
 
 

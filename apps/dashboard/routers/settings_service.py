@@ -167,7 +167,8 @@ def _commander_dir(project_root: Path) -> Path:
 def _invalidate_home_cache(slug: str) -> None:
     """Drop cached /api/home payload for slug after identity-changing settings writes."""
     try:
-        _server()._invalidate_home_cache(slug)
+        from home_service import invalidate_home_by_slug  # noqa: PLC0415
+        invalidate_home_by_slug(slug)
     except Exception:
         pass
 

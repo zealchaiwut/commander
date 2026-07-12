@@ -279,11 +279,14 @@ def _enrich_home_artifact(artifact: dict) -> None:
         p["name"] = cfg.get("name", slug)
         p["icon"] = cfg.get("icon", "ti-folder")
         p["color"] = cfg.get("color", "gray")
-        try:
-            summary = brief_summary.get_or_create_project_summary(slug, date=date)
-            p["briefSummary"] = (summary or {}).get("summary", "")
-        except Exception:
+        if config.brief_disabled():
             p["briefSummary"] = ""
+        else:
+            try:
+                summary = brief_summary.get_or_create_project_summary(slug, date=date)
+                p["briefSummary"] = (summary or {}).get("summary", "")
+            except Exception:
+                p["briefSummary"] = ""
 
 
 @router.get("/api/brief/daily", response_model=DailyArtifact)

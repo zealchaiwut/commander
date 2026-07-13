@@ -12308,25 +12308,26 @@ let _smgmtLiveCacheRepo = null;
 let _smgmtLiveCacheSeq = 0;
 const _smgmtLiveCacheWriteSeq = {};
 
-// ── SSE-driven board updates (issue #1777) ───────────────────────────────────
-// The sprint board is driven by the per-sprint SSE stream (/live/stream) rather
-// than a 2-second REST poll. The SSE stream emits `snapshot` events (full live
-// data) and `log_line` events (dispatch + per-issue logs keyed by issue_num).
+// ── SSE-driven board updates (issue #1777, #1818) ────────────────────────────
+// The sprint board is driven by per-sprint SSE streams (/live/stream) rather
+// than a 2-second REST poll. Each running label gets its own EventSource so
+// multiple concurrent sprints all receive live board/snapshot updates (issue #1818).
+// The SSE stream emits `snapshot` events (full live data) and `log_line` events
+// (dispatch + per-issue logs keyed by issue_num).
 // On disconnect, a slow fallback poll (≥15 s) via /api/running keeps the board
 // fresh and attempts SSE reconnect on each tick.
-let _smgmtSseEs = null;       // EventSource instance when connected
-let _smgmtSseLabel = null;    // Sprint label the SSE is streaming
-let _smgmtSseFallbackId = null;  // fallback setInterval ID when SSE is offline
+const _smgmtSseEs = new Map();        // label → EventSource when connected (issue #1818)
+const _smgmtSseFallbackId = new Map(); // label → fallback setInterval ID (issue #1818)
 const _SMGMT_SSE_FALLBACK_MS = 15000;  // ≥15 s fallback poll interval (AC6)
 
 /** Connect (or reconnect) the SSE stream for a running sprint. */
 function _smgmtSseConnect(label, repo) {
-  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
-  _smgmtSseLabel = label;
+  const _prev = _smgmtSseEs.get(label);
+  if (_prev) { try { _prev.close(); } catch (_) {} _smgmtSseEs.delete(label); }
   const url = '/api/sprints/' + encodeURIComponent(label)
     + '/live/stream?project=' + encodeURIComponent(repo);
   const es = new EventSource(url);
-  _smgmtSseEs = es;
+  _smgmtSseEs.set(label, es);
 
   es.addEventListener('snapshot', function(ev) {
     try { _smgmtSseHandleSnapshot(label, JSON.parse(ev.data)); } catch (_) {}
@@ -12338,36 +12339,40 @@ function _smgmtSseConnect(label, repo) {
 
   es.addEventListener('complete', function() {
     try { es.close(); } catch (_) {}
-    _smgmtSseEs = null;
-    _smgmtSseLabel = null;
-    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+    _smgmtSseEs.delete(label);
+    if (!_smgmtSseFallbackId.has(label)) _smgmtSseStartFallback(label, repo);
   });
 
   es.onerror = function() {
     try { es.close(); } catch (_) {}
-    _smgmtSseEs = null;
-    _smgmtSseLabel = null;
-    if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
+    _smgmtSseEs.delete(label);
+    if (!_smgmtSseFallbackId.has(label)) _smgmtSseStartFallback(label, repo);
   };
 }
 
-/** Disconnect SSE and stop the fallback poll. */
+/** Disconnect all SSE streams and stop all fallback polls. */
 function _smgmtSseDisconnect() {
-  if (_smgmtSseEs) { try { _smgmtSseEs.close(); } catch (_) {} _smgmtSseEs = null; }
-  _smgmtSseLabel = null;
+  _smgmtSseEs.forEach(function(es) { try { es.close(); } catch (_) {} });
+  _smgmtSseEs.clear();
   _smgmtSseFallbackStop();
 }
 
-/** Stop the fallback poll (called when SSE reconnects). */
-function _smgmtSseFallbackStop() {
-  if (_smgmtSseFallbackId !== null) { clearInterval(_smgmtSseFallbackId); _smgmtSseFallbackId = null; }
+/** Stop the fallback poll. Pass a label to stop just that label's poll; omit to stop all. */
+function _smgmtSseFallbackStop(label) {
+  if (label !== undefined) {
+    const id = _smgmtSseFallbackId.get(label);
+    if (id !== undefined) { clearInterval(id); _smgmtSseFallbackId.delete(label); }
+  } else {
+    _smgmtSseFallbackId.forEach(function(id) { clearInterval(id); });
+    _smgmtSseFallbackId.clear();
+  }
 }
 
-/** Start the ≥15 s fallback poll. Polls /api/running and attempts SSE reconnect. */
+/** Start the ≥15 s fallback poll for a label. Polls /api/running and attempts SSE reconnect. */
 function _smgmtSseStartFallback(label, repo) {
-  _smgmtSseFallbackStop();
-  _smgmtSseFallbackId = setInterval(async function() {
-    if (_smgmtSseEs) { _smgmtSseFallbackStop(); return; }  // SSE came back
+  _smgmtSseFallbackStop(label);
+  _smgmtSseFallbackId.set(label, setInterval(async function() {
+    if (_smgmtSseEs.has(label)) { _smgmtSseFallbackStop(label); return; }  // SSE came back
     // Attempt SSE reconnect first
     _smgmtSseConnect(label, repo);
     // Also poll /api/running for a board state snapshot during the outage
@@ -12378,12 +12383,12 @@ function _smgmtSseStartFallback(label, repo) {
         if (live && live.sprint_label) _smgmtSseHandleSnapshot(live.sprint_label, live);
       }
     } catch (_) {}
-  }, _SMGMT_SSE_FALLBACK_MS);
+  }, _SMGMT_SSE_FALLBACK_MS));
 }
 
 /** Handle a 'snapshot' event from the SSE stream. Updates board metrics in place. */
 function _smgmtSseHandleSnapshot(label, live) {
-  if (_smgmtSseEs) _smgmtSseFallbackStop();  // SSE is live → stop fallback poll
+  if (_smgmtSseEs.has(label)) _smgmtSseFallbackStop(label);  // SSE is live → stop fallback poll
   const _seq = ++_smgmtLiveCacheSeq;
   if (_seq < (_smgmtLiveCacheWriteSeq[label] || 0)) return;
   _smgmtLiveCacheWriteSeq[label] = _seq;
@@ -19499,12 +19504,13 @@ function _smgmtLivePollRestart() {
     return;
   }
 
-  // Connect SSE stream — replaces the 2s REST poll for live board updates (issue #1777 AC2).
+  // Connect SSE stream for each running sprint — one connection per label (issue #1818).
   // The SSE stream emits 'snapshot' events every ~5 s and 'log_line' events in real time.
-  const _sseLabel = Array.from(_smgmtRunningLabels)[0];
   const _sseRepo = _smgmtRepo();
-  if (_sseLabel && _sseRepo) {
-    _smgmtSseConnect(_sseLabel, _sseRepo);
+  if (_sseRepo) {
+    for (const _sseLabel of _smgmtRunningLabels) {
+      _smgmtSseConnect(_sseLabel, _sseRepo);
+    }
   }
 
   // First paint: always use /api/running snapshot (issue #1789 cutover from flag #1647).

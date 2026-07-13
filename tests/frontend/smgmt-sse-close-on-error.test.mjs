@@ -23,7 +23,7 @@ const html = readFileSync(htmlPath, 'utf8');
 // Extract the SSE connect/fallback block by pattern.
 // Starts at the first `let _smgmtSseEs` declaration and ends at the closing `}`
 // of `_smgmtSseStartFallback`, identified by the sentinel comment that follows.
-const startMarker = 'let _smgmtSseEs = null;';
+const startMarker = 'const _smgmtSseEs = new Map();';
 const endMarker = '/** Handle a \'snapshot\' event from the SSE stream.';
 const startIdx = html.indexOf(startMarker);
 const endIdx = html.indexOf(endMarker);

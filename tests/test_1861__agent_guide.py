@@ -289,6 +289,6 @@ class TestDocumentedPathsDriftGuard:
                 missing.append(f"{method} {raw_path}")
 
         assert not missing, (
-            f"Documented paths not found in app.routes (endpoint drift detected):\n"
+            "Documented paths not found in app.routes (endpoint drift detected):\n"
             + "\n".join(f"  {p}" for p in missing)
         )

@@ -183,16 +183,20 @@ def _issues_from_agent_runs(label: str, project: str = "") -> list[dict]:
     """Derive per-issue states from agent_runs records for a sprint, scoped by project.
 
     Mirrors the logic in sprint_history_service._issues_from_agent_runs to avoid
-    a circular import. Any outcome in _AGENT_RUN_DONE marks the issue done (merged);
-    otherwise it is failed or open (unknown). Scoping by project stops a
-    same-numbered sprint in another repo from being merged into this sprint's
-    issues_json on reconcile.
+    a circular import. The LATEST definitive outcome per ticket wins (issue
+    #1882): a first tester pass followed by failed fix-round runs is a failed
+    ticket, not a done one — any-done-wins settled perf-coach sprint-105's
+    #1361 as merged although its last two tester runs failed. Scoping by
+    project stops a same-numbered sprint in another repo from being merged
+    into this sprint's issues_json on reconcile.
     """
     try:
         rows = _db().agent_runs_for_sprint(label, project=project or None)
     except Exception:
         return []
-    agg: dict[int, dict] = {}
+    # rows are ordered by (issue_number, id); id order is chronological per
+    # ticket, so the last definitive outcome seen is the ticket's final word.
+    agg: dict[int, str] = {}
     for row in rows:
         try:
             tid = int(row.get("issue_number") or 0)
@@ -201,17 +205,17 @@ def _issues_from_agent_runs(label: str, project: str = "") -> list[dict]:
         if tid <= 0:
             continue
         outcome = (row.get("outcome") or "").strip().lower()
-        rec = agg.setdefault(tid, {"done": False, "failed": False})
+        agg.setdefault(tid, "open")
         if outcome in _AGENT_RUN_DONE:
-            rec["done"] = True
+            agg[tid] = "done"
         elif outcome in _AGENT_RUN_FAILED:
-            rec["failed"] = True
+            agg[tid] = "failed"
     result = []
     for tid in sorted(agg):
-        rec = agg[tid]
-        if rec["done"]:
+        final = agg[tid]
+        if final == "done":
             state, agent_status = "merged", "completed"
-        elif rec["failed"]:
+        elif final == "failed":
             state, agent_status = "closed", "failed"
         else:
             state, agent_status = "open", None
@@ -284,6 +288,35 @@ def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
                 by_id[tid] = ar
                 changed = True
 
+    # Issue #1882: gate failures that land AFTER the last agent run (e.g. a lint
+    # gate exhausting the fix-loop once coder+tester already passed) leave no
+    # failed agent_runs outcome, so the union above would settle the ticket
+    # done. The live GitHub needs-rework label — served from the zero-quota
+    # issues mirror — is authoritative: a ticket carrying it is never settled
+    # to merged/done here. (A ticket later fixed in a child sprint has the
+    # label removed on GitHub, so this never resurrects stale failures.)
+    _proj = (project or row.get("project") or "").strip()
+    if _proj:
+        for tid, cur in by_id.items():
+            if (cur.get("state") or "").lower() != "merged" and \
+               (cur.get("agent_status") or "").lower() not in ("completed", "done"):
+                continue
+            try:
+                mirrored = _db().get_mirrored_issue(_proj, tid)
+            except Exception:
+                mirrored = None
+            if not mirrored:
+                continue
+            names = {
+                (lb.get("name") or "").lower()
+                for lb in (mirrored.get("labels") or [])
+                if isinstance(lb, dict)
+            }
+            if "needs-rework" in names:
+                cur["state"] = "closed"
+                cur["agent_status"] = "failed"
+                changed = True
+
     if not changed:
         return False
 
@@ -306,7 +339,6 @@ def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
     )
 
     new_json = _json.dumps(merged)
-    _proj = (project or row.get("project") or "").strip()
     _db().update_sprint_run_counts(
         label, new_json, settled_done, uat_count, failure_count, project=_proj,
     )

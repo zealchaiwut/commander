@@ -9,10 +9,8 @@ AC3: Path traversal rejected: ../../etc/passwd and docs/../apps/dashboard/.env
 AC4: Unknown project slug returns 404
 AC5: Zero GitHub API calls — pure local filesystem reads
 """
-import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI, HTTPException

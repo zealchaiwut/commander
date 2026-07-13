@@ -63,38 +63,33 @@ class TestBriefDailyEnrichment:
             assert len(projects) > 0
             assert projects[0]["briefSummary"] == "Worked on features"
 
-    def test_brief_daily_embeds_milestone_field(self, client_with_home):
-        """AC2: milestone is embedded in brief.projects."""
+    def test_brief_daily_does_not_embed_milestone_field(self, client_with_home):
+        """milestone enrichment was removed in #1845 — field must not appear in response."""
         with patch('routers.brief.brief_artifact.get_or_create_home_artifact') as mock_get_artifact, \
              patch('routers.brief._projects_module.load_projects') as mock_projects, \
-             patch('routers.brief.home_milestone_service.active_milestone_progress') as mock_milestone:
+             patch('routers.brief.brief_summary.get_or_create_project_summary',
+                   return_value={"summary": ""}):
             mock_get_artifact.return_value = {
                 "available": True,
-                "brief": {
-                    "projects": [
-                        {"project": "test-proj2"}
-                    ]
-                },
+                "brief": {"projects": [{"project": "test-proj2"}]},
                 "date": "2026-01-01"
             }
-            mock_projects.return_value = [
-                {"repo": "org/test-proj2", "name": "Test 2"}
-            ]
-            mock_milestone.return_value = {"title": "v1.0", "label": "3/5"}
+            mock_projects.return_value = [{"repo": "org/test-proj2", "name": "Test 2"}]
 
             r = client_with_home.get("/api/brief/daily")
             assert r.status_code == 200
             data = r.json()
             projects = data["brief"].get("projects", [])
             assert len(projects) > 0
-            assert projects[0]["milestone"] == {"title": "v1.0", "label": "3/5"}
+            assert "milestone" not in projects[0], (
+                "milestone field must not be embedded after #1845 removal"
+            )
 
     def test_brief_daily_embeds_repo_and_project_metadata(self, client_with_home):
         """AC2: repo, name, icon, color are embedded."""
         with patch('routers.brief.brief_artifact.get_or_create_home_artifact') as mock_get_artifact, \
              patch('routers.brief._projects_module.load_projects') as mock_projects, \
-             patch('routers.brief.brief_summary.get_or_create_project_summary'), \
-             patch('routers.brief.home_milestone_service.active_milestone_progress'):
+             patch('routers.brief.brief_summary.get_or_create_project_summary'):
             mock_get_artifact.return_value = {
                 "available": True,
                 "brief": {
@@ -126,8 +121,7 @@ class TestBriefDailyEnrichment:
         """AC2: missing project metadata does not crash."""
         with patch('routers.brief.brief_artifact.get_or_create_home_artifact') as mock_get_artifact, \
              patch('routers.brief._projects_module.load_projects') as mock_projects, \
-             patch('routers.brief.brief_summary.get_or_create_project_summary') as mock_summary, \
-             patch('routers.brief.home_milestone_service.active_milestone_progress') as mock_milestone:
+             patch('routers.brief.brief_summary.get_or_create_project_summary') as mock_summary:
             mock_get_artifact.return_value = {
                 "available": True,
                 "brief": {
@@ -139,7 +133,6 @@ class TestBriefDailyEnrichment:
             }
             mock_projects.return_value = []
             mock_summary.return_value = None
-            mock_milestone.return_value = None
 
             r = client_with_home.get("/api/brief/daily")
             assert r.status_code == 200
@@ -147,7 +140,8 @@ class TestBriefDailyEnrichment:
             p = data["brief"]["projects"][0]
             # Should have defaults when project is not found
             assert p.get("briefSummary") == ""
-            assert p.get("milestone") is None
+            # milestone field is not embedded after #1845 removal
+            assert "milestone" not in p
 
 
 class TestBackwardCompatibility:

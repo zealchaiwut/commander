@@ -1,4 +1,4 @@
-"""Tests for issue #1803 — _bulk_rework_from_mirror must filter to open issues only.
+"""Tests for issue #1803 — rework mirror must filter to open issues only.
 
 The gh fallback (_count_rework_tickets) uses `gh issue list` which defaults to
 --state open, so the mirror path must also restrict to open issues to keep both
@@ -7,7 +7,7 @@ paths in sync.
 AC (derived from issue body):
   - _bulk_rework_from_mirror calls db.get_mirrored_issues with state='open'
   - Closed issues carrying needs-rework are excluded from the mirror count
-  - Mirror count matches gh fallback count for a scenario with closed rework issues
+  - Mirror count == gh fallback count (scenario: closed rework issues present)
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
@@ -30,7 +30,9 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 import db  # noqa: E402
 
 
-def _make_state_file(sprints_dir: Path, sprint_num: int, start_ts: str) -> None:
+def _make_state_file(
+    sprints_dir: Path, sprint_num: int, start_ts: str
+) -> None:
     sprints_dir.mkdir(parents=True, exist_ok=True)
     state = {
         "sprint_label": f"sprint-{sprint_num}",
@@ -42,20 +44,26 @@ def _make_state_file(sprints_dir: Path, sprint_num: int, start_ts: str) -> None:
              "coder_started_at": None, "tester_started_at": None},
         ],
     }
-    (sprints_dir / f"sprint-{sprint_num}-state.json").write_text(json.dumps(state))
+    fname = f"sprint-{sprint_num}-state.json"
+    (sprints_dir / fname).write_text(json.dumps(state))
 
 
-def _mirror_iss(number: int, sprint_label: str, extra_labels: list[str] | None = None,
-                state: str = "open") -> dict:
-    labels = [{"name": sprint_label}] + [{"name": l} for l in (extra_labels or [])]
+def _mirror_iss(
+    number: int,
+    sprint_label: str,
+    extra_labels: list[str] | None = None,
+    state: str = "open",
+) -> dict:
+    labels = [{"name": sprint_label}]
+    labels += [{"name": lbl_n} for lbl_n in (extra_labels or [])]
     return {"number": number, "state": state, "title": f"Issue {number}",
             "labels": labels, "updatedAt": ""}
 
 
-# ── AC: _bulk_rework_from_mirror passes state='open' to db.get_mirrored_issues ──
+# AC: _bulk_rework_from_mirror passes state='open' to db.get_mirrored_issues
 
 def test_bulk_rework_from_mirror_passes_state_open():
-    """_bulk_rework_from_mirror must call db.get_mirrored_issues with state='open'."""
+    """Mirror call must pass state='open' to db.get_mirrored_issues."""
     mod = importlib.import_module("routers.metrics")
     with patch.object(db, "get_mirrored_issues", return_value=[]) as mock_get:
         mod._bulk_rework_from_mirror("owner/repo")
@@ -74,7 +82,8 @@ def test_bulk_rework_excludes_closed_issues():
     mod = importlib.import_module("routers.metrics")
 
     open_rework = _mirror_iss(1, "sprint-10", ["needs-rework"], state="open")
-    # The mock returns only open issues — simulating what get_mirrored_issues(state='open') does.
+    # The mock returns only open issues — simulating what
+    # get_mirrored_issues(state='open') does.
     with patch.object(db, "get_mirrored_issues", return_value=[open_rework]):
         result = mod._bulk_rework_from_mirror("owner/repo")
 
@@ -82,7 +91,7 @@ def test_bulk_rework_excludes_closed_issues():
 
 
 def test_bulk_rework_does_not_double_count_closed_via_state_kwarg():
-    """When get_mirrored_issues is called with state='open', closed issues are absent.
+    """Verify state='open' excludes closed issues from the mirror count.
 
     This test verifies parity: a closed issue that was previously visible
     (all-state call) is no longer counted when only open issues are returned.
@@ -99,13 +108,13 @@ def test_bulk_rework_does_not_double_count_closed_via_state_kwarg():
     assert result == {"sprint-10": 1}
 
 
-# ── AC: integration — mirror and gh fallback agree on open-only count ─────────
+# AC: integration — mirror and gh fallback agree on open-only count
 
 def test_mirror_and_gh_fallback_agree_on_open_only(tmp_path):
     """Mirror path and gh fallback must return the same rework count.
 
     Scenario: one open needs-rework issue and one closed needs-rework issue for
-    the same sprint.  The gh fallback (--state open) returns 1.  The mirror path
+    the same sprint.  The gh fallback (--state open) returns 1.  Mirror path
     with state='open' must also return 1.
     """
     sprints_dir = tmp_path / ".commander" / "sprints"
@@ -131,5 +140,5 @@ def test_mirror_and_gh_fallback_agree_on_open_only(tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
-    # Open-only count: 1 (the closed issue is excluded by the state='open' filter)
+    # Open-only count: 1 (closed issue excluded by state='open' filter)
     assert data[0]["ticket_outcomes_breakdown"]["needs_rework"] == 1

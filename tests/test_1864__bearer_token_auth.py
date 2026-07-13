@@ -12,7 +12,6 @@ Note: AC5 (CLAUDE.md updated) is a documentation change verified by code review.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 

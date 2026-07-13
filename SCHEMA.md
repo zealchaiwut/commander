@@ -595,6 +595,12 @@ nothing. The project page handles the event by refetching the board, deferring t
 refetch when the event arrives while the tab is hidden and flushing it on the next
 `visibilitychange` back to visible.
 
+**SSE all running labels (issue #1818).** The sprint-management SSE client
+(`project.html`) opens a stream for **every** running sprint label, not just the
+first — a board with multiple concurrent running sprints now receives live
+`snapshot`/`log_line`/`complete` updates for all of them instead of only the
+first-connected label.
+
 **Estimator file-prediction accuracy (issue #1417).** On each merge,
 `finish_feature.py` compares the ticket estimate's `files_likely_affected`
 against the files the merge commit actually changed (`git diff-tree
@@ -656,7 +662,7 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 | `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
 | `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
 | `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
-| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
+| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Duplicate slugs are silently collapsed and requesting more than `MAX_BATCH_SLUGS=50` unique slugs returns HTTP 400 (issue #1797). Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.

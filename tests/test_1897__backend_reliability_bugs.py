@@ -24,9 +24,7 @@ import sys
 import threading
 import time
 import types
-import uuid
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 

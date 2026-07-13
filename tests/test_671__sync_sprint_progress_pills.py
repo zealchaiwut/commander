@@ -15,6 +15,8 @@ import json
 import re
 import sys
 import tempfile
+from datetime import datetime as _dt
+from datetime import timezone as _tz
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -548,6 +550,10 @@ class TestStaleFetchBehavior:
             "total": 1,
             "run_state": "running",
             "source": "live",
+            # Fresh timestamp — a real persisted file always has one (issue #1866);
+            # the fixture must reflect that to exercise tier 2 without falling
+            # through to the GitHub-fallback tier's freshness gate.
+            "fetched_at": _dt.now(_tz.utc).isoformat(),
         }
         (runtime / "sprint-progress.json").write_text(json.dumps(cached), encoding="utf-8")
 

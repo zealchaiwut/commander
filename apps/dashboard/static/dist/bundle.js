@@ -3825,32 +3825,38 @@ ${listing}`
     const loading = document.getElementById("rr-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: "running",
-      mode: "indeterminate",
-      current: current || "Loading preview\u2026"
-    }, {
-      id: "rr-preview-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: "running",
+        mode: "indeterminate",
+        current: current || "Loading preview\u2026"
+      },
+      {
+        id: "rr-preview-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _rrShowCreateProgress(done, total, current, status, error) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: status || "running",
-      mode: "bar",
-      done: done || 0,
-      total: total || 3,
-      current: current || "",
-      error: error || "",
-      result: status === "done" ? "Sub-sprint created" : ""
-    }, {
-      id: "rr-create-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: status || "running",
+        mode: "bar",
+        done: done || 0,
+        total: total || 3,
+        current: current || "",
+        error: error || "",
+        result: status === "done" ? "Sub-sprint created" : ""
+      },
+      {
+        id: "rr-create-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _rrOpen() {
@@ -3875,9 +3881,13 @@ ${listing}`
     return "rr-cat-queued";
   }
   function _rrUpdateState() {
-    const checkboxes = document.querySelectorAll("#rr-ticket-list input[type=checkbox]");
+    const checkboxes = document.querySelectorAll(
+      "#rr-ticket-list input[type=checkbox]"
+    );
     const checked = Array.from(checkboxes).filter((c) => c.checked);
-    const uatChecked = Array.from(checkboxes).filter((c) => c.checked && c.dataset.cat === "UAT").length;
+    const uatChecked = Array.from(checkboxes).filter(
+      (c) => c.checked && c.dataset.cat === "UAT"
+    ).length;
     const confirmBtn = document.getElementById("rr-confirm-btn");
     if (confirmBtn)
       confirmBtn.disabled = checked.length === 0;
@@ -3898,8 +3908,13 @@ ${listing}`
   }
   async function smgmtRerunSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo)
+    if (!repo) {
+      _smgmtShowToast(
+        "No project loaded \u2014 please refresh and try again.",
+        "warning"
+      );
       return;
+    }
     _rrLabel = label;
     _rrVersionedLabel = null;
     _rrOpen();
@@ -3947,9 +3962,7 @@ ${listing}`
       const errEl = document.getElementById("rr-error");
       errEl.textContent = "Failed to load preview: " + e.message;
       errEl.classList.remove("hidden");
-      if (typeof _smgmtShowToast === "function") {
-        _smgmtShowToast("Re-run preview failed: " + e.message);
-      }
+      _smgmtShowToast("Re-run preview failed: " + e.message, "error");
     }
   }
   async function _rrConfirm() {
@@ -3957,7 +3970,9 @@ ${listing}`
     if (!_rrLabel || !repo)
       return;
     const parentLabel = _rrLabel;
-    const checkboxes = Array.from(document.querySelectorAll("#rr-ticket-list input[type=checkbox]"));
+    const checkboxes = Array.from(
+      document.querySelectorAll("#rr-ticket-list input[type=checkbox]")
+    );
     const ticketNumbers = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
     if (ticketNumbers.length === 0)
       return;
@@ -3974,7 +3989,10 @@ ${listing}`
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: false })
+          body: JSON.stringify({
+            ticket_numbers: ticketNumbers,
+            auto_run: false
+          })
         }
       );
       if (!res.ok) {
@@ -3984,7 +4002,9 @@ ${listing}`
           detail = parsed.detail || detail;
         } catch (_) {
         }
-        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        throw new Error(
+          typeof detail === "string" ? detail : JSON.stringify(detail)
+        );
       }
       const data = await res.json();
       const subLabel = data.sub_label;
@@ -4001,7 +4021,9 @@ ${listing}`
       _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
       if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`${subDisplay} created with label errors \u2014 check GitHub.`);
+        _smgmtShowToast(
+          `${subDisplay} created with label errors \u2014 check GitHub.`
+        );
       } else {
         _smgmtShowToast(`${subDisplay} ready \u2014 confirm run`);
       }
@@ -4011,12 +4033,14 @@ ${listing}`
       }
       _rrClose();
     } catch (e) {
-      _rrShowCreateProgress(0, 3, "", "error", e.message || "Failed to create re-run sprint");
+      const errMsg = e.message || "Failed to create re-run sprint";
+      _rrShowCreateProgress(0, 3, "", "error", errMsg);
       const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to re-run sprint: " + e.message;
+      errEl.textContent = "Failed to re-run sprint: " + errMsg;
       errEl.classList.remove("hidden");
       document.getElementById("rr-loading").classList.add("hidden");
       document.getElementById("rr-content").classList.remove("hidden");
+      _smgmtShowToast("Re-run failed: " + errMsg, "error");
       if (confirmBtn) {
         confirmBtn.disabled = false;
         confirmBtn.textContent = _rrVersionedLabel ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}` : "Create sprint and run";
@@ -6823,14 +6847,21 @@ Resolve manually and re-run Bulk complete.`,
     }
     const sorted = [...filtered].sort((a, b) => b.number - a.number);
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
-    if (sorted.length === 0) {
-      const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
-    } else {
-      ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+    const hasActiveSelection = typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.size > 0;
+    if (!hasActiveSelection) {
+      if (sorted.length === 0) {
+        const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
+        ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
+      } else {
+        ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+      }
     }
     _blSyncFilterPills();
-    _blUpdateActions();
+    if (typeof _smgmtUpdateSelectionUI === "function") {
+      _smgmtUpdateSelectionUI();
+    } else {
+      _blUpdateActions();
+    }
   }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const hasEstimate = _smgmtTicketHasEstimate(ticket);

@@ -11,9 +11,11 @@ exposed here (create_estimate_job / run_issue_estimate).
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +36,14 @@ router = APIRouter(tags=["estimate_jobs"])
 # ── Job store (in-memory + disk) ──────────────────────────────────────────────
 
 _estimate_jobs: dict[str, dict] = {}
+
+# Cap on the in-memory job store — oldest done/failed jobs are evicted when
+# this limit is hit (issue #1897). Running/queued jobs are never evicted.
+_MAX_JOBS = 200
+
+# Job files older than this many hours are pruned from disk on each new job
+# creation (issue #1897).
+_JOB_FILE_MAX_AGE_HOURS = 24
 
 # Max concurrent estimator subprocesses — protects the shared claude CLI.
 _ESTIMATE_CONCURRENCY = 1
@@ -66,6 +76,40 @@ def _persist_job(job: dict) -> None:
         pass
 
 
+def _prune_old_job_files() -> None:
+    """Remove persisted job files older than _JOB_FILE_MAX_AGE_HOURS (issue #1897)."""
+    try:
+        cutoff = time.time() - _JOB_FILE_MAX_AGE_HOURS * 3600
+        for f in _jobs_dir().iterdir():
+            if f.suffix == ".json":
+                try:
+                    if os.path.getmtime(f) < cutoff:
+                        f.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _evict_if_needed() -> None:
+    """Evict oldest done/failed jobs when _estimate_jobs reaches _MAX_JOBS (issue #1897).
+
+    Running and queued jobs are never evicted — only completed (done/failed) ones
+    are candidates. After evicting from memory, prune old disk files by age.
+    """
+    if len(_estimate_jobs) < _MAX_JOBS:
+        return
+    evictable = sorted(
+        (j.get("created_at", ""), jid)
+        for jid, j in _estimate_jobs.items()
+        if j.get("status") in ("done", "failed")
+    )
+    n_to_evict = max(1, len(_estimate_jobs) - _MAX_JOBS + 1)
+    for _, jid in evictable[:n_to_evict]:
+        _estimate_jobs.pop(jid, None)
+    _prune_old_job_files()
+
+
 def get_estimate_job(job_id: str) -> dict | None:
     """Return a job from memory or lazy-load from disk after a server restart."""
     job = _estimate_jobs.get(job_id)
@@ -84,6 +128,7 @@ def get_estimate_job(job_id: str) -> dict | None:
 
 def create_estimate_job(issue_id: int, repo: str) -> str:
     """Create and persist a new single-issue estimate job; return its job_id."""
+    _evict_if_needed()
     job_id = str(uuid.uuid4())
     job = {
         "job_id": job_id,
@@ -296,6 +341,7 @@ def post_sprint_estimate(
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
+    _evict_if_needed()
     job_id = str(uuid.uuid4())
     job = {
         "job_id": job_id,

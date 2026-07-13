@@ -191,6 +191,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 from routers import (  # noqa: E402
+    agent_guide_router,
     api_volume_router,
     docs_router,
     activity_router,
@@ -304,6 +305,7 @@ app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
 app.include_router(running_router)
 app.include_router(docs_router)
+app.include_router(agent_guide_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

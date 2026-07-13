@@ -4299,6 +4299,17 @@ def run_sprint(
         max_tester_slots=max_tester_slots,
     )
     if pf.early_exit:
+        if pf.rerun_dispatch_error:
+            _ended_at = datetime.now(timezone.utc).isoformat()
+            _plan_json_set_state_sm(
+                label, "needs_rework", cfg=cfg,
+                ended_at=_ended_at, end_reason="rerun-dispatch-error",
+            )
+            _sprint_db_set_state_sm(
+                label, "needs_rework", project=pf.eff_repo or "",
+                ended_at=_ended_at, end_reason="rerun-dispatch-error",
+            )
+            raise SystemExit(1)
         return pf.summary, pf.state
 
     state              = pf.state

@@ -564,15 +564,23 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     label = row.get("label")
     if not row.get("run_ingested_at"):
         state = _read_state_file(sprints_dirs, label)
+        # Issue #1881: the search list ends with the shared legacy sprints dir, so
+        # a label match there can be ANOTHER project's artifact (labels are only
+        # unique per repo). Never ingest a state file that names a different
+        # project than the row.
+        row_proj = (row.get("project") or "").strip()
+        state_proj = (state.get("project") or "").strip() if state else ""
+        if state is not None and state_proj and row_proj and state_proj != row_proj:
+            state = None
         if state is not None:
             try:
                 summary_path = _find_summary_path(sprints_dirs, label)
                 _db().ingest_sprint_run_artifact(
                     label, state,
-                    project=row.get("project") or "",
+                    project=row_proj,
                     summary_path=summary_path,
                 )
-                refreshed = _db().get_sprint(label)
+                refreshed = _db().get_sprint(label, project=row_proj or None)
                 if refreshed:
                     row = refreshed
             except Exception:

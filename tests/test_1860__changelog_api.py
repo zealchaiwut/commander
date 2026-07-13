@@ -1,22 +1,22 @@
 """Tests for issue #1860 — changelog index API endpoint.
 
 AC coverage:
-  AC1 — GET /api/projects/{slug}/changelog returns entries from both uat/ and
-         prd/ newest-first, each with env, date, slug, path, title, excerpt
+  AC1 — GET /api/projects/{slug}/changelog returns entries from both
+         uat/ and prd/ newest-first, each with env, date, slug, path,
+         title, excerpt
   AC2 — env= filters to one environment; limit= caps result count
-  AC3 — _template.md excluded; malformed filenames (no date prefix) included
-         with date null rather than crashing
-  AC4 — Behavioral test: seed a temp docs/changelog tree with 2 uat + 1 prd
-         entries + template, assert order, filtering, and template exclusion
+  AC3 — _template.md excluded; malformed filenames (no date prefix)
+         included with date null rather than crashing
+  AC4 — Behavioral test: seed a temp docs/changelog tree with
+         2 uat + 1 prd entries + template, assert order, filtering,
+         and template exclusion
   AC5 — Zero GitHub API calls
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -30,7 +30,7 @@ import routers.changelog_service as changelog_service  # noqa: E402
 from routers.changelog import router as changelog_router  # noqa: E402
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ─────────────────────────────────────────────────────────────────
 
 def _make_app():
     app = FastAPI()
@@ -54,7 +54,8 @@ def _build_changelog_tree(base: Path) -> Path:
 
     # UAT entry 1 — newer
     (uat_dir / "2026-06-10-sprint-50.md").write_text(
-        "# UAT Changelog — Sprint 50\n\nFirst paragraph for sprint 50.\n\nSecond paragraph.",
+        "# UAT Changelog — Sprint 50\n\n"
+        "First paragraph for sprint 50.\n\nSecond paragraph.",
         encoding="utf-8",
     )
     # UAT entry 2 — older
@@ -85,14 +86,16 @@ def _build_changelog_tree(base: Path) -> Path:
     return clone
 
 
-# ── AC1: returns both envs newest-first with required fields ──────────────────
+# ── AC1: returns both envs newest-first with required fields ─────────────────
 
 class TestChangelogBothEnvs:
-    """AC1 — returns entries from both uat/ and prd/, newest-first, with all fields."""
+    """AC1 — entries from both uat/ and prd/, newest-first, all fields."""
 
     def test_returns_200(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         r = client.get("/api/projects/testproject/changelog")
@@ -100,7 +103,9 @@ class TestChangelogBothEnvs:
 
     def test_returns_list(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -108,7 +113,9 @@ class TestChangelogBothEnvs:
 
     def test_includes_both_envs(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -118,7 +125,9 @@ class TestChangelogBothEnvs:
 
     def test_each_entry_has_required_fields(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -129,11 +138,12 @@ class TestChangelogBothEnvs:
 
     def test_newest_first_ordering(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
-        # Filter only entries with a date (skip malformed)
         dated = [e for e in data if e["date"] is not None]
         dates = [e["date"] for e in dated]
         assert dates == sorted(dates, reverse=True), (
@@ -142,25 +152,35 @@ class TestChangelogBothEnvs:
 
     def test_title_extracted_from_first_heading(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
-        entry_50 = next(e for e in data if "sprint-50" in e.get("slug", ""))
+        entry_50 = next(
+            e for e in data if "sprint-50" in e.get("slug", "")
+        )
         assert entry_50["title"] == "UAT Changelog — Sprint 50"
 
     def test_excerpt_is_first_paragraph(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
-        entry_50 = next(e for e in data if "sprint-50" in e.get("slug", ""))
+        entry_50 = next(
+            e for e in data if "sprint-50" in e.get("slug", "")
+        )
         assert entry_50["excerpt"] == "First paragraph for sprint 50."
 
     def test_path_is_relative(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -171,80 +191,112 @@ class TestChangelogBothEnvs:
 
     def test_prd_path_correct(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
-        prd_entry = next(e for e in data if e["env"] == "prd" and e["date"] is not None)
-        assert prd_entry["path"] == "docs/changelog/prd/2026-05-20-sprint-40.md"
+        prd_entry = next(
+            e for e in data
+            if e["env"] == "prd" and e["date"] is not None
+        )
+        assert prd_entry["path"] == (
+            "docs/changelog/prd/2026-05-20-sprint-40.md"
+        )
 
 
-# ── AC2: env filter and limit ─────────────────────────────────────────────────
+# ── AC2: env filter and limit ────────────────────────────────────────────────
 
 class TestEnvFilterAndLimit:
     """AC2 — env= filters to one env; limit= caps result count."""
 
     def test_env_uat_returns_only_uat(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
-        data = client.get("/api/projects/testproject/changelog?env=uat").json()
+        data = client.get(
+            "/api/projects/testproject/changelog?env=uat"
+        ).json()
         assert all(e["env"] == "uat" for e in data)
 
     def test_env_prd_returns_only_prd(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
-        data = client.get("/api/projects/testproject/changelog?env=prd").json()
+        data = client.get(
+            "/api/projects/testproject/changelog?env=prd"
+        ).json()
         assert all(e["env"] == "prd" for e in data)
 
     def test_env_uat_excludes_prd_entries(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
-        data = client.get("/api/projects/testproject/changelog?env=uat").json()
+        data = client.get(
+            "/api/projects/testproject/changelog?env=uat"
+        ).json()
         assert not any(e["env"] == "prd" for e in data)
 
     def test_limit_caps_results(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
-        data = client.get("/api/projects/testproject/changelog?limit=1").json()
+        data = client.get(
+            "/api/projects/testproject/changelog?limit=1"
+        ).json()
         assert len(data) == 1
 
     def test_limit_larger_than_total_returns_all(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         all_data = client.get("/api/projects/testproject/changelog").json()
         limited_data = client.get(
-            f"/api/projects/testproject/changelog?limit={len(all_data) + 100}"
+            "/api/projects/testproject/changelog"
+            f"?limit={len(all_data) + 100}"
         ).json()
         assert len(limited_data) == len(all_data)
 
     def test_limit_with_env_filter(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
-        data = client.get("/api/projects/testproject/changelog?env=uat&limit=1").json()
+        data = client.get(
+            "/api/projects/testproject/changelog?env=uat&limit=1"
+        ).json()
         assert len(data) == 1
         assert data[0]["env"] == "uat"
 
 
-# ── AC3: template exclusion and malformed filenames ───────────────────────────
+# ── AC3: template exclusion and malformed filenames ──────────────────────────
 
 class TestTemplateExclusionAndMalformed:
-    """AC3 — _template.md excluded; malformed filenames included with date=null."""
+    """AC3 — _template.md excluded; malformed filenames, date=null."""
 
     def test_template_files_excluded(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -256,23 +308,31 @@ class TestTemplateExclusionAndMalformed:
                 f"_template slug must be excluded: found {entry}"
             )
 
-    def test_malformed_filename_included_with_null_date(self, tmp_path, monkeypatch):
+    def test_malformed_filename_included_with_null_date(
+        self, tmp_path, monkeypatch
+    ):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
         malformed = [e for e in data if "no-date-here" in e["path"]]
         assert len(malformed) == 1, (
-            f"Malformed filename should be included once, found: {malformed}"
+            "Malformed filename should be included once, "
+            f"found: {malformed}"
         )
         assert malformed[0]["date"] is None, (
-            f"Malformed entry should have date=null, got: {malformed[0]['date']}"
+            "Malformed entry should have date=null, "
+            f"got: {malformed[0]['date']}"
         )
 
     def test_malformed_title_still_extracted(self, tmp_path, monkeypatch):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         data = client.get("/api/projects/testproject/changelog").json()
@@ -281,15 +341,17 @@ class TestTemplateExclusionAndMalformed:
         assert "no date prefix" in malformed["excerpt"].lower()
 
 
-# ── AC4: behavioral seed test ─────────────────────────────────────────────────
+# ── AC4: behavioral seed test ────────────────────────────────────────────────
 
 class TestBehavioralSeed:
-    """AC4 — seed a temp tree, assert order, filtering, and template exclusion together."""
+    """AC4 — seed a temp tree, assert order, filtering, template exclusion."""
 
     def test_seeded_tree_full_behavior(self, tmp_path, monkeypatch):
-        """Seed 2 uat + 1 prd entries + template; assert all four AC properties."""
+        """Seed 2 uat + 1 prd + template; assert all four AC props."""
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         # --- No filter: both envs, newest-first, template excluded ---
@@ -302,7 +364,6 @@ class TestBehavioralSeed:
         )
 
         # Order: 2026-06-10 (uat) > 2026-05-20 (prd) > 2026-05-01 (uat)
-        # (malformed entry has date=None and may appear anywhere in the tail)
         dated = [e for e in all_data if e["date"] is not None]
         dates = [e["date"] for e in dated]
         assert dates == sorted(dates, reverse=True), (
@@ -316,32 +377,39 @@ class TestBehavioralSeed:
         assert dated[2]["env"] == "uat"
 
         # --- env=uat filter ---
-        uat_data = client.get("/api/projects/testproject/changelog?env=uat").json()
+        uat_data = client.get(
+            "/api/projects/testproject/changelog?env=uat"
+        ).json()
         assert all(e["env"] == "uat" for e in uat_data)
-        # Template still excluded even with filter
         assert not any("_template" in e["path"] for e in uat_data)
 
         # --- env=prd filter ---
-        prd_data = client.get("/api/projects/testproject/changelog?env=prd").json()
+        prd_data = client.get(
+            "/api/projects/testproject/changelog?env=prd"
+        ).json()
         prd_dated = [e for e in prd_data if e["date"] is not None]
         assert len(prd_dated) == 1
         assert prd_dated[0]["date"] == "2026-05-20"
 
         # --- limit=2 ---
-        limited = client.get("/api/projects/testproject/changelog?limit=2").json()
+        limited = client.get(
+            "/api/projects/testproject/changelog?limit=2"
+        ).json()
         assert len(limited) == 2
 
 
-# ── AC5: zero GitHub API calls ────────────────────────────────────────────────
+# ── AC5: zero GitHub API calls ───────────────────────────────────────────────
 
 class TestZeroGitHubCalls:
-    """AC5 — endpoint makes zero GitHub API calls (pure local filesystem reads)."""
+    """AC5 — endpoint makes zero GitHub API calls (pure filesystem reads)."""
 
     def test_changelog_makes_zero_gh_calls(
         self, tmp_path, monkeypatch, call_budget_fixture
     ):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         client.get("/api/projects/testproject/changelog")
@@ -351,23 +419,29 @@ class TestZeroGitHubCalls:
         self, tmp_path, monkeypatch, call_budget_fixture
     ):
         clone = _build_changelog_tree(tmp_path)
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", lambda slug: clone)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", lambda slug: clone
+        )
         client = _make_app()
 
         client.get("/api/projects/testproject/changelog?env=uat")
         call_budget_fixture.assert_zero_gh()
 
 
-# ── Unknown slug ──────────────────────────────────────────────────────────────
+# ── Unknown slug ─────────────────────────────────────────────────────────────
 
 class TestUnknownSlug:
     """Unknown project slug should return 404."""
 
     def test_unknown_slug_returns_404(self, monkeypatch):
         def _raise_404(slug):
-            raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
+            raise HTTPException(
+                status_code=404, detail=f"Project '{slug}' not found"
+            )
 
-        monkeypatch.setattr(changelog_service, "resolve_clone_root", _raise_404)
+        monkeypatch.setattr(
+            changelog_service, "resolve_clone_root", _raise_404
+        )
         client = _make_app()
 
         r = client.get("/api/projects/does-not-exist/changelog")

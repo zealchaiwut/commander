@@ -18,7 +18,7 @@ def get_project_changelog(
     env: Optional[str] = None,
     limit: Optional[int] = None,
 ):
-    """Return parsed changelog entries from docs/changelog/{uat,prd}/ newest-first.
+    """Return changelog entries from docs/changelog/{uat,prd}/, newest-first.
 
     env   — filter to "uat" or "prd"; omit for both.
     limit — cap result count.

@@ -7,9 +7,9 @@ Public API:
 Each entry has: {env, date, slug, path, title, excerpt}
   env     — "uat" or "prd"
   date    — "YYYY-MM-DD" parsed from filename, or null for malformed names
-  slug    — remainder of filename after date prefix (or full stem for malformed)
-  path    — repo-relative path, e.g. docs/changelog/uat/2026-05-26-sprint-6.md
-  title   — text of the first heading (stripped of leading #), empty string if none
+  slug    — remainder after date prefix, or full stem for malformed
+  path    — repo-relative path, e.g. docs/changelog/uat/YYYY-MM-DD-slug.md
+  title   — first heading text, stripped of leading #; empty string if none
   excerpt — first non-empty, non-heading paragraph, empty string if none
 """
 from __future__ import annotations
@@ -18,10 +18,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import HTTPException
-
-# Reuse resolve_clone_root from docs_service — same project-slug → clone-root logic.
-from routers.docs_service import resolve_clone_root  # noqa: F401 (re-exported)
+# Same resolve_clone_root logic as docs_service — one source of truth.
+from routers.docs_service import resolve_clone_root  # noqa: F401
 
 _CHANGELOG_SUBDIR = Path("docs") / "changelog"
 _DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)$")
@@ -44,7 +42,7 @@ def _parse_markdown(text: str) -> tuple[str, str]:
         if stripped.startswith("#"):
             if not title:
                 title = stripped.lstrip("#").strip()
-            # End paragraph scan once we've seen a heading and started collecting
+            # End scan once we've seen a heading and started collecting
             if in_para:
                 break
             continue

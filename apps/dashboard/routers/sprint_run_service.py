@@ -48,6 +48,16 @@ class SprintMgmtRunBody(BaseModel):
             raise ValueError(
                 "callback_url must be an http or https URL, got: " + repr(v)
             )
+        # SSRF guard (issue #1896): reject internal/loopback/metadata targets at
+        # request time. Fire-time re-screening in sprint_webhook_service is the
+        # authoritative check against DNS rebinding.
+        try:
+            from routers import sprint_webhook_service as _wh  # noqa: PLC0415
+        except ImportError:
+            import sprint_webhook_service as _wh  # type: ignore[no-redef]  # noqa: PLC0415
+        reason = _wh.screen_callback_url(v)
+        if reason is not None:
+            raise ValueError("callback_url rejected: " + reason)
         return v
 
 

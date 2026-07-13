@@ -47,12 +47,24 @@ class TestCallbackUrlBody:
 
     def test_body_accepts_http_callback_url(self):
         from routers.sprint_run_service import SprintMgmtRunBody
+        # Public host is accepted (uses a documentation IP that resolves publicly).
         body = SprintMgmtRunBody(
             project="owner/repo",
             sprint_label="sprint-10",
-            callback_url="http://localhost:9000/hook",
+            callback_url="http://example.com/hook",
         )
-        assert body.callback_url == "http://localhost:9000/hook"
+        assert body.callback_url == "http://example.com/hook"
+
+    def test_body_rejects_internal_callback_url(self):
+        # SSRF guard (#1896): an internal/loopback target is rejected at request time.
+        import pytest as _pytest
+        from routers.sprint_run_service import SprintMgmtRunBody
+        with _pytest.raises(Exception):
+            SprintMgmtRunBody(
+                project="owner/repo",
+                sprint_label="sprint-10",
+                callback_url="http://localhost:9000/hook",
+            )
 
     def test_body_defaults_callback_url_to_none(self):
         from routers.sprint_run_service import SprintMgmtRunBody
@@ -101,7 +113,14 @@ class TestValidateCallbackUrl:
 
     def test_accepts_http(self):
         from routers.sprint_webhook_service import validate_callback_url
-        assert validate_callback_url("http://localhost:9000/hook") is True
+        # Public host over http passes; loopback/internal is now rejected by the
+        # SSRF guard (#1896) — see test_rejects_internal below.
+        assert validate_callback_url("http://example.com/hook") is True
+
+    def test_rejects_internal(self):
+        # SSRF guard (#1896): loopback resolves to 127.0.0.1 and is rejected.
+        from routers.sprint_webhook_service import validate_callback_url
+        assert validate_callback_url("http://localhost:9000/hook") is False
 
     def test_rejects_ftp(self):
         from routers.sprint_webhook_service import validate_callback_url
@@ -156,7 +175,12 @@ def _start_test_receiver() -> tuple[HTTPServer, int]:
 class TestWebhookPayloadShape:
     """AC2: behavioral test — deliver_sprint_webhook sends correct JSON shape."""
 
-    def test_delivers_finished_payload(self):
+    def test_delivers_finished_payload(self, monkeypatch):
+        import routers.sprint_webhook_service as _wh
+        # This test exercises the delivery mechanism against a loopback test
+        # server; the SSRF guard (#1896) legitimately blocks 127.0.0.1, so
+        # screen it off here — guard behavior is covered in test_1896.
+        monkeypatch.setattr(_wh, "screen_callback_url", lambda u: None)
         from routers.sprint_webhook_service import deliver_sprint_webhook
         server, port = _start_test_receiver()
         payload = {
@@ -178,7 +202,9 @@ class TestWebhookPayloadShape:
         assert got["tickets"] == [{"number": 100, "status": "done"}]
         assert got["summary_url"] == "https://github.com/owner/repo/issues/99"
 
-    def test_delivers_needs_rework_payload(self):
+    def test_delivers_needs_rework_payload(self, monkeypatch):
+        import routers.sprint_webhook_service as _wh
+        monkeypatch.setattr(_wh, "screen_callback_url", lambda u: None)
         from routers.sprint_webhook_service import deliver_sprint_webhook
         server, port = _start_test_receiver()
         payload = {
@@ -491,8 +517,10 @@ class TestCallbackUrlAuthGate:
 class TestCallbackMonitorIntegration:
     """AC2+AC3: background monitor fires callback when subprocess exits."""
 
-    def test_monitor_fires_callback_on_exit(self, tmp_path):
+    def test_monitor_fires_callback_on_exit(self, tmp_path, monkeypatch):
         """AC2: monitor thread fires POST to callback_url after proc exits."""
+        import routers.sprint_webhook_service as _wh
+        monkeypatch.setattr(_wh, "screen_callback_url", lambda u: None)
         from routers.sprint_webhook_service import start_callback_monitor
 
         sprints_dir = tmp_path / "sprints"

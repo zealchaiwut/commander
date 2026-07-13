@@ -112,19 +112,42 @@ def _blended_rate(project: Optional[str]) -> Optional[float]:
         return None
 
 
-def _fetch_sprint_agent_run_rows(sprint_label: str) -> list[dict]:
-    """All agent_runs rows for a sprint label (empty list on any DB error)."""
+def _fetch_sprint_agent_run_rows(
+    sprint_label: str, project: Optional[str] = None
+) -> list[dict]:
+    """All agent_runs rows for a sprint label, scoped by project (issue #1897).
+
+    When *project* is given, rows are filtered to that project first. If no
+    project-scoped rows exist, falls back to legacy blank/NULL-project rows so
+    pre-migration sprints still render. Rows owned by a *different* project are
+    never returned — same contract as db.agent_runs_for_sprint (#1881).
+    """
     import db as _db  # sibling module
 
+    _COLS = (
+        "SELECT issue_number, agent, total_tokens, duration_seconds, "
+        "attempt_kind, started_at, finished_at "
+        "FROM agent_runs "
+    )
     try:
         with _db.get_conn() as conn:
             _db._create_agent_runs_table(conn)
-            raw = conn.execute(
-                "SELECT issue_number, agent, total_tokens, duration_seconds, "
-                "attempt_kind, started_at, finished_at "
-                "FROM agent_runs WHERE sprint_label = ?",
-                (sprint_label,),
-            ).fetchall()
+            if project:
+                raw = conn.execute(
+                    _COLS + "WHERE sprint_label = ? AND project = ?",
+                    (sprint_label, project),
+                ).fetchall()
+                if not raw:
+                    raw = conn.execute(
+                        _COLS + "WHERE sprint_label = ? "
+                        "AND (project = '' OR project IS NULL)",
+                        (sprint_label,),
+                    ).fetchall()
+            else:
+                raw = conn.execute(
+                    _COLS + "WHERE sprint_label = ?",
+                    (sprint_label,),
+                ).fetchall()
             return [dict(r) for r in raw]
     except Exception:
         return []
@@ -201,7 +224,7 @@ def running_metrics(sprint_label: str, project: Optional[str]) -> dict[str, Any]
       - ``agent_time_split`` — {"coder": secs, "tester": secs} from duration_seconds
       - ``token_cost_usd`` / ``usd_per_token`` — only when a price map is set
     """
-    rows = _fetch_sprint_agent_run_rows(sprint_label)
+    rows = _fetch_sprint_agent_run_rows(sprint_label, project)
 
     if not rows:
         return {}

@@ -41,6 +41,25 @@ try:
 except ImportError:
     _api_volume = None  # type: ignore[assignment]
 
+# ── Main-loop reference for threadpool broadcast (issue #1897) ───────────────
+
+# Captured at server startup so invalidate_board can schedule SSE broadcasts
+# via run_coroutine_threadsafe when called from threadpool (sync) route handlers
+# where asyncio.get_running_loop() raises RuntimeError.
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Capture the main event loop.
+
+    Call once from the lifespan startup context before any sync route handlers
+    can fire. invalidate_board then uses run_coroutine_threadsafe to schedule
+    board_invalidated broadcasts without a running loop in the calling thread.
+    """
+    global _main_loop
+    _main_loop = loop
+
+
 # ── TTL ───────────────────────────────────────────────────────────────────────
 
 
@@ -99,6 +118,12 @@ def invalidate_board(project: str) -> None:
 
     Also evicts the home-cache entry for the same project so sprint mutations
     invalidate both caches from a single call site (issue #1786).
+
+    Broadcast path (issue #1897):
+    - Async context (async route): asyncio.get_running_loop() succeeds → create_task.
+    - Threadpool context (sync ``def`` route): get_running_loop() raises RuntimeError →
+      fall back to run_coroutine_threadsafe on the main loop captured at startup.
+    - No main loop captured (test / script context): skip broadcast silently.
     """
     _cache.pop(project, None)
     try:
@@ -107,14 +132,21 @@ def invalidate_board(project: str) -> None:
     except Exception:
         pass
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return  # no event loop — sync test context, skip broadcast
-    try:
         from .logs_service import broadcast as _bc  # noqa: PLC0415
     except ImportError:
         try:
             from logs_service import broadcast as _bc  # type: ignore[no-redef]  # noqa: PLC0415
         except ImportError:
             return
-    loop.create_task(_bc({"type": "board_invalidated", "project": project}))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_bc({"type": "board_invalidated", "project": project}))
+        return
+    except RuntimeError:
+        pass
+    # Called from a threadpool (sync route handler) — schedule on the main loop.
+    if _main_loop is not None and not _main_loop.is_closed():
+        asyncio.run_coroutine_threadsafe(
+            _bc({"type": "board_invalidated", "project": project}),
+            _main_loop,
+        )

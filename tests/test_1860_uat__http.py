@@ -48,7 +48,7 @@ class TestChangelogHTTPUAT:
         r = client.get("/api/projects/commander/changelog?env=uat")
         data = r.json()
         assert all(e["env"] == "uat" for e in data), (
-            f"env=uat filter should return only uat entries"
+            "env=uat filter should return only uat entries"
         )
 
     def test_limit_parameter_works(self, client):

@@ -60,7 +60,7 @@ def _bulk_rework_from_mirror(repo: str) -> dict[str, int] | None:
     Returns None when the mirror is empty so the caller can fall back to gh.
     """
     try:
-        all_issues = db.get_mirrored_issues(repo)
+        all_issues = db.get_mirrored_issues(repo, state="open")
     except Exception:
         return None
     if not all_issues:
@@ -78,7 +78,7 @@ def _bulk_rework_from_mirror(repo: str) -> dict[str, int] | None:
 
 
 def _count_rework_tickets(sprint_label: str, project: str) -> int:
-    """Fallback: live gh call to count needs-rework issues for a single sprint."""
+    """Fallback: gh call to count needs-rework issues for a sprint."""
     try:
         r = github_client.get_repo_for_operation(project)
         result = subprocess.run(
@@ -123,7 +123,10 @@ def get_sprint_metrics(request: Request):
             except ValueError:
                 raise HTTPException(
                     400,
-                    detail=f"Invalid 'from' date {raw_from!r} — expected YYYY-MM-DD",
+                    detail=(
+                        f"Invalid 'from' date {raw_from!r}"
+                        " — expected YYYY-MM-DD"
+                    ),
                 )
         else:
             from_date = today - timedelta(days=30)
@@ -134,7 +137,10 @@ def get_sprint_metrics(request: Request):
             except ValueError:
                 raise HTTPException(
                     400,
-                    detail=f"Invalid 'to' date {raw_to!r} — expected YYYY-MM-DD",
+                    detail=(
+                        f"Invalid 'to' date {raw_to!r}"
+                        " — expected YYYY-MM-DD"
+                    ),
                 )
         else:
             to_date = today
@@ -142,11 +148,19 @@ def get_sprint_metrics(request: Request):
     if from_date > to_date:
         raise HTTPException(
             400,
-            detail=f"'from' date ({from_date}) must not be after 'to' date ({to_date})",
+            detail=(
+                f"'from' ({from_date}) must not be after"
+                f" 'to' ({to_date})"
+            ),
         )
 
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(
+        from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc
+    )
+    to_dt = datetime(
+        to_date.year, to_date.month, to_date.day,
+        23, 59, 59, tzinfo=timezone.utc,
+    )
 
     try:
         all_projects = projects_module.load_projects()
@@ -193,7 +207,8 @@ def get_sprint_metrics(request: Request):
             if not start_ts_str:
                 continue
             try:
-                start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(
+                ts = start_ts_str.rstrip("Z")
+                start_dt = datetime.fromisoformat(ts).replace(
                     tzinfo=timezone.utc
                 )
             except Exception:
@@ -212,13 +227,23 @@ def get_sprint_metrics(request: Request):
             issues = state_data.get("issues", [])
 
             done_count = sum(1 for i in issues if i.get("status") == "done")
-            failed_count = sum(1 for i in issues if i.get("status") == "failed")
-            skipped_count = sum(1 for i in issues if i.get("status") == "skipped")
+            failed_count = sum(
+                1 for i in issues if i.get("status") == "failed"
+            )
+            skipped_count = sum(
+                1 for i in issues if i.get("status") == "skipped"
+            )
 
             coder_count = sum(1 for i in issues if i.get("coder_started_at"))
             tester_count = sum(1 for i in issues if i.get("tester_started_at"))
-            reviewer_count = 1 if state_data.get("reviewer_status") not in (None, "") else 0
-            documenter_count = 1 if state_data.get("documenter_status") not in (None, "") else 0
+            reviewer_count = (
+                1 if state_data.get("reviewer_status") not in (None, "")
+                else 0
+            )
+            documenter_count = (
+                1 if state_data.get("documenter_status") not in (None, "")
+                else 0
+            )
 
             tokens_in = int(state_data.get("total_tokens_in") or 0)
             tokens_out = int(state_data.get("total_tokens_out") or 0)
@@ -229,7 +254,9 @@ def get_sprint_metrics(request: Request):
             if rework_by_sprint is not None:
                 needs_rework_count = rework_by_sprint.get(sprint_label_val, 0)
             else:
-                needs_rework_count = _count_rework_tickets(sprint_label_val, project_val)
+                needs_rework_count = _count_rework_tickets(
+                    sprint_label_val, project_val
+                )
 
             results.append({
                 "sprint_label": sprint_label_val,
@@ -256,12 +283,17 @@ def get_sprint_metrics(request: Request):
 
 @router.get("/api/projects/{slug}/analytics/metrics")
 def get_project_analytics_metrics(slug: str, request: Request):
-    """GET /api/projects/{slug}/analytics/metrics — delivery-health metrics (issue #1267)."""
+    """GET /api/projects/{slug}/analytics/metrics.
+
+    Delivery-health metrics (issue #1267).
+    """
     srv = _server()
     repo = srv._resolve_project_slug(slug)
     project_root = _project_root_path(repo)
     since = request.query_params.get("since")
     until = request.query_params.get("until")
     sprint_filter = request.query_params.get("sprint")
-    return srv._compute_analytics_metrics(project_root, since=since, until=until,
-                                          sprint_filter=sprint_filter)
+    return srv._compute_analytics_metrics(
+        project_root, since=since, until=until,
+        sprint_filter=sprint_filter,
+    )

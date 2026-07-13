@@ -64,6 +64,8 @@ def _serve_html(path: Path) -> HTMLResponse:
     except OSError:
         raise HTTPException(status_code=404, detail="Not found")
     content = _inject_version_into_html(content)
+    from routers.auth import inject_auth_script  # noqa: PLC0415
+    content = inject_auth_script(content)
     return HTMLResponse(content=content, headers=_HTML_NO_CACHE_HEADERS)
 
 

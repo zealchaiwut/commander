@@ -195,6 +195,7 @@ from routers import (  # noqa: E402
     api_volume_router,
     docs_router,
     changelog_router,
+    estimate_jobs_router,
     activity_router,
     advisor_router,
     analytics_router,
@@ -308,9 +309,18 @@ app.include_router(running_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
 app.include_router(changelog_router)
+app.include_router(estimate_jobs_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def _bearer_auth(request: Request, call_next):
+    from routers.auth import bearer_auth_gate  # noqa: PLC0415
+    if (early := bearer_auth_gate(request)) is not None:
+        return early
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def _attach_request_id(request: Request, call_next):

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ── Request body models (mirrors of the server.py originals) ─────────────────
@@ -31,6 +31,24 @@ class SprintMgmtRunBody(BaseModel):
     # run endpoint resolves it, so the global toggle is the default and an
     # explicit modal choice is a per-run override.
     llm_provider: Optional[str] = None
+    # Optional webhook URL called on sprint terminal state (issue #1865).
+    # Must be an http/https URL; omit to disable.
+    callback_url: Optional[str] = None
+
+    @field_validator("callback_url", mode="before")
+    @classmethod
+    def _validate_callback_url(cls, v):
+        if v is None:
+            return None
+        import urllib.parse
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("callback_url must be a non-empty string")
+        parsed = urllib.parse.urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                "callback_url must be an http or https URL, got: " + repr(v)
+            )
+        return v
 
 
 class SprintRerunV2Body(BaseModel):

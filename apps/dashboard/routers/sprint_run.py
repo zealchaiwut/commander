@@ -16,6 +16,7 @@ are accessed via the deferred ``_server()`` import to avoid circular imports.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import subprocess
 import uuid
@@ -28,6 +29,7 @@ from . import sprint_run_service
 from .sprint_run_service import SprintMgmtRunBody, SprintRerunV2Body
 from .board_cache import invalidate_board
 from . import brief_invalidation
+from . import sprint_webhook_service
 
 router = APIRouter(tags=["sprint_run"])
 
@@ -372,6 +374,20 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     if body.llm_provider is None:
         body.llm_provider = llm_provider_service.get_provider()["provider"]
     llm_provider_service.validate_provider(body.llm_provider)
+
+    # AC5 (issue #1865): callback_url requires bearer-token auth when the token is configured.
+    if body.callback_url:
+        _api_token = os.environ.get("COMMANDER_API_TOKEN", "").strip()
+        if not sprint_webhook_service.check_callback_url_auth(
+            callback_url=body.callback_url,
+            auth_header=request.headers.get("Authorization", ""),
+            api_token=_api_token,
+        ):
+            raise HTTPException(
+                403,
+                detail="callback_url requires bearer-token authentication (COMMANDER_API_TOKEN is set)",
+            )
+
     if not srv.SPRINT_MANAGER_PATH.exists():
         srv._slog.event(
             "route.error",
@@ -565,14 +581,19 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     pending_path = pid_dir / f"{body.sprint_label}-pid.pending"
 
     _started_at = datetime.now(timezone.utc).isoformat()
+    _plan_extra: dict = {
+        "started_at": _started_at,
+        "use_cline_followups": body.use_cline_followups,
+        "llm_provider": body.llm_provider,
+    }
+    if body.callback_url:
+        _plan_extra["callback_url"] = body.callback_url
     try:
         srv._plan_json_set_state(
             project_root,
             body.sprint_label,
             "running",
-            started_at=_started_at,
-            use_cline_followups=body.use_cline_followups,
-            llm_provider=body.llm_provider,
+            **_plan_extra,
         )
     except Exception:
         pass
@@ -594,6 +615,16 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         pending_path=pending_path,
         sprint_label=body.sprint_label,
         project=body.project,
+    )
+
+    # AC2/AC3/AC4 (issue #1865): best-effort webhook on terminal state.
+    sprint_webhook_service.start_callback_monitor(
+        proc=proc,
+        callback_url=body.callback_url,
+        sprint_label=body.sprint_label,
+        project=body.project,
+        sprints_dir=pid_dir,
+        started_at=_started_at,
     )
 
     srv._slog.event(
@@ -647,6 +678,16 @@ def kill_sprint(sprint_label: str, project: str):
     sprints_dir = srv._commander_dir(project_root) / "sprints"
     pid_file = sprints_dir / f"{sprint_label}-pid"
     pending_file = sprints_dir / f"{sprint_label}-pid.pending"
+
+    # Read callback_url from plan.json before killing so we can fire it after (issue #1865).
+    _kill_callback_url: Optional[str] = None
+    _kill_started_at: Optional[str] = None
+    try:
+        _kill_plan = srv._read_plan_json(project_root, sprint_label) or {}
+        _kill_callback_url = _kill_plan.get("callback_url")
+        _kill_started_at = _kill_plan.get("started_at")
+    except Exception:
+        pass
 
     active_file = pid_file if pid_file.exists() else (pending_file if pending_file.exists() else None)
     if active_file is None:
@@ -736,6 +777,24 @@ def kill_sprint(sprint_label: str, project: str):
         action_id=str(uuid.uuid4()),
     )
     invalidate_board(project)
+
+    # AC2 (issue #1865): fire webhook with outcome="killed" in a background thread.
+    if _kill_callback_url:
+        import threading as _threading
+        _kill_payload = sprint_webhook_service.build_webhook_payload(
+            sprints_dir=sprints_dir,
+            sprint_label=sprint_label,
+            project=project or "",
+            started_at=_kill_started_at,
+        )
+        _t = _threading.Thread(
+            target=sprint_webhook_service.deliver_sprint_webhook,
+            args=(_kill_callback_url, _kill_payload),
+            daemon=True,
+            name=f"sprint-webhook-kill-{sprint_label}",
+        )
+        _t.start()
+
     return {"ok": True}
 
 

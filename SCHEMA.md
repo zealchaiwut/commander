@@ -690,3 +690,22 @@ and asserts no stale running row survives.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/debug/sprint-collisions` | Return the `.commander/runtime/sprint-collisions.json` manifest written by `audit_sprint_collisions.py`. Returns `[]` when the manifest has not been generated yet (or is unreadable). Read-only; reads from disk, no DB query |
+
+### Read-only docs endpoints (issue #1859)
+
+Read-only access to a project's markdown docs from disk — no DB, no GitHub. Backed by `routers/docs.py` + `routers/docs_service.py`. The clone root is resolved from the project slug via `docs_service.resolve_clone_root(slug)`, which honours both nested (`~/dev/<slug>/main/`) and flat (`~/dev/<slug>/`) layouts; `COMMANDER_PROJECTS_BASE` overrides the `~/dev` base.
+
+The **allowed doc set** is `docs/**/*.md` plus the root allowlist `{README.md, CHANGELOG.md}`. `get_doc` enforces, in order: reject absolute paths (400); reject non-`.md` extensions (400); reject any `..` path segment (400); resolve and verify containment inside the clone root (400 on escape); verify membership in the allowed set (400); reject symlinks (400); 404 if the file is missing. Listing skips symlinks.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/docs` | List allowed `.md` docs as `[{path, size, mtime}]` (docs/** then README/CHANGELOG). 404 if the slug is not a tracked project |
+| `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one allowed `.md` file as `{path, content}`. 400 on path-traversal/extension/symlink violations, 404 if absent |
+
+### Agent operate guide (issue #1861)
+
+Serves the canonical agent operate guide (`docs/agent-guide.md`, 5 canonical workflow recipes) as JSON. Backed by `routers/agent_guide.py` + `routers/agent_guide_service.py`. `GUIDE_PATH` is exposed at module level for test monkeypatching.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/agent-guide` | Return `{content, version}` for `docs/agent-guide.md` — `content` is the full markdown, `version` is a 16-hex-char SHA-256 fingerprint of the content (stable across unchanged reads). 404 with a helpful message if the file is absent |

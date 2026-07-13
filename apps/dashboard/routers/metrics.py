@@ -60,7 +60,7 @@ def _bulk_rework_from_mirror(repo: str) -> dict[str, int] | None:
     Returns None when the mirror is empty so the caller can fall back to gh.
     """
     try:
-        all_issues = db.get_mirrored_issues(repo)
+        all_issues = db.get_mirrored_issues(repo, state="open")
     except Exception:
         return None
     if not all_issues:

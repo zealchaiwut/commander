@@ -709,3 +709,42 @@ Serves the canonical agent operate guide (`docs/agent-guide.md`, 5 canonical wor
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/agent-guide` | Return `{content, version}` for `docs/agent-guide.md` — `content` is the full markdown, `version` is a 16-hex-char SHA-256 fingerprint of the content (stable across unchanged reads). 404 with a helpful message if the file is absent |
+
+### Static bearer-token auth on write endpoints (issue #1864)
+
+Optional single static token that gates write endpoints. Set `COMMANDER_API_TOKEN` in `apps/dashboard/.env` (read from the environment at request time). When set, all `POST/PUT/PATCH/DELETE` requests must carry `Authorization: Bearer <token>`; `GET`, `HEAD`, `OPTIONS`, and SSE requests are always open, and requests from `127.0.0.1` / `::1` / `localhost` (same-host hooks) are exempt. When the var is unset, every request passes through unchanged (default, no auth). This is the only sanctioned auth in an otherwise single-user, local-only app — no accounts, sessions, OAuth, or per-role permissions.
+
+Enforcement is a single `@app.middleware("http")` (`_bearer_auth` in `server.py`) delegating to `bearer_auth_gate` in `routers/auth.py`, which returns a `401 {"detail": "Unauthorized"}` on failure or `None` to pass through. Served HTML pages have a `<script>` injected via `inject_auth_script` (`routers/auth.py`) that monkey-patches `window.fetch` to add the `Authorization` header on all non-GET requests, so the browser UI keeps working with no frontend changes.
+
+### Async estimate jobs + whole-sprint batch estimate (issue #1863)
+
+Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persisted to `<project>/.commander/estimate-jobs/{job_id}.json` and reload from disk on cache miss (survive restarts). Logic lives in `routers/estimate_jobs.py`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/issues/{issue_id}/estimate?repo=&async=1` | With `async=1`: returns `202 {"job_id": ...}` immediately and runs the issue estimator in the background. Without it: unchanged synchronous behavior returning `{"ok": true, "size": "S"\|"M"\|"L"\|"XL"}` |
+| `POST` | `/api/sprints/{sprint_label}/estimate?project=` | Start an async batch estimate over every issue in the sprint. Returns `202 {"job_id": ...}`. 400 on an invalid sprint label |
+| `GET` | `/api/estimate-jobs/{job_id}` | Return the job document `{job_id, type, status, progress:[{number, status, size?}], ...}`. 404 if the job is unknown |
+
+### Sprint-finished webhook — optional callback_url on sprint run (issue #1865)
+
+The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
+
+Payload shape (built by `build_webhook_payload` from `plan.json` + `state.json`):
+
+```
+{
+  "project": "owner/repo",
+  "sprint_label": "sprint-N",
+  "outcome": "finished" | "needs_rework" | "killed",
+  "duration_sec": <int>,
+  "tickets": [{"number": <int>, "status": <str>}],
+  "summary_url": <str>   // present only when known
+}
+```
+
+**Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
+
+### Code-state snapshot at sprint finish (issue #1862)
+
+At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`services/sprint_manager/code_state.py`, backed by `scripts/generate_code_state.py`) to regenerate `docs/architecture/code-state.md` and commit/push it to the sprint branch. It runs after the documenter/brief step and is **non-fatal** — it never raises; any failure prints a `[code_state] WARNING` line so the sprint pipeline continues. No new tables or endpoints.

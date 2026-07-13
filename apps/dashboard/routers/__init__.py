@@ -60,6 +60,7 @@ from .llm_provider import router as llm_provider_router
 from .running import router as running_router
 from .api_volume import router as api_volume_router
 from .docs import router as docs_router
+from .agent_guide import router as agent_guide_router
 
 __all__ = [
     "activity_router",
@@ -116,4 +117,5 @@ __all__ = [
     "running_router",
     "api_volume_router",
     "docs_router",
+    "agent_guide_router",
 ]

@@ -209,6 +209,16 @@ except ImportError:  # pragma: no cover
     _BRIEF_GENERATOR_AVAILABLE = False
 
 try:
+    # issue #1862
+    from services.sprint_manager.code_state import (
+        generate_code_state_snapshot as _generate_code_state_snapshot,
+    )
+    _CODE_STATE_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _generate_code_state_snapshot = None  # type: ignore[assignment]
+    _CODE_STATE_AVAILABLE = False
+
+try:
     from services.sprint_manager import suite_health_gate as _suite_health_gate
     _SUITE_HEALTH_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -4939,6 +4949,20 @@ def main() -> None:
         except Exception as e_brief:
             structured_log.warn("brief_generator_failed", f"write_sprint_brief failed (non-fatal): {e_brief}", exc=str(e_brief))
             sys.stdout.write(str(f"  [brief_generator] WARNING: brief generation failed: {e_brief}") + "\n")
+
+    # Generate code-state snapshot after documenter/brief (issue #1862) — non-fatal.
+    if not args.dry_run and state.issues and _CODE_STATE_AVAILABLE:
+        _cs_cwd = Path(cfg.worktree_tester) if cfg else Path.cwd()
+        try:
+            _generate_code_state_snapshot(
+                sprint_label=state.sprint_label,
+                sprint_branch=effective_target,
+                cwd=_cs_cwd,
+            )
+        except Exception as e_cs:
+            structured_log.warn("code_state_snapshot_failed", f"code-state snapshot failed (non-fatal): {e_cs}", exc=str(e_cs))
+            sys.stdout.write(str(f"  [code_state] WARNING: snapshot failed: {e_cs}") + "\n")
+            sys.stdout.flush()
 
     # AC6, AC7: child sprints get an open PR into the base branch at sprint end.
     # develop is reached only at Merge Sprint — no auto-merge here.

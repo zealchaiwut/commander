@@ -763,6 +763,16 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
         project = row.get("project") or ""
         if not label or (project, label) in live:
             continue
+        # AC1 (#1887): verify the manager PID is dead before settling a running
+        # row.  During post-sprint phase (documenter/reviewer dispatched) the
+        # plan.json leaves state=running so the sprint drops from _all_sprints_running,
+        # but the manager process is still alive — do not orphan it.
+        try:
+            _proj_root = _project_root_path(project) if project else None
+            if _proj_root is not None and _live_manager_pid(_proj_root, label) is not None:
+                continue
+        except Exception:
+            pass
         started = (row.get("started_at") or "").strip()
         ts = None
         if started:

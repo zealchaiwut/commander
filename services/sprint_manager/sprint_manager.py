@@ -2275,35 +2275,10 @@ def _build_design_block(
 
     # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
     # When caller already has the body (issue #1541), skip the subprocess call.
+    # Routes through _mirror_issue_body (issue #1813) so all body-fetch call sites
+    # share the same mirror → live-fallback logic with consistent error logging.
     if issue_body is None:
-        issue_body = ""
-        if eff_repo:
-            # Try mirror first (zero gh quota cost, issue #1782).
-            _bdb_mirror = github_client._mirror_issue(eff_repo, issue_num)
-            if _bdb_mirror is not None and _bdb_mirror.get("body") is not None:
-                issue_body = _bdb_mirror.get("body") or ""
-            else:
-                # Mirror miss — fall back to live gh api.
-                try:
-                    result = subprocess.run(
-                        ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                        capture_output=True, text=True, timeout=30,
-                    )
-                    if result.returncode == 0:
-                        data = json.loads(result.stdout)
-                        issue_body = data.get("body", "") or ""
-                    else:
-                        sys.stdout.write(
-                            f"WARNING: gh fetch failed for issue #{issue_num}"
-                            f" (exit {result.returncode}); falling back to heading index\n"
-                        )
-                        sys.stdout.flush()
-                except Exception as _exc:
-                    sys.stdout.write(
-                        f"WARNING: gh fetch error for issue #{issue_num}"
-                        f" ({_exc!r}); falling back to heading index\n"
-                    )
-                    sys.stdout.flush()
+        issue_body = _mirror_issue_body(eff_repo, issue_num) or ""
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])

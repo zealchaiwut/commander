@@ -8,8 +8,10 @@ the sprint pipeline.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import socket
 import threading
 import time
 import urllib.parse
@@ -23,6 +25,61 @@ logger = logging.getLogger(__name__)
 _BACKOFF_SECS = [1, 3]    # waits before retry 2 and retry 3
 _TIMEOUT_SECS = 10
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow redirects — a 30x to an internal host must not bypass
+    the SSRF screen applied to the original URL (issue #1896)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+# Opener that never follows redirects. Used for all webhook delivery.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def screen_callback_url(url: str) -> Optional[str]:
+    """Return a rejection reason if *url* is not a safe public webhook target,
+    else None (issue #1896 — SSRF guard).
+
+    Rejects non-http(s) schemes and any host that resolves to a loopback,
+    link-local (incl. 169.254.169.254 cloud metadata), private/RFC1918, ULA,
+    multicast, reserved, or unspecified address. Resolves DNS and screens
+    *every* returned address so a name that maps to a mix of public and
+    internal IPs is still rejected.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as exc:  # noqa: BLE001
+        return f"unparseable url: {exc}"
+    if parsed.scheme not in ("http", "https"):
+        return f"scheme must be http/https, got {parsed.scheme!r}"
+    host = parsed.hostname
+    if not host:
+        return "empty host"
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or None)
+    except (socket.gaierror, UnicodeError, OSError) as exc:
+        return f"cannot resolve host {host!r}: {exc}"
+    for info in infos:
+        addr = info[4][0]
+        # Strip an IPv6 scope id (e.g. 'fe80::1%en0') before parsing.
+        addr = addr.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return f"unparseable resolved address {addr!r}"
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return f"host {host!r} resolves to blocked non-public address {addr}"
+    return None
+
 _OUTCOME_MAP = {
     "ready_to_merge": "finished",
     "completed": "finished",
@@ -34,12 +91,19 @@ _KILL_END_REASONS = frozenset({"stopped by user"})
 
 
 def validate_callback_url(url: str) -> bool:
-    """Return True iff url has an http/https scheme and a non-empty host."""
+    """Return True iff url is structurally valid AND passes the SSRF screen.
+
+    Structural check (http/https scheme + non-empty host) plus
+    ``screen_callback_url`` so an internal/loopback/metadata target is rejected
+    at request time, not just at fire time (issue #1896).
+    """
     try:
         parsed = urllib.parse.urlparse(url)
-        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return False
     except Exception:
         return False
+    return screen_callback_url(url) is None
 
 
 def check_callback_url_auth(
@@ -64,7 +128,16 @@ def check_callback_url_auth(
 
 
 def fire_sprint_webhook(url: str, payload: dict) -> bool:
-    """POST payload as JSON to url.  Returns True on 2xx, False on any error."""
+    """POST payload as JSON to url.  Returns True on 2xx, False on any error.
+
+    Re-screens the URL against the SSRF guard immediately before connecting
+    (authoritative check — DNS may have changed since request time, i.e. a
+    rebinding attack) and never follows redirects (issue #1896).
+    """
+    reason = screen_callback_url(url)
+    if reason is not None:
+        logger.warning("sprint webhook blocked (SSRF guard): %s — %s", url, reason)
+        return False
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -76,7 +149,7 @@ def fire_sprint_webhook(url: str, payload: dict) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT_SECS) as resp:
+        with _NO_REDIRECT_OPENER.open(req, timeout=_TIMEOUT_SECS) as resp:
             return 200 <= resp.status < 300
     except Exception:
         return False

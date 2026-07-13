@@ -195,6 +195,7 @@ from routers import (  # noqa: E402
     api_volume_router,
     docs_router,
     changelog_router,
+    estimate_jobs_router,
     activity_router,
     advisor_router,
     analytics_router,
@@ -308,6 +309,7 @@ app.include_router(running_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
 app.include_router(changelog_router)
+app.include_router(estimate_jobs_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

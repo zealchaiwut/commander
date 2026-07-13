@@ -62,6 +62,7 @@ from .api_volume import router as api_volume_router
 from .docs import router as docs_router
 from .agent_guide import router as agent_guide_router
 from .changelog import router as changelog_router
+from .estimate_jobs import router as estimate_jobs_router
 
 __all__ = [
     "activity_router",
@@ -120,4 +121,5 @@ __all__ = [
     "docs_router",
     "agent_guide_router",
     "changelog_router",
+    "estimate_jobs_router",
 ]

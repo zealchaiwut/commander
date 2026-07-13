@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -334,6 +334,9 @@ def get_plan_usage():
 
 # ── Estimator health & on-demand estimate routes ──────────────────────────────
 
+from routers import estimate_jobs as _ej  # noqa: E402
+
+
 @router.get("/api/estimator/health")
 def estimator_health():
     """Check whether the estimator agent (claude CLI) is available."""
@@ -342,12 +345,30 @@ def estimator_health():
 
 
 @router.post("/api/issues/{issue_id}/estimate")
-def estimate_issue_on_demand(request: Request, issue_id: int, repo: str, force: bool = True):
+def estimate_issue_on_demand(
+    request: Request,
+    issue_id: int,
+    repo: str,
+    force: bool = True,
+    async_: bool = Query(False, alias="async"),
+    background_tasks: BackgroundTasks = None,
+    response: Response = None,
+):
     """Run the issue estimator on demand and apply the size label.
 
-    Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success.
+    Returns {"ok": True, "size": "S"|"M"|"L"|"XL"} on success (sync).
+    With ?async=1 returns 202 {"job_id": "..."} immediately; poll
+    GET /api/estimate-jobs/{job_id} for status and result.
     The force param is accepted for API compatibility; the endpoint always runs fresh.
     """
+    if async_:
+        job_id = _ej.create_estimate_job(issue_id, repo)
+        if background_tasks is not None:
+            background_tasks.add_task(_ej.run_issue_estimate, job_id, issue_id, repo)
+        if response is not None:
+            response.status_code = 202
+        return {"job_id": job_id}
+
     import json  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
     srv = _server()

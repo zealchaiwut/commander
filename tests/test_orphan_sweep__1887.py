@@ -12,8 +12,7 @@ internal backend behaviors not exposed via the HTTP API.
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -25,26 +24,26 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 os.environ.setdefault("DB_PATH", str(REPO_ROOT / "test_orphan_sweep_1887.db"))
 
 
-@pytest.fixture(autouse=True)
-def cleanup_db():
-    """Clean up test DB after each test."""
-    yield
-    db_path = Path(os.environ.get("DB_PATH", "test_orphan_sweep_1887.db"))
-    if db_path.exists():
-        db_path.unlink()
+@pytest.fixture()
+def isolated_db(tmp_path):
+    """Patch db.DB_PATH to a temp file so tests never touch the production DB."""
+    import db as db_module
+    original = db_module.DB_PATH
+    db_module.DB_PATH = tmp_path / "test_1887.db"
+    db_module.init_db()
+    yield db_module
+    db_module.DB_PATH = original
 
 
-def test_ac1_live_manager_pid_prevents_orphan_settle():
+def test_ac1_live_manager_pid_prevents_orphan_settle(isolated_db):
     """AC1: sweep must verify manager PID is dead before settling running row.
 
     Reproduces perf-coach sprint-104.1 false-fail: plan.json leaves state=running
     during post-sprint phase, sprint drops from _all_sprints_running, but manager
     process is alive dispatching documenter/reviewer. Sweep must NOT settle this.
     """
-    import db as db_module
     import startup
-
-    db_module.init_db()
+    db_module = isolated_db
     label = "sprint-104.1-ac1"
     project = "zealchaiwut/perf-coach"
 
@@ -73,12 +72,10 @@ def test_ac1_live_manager_pid_prevents_orphan_settle():
     )
 
 
-def test_ac1_dead_manager_pid_allows_settle():
+def test_ac1_dead_manager_pid_allows_settle(isolated_db):
     """AC1 corollary: sweep must settle row when manager PID is dead."""
-    import db as db_module
     import startup
-
-    db_module.init_db()
+    db_module = isolated_db
     label = "sprint-999-dead"
     project = "zealchaiwut/perf-coach"
 
@@ -102,17 +99,15 @@ def test_ac1_dead_manager_pid_allows_settle():
     )
 
 
-def test_ac2_post_sprint_phase_survives_sweep():
+def test_ac2_post_sprint_phase_survives_sweep(isolated_db):
     """AC2: sprint in post-sprint phase (tickets done, documenter running) survives.
 
     During post-sprint, plan.json leaves state=running but _all_sprints_running
     filters it out. The manager PID is live (documenter/reviewer dispatched).
     Sweep must see the live PID and leave the row untouched.
     """
-    import db as db_module
     import startup
-
-    db_module.init_db()
+    db_module = isolated_db
     label = "sprint-104-post-sprint-ac2"
     project = "zealchaiwut/perf-coach"
 
@@ -193,7 +188,7 @@ def test_ac3_is_manager_pid_alive_honors_project_root():
         )
 
 
-def test_ac4_comprehensive_sweep_scenarios():
+def test_ac4_comprehensive_sweep_scenarios(isolated_db):
     """AC4: comprehensive test coverage of all sweep scenarios.
 
     Tests the complete matrix:
@@ -202,10 +197,8 @@ def test_ac4_comprehensive_sweep_scenarios():
     - PID file absent → sweep settles (checked via _live_manager_pid returning None)
     - PID check exception → sweep proceeds (best-effort)
     """
-    import db as db_module
     import startup
-
-    db_module.init_db()
+    db_module = isolated_db
 
     # Scenario 1: Live PID (already tested in AC1, here for matrix coverage)
     label_live = "scenario-live-ac4"

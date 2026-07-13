@@ -3672,6 +3672,8 @@ def _compute_analytics_metrics(project_root: Path,
 
     sprint_ticket_counts: list[int] = []
     sprint_lengths: list[float] = []
+    by_sprint: list[dict] = []
+    issue_rejections: list[dict] = []
 
     # Token counts are sourced from the status files (model_name is joined from
     # the token_usage table below for pricing only).
@@ -3728,6 +3730,11 @@ def _compute_analytics_metrics(project_root: Path,
                     if rejections >= 2:
                         rework_2plus += 1
 
+                if rejections > 0:
+                    issue_num = issue.get("number")
+                    if issue_num is not None:
+                        issue_rejections.append({"number": issue_num, "rejections": rejections})
+
                 # Coder duration
                 coder_start = issue.get("coder_started_at")
                 coder_end = issue.get("coder_finished_at")
@@ -3763,6 +3770,35 @@ def _compute_analytics_metrics(project_root: Path,
                         tester_all.append((e - s).total_seconds() / 60.0)
                     except Exception:
                         pass
+
+            # Per-sprint summary entry
+            sp_total = len(sprint_done)
+            sp_fp = 0
+            sp_rw = 0
+            sp_coder_mins: list[float] = []
+            for issue in sprint_done:
+                rej = _count_tester_rejections(issue)
+                if rej == 0:
+                    sp_fp += 1
+                else:
+                    sp_rw += 1
+                cs = issue.get("coder_started_at")
+                ce = issue.get("coder_finished_at")
+                if cs and ce:
+                    try:
+                        _s = datetime.fromisoformat(cs.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        _e = datetime.fromisoformat(ce.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        sp_coder_mins.append((_e - _s).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+            by_sprint.append({
+                "sprint_label": sprint_label_val,
+                "first_pass_rate": round(sp_fp / sp_total, 4) if sp_total else 0.0,
+                "rework_rate": round(sp_rw / sp_total, 4) if sp_total else 0.0,
+                "avg_coder_minutes": round(sum(sp_coder_mins) / len(sp_coder_mins), 2) if sp_coder_mins else 0.0,
+                "wall_clock_minutes": round(wall_clock_secs / 60.0, 2),
+                "tickets_done": sp_total,
+            })
 
     first_pass_rate = first_pass_count / total_completed if total_completed else 0
     rework_rate_val = rework_count / total_completed if total_completed else 0
@@ -3825,6 +3861,8 @@ def _compute_analytics_metrics(project_root: Path,
         round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
     )
 
+    most_reworked = sorted(issue_rejections, key=lambda x: x["rejections"], reverse=True)[:5]
+
     return {
         "first_pass_rate": {
             "rate": round(first_pass_rate, 4),
@@ -3861,6 +3899,8 @@ def _compute_analytics_metrics(project_root: Path,
                 "rework_cost_annotation": rework_cost_annotation,
             },
         },
+        "most_reworked": most_reworked,
+        "by_sprint": by_sprint,
     }
 
 

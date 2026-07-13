@@ -941,6 +941,31 @@
     }
     .status-inflight-arrow { color: var(--text-muted); font-size: 13px; flex-shrink: 0; }
     .status-none-msg { font-size: 13px; color: var(--text-sub); font-style: italic; padding: 4px 0; }
+    .status-card--wide { grid-column: span 2; }
+    @media (max-width: 780px) { .status-card--wide { grid-column: span 1; } }
+    .status-tokens-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .status-tokens-table th {
+      text-align: left; padding: 4px 8px 6px 0; font-size: 10px;
+      font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--text-sub); border-bottom: 1px solid var(--border);
+    }
+    .status-tokens-table td {
+      padding: 7px 8px 7px 0; color: var(--text);
+      border-bottom: 1px solid var(--border); vertical-align: middle;
+    }
+    .status-tokens-table tr:last-child td { border-bottom: none; }
+    .status-tokens-table td:last-child,
+    .status-tokens-table th:last-child { text-align: right; padding-right: 0; }
+    .status-tokens-num {
+      font-family: var(--mono); font-variant-numeric: tabular-nums;
+      color: var(--text-muted); font-size: 11px;
+    }
+    .status-tokens-link {
+      color: var(--text); text-decoration: none;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+      max-width: 340px;
+    }
+    .status-tokens-link:hover { color: var(--blue); text-decoration: underline; }
     .status-last-updated {
       font-size: 11px; color: var(--text-sub); text-align: right; margin-top: 16px;
     }
@@ -7529,98 +7554,6 @@
     .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
     .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
     @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
-    /* Logs › Issues view */
-    .logs-issue-group { border-bottom: 1px solid var(--border); }
-    .logs-issue-group-label {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 20px; background: var(--surface-2);
-      font-size: 12px; font-weight: 700; color: var(--text-muted);
-      position: sticky; top: 0; z-index: 1;
-    }
-    .logs-issue-group-count {
-      font-weight: 600; color: var(--text-sub);
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 999px; padding: 0 7px; font-size: 11px;
-    }
-    .logs-issue-row {
-      display: flex; align-items: center; gap: 10px; width: 100%;
-      padding: 9px 20px; background: none; border: none; border-top: 1px solid var(--border);
-      cursor: pointer; text-align: left; font-family: inherit; transition: background .12s;
-    }
-    .logs-issue-row:first-of-type { border-top: none; }
-    .logs-issue-row:hover { background: var(--surface-hover); }
-    .logs-issue-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
-    .logs-issue-num { font-family: var(--mono); font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
-    .logs-issue-title {
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      font-size: 13px; color: var(--text);
-    }
-    .logs-issue-action {
-      display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
-      font-size: 12px; font-weight: 600; color: var(--blue); opacity: 0; transition: opacity .12s;
-    }
-    .logs-issue-row:hover .logs-issue-action { opacity: 1; }
-    .logs-run-row { border-bottom: 1px solid var(--border); }
-    .logs-run-header {
-      display: flex; align-items: center; gap: 10px; padding: 10px 20px;
-      cursor: pointer; transition: background .12s; user-select: none;
-    }
-    .logs-run-header:hover { background: var(--surface-hover); }
-    .logs-run-chevron { color: var(--text-sub); font-size: 12px; transition: transform .15s; flex-shrink: 0; }
-    .logs-run-row.expanded .logs-run-chevron { transform: rotate(90deg); }
-    .logs-run-id {
-      font-family: var(--mono); font-size: 12px; color: var(--text); font-weight: 600;
-      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .logs-run-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
-    .logs-status-badge {
-      display: inline-flex; align-items: center; padding: 2px 8px;
-      border-radius: 10px; font-size: 11px; font-weight: 600;
-    }
-    .logs-status-badge.success { background: var(--green-bg); color: var(--green); }
-    .logs-status-badge.partial { background: var(--amber-bg); color: var(--amber); }
-    .logs-status-badge.unknown { background: var(--surface-2); color: var(--text-muted); }
-    .logs-run-events {
-      display: none; background: var(--bg); border-top: 1px solid var(--border);
-      max-height: 400px; overflow-y: auto;
-      font-family: var(--mono); font-size: 11px; line-height: 1.7;
-      padding: 8px 20px 8px 44px;
-    }
-    .logs-run-row.expanded .logs-run-events { display: block; }
-    /* Per-ticket timing / token / failure strip (#858) */
-    .logs-ticket-stats { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 6px 20px 6px 44px; }
-    .logs-run-row.expanded .logs-ticket-stats:not(:empty) { display: block; }
-    .logs-ticket-row {
-      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px;
-      padding: 5px 0; border-bottom: 1px solid var(--border);
-      font-size: 11px; color: var(--text-muted);
-    }
-    .logs-ticket-row:last-child { border-bottom: none; }
-    .logs-ticket-num { font-family: var(--mono); font-weight: 600; color: var(--text); min-width: 52px; }
-    .logs-ticket-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-    .logs-ticket-metric i { font-size: 12px; color: var(--text-sub); }
-    .logs-ticket-fail { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-    .logs-ticket-fail-class {
-      display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9px;
-      background: var(--red-bg); color: var(--red); font-weight: 600;
-      font-family: var(--mono); font-size: 10px; letter-spacing: .02em;
-    }
-    .logs-ticket-fail-msg { color: var(--red); opacity: .85; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .logs-ticket-row.failed .logs-ticket-num { color: var(--red); }
-    .logs-ica-cost { display: none; background: var(--bg); border-top: 1px solid var(--border); padding: 5px 20px 5px 44px; }
-    .logs-run-row.expanded .logs-ica-cost:not(:empty) { display: block; }
-    .logs-ica-cost-row {
-      display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px;
-      font-size: 11px; color: var(--text-muted);
-    }
-    .logs-ica-badge {
-      display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 9px;
-      background: var(--blue-bg,rgba(59,130,246,.12)); color: var(--blue); font-weight: 700;
-      font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
-    }
-    .logs-ica-metric { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
-    .logs-ica-metric i { font-size: 12px; color: var(--text-sub); }
-    .logs-ica-cost-val { color: var(--text); font-weight: 600; }
     .logs-event-line { display: flex; gap: 8px; }
     .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
     .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
@@ -7636,10 +7569,6 @@
     .logs-live-dot {
       width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
       animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
-    }
-    @media (max-width: 600px) {
-      .logs-run-id { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .logs-ticket-fail { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-wrap: nowrap; }
     }
     /* ── Events Activity Log (issue #633) ── */
     .evl-bundle-row { border-bottom: 1px solid var(--border); }
@@ -7696,6 +7625,35 @@
       border-top: 1px solid var(--border);
     }
     .evl-day-head:first-child { border-top: none; }
+    /* Sprint-run group headers (issue #1853) */
+    .evl-run-group { border-top: 1px solid var(--border); }
+    .evl-run-group:first-child { border-top: none; }
+    .evl-run-head {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+    }
+    .evl-run-head:hover { background: var(--surface-hover); }
+    .evl-run-head:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    .evl-run-head--error { border-left: 3px solid var(--red); }
+    .evl-run-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
+    .evl-run-group.expanded .evl-run-chevron { transform: rotate(90deg); }
+    .evl-run-label { font-size: 13px; font-weight: 600; color: var(--text); }
+    .evl-run-err-badge {
+      background: var(--red-bg); color: var(--red);
+      border: 1px solid var(--red); border-radius: 4px;
+      padding: 1px 6px; font-size: 11px; font-weight: 600; flex-shrink: 0;
+    }
+    .evl-run-summary { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: auto; }
+    .evl-run-outcome {
+      font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+    }
+    .evl-run-outcome--completed { background: var(--green-bg); color: var(--green); }
+    .evl-run-outcome--failed { background: var(--red-bg); color: var(--red); }
+    .evl-run-body { display: none; }
+    .evl-run-group.expanded .evl-run-body { display: block; }
+    .evl-run-body > .evl-log-row:first-child { border-top: none; }
     .evl-log-row {
       display: flex; align-items: flex-start; gap: 11px; padding: 8px 16px;
       border-top: 1px solid var(--border); transition: background .1s;
@@ -7873,6 +7831,28 @@
     }
     .evl-error-btn--action:hover { background: var(--amber-bg); }
 
+    /* ── Logs nav error badge (issue #1857) ── */
+    .logs-nav-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 16px; height: 16px;
+      background: var(--red); color: #fff;
+      border-radius: 8px; font-size: 10px; font-weight: 700;
+      padding: 0 4px; margin: 0 3px 0 1px; line-height: 1; flex-shrink: 0;
+    }
+    .logs-nav-badge.hidden { display: none; }
+    .evl-since-banner {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 16px; font-size: 12px; color: var(--text-sub);
+      border-bottom: 1px solid var(--border); background: var(--surface-2);
+    }
+    .evl-since-banner i { font-size: 13px; flex-shrink: 0; }
+    .evl-since-banner-link {
+      color: var(--blue); background: none; border: none;
+      cursor: pointer; font-size: 12px; padding: 0;
+      text-decoration: underline; white-space: nowrap;
+    }
+    .evl-since-banner-link:hover { text-decoration: none; }
+
     /* ── Branch cleanup controls (issue #634) ── */
     .evl-stale-banner-inner {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -7906,16 +7886,14 @@
 
     /* Suppress all Logs tab motion when user prefers reduced motion */
     @media (prefers-reduced-motion: reduce) {
-      .logs-chip, .logs-view-btn, .logs-issue-row, .logs-run-header,
+      .logs-chip, .logs-view-btn,
       .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
-      .evl-chevron, .logs-run-chevron, .logs-live-dot,
+      .evl-chevron, .logs-live-dot,
       .logs-skeleton-row { transition: none !important; animation: none !important; }
     }
 
     @media (max-width: 768px) {
       .logs-toolbar { padding: 10px 12px 8px; }
-      .logs-run-header { padding: 10px 12px; }
-      .logs-run-events { padding: 8px 12px 8px 28px; }
       .logs-raw-stream { padding: 8px 12px; }
       .logs-search-wrap { max-width: 100%; }
     }
@@ -8127,8 +8105,14 @@
     .metric-card.is-empty .metric-val,
     .metric-card.is-empty .metric-sub,
     .metric-card.is-empty .bar,
-    .metric-card.is-empty .breakdown { display: none; }
+    .metric-card.is-empty .breakdown,
+    .metric-card.is-empty .mrw-list { display: none; }
     .metric-card.is-empty .metric-empty { display: block; }
+    .mrw-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 6px; }
+    .mrw-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .mrw-link { font-family: var(--mono); font-weight: 600; color: var(--blue); text-decoration: none; }
+    .mrw-link:hover { text-decoration: underline; }
+    .mrw-count { font-size: 11px; color: var(--text-sub); font-family: var(--mono); }
     .src-note { font-size: 11px; color: var(--text-sub); font-family: var(--mono); line-height: 1.6; padding-top: 10px; }
     /* ── Analytics page (mirrors analytics mock) ── */
     .anl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -8145,6 +8129,14 @@
     .anl-panel.show { display: flex; }
     /* Sprint sub-nav: Board / Running / History (issue #798) */
     .subnav { display: flex; align-items: center; gap: 6px; padding: 14px 20px 0; }
+    /* Delivery-health stat strip (issue #1849) */
+    #sprint-health-strip { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; padding: 6px 20px 8px; border-top: 1px solid var(--border); background: var(--surface-2, rgba(0,0,0,.03)); font-size: 12px; color: var(--text-sub); }
+    #sprint-health-strip[hidden] { display: none; }
+    #sprint-health-strip .shs-stat { display: inline-flex; align-items: baseline; gap: 4px; }
+    #sprint-health-strip .shs-val { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+    #sprint-health-strip .shs-label { font-size: 11px; color: var(--text-muted); }
+    #sprint-health-strip .shs-see-more { margin-left: auto; font-size: 11px; color: var(--link, #3b82f6); text-decoration: none; white-space: nowrap; }
+    #sprint-health-strip .shs-see-more:hover { text-decoration: underline; }
     .subtab { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
     .subtab.active { background: var(--surface); border-color: var(--text-muted); color: var(--text); font-weight: 600; }
     .subtab:hover:not(.active) { background: var(--surface); }
@@ -10229,12 +10221,18 @@
                 aria-selected="false" tabindex="-1" onclick="switchTab('tickets')">
           <i class="ti ti-list"></i>Issues
         </button>
-        <!-- Manage: Logs + Deploy + Analytics -->
+        <!-- Analytics: promoted to top-level tab (issue #1856) -->
+        <button class="stab" role="tab" id="stab-metrics"
+                aria-selected="false" tabindex="-1" onclick="switchTab('metrics')">
+          <i class="ti ti-chart-bar"></i>Analytics
+        </button>
+        <!-- Manage: Logs + Deploy -->
         <div class="stab-group" id="stab-group-manage">
           <button class="stab stab-trigger" type="button" id="stab-manage-trigger"
                   aria-haspopup="true" aria-expanded="false" tabindex="-1"
                   onclick="toggleStabDropdown('manage', event)">
             <i class="ti ti-tool"></i>Manage
+            <span id="logs-nav-badge" class="logs-nav-badge hidden" aria-label="unread error events"></span>
             <i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" role="menu">
@@ -10245,10 +10243,6 @@
             <button class="stab" role="menuitem" id="stab-deploy"
                     aria-selected="false" onclick="switchTab('deploy')">
               <i class="ti ti-rocket"></i>Deploy
-            </button>
-            <button class="stab" role="menuitem" id="stab-metrics"
-                    aria-selected="false" onclick="switchTab('metrics')">
-              <i class="ti ti-chart-bar"></i>Analytics
             </button>
           </div>
         </div>
@@ -10374,6 +10368,8 @@
               </button>
             </div>
           </nav>
+          <!-- Delivery-health stat strip (issue #1849) — hidden until data loads -->
+          <div id="sprint-health-strip" hidden aria-label="Delivery health summary"></div>
         </div>
 
         <!-- Board sub-view (default) -->
@@ -10671,10 +10667,6 @@
                         aria-selected="true" onclick="logsSetView('activity')">
                   <i class="ti ti-activity"></i> Activity
                 </button>
-                <button class="logs-seg-btn" id="logs-view-timeline" role="tab"
-                        aria-selected="false" onclick="logsSetView('timeline')">
-                  <i class="ti ti-list-tree"></i> Runs
-                </button>
                 <button class="logs-seg-btn" id="logs-view-raw" role="tab"
                         aria-selected="false" onclick="logsSetView('raw')">
                   <i class="ti ti-terminal-2"></i> Raw
@@ -10732,9 +10724,6 @@
           </div>
           <!-- Body -->
           <div class="logs-body">
-            <div id="logs-timeline" class="hidden">
-              <div class="logs-empty" id="logs-empty">Loading runs…</div>
-            </div>
             <div id="logs-raw" class="hidden">
               <div class="logs-raw-stream" id="logs-raw-stream">
                 <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
@@ -10742,6 +10731,7 @@
             </div>
             <div id="logs-activity">
               <div id="evl-stale-banner" class="hidden"></div>
+              <div id="evl-since-banner" class="hidden"></div>
               <div class="evl-list" id="evl-list">
                 <div class="logs-skeleton" id="evl-skeleton">
                   <div class="logs-skeleton-row"></div>
@@ -10749,49 +10739,6 @@
                   <div class="logs-skeleton-row"></div>
                 </div>
                 <div class="logs-empty hidden" id="evl-empty">No events</div>
-              </div>
-            </div>
-            <!-- Search panel (issue #785) -->
-            <div id="logs-search-pane" class="hidden">
-              <div class="lsr-form" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);align-items:flex-end">
-                <div style="display:flex;flex-direction:column;gap:3px;flex:2;min-width:140px">
-                  <label class="lsr-label" for="logs-search-q">Keyword</label>
-                  <input type="text" id="logs-search-q" class="lsr-input" placeholder="substring to find…" autocomplete="off" onkeydown="if(event.key==='Enter')logsSearchSubmit()">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:90px">
-                  <label class="lsr-label" for="lsr-sprint">Sprint</label>
-                  <input type="text" id="lsr-sprint" class="lsr-input" placeholder="sprint-59">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:80px">
-                  <label class="lsr-label" for="lsr-issue">Issue #</label>
-                  <input type="number" id="lsr-issue" class="lsr-input" placeholder="785" min="1">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;min-width:80px">
-                  <label class="lsr-label" for="lsr-agent">Agent</label>
-                  <select id="lsr-agent" class="lsr-input">
-                    <option value="">Any</option>
-                    <option value="coder">coder</option>
-                    <option value="tester">tester</option>
-                    <option value="dispatch">dispatch</option>
-                  </select>
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px;min-width:80px">
-                  <label class="lsr-label" for="lsr-level">Level</label>
-                  <select id="lsr-level" class="lsr-input">
-                    <option value="">Any</option>
-                    <option value="INFO">INFO</option>
-                    <option value="WARN">WARN</option>
-                    <option value="ERROR">ERROR</option>
-                    <option value="FAIL">FAIL</option>
-                  </select>
-                </div>
-                <button class="btn-sm btn-primary" onclick="logsSearchSubmit()">
-                  <i class="ti ti-search"></i> Search
-                </button>
-              </div>
-              <div id="lsr-status" class="hidden" style="padding:4px 12px;font-size:11px;color:var(--text-sub)"></div>
-              <div id="lsr-results" style="overflow-y:auto;flex:1">
-                <div class="logs-empty lsr-empty hidden" id="lsr-empty">No matches found.</div>
               </div>
             </div>
           </div>
@@ -11099,18 +11046,18 @@
 
         <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
         <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
-          <button class="anl-tab-btn active" id="anl-tab-calibration" role="tab"
-                  aria-selected="true" onclick="anlShowTab('calibration')">Calibration</button>
+          <button class="anl-tab-btn active" id="anl-tab-metrics" role="tab"
+                  aria-selected="true" onclick="anlShowTab('metrics')">Metrics</button>
+          <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
+                  aria-selected="false" onclick="anlShowTab('calibration')">Calibration</button>
           <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
                   aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
           <button class="anl-tab-btn" id="anl-tab-status" role="tab"
                   aria-selected="false" onclick="anlShowTab('status')">Status</button>
-          <button class="anl-tab-btn" id="anl-tab-metrics" role="tab"
-                  aria-selected="false" onclick="anlShowTab('metrics')">Metrics</button>
         </div>
 
         <!-- Calibration panel -->
-        <div class="anl-panel show" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
+        <div class="anl-panel" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
           <div class="anl-card">
             <div class="anl-card-head">
               <i class="ti ti-target-arrow"></i>
@@ -11161,8 +11108,8 @@
           </div>
         </div>
 
-        <!-- Metrics panel (delivery-health, #648) -->
-        <div class="anl-panel" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
+        <!-- Metrics panel (delivery-health, #648) — default active sub-tab (issue #1856) -->
+        <div class="anl-panel show" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
           <div class="metric-grid" id="metric-grid">
             <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
               <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
@@ -11190,22 +11137,15 @@
               <div class="metric-sub" id="thr-sub"></div>
               <div class="metric-empty">No data for this period</div>
             </div>
-            <div class="metric-card" id="card-cost-sprint" role="region" aria-label="Cost per sprint">
-              <div class="metric-label"><i class="ti ti-coin" style="font-size:13px"></i> Cost / sprint</div>
-              <div class="metric-val"><span id="cps-val">—</span></div>
-              <div class="breakdown" id="cps-breakdown"></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-cost-ticket" role="region" aria-label="Cost per ticket">
-              <div class="metric-label"><i class="ti ti-receipt" style="font-size:13px"></i> Cost / ticket</div>
-              <div class="metric-val"><span id="cpt-val">—</span></div>
-              <div class="metric-sub" id="cpt-sub"></div>
-              <div class="metric-empty">No data for this period</div>
+            <div class="metric-card" id="card-most-reworked" role="region" aria-label="Most reworked tickets">
+              <div class="metric-label"><i class="ti ti-repeat" style="font-size:13px"></i> Most reworked tickets</div>
+              <ol class="mrw-list" id="mrw-list" aria-label="Most reworked tickets ranked list"></ol>
+              <div class="metric-empty">No rework data for this period</div>
             </div>
           </div>
           <div class="src-note" aria-label="Data source note">
             sources: first-pass/rework from sprint state (tester_attempt_count) ·
-            durations from coder/tester timestamps · cost from token_usage × model price ·
+            durations from coder/tester timestamps ·
             throughput from sprint state files
           </div>
         </div>
@@ -11232,6 +11172,22 @@
                     <span class="status-card-title"><i class="ti ti-rocket"></i>Active Sprint</span>
                   </div>
                   <div class="status-card-body" id="status-sprint-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-cpu"></i>Tokens by Agent</span>
+                  </div>
+                  <div class="status-card-body" id="status-tokens-agent-body">
+                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
+                  </div>
+                </div>
+                <div class="status-card status-card--wide">
+                  <div class="status-card-hdr">
+                    <span class="status-card-title"><i class="ti ti-flame"></i>Top Tickets by Tokens</span>
+                  </div>
+                  <div class="status-card-body" id="status-tokens-ticket-body">
                     <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
                   </div>
                 </div>
@@ -11313,6 +11269,30 @@
             </div>
             <div class="anl-card-body">
               <div id="metrics-tokens-wrap"><canvas id="metrics-tokens-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-rosette-discount-check"></i>
+              <div>
+                <div class="anl-card-title">First-Pass Rate per Sprint</div>
+                <div class="anl-card-sub">share of tickets tester accepted on the first try</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-fpr-wrap"><canvas id="metrics-fpr-chart" style="width:100%;height:220px;"></canvas></div>
+            </div>
+          </div>
+          <div class="anl-card">
+            <div class="anl-card-head">
+              <i class="ti ti-refresh-alert"></i>
+              <div>
+                <div class="anl-card-title">Rework Rate per Sprint</div>
+                <div class="anl-card-sub">share of tickets tester rejected at least once</div>
+              </div>
+            </div>
+            <div class="anl-card-body">
+              <div id="metrics-rpr-wrap"><canvas id="metrics-rpr-chart" style="width:100%;height:220px;"></canvas></div>
             </div>
           </div>
         </div>
@@ -12179,6 +12159,9 @@ function parseUrl() {
             : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
             : (rawTab === 'calibration')      ? 'calibration'
             : (rawTab === 'status')           ? 'status'
+            // 'metrics' / 'analytics' resolve to the Analytics tab (issue #1856)
+            : (rawTab === 'metrics')          ? 'metrics'
+            : (rawTab === 'analytics')        ? 'metrics'
             : (rawTab === 'notes')            ? 'notes'
             : (rawTab === 'settings')         ? 'settings'
             : (rawTab === 'global-settings')  ? 'global-settings'
@@ -12855,6 +12838,9 @@ async function loadHomeData(silent) {
 
     const projects = data.projects || [];
     _projectData = projects.find(p => p.slug === _slug) || null;
+
+    // Populate error badge when returning to a non-Logs tab (issue #1857)
+    if (_activeTab !== 'logs') _logsBadgeFetch().catch(() => {});
 
     buildSidebar(projects);
     updateProjectHeader(_projectData);
@@ -13806,10 +13792,6 @@ async function init() {
   const _todoDockPanel = document.getElementById('todo-dock-panel');
   if (_todoDockPanel && window.CommanderTodo) CommanderTodo.mount(_todoDockPanel, slug);
 
-  // Wire analytics page link now that slug is known
-  const _anlPageLink = document.getElementById('stab-analytics-page');
-  if (_anlPageLink) _anlPageLink.href = '/project/' + encodeURIComponent(slug) + '/analytics';
-
   initTheme();
   updateSidebarFooter();
   checkGhAuthStatus().catch(() => {});
@@ -14132,6 +14114,14 @@ function _projConnectSse() {
       }
       if (data.type !== 'update' || !data.event) return;
       const et = data.event.event_type;
+      // Increment error badge when an error event arrives while not on Logs tab (issue #1857)
+      if (_activeTab !== 'logs' && typeof window.evlIsErrorEvent === 'function') {
+        const sseEv = { type: et, detail: { status: data.event.status } };
+        if (window.evlIsErrorEvent(sseEv)) {
+          _logsBadgeCount++;
+          _logsUpdateNavBadge(_logsBadgeCount);
+        }
+      }
       if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
       const repo = _cachedFullRepo[_slug];
       if (!repo) return;
@@ -27186,6 +27176,7 @@ const _logsState = {
 };
 let _logsLoaded = false;
 let _logsSearchTimer = null;
+let _logsBadgeCount = 0;
 
 /** Build a Logs-tab URL filtered to one sprint issue (raw per-issue log view). */
 function _logsIssueLogUrl(issueNum, sprintLabel) {
@@ -27227,6 +27218,22 @@ function logsInit() {
 
   if (!_logsLoaded) {
     _logsLoaded = true;
+    // Capture last-visit timestamp before overwriting it (used by evlFetch)
+    _evlState.sinceTs = typeof window.logsReadLastVisit === 'function'
+      ? window.logsReadLastVisit(_slug) : null;
+    // Pre-apply error severity filter when badge shows unseen errors
+    if (_logsBadgeCount > 0) {
+      _logsState.filter.severity = 'error';
+      document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+        var on = b.dataset.level === 'error';
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    // Clear badge and stamp last-visit as seen
+    _logsBadgeCount = 0;
+    _logsUpdateNavBadge(0);
+    if (typeof window.logsWriteLastVisit === 'function') window.logsWriteLastVisit(_slug);
     _logsPopulateRawLevelDropdown();
     logsFetchRuns();
     logsSyncGitHub();
@@ -27265,6 +27272,69 @@ function logsDestroy() {
   _logsDisconnectLive();
 }
 
+// ── Error badge helpers (issue #1857) ────────────────────────────────────────
+
+function _logsUpdateNavBadge(count) {
+  var badge = document.getElementById('logs-nav-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function _logsUpdateSinceBanner() {
+  var banner = document.getElementById('evl-since-banner');
+  if (!banner) return;
+  if (!_evlState.sinceMode || !_evlState.sinceTs) {
+    banner.className = 'hidden';
+    banner.innerHTML = '';
+    return;
+  }
+  var dt = '';
+  try { dt = new Date(_evlState.sinceTs).toLocaleString(); } catch (_) { dt = _evlState.sinceTs; }
+  banner.className = 'evl-since-banner';
+  banner.innerHTML = '<i class="ti ti-clock"></i>'
+    + '<span>Showing events since ' + escHtml(dt) + '</span>'
+    + '<button class="evl-since-banner-link" onclick="evlFetchFull()">Show full history</button>';
+}
+
+async function _logsBadgeFetch() {
+  if (!_projectData) return;
+  var since = typeof window.logsReadLastVisit === 'function'
+    ? window.logsReadLastVisit(_slug) : null;
+  if (!since) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); return; }
+  var slug = (_projectData.repo || '').split('/').pop();
+  try {
+    var url = typeof window.buildEvlFetchUrl === 'function'
+      ? window.buildEvlFetchUrl(slug, since)
+      : '/api/projects/' + encodeURIComponent(slug) + '/events?since=' + encodeURIComponent(since) + '&limit=50';
+    var resp = await fetch(url);
+    var events = resp.ok ? await resp.json() : [];
+    var count = typeof window.logsCountNewErrors === 'function'
+      ? window.logsCountNewErrors(events) : 0;
+    _logsBadgeCount = count;
+    _logsUpdateNavBadge(count);
+  } catch (_) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); }
+}
+
+async function evlFetchFull() {
+  _evlState.sinceTs = null;
+  _evlState.sinceMode = false;
+  _logsState.filter.severity = 'all';
+  document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+    var on = b.dataset.level === 'all';
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  _logsUpdateSinceBanner();
+  _evlState.events = null;
+  _evlState.loading = false;
+  await evlFetch();
+}
+
 async function logsFetchRuns() {
   if (!_projectData) return;
   const project = _projectData.repo;
@@ -27283,22 +27353,9 @@ async function logsFetchRuns() {
       const sprintSel = document.getElementById('logs-filter-sprint');
       if (sprintSel) sprintSel.value = _logsState.filter.sprint;
     }
-    if (_logsState.filter.issue && _logsState.viewMode === 'raw') {
+    if (_logsState.viewMode === 'raw' &&
+        (_logsState.filter.issue || _logsState.rawLines === null)) {
       logsLoadRawView();
-    }
-
-    if (!_logsLoaded || existingIds.size === 0) {
-      logsRenderTimeline();
-      _logsAutoExpandFirst();
-    } else if (added.length > 0) {
-      for (const run of added) {
-        _logsAppendRunRow(run);
-      }
-    }
-
-    const emptyEl = document.getElementById('logs-empty');
-    if (emptyEl && newRuns.length === 0) {
-      emptyEl.textContent = 'No sprint runs found for this project.';
     }
   } catch (_) {}
 }
@@ -27306,7 +27363,6 @@ async function logsFetchRuns() {
 function _logsApplyFilters() {
   if (_logsState.viewMode === 'activity') evlRender();
   else if (_logsState.viewMode === 'raw') _logsRenderRawStream();
-  else logsRenderTimeline();
 }
 
 function logsFilterSprintSelect(sel) {
@@ -27393,265 +27449,36 @@ function logsOnSearch(value) {
 }
 
 function logsSetView(mode) {
-  if (mode === 'issues' || mode === 'search') mode = 'activity';
+  if (mode === 'timeline') {
+    switchTab('sprint-mgmt');
+    _smgmtShowSubView('history');
+    return;
+  }
   _logsState.viewMode = mode;
-  const timelineEl = document.getElementById('logs-timeline');
   const rawEl      = document.getElementById('logs-raw');
   const activityEl = document.getElementById('logs-activity');
   const sevSeg     = document.getElementById('logs-severity-seg');
   const rawLvlSel  = document.getElementById('logs-filter-raw-level');
-  const segBtns = ['activity', 'timeline', 'raw'];
+  const segBtns = ['activity', 'raw'];
   segBtns.forEach(function(m) {
-    var btn = document.getElementById('logs-view-' + (m === 'timeline' ? 'timeline' : m));
+    var btn = document.getElementById('logs-view-' + m);
     if (btn) {
       var on = mode === m;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     }
   });
-  timelineEl?.classList.toggle('hidden', mode !== 'timeline');
   rawEl?.classList.toggle('hidden', mode !== 'raw');
   activityEl?.classList.toggle('hidden', mode !== 'activity');
   sevSeg?.classList.toggle('hidden', mode !== 'activity');
   rawLvlSel?.classList.toggle('hidden', mode === 'activity');
+  document.getElementById('logs-filter-agent')?.classList.toggle('hidden', mode !== 'activity');
+  document.getElementById('logs-filter-source')?.classList.toggle('hidden', mode !== 'activity');
   if (mode === 'raw')      logsLoadRawView();
   if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
-  else if (mode === 'timeline') logsRenderTimeline();
 }
 
-// ── Logs › Search view (issue #785) ─────────────────────────────────────────
-
-const _lsrState = { loading: false, lastQuery: null };
-
-async function logsSearchSubmit() {
-  const q       = document.getElementById('logs-search-q')?.value.trim() || '';
-  const sprint  = document.getElementById('lsr-sprint')?.value.trim() || '';
-  const issue   = document.getElementById('lsr-issue')?.value.trim() || '';
-  const agent   = document.getElementById('lsr-agent')?.value || '';
-  const level   = document.getElementById('lsr-level')?.value || '';
-
-  if (!q && !sprint && !issue && !agent && !level) {
-    const statusEl = document.getElementById('lsr-status');
-    if (statusEl) { statusEl.textContent = 'Enter at least one search field.'; statusEl.classList.remove('hidden'); }
-    return;
-  }
-
-  const params = new URLSearchParams();
-  if (q)      params.set('q', q);
-  if (sprint) params.set('sprint', sprint);
-  if (issue)  params.set('issue', issue);
-  if (agent)  params.set('agent', agent);
-  if (level)  params.set('level', level);
-  if (_projectData?.repo) params.set('project', _projectData.repo);
-
-  const statusEl  = document.getElementById('lsr-status');
-  const resultsEl = document.getElementById('lsr-results');
-  const emptyEl   = document.getElementById('lsr-empty');
-
-  if (statusEl) { statusEl.textContent = 'Searching…'; statusEl.classList.remove('hidden'); }
-  if (resultsEl) resultsEl.querySelectorAll('.lsr-result, .lsr-truncation').forEach(e => e.remove());
-  if (emptyEl) emptyEl.classList.add('hidden');
-  _lsrState.loading = true;
-
-  try {
-    const resp = await fetch(`/api/logs/search?${params}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    _lsrRenderResults(data, q);
-  } catch (err) {
-    if (statusEl) statusEl.textContent = `Search error: ${err.message}`;
-  } finally {
-    _lsrState.loading = false;
-  }
-}
-
-function _lsrRenderResults(data, q) {
-  const statusEl  = document.getElementById('lsr-status');
-  const resultsEl = document.getElementById('lsr-results');
-  const emptyEl   = document.getElementById('lsr-empty');
-
-  const matches = data.matches || [];
-  const ms = data.query_ms ?? 0;
-
-  if (statusEl) {
-    let msg = `${data.total ?? matches.length} match${(data.total ?? matches.length) !== 1 ? 'es' : ''}`;
-    if (data.capped) msg += ' (showing first 500)';
-    if (data.timed_out) msg += ' — search timed out, results may be partial';
-    msg += ` · ${ms} ms`;
-    statusEl.textContent = msg;
-    statusEl.classList.remove('hidden');
-  }
-
-  if (matches.length === 0) {
-    if (emptyEl) emptyEl.classList.remove('hidden');
-    return;
-  }
-
-  if (!resultsEl) return;
-  const frag = document.createDocumentFragment();
-
-  for (const m of matches) {
-    const div = document.createElement('div');
-    div.className = 'lsr-result';
-    div.dataset.lineOffset = m.line_offset ?? 0;
-    div.dataset.file = m.file || '';
-    div.dataset.sprint = m.sprint || '';
-    const metaParts = [];
-    if (m.sprint) metaParts.push(`<span class="lsr-badge">${escHtml(m.sprint)}</span>`);
-    if (m.issue)  metaParts.push(`<span class="lsr-badge">#${escHtml(String(m.issue))}</span>`);
-    if (m.agent)  metaParts.push(`<span class="lsr-badge">${escHtml(m.agent)}</span>`);
-    metaParts.push(`<span style="color:var(--text-sub);font-size:10px">line ${(m.line_offset ?? 0) + 1}</span>`);
-    const highlighted = q ? escHtml(m.text || '').replace(
-      new RegExp(escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-      s => `<mark>${s}</mark>`
-    ) : escHtml(m.text || '');
-    div.innerHTML = `<div class="lsr-result-meta">${metaParts.join('')}</div><div class="lsr-result-text">${highlighted}</div>`;
-    div.onclick = () => _lsrOpenResult(m);
-    frag.appendChild(div);
-  }
-
-  if (data.capped) {
-    const trunc = document.createElement('div');
-    trunc.className = 'lsr-truncation';
-    trunc.textContent = 'Results capped at 500. Narrow your search to see more.';
-    frag.appendChild(trunc);
-  }
-
-  resultsEl.appendChild(frag);
-}
-
-function _lsrOpenResult(match) {
-  // Switch to Raw view, filter to the sprint containing this result, then
-  // scroll to the matching line_offset.
-  const sprint = match.sprint;
-  const lineOffset = match.line_offset ?? 0;
-
-  if (sprint) {
-    _logsState.filter.sprint = sprint;
-    const sel = document.getElementById('logs-filter-sprint');
-    if (sel) sel.value = sprint;
-  }
-
-  logsSetView('raw');
-  // After the raw log loads, scroll to the matching line
-  _lsrScrollToLine(lineOffset);
-}
-
-async function _lsrScrollToLine(lineOffset) {
-  // logsLoadRawView is async; wait briefly for it to finish then scroll
-  const streamEl = document.getElementById('logs-raw-stream');
-  if (!streamEl) return;
-
-  // Poll until content changes from placeholder
-  let attempts = 0;
-  while (attempts < 20) {
-    await new Promise(r => setTimeout(r, 150));
-    const lines = streamEl.querySelectorAll('.logs-raw-line');
-    if (lines.length > 1) {
-      const target = lines[lineOffset] || lines[lines.length - 1];
-      if (target) {
-        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        target.style.background = 'var(--yellow-bg, #fef9c3)';
-        setTimeout(() => { target.style.background = ''; }, 2500);
-      }
-      return;
-    }
-    attempts++;
-  }
-}
-
-// ── Logs › Issues view: browse per-issue logs without typing ─────────────────
 function _logsRepo() { return _projectData ? _projectData.repo : (_smgmtRepo() || ''); }
-
-async function _logsLoadIssues() {
-  const repo = _logsRepo();
-  if (!repo) return;
-  // Reuse the board's already-loaded issue list when available
-  if (_smgmtData && Array.isArray(_smgmtData.issues)) {
-    _logsState.issues = _smgmtData.issues;
-    _logsRenderIssues();
-    return;
-  }
-  try {
-    const resp = await fetch(`/api/sprint-management/issues?repo=${encodeURIComponent(repo)}`);
-    _logsState.issues = resp.ok ? ((await resp.json()).issues || []) : [];
-  } catch (_) { _logsState.issues = []; }
-  _logsRenderIssues();
-}
-
-function _logsIssueStatusBadge(iss) {
-  const hasRework = (iss.labels || []).some(l => l.name === 'need-rework' || l.name === 'needs-rework');
-  const cls = hasRework ? 'smgmt-status-need-rework' : ({
-    'backlog':     'smgmt-status-backlog',
-    'in-progress': 'smgmt-status-in-progress',
-    'sit':         'smgmt-status-sit',
-    'uat':         'smgmt-status-uat',
-    'done':        'smgmt-status-done',
-  }[iss.status] || 'smgmt-status-backlog');
-  const label = hasRework ? 'needs rework' : (iss.status || 'backlog');
-  return `<span class="smgmt-ticket-status ${cls}">${escHtml(label)}</span>`;
-}
-
-function _logsRenderIssues() {
-  const container = document.getElementById('logs-issues');
-  if (!container) return;
-  if (_logsState.issues === null) {
-    container.innerHTML = `<div class="logs-empty">Loading issues…</div>`;
-    return;
-  }
-  const dispatched = _logsState.issues.filter(i => i.sprint_label);
-  const q = _logsState.search;
-  let issues = dispatched;
-  if (q) issues = issues.filter(i => String(i.number).includes(q) || (i.title || '').toLowerCase().includes(q));
-  if (issues.length === 0) {
-    container.innerHTML = `<div class="logs-empty">${
-      dispatched.length === 0
-        ? 'No dispatched issues yet — per-issue logs appear here after a sprint runs.'
-        : 'No issues match your filter.'
-    }</div>`;
-    return;
-  }
-  const groups = {};
-  issues.forEach(i => { (groups[i.sprint_label] = groups[i.sprint_label] || []).push(i); });
-  const labels = Object.keys(groups).sort((a, b) => sprintLabelCompare(b, a)); // newest sprint first
-  const repo = _logsRepo();
-  let html = '';
-  for (const label of labels) {
-    const rows = groups[label].sort((a, b) => b.number - a.number).map(i =>
-      `<button class="logs-issue-row" onclick="openLvIssueLog(${i.number}, '${escHtml(label)}', '${escHtml(repo)}')">
-        <span class="logs-issue-num">#${i.number}</span>
-        <span class="logs-issue-title" title="${escHtml(i.title)}">${escHtml(i.title)}</span>
-        ${_logsIssueStatusBadge(i)}
-        <span class="logs-issue-action"><i class="ti ti-file-text"></i> View log</span>
-      </button>`
-    ).join('');
-    html += `<div class="logs-issue-group">
-      <div class="logs-issue-group-label">${escHtml(sprintLabelDisplay(label))} <span class="logs-issue-group-count">${groups[label].length}</span></div>
-      ${rows}
-    </div>`;
-  }
-  container.innerHTML = html;
-}
-
-function _logsFilteredRuns() {
-  let runs = _logsState.runs;
-  const q = _logsState.search;
-  const sprint = _logsState.filter.sprint;
-  if (sprint) runs = runs.filter(r => r.sprint_label === sprint);
-  if (q) runs = runs.filter(r => r.run_id.toLowerCase().includes(q) || r.sprint_label.toLowerCase().includes(q));
-  return [...runs].sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
-}
-
-/** Auto-expand the newest run so the default view shows content, not just headers. */
-function _logsAutoExpandFirst() {
-  if (_logsState.expanded.size > 0) return;
-  const runs = _logsFilteredRuns();
-  if (runs.length === 0) return;
-  const header = document.querySelector(
-    `[data-run-id="${CSS.escape(runs[0].run_id)}"] .logs-run-header`
-  );
-  if (header) logsToggleRun(header);
-}
 
 function _logsClassifyLine(raw) {
   const s = String(raw || '').trim();
@@ -27681,69 +27508,6 @@ function _logsFilterEvents(events) {
   return (events || []).filter(_logsRunEventMatches);
 }
 
-function logsRenderTimeline() {
-  const container = document.getElementById('logs-timeline');
-  if (!container) return;
-  const runs = _logsFilteredRuns();
-  if (runs.length === 0) {
-    container.innerHTML = `<div class="logs-empty">${
-      _logsState.runs.length === 0 ? 'No sprint runs found.' : 'No runs match current filters.'
-    }</div>`;
-    return;
-  }
-  container.innerHTML = runs.map(_logsRunRowHtml).join('');
-  for (const runId of _logsState.expanded) {
-    const row = container.querySelector(`[data-run-id="${CSS.escape(runId)}"]`);
-    if (!row) continue;
-    row.classList.add('expanded');
-    const statsEl = row.querySelector('.logs-ticket-stats');
-    if (statsEl && _logsState.ticketStats[runId]) {
-      statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
-    }
-    const icaCostEl = document.getElementById(`logs-ica-cost-${runId}`);
-    if (icaCostEl && _logsState.icaCost[runId]) {
-      icaCostEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
-    }
-    const eventsEl = row.querySelector('.logs-run-events');
-    if (eventsEl && _logsState.events[runId]) {
-      eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
-    }
-  }
-}
-
-function _logsRunRowHtml(run) {
-  const startDt = new Date(run.start_time);
-  const startStr = startDt.toLocaleDateString() + ' ' +
-    startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const badge = `<span class="logs-status-badge ${escHtml(run.outcome)}">${escHtml(run.outcome)}</span>`;
-  const isExpanded = _logsState.expanded.has(run.run_id);
-  const eventsContent = isExpanded && _logsState.events[run.run_id]
-    ? _logsEventsHtml(_logsState.events[run.run_id])
-    : '<div class="logs-empty" style="padding:6px 0;font-size:11px">Loading events…</div>';
-
-  return `<div class="logs-run-row${isExpanded ? ' expanded' : ''}" data-run-id="${escHtml(run.run_id)}" data-sprint="${escHtml(run.sprint_label)}" data-project="${escHtml(run.project)}">
-  <div class="logs-run-header" onclick="logsToggleRun(this)">
-    <i class="ti ti-chevron-right logs-run-chevron"></i>
-    <span class="logs-run-id">${escHtml(run.run_id)}</span>
-    <div class="logs-run-meta">
-      <span>${escHtml(startStr)}</span>
-      <span>${run.ticket_count} ticket${run.ticket_count !== 1 ? 's' : ''}</span>
-      ${badge}
-    </div>
-  </div>
-  <div class="logs-ticket-stats" id="logs-stats-${escHtml(run.run_id)}">${
-    isExpanded && _logsState.ticketStats[run.run_id]
-      ? _logsTicketStatsHtml(_logsState.ticketStats[run.run_id])
-      : ''
-  }</div>
-  <div class="logs-ica-cost" id="logs-ica-cost-${escHtml(run.run_id)}">${
-    isExpanded && _logsState.icaCost[run.run_id]
-      ? _logsIcaCostHtml(_logsState.icaCost[run.run_id])
-      : ''
-  }</div>
-  <div class="logs-run-events" id="logs-events-${escHtml(run.run_id)}">${isExpanded ? eventsContent : ''}</div>
-</div>`;
-}
 
 // Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
 // dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
@@ -27904,18 +27668,6 @@ function _logsParseLines(lines) {
     entries.push({ timestamp: '—', type, message: s });
   }
   return entries;
-}
-
-function _logsAppendRunRow(run) {
-  const timeline = document.getElementById('logs-timeline');
-  if (!timeline) return;
-  const emptyEl = timeline.querySelector('.logs-empty');
-  if (emptyEl) emptyEl.remove();
-  const filteredRuns = _logsFilteredRuns();
-  if (!filteredRuns.find(r => r.run_id === run.run_id)) return;
-  const div = document.createElement('div');
-  div.innerHTML = _logsRunRowHtml(run);
-  timeline.insertBefore(div.firstElementChild, timeline.firstChild);
 }
 
 async function logsLoadRawView() {
@@ -28122,6 +27874,8 @@ const _evlState = {
   loading: false,
   staleBranches: new Set(),
   sprintFeatMap: {},
+  sinceMode: false,   // true when current events were fetched with a since= constraint
+  sinceTs: null,      // the since= timestamp used for this Logs session (captured before overwrite)
 };
 
 function _evlEffectChip(ev) {
@@ -28416,17 +28170,35 @@ async function evlFetch() {
   if (emEl) emEl.classList.add('hidden');
 
   const slug = (_projectData.repo || '').split('/').pop();
+  const since = _evlState.sinceTs;
   try {
-    const resp = await fetch(`/api/projects/${encodeURIComponent(slug)}/events?limit=200`);
+    var url = typeof window.buildEvlFetchUrl === 'function'
+      ? window.buildEvlFetchUrl(slug, since)
+      : ('/api/projects/' + encodeURIComponent(slug) + '/events?limit=200');
+    const resp = await fetch(url);
     _evlState.events = resp.ok ? await resp.json() : [];
+    _evlState.sinceMode = !!since;
   } catch (_) {
     _evlState.events = [];
+    _evlState.sinceMode = false;
+  }
+
+  // Auto-apply error filter when since-mode has errors and no filter was manually set
+  if (_evlState.sinceMode && _evlState.events.some(_evlIsError)
+      && _logsState.filter.severity === 'all') {
+    _logsState.filter.severity = 'error';
+    document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
+      var on = b.dataset.level === 'error';
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   await evlFetchStaleBranches();
   _evlState.loading = false;
   _logsPopulateSprintDropdown();
   _logsPopulateRawLevelDropdown();
+  _logsUpdateSinceBanner();
   if (_logsState.viewMode === 'activity') evlRender();
 }
 
@@ -28884,7 +28656,6 @@ function evlRenderTimeline(events) {
   if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
 
   var visible = events.filter(function(e) { return _evlMatchesFilter(e); });
-
   if (visible.length === 0) return '<div class="logs-empty">No events</div>';
 
   // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
@@ -28902,34 +28673,18 @@ function evlRenderTimeline(events) {
   }
   _evlState.sprintFeatMap = sprintFeatMap;
 
-  var byDay = [];
-  var dayMap = {};
-
-  for (var i = 0; i < events.length; i++) {
-    var e = events[i];
-    var ts = e.timestamp || '';
-    var dayKey = ts.substring(0, 10);
-    if (!dayMap[dayKey]) {
-      dayMap[dayKey] = [];
-      byDay.push({ key: dayKey, ts: ts, events: dayMap[dayKey] });
-    }
-    dayMap[dayKey].push(e);
-  }
+  // Group events by sprint run (issue #1853)
+  var groups = evlGroupEventsByRun(events);
 
   var html = '';
-  for (var j = 0; j < byDay.length; j++) {
-    var bucket = byDay[j];
-    var visibleInDay = bucket.events.filter(function(e) {
-      return _evlMatchesFilter(e);
-    });
-    if (visibleInDay.length === 0) continue;
+  for (var g = 0; g < groups.length; g++) {
+    var group = groups[g];
 
-    html += '<div class="evl-day-head">' + escHtml(_evlDayLabel(bucket.ts)) + '</div>';
-
+    // Compress visible events in this group (dedup consecutive identical rows)
     var compressed = [];
     var lastSig = null;
-    for (var k = 0; k < bucket.events.length; k++) {
-      var evK = bucket.events[k];
+    for (var k = 0; k < group.events.length; k++) {
+      var evK = group.events[k];
       if (!_evlMatchesFilter(evK)) continue;
       var sigK = _evlDedupSignature(evK);
       if (sigK === lastSig && compressed.length > 0) {
@@ -28939,12 +28694,14 @@ function evlRenderTimeline(events) {
         lastSig = sigK;
       }
     }
+    if (compressed.length === 0) continue;
 
+    // Build event rows HTML
+    var rowsHtml = '';
     for (var c = 0; c < compressed.length; c++) {
       var item = compressed[c];
       var ev = item.ev;
       var dupN = item.count;
-
       var timePart = (ev.timestamp || '').substring(11, 16);
       var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
       var badgeCls = _evlBadgeCls(badgeLabel);
@@ -28959,21 +28716,56 @@ function evlRenderTimeline(events) {
       var dupBadge = dupN > 1 ? '<span class="evl-dup-badge" title="' + dupN + ' identical events">×' + dupN + '</span>' : '';
       var errChev = isErr ? '<i class="ti ti-chevron-down evl-error-chev"></i>' : '';
       var clickAttr = isErr ? ' onclick="evlToggleErrorRow(this)"' : '';
-
-      html += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
+      rowsHtml += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
         + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '"' + clickAttr + '>'
         + '<span class="lr-time">' + escHtml(timePart) + '</span>'
         + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
         + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
-        + dupBadge
-        + durPill
-        + errChev
-        + errPanel
+        + dupBadge + durPill + errChev + errPanel
+        + '</div>';
+    }
+
+    if (group.isOther) {
+      // Dashboard / other: day-header, no collapse
+      var dayLabel = group.dayKey
+        ? 'Dashboard / other · ' + _evlDayLabel(group.dayKey + 'T00:00:00')
+        : 'Dashboard / other';
+      html += '<div class="evl-day-head">' + escHtml(dayLabel) + '</div>';
+      html += rowsHtml;
+    } else {
+      // Sprint run: collapsible group header
+      var isExpanded = group.hasErrors;  // error runs start expanded
+      var outcomeHtml = '';
+      if (group.outcome === 'completed') {
+        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--completed">completed</span>';
+      } else if (group.outcome === 'failed') {
+        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--failed">failed</span>';
+      }
+      var errBadge = group.errorCount > 0
+        ? '<span class="evl-run-err-badge">' + group.errorCount + ' error' + (group.errorCount !== 1 ? 's' : '') + '</span>'
+        : '';
+      var summary = compressed.length + ' event' + (compressed.length !== 1 ? 's' : '');
+      var headCls = 'evl-run-head' + (group.errorCount > 0 ? ' evl-run-head--error' : '');
+      html += '<div class="evl-run-group' + (isExpanded ? ' expanded' : '') + '">'
+        + '<div class="' + headCls + '" role="button" tabindex="0"'
+        + ' onclick="evlToggleRunGroup(this.parentNode)"'
+        + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \')evlToggleRunGroup(this.parentNode)">'
+        + '<i class="ti ti-chevron-right evl-run-chevron"></i>'
+        + '<span class="evl-run-label">' + escHtml(sprintLabelDisplay(group.sprint_label)) + '</span>'
+        + outcomeHtml
+        + errBadge
+        + '<span class="evl-run-summary">' + escHtml(summary) + '</span>'
+        + '</div>'
+        + '<div class="evl-run-body">' + rowsHtml + '</div>'
         + '</div>';
     }
   }
 
   return html || '<div class="logs-empty">No events</div>';
+}
+
+function evlToggleRunGroup(groupEl) {
+  if (groupEl) groupEl.classList.toggle('expanded');
 }
 
 // ── Branch cleanup helpers (issue #634) ──────────────────────────────────────
@@ -30935,10 +30727,66 @@ document.addEventListener('keydown', function(e) {
     _renderDuration(data);
   }
 
+  // Per-sprint first-pass rate line chart (issue #1848).
+  function _renderFpr(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('fpr', 'No data available'); return; }
+    _resetCanvas('fpr');
+    const c = _colors();
+    if (_charts.fpr) _charts.fpr.destroy();
+    const opts = _chartOpts(v => Math.round(v * 100) + '%');
+    opts.scales.y.max = 1;
+    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
+    _charts.fpr = new Chart(
+      document.getElementById('metrics-fpr-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'First-pass rate', data: data.map(d => d.first_pass_rate || 0),
+            borderColor: c.green, backgroundColor: c.green + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
+  // Per-sprint rework rate line chart (issue #1848).
+  function _renderRpr(data) {
+    data = data || [];
+    if (!data.length) { _showMsg('rpr', 'No data available'); return; }
+    _resetCanvas('rpr');
+    const c = _colors();
+    if (_charts.rpr) _charts.rpr.destroy();
+    const opts = _chartOpts(v => Math.round(v * 100) + '%');
+    opts.scales.y.max = 1;
+    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
+    _charts.rpr = new Chart(
+      document.getElementById('metrics-rpr-chart'),
+      {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.sprint_label),
+          datasets: [{ label: 'Rework rate', data: data.map(d => d.rework_rate || 0),
+            borderColor: c.orange, backgroundColor: c.orange + '33', fill: true, tension: 0.3, pointRadius: 4 }],
+        },
+        options: opts,
+      }
+    );
+  }
+
   // Render the loaded series: velocity/failure/duration from /api/metrics/sprints,
-  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859).
-  function _renderLoaded() { _renderAll(_metricsData); _renderTokens(_tokensData); }
+  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859),
+  // first-pass/rework-per-sprint from delivery-health endpoint (issue #1848).
+  function _renderLoaded() {
+    _renderAll(_metricsData);
+    _renderTokens(_tokensData);
+    _renderFpr(_bySprintData);
+    _renderRpr(_bySprintData);
+  }
   function _tableLoaded() { _tableFallback(_metricsData); _tableTokens(_tokensData); }
+
+  let _bySprintData = null;
 
   // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
   // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
@@ -30948,13 +30796,13 @@ document.addEventListener('keydown', function(e) {
       return;
     }
 
-    ['velocity', 'failure', 'duration', 'tokens'].forEach(k => {
+    ['velocity', 'failure', 'duration', 'tokens', 'fpr', 'rpr'].forEach(k => {
       const w = document.getElementById('metrics-' + k + '-wrap');
       if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
     });
 
     try {
-      const res = await fetch('/api/metrics/sprints');
+      const res = await fetch('/api/metrics/sprints?project=' + encodeURIComponent(_slug));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       _metricsData = await res.json();
     } catch (e) {
@@ -30974,6 +30822,18 @@ document.addEventListener('keydown', function(e) {
       _showMsg('tokens', 'Failed to load tokens');
     }
 
+    // Per-sprint first-pass/rework series from delivery-health endpoint (issue #1848).
+    try {
+      const dhRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics');
+      if (!dhRes.ok) throw new Error('HTTP ' + dhRes.status);
+      const dh = await dhRes.json();
+      _bySprintData = Array.isArray(dh.by_sprint) ? dh.by_sprint : [];
+    } catch (e) {
+      _bySprintData = [];
+      _showMsg('fpr', 'Failed to load data');
+      _showMsg('rpr', 'Failed to load data');
+    }
+
     _metricsLoaded = true;
     _loadChartJs(_renderLoaded, _tableLoaded);
   };
@@ -30982,16 +30842,16 @@ document.addEventListener('keydown', function(e) {
 // ── Analytics delivery-health cards (#648, ported from the retired analytics page) ──
 (function () {
   function _anlSet(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
-  function _anlFmt$(v) { return '$' + (v || 0).toFixed(2); }
   function _anlFmtMin(m) { m = m || 0; return m < 60 ? Math.round(m) + 'm' : (m / 60).toFixed(1) + 'h'; }
   function _anlPct(r) { return Math.round((r || 0) * 100); }
 
   function _anlClear() {
     ['fpr-val','fpr-sub','rwr-val','rwr-sub','dur-val','dur-breakdown',
-     'thr-val','thr-sub','cps-val','cps-breakdown','cpt-val','cpt-sub'].forEach(id => {
+     'thr-val','thr-sub'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '—';
     });
     ['fpr-bar','rwr-bar'].forEach(id => { const el = document.getElementById(id); if (el) el.style.width = '0%'; });
+    const mrwEl = document.getElementById('mrw-list'); if (mrwEl) mrwEl.innerHTML = '';
     document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.remove('is-empty'));
   }
 
@@ -31001,7 +30861,7 @@ document.addEventListener('keydown', function(e) {
 
   function _anlRender(d) {
     const fpr = d.first_pass_rate || {}, rwr = d.rework_rate || {}, dur = d.avg_duration || {};
-    const thr = d.throughput || {}, cost = d.cost || {}, ps = cost.per_sprint || {}, pt = cost.per_ticket || {};
+    const thr = d.throughput || {};
     if ((fpr.total_completed || 0) <= 0) { _anlEmpty(); return; }
 
     const fprPct = _anlPct(fpr.rate);
@@ -31022,14 +30882,21 @@ document.addEventListener('keydown', function(e) {
     _anlSet('thr-val', (thr.avg_tickets_per_sprint || 0).toFixed(1));
     _anlSet('thr-sub', _anlFmtMin(thr.avg_sprint_length_minutes || 0) + ' avg sprint length');
 
-    _anlSet('cps-val', _anlFmt$(ps.total));
-    const byRole = ps.by_role || {};
-    const cpsEl = document.getElementById('cps-breakdown');
-    if (cpsEl) cpsEl.innerHTML = ['coder','tester','estimator'].map(r => '<span>' + r + ' ' + _anlFmt$(byRole[r]) + '</span>').join(' · ');
-
-    _anlSet('cpt-val', _anlFmt$(pt.avg));
-    const rwCost = pt.rework_cost_annotation || 0;
-    _anlSet('cpt-sub', rwCost > 0 ? 'rework adds ~' + _anlFmt$(rwCost) + '/ticket on rejected ones' : '');
+    const mrwItems = Array.isArray(d.most_reworked) ? d.most_reworked : [];
+    const mrwEl = document.getElementById('mrw-list');
+    if (mrwEl) {
+      if (mrwItems.length === 0) {
+        mrwEl.innerHTML = '';
+        const card = document.getElementById('card-most-reworked');
+        if (card) card.classList.add('is-empty');
+      } else {
+        const repo = (_projectData && _projectData.repo) ? _projectData.repo : null;
+        mrwEl.innerHTML = mrwItems.map(function (e) {
+          const href = repo ? 'https://github.com/' + repo + '/issues/' + e.number : '#';
+          return '<li class="mrw-item"><a href="' + href + '" target="_blank" rel="noopener" class="mrw-link">#' + e.number + '</a><span class="mrw-count">' + e.rejections + ' rejection' + (e.rejections !== 1 ? 's' : '') + '</span></li>';
+        }).join('');
+      }
+    }
   }
 
   // Scope → query string (shared by metrics + calibration). Reads #scope-days.
@@ -31048,9 +30915,12 @@ document.addEventListener('keydown', function(e) {
   window.anlFetchDeliveryHealth = function () {
     if (!_slug) return;
     _anlClear();
-    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics' + _anlScopeQS())
+    // Reuse data already cached by the stat strip when no scope filter is active (AC4 issue #1849)
+    const qs = _anlScopeQS();
+    if (!qs && window._anlHealthData) { _anlRender(window._anlHealthData); return; }
+    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics' + qs)
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(_anlRender)
+      .then(function (d) { window._anlHealthData = d; _anlRender(d); })
       .catch(err => { console.error('Analytics delivery-health fetch failed:', err); _anlEmpty(); });
   };
 
@@ -31180,9 +31050,9 @@ document.addEventListener('keydown', function(e) {
     else window.anlFetchCalibration();
   };
 
-  // Override metricsInit: Analytics tab opens on Calibration (first tab) and lazy-loads data.
+  // Override metricsInit: Analytics tab opens on Metrics (delivery-health cards) sub-tab (issue #1856).
   window.metricsInit = function () {
-    window.anlShowTab('calibration');
+    window.anlShowTab('metrics');
   };
 }());
 
@@ -31207,8 +31077,8 @@ async function statusRefresh() {
   const btn = document.getElementById('status-refresh-btn');
   if (btn) btn.classList.add('spinning');
 
-  let navData = null, issuesData = null, goalData = null;
-  let navErr = false, issuesErr = false;
+  let navData = null, issuesData = null, goalData = null, costData = null;
+  let navErr = false, issuesErr = false, costErr = false;
 
   const fetches = [
     snavNavStatusFetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
@@ -31218,6 +31088,10 @@ async function statusRefresh() {
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(d => { issuesData = d; })
       .catch(() => { issuesErr = true; }),
+    fetch('/api/projects/' + encodeURIComponent(slug) + '/analytics/cost')
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(d => { costData = d; })
+      .catch(() => { costErr = true; }),
   ];
   await Promise.all(fetches);
 
@@ -31231,6 +31105,8 @@ async function statusRefresh() {
 
   const issues = issuesData ? (issuesData.issues || []) : null;
   _statusRenderSprint(navData, goalData, navErr);
+  _statusRenderTokensByAgent(costData ? (costData.by_agent || []) : null, costErr);
+  _statusRenderTokensByTicket(costData ? (costData.by_ticket || []) : null, repo, costErr);
   _statusRenderLabels(issues, issuesErr);
   _statusRenderActivity(issues, issuesErr);
   _statusRenderInflight(issues, issuesErr);
@@ -31259,6 +31135,47 @@ function _statusRenderSprint(navData, goalData, err) {
       <span class="status-sprint-state ${stateClass}">${stateLabel}</span>
     </div>
     <div class="status-sprint-goal">${goal}</div>`;
+}
+
+function _statusRenderTokensByAgent(rows, err) {
+  const el = document.getElementById('status-tokens-agent-body');
+  if (!el) return;
+  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
+    return;
+  }
+  let html = '<table class="status-tokens-table"><thead><tr><th>Agent</th><th>Tokens</th></tr></thead><tbody>';
+  for (const row of rows) {
+    const agent = escHtml(row.agent || '—');
+    const tokens = Number(row.total_tokens || 0).toLocaleString();
+    html += `<tr><td>${agent}</td><td class="status-tokens-num">${tokens}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function _statusRenderTokensByTicket(rows, repo, err) {
+  const el = document.getElementById('status-tokens-ticket-body');
+  if (!el) return;
+  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
+  if (!rows || rows.length === 0) {
+    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
+    return;
+  }
+  const baseUrl = repo ? 'https://github.com/' + repo + '/issues/' : '#';
+  let html = '<table class="status-tokens-table"><thead><tr><th>Issue</th><th>Tokens</th></tr></thead><tbody>';
+  for (const row of rows) {
+    const num = row.issue_number;
+    const tokens = Number(row.total_tokens || 0).toLocaleString();
+    const href = escHtml(baseUrl + num);
+    html += `<tr>
+      <td><a class="status-tokens-link" href="${href}" target="_blank" rel="noopener noreferrer">#${num}</a></td>
+      <td class="status-tokens-num">${tokens}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 const _STATUS_COL_COLORS = {

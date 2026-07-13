@@ -1,4 +1,84 @@
 (() => {
+  // apps/dashboard/static/src/activity-grouping.js
+  var _SPRINT_TYPE_PREFIX = "sprint_";
+  function _evlGetSprintLabel(ev) {
+    if (ev.sprint_label)
+      return ev.sprint_label;
+    const d = ev.detail || {};
+    if (d.sprint_label)
+      return d.sprint_label;
+    if (d.sprint_id)
+      return d.sprint_id;
+    if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target)
+      return ev.target;
+    return null;
+  }
+  function _isRunError(ev) {
+    const type = ev.type || "";
+    if (type === "ticket_failed")
+      return true;
+    if (type === "agent_finished") {
+      const st = (ev.detail || {}).status || "";
+      return st === "error" || st === "timed_out";
+    }
+    return false;
+  }
+  function evlGroupEventsByRun(events) {
+    if (!events || events.length === 0)
+      return [];
+    const order = [];
+    const map = {};
+    for (const ev of events) {
+      const sl = _evlGetSprintLabel(ev);
+      if (sl) {
+        const key = "sprint:" + sl;
+        if (!map[key]) {
+          map[key] = {
+            key,
+            sprint_label: sl,
+            isOther: false,
+            dayKey: null,
+            events: [],
+            hasErrors: false,
+            errorCount: 0,
+            outcome: null
+          };
+          order.push(key);
+        }
+        const g = map[key];
+        g.events.push(ev);
+        if (_isRunError(ev)) {
+          g.hasErrors = true;
+          g.errorCount += 1;
+        }
+        if (ev.type === "sprint_finished") {
+          const d = ev.detail || {};
+          const failed = d.failed || 0;
+          g.outcome = failed > 0 ? "failed" : "completed";
+        }
+      } else {
+        const ts = ev.timestamp || "";
+        const dayKey = ts.substring(0, 10) || "unknown";
+        const key = "other:" + dayKey;
+        if (!map[key]) {
+          map[key] = {
+            key,
+            sprint_label: "",
+            isOther: true,
+            dayKey,
+            events: [],
+            hasErrors: false,
+            errorCount: 0,
+            outcome: null
+          };
+          order.push(key);
+        }
+        map[key].events.push(ev);
+      }
+    }
+    return order.map((k) => map[k]);
+  }
+
   // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
@@ -650,7 +730,7 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["logs", "deploy", "metrics", "bulk-create"],
+    manage: ["logs", "deploy", "bulk-create"],
     planning: [
       "timeline",
       "compare",
@@ -663,7 +743,7 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
@@ -709,6 +789,7 @@
     const _topLevelTabs = [
       "sprint-mgmt",
       "tickets",
+      "metrics",
       "manage",
       "planning",
       "settings"
@@ -1583,6 +1664,63 @@
   globalThis._pfXLMinutesSaved ??= 0;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
+
+  // apps/dashboard/static/src/sprint-board/health-strip.js
+  function _fmtPct(rate) {
+    return Math.round((rate || 0) * 100) + "%";
+  }
+  function _fmtDur(minutes) {
+    minutes = minutes || 0;
+    return minutes < 60 ? Math.round(minutes) + "m" : (minutes / 60).toFixed(1) + "h";
+  }
+  function _sHealthBuildHtml(data) {
+    const fpr = data && data.first_pass_rate || {};
+    const rwr = data && data.rework_rate || {};
+    const thr = data && data.throughput || {};
+    if ((fpr.total_completed || 0) <= 0)
+      return null;
+    const fprPct = _fmtPct(fpr.rate);
+    const rwrPct = _fmtPct(rwr.rate);
+    const durStr = _fmtDur(thr.avg_sprint_length_minutes);
+    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + `</span><span class="shs-label">avg sprint</span></span><a class="shs-see-more" href="#" onclick="switchTab('metrics');if(typeof anlShowTab==='function')anlShowTab('metrics');return false;">See more \u2192</a>`;
+  }
+  function _sHealthStripRender(data) {
+    const el = document.getElementById("sprint-health-strip");
+    if (!el)
+      return;
+    const html = _sHealthBuildHtml(data);
+    if (html === null) {
+      el.hidden = true;
+      return;
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+  }
+  function sprintHealthStripInit2(slug) {
+    if (!slug)
+      return;
+    if (typeof window !== "undefined" && window._anlHealthData) {
+      _sHealthStripRender(window._anlHealthData);
+      return;
+    }
+    if (typeof window !== "undefined" && window._anlHealthPromise)
+      return;
+    const url = "/api/projects/" + encodeURIComponent(slug) + "/analytics/metrics";
+    const p = fetch(url).then(function(r) {
+      return r.ok ? r.json() : null;
+    }).then(function(d) {
+      if (d) {
+        if (typeof window !== "undefined")
+          window._anlHealthData = d;
+        _sHealthStripRender(d);
+      }
+      return d;
+    }).catch(function() {
+      return null;
+    });
+    if (typeof window !== "undefined")
+      window._anlHealthPromise = p;
+  }
 
   // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
@@ -5158,6 +5296,9 @@ Resolve manually and re-run Bulk complete.`,
         delete _smgmtFinishCards[k];
     }
     try {
+      if (typeof sprintHealthStripInit === "function") {
+        sprintHealthStripInit(_slug);
+      }
       if (typeof _smgmtEnsureCapData === "function") {
         _smgmtEnsureCapData();
       }
@@ -8697,6 +8838,71 @@ Proceed anyway?`)) {
   globalThis._histSetTtlMin = _histSetTtlMin;
   globalThis._histBulkSignOff = _histBulkSignOff;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
+  globalThis._sHealthBuildHtml = _sHealthBuildHtml;
+  globalThis._sHealthStripRender = _sHealthStripRender;
+  globalThis.sprintHealthStripInit = sprintHealthStripInit2;
+
+  // apps/dashboard/static/src/logs-error-badge.js
+  function logsErrorBadgeKey(slug) {
+    return "commander_logs_last_visit_" + slug;
+  }
+  function logsReadLastVisit(slug) {
+    try {
+      return typeof localStorage !== "undefined" && localStorage.getItem(logsErrorBadgeKey(slug)) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function logsWriteLastVisit(slug) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(logsErrorBadgeKey(slug), (/* @__PURE__ */ new Date()).toISOString());
+      }
+    } catch (_) {
+    }
+  }
+  function evlIsErrorEvent(ev) {
+    const type = ev.type || "";
+    if (type === "ticket_failed")
+      return true;
+    if (type === "agent_finished") {
+      const st = (ev.detail || {}).status || "";
+      return st === "error" || st === "timed_out";
+    }
+    return false;
+  }
+  function logsCountNewErrors(events) {
+    return events.filter(evlIsErrorEvent).length;
+  }
+  function buildEvlFetchUrl(slug, sinceTs) {
+    const base = "/api/projects/" + encodeURIComponent(slug) + "/events";
+    if (sinceTs) {
+      return base + "?since=" + encodeURIComponent(sinceTs) + "&limit=200";
+    }
+    return base + "?limit=200";
+  }
+
+  // apps/dashboard/static/src/logs-view-controls.js
+  function shouldAutoLoadRaw(viewMode, rawLines, runCount) {
+    return viewMode === "raw" && rawLines === null && runCount > 0;
+  }
+  function pickAutoSprintLabel(runs, filterSprint) {
+    if (filterSprint)
+      return filterSprint;
+    return runs[0] && runs[0].sprint_label || null;
+  }
+  function logsToolbarVisibility(mode) {
+    const isActivity = mode === "activity";
+    const isRaw = mode === "raw";
+    return {
+      agentSelect: isActivity,
+      sourceSelect: isActivity,
+      severitySeg: isActivity,
+      rawLevelSelect: isRaw,
+      sprintSelect: true,
+      searchInput: true
+    };
+  }
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
@@ -8767,5 +8973,23 @@ Proceed anyway?`)) {
   globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
   globalThis.startGhAuthPoll = startGhAuthPoll;
   globalThis.stopGhAuthPoll = stopGhAuthPoll;
+  root.evlGroupEventsByRun = evlGroupEventsByRun;
+  globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+  root.logsReadLastVisit = logsReadLastVisit;
+  root.logsWriteLastVisit = logsWriteLastVisit;
+  root.evlIsErrorEvent = evlIsErrorEvent;
+  root.logsCountNewErrors = logsCountNewErrors;
+  root.buildEvlFetchUrl = buildEvlFetchUrl;
+  globalThis.logsReadLastVisit = logsReadLastVisit;
+  globalThis.logsWriteLastVisit = logsWriteLastVisit;
+  globalThis.evlIsErrorEvent = evlIsErrorEvent;
+  globalThis.logsCountNewErrors = logsCountNewErrors;
+  globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+  root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  root.pickAutoSprintLabel = pickAutoSprintLabel;
+  root.logsToolbarVisibility = logsToolbarVisibility;
+  globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+  globalThis.logsToolbarVisibility = logsToolbarVisibility;
 })();
 //# sourceMappingURL=bundle.js.map

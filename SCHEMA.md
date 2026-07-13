@@ -417,7 +417,7 @@ Clears `<project-root>/.commander/calibration_cache.json` and rescans every `spr
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/project/{slug}/analytics` | Serve the analytics HTML page for a project |
+| `GET` | `/project/{slug}/analytics` | Retired standalone analytics page — permanent **301 redirect** to the in-chrome Analytics tab at `/project/{slug}/metrics` (issue #1846). The old `static/analytics.html` page is deleted |
 | `GET` | `/api/sprint-progress` | Current sprint progress summary (tickets done/total, elapsed) |
 | `GET` | `/api/projects/{slug}/analytics/metrics` | Aggregated sprint metrics: velocity, throughput, cycle time by size |
 | `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |

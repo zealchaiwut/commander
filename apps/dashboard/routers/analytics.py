@@ -116,24 +116,6 @@ def _query_by_agent() -> list[dict]:
         return []
 
 
-def _query_trend_30d() -> list[dict]:
-    """Return per-day token totals for the last 30 days."""
-    try:
-        with _db.get_conn() as conn:
-            _db._create_agent_runs_table(conn)
-            rows = conn.execute(
-                """SELECT DATE(started_at) AS date, SUM(total_tokens) AS tokens
-                   FROM agent_runs
-                   WHERE total_tokens IS NOT NULL
-                     AND started_at >= DATE('now', '-30 days')
-                   GROUP BY DATE(started_at)
-                   ORDER BY date"""
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
-
-
 def _query_token_usage_by_model() -> list[dict]:
     """Return input/output token totals grouped by model_name from token_usage table."""
     try:
@@ -265,9 +247,9 @@ router = APIRouter(tags=["analytics"])
 def get_project_analytics_cost(slug: str):
     """GET /api/projects/{slug}/analytics/cost — token usage breakdown (issue #786).
 
-    Returns token totals by sprint, by ticket (top 10), by agent, per-size averages,
-    and a 30-day trend series. When a price_map is configured in settings, includes
-    cost_usd estimates for each bucket; omits them otherwise.
+    Returns token totals by sprint, by ticket (top 10), by agent, and per-size averages.
+    When a price_map is configured in settings, includes cost_usd estimates for each
+    bucket; omits them otherwise.
     """
     repo = _resolve_project_slug(slug)
     project_root = _project_root_path(repo)
@@ -283,7 +265,6 @@ def get_project_analytics_cost(slug: str):
     by_sprint = _query_by_sprint()
     by_ticket = _query_by_ticket(limit=10)
     by_agent = _query_by_agent()
-    trend_30d = _query_trend_30d()
     per_size_avg_tokens = _compute_per_size_avg(project_root)
 
     usd_per_token: float | None = None
@@ -305,7 +286,6 @@ def get_project_analytics_cost(slug: str):
         "by_sprint": by_sprint,
         "by_ticket": by_ticket,
         "by_agent": by_agent,
-        "trend_30d": trend_30d,
         "per_size_avg_tokens": per_size_avg_tokens,
         "price_map_configured": price_map_configured,
         # Blended $/token rate so the capacity-bar forecast can derive a $ figure

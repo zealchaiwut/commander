@@ -256,9 +256,13 @@ The Issue Estimator agent reads a ticket after it is created and produces struct
 - DO NOT add Discord, Slack, or other notification systems (separate sprint)
 - DO NOT add auth (single-user, local only) — **exception**: a single static bearer
   token for write endpoints is sanctioned (issue #1864). Set `COMMANDER_API_TOKEN`
-  in `apps/dashboard/.env`; GET/SSE stay open; 127.0.0.1 callers (hooks) are exempt;
-  the browser UI has the token injected via `routers/auth.py`. No user accounts,
-  sessions, OAuth, or per-role permissions.
+  in `apps/dashboard/.env`; GET/SSE stay open; 127.0.0.1 callers (hooks) are exempt.
+  The token is **never** rendered into served HTML (issue #1895 — that leaked it to
+  any open GET); the browser stores it in `localStorage`
+  (`commanderSetApiToken('<token>')` once) and `routers/auth.py`'s injected,
+  secretless script attaches it to non-GET fetches. Headless callers (Hermes) send
+  `Authorization: Bearer <token>` directly. No user accounts, sessions, OAuth, or
+  per-role permissions.
 - DO NOT add caching layers beyond the existing 30s GitHub cache
 
 ## When in Doubt

@@ -182,6 +182,7 @@
     }
     .stat-v.g { color: var(--green); }
     .stat-v.a { color: var(--amber); }
+    .stat-v.r { color: var(--red); }
     .stat-l {
       font-size: 12px;
       color: var(--text-muted);
@@ -445,31 +446,6 @@
       0%, 100% { box-shadow: 0 0 0 2px var(--green-bg); }
       50% { box-shadow: 0 0 0 5px var(--green-bg); }
     }
-
-    /* milestone indicator */
-    .pb-milestone {
-      display: none;
-      margin-left: auto;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-      padding: 3px 9px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      background: transparent;
-      color: var(--text-muted);
-      font-size: 12px;
-      max-width: 44%;
-      transition: border-color 0.12s, color 0.12s;
-    }
-    /* Milestones hidden per operator request — remove .show override to restore */
-    .pb-milestone.show { display: none; }
-    .pb-milestone .ti { font-size: 12px; flex-shrink: 0; }
-    .pb-ms-name { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pb-milestone:hover { border-color: var(--blue); color: var(--blue); }
-    .pb-milestone:hover .pb-ms-name { color: var(--blue); }
-    .pb-ms-count { font-family: var(--mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
-    .pb-milestone + .pbstatus { margin-left: 8px; }
 
     /* collapse toggle */
     .pb-bottom-toggle {
@@ -752,7 +728,6 @@
       .dec-act,
       .open-proj,
       .add-proj,
-      .pb-milestone,
       .pbname-go,
       .pb-bottom-toggle,
       .planner-link,
@@ -780,6 +755,7 @@
     <div class="top-nav-date-nav">
       <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:13px"></i></button>
       <button class="nav-btn today" onclick="gotoToday()" id="today-btn">Today</button>
+      <button class="nav-btn" id="refresh-btn" onclick="refreshBrief()">Refresh</button>
       <span class="date-pick-wrap">
         <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:12px"></i></button>
         <input type="date" id="date-pick" aria-label="Pick a date" max="" onchange="onDatePick(event)">
@@ -826,8 +802,12 @@
   }
 
   function _bottomHidden(slug){
-    try { return localStorage.getItem('pb_hide_bottom_' + slug) === '1'; }
-    catch(_){ return false; }
+    try {
+      const v = localStorage.getItem('pb_hide_bottom_' + slug);
+      if (v === null) return true; // first visit: default to hidden
+      return v === '1';
+    }
+    catch(_){ return true; }
   }
   function toggleBottom(slug){
     const card = document.querySelector('.pbrief[data-slug="' + (window.CSS && CSS.escape ? CSS.escape(slug) : slug) + '"]');
@@ -924,9 +904,14 @@
     }
 
     const brief = (artifact && artifact.brief) || {};
-    const gk = brief.global_kpis || {};
     const decisions = brief.decisions || [];
     const projects = brief.projects || [];
+    const ranOvernight = brief.ran_overnight || [];
+    const overnight_failures = ranOvernight.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
+    const gk = Object.assign({}, brief.global_kpis || {}, { overnight_failures });
 
     // Populate project metadata from enriched brief before rendering so
     // renderProjectsShell can merge artifact + live slugs (issue #1778 AC1/AC5).
@@ -944,7 +929,7 @@
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
-    html += renderRanOvernight(brief.ran_overnight || []);
+    html += renderRanOvernight(ranOvernight);
     html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
@@ -963,22 +948,6 @@
       }
     });
 
-    // Populate milestone badge from embedded data (issue #1778 AC1/AC5).
-    projects.forEach(p => {
-      if (p.milestone === undefined) {
-        loadMilestone(p.project, p.repo);
-        return;
-      }
-      const m = p.milestone;
-      const el = document.getElementById('ms-' + p.project);
-      if (!el || !m || !m.label) return;
-      const name = m.title || 'Milestone';
-      el.querySelector('.pb-ms-name').textContent = name;
-      el.querySelector('.pb-ms-count').textContent = m.label;
-      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
-      el.classList.add('show');
-    });
-
     // Batch-load todos and mount with preloaded data (issue #1778 AC1/AC3/AC4).
     if (projects.length && window.CommanderTodo) {
       const slugs = projects.map(p => p.project).filter(Boolean);
@@ -993,22 +962,6 @@
         if (el) CommanderTodo.mount(el, slug, { preloadedData: todosMap[slug] || [] });
       });
     }
-  }
-
-  async function loadMilestone(slug, repo){
-    const el = document.getElementById('ms-' + slug);
-    if (!el || !repo) return;
-    try {
-      const r = await fetch('/api/home/milestone?repo=' + encodeURIComponent(repo));
-      if (!r.ok) return;
-      const m = await r.json();
-      if (!m || !m.label) return;
-      const name = m.title || 'Milestone';
-      el.querySelector('.pb-ms-name').textContent = name;
-      el.querySelector('.pb-ms-count').textContent = m.label;
-      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
-      el.classList.add('show');
-    } catch(_) {}
   }
 
   // ── brief header ──────────────────────────────────────────────────────────
@@ -1045,8 +998,13 @@
   // ── KPI strip ─────────────────────────────────────────────────────────────
   function renderKpis(gk){
     const n = v => (v == null ? 0 : v);
+    const failures = n(gk.overnight_failures);
+    const failCell = failures > 0
+      ? `<div class="stat-cell"><span class="stat-v r">${failures}</span><span class="stat-l">Failed</span></div>`
+      : '';
     return `
     <div class="status-bar">
+      ${failCell}
       <div class="stat-cell"><span class="stat-v g">${n(gk.sprints_shipped)}</span><span class="stat-l">Sprints shipped</span></div>
       <div class="stat-cell"><span class="stat-v">${n(gk.tickets_done)}</span><span class="stat-l">Tickets done</span></div>
       <div class="stat-cell"><span class="stat-v">${n(gk.in_progress)}</span><span class="stat-l">In progress</span></div>
@@ -1065,7 +1023,13 @@
 
   function renderRanOvernight(list){
     if (!list || !list.length) return '';
-    const rows = list.map(e => {
+    const _ORDER = {failure: 0, partial: 1, success: 2};
+    const sorted = [...list].sort((a, b) => {
+      const oa = _ORDER[String(a.outcome || '').toLowerCase()] ?? 1;
+      const ob = _ORDER[String(b.outcome || '').toLowerCase()] ?? 1;
+      return oa - ob;
+    });
+    const rows = sorted.map(e => {
       const outcome = String(e.outcome || '').toLowerCase();
       const cls = ['success','failure','partial'].includes(outcome) ? outcome : 'partial';
       const ic = outcome === 'success' ? 'ti-circle-check'
@@ -1082,18 +1046,24 @@
           <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:11px"></i></a>
         </div>`;
     });
+    // Failures and partials must never be hidden — keep them all visible
+    const neverHide = sorted.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
     return `
     <div class="sec">
       <div class="sec-hdr"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
-      ${_briefCollapsibleRows(rows, 'ran')}
+      ${_briefCollapsibleRows(rows, 'ran', neverHide)}
     </div>`;
   }
 
-  function _briefCollapsibleRows(rowsArr, id){
-    if (rowsArr.length <= 3) return `<div class="planner-list">${rowsArr.join('')}</div>`;
-    const head = rowsArr.slice(0, 3).join('');
-    const rest = rowsArr.slice(3).join('');
-    const n = rowsArr.length - 3;
+  function _briefCollapsibleRows(rowsArr, id, neverHide){
+    const threshold = Math.max(3, neverHide || 0);
+    if (rowsArr.length <= threshold) return `<div class="planner-list">${rowsArr.join('')}</div>`;
+    const head = rowsArr.slice(0, threshold).join('');
+    const rest = rowsArr.slice(threshold).join('');
+    const n = rowsArr.length - threshold;
     return `<div class="planner-list">${head}</div>
       <div class="planner-list planner-more" id="${id}-more" style="display:none">${rest}</div>
       <button type="button" class="planner-see-more" id="${id}-btn" onclick="_briefToggleMore('${id}', ${n})">See ${n} more <i class="ti ti-chevron-down"></i></button>`;
@@ -1337,13 +1307,6 @@
       <div class="pbrief${_bottomHidden(slug) ? ' hide-bottom' : ''}" data-slug="${esc(slug)}">
         <div class="pbrief-head">
           ${_projectTitleLinkHtml(slug)}
-          <a class="pb-milestone" id="ms-${esc(slug)}" href="/project/${esc(slug)}/roadmap"
-             title="Active milestone — open Roadmap"
-             aria-label="Active milestone progress, open Roadmap tab">
-            <i class="ti ti-flag-3"></i>
-            <span class="pb-ms-name"></span>
-            <span class="pb-ms-count"></span>
-          </a>
           ${_cardMeta(p)}
           ${_statusPill(p)}
           <button class="pb-bottom-toggle" title="Hide/show shipped detail and to-do"
@@ -1353,6 +1316,7 @@
 
         <div class="pb-grid">
           <div class="pb-cell pb-cell-summary">
+            ${_statusLine(p)}
             <div class="pb-summary">
               <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
               <div class="pb-sum-body">
@@ -1360,7 +1324,6 @@
                 <div class="pb-sum-text" id="sum-${esc(slug)}">${summaryLoadingHtml()}</div>
               </div>
             </div>
-            ${_statusLine(p)}
           </div>
           <div class="pb-cell pb-cell-todo">
             <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>
@@ -1409,6 +1372,13 @@
     _go(fmtIso(dt));
   }
   function gotoToday(){ _go(null); }
+  async function refreshBrief(){
+    const b = document.getElementById('refresh-btn');
+    if (b) b.disabled = true;
+    try { await fetch('/api/brief/daily/regenerate', {method:'POST'}); } catch(_) {}
+    if (b) b.disabled = false;
+    loadBrief(_curDate);
+  }
   function onDatePick(ev){
     const v = ev.target.value;
     if (v) _go(v);

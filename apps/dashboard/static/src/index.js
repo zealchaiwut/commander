@@ -9,6 +9,7 @@
  * Follow-on tickets extract additional self-contained blocks into static/src/
  * and import them here.
  */
+import { evlGroupEventsByRun } from "./activity-grouping.js";
 import {
   colorizeLogLine,
   escapeLogHtml,
@@ -150,3 +151,39 @@ root.stopGhAuthPoll = stopGhAuthPoll;
 globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
 globalThis.startGhAuthPoll = startGhAuthPoll;
 globalThis.stopGhAuthPoll = stopGhAuthPoll;
+
+// Activity feed run-grouping helper (issue #1853)
+root.evlGroupEventsByRun = evlGroupEventsByRun;
+globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+
+// Logs error badge helpers (issue #1857)
+import {
+  logsReadLastVisit,
+  logsWriteLastVisit,
+  evlIsErrorEvent,
+  logsCountNewErrors,
+  buildEvlFetchUrl,
+} from "./logs-error-badge.js";
+root.logsReadLastVisit = logsReadLastVisit;
+root.logsWriteLastVisit = logsWriteLastVisit;
+root.evlIsErrorEvent = evlIsErrorEvent;
+root.logsCountNewErrors = logsCountNewErrors;
+root.buildEvlFetchUrl = buildEvlFetchUrl;
+globalThis.logsReadLastVisit = logsReadLastVisit;
+globalThis.logsWriteLastVisit = logsWriteLastVisit;
+globalThis.evlIsErrorEvent = evlIsErrorEvent;
+globalThis.logsCountNewErrors = logsCountNewErrors;
+globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+
+// Logs view control helpers (issue #1858)
+import {
+  shouldAutoLoadRaw,
+  pickAutoSprintLabel,
+  logsToolbarVisibility,
+} from "./logs-view-controls.js";
+root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+root.pickAutoSprintLabel = pickAutoSprintLabel;
+root.logsToolbarVisibility = logsToolbarVisibility;
+globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+globalThis.logsToolbarVisibility = logsToolbarVisibility;

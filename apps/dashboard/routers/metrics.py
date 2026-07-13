@@ -103,11 +103,13 @@ def get_sprint_metrics(request: Request):
     Query params:
       from=YYYY-MM-DD  (default: 30 days ago)
       to=YYYY-MM-DD    (default: today)
+      project=<slug or owner/repo>  (optional; filters to one project)
 
     Response: JSON array of sprint metric objects.
     """
     today = datetime.now(tz=timezone.utc).date()
 
+    raw_project = request.query_params.get("project")
     raw_from = request.query_params.get("from")
     raw_to = request.query_params.get("to")
 
@@ -159,6 +161,14 @@ def get_sprint_metrics(request: Request):
         repo = proj.get("repo", "")
         if not repo:
             continue
+
+        if raw_project is not None:
+            if "/" in raw_project:
+                if repo != raw_project:
+                    continue
+            else:
+                if repo.split("/")[-1] != raw_project:
+                    continue
 
         if repo not in _rework_cache:
             _rework_cache[repo] = _bulk_rework_from_mirror(repo)

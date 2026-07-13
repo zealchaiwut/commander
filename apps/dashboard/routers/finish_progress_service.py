@@ -280,6 +280,11 @@ async def run_finish_sprint(
             pass
 
         _log("Done.")
+        try:
+            from routers import brief_invalidation as _bi  # noqa: PLC0415
+            _bi.invalidate_home_brief_today()
+        except Exception:
+            pass
 
         parts: list[str] = [f"{closed} issue{'s' if closed != 1 else ''} closed", "sprint merged"]
         result = ", ".join(parts)

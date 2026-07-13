@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -30,7 +31,8 @@ def _bkk_midnight_utc() -> str:
     return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def get_conn() -> sqlite3.Connection:
+@contextlib.contextmanager
+def get_conn():
     # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
     # manager subprocess both write this file concurrently. The rollback
     # journal (sqlite's default) serializes all writers and blocks readers
@@ -44,7 +46,10 @@ def get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db():

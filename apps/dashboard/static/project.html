@@ -12337,12 +12337,14 @@ function _smgmtSseConnect(label, repo) {
   });
 
   es.addEventListener('complete', function() {
+    try { es.close(); } catch (_) {}
     _smgmtSseEs = null;
     _smgmtSseLabel = null;
     if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);
   });
 
   es.onerror = function() {
+    try { es.close(); } catch (_) {}
     _smgmtSseEs = null;
     _smgmtSseLabel = null;
     if (!_smgmtSseFallbackId) _smgmtSseStartFallback(label, repo);

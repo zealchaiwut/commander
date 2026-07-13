@@ -748,3 +748,21 @@ Payload shape (built by `build_webhook_payload` from `plan.json` + `state.json`)
 ### Code-state snapshot at sprint finish (issue #1862)
 
 At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`services/sprint_manager/code_state.py`, backed by `scripts/generate_code_state.py`) to regenerate `docs/architecture/code-state.md` and commit/push it to the sprint branch. It runs after the documenter/brief step and is **non-fatal** — it never raises; any failure prints a `[code_state] WARNING` line so the sprint pipeline continues. No new tables or endpoints.
+
+### Sprint merge-conflict status — auto-resolve + human-needed signal (issue #1898)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. |
+
+Response:
+
+```
+200 {"label": "sprint-N", "blocked": false}
+200 {"label": "sprint-N", "blocked": true, "code": "merge_conflict_needs_human",
+     "files": [...], "at": "<iso>"}
+```
+
+**Auto-resolve path.** When a sprint branch is synced into `develop` before merge (`_prepare_sprint_branch_for_develop_merge` in `startup.py`), conflicts are triaged by file: `docs/**.md` files resolve via the existing doc-merge path, and **append-only** conflicts in `SCHEMA.md` / any `models.py` (`_is_union_merge_safe_path`) resolve via `git merge-file --union`. A conflict region is only treated as append-only when its diff3 base section is empty (`_has_overlapping_conflict_in_diff3`); any overlapping edit to existing lines is **not** auto-resolved. Anything else is a needs-human conflict.
+
+**Needs-human path.** `_gh_merge_branch_via_pr` accepts an optional `conflict_detail_out` dict and, on a needs-human conflict, fills `{"code": "merge_conflict_needs_human", "files": [...]}`. `POST .../complete-step` then persists the block into `plan.json` (`conflict_blocked: {files, at}`) and returns a structured **HTTP 409** `{"code": "merge_conflict_needs_human", "files": [...], "label", "message"}` instead of an opaque string. A later successful merge clears the stale flag.

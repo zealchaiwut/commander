@@ -763,6 +763,16 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
         project = row.get("project") or ""
         if not label or (project, label) in live:
             continue
+        # AC1 (#1887): verify the manager PID is dead before settling a running
+        # row.  During post-sprint phase (documenter/reviewer dispatched) the
+        # plan.json leaves state=running so the sprint drops from _all_sprints_running,
+        # but the manager process is still alive — do not orphan it.
+        try:
+            _proj_root = _project_root_path(project) if project else None
+            if _proj_root is not None and _live_manager_pid(_proj_root, label) is not None:
+                continue
+        except Exception:
+            pass
         started = (row.get("started_at") or "").strip()
         ts = None
         if started:
@@ -4497,6 +4507,159 @@ def _is_doc_merge_path(path: str) -> bool:
     return path.startswith("docs/") and path.endswith(".md")
 
 
+def _is_union_merge_safe_path(path: str) -> bool:
+    """Files where append-only additions can be auto-resolved via union merge (issue #1898).
+
+    Covers SCHEMA.md and any models.py (at any directory depth). Never auto-resolves
+    files that carry executable logic beyond model definitions.
+    """
+    name = Path(path).name.lower()
+    return name == "schema.md" or name == "models.py"
+
+
+def _has_overlapping_conflict_in_diff3(diff3_text: str) -> bool:
+    """True when any conflict region in diff3 output has non-empty base content.
+
+    Append-only conflicts have an empty ||||||| base section (both sides added
+    new content at the same spot). Overlapping modifications have non-empty base
+    sections (both sides changed the same existing lines) — these are not safe to
+    auto-resolve via union (issue #1898).
+    """
+    in_base = False
+    base_lines: list = []
+    for line in diff3_text.splitlines():
+        if line.startswith("<<<<<<<"):
+            in_base = False
+            base_lines = []
+        elif line.startswith("|||||||"):
+            in_base = True
+        elif in_base and line.startswith("======="):
+            if any(ln.strip() for ln in base_lines):
+                return True
+            in_base = False
+            base_lines = []
+        elif in_base:
+            base_lines.append(line)
+    return False
+
+
+def _resolve_union_merge_conflicts(cwd: Path, paths: list) -> tuple:
+    """Attempt union merge on each path. Returns (all_resolved, still_conflicting).
+
+    Strategy (issue #1898):
+    1. Run git merge-file --diff3 to inspect conflict regions.
+    2. If any conflict region has non-empty base content (both sides modified the
+       same existing lines), treat the file as NOT auto-resolvable.
+    3. Otherwise all conflicts are append-only — apply git merge-file --union which
+       cleanly includes both sides' additions without conflict markers.
+    Resolved files are written in-place and staged with git add.
+    """
+    import tempfile as _tempfile
+    still_conflicting: list = []
+    for path in paths:
+        def _git_show(stage: str) -> Optional[str]:
+            r = subprocess.run(
+                ["git", "show", f":{stage}:{path}"],
+                cwd=cwd, capture_output=True, text=True, timeout=30,
+            )
+            return r.stdout if r.returncode == 0 else None
+
+        ours_text = _git_show("2")
+        base_text = _git_show("1") or ""
+        theirs_text = _git_show("3")
+
+        if ours_text is None or theirs_text is None:
+            still_conflicting.append(path)
+            continue
+
+        ours_tmp = base_tmp = theirs_tmp = diff3_tmp = None
+        try:
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".ours", delete=False, encoding="utf-8"
+            ) as f:
+                ours_tmp = f.name
+                f.write(ours_text)
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".base", delete=False, encoding="utf-8"
+            ) as f:
+                base_tmp = f.name
+                f.write(base_text)
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".theirs", delete=False, encoding="utf-8"
+            ) as f:
+                theirs_tmp = f.name
+                f.write(theirs_text)
+
+            # Step 1: diff3 check — detect overlapping (non-append-only) conflicts
+            import shutil as _shutil
+            diff3_tmp = ours_tmp + ".diff3"
+            _shutil.copy(ours_tmp, diff3_tmp)
+            subprocess.run(
+                ["git", "merge-file", "--diff3", diff3_tmp, base_tmp, theirs_tmp],
+                capture_output=True, text=True,
+            )
+            with open(diff3_tmp, encoding="utf-8") as f:
+                diff3_result = f.read()
+            try:
+                os.unlink(diff3_tmp)
+            except OSError:
+                pass
+            diff3_tmp = None
+
+            if _has_overlapping_conflict_in_diff3(diff3_result):
+                still_conflicting.append(path)
+                continue
+
+            # Step 2: all conflicts are append-only — union merge is safe
+            subprocess.run(
+                ["git", "merge-file", "--union", ours_tmp, base_tmp, theirs_tmp],
+                capture_output=True, text=True,
+            )
+            with open(ours_tmp, encoding="utf-8") as f:
+                merged = f.read()
+        finally:
+            for tmp in (base_tmp, theirs_tmp, ours_tmp, diff3_tmp):
+                if tmp:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+
+        (cwd / path).write_text(merged, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", path], cwd=cwd, capture_output=True, text=True, timeout=30,
+        )
+
+    return len(still_conflicting) == 0, still_conflicting
+
+
+# ── Conflict-blocked state (issue #1898) ─────────────────────────────────────
+# Persisted in plan.json under "conflict_blocked": {"files": [...], "at": "<iso>"}
+# so the GET /conflict-status endpoint can surface it to autonomous callers.
+
+def _sprint_set_conflict_blocked(project_root: Path, sprint_label: str, files: list) -> None:
+    existing = _read_plan_json(project_root, sprint_label) or {}
+    existing["conflict_blocked"] = {
+        "files": files,
+        "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
+    _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_clear_conflict_blocked(project_root: Path, sprint_label: str) -> None:
+    existing = _read_plan_json(project_root, sprint_label)
+    if existing and "conflict_blocked" in existing:
+        del existing["conflict_blocked"]
+        _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_get_conflict_blocked(project_root: Path, sprint_label: str) -> Optional[dict]:
+    plan = _read_plan_json(project_root, sprint_label)
+    if not plan:
+        return None
+    return plan.get("conflict_blocked") or None
+
+
 def _changelog_sprint_sections(text: str) -> dict[str, str]:
     """Map sprint label (e.g. '91', '85.5') to its full ## Sprint section text."""
     matches = list(_CHANGELOG_SPRINT_HEADER_RE.finditer(text))
@@ -4597,20 +4760,30 @@ def _prepare_sprint_branch_for_develop_merge(repo: str, head_branch: str) -> tup
             unmerged = [ln.strip() for ln in (status.stdout or "").splitlines() if ln.strip()]
             if not unmerged:
                 return False, merge.stderr.strip() or "git merge develop failed"
+            doc_files = [p for p in unmerged if _is_doc_merge_path(p)]
             non_doc = [p for p in unmerged if not _is_doc_merge_path(p)]
-            if non_doc:
+            safe_non_doc = [p for p in non_doc if _is_union_merge_safe_path(p)]
+            unsafe = [p for p in non_doc if not _is_union_merge_safe_path(p)]
+            if unsafe:
                 _run("git", "merge", "--abort")
-                return False, f"merge conflict in non-doc files: {', '.join(non_doc)}"
-            if not _resolve_doc_merge_conflicts(cwd, unmerged):
-                _run("git", "merge", "--abort")
-                return False, "failed to auto-resolve doc conflicts"
+                # Prefix signals "needs human" to _gh_merge_branch_via_pr and complete-step
+                return False, f"merge_conflict_needs_human: {', '.join(unsafe)}"
+            if doc_files:
+                if not _resolve_doc_merge_conflicts(cwd, doc_files):
+                    _run("git", "merge", "--abort")
+                    return False, "failed to auto-resolve doc conflicts"
+            if safe_non_doc:
+                resolved, still_bad = _resolve_union_merge_conflicts(cwd, safe_non_doc)
+                if not resolved:
+                    _run("git", "merge", "--abort")
+                    return False, f"merge_conflict_needs_human: {', '.join(still_bad)}"
             commit = _run(
                 "git", "commit", "-m",
-                f"sync develop into {head_branch} (resolve doc conflicts)",
+                f"sync develop into {head_branch} (resolve doc and union conflicts)",
             )
             if commit.returncode != 0:
                 _run("git", "merge", "--abort")
-                return False, commit.stderr.strip() or "failed to commit doc resolution"
+                return False, commit.stderr.strip() or "failed to commit resolved conflicts"
 
         push = _run("git", "push", "origin", head_branch)
         if push.returncode != 0:
@@ -4687,15 +4860,28 @@ def _gh_merge_branch_via_pr(
     base: str,
     title: str,
     delete_branch: bool = True,
+    conflict_detail_out: Optional[dict] = None,
 ) -> tuple[bool, str, int | None]:
-    """Create (or reuse) a PR head→base and merge it. Returns (ok, detail)."""
+    """Create (or reuse) a PR head→base and merge it. Returns (ok, detail).
+
+    When conflict_detail_out (a mutable dict) is provided, fills it with
+    {"code": "merge_conflict_needs_human", "files": [...]} on a needs-human
+    conflict so callers can distinguish it from other failures (issue #1898).
+    """
     if base == "develop":
         prep_ok, prep_detail = _prepare_sprint_branch_for_develop_merge(repo, head)
         if not prep_ok:
+            if conflict_detail_out is not None and prep_detail.startswith("merge_conflict_needs_human:"):
+                files_str = prep_detail.split(":", 1)[1].strip()
+                conflict_detail_out["code"] = "merge_conflict_needs_human"
+                conflict_detail_out["files"] = [f.strip() for f in files_str.split(",") if f.strip()]
             return False, f"prepare for develop merge failed: {prep_detail}", None
 
     has_conflict, conflict_msg, conflict_files = _check_branch_merge_conflict(repo, head, base)
     if has_conflict:
+        if conflict_detail_out is not None:
+            conflict_detail_out["code"] = "merge_conflict_needs_human"
+            conflict_detail_out["files"] = conflict_files
         suffix = f" ({', '.join(conflict_files)})" if conflict_files else ""
         return False, f"merge conflict: {conflict_msg}{suffix}", None
 

@@ -49,7 +49,7 @@ def pid_dir(tmp_path):
 
 def _pid_mock(pid_dir: Path):
     """Return a side_effect that redirects _manager_pid_file to pid_dir."""
-    def _mock(label: str) -> Path:
+    def _mock(label: str, project: str = "") -> Path:
         return pid_dir / f"{label}-pid"
     return _mock
 

@@ -55,14 +55,28 @@ def _db():
     return db
 
 
-def _manager_pid_file(label: str) -> Path:
-    """Return the per-sprint manager PID file path for the given sprint label."""
-    return _REPO_ROOT / ".commander" / "sprints" / f"{label}-pid"
+def _manager_pid_file(label: str, project: str = "") -> Path:
+    """Return the per-sprint manager PID file path for the given sprint label.
+
+    AC3 (#1887): resolve under the sprint's PROJECT root, not the dashboard
+    repo root.  For non-commander projects (e.g. perf-coach) the PID file lives
+    under ~/dev/perf-coach/.commander/sprints/<label>-pid, not under the
+    commander checkout.  Falls back to _REPO_ROOT when project is empty/unknown.
+    """
+    if project:
+        try:
+            import server as srv  # noqa: PLC0415 — lazy import to avoid cycle
+            project_root = srv._project_root_path(project)
+        except Exception:
+            project_root = _REPO_ROOT
+    else:
+        project_root = _REPO_ROOT
+    return project_root / ".commander" / "sprints" / f"{label}-pid"
 
 
-def _is_manager_pid_alive(label: str) -> bool:
+def _is_manager_pid_alive(label: str, project: str = "") -> bool:
     """Return True if the sprint-manager process owning *label* is still running."""
-    pid_path = _manager_pid_file(label)
+    pid_path = _manager_pid_file(label, project)
     if not pid_path.exists():
         return False
     try:
@@ -122,9 +136,9 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
     #  • PID file absent       → unknown; a pure rework signal must NOT flip a
     #                            running sprint (issue #1095), so leave it running.
     if stored == "running":
-        if not _manager_pid_file(label).exists():
+        if not _manager_pid_file(label, project).exists():
             return None
-        if _is_manager_pid_alive(label):
+        if _is_manager_pid_alive(label, project):
             return None
 
     try:

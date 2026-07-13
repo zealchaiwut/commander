@@ -315,6 +315,14 @@ app.include_router(estimate_jobs_router)
 # ── Middleware ────────────────────────────────────────────────────────────────
 
 @app.middleware("http")
+async def _bearer_auth(request: Request, call_next):
+    from routers.auth import bearer_auth_gate  # noqa: PLC0415
+    if (early := bearer_auth_gate(request)) is not None:
+        return early
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _attach_request_id(request: Request, call_next):
     request.state.request_id = str(uuid.uuid4())
     return await call_next(request)

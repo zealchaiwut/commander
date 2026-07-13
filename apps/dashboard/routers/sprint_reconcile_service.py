@@ -625,7 +625,7 @@ def _gather_reconcile_inputs_mirror(
     pr_info: dict | None = None
 
     def _names(iss: dict) -> list[str]:
-        return [l.get("name") for l in (iss.get("labels") or []) if isinstance(l, dict)]
+        return [lbl.get("name") for lbl in (iss.get("labels") or []) if isinstance(lbl, dict)]
 
     try:
         import github_client as gh  # noqa: PLC0415

@@ -7,106 +7,109 @@ AC2: An SSE error/complete on one label does not disconnect the other labels'
 AC3: _smgmtSseDisconnect closes all open EventSource connections and empties
      the internal _smgmtSseEs map
 
-These ACs are verified via frontend behavioral tests (node --test) in
+ACs are verified via frontend behavioral tests (node --test) in
 tests/frontend/smgmt-sse-all-labels.test.mjs
 
-This pytest file verifies the HTTP-level SSE infrastructure endpoints work
-correctly for multiple concurrent sprints.
-
-Tests run against UAT server at $UAT_BASE_URL
+This pytest file verifies the HTTP-level SSE infrastructure supports multiple
+concurrent sprint labels without requiring a live server.
 """
+from __future__ import annotations
+
 import os
-import pytest
-import httpx
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(DASHBOARD_DIR))
+
+os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from starlette.routing import Match  # noqa: E402
+
+from routers.running import router as running_router  # noqa: E402
+from routers.sprint_live import router as sprint_live_router  # noqa: E402
 
 
-BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "")
-if not BASE_URL.startswith("http"):
-    raise RuntimeError(
-        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+def _make_running_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(running_router)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _get_live_route():
+    return next(
+        r for r in sprint_live_router.routes
+        if getattr(r, "path", "") == "/api/sprints/{sprint_label}/live"
     )
 
 
-@pytest.fixture
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
-        yield c
+# --- AC1: live endpoint is parameterized — supports any label, not just the first ---
+
+def test_sse_all_labels__ac1_live_snapshot_per_label():
+    """AC1: The /api/sprints/{label}/live route is parameterized and matches both sprint-117 and sprint-118."""
+    routes = {getattr(r, "path", "") for r in sprint_live_router.routes}
+    assert "/api/sprints/{sprint_label}/live" in routes, (
+        f"Route /api/sprints/{{sprint_label}}/live not registered. Found: {routes}"
+    )
+
+    live_route = _get_live_route()
+    scope1 = {"type": "http", "method": "GET", "path": "/api/sprints/sprint-117/live"}
+    scope2 = {"type": "http", "method": "GET", "path": "/api/sprints/sprint-118/live"}
+    match1, _ = live_route.matches(scope1)
+    match2, _ = live_route.matches(scope2)
+    assert match1 == Match.FULL, "Route must match sprint-117"
+    assert match2 == Match.FULL, "Route must match sprint-118"
 
 
-# --- Acceptance Criteria ---
-
-def test_sse_all_labels__ac1_live_snapshot_per_label(client):
-    # AC1: Verify /api/sprints/{label}/live endpoint supports multiple labels
-    # Each label must be able to request its own snapshot independently
-
-    # Test that we can request snapshots for different labels
-    r1 = client.get("/api/sprints/sprint-117/live?project=zealchaiwut/commander")
-    r2 = client.get("/api/sprints/sprint-118/live?project=zealchaiwut/commander")
-
-    # Both should return valid responses (may be empty if sprint not running)
-    # The key is both endpoints are supported, not just the first one
-    assert r1.status_code in (200, 404), f"Label 1 endpoint failed: {r1.status_code}"
-    assert r2.status_code in (200, 404), f"Label 2 endpoint failed: {r2.status_code}"
+def test_sse_all_labels__ac1_multiple_labels_support():
+    """AC1: /api/running returns 200 or 404 (not 422/500) for a valid project."""
+    with patch("routers.running.build_running_snapshot", return_value=None):
+        client = _make_running_client()
+        r = client.get("/api/running?project=zealchaiwut/commander")
+        assert r.status_code in (200, 404), (
+            f"GET /api/running must return 200 or 404, got {r.status_code}: {r.text}"
+        )
 
 
-def test_sse_all_labels__ac1_multiple_labels_support(client):
-    # AC1: The implementation supports multiple concurrent sprint labels
-    # Verify the /api/running endpoint can return multiple running sprints
+# --- AC2: each label's stream is independently routable ---
 
-    r = client.get("/api/running?project=zealchaiwut/commander")
-    assert r.status_code == 200, f"GET /api/running should return 200, got {r.status_code}"
-    data = r.json()
+def test_sse_all_labels__ac2_independent_streams():
+    """AC2: sprint-117 and sprint-118 both fully match the live route independently."""
+    live_route = _get_live_route()
 
-    # This endpoint should return a valid response structure
-    # (may be empty if no sprints running, but should be a dict/list)
-    assert isinstance(data, (dict, list)), "Response should be dict or list"
-
-
-def test_sse_all_labels__ac2_independent_streams(client):
-    # AC2: Each label's stream is independent
-    # Verify that querying the /api/sprints/{label}/live endpoint separately
-    # for each label works correctly
-
-    # This is a smoke test that the endpoint structure supports multiple labels
-    # without cross-contamination. Actual stream independence is tested in frontend.
-
-    label1 = "sprint-117"
-    label2 = "sprint-118"
-
-    # Verify both endpoints are routable (endpoint structure supports multiple labels)
-    r1 = client.get(f"/api/sprints/{label1}/live?project=zealchaiwut/commander", follow_redirects=False)
-    r2 = client.get(f"/api/sprints/{label2}/live?project=zealchaiwut/commander", follow_redirects=False)
-
-    # Both should route correctly (may be 404 if not running, but endpoint structure OK)
-    assert r1.status_code in (200, 404, 500, 204), f"First label endpoint routing failed: {r1.status_code}"
-    assert r2.status_code in (200, 404, 500, 204), f"Second label endpoint routing failed: {r2.status_code}"
+    for label in ("sprint-117", "sprint-118", "sprint-1", "sprint-999"):
+        scope = {"type": "http", "method": "GET", "path": f"/api/sprints/{label}/live"}
+        match, _ = live_route.matches(scope)
+        assert match == Match.FULL, (
+            f"Live route must independently match label '{label}', got {match}"
+        )
 
 
-def test_sse_all_labels__ac3_api_consistency(client):
-    # AC3: _smgmtSseDisconnect clears all connections
-    # Verify the API doesn't hold stale references to old sprint labels
+# --- AC3: /api/running returns current state with no stale labels ---
 
-    # Test that /api/running returns current running sprints (no stale labels)
-    r = client.get("/api/running?project=zealchaiwut/commander")
-    assert r.status_code == 200
+def test_sse_all_labels__ac3_api_consistency():
+    """AC3: /api/running returns 404 when no sprint running (no stale label leak)."""
+    with patch("routers.running.build_running_snapshot", return_value=None):
+        client = _make_running_client()
+        r = client.get("/api/running?project=zealchaiwut/commander")
+        assert r.status_code == 404
+        data = r.json()
+        assert "detail" in data, "404 response must have 'detail' field"
 
-    data = r.json()
-    # Should be a valid response (dict or list, not error)
-    assert data is not None
 
-
-# --- Frontend behavior tests are the primary verification ---
+# --- Frontend behavioral tests are the primary AC verification ---
 
 def test_sse_all_labels__frontend_tests_exist():
-    # The primary AC verification happens in frontend/smgmt-sse-all-labels.test.mjs
-    # This test documents that those tests must pass
+    """Frontend smgmt-sse-all-labels.test.mjs must exist and cover all three ACs."""
+    test_file = REPO_ROOT / "tests" / "frontend" / "smgmt-sse-all-labels.test.mjs"
+    assert test_file.exists(), f"Frontend test file {test_file} must exist"
 
-    test_file = "tests/frontend/smgmt-sse-all-labels.test.mjs"
-    assert os.path.exists(test_file), f"Frontend test file {test_file} must exist"
-
-    with open(test_file) as f:
-        content = f.read()
-        # Verify the test file covers all three ACs
-        assert "AC1" in content, "Frontend tests must cover AC1"
-        assert "AC2" in content, "Frontend tests must cover AC2"
-        assert "AC3" in content, "Frontend tests must cover AC3"
+    content = test_file.read_text()
+    assert "AC1" in content, "Frontend tests must cover AC1"
+    assert "AC2" in content, "Frontend tests must cover AC2"
+    assert "AC3" in content, "Frontend tests must cover AC3"

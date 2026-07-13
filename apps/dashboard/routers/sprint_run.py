@@ -1039,10 +1039,33 @@ def rerun_sprint(sprint_label: str, project: str, body: SprintRerunV2Body):
     _moved_set = set(moved)
     _manifest_decisions = [d for d in to_move if d["issue_num"] in _moved_set]
     _manifest_path = sprints_dir / f"{sub_label}-rerun-manifest.json"
-    _manifest_path.write_text(
-        json.dumps({"decisions": _manifest_decisions, "all_moved": all_moved}),
-        encoding="utf-8",
-    )
+    try:
+        _manifest_path.write_text(
+            json.dumps({"decisions": _manifest_decisions, "all_moved": all_moved}),
+            encoding="utf-8",
+        )
+    except OSError as _manifest_exc:
+        # Tickets are already relabeled to sub_label but sprint_manager was never
+        # dispatched — the "stranded moved tickets" failure mode (#1827) triggered
+        # by I/O error instead of label-lag race. Roll back state and fail loudly
+        # naming the stranded tickets (issue #1840).
+        _moved_str = ", ".join(f"#{n}" for n in moved)
+        try:
+            srv._plan_json_set_state(project_root, sub_label, "needs_rework",
+                                     end_reason="manifest_write_failed",
+                                     parent=sprint_label)
+            srv._sprint_db_set_state(sub_label, project, "needs_rework",
+                                     end_reason="manifest_write_failed")
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Manifest write failed ({_manifest_exc}): tickets {_moved_str} were "
+                f"relabeled to {sub_label!r} but sprint_manager was never dispatched. "
+                "Fix the disk/permission issue and retry the rerun."
+            ),
+        )
     _spawn_argv = srv._sprint_manager_argv(sub_label, project, project_root)
     _spawn_argv += ["--rerun-manifest", str(_manifest_path)]
 

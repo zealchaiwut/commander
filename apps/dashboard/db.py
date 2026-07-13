@@ -1638,9 +1638,10 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
     When *project* is given, rows are scoped to it — sprint labels are unique only
     per repo, so an unscoped read mixes a same-numbered sprint from another
     project. Legacy rows written before the project column existed have NULL
-    project; if the project filter finds none, fall back to the label-only read so
-    pre-migration sprints still render (their cross-project bleed, if any, is
-    masked downstream by the issue-mirror filter).
+    project; if the project filter finds none, fall back to a read restricted to
+    those blank/NULL-project rows so pre-migration sprints still render. Rows
+    owned by a *different* project are never returned (issue #1881 — a draft
+    sprint that never ran was rendering another project's same-labelled runs).
     """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
@@ -1652,6 +1653,13 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
             ).fetchall()
             if rows:
                 return [dict(r) for r in rows]
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE sprint_label = ? "
+                "AND (project = '' OR project IS NULL) "
+                "ORDER BY issue_number, id",
+                (sprint_label,),
+            ).fetchall()
+            return [dict(r) for r in rows]
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",

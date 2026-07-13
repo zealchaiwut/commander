@@ -192,6 +192,7 @@ app = FastAPI(lifespan=lifespan)
 
 from routers import (  # noqa: E402
     api_volume_router,
+    docs_router,
     activity_router,
     advisor_router,
     analytics_router,
@@ -302,6 +303,7 @@ app.include_router(bulk_tickets_router)
 app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
 app.include_router(running_router)
+app.include_router(docs_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

@@ -149,6 +149,11 @@ async def lifespan(app: FastAPI):
         environment=ENVIRONMENT, git_sha=_GIT_SHA, git_branch=_GIT_BRANCH,
     )
     db.init_db()
+    try:
+        from routers.board_cache import set_main_loop as _set_board_cache_loop  # noqa: PLC0415
+        _set_board_cache_loop(asyncio.get_event_loop())
+    except Exception:
+        pass
     _check_gh_auth()
     _validate_github_repos()
     _sweep_orphan_pid_files()

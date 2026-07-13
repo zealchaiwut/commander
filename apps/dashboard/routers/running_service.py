@@ -7,7 +7,6 @@ client methods are invoked during a request.
 from __future__ import annotations
 
 import json
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,7 +129,7 @@ def build_running_snapshot(project: str) -> Optional[dict]:
             pass
 
     # Per-ticket progress (SQLite-backed, no GitHub API)
-    _agent_run_rows = _live_metrics._fetch_sprint_agent_run_rows(sprint_label)
+    _agent_run_rows = _live_metrics._fetch_sprint_agent_run_rows(sprint_label, project)
     _runs_by_issue = _live_metrics.runs_by_issue(_agent_run_rows)
 
     estimates: dict = status_data.get("estimates", {})

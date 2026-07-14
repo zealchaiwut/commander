@@ -19541,11 +19541,16 @@ async function _smgmtRunningFirstPaint() {
     }
     const data = await resp.json();
     const label = data && data.sprint_label;
-    if (!label || !_smgmtRunningLabels.has(label)) {
-      // Snapshot mismatch — fall back so the normal tick resolves state
+    if (!label) {
+      // No sprint actually running — fall back so the normal tick resolves state
       _smgmtLivePollTick();
       return;
     }
+    // /api/running is the authoritative source for "is this label running now" —
+    // self-heal _smgmtRunningLabels from it rather than gating on a copy that
+    // may lag behind a separately-cached endpoint (e.g. the board aggregate's
+    // TTL cache not yet reflecting a fresh re-dispatch) (issue #1926).
+    if (!_smgmtRunningLabels.has(label)) _smgmtRunningLabels.add(label);
     const hadLiveIssues = !!(_smgmtLiveCache[label] && _smgmtLiveCache[label].issues && _smgmtLiveCache[label].issues.length);
     // Stale-write guard: skip if a newer fetch already wrote this slot (issue #1745).
     if (_fpSeq < (_smgmtLiveCacheWriteSeq[label] || 0)) { _smgmtLivePollTick(); return; }

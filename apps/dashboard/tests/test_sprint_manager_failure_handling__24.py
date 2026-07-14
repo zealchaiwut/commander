@@ -27,7 +27,9 @@ INDEX_HTML    = Path(__file__).parent.parent / "static" / "index.html"
 
 def _import_sprint_manager():
     """Import sprint_manager.py as a module, mocking dotenv and github_client."""
-    import importlib, importlib.util, types
+    import importlib
+    import importlib.util
+    import types
 
     # Provide stub modules so the import doesn't fail outside the full env
     dotenv_stub = types.ModuleType("dotenv")
@@ -186,7 +188,7 @@ class TestAlertModes:
     def test_multiple_alert_modes_combined(self):
         sm = _import_sprint_manager()
         with mock.patch.object(sm, "_alert_file") as mock_file, \
-             mock.patch.object(sm, "_alert_dashboard_banner") as mock_banner, \
+             mock.patch.object(sm, "_alert_dashboard_banner") as _, \
              mock.patch.object(sm, "_alert_discord") as _:
             try:
                 sm.dispatch_alerts(

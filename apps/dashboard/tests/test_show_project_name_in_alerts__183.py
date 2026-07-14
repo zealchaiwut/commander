@@ -7,7 +7,6 @@ AC-4: Frontend repoPrefix logic in renderAlertBanners already handles repo corre
 AC-5: /api/alerts POST persists repo; GET returns it; missing repo returns null gracefully.
 AC-6: Smoke test — alert with repo shows correct owner/repo in API response.
 """
-import inspect
 import re
 import httpx
 import pytest

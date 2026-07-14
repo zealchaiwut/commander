@@ -33,7 +33,7 @@ def test_gitignore_covers_venv_symlink():
     lines = gitignore.read_text().splitlines()
     # Bare 'venv' (without trailing slash) matches files, symlinks, AND dirs.
     # 'venv/' only matches directories — insufficient for symlinks.
-    bare_entries = [l.strip() for l in lines if l.strip() in ("venv", "/venv")]
+    bare_entries = [ln.strip() for ln in lines if ln.strip() in ("venv", "/venv")]
     assert bare_entries, (
         ".gitignore must include 'venv' (without trailing slash) to prevent "
         "re-committing a venv symlink. Currently only 'venv/' may be present, "
@@ -45,7 +45,7 @@ def test_gitignore_covers_runtime_venv_cache():
     """AC2 (runtime path): .commander/runtime/ entry covers the venv-cache path."""
     gitignore = REPO_ROOT / ".gitignore"
     lines = gitignore.read_text().splitlines()
-    stripped = [l.strip() for l in lines]
+    stripped = [ln.strip() for ln in lines]
     # The runtime venv-cache lives under .commander/runtime/; that dir is already
     # expected to be in .gitignore per project conventions.
     assert ".commander/runtime/" in stripped, (

@@ -3693,7 +3693,11 @@ def _compute_analytics_metrics(project_root: Path,
     estimates_dir = _commander_dir(project_root) / "estimates"
 
     if sprints_dir.exists():
-        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+        def _sprint_num_key(p: Path) -> int:
+            m = re.search(r"sprint-(\d+)-state", p.name)
+            return int(m.group(1)) if m else 0
+
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json"), key=_sprint_num_key):
             try:
                 state_data = json.loads(state_file.read_text(encoding="utf-8"))
             except Exception:

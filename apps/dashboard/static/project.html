@@ -17642,7 +17642,7 @@ function _smgmtLanesUpdate(label, live) {
     lanesEl.innerHTML = _smgmtWorkerLanesHtml(label, live);
     // When SSE is connected, per-worker logs arrive via keyed log_line events
     // (_smgmtSseHandleLogLine) — do NOT fire REST calls (issue #1777 AC5).
-    if (!_smgmtSseEs) {
+    if (!_smgmtSseEs.has(label)) {
       const repo = typeof _smgmtRepo === 'function' ? _smgmtRepo() : '';
       _smgmtWorkerLogFetch(label, repo, activeCoders);
     }
@@ -18516,7 +18516,7 @@ function _smgmtInspectorStreamRestart() {
   // Always do one initial fetch for the current log content.
   _smgmtInspectorStreamTick();
   // Only start the recurring 5 s poll when SSE is not connected (fallback mode).
-  if (!_smgmtSseEs) {
+  if (!_smgmtSseEs.has(_smgmtInspectorLabel)) {
     _smgmtInspectorPollId = visibilityInterval(_smgmtInspectorStreamTick, 5000);
   }
 }
@@ -22196,6 +22196,7 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
     } else if (data.applied > 0) {
       _smgmtShowToast(`Moved ${data.applied} issue${data.applied !== 1 ? 's' : ''} to ${dest}.`);
     }
+    if (isNew) _smgmtClearSelection();
     await loadSprintMgmt();
   } catch (e) {
     _smgmtShowToast('Failed to move issues: ' + e.message);

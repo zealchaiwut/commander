@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from services.sprint_manager import sprint_scheduler as _sched
 from . import scheduler_service
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["scheduler"])
 
@@ -48,6 +49,7 @@ def set_schedule_config(body: ScheduleConfigBody):
         stored = _sched.set_scheduled_time(body.project, body.scheduled_run_time)
     except _sched.ScheduleError as e:
         raise HTTPException(400, detail=str(e))
+    invalidate_board(body.project)
     return {"project": body.project, "scheduled_run_time": stored}
 
 
@@ -61,6 +63,7 @@ def get_run_on_schedule_map(project: str):
 def set_run_on_schedule(body: RunOnScheduleBody):
     """Toggle Run-on-schedule for a sprint (defaults off, AC3)."""
     value = _sched.set_run_on_schedule(body.project, body.sprint_label, body.enabled)
+    invalidate_board(body.project)
     return {
         "project": body.project,
         "sprint_label": body.sprint_label,

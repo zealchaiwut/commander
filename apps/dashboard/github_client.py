@@ -16,6 +16,11 @@ from typing import Optional
 from config import TEST_GITHUB_REPO
 
 _logger = logging.getLogger(__name__)
+
+try:
+    import api_volume as _api_volume
+except ImportError:
+    _api_volume = None  # type: ignore[assignment]
 _GH_DEBUG = os.environ.get("COMMANDER_GH_API_DEBUG", "").strip() == "1"
 # gh subcommands that route through GraphQL (shared 5000/hr budget).
 _GH_GRAPHQL_SUBCMDS = frozenset({
@@ -142,6 +147,23 @@ def _mirror_issue(repo_name: str, issue_number: int) -> dict | None:
         return None
 
 
+def _mirror_milestones(repo: str, state: str | None = None) -> list[dict] | None:
+    """Return mirrored milestones for repo, or None/[] to signal gh fallback.
+
+    Returns None when DB is unavailable; returns [] when DB is available but
+    the mirror is not yet populated. Both trigger the live gh fallback.
+    `state` of None or "all" fetches all states.
+    """
+    if not os.environ.get("DB_PATH"):
+        return None
+    try:
+        import db
+        db_state = None if (state is None or state == "all") else state
+        return db.get_mirrored_milestones(repo, state=db_state)
+    except Exception:
+        return None
+
+
 def _mirror_labels(repo_name: str) -> list[dict] | None:
     """Return {name, color} for every label on any mirrored issue, or None.
 
@@ -188,7 +210,11 @@ def _ttl_for(key: str) -> float:
 def _cached(key: str, fn):
     now = time.monotonic()
     if key in _cache and now - _cache[key][0] < _ttl_for(key):
+        if _api_volume:
+            _api_volume.record_gc_hit()
         return _cache[key][1]
+    if _api_volume:
+        _api_volume.record_gc_miss()
     val = fn()
     _cache[key] = (now, val)
     return val
@@ -227,12 +253,16 @@ def _log_gh_call(gh_args: tuple[str, ...]) -> None:
 
 def _json(*args) -> object:
     _log_gh_call(args)
+    if _api_volume:
+        _api_volume.record_gh_subprocess()
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 
 
 def _run(*args) -> str:
     _log_gh_call(args)
+    if _api_volume:
+        _api_volume.record_gh_subprocess()
     r = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return r.stdout.strip()
 
@@ -264,6 +294,8 @@ def list_issues(sprint: int, repo_name: str | None = None) -> list[dict]:
             if any(lbl.get("name") == sprint_label for lbl in i.get("labels", []))
         ]
         return [{"column": classify_issue(i), **i} for i in issues]
+    if _api_volume:
+        _api_volume.record_mirror_fallback()
     key = f"issues:{r}:{sprint}"
     def fetch():
         issues = _json(
@@ -358,6 +390,20 @@ def get_issue(issue_number: int, repo_name: str | None = None) -> dict:
     mirror = _mirror_issue(r, issue_number)
     if mirror is not None and "body" in mirror:
         return mirror
+    return _json(
+        "issue", "view", str(issue_number), "--repo", r,
+        "--json", "number,title,labels,assignees,state,stateReason,url,body,createdAt,updatedAt",
+    )
+
+
+def get_issue_live(issue_number: int, repo_name: str | None = None) -> dict:
+    """Fetch a single issue from live GitHub, bypassing the SQLite mirror.
+
+    Use this only in write-verify paths where the mirror may not have refreshed
+    yet (e.g. sprint-creation label verification — issue #1822).  Normal read
+    paths should use get_issue() to stay within the zero-quota model.
+    """
+    r = _r(repo_name)
     return _json(
         "issue", "view", str(issue_number), "--repo", r,
         "--json", "number,title,labels,assignees,state,stateReason,url,body,createdAt,updatedAt",
@@ -561,26 +607,22 @@ def _live_sprint_label_names(repo_name: str) -> list[str]:
 
 
 def _all_sprint_label_names(repo_name: str) -> set[str]:
-    """Union of mirror-derived sprint labels (zero-cost, fresh for active labels)
-    and the TTL-cached live label list (catches empty/orphan labels).
+    """Return the set of sprint label names for *repo_name*.
 
-    Mirror labels absent from the live registry are filtered out to prevent
-    deleted labels from resurrecting as zombie sprints (issue #1355): a deleted
-    label persists in stale raw.labels of closed mirror rows but is absent from
-    the live gh label list, so intersecting the mirror contribution against live
-    blocks it. When live returns empty (gh failure or genuinely no sprints) the
-    mirror is used unfiltered as fallback so the board stays usable offline."""
+    Live registry is authoritative when available: only labels present in the
+    live list are returned (zombie-sprint guard, issue #1355).  When live is
+    empty (GitHub down or no sprint labels yet) the mirror is used unfiltered
+    as fallback so the board stays usable offline."""
     live = set(_live_sprint_label_names(repo_name))
     mirror = _mirror_labels(repo_name)
     if mirror is None:
         return live
-    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
     if live:
-        # Live succeeded — only admit mirror labels that also exist live.
-        # Deleted labels linger in stale mirror rows but are absent from live,
-        # so the intersection prevents them from surfacing as zombie sprints.
-        return live | (mirror_sprint & live)
+        # Live succeeded — it is the authoritative source; mirror adds nothing
+        # here because A ∪ (B ∩ A) == A for any sets A, B.
+        return live
     # Live is empty (gh down or no sprint labels yet) — fall back to mirror.
+    mirror_sprint = {lbl["name"] for lbl in mirror if SPRINT_LABEL_RE_ALL.match(lbl["name"])}
     return mirror_sprint
 
 
@@ -608,33 +650,6 @@ def list_merged_sprint_branches(repo_name: str | None = None) -> set[str]:
         except Exception:
             return set()
         return {p.get("headRefName") for p in (out or []) if p.get("headRefName")}
-
-    return _cached(key, fetch)
-
-
-def list_milestones(repo_name: str | None = None) -> list[dict]:
-    """List repository milestones (issue #861, Plan next sprint).
-
-    Returns ``[{title, state, dueOn, number}, ...]`` for all milestones. Used to
-    resolve the *active milestone* (the open milestone with the nearest due
-    date). Cached on the standard TTL like the other read paths.
-    """
-    r = _r(repo_name)
-    key = f"milestones:{r}"
-
-    def fetch():
-        out = _json("api", f"repos/{r}/milestones",
-                    "--paginate", "-X", "GET",
-                    "-f", "state=all", "-f", "per_page=100")
-        result = []
-        for m in out or []:
-            result.append({
-                "title": m.get("title", ""),
-                "state": m.get("state", "open"),
-                "dueOn": m.get("due_on"),
-                "number": m.get("number"),
-            })
-        return result
 
     return _cached(key, fetch)
 
@@ -762,11 +777,27 @@ def latest_active_sprint(repo_name: str | None = None) -> Optional[int]:
     r = _r(repo_name)
     key = f"latest_sprint:{r}"
     def fetch():
+        # Mirror-first path: group_issues_by_sprint is a single O(n) pass with
+        # zero gh subprocess calls when the DB mirror is populated (issue #1783).
+        grouped = group_issues_by_sprint(r)
+        if grouped is not None:
+            active: set[int] = set()
+            for sprint_num, issues in grouped.items():
+                for issue in issues:
+                    if issue.get("state") == "open":
+                        active.add(sprint_num)
+                        break
+            if active:
+                return max(active)
+            sprints = list_sprints(r)
+            return sprints[-1] if sprints else None
+
+        # Mirror unavailable — fall back to gh issue list (GraphQL).
         open_issues = _json(
             "issue", "list", "--repo", r,
             "--state", "open", "--json", "labels", "--limit", "500",
         )
-        active: set[int] = set()
+        active = set()
         for issue in open_issues:
             for lbl in issue.get("labels", []):
                 m = SPRINT_RE.match(lbl["name"])
@@ -795,26 +826,38 @@ def _pr_from_rest(pr: dict) -> dict:
 def get_pr(pr_number: int, repo_name: str | None = None) -> dict:
     # REST (gh api) instead of `gh pr view` — pr view goes through GraphQL,
     # whose 5000/hr budget is the scarce one; REST has its own.
-    pr = _json("api", f"repos/{_r(repo_name)}/pulls/{pr_number}")
-    return _pr_from_rest(pr)
+    # Cached at 30s TTL (key pr:{repo}:{number}) — invalidated on PR mutations.
+    r = _r(repo_name)
+    key = f"pr:{r}:{pr_number}"
+    def fetch():
+        return _pr_from_rest(_json("api", f"repos/{r}/pulls/{pr_number}"))
+    return _cached(key, fetch)
 
 
 def find_open_pr_for_head(head_branch: str, repo_name: str | None = None) -> dict | None:
-    """Return the first open PR whose head branch matches head_branch, or None."""
+    """Return the first open PR whose head branch matches head_branch, or None.
+
+    Cached at 30s TTL (key pr_head:{repo}:{branch}) — invalidated on PR mutations.
+    """
     r = _r(repo_name)
+    key = f"pr_head:{r}:{head_branch}"
     owner = r.split("/")[0]
-    try:
-        # REST instead of `gh pr list` (GraphQL). head filter needs owner:branch.
-        prs = _json("api", f"repos/{r}/pulls?state=open&head={owner}:{head_branch}")
-        return _pr_from_rest(prs[0]) if prs else None
-    except subprocess.CalledProcessError:
-        return None
+    def fetch():
+        try:
+            # REST instead of `gh pr list` (GraphQL). head filter needs owner:branch.
+            prs = _json("api", f"repos/{r}/pulls?state=open&head={owner}:{head_branch}")
+            return _pr_from_rest(prs[0]) if prs else None
+        except subprocess.CalledProcessError:
+            return None
+    return _cached(key, fetch)
 
 
 def merge_pr(pr_number: int, repo_name: str | None = None) -> None:
     """Merge a PR by number using a merge commit (preserves history)."""
     r = _r(repo_name)
     _run("pr", "merge", str(pr_number), "--repo", r, "--merge")
+    invalidate(f"pr:{r}:")
+    invalidate(f"pr_head:{r}:")
 
 
 def repo_config() -> dict:
@@ -963,25 +1006,6 @@ def create_issue(title: str, body: str, labels: list[str],
     return number, url
 
 
-def list_milestones(repo_name: str | None = None, state: str = "open") -> list[dict]:  # noqa: F811
-    """Return the repo's milestones as [{"number", "title", "state"}, ...].
-
-    Used by the milestone selector (issue #879) and the roadmap tab. ``state``
-    is one of "open" | "closed" | "all" (GitHub's milestone filter). Cached on
-    the standard github_client TTL.
-    """
-    r = _r(repo_name)
-    key = f"milestones:{r}:{state}"
-
-    def fetch():
-        raw = _json("api", f"repos/{r}/milestones?state={state}&per_page=100")
-        return [
-            {"number": m["number"], "title": m["title"], "state": m.get("state", "open")}
-            for m in (raw or [])
-        ]
-
-    return _cached(key, fetch)
-
 
 def milestone_view(issue: dict) -> dict | None:
     """Shrink a gh issue's milestone object to the {number, title} the UI needs.
@@ -1061,14 +1085,27 @@ def update_issue_body(issue_id: int, body: str, repo_name: str | None = None):
 
 # ── milestone operations (issue #878) ────────────────────────────────────────
 
-def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:  # noqa: F811
-    """Return all milestones for the repo as a list of dicts.
+def list_milestones(repo_name: str | None = None, state: str = "all") -> list[dict]:
+    """Return milestones, mirror-backed with live gh fallback (issue #1784).
 
-    Fields include: number, title, description, due_on, state.
+    Mirror path: db.get_mirrored_milestones — zero gh subprocesses when the
+    mirror is populated (synced every 60 s by github_milestones.py).
+    Live fallback: gh api REST paginate when the mirror is empty.
+    Return shape: GitHub-shaped dicts with due_on field; consumers that expect
+    the legacy dueOn field (e.g. active_milestone) already accept both.
     """
     r = _r(repo_name)
-    return _json("api", f"repos/{r}/milestones", "-f", f"state={state}",
-                 "-f", "per_page=100")
+    mirrored = _mirror_milestones(r, state)
+    if mirrored:
+        return mirrored
+    key = f"milestones:{r}:{state}"
+    def fetch():
+        return _json(
+            "api", f"repos/{r}/milestones",
+            "--paginate", "-X", "GET",
+            "-f", f"state={state}", "-f", "per_page=100",
+        ) or []
+    return _cached(key, fetch)
 
 
 def list_issues_with_milestone(repo_name: str | None = None) -> list[dict]:

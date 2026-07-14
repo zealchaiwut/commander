@@ -16,6 +16,7 @@ import config
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import projects as _projects_module
 from . import brief_artifact
 from . import brief_service
 from . import brief_summary
@@ -28,7 +29,7 @@ def _require_brief_enabled() -> None:
         raise HTTPException(404, detail="Brief is disabled")
 
 
-# ── response models ───────────────────────────────────────────────────────────
+# ── response models ──────────────────────────────────────────────────────────
 
 class CurrentTicket(BaseModel):
     issue_number: Optional[int] = None
@@ -96,7 +97,8 @@ class RanOvernightEntry(BaseModel):
 
 
 class SuggestedNextItem(BaseModel):
-    """One advisor suggestion or look-ahead entry for the brief (issue #884)."""
+    """One advisor suggestion or look-ahead entry for the brief
+    (issue #884)."""
     text: str = ""
     type: str = "suggestion"  # "suggestion" | "look_ahead"
     slug: str = ""
@@ -183,7 +185,7 @@ class DailyArtifact(BaseModel):
     message: Optional[str] = None
 
 
-# ── routes ────────────────────────────────────────────────────────────────────
+# ── routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
 def get_project_brief(slug: str, date: Optional[str] = None):
@@ -197,12 +199,15 @@ def get_home_brief(date: Optional[str] = None):
     return brief_service.build_home_brief(date=date)
 
 
-# ── LLM summary (issue #840) ──────────────────────────────────────────────────
+# ── LLM summary (issue #840) ─────────────────────────────────────────────────
 # Kept separate from the structured-brief routes above so brief assembly stays
 # LLM-free (#839 AC5). The summary path generates+caches a Haiku narrative and
 # always falls back to a deterministic templated string (never 5xx — AC6).
 
-@router.get("/api/projects/{slug}/brief/summary", response_model=ProjectSummary)
+@router.get(
+    "/api/projects/{slug}/brief/summary",
+    response_model=ProjectSummary,
+)
 def get_project_brief_summary(slug: str, date: Optional[str] = None):
     """Return the cached (or freshly generated) summary for a project brief."""
     _require_brief_enabled()
@@ -214,7 +219,8 @@ def get_project_brief_summary(slug: str, date: Optional[str] = None):
 def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
     """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
     _require_brief_enabled()
-    return brief_summary.get_or_create_project_summary(slug, date=date, force=True)
+    return brief_summary.get_or_create_project_summary(
+        slug, date=date, force=True)
 
 
 @router.get("/api/brief/summary", response_model=HomeSummary)
@@ -231,11 +237,11 @@ def regenerate_home_brief_summary(date: Optional[str] = None):
     return brief_summary.get_or_create_home_summary(date=date, force=True)
 
 
-# ── daily artifact store (issue #841) ─────────────────────────────────────────
+# ── daily artifact store (issue #841) ────────────────────────────────────────
 # Persist the full daily brief per (project, date) so it is generated once and
 # served instantly thereafter. The current day is lazily generated on first
-# load; past dates are served from the store, with a clear empty state when none
-# was ever stored (never a recompute, never a 5xx).
+# load; past dates are served from the store, with a clear empty
+# state when none was ever stored (never a recompute, never a 5xx).
 
 @router.get("/api/projects/{slug}/brief/daily", response_model=DailyArtifact)
 def get_project_daily_brief(slug: str, date: Optional[str] = None):
@@ -247,13 +253,60 @@ def get_project_daily_brief(slug: str, date: Optional[str] = None):
              response_model=DailyArtifact)
 def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
     """Rebuild and re-store the daily brief, advancing the timestamp (AC7)."""
-    return brief_artifact.get_or_create_project_artifact(slug, date=date, force=True)
+    return brief_artifact.get_or_create_project_artifact(
+        slug, date=date, force=True)
+
+
+def _enrich_home_artifact(artifact: dict) -> None:
+    """Embed per-project metadata into the home artifact's project entries.
+
+    Adds ``repo``, ``name``, ``icon``, ``color``, and ``briefSummary`` to each
+    entry in ``artifact["brief"]["projects"]`` so the home page can render with
+    one HTTP request instead of 1+N (issue #1778 AC2).
+    """
+    brief = artifact.get("brief")
+    if not brief:
+        return
+    date = artifact.get("date")
+    try:
+        all_projects = _projects_module.load_projects()
+    except Exception:
+        all_projects = []
+    proj_by_slug: dict = {
+        p["repo"].split("/")[-1]: p
+        for p in all_projects
+        if p.get("repo")
+    }
+    for p in (brief.get("projects") or []):
+        slug = p.get("project") or ""
+        cfg = proj_by_slug.get(slug, {})
+        repo = cfg.get("repo", "")
+        p["repo"] = repo
+        p["name"] = cfg.get("name", slug)
+        p["icon"] = cfg.get("icon", "ti-folder")
+        p["color"] = cfg.get("color", "gray")
+        if config.brief_disabled():
+            p["briefSummary"] = ""
+        else:
+            try:
+                summary = brief_summary.get_or_create_project_summary(
+                    slug, date=date)
+                p["briefSummary"] = (summary or {}).get("summary", "")
+            except Exception:
+                p["briefSummary"] = ""
 
 
 @router.get("/api/brief/daily", response_model=DailyArtifact)
 def get_home_daily_brief(date: Optional[str] = None):
-    """Return the stored (or lazily generated) daily home roll-up artifact."""
-    return brief_artifact.get_or_create_home_artifact(date=date)
+    """Return the home roll-up artifact enriched with per-project metadata.
+
+    Embeds ``briefSummary``, ``repo``, ``name``, ``icon``, and ``color`` so the
+    home page needs only this one call (issue #1778 AC2).
+    """
+    artifact = brief_artifact.get_or_create_home_artifact(date=date)
+    if artifact.get("available"):
+        _enrich_home_artifact(artifact)
+    return artifact
 
 
 @router.post("/api/brief/daily/regenerate", response_model=DailyArtifact)

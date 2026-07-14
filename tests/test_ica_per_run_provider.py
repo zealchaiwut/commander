@@ -96,12 +96,19 @@ def test_effective_settings_error_defaults_anthropic(plan_dir, monkeypatch):
 
 def test_apply_ica_env_sets_routing_and_strips_key(monkeypatch):
     monkeypatch.delenv("COMMANDER_PROXY_URL", raising=False)
-    sub_env = {"ANTHROPIC_API_KEY": "sk-real-metered-key"}
+    sub_env = {
+        "ANTHROPIC_API_KEY": "sk-real-metered-key",
+        "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-real-subscription-token",
+    }
     model_routing.apply_ica_agent_env(sub_env)
     assert sub_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8788"
     assert sub_env["ANTHROPIC_CUSTOM_HEADERS"] == "X-CCProxy-Profile: ica"
     assert sub_env["CCPROXY_PROFILE"] == "ica"
     assert "ANTHROPIC_API_KEY" not in sub_env, "metered key must never reach the proxy path"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in sub_env, (
+        "subscription OAuth token must be stripped or the CLI validates the "
+        "model against api.anthropic.com and the ICA-only model id fails"
+    )
     assert sub_env["ANTHROPIC_AUTH_TOKEN"] == "commander-ica-proxy"
 
 

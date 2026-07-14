@@ -31,6 +31,8 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 router = APIRouter(tags=["sprint_finish"])
 
+from .board_cache import invalidate_board  # noqa: E402
+
 _NON_WORK_LABELS_FINISH = {"sprint-summary", "docs", "documentation"}
 
 
@@ -437,6 +439,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
     srv.github_client.invalidate("open_issues:")
     srv.github_client.invalidate("issues:")
     srv.github_client.invalidate("recent_closed:")
+    invalidate_board(repo)
 
     await srv.broadcast({
         "type": "update",
@@ -603,6 +606,7 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
         action_id=str(uuid.uuid4()),
     )
 
+    invalidate_board(repo)
     result: dict = {
         "closed": closed,
         "completed": completed,
@@ -674,17 +678,43 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     # 1) Merge this step (skip if already merged). Conflict → 409, stop & resume.
     merged = False
     if srv._branch_has_unmerged_commits(repo, head, base):
+        conflict_info: dict = {}
         ok, detail, _pr = srv._gh_merge_branch_via_pr(
             repo, head, base,
             f"Merge Sprint: {label} → {target_name}",
             delete_branch=not is_base,
+            conflict_detail_out=conflict_info,
         )
         if not ok:
+            if conflict_info.get("code") == "merge_conflict_needs_human":
+                try:
+                    srv._sprint_set_conflict_blocked(
+                        project_root, label, conflict_info.get("files", []),
+                    )
+                except Exception:
+                    pass
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "merge_conflict_needs_human",
+                        "files": conflict_info.get("files", []),
+                        "label": label,
+                        "message": (
+                            f"Merge {label} → {target_name} requires human conflict "
+                            f"resolution — auto-resolve is not safe for these files"
+                        ),
+                    },
+                )
             raise HTTPException(
                 409,
                 detail=f"Merge {label} → {target_name} failed — resolve the conflict and re-run: {detail}",
             )
         merged = True
+        # Clear any stale conflict-blocked flag from a previous failed attempt
+        try:
+            srv._sprint_clear_conflict_blocked(project_root, label)
+        except Exception:
+            pass
 
     # 2) Close this sprint's summary issue(s).
     closed_summary: list[int] = []
@@ -737,6 +767,8 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         except Exception:
             pass
 
+    invalidate_board(repo)
+
     return {
         "ok": True,
         "label": label,
@@ -745,3 +777,34 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         "closed_summary": closed_summary,
         "closed_tickets": closed_tickets,
     }
+
+
+@router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status")
+def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
+    """Return the merge-conflict-blocked state for a sprint (issue #1898).
+
+    Autonomous callers (Hermes loop) poll this to discover which sprints are
+    parked on a human-needed merge conflict so they can skip and continue with
+    other sprints instead of hanging.
+
+    Response:
+      200 {label, blocked: false}                         — no conflict block
+      200 {label, blocked: true, code, files, at}        — blocked on conflict
+    """
+    srv = _server()
+    if not srv._SPRINT_LABEL_RE.match(label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+
+    repo = f"{owner}/{repo_name}"
+    project_root = srv._project_root_path(repo)
+
+    blocked_info = srv._sprint_get_conflict_blocked(project_root, label)
+    if blocked_info:
+        return {
+            "label": label,
+            "blocked": True,
+            "code": "merge_conflict_needs_human",
+            "files": blocked_info.get("files", []),
+            "at": blocked_info.get("at"),
+        }
+    return {"label": label, "blocked": False}

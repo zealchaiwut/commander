@@ -763,6 +763,16 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
         project = row.get("project") or ""
         if not label or (project, label) in live:
             continue
+        # AC1 (#1887): verify the manager PID is dead before settling a running
+        # row.  During post-sprint phase (documenter/reviewer dispatched) the
+        # plan.json leaves state=running so the sprint drops from _all_sprints_running,
+        # but the manager process is still alive — do not orphan it.
+        try:
+            _proj_root = _project_root_path(project) if project else None
+            if _proj_root is not None and _live_manager_pid(_proj_root, label) is not None:
+                continue
+        except Exception:
+            pass
         started = (row.get("started_at") or "").strip()
         ts = None
         if started:
@@ -1732,149 +1742,21 @@ def _parse_summary_file(path: Path) -> dict:
     }
 
 
-# ── home aggregated endpoint (#216) ──────────────────────────────────────────
-
-_home_cache: dict[str, tuple[float, dict]] = {}
-_HOME_CACHE_TTL = 30.0
-
+# ── home aggregated endpoint (#216) ── delegated to home_service (issue #1786)
 
 def _invalidate_home_cache(slug: str) -> None:
-    """Drop cached /api/home payload for *slug* after identity-changing settings writes."""
-    _home_cache.pop(f"home:{slug}", None)
-
-
-def _project_identity_for_home(repo: str, proj: dict, slug: str) -> dict[str, str]:
-    """Resolve icon/color/display name for home payloads (settings override projects.json)."""
-    icon = proj.get("icon", "ti-folder")
-    color = proj.get("color", "gray")
-    name = proj.get("name", slug)
+    """Drop cached /api/home payload for *slug* — delegates to home_service."""
     try:
-        proj_override = _settings_repo.get_setting_scoped("project", APP_CONFIG_KEY, project=repo)
-        if proj_override.get("icon"):
-            icon = proj_override["icon"]
-        if proj_override.get("color"):
-            color = proj_override["color"]
-        if proj_override.get("display_name"):
-            name = proj_override["display_name"]
+        from home_service import invalidate_home_by_slug  # noqa: PLC0415
+        invalidate_home_by_slug(slug)
     except Exception:
         pass
-    return {"name": name, "icon": icon, "color": color}
 
 
 def _home_project_data(proj: dict, running_sprints: list[dict]) -> dict:
-    """Compute per-project home data, cached 30 s per project slug.
-
-    On any GitHub fetch error, returns an idle sentinel with 0 counts so the
-    overall endpoint still returns 200.
-    """
-    repo = proj["repo"]
-    slug = repo.split("/")[-1]
-    identity = _project_identity_for_home(repo, proj, slug)
-    name = identity["name"]
-    icon = identity["icon"]
-    color = identity["color"]
-
-    cache_key = f"home:{slug}"
-    now = time.monotonic()
-    cached = _home_cache.get(cache_key)
-    if cached and now - cached[0] < _HOME_CACHE_TTL:
-        return cached[1]
-
-    def _idle() -> dict:
-        sentinel: dict = {
-            "name": name, "slug": slug, "repo": repo, "icon": icon, "color": color,
-            "status": "idle", "uat_count": 0, "backlog_count": 0,
-            "last_activity_at": None,
-        }
-        _home_cache[cache_key] = (now, sentinel)
-        return sentinel
-
-    try:
-        all_open = github_client.list_all_open_issues(repo_name=repo)
-    except Exception:
-        return _idle()
-
-    proj_running = [r for r in running_sprints if r["project"] == repo]
-    sprint_running_field: dict | None = None
-    if proj_running:
-        r0 = proj_running[0]
-        status_data = _sprint_statuses.get((r0["project"], r0["sprint_label"]), {})
-        start_ts = status_data.get("start_timestamp")
-        elapsed_sec = 0
-        if start_ts:
-            try:
-                start_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
-                elapsed_sec = int((datetime.now(timezone.utc) - start_dt).total_seconds())
-            except Exception:
-                pass
-        sprint_running_field = {"label": r0["sprint_label"], "elapsed_sec": elapsed_sec}
-
-    uat_issues = [i for i in all_open if any(lbl["name"] == "UAT" for lbl in i.get("labels", []))]
-    backlog_issues = [i for i in all_open if github_client.classify_issue(i) == "backlog"]
-
-    # The durable SQLite sprints table (issue #757) is authoritative for the
-    # running check, so the PID-based scan above is sufficient. The former Neon
-    # supplement was removed in issue #758.
-    if proj_running:
-        status = "running"
-    elif uat_issues:
-        status = "uat-pending"
-    else:
-        status = "idle"
-
-    last_activity_at: str | None = None
-    issue_timestamps = [i.get("updatedAt") for i in all_open if i.get("updatedAt")]
-    if issue_timestamps:
-        last_activity_at = max(issue_timestamps)
-
-    last_sprint_data: dict | None = None
-    seen_dirs: set[str] = set()
-    for sprints_dir in [
-        _commander_dir(_project_root_path(repo)) / "sprints",
-        SPRINTS_DIR,
-    ]:
-        key_str = str(sprints_dir.resolve())
-        if not sprints_dir.exists() or key_str in seen_dirs:
-            continue
-        seen_dirs.add(key_str)
-        summary_files = sorted(
-            sprints_dir.glob("*-summary-*.md"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if summary_files and last_sprint_data is None:
-            try:
-                meta = _parse_summary_file(summary_files[0])
-                if meta.get("date"):
-                    sprint_ts = meta["date"] + "T00:00:00Z"
-                    if last_activity_at is None or sprint_ts > last_activity_at:
-                        last_activity_at = sprint_ts
-                last_sprint_data = {
-                    "sprint_num": meta.get("sprint_num"),
-                    "date": meta.get("date"),
-                    "status": meta.get("status"),
-                }
-            except Exception:
-                pass
-
-    result: dict = {
-        "name": name,
-        "slug": slug,
-        "repo": repo,
-        "icon": icon,
-        "color": color,
-        "status": status,
-        "uat_count": len(uat_issues),
-        "backlog_count": len(backlog_issues),
-        "last_activity_at": last_activity_at,
-    }
-    if sprint_running_field is not None:
-        result["sprint_running"] = sprint_running_field
-    if last_sprint_data is not None:
-        result["last_sprint"] = last_sprint_data
-
-    _home_cache[cache_key] = (now, result)
-    return result
+    """Per-project home payload — delegates to home_service (issue #1786)."""
+    from home_service import home_project_data  # noqa: PLC0415
+    return home_project_data(proj, running_sprints, _sprint_statuses)
 
 
 def _home_activity_feed(
@@ -2662,8 +2544,10 @@ def _sprint_signoff_set_approved(
 ) -> None:
     """Record approval in plan.json and clear the pending gate.
 
-    Also lifts the lifecycle state out of `draft` to `planned` so the sprint
-    reads as ready-to-run once the gate is cleared (AC5).
+    Ensures the lifecycle state is the sanctioned post-#1686 "draft" value so
+    the sprint reads as ready-to-run once the gate is cleared.  Writing
+    "planned" here is forbidden — it was deprecated in #1686 and nothing may
+    emit it anew (#1773).
     """
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["signoff"] = {
@@ -2672,7 +2556,7 @@ def _sprint_signoff_set_approved(
         "approved_at": approved_at,
     }
     if existing.get("state") in (None, "draft"):
-        existing["state"] = "planned"
+        existing["state"] = "draft"
     _write_plan_json(project_root, sprint_label, existing)
 
 
@@ -3798,6 +3682,8 @@ def _compute_analytics_metrics(project_root: Path,
 
     sprint_ticket_counts: list[int] = []
     sprint_lengths: list[float] = []
+    by_sprint: list[dict] = []
+    issue_rejections: list[dict] = []
 
     # Token counts are sourced from the status files (model_name is joined from
     # the token_usage table below for pricing only).
@@ -3807,7 +3693,11 @@ def _compute_analytics_metrics(project_root: Path,
     estimates_dir = _commander_dir(project_root) / "estimates"
 
     if sprints_dir.exists():
-        for state_file in sorted(sprints_dir.glob("sprint-*-state.json")):
+        def _sprint_num_key(p: Path) -> int:
+            m = re.search(r"sprint-(\d+)-state", p.name)
+            return int(m.group(1)) if m else 0
+
+        for state_file in sorted(sprints_dir.glob("sprint-*-state.json"), key=_sprint_num_key):
             try:
                 state_data = json.loads(state_file.read_text(encoding="utf-8"))
             except Exception:
@@ -3854,6 +3744,11 @@ def _compute_analytics_metrics(project_root: Path,
                     if rejections >= 2:
                         rework_2plus += 1
 
+                if rejections > 0:
+                    issue_num = issue.get("number")
+                    if issue_num is not None:
+                        issue_rejections.append({"number": issue_num, "rejections": rejections})
+
                 # Coder duration
                 coder_start = issue.get("coder_started_at")
                 coder_end = issue.get("coder_finished_at")
@@ -3889,6 +3784,35 @@ def _compute_analytics_metrics(project_root: Path,
                         tester_all.append((e - s).total_seconds() / 60.0)
                     except Exception:
                         pass
+
+            # Per-sprint summary entry
+            sp_total = len(sprint_done)
+            sp_fp = 0
+            sp_rw = 0
+            sp_coder_mins: list[float] = []
+            for issue in sprint_done:
+                rej = _count_tester_rejections(issue)
+                if rej == 0:
+                    sp_fp += 1
+                else:
+                    sp_rw += 1
+                cs = issue.get("coder_started_at")
+                ce = issue.get("coder_finished_at")
+                if cs and ce:
+                    try:
+                        _s = datetime.fromisoformat(cs.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        _e = datetime.fromisoformat(ce.rstrip("Z")).replace(tzinfo=timezone.utc)
+                        sp_coder_mins.append((_e - _s).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+            by_sprint.append({
+                "sprint_label": sprint_label_val,
+                "first_pass_rate": round(sp_fp / sp_total, 4) if sp_total else 0.0,
+                "rework_rate": round(sp_rw / sp_total, 4) if sp_total else 0.0,
+                "avg_coder_minutes": round(sum(sp_coder_mins) / len(sp_coder_mins), 2) if sp_coder_mins else 0.0,
+                "wall_clock_minutes": round(wall_clock_secs / 60.0, 2),
+                "tickets_done": sp_total,
+            })
 
     first_pass_rate = first_pass_count / total_completed if total_completed else 0
     rework_rate_val = rework_count / total_completed if total_completed else 0
@@ -3951,6 +3875,8 @@ def _compute_analytics_metrics(project_root: Path,
         round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
     )
 
+    most_reworked = sorted(issue_rejections, key=lambda x: x["rejections"], reverse=True)[:5]
+
     return {
         "first_pass_rate": {
             "rate": round(first_pass_rate, 4),
@@ -3987,6 +3913,8 @@ def _compute_analytics_metrics(project_root: Path,
                 "rework_cost_annotation": rework_cost_annotation,
             },
         },
+        "most_reworked": most_reworked,
+        "by_sprint": by_sprint,
     }
 
 
@@ -4583,6 +4511,159 @@ def _is_doc_merge_path(path: str) -> bool:
     return path.startswith("docs/") and path.endswith(".md")
 
 
+def _is_union_merge_safe_path(path: str) -> bool:
+    """Files where append-only additions can be auto-resolved via union merge (issue #1898).
+
+    Covers SCHEMA.md and any models.py (at any directory depth). Never auto-resolves
+    files that carry executable logic beyond model definitions.
+    """
+    name = Path(path).name.lower()
+    return name == "schema.md" or name == "models.py"
+
+
+def _has_overlapping_conflict_in_diff3(diff3_text: str) -> bool:
+    """True when any conflict region in diff3 output has non-empty base content.
+
+    Append-only conflicts have an empty ||||||| base section (both sides added
+    new content at the same spot). Overlapping modifications have non-empty base
+    sections (both sides changed the same existing lines) — these are not safe to
+    auto-resolve via union (issue #1898).
+    """
+    in_base = False
+    base_lines: list = []
+    for line in diff3_text.splitlines():
+        if line.startswith("<<<<<<<"):
+            in_base = False
+            base_lines = []
+        elif line.startswith("|||||||"):
+            in_base = True
+        elif in_base and line.startswith("======="):
+            if any(ln.strip() for ln in base_lines):
+                return True
+            in_base = False
+            base_lines = []
+        elif in_base:
+            base_lines.append(line)
+    return False
+
+
+def _resolve_union_merge_conflicts(cwd: Path, paths: list) -> tuple:
+    """Attempt union merge on each path. Returns (all_resolved, still_conflicting).
+
+    Strategy (issue #1898):
+    1. Run git merge-file --diff3 to inspect conflict regions.
+    2. If any conflict region has non-empty base content (both sides modified the
+       same existing lines), treat the file as NOT auto-resolvable.
+    3. Otherwise all conflicts are append-only — apply git merge-file --union which
+       cleanly includes both sides' additions without conflict markers.
+    Resolved files are written in-place and staged with git add.
+    """
+    import tempfile as _tempfile
+    still_conflicting: list = []
+    for path in paths:
+        def _git_show(stage: str) -> Optional[str]:
+            r = subprocess.run(
+                ["git", "show", f":{stage}:{path}"],
+                cwd=cwd, capture_output=True, text=True, timeout=30,
+            )
+            return r.stdout if r.returncode == 0 else None
+
+        ours_text = _git_show("2")
+        base_text = _git_show("1") or ""
+        theirs_text = _git_show("3")
+
+        if ours_text is None or theirs_text is None:
+            still_conflicting.append(path)
+            continue
+
+        ours_tmp = base_tmp = theirs_tmp = diff3_tmp = None
+        try:
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".ours", delete=False, encoding="utf-8"
+            ) as f:
+                ours_tmp = f.name
+                f.write(ours_text)
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".base", delete=False, encoding="utf-8"
+            ) as f:
+                base_tmp = f.name
+                f.write(base_text)
+            with _tempfile.NamedTemporaryFile(
+                mode="w", suffix=".theirs", delete=False, encoding="utf-8"
+            ) as f:
+                theirs_tmp = f.name
+                f.write(theirs_text)
+
+            # Step 1: diff3 check — detect overlapping (non-append-only) conflicts
+            import shutil as _shutil
+            diff3_tmp = ours_tmp + ".diff3"
+            _shutil.copy(ours_tmp, diff3_tmp)
+            subprocess.run(
+                ["git", "merge-file", "--diff3", diff3_tmp, base_tmp, theirs_tmp],
+                capture_output=True, text=True,
+            )
+            with open(diff3_tmp, encoding="utf-8") as f:
+                diff3_result = f.read()
+            try:
+                os.unlink(diff3_tmp)
+            except OSError:
+                pass
+            diff3_tmp = None
+
+            if _has_overlapping_conflict_in_diff3(diff3_result):
+                still_conflicting.append(path)
+                continue
+
+            # Step 2: all conflicts are append-only — union merge is safe
+            subprocess.run(
+                ["git", "merge-file", "--union", ours_tmp, base_tmp, theirs_tmp],
+                capture_output=True, text=True,
+            )
+            with open(ours_tmp, encoding="utf-8") as f:
+                merged = f.read()
+        finally:
+            for tmp in (base_tmp, theirs_tmp, ours_tmp, diff3_tmp):
+                if tmp:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+
+        (cwd / path).write_text(merged, encoding="utf-8")
+        subprocess.run(
+            ["git", "add", path], cwd=cwd, capture_output=True, text=True, timeout=30,
+        )
+
+    return len(still_conflicting) == 0, still_conflicting
+
+
+# ── Conflict-blocked state (issue #1898) ─────────────────────────────────────
+# Persisted in plan.json under "conflict_blocked": {"files": [...], "at": "<iso>"}
+# so the GET /conflict-status endpoint can surface it to autonomous callers.
+
+def _sprint_set_conflict_blocked(project_root: Path, sprint_label: str, files: list) -> None:
+    existing = _read_plan_json(project_root, sprint_label) or {}
+    existing["conflict_blocked"] = {
+        "files": files,
+        "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
+    _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_clear_conflict_blocked(project_root: Path, sprint_label: str) -> None:
+    existing = _read_plan_json(project_root, sprint_label)
+    if existing and "conflict_blocked" in existing:
+        del existing["conflict_blocked"]
+        _write_plan_json(project_root, sprint_label, existing)
+
+
+def _sprint_get_conflict_blocked(project_root: Path, sprint_label: str) -> Optional[dict]:
+    plan = _read_plan_json(project_root, sprint_label)
+    if not plan:
+        return None
+    return plan.get("conflict_blocked") or None
+
+
 def _changelog_sprint_sections(text: str) -> dict[str, str]:
     """Map sprint label (e.g. '91', '85.5') to its full ## Sprint section text."""
     matches = list(_CHANGELOG_SPRINT_HEADER_RE.finditer(text))
@@ -4683,20 +4764,30 @@ def _prepare_sprint_branch_for_develop_merge(repo: str, head_branch: str) -> tup
             unmerged = [ln.strip() for ln in (status.stdout or "").splitlines() if ln.strip()]
             if not unmerged:
                 return False, merge.stderr.strip() or "git merge develop failed"
+            doc_files = [p for p in unmerged if _is_doc_merge_path(p)]
             non_doc = [p for p in unmerged if not _is_doc_merge_path(p)]
-            if non_doc:
+            safe_non_doc = [p for p in non_doc if _is_union_merge_safe_path(p)]
+            unsafe = [p for p in non_doc if not _is_union_merge_safe_path(p)]
+            if unsafe:
                 _run("git", "merge", "--abort")
-                return False, f"merge conflict in non-doc files: {', '.join(non_doc)}"
-            if not _resolve_doc_merge_conflicts(cwd, unmerged):
-                _run("git", "merge", "--abort")
-                return False, "failed to auto-resolve doc conflicts"
+                # Prefix signals "needs human" to _gh_merge_branch_via_pr and complete-step
+                return False, f"merge_conflict_needs_human: {', '.join(unsafe)}"
+            if doc_files:
+                if not _resolve_doc_merge_conflicts(cwd, doc_files):
+                    _run("git", "merge", "--abort")
+                    return False, "failed to auto-resolve doc conflicts"
+            if safe_non_doc:
+                resolved, still_bad = _resolve_union_merge_conflicts(cwd, safe_non_doc)
+                if not resolved:
+                    _run("git", "merge", "--abort")
+                    return False, f"merge_conflict_needs_human: {', '.join(still_bad)}"
             commit = _run(
                 "git", "commit", "-m",
-                f"sync develop into {head_branch} (resolve doc conflicts)",
+                f"sync develop into {head_branch} (resolve doc and union conflicts)",
             )
             if commit.returncode != 0:
                 _run("git", "merge", "--abort")
-                return False, commit.stderr.strip() or "failed to commit doc resolution"
+                return False, commit.stderr.strip() or "failed to commit resolved conflicts"
 
         push = _run("git", "push", "origin", head_branch)
         if push.returncode != 0:
@@ -4773,15 +4864,28 @@ def _gh_merge_branch_via_pr(
     base: str,
     title: str,
     delete_branch: bool = True,
+    conflict_detail_out: Optional[dict] = None,
 ) -> tuple[bool, str, int | None]:
-    """Create (or reuse) a PR head→base and merge it. Returns (ok, detail)."""
+    """Create (or reuse) a PR head→base and merge it. Returns (ok, detail).
+
+    When conflict_detail_out (a mutable dict) is provided, fills it with
+    {"code": "merge_conflict_needs_human", "files": [...]} on a needs-human
+    conflict so callers can distinguish it from other failures (issue #1898).
+    """
     if base == "develop":
         prep_ok, prep_detail = _prepare_sprint_branch_for_develop_merge(repo, head)
         if not prep_ok:
+            if conflict_detail_out is not None and prep_detail.startswith("merge_conflict_needs_human:"):
+                files_str = prep_detail.split(":", 1)[1].strip()
+                conflict_detail_out["code"] = "merge_conflict_needs_human"
+                conflict_detail_out["files"] = [f.strip() for f in files_str.split(",") if f.strip()]
             return False, f"prepare for develop merge failed: {prep_detail}", None
 
     has_conflict, conflict_msg, conflict_files = _check_branch_merge_conflict(repo, head, base)
     if has_conflict:
+        if conflict_detail_out is not None:
+            conflict_detail_out["code"] = "merge_conflict_needs_human"
+            conflict_detail_out["files"] = conflict_files
         suffix = f" ({', '.join(conflict_files)})" if conflict_files else ""
         return False, f"merge conflict: {conflict_msg}{suffix}", None
 
@@ -5036,9 +5140,9 @@ def _open_summary_issues_for_labels(repo: str, labels: list[str]) -> list[dict]:
 def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str) -> tuple[list[str], list[dict]]:
     if not re.match(r"^sprint-\d+$", base_label):
         raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
+    # A base sprint with zero DB children is a clean, single-attempt sprint
+    # (no rework ever needed) — not an error state (issue #1758).
     child_labels = children_of(base_label, project_root)
-    if not child_labels:
-        raise HTTPException(400, detail=f"No child sprints found under {base_label}")
     all_labels = [base_label, *child_labels]
     sprint_issues: list[dict] = []
     seen_nums: set[int] = set()

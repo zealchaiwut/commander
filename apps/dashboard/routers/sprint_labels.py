@@ -24,6 +24,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 
 import db  # noqa: E402
 import github_client  # noqa: E402
+from .board_cache import invalidate_board  # noqa: E402
 
 router = APIRouter()
 
@@ -123,4 +124,6 @@ async def batch_sprint_labels(body: BatchLabelsBody):
             errors.append(f"#{change.issue_num}: {e}")
             failed += 1
 
+    if applied > 0:
+        invalidate_board(github_client.get_repo_for_operation(repo))
     return {"applied": applied, "failed": failed, "errors": errors}

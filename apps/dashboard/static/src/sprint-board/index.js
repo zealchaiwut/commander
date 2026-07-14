@@ -13,6 +13,9 @@
 import './state.js';
 
 import {
+  _sHealthBuildHtml, _sHealthStripRender, sprintHealthStripInit,
+} from './health-strip.js';
+import {
   smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
 } from './plan-next.js';
 import {
@@ -74,6 +77,8 @@ import {
   _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
   _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
   smgmtAddToDraft,
+  // SSE board_invalidated handler (issue #1785)
+  _boardSseOnInvalidated, _boardSseOnVisible,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -199,6 +204,10 @@ globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
 
 globalThis.smgmtAddToDraft = smgmtAddToDraft;
 
+// SSE board_invalidated handler (issue #1785)
+globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
+globalThis._boardSseOnVisible = _boardSseOnVisible;
+
 // Run-on-schedule toggle (issue #863)
 globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
 globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
@@ -229,3 +238,8 @@ globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
 globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;
+
+// Delivery-health stat strip (issue #1849)
+globalThis._sHealthBuildHtml = _sHealthBuildHtml;
+globalThis._sHealthStripRender = _sHealthStripRender;
+globalThis.sprintHealthStripInit = sprintHealthStripInit;

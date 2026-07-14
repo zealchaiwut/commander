@@ -643,3 +643,41 @@ def get_sprint_management_issues(repo: str):
         "sprint_signoff": sprint_signoff,
         "sprint_has_run": sprint_has_run,
     }
+
+
+# ── Board aggregate endpoint (issue #1636) ────────────────────────────────────
+
+@router.get("/api/board")
+def get_board(project: str):
+    """Server-computed board aggregate — single-pass, mirror + SQLite only.
+
+    Returns the full board payload in one request with zero ``gh`` subprocess
+    calls. All sprint cards include inline lifecycle_state, tickets, mini_rail,
+    dep_order, estimate_hours, and run_stats. Rerun chains collapse to a single
+    lineage entry with a ``chain`` field listing all member labels.
+
+    Response shape::
+
+        {
+          project, generated_at,
+          sections: {running[], needs_rework[], ready_to_merge[], draft[],
+                     lineage[], backlog: {count, tickets[]}},
+          capacity,
+          summaries: {<label>: <summary>}
+        }
+    """
+    try:
+        repo = github_client.get_repo_for_operation(project)
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc))
+
+    from . import board_cache, board_service  # noqa: PLC0415
+
+    cached = board_cache.get_board_cache(repo)
+    if cached is not None:
+        snapshot, remaining = cached
+        return {**snapshot, "cache": {"hit": True, "ttl_s": round(remaining, 2)}}
+
+    snapshot = board_service.assemble_board(repo)
+    board_cache.store_board_cache(repo, snapshot)
+    return {**snapshot, "cache": {"hit": False, "ttl_s": board_cache.current_ttl()}}

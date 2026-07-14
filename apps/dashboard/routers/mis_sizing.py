@@ -27,6 +27,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import db  # noqa: E402
 import github_client  # noqa: E402
 
 try:
@@ -287,26 +288,35 @@ def rebuild_mis_sizing_history(project: str):
     labels_fetched = False
     try:
         repo = github_client.get_repo_for_operation(project)
-        result = subprocess.run(
-            ["gh", "issue", "list", "--repo", repo,
-             "--state", "all", "--json", "number,labels", "--limit", "1000"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            for iss in json.loads(result.stdout or "[]"):
+        mirrored = db.get_mirrored_issues(repo, state=None)
+        if mirrored:
+            for iss in mirrored:
                 n = iss.get("number")
                 if n in issue_numbers:
-                    labels_by_num[n] = [
-                        lbl["name"] for lbl in iss.get("labels", [])
-                    ]
+                    labels_by_num[n] = [lbl["name"] for lbl in iss.get("labels", [])]
             if labels_by_num:
                 labels_fetched = True
         else:
-            logger.warning(
-                "gh issue list exited with code %d: %s",
-                result.returncode,
-                result.stderr.strip(),
+            result = subprocess.run(
+                ["gh", "issue", "list", "--repo", repo,
+                 "--state", "all", "--json", "number,labels", "--limit", "1000"],
+                capture_output=True, text=True, timeout=60,
             )
+            if result.returncode == 0:
+                for iss in json.loads(result.stdout or "[]"):
+                    n = iss.get("number")
+                    if n in issue_numbers:
+                        labels_by_num[n] = [
+                            lbl["name"] for lbl in iss.get("labels", [])
+                        ]
+                if labels_by_num:
+                    labels_fetched = True
+            else:
+                logger.warning(
+                    "gh issue list exited with code %d: %s",
+                    result.returncode,
+                    result.stderr.strip(),
+                )
     except Exception as exc:
         logger.warning("GitHub label fetch failed: %s", exc)
 

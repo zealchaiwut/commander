@@ -564,15 +564,23 @@ def _record_from_lifecycle(row: dict, sprints_dirs: Path | list[Path]) -> dict:
     label = row.get("label")
     if not row.get("run_ingested_at"):
         state = _read_state_file(sprints_dirs, label)
+        # Issue #1881: the search list ends with the shared legacy sprints dir, so
+        # a label match there can be ANOTHER project's artifact (labels are only
+        # unique per repo). Never ingest a state file that names a different
+        # project than the row.
+        row_proj = (row.get("project") or "").strip()
+        state_proj = (state.get("project") or "").strip() if state else ""
+        if state is not None and state_proj and row_proj and state_proj != row_proj:
+            state = None
         if state is not None:
             try:
                 summary_path = _find_summary_path(sprints_dirs, label)
                 _db().ingest_sprint_run_artifact(
                     label, state,
-                    project=row.get("project") or "",
+                    project=row_proj,
                     summary_path=summary_path,
                 )
-                refreshed = _db().get_sprint(label)
+                refreshed = _db().get_sprint(label, project=row_proj or None)
                 if refreshed:
                     row = refreshed
             except Exception:
@@ -1440,6 +1448,18 @@ def get_sprint_history(offset: int = 0, limit: int = 20, sprints_dir: Path | Non
             pass
 
     _finalize_issues(window, search_dirs, title_map=title_map, ran_by_label=ran_by_label)
+
+    # Inline run-stats into every history row — single in-process pass, no
+    # HTTP self-calls (issue #1639 AC1–AC4). Calls the run_stats compute unit
+    # directly so the frontend makes zero per-card /run-stats round-trips.
+    from . import run_stats_service as _run_stats_svc  # noqa: PLC0415
+    for r in window:
+        _label = r.get("label") or ""
+        _project = (r.get("project") or "") or None
+        try:
+            r["run_stats"] = _run_stats_svc.sprint_run_stats(_label, project=_project)
+        except Exception:
+            r["run_stats"] = None
 
     for r in window:
         r.pop("_sort_key", None)

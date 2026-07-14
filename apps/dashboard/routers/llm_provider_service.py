@@ -61,7 +61,7 @@ def _call_proxy_profile(provider: str) -> None:
     try:
         resp = httpx.post(url, json={"name": provider}, timeout=5.0)
         resp.raise_for_status()
-    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+    except httpx.RequestError as exc:
         raise HTTPException(
             status_code=503,
             detail=(

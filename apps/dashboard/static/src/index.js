@@ -9,6 +9,7 @@
  * Follow-on tickets extract additional self-contained blocks into static/src/
  * and import them here.
  */
+import { evlGroupEventsByRun } from "./activity-grouping.js";
 import {
   colorizeLogLine,
   escapeLogHtml,
@@ -31,8 +32,31 @@ import {
   getProgressActivityPayload,
   BOARD_OVERLAY_PA_ID,
 } from "./progress-host.js";
-import { switchTab, toggleStabDropdown, closeAllStabDropdowns } from './shell/tabs.js';
-import { loadCommanderFeatures } from './shell/features.js';
+import {
+  switchTab,
+  toggleStabDropdown,
+  closeAllStabDropdowns,
+} from "./shell/tabs.js";
+import { loadCommanderFeatures } from "./shell/features.js";
+import {
+  visibilityInterval,
+  installVisibilityGuard,
+} from "./shell/visibility.js";
+import {
+  snavNavStatusFetch,
+  snavNavStatusCacheClear,
+} from "./shell/snav-cache.js";
+import {
+  getEnvironment,
+  getVersion,
+  getSettings,
+  invalidateSettings,
+} from "./api.js";
+import {
+  GH_AUTH_POLL_INTERVAL_MS,
+  startGhAuthPoll,
+  stopGhAuthPoll,
+} from "./device-login.js";
 import {
   sprintCleanupPreview,
   sprintCleanupConfirm,
@@ -45,7 +69,7 @@ import {
   _psCleanupModalClose,
   _psCleanupPaneClose,
   _psCleanupPaneConfirm,
-} from './settings/cleanup.js';
+} from "./settings/cleanup.js";
 import "./sprint-board/index.js";
 
 // Preserve the historical global API. project.html and run_browser.html call
@@ -74,10 +98,17 @@ root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
 root.loadCommanderFeatures = loadCommanderFeatures;
+root.visibilityInterval = visibilityInterval;
+root.snavNavStatusFetch = snavNavStatusFetch;
+root.snavNavStatusCacheClear = snavNavStatusCacheClear;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
+globalThis.visibilityInterval = visibilityInterval;
+globalThis.snavNavStatusFetch = snavNavStatusFetch;
+globalThis.snavNavStatusCacheClear = snavNavStatusCacheClear;
+installVisibilityGuard();
 
 // Project Settings cleanup (issue #735 / #808)
 root.sprintCleanupPreview = sprintCleanupPreview;
@@ -102,3 +133,57 @@ globalThis.psCleanupModalConfirm = psCleanupModalConfirm;
 globalThis._psCleanupModalClose = _psCleanupModalClose;
 globalThis._psCleanupPaneClose = _psCleanupPaneClose;
 globalThis._psCleanupPaneConfirm = _psCleanupPaneConfirm;
+
+// Stable-endpoint cache helpers (issue #1779)
+root.getEnvironment = getEnvironment;
+root.getVersion = getVersion;
+root.getSettings = getSettings;
+root.invalidateSettings = invalidateSettings;
+globalThis.getEnvironment = getEnvironment;
+globalThis.getVersion = getVersion;
+globalThis.getSettings = getSettings;
+globalThis.invalidateSettings = invalidateSettings;
+
+// Device-login poll manager (issue #1779)
+root.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+root.startGhAuthPoll = startGhAuthPoll;
+root.stopGhAuthPoll = stopGhAuthPoll;
+globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+globalThis.startGhAuthPoll = startGhAuthPoll;
+globalThis.stopGhAuthPoll = stopGhAuthPoll;
+
+// Activity feed run-grouping helper (issue #1853)
+root.evlGroupEventsByRun = evlGroupEventsByRun;
+globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+
+// Logs error badge helpers (issue #1857)
+import {
+  logsReadLastVisit,
+  logsWriteLastVisit,
+  evlIsErrorEvent,
+  logsCountNewErrors,
+  buildEvlFetchUrl,
+} from "./logs-error-badge.js";
+root.logsReadLastVisit = logsReadLastVisit;
+root.logsWriteLastVisit = logsWriteLastVisit;
+root.evlIsErrorEvent = evlIsErrorEvent;
+root.logsCountNewErrors = logsCountNewErrors;
+root.buildEvlFetchUrl = buildEvlFetchUrl;
+globalThis.logsReadLastVisit = logsReadLastVisit;
+globalThis.logsWriteLastVisit = logsWriteLastVisit;
+globalThis.evlIsErrorEvent = evlIsErrorEvent;
+globalThis.logsCountNewErrors = logsCountNewErrors;
+globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+
+// Logs view control helpers (issue #1858)
+import {
+  shouldAutoLoadRaw,
+  pickAutoSprintLabel,
+  logsToolbarVisibility,
+} from "./logs-view-controls.js";
+root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+root.pickAutoSprintLabel = pickAutoSprintLabel;
+root.logsToolbarVisibility = logsToolbarVisibility;
+globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+globalThis.logsToolbarVisibility = logsToolbarVisibility;

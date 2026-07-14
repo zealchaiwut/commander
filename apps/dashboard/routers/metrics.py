@@ -1,5 +1,7 @@
 from __future__ import annotations
 import json
+import logging
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -13,8 +15,12 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import db  # noqa: E402
 import github_client  # noqa: E402
 import projects as projects_module  # noqa: E402
+
+logger = logging.getLogger(__name__)
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 
 _PROJECTS_BASE = Path.home() / "dev"
 
@@ -48,8 +54,31 @@ def _sprint_json_read(path):
     return {}
 
 
+def _bulk_rework_from_mirror(repo: str) -> dict[str, int] | None:
+    """Single mirror pass: {sprint_label: rework_count} across all sprints.
+
+    Returns None when the mirror is empty so the caller can fall back to gh.
+    """
+    try:
+        all_issues = db.get_mirrored_issues(repo, state="open")
+    except Exception:
+        return None
+    if not all_issues:
+        return None
+    counts: dict[str, int] = {}
+    for iss in all_issues:
+        labels = {lbl["name"] for lbl in iss.get("labels", [])}
+        if "needs-rework" not in labels:
+            continue
+        for lbl_name in labels:
+            if _SPRINT_LABEL_RE.match(lbl_name):
+                counts[lbl_name] = counts.get(lbl_name, 0) + 1
+                break
+    return counts
+
+
 def _count_rework_tickets(sprint_label: str, project: str) -> int:
-    """Return number of open issues in the sprint carrying needs-rework label."""
+    """Fallback: gh call to count needs-rework issues for a sprint."""
     try:
         r = github_client.get_repo_for_operation(project)
         result = subprocess.run(
@@ -74,11 +103,13 @@ def get_sprint_metrics(request: Request):
     Query params:
       from=YYYY-MM-DD  (default: 30 days ago)
       to=YYYY-MM-DD    (default: today)
+      project=<slug or owner/repo>  (optional; filters to one project)
 
     Response: JSON array of sprint metric objects.
     """
     today = datetime.now(tz=timezone.utc).date()
 
+    raw_project = request.query_params.get("project")
     raw_from = request.query_params.get("from")
     raw_to = request.query_params.get("to")
 
@@ -92,7 +123,10 @@ def get_sprint_metrics(request: Request):
             except ValueError:
                 raise HTTPException(
                     400,
-                    detail=f"Invalid 'from' date {raw_from!r} — expected YYYY-MM-DD",
+                    detail=(
+                        f"Invalid 'from' date {raw_from!r}"
+                        " — expected YYYY-MM-DD"
+                    ),
                 )
         else:
             from_date = today - timedelta(days=30)
@@ -103,7 +137,10 @@ def get_sprint_metrics(request: Request):
             except ValueError:
                 raise HTTPException(
                     400,
-                    detail=f"Invalid 'to' date {raw_to!r} — expected YYYY-MM-DD",
+                    detail=(
+                        f"Invalid 'to' date {raw_to!r}"
+                        " — expected YYYY-MM-DD"
+                    ),
                 )
         else:
             to_date = today
@@ -111,11 +148,19 @@ def get_sprint_metrics(request: Request):
     if from_date > to_date:
         raise HTTPException(
             400,
-            detail=f"'from' date ({from_date}) must not be after 'to' date ({to_date})",
+            detail=(
+                f"'from' ({from_date}) must not be after"
+                f" 'to' ({to_date})"
+            ),
         )
 
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(
+        from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc
+    )
+    to_dt = datetime(
+        to_date.year, to_date.month, to_date.day,
+        23, 59, 59, tzinfo=timezone.utc,
+    )
 
     try:
         all_projects = projects_module.load_projects()
@@ -124,11 +169,23 @@ def get_sprint_metrics(request: Request):
 
     results = []
     seen_paths: set[Path] = set()
+    _rework_cache: dict[str, dict[str, int] | None] = {}
 
     for proj in all_projects:
         repo = proj.get("repo", "")
         if not repo:
             continue
+
+        if raw_project is not None:
+            if "/" in raw_project:
+                if repo != raw_project:
+                    continue
+            else:
+                if repo.split("/")[-1] != raw_project:
+                    continue
+
+        if repo not in _rework_cache:
+            _rework_cache[repo] = _bulk_rework_from_mirror(repo)
 
         project_root = _project_root_path(repo)
         sprints_dir = _commander_dir(project_root) / "sprints"
@@ -150,7 +207,8 @@ def get_sprint_metrics(request: Request):
             if not start_ts_str:
                 continue
             try:
-                start_dt = datetime.fromisoformat(start_ts_str.rstrip("Z")).replace(
+                ts = start_ts_str.rstrip("Z")
+                start_dt = datetime.fromisoformat(ts).replace(
                     tzinfo=timezone.utc
                 )
             except Exception:
@@ -169,18 +227,36 @@ def get_sprint_metrics(request: Request):
             issues = state_data.get("issues", [])
 
             done_count = sum(1 for i in issues if i.get("status") == "done")
-            failed_count = sum(1 for i in issues if i.get("status") == "failed")
-            skipped_count = sum(1 for i in issues if i.get("status") == "skipped")
+            failed_count = sum(
+                1 for i in issues if i.get("status") == "failed"
+            )
+            skipped_count = sum(
+                1 for i in issues if i.get("status") == "skipped"
+            )
 
             coder_count = sum(1 for i in issues if i.get("coder_started_at"))
             tester_count = sum(1 for i in issues if i.get("tester_started_at"))
-            reviewer_count = 1 if state_data.get("reviewer_status") not in (None, "") else 0
-            documenter_count = 1 if state_data.get("documenter_status") not in (None, "") else 0
+            reviewer_count = (
+                1 if state_data.get("reviewer_status") not in (None, "")
+                else 0
+            )
+            documenter_count = (
+                1 if state_data.get("documenter_status") not in (None, "")
+                else 0
+            )
 
             tokens_in = int(state_data.get("total_tokens_in") or 0)
             tokens_out = int(state_data.get("total_tokens_out") or 0)
             total_tokens = tokens_in + tokens_out
             token_estimate = total_tokens if total_tokens > 0 else None
+
+            rework_by_sprint = _rework_cache.get(repo)
+            if rework_by_sprint is not None:
+                needs_rework_count = rework_by_sprint.get(sprint_label_val, 0)
+            else:
+                needs_rework_count = _count_rework_tickets(
+                    sprint_label_val, project_val
+                )
 
             results.append({
                 "sprint_label": sprint_label_val,
@@ -191,7 +267,7 @@ def get_sprint_metrics(request: Request):
                     "done": done_count,
                     "failed": failed_count,
                     "skipped": skipped_count,
-                    "needs_rework": 0,
+                    "needs_rework": needs_rework_count,
                 },
                 "agent_dispatch_counts": {
                     "coder": coder_count,
@@ -207,12 +283,17 @@ def get_sprint_metrics(request: Request):
 
 @router.get("/api/projects/{slug}/analytics/metrics")
 def get_project_analytics_metrics(slug: str, request: Request):
-    """GET /api/projects/{slug}/analytics/metrics — delivery-health metrics (issue #1267)."""
+    """GET /api/projects/{slug}/analytics/metrics.
+
+    Delivery-health metrics (issue #1267).
+    """
     srv = _server()
     repo = srv._resolve_project_slug(slug)
     project_root = _project_root_path(repo)
     since = request.query_params.get("since")
     until = request.query_params.get("until")
     sprint_filter = request.query_params.get("sprint")
-    return srv._compute_analytics_metrics(project_root, since=since, until=until,
-                                          sprint_filter=sprint_filter)
+    return srv._compute_analytics_metrics(
+        project_root, since=since, until=until,
+        sprint_filter=sprint_filter,
+    )

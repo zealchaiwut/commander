@@ -167,7 +167,8 @@ def _commander_dir(project_root: Path) -> Path:
 def _invalidate_home_cache(slug: str) -> None:
     """Drop cached /api/home payload for slug after identity-changing settings writes."""
     try:
-        _server()._invalidate_home_cache(slug)
+        from home_service import invalidate_home_by_slug  # noqa: PLC0415
+        invalidate_home_by_slug(slug)
     except Exception:
         pass
 
@@ -207,6 +208,16 @@ def _validate_settings_body(body: dict) -> None:
                 f"Allowed fields: {', '.join(sorted(KNOWN_FIELDS))}"
             ),
         )
+    for key, value in body.items():
+        meta = KNOWN_FIELDS.get(key)
+        if meta is None or meta.get("secret"):
+            continue
+        default = meta["default"]
+        if type(default) is int and value is not None and type(value) is not int:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Field '{key}' must be an integer, got {type(value).__name__!r}.",
+            )
     if "coder_backend" in body and body["coder_backend"] not in _VALID_CODER_BACKENDS:
         raise HTTPException(
             status_code=400,

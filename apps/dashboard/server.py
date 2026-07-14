@@ -149,6 +149,11 @@ async def lifespan(app: FastAPI):
         environment=ENVIRONMENT, git_sha=_GIT_SHA, git_branch=_GIT_BRANCH,
     )
     db.init_db()
+    try:
+        from routers.board_cache import set_main_loop as _set_board_cache_loop  # noqa: PLC0415
+        _set_board_cache_loop(asyncio.get_event_loop())
+    except Exception:
+        pass
     _check_gh_auth()
     _validate_github_repos()
     _sweep_orphan_pid_files()
@@ -191,6 +196,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 from routers import (  # noqa: E402
+    agent_guide_router,
+    api_volume_router,
+    docs_router,
+    changelog_router,
+    estimate_jobs_router,
     activity_router,
     advisor_router,
     analytics_router,
@@ -215,10 +225,10 @@ from routers import (  # noqa: E402
     sprint_collisions_router,
     resolve_conflict_router,
     llm_provider_router,
+    running_router,
     pages_router,
     project_branches_router,
     projects_router,
-    reports_router,
     roadmap_router,
     runs_router,
     settings_router,
@@ -247,6 +257,7 @@ from routers.bulk_tickets import _get_bulk_job  # noqa: E402
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 
+app.include_router(api_volume_router)
 app.include_router(pages_router)
 app.include_router(activity_router)
 app.include_router(advisor_router)
@@ -270,7 +281,6 @@ app.include_router(mis_sizing_router)
 app.include_router(xl_suggestions_router)
 app.include_router(sprint_collisions_router)
 app.include_router(projects_router)
-app.include_router(reports_router)
 app.include_router(roadmap_router)
 app.include_router(runs_router)
 # scheduler_router is mounted via routers/sprints.py (rides the already-mounted
@@ -300,9 +310,22 @@ app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
 app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
+app.include_router(running_router)
+app.include_router(docs_router)
+app.include_router(agent_guide_router)
+app.include_router(changelog_router)
+app.include_router(estimate_jobs_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def _bearer_auth(request: Request, call_next):
+    from routers.auth import bearer_auth_gate  # noqa: PLC0415
+    if (early := bearer_auth_gate(request)) is not None:
+        return early
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def _attach_request_id(request: Request, call_next):
@@ -316,6 +339,20 @@ async def add_api_no_cache_headers(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def _count_request_paths(request: Request, call_next):
+    response = await call_next(request)
+    route = request.scope.get("route")
+    path = (
+        route.path
+        if (route is not None and hasattr(route, "path"))
+        else request.url.path
+    )
+    import api_volume as _av  # noqa: PLC0415
+    _av.record_request(path)
     return response
 
 

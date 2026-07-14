@@ -1,191 +1,526 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-<!-- impeccable-disable single-font, flat-type-hierarchy -- pre-existing violations, scoped per-file (issue #1205) -->
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Run Browser — Commander</title>
-<script src="/static/log-colorize.js"></script>
-<link rel="stylesheet" href="/static/css/tokens.css">
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Run Browser — Commander</title>
+  <!-- Apply saved theme before paint -->
+  <script>
+    try {
+      document.documentElement.setAttribute(
+        'data-theme', localStorage.getItem('theme') || 'dark');
+    } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+  </script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
+  <script src="/static/log-colorize.js"></script>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    /* ── local tokens ── */
+    :root {
+      --nav-h: 52px;
+      --icon-on-color: #fff;
+    }
 
-  :root {
-    --bg:        #0d1117;
-    --bg2:       #161b22;
-    --bg3:       #21262d;
-    --border:    #30363d;
-    --text:      #e6edf3;
-    --text-muted:#8b949e;
-    --accent:    #388bfd;
-    --fail:      #f85149;
-    --pass:      #3fb950;
-    --warn:      #d29922;
-    --radius:    6px;
-    --sp:        8px;
-  }
+    /* ── reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  html, body { height: 100%; background: var(--bg); color: var(--text);
-               font: 14px/1.5 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+    /* ── focus ring (WCAG 2.1 AA) ── */
+    :focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
 
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+    /* ── base ── */
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
 
-  /* ── layout ──────────────────────────────────────────────────────────────── */
-  #app { display: flex; flex-direction: column; height: 100%; overflow-x: hidden; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
 
-  /* top nav */
-  #nav { display: flex; align-items: center; gap: var(--sp); padding: 10px 16px;
-         background: var(--bg2); border-bottom: 1px solid var(--border);
-         flex-shrink: 0; overflow-x: auto; white-space: nowrap; }
-  #nav .crumb { color: var(--text-muted); cursor: pointer; }
-  #nav .crumb:hover { color: var(--text); }
-  #nav .sep { color: var(--border); }
-  #nav .crumb.active { color: var(--text); }
+    /* ── top nav ── */
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: var(--z-nav);
+      height: var(--nav-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 0;
+      overflow-x: auto;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .top-nav-brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      flex-shrink: 0;
+      text-decoration: none;
+    }
+    .top-nav-brand:hover { text-decoration: none; color: var(--text); }
+    .top-nav-vsep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+      margin: 0 12px;
+    }
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex: 1;
+      min-width: 0;
+    }
+    .crumb-btn {
+      background: none;
+      border: none;
+      padding: 3px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      transition: color 0.12s;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .crumb-btn:hover { color: var(--text); }
+    .crumb-btn.active { color: var(--text); font-weight: 600; cursor: default; }
+    .crumb-btn.active:hover { color: var(--text); }
+    .crumb-sep {
+      color: var(--border);
+      font-size: 15px;
+      margin: 0 4px;
+      flex-shrink: 0;
+      user-select: none;
+    }
 
-  /* panels */
-  #panels { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    /* ── app shell ── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #panels {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px 24px;
+    }
+    .panel.hidden { display: none; }
 
-  .panel { flex: 1; overflow-y: auto; padding: 12px 16px; }
-  .panel.hidden { display: none; }
+    /* ── page title bar ── */
+    .page-title-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .page-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+    .page-count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+      font-weight: 400;
+    }
 
-  /* ── sprint list ─────────────────────────────────────────────────────────── */
-  .sprint-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 12px; margin-bottom: 6px;
-    background: var(--bg2); border: 1px solid var(--border);
-    border-radius: var(--radius); cursor: pointer; user-select: none;
-  }
-  .sprint-item:hover { border-color: var(--accent); }
-  .sprint-item.has-failures { border-left: 3px solid var(--fail); }
-  .sprint-item.all-passing  { border-left: 3px solid var(--pass); }
+    /* ── sprint list ── */
+    .sprint-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .sprint-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .sprint-row:hover {
+      border-color: var(--text-muted);
+      background: var(--surface-hover);
+    }
+    .sprint-row:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    .sprint-row-l { min-width: 0; }
+    .sprint-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      font-family: var(--mono);
+    }
+    .sprint-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .sprint-row-r {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
 
-  .sprint-name { font-weight: 600; }
-  .sprint-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; padding: 2px 6px; border-radius: 10px;
-    font-weight: 600; white-space: nowrap;
-  }
-  .badge-fail { background: rgba(248,81,73,.15); color: var(--fail); }
-  .badge-pass { background: rgba(63,185,80,.15); color: var(--pass); }
-  .badge-warn { background: rgba(210,153,34,.15); color: var(--warn); }
-  /* ICA caching-reduced indicator (issue #1673) */
-  .badge-caching-reduced {
-    background: rgba(210,153,34,.12); color: var(--warn);
-    cursor: help;
-  }
+    /* ── outcome badges ── */
+    .outcome-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .outcome-badge.pass    { background: var(--color-success);    color: var(--color-success-fg); }
+    .outcome-badge.fail    { background: var(--color-fail);       color: var(--color-fail-fg);    }
+    .outcome-badge.warn    { background: var(--color-warn);       color: var(--color-warn-fg);    }
+    .outcome-badge.neutral { background: var(--surface-2);        color: var(--text-muted);       }
 
-  /* ── ticket list ─────────────────────────────────────────────────────────── */
-  .ticket-item {
-    padding: 10px 12px; margin-bottom: 6px;
-    background: var(--bg2); border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-  .ticket-item.has-failures { border-left: 3px solid var(--fail); }
-  .ticket-item.all-passing  { border-left: 3px solid var(--pass); }
-  .ticket-header { display: flex; align-items: center; justify-content: space-between; }
-  .ticket-title  { font-weight: 600; }
-  .agents-row    { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .agent-chip {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 10px; border-radius: 14px; cursor: pointer;
-    font-size: 12px; border: 1px solid var(--border);
-    background: var(--bg3); transition: border-color .15s;
-  }
-  .agent-chip:hover { border-color: var(--accent); }
-  .agent-chip.outcome-failed  { border-color: var(--fail); background: rgba(248,81,73,.08); }
-  .agent-chip.outcome-success,
-  .agent-chip.outcome-passed  { border-color: var(--pass); background: rgba(63,185,80,.08); }
-  .dur { color: var(--text-muted); font-size: 11px; }
+    /* chevron icon in sprint row */
+    .sprint-row-chevron {
+      font-size: 14px;
+      color: var(--text-sub);
+      transition: color 0.12s;
+    }
+    .sprint-row:hover .sprint-row-chevron { color: var(--text-muted); }
 
-  /* ── log pane ────────────────────────────────────────────────────────────── */
-  #log-panel { display: flex; flex-direction: column; height: 100%; }
-  #log-controls {
-    display: flex; align-items: center; gap: var(--sp); padding: 8px 16px;
-    background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0;
-    flex-wrap: wrap;
-  }
-  #log-controls button {
-    padding: 4px 10px; border-radius: var(--radius);
-    background: var(--bg3); color: var(--text); border: 1px solid var(--border);
-    cursor: pointer; font-size: 12px;
-  }
-  #log-controls button:hover { border-color: var(--accent); }
-  #log-controls button:disabled { opacity: .4; cursor: default; }
-  #log-page-info { font-size: 12px; color: var(--text-muted); }
+    /* ── ticket list ── */
+    .ticket-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .ticket-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      transition: border-color 0.12s;
+    }
+    .ticket-row.has-failures { border-color: var(--color-fail-fg); }
+    .ticket-row.all-passing  { border-color: var(--color-success-fg); }
+    .ticket-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+    }
+    .ticket-num {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+    .ticket-num span {
+      color: var(--text-muted);
+      font-weight: 400;
+    }
 
-  #log-content {
-    flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px;
-    line-height: 1.6; white-space: pre-wrap; word-break: break-all;
-  }
-  .log-line { display: block; }
-  .log-line:hover { background: var(--bg3); }
+    /* ── agent chips ── */
+    .agents-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 14px 12px;
+    }
+    .agent-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      cursor: pointer;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: inherit;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .agent-chip:hover { border-color: var(--text-muted); background: var(--surface-hover); }
+    .agent-chip:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    /* Role-colored chips */
+    .agent-chip[data-role="coder"]  { background: var(--role-coder-bg);   color: var(--role-coder);   border-color: var(--role-coder-bg); }
+    .agent-chip[data-role="tester"] { background: var(--role-tester-bg);  color: var(--role-tester);  border-color: var(--role-tester-bg); }
+    .agent-chip[data-role="ba"]     { background: var(--role-ba-bg);      color: var(--role-ba);      border-color: var(--role-ba-bg); }
+    .agent-chip[data-role="reviewer"]  { background: var(--indigo-bg);    color: var(--indigo);       border-color: var(--indigo-bg); }
+    .agent-chip[data-role="documenter"]{ background: var(--amber-bg);     color: var(--amber);        border-color: var(--amber-bg); }
+    .agent-chip[data-role="estimator"] { background: var(--teal-bg);      color: var(--teal);         border-color: var(--teal-bg); }
+    /* Outcome overlay on chip */
+    .agent-chip.outcome-failed { border-color: var(--color-fail-fg); }
+    .agent-chip.outcome-success,
+    .agent-chip.outcome-passed { border-color: var(--color-success-fg); }
+    .chip-dur {
+      font-family: var(--mono);
+      font-size: 10px;
+      opacity: 0.7;
+    }
+    .chip-ic { font-size: 12px; }
 
-  /* log chip styles (from log-colorize.js) */
-  .log-chip { padding: 0 5px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-  .log-chip--issue { background: rgba(56,139,253,.2); color: #79c0ff; }
-  .log-chip--agent { padding: 0 5px; border-radius: 3px; }
-  .log-agent-coder     { background: rgba(56,139,253,.2); color: #79c0ff; }
-  .log-agent-tester    { background: rgba(63,185,80,.2);  color: #56d364; }
-  .log-agent-reviewer  { background: rgba(163,113,247,.2);color: #d2a8ff; }
-  .log-agent-documenter{ background: rgba(210,153,34,.2); color: #e3b341; }
-  .log-agent-estimator { background: rgba(56,189,200,.2); color: #39d0d8; }
-  .log-agent-ba        { background: rgba(255,131,192,.2);color: #ff83c0; }
+    /* ── ICA caching badge ── */
+    .caching-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      background: var(--amber-bg);
+      color: var(--amber);
+      cursor: help;
+      white-space: nowrap;
+    }
 
-  /* loading / error */
-  .msg { color: var(--text-muted); padding: 24px 0; text-align: center; }
-  .err { color: var(--fail); padding: 24px 0; text-align: center; }
+    /* ── log panel ── */
+    #log-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    #log-panel.hidden { display: none; }
 
-  /* ── mobile (<= 390 px) ──────────────────────────────────────────────────── */
-  @media (max-width: 390px) {
-    #nav { padding: 8px 10px; font-size: 12px; }
-    .panel { padding: 8px 10px; }
-    .sprint-item, .ticket-item { padding: 8px 10px; }
-    #log-content { font-size: 11px; padding: 8px 10px; }
-    #log-controls { padding: 6px 10px; }
-    .agent-chip { padding: 4px 8px; font-size: 11px; }
-  }
-</style>
+    .log-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .log-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+      white-space: nowrap;
+    }
+    .log-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+    .log-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+    .log-btn.active {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+    }
+    .log-page-info {
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-sub);
+    }
+    .log-toolbar-spacer { flex: 1; }
+
+    #log-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 20px;
+      font-size: 12px;
+      font-family: var(--mono);
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: var(--bg);
+    }
+    .log-line {
+      display: block;
+      border-radius: var(--radius-xs);
+      transition: background 0.1s;
+    }
+    .log-line:hover { background: var(--surface); }
+
+    /* log chip styles (from log-colorize.js) */
+    .log-chip { padding: 0 5px; border-radius: var(--radius-xs); font-size: 11px; font-weight: 700; }
+    .log-chip--issue { background: var(--blue-bg); color: var(--blue); }
+    .log-chip--agent { padding: 0 5px; border-radius: var(--radius-xs); }
+    .log-agent-coder      { background: var(--role-coder-bg);    color: var(--role-coder); }
+    .log-agent-tester     { background: var(--role-tester-bg);   color: var(--role-tester); }
+    .log-agent-reviewer   { background: var(--indigo-bg);        color: var(--indigo); }
+    .log-agent-documenter { background: var(--amber-bg);         color: var(--amber); }
+    .log-agent-estimator  { background: var(--teal-bg);          color: var(--teal); }
+    .log-agent-ba         { background: var(--role-ba-bg);       color: var(--role-ba); }
+
+    /* ── empty / loading / error states ── */
+    .state-msg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .state-msg .ti { font-size: 26px; color: var(--text-sub); }
+    .state-msg.error { color: var(--color-fail-fg); }
+    .state-msg.error .ti { color: var(--color-fail-fg); }
+    .state-msg .spin { animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── back button in panel header ── */
+    .panel-back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 0;
+      min-height: 36px;
+      margin-bottom: 10px;
+      transition: color 0.12s;
+    }
+    .panel-back-btn:hover { color: var(--text); }
+    .panel-back-btn .ti { font-size: 13px; }
+
+    /* ── mobile ── */
+    @media (max-width: 480px) {
+      .top-nav { padding: 0 12px; }
+      .panel { padding: 12px 12px 20px; }
+      .log-toolbar { padding: 6px 12px; }
+      #log-content { padding: 10px 12px; }
+      .sprint-row, .ticket-head { padding: 9px 11px; }
+      .agents-row { padding: 0 11px 10px; }
+    }
+
+    /* ── reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .sprint-row,
+      .ticket-row,
+      .agent-chip,
+      .log-btn,
+      .log-line,
+      .crumb-btn,
+      .panel-back-btn { transition: none; }
+      .state-msg .spin { animation: none; }
+    }
+  </style>
 </head>
 <body>
 <div id="app">
-  <!-- breadcrumb nav -->
-  <div id="nav">
-    <span class="crumb active" id="nav-home" onclick="navTo('sprints')">Run Browser</span>
-    <span class="sep" id="nav-sep1" style="display:none">›</span>
-    <span class="crumb" id="nav-sprint" style="display:none"></span>
-    <span class="sep" id="nav-sep2" style="display:none">›</span>
-    <span class="crumb" id="nav-ticket" style="display:none"></span>
-    <span class="sep" id="nav-sep3" style="display:none">›</span>
-    <span class="crumb" id="nav-agent" style="display:none"></span>
-  </div>
 
-  <!-- panels container -->
+  <!-- sticky nav -->
+  <nav class="top-nav" aria-label="Commander navigation">
+    <a href="/" class="top-nav-brand" aria-label="Commander home">Commander</a>
+    <div class="top-nav-vsep" role="presentation" aria-hidden="true"></div>
+    <div class="breadcrumb" aria-label="Location">
+      <button class="crumb-btn active" id="nav-home"
+              onclick="navTo('sprints')" aria-current="page">
+        <i class="ti ti-player-play" aria-hidden="true"></i>
+        Run Browser
+      </button>
+      <span class="crumb-sep" aria-hidden="true" id="nav-sep1" style="display:none">›</span>
+      <button class="crumb-btn" id="nav-sprint" style="display:none"
+              onclick="navTo('tickets')" aria-label="Back to sprint"></button>
+      <span class="crumb-sep" aria-hidden="true" id="nav-sep2" style="display:none">›</span>
+      <button class="crumb-btn" id="nav-ticket" style="display:none"
+              onclick="navTo('tickets')" aria-label="Back to tickets"></button>
+      <span class="crumb-sep" aria-hidden="true" id="nav-sep3" style="display:none">›</span>
+      <span class="crumb-btn active" id="nav-agent" style="display:none" aria-current="page"></span>
+    </div>
+  </nav>
+
+  <!-- panels -->
   <div id="panels">
-    <!-- Sprint list panel -->
-    <div class="panel" id="panel-sprints">
-      <div class="msg" id="sprints-loading">Loading runs…</div>
-      <div id="sprints-list"></div>
+
+    <!-- Sprint list -->
+    <div class="panel" id="panel-sprints" role="main">
+      <div class="page-title-bar">
+        <span class="page-title">Runs</span>
+        <span class="page-count" id="sprints-count" aria-live="polite"></span>
+      </div>
+      <div class="state-msg" id="sprints-loading" aria-live="polite">
+        <i class="ti ti-loader-2 spin" aria-hidden="true"></i>
+        Loading runs…
+      </div>
+      <div class="sprint-list" id="sprints-list" role="list"></div>
     </div>
 
-    <!-- Ticket list panel -->
-    <div class="panel hidden" id="panel-tickets">
-      <div id="tickets-list"></div>
+    <!-- Ticket list -->
+    <div class="panel hidden" id="panel-tickets" role="main">
+      <button class="panel-back-btn" onclick="navTo('sprints')" aria-label="Back to all runs">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> All runs
+      </button>
+      <div class="page-title-bar">
+        <span class="page-title" id="tickets-panel-title">Tickets</span>
+        <span class="page-count" id="tickets-count" aria-live="polite"></span>
+      </div>
+      <div class="ticket-list" id="tickets-list" role="list"></div>
     </div>
 
     <!-- Log panel -->
-    <div id="log-panel" class="hidden">
-      <div id="log-controls">
-        <button id="btn-prev" onclick="logPage(-1)" disabled>← Prev</button>
-        <button id="btn-next" onclick="logPage(1)">Next →</button>
-        <button onclick="logTail()">Tail</button>
-        <span id="log-page-info"></span>
+    <div id="log-panel" class="hidden" role="main">
+      <div class="log-toolbar" role="toolbar" aria-label="Log navigation">
+        <button class="log-btn" id="btn-prev"
+                onclick="logPage(-1)" disabled aria-label="Previous page">
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Prev
+        </button>
+        <button class="log-btn" id="btn-next"
+                onclick="logPage(1)" aria-label="Next page">
+          Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+        </button>
+        <button class="log-btn" onclick="logTail()" aria-label="Jump to end of log">
+          <i class="ti ti-arrow-bar-to-down" aria-hidden="true"></i> Tail
+        </button>
+        <span class="log-page-info" id="log-page-info" aria-live="polite"></span>
       </div>
-      <div id="log-content"></div>
+      <div id="log-content" role="log" aria-live="off" aria-label="Agent log output"></div>
     </div>
-  </div>
-</div>
+
+  </div><!-- /panels -->
+</div><!-- /app -->
 
 <script>
 (function () {
@@ -203,11 +538,9 @@
   // ── init ───────────────────────────────────────────────────────────────────
   function init() {
     fetchRuns();
-    // Check for deep-link ?sprint=<label> in URL
     var params = new URLSearchParams(window.location.search);
     var deepSprint = params.get('sprint');
     if (deepSprint) {
-      // Wait for runs to load then auto-navigate
       window._deepSprint = deepSprint;
     }
   }
@@ -219,7 +552,6 @@
       .then(function (data) {
         _runs = data;
         renderSprints();
-        // Handle deep-link
         if (window._deepSprint) {
           var target = _runs.find(function (s) { return s.sprint === window._deepSprint; });
           if (target) { selectSprint(target); }
@@ -227,8 +559,9 @@
         }
       })
       .catch(function (e) {
-        document.getElementById('sprints-loading').className = 'err';
-        document.getElementById('sprints-loading').textContent = 'Failed to load runs: ' + e;
+        var el = document.getElementById('sprints-loading');
+        el.classList.add('error');
+        el.innerHTML = '<i class="ti ti-alert-triangle" aria-hidden="true"></i> Failed to load runs: ' + e;
       });
   }
 
@@ -236,33 +569,54 @@
   function renderSprints() {
     var container = document.getElementById('sprints-list');
     var loading   = document.getElementById('sprints-loading');
+    var countEl   = document.getElementById('sprints-count');
+
     loading.style.display = 'none';
     container.innerHTML   = '';
 
     if (_runs.length === 0) {
-      container.innerHTML = '<div class="msg">No runs recorded yet.</div>';
+      container.innerHTML =
+        '<div class="state-msg">' +
+          '<i class="ti ti-history" aria-hidden="true"></i>' +
+          'No runs recorded yet.' +
+        '</div>';
       return;
     }
 
+    countEl.textContent = _runs.length + ' run' + (_runs.length !== 1 ? 's' : '');
+
     _runs.forEach(function (sp) {
-      var div  = document.createElement('div');
-      var cls  = 'sprint-item' + (sp.failed_count > 0 ? ' has-failures' : ' all-passing');
-      div.className = cls;
-      div.onclick   = function () { selectSprint(sp); };
+      var failed = sp.failed_count > 0;
+      var badgeCls = failed ? 'fail' : 'pass';
+      var badgeIc  = failed ? 'ti-alert-circle' : 'ti-circle-check';
+      var badgeTxt = failed ? (sp.failed_count + ' failed') : 'all passed';
 
       var meta = sp.failed_count + ' failed / ' + sp.total_count + ' total';
-      if (sp.ended_at) meta += ' · ' + sp.ended_at.slice(0, 10);
+      if (sp.ended_at) meta += '  ·  ' + sp.ended_at.slice(0, 10);
 
-      var badgeHtml = sp.failed_count > 0
-        ? '<span class="badge badge-fail">' + sp.failed_count + ' failed</span>'
-        : '<span class="badge badge-pass">all passed</span>';
+      var div = document.createElement('div');
+      div.className = 'sprint-row';
+      div.setAttribute('role', 'listitem');
+      div.setAttribute('tabindex', '0');
+      div.setAttribute('aria-label', sp.sprint + ', ' + badgeTxt);
+      div.onclick   = function () { selectSprint(sp); };
+      div.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectSprint(sp); }
+      };
 
       div.innerHTML =
-        '<div>' +
+        '<div class="sprint-row-l">' +
           '<div class="sprint-name">' + esc(sp.sprint) + '</div>' +
           '<div class="sprint-meta">' + esc(meta) + '</div>' +
         '</div>' +
-        '<div>' + badgeHtml + '</div>';
+        '<div class="sprint-row-r">' +
+          '<span class="outcome-badge ' + badgeCls + '">' +
+            '<i class="ti ' + badgeIc + '" aria-hidden="true"></i>' +
+            esc(badgeTxt) +
+          '</span>' +
+          '<i class="ti ti-chevron-right sprint-row-chevron" aria-hidden="true"></i>' +
+        '</div>';
+
       container.appendChild(div);
     });
   }
@@ -279,41 +633,64 @@
   // ── ticket list ────────────────────────────────────────────────────────────
   function renderTickets(sp) {
     var container = document.getElementById('tickets-list');
-    container.innerHTML = '';
+    var title     = document.getElementById('tickets-panel-title');
+    var countEl   = document.getElementById('tickets-count');
 
-    if (!sp.tickets || sp.tickets.length === 0) {
-      container.innerHTML = '<div class="msg">No tickets in this sprint.</div>';
+    container.innerHTML = '';
+    title.textContent   = esc(sp.sprint);
+
+    var tickets = sp.tickets || [];
+    if (tickets.length === 0) {
+      container.innerHTML =
+        '<div class="state-msg">' +
+          '<i class="ti ti-clipboard-off" aria-hidden="true"></i>' +
+          'No tickets in this sprint.' +
+        '</div>';
       return;
     }
 
-    sp.tickets.forEach(function (ticket) {
+    countEl.textContent = tickets.length + ' ticket' + (tickets.length !== 1 ? 's' : '');
+
+    tickets.forEach(function (ticket) {
+      var failed = isFailedTicket(ticket);
       var div = document.createElement('div');
-      var cls = 'ticket-item' + (isFailedTicket(ticket) ? ' has-failures' : ' all-passing');
-      div.className = cls;
+      div.className = 'ticket-row' + (failed ? ' has-failures' : ' all-passing');
+      div.setAttribute('role', 'listitem');
 
       var agentsHtml = (ticket.agents || []).map(function (a) {
-        var oc  = (a.outcome || '').toLowerCase();
-        var acls = 'agent-chip outcome-' + oc;
-        var dur  = a.duration_seconds ? formatDur(a.duration_seconds) : '—';
-        var cachingBadge = a.provider === 'ICA'
-          ? '<span class="badge badge-caching-reduced" title="Prompt caching is unavailable through the ICA proxy; full context is re-sent each turn">caching: reduced</span> '
+        var oc   = (a.outcome || '').toLowerCase();
+        var role = getRoleFromAgent(a.agent);
+        var icCls = outcomeIcon(oc);
+        var dur   = a.duration_seconds ? formatDur(a.duration_seconds) : '';
+        var durHtml = dur ? '<span class="chip-dur">' + esc(dur) + '</span>' : '';
+
+        var cachingHtml = a.provider === 'ICA'
+          ? '<span class="caching-badge" title="Prompt caching unavailable through ICA proxy; full context re-sent each turn">' +
+              '<i class="ti ti-alert-triangle" style="font-size:8px" aria-hidden="true"></i>caching: reduced' +
+            '</span>'
           : '';
-        return cachingBadge + '<span class="' + acls + '" onclick="selectAgent(' +
-          JSON.stringify(ticket.issue_number) + ',' + JSON.stringify(a.agent) +
-          ');event.stopPropagation()">' +
+
+        return cachingHtml +
+          '<button class="agent-chip outcome-' + esc(oc) + '"' +
+          ' data-role="' + esc(role) + '"' +
+          ' onclick="selectAgent(' +
+            JSON.stringify(ticket.issue_number) + ',' + JSON.stringify(a.agent) +
+          ');event.stopPropagation()"' +
+          ' aria-label="' + esc(a.agent) + ' agent, ' + (oc || 'pending') + (dur ? ', ' + dur : '') + '">' +
+          '<i class="ti ' + icCls + ' chip-ic" aria-hidden="true"></i>' +
           '<span>' + esc(a.agent) + '</span>' +
-          '<span class="dur">' + esc(dur) + '</span>' +
-          '</span>';
+          durHtml +
+          '</button>';
       }).join('');
 
-      var outcomeHtml = isFailedTicket(ticket)
-        ? '<span class="badge badge-fail">failed</span>'
-        : '<span class="badge badge-pass">passed</span>';
+      var outcomeBadge = failed
+        ? '<span class="outcome-badge fail"><i class="ti ti-x" aria-hidden="true"></i>failed</span>'
+        : '<span class="outcome-badge pass"><i class="ti ti-check" aria-hidden="true"></i>passed</span>';
 
       div.innerHTML =
-        '<div class="ticket-header">' +
-          '<span class="ticket-title">Issue #' + ticket.issue_number + '</span>' +
-          outcomeHtml +
+        '<div class="ticket-head">' +
+          '<span class="ticket-num"><span>#</span>' + esc(ticket.issue_number) + '</span>' +
+          outcomeBadge +
         '</div>' +
         '<div class="agents-row">' + agentsHtml + '</div>';
 
@@ -326,6 +703,24 @@
       var oc = (a.outcome || '').toLowerCase();
       return oc === 'failed' || oc === 'failure' || oc === 'needs-rework';
     });
+  }
+
+  function getRoleFromAgent(name) {
+    var n = (name || '').toLowerCase();
+    if (n.includes('coder'))      return 'coder';
+    if (n.includes('tester'))     return 'tester';
+    if (n.includes('reviewer'))   return 'reviewer';
+    if (n.includes('document'))   return 'documenter';
+    if (n.includes('estimat'))    return 'estimator';
+    if (n.includes('ba'))         return 'ba';
+    return '';
+  }
+
+  function outcomeIcon(oc) {
+    if (oc === 'failed' || oc === 'failure') return 'ti-circle-x';
+    if (oc === 'success' || oc === 'passed') return 'ti-circle-check';
+    if (oc === 'needs-rework')               return 'ti-refresh';
+    return 'ti-circle';
   }
 
   function selectAgent(issueNum, agent) {
@@ -346,7 +741,11 @@
                  '/' + issue + '/' + encodeURIComponent(agent) +
                  '/log?offset=' + _logOffset + '&limit=' + _logLimit;
 
-    document.getElementById('log-content').textContent = 'Loading…';
+    var content = document.getElementById('log-content');
+    content.innerHTML =
+      '<div class="state-msg">' +
+        '<i class="ti ti-loader-2 spin" aria-hidden="true"></i>Loading…</div>';
+
     fetch(url)
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (data) {
@@ -355,7 +754,10 @@
         updateLogControls();
       })
       .catch(function (e) {
-        document.getElementById('log-content').textContent = 'Error loading log: ' + e;
+        content.innerHTML =
+          '<div class="state-msg error">' +
+            '<i class="ti ti-alert-triangle" aria-hidden="true"></i>Error loading log: ' + esc(String(e)) +
+          '</div>';
       });
   }
 
@@ -375,7 +777,11 @@
                  '/' + issue + '/' + encodeURIComponent(agent) +
                  '/log/tail?kb=32';
 
-    document.getElementById('log-content').textContent = 'Loading tail…';
+    var content = document.getElementById('log-content');
+    content.innerHTML =
+      '<div class="state-msg">' +
+        '<i class="ti ti-loader-2 spin" aria-hidden="true"></i>Loading tail…</div>';
+
     fetch(url)
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (data) {
@@ -384,7 +790,10 @@
         updateLogControls();
       })
       .catch(function (e) {
-        document.getElementById('log-content').textContent = 'Error loading tail: ' + e;
+        content.innerHTML =
+          '<div class="state-msg error">' +
+            '<i class="ti ti-alert-triangle" aria-hidden="true"></i>Error loading tail: ' + esc(String(e)) +
+          '</div>';
       });
   }
 
@@ -402,19 +811,25 @@
   function updateLogControls() {
     document.getElementById('btn-prev').disabled = _logOffset === 0;
     document.getElementById('btn-next').disabled = _logOffset + _logLimit >= _logTotal;
+    var from = _logOffset + 1;
+    var to   = Math.min(_logOffset + _logLimit, _logTotal);
     document.getElementById('log-page-info').textContent =
-      'Lines ' + _logOffset + '–' + Math.min(_logOffset + _logLimit, _logTotal) +
-      ' of ' + _logTotal;
+      _logTotal > 0
+        ? from + '–' + to + ' / ' + _logTotal + ' lines'
+        : '0 lines';
   }
 
   // ── navigation ─────────────────────────────────────────────────────────────
   function showPanel(name) {
-    var panels = ['sprints', 'tickets', 'log'];
-    panels.forEach(function (p) {
-      var el = document.getElementById('panel-' + p) ||
-               document.getElementById(p === 'log' ? 'log-panel' : 'panel-' + p);
+    var ids = {
+      sprints: 'panel-sprints',
+      tickets: 'panel-tickets',
+      log:     'log-panel'
+    };
+    Object.keys(ids).forEach(function (key) {
+      var el = document.getElementById(ids[key]);
       if (!el) return;
-      if (p === name) {
+      if (key === name) {
         el.classList.remove('hidden');
       } else {
         el.classList.add('hidden');
@@ -447,42 +862,49 @@
     var agentEl = document.getElementById('nav-agent');
 
     // Reset
-    [sep1,sprint,sep2,ticket,sep3,agentEl].forEach(function (el) { el.style.display='none'; });
-    home.className = 'crumb';
+    [sep1, sprint, sep2, ticket, sep3, agentEl].forEach(function (el) {
+      el.style.display = 'none';
+    });
+    home.classList.toggle('active', !_currentSprint);
+    home.removeAttribute('aria-current');
+    if (!_currentSprint) home.setAttribute('aria-current', 'page');
 
     if (_currentSprint) {
       sep1.style.display = '';
       sprint.style.display = '';
       sprint.textContent = _currentSprint.sprint;
-      sprint.className = 'crumb' + (_currentIssue ? '' : ' active');
+      sprint.classList.toggle('active', !_currentAgent);
+      if (!_currentAgent) sprint.setAttribute('aria-current', 'page');
+      else sprint.removeAttribute('aria-current');
       sprint.onclick = function () { navTo('tickets'); };
     }
     if (_currentIssue != null) {
       sep2.style.display = '';
       ticket.style.display = '';
       ticket.textContent = '#' + _currentIssue;
-      ticket.className = 'crumb' + (_currentAgent ? '' : ' active');
+      ticket.classList.toggle('active', !_currentAgent);
+      if (!_currentAgent) ticket.setAttribute('aria-current', 'page');
+      else ticket.removeAttribute('aria-current');
       ticket.onclick = function () { navTo('tickets'); };
     }
     if (_currentAgent) {
       sep3.style.display = '';
       agentEl.style.display = '';
       agentEl.textContent = _currentAgent;
-      agentEl.className = 'crumb active';
-    }
-    if (!_currentSprint) {
-      home.className = 'crumb active';
+      agentEl.classList.add('active');
+      agentEl.setAttribute('aria-current', 'page');
     }
   }
 
   // ── utils ──────────────────────────────────────────────────────────────────
   function esc(s) {
     return String(s == null ? '' : s)
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   function formatDur(secs) {
-    if (secs < 60)  return secs + 's';
+    if (secs < 60)   return secs + 's';
     if (secs < 3600) return Math.round(secs / 60) + 'm';
     return (secs / 3600).toFixed(1) + 'h';
   }

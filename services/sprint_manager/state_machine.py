@@ -220,10 +220,17 @@ def transition(
         # drift lazily. Write the new state through to the local ticket_status
         # table; a DB failure must NOT fail the transition.
         _write_ticket_status(issue, target_state.name, actor, note)
+        _invalidate_mirror_issue(eff_repo, issue)
         _log_transition(issue, current_status, desired, actor, note)
         return True
 
     raise TransitionError(last_error or "Transition failed after all retries")
+
+
+def _brief_today() -> str:
+    """Return today's UTC date string. Seam — patched in tests (issue #1854)."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _write_ticket_status(
@@ -261,3 +268,32 @@ def _write_ticket_status(
             )
         else:
             sys.stdout.write(str(msg) + "\n")
+
+    # Brief cache invalidation (fire-and-forget, issue #1854).
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _dash_dir = _Path(__file__).parent.parent.parent / "apps" / "dashboard"
+        if str(_dash_dir) not in _sys.path:
+            _sys.path.insert(0, str(_dash_dir))
+        import db  # noqa: PLC0415
+        db.delete_brief_artifact("home", "", _brief_today())
+    except Exception:
+        pass
+
+
+def _invalidate_mirror_issue(repo: str, issue: int) -> None:
+    """Delete the issue's mirror row so _get_issue_labels falls back to REST (issue #1814).
+
+    Best-effort: never raises.
+    """
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _dash_dir = _Path(__file__).parent.parent.parent / "apps" / "dashboard"
+        if str(_dash_dir) not in _sys.path:
+            _sys.path.insert(0, str(_dash_dir))
+        import db  # noqa: PLC0415
+        db.invalidate_mirrored_issue(repo, issue)
+    except Exception:
+        pass

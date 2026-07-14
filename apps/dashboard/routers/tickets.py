@@ -109,22 +109,6 @@ def backlog_triage(owner: str, repo_name: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/api/projects/{owner}/{repo_name}/backlog/cleanup")
-def backlog_cleanup(owner: str, repo_name: str, body: BacklogCleanupBody):
-    """Close selected backlog cleanup candidates on GitHub."""
-    if not body.confirmed:
-        raise HTTPException(status_code=400, detail="Request must have confirmed=true")
-    repo = f"{owner}/{repo_name}"
-    numbers = body.issue_numbers or []
-    if not numbers:
-        preview = backlog_cleanup_service.scan_backlog(repo)
-        numbers = [c["number"] for c in preview.get("candidates") or []]
-    try:
-        return backlog_cleanup_service.apply_backlog_cleanup(repo, numbers)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/api/tickets/{issue_id}/approve")
 async def approve_ticket(request: Request, issue_id: int, repo: Optional[str] = None):
     """Close a UAT-labelled ticket on GitHub and remove the UAT label."""

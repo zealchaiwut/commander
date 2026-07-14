@@ -10,238 +10,778 @@
       document.documentElement.setAttribute(
         'data-theme', localStorage.getItem('theme') || 'dark');
     } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    // Pre-set date picker max to today so it's usable before JS init completes
+    document.addEventListener('DOMContentLoaded', function(){
+      var p = document.getElementById('date-pick');
+      if (p) {
+        var t = new Date();
+        var iso = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+        p.max = iso;
+        p.value = iso;
+      }
+    });
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/css/tokens.css">
   <style>
-    /* ── local token: pure-white icon color for brand-colored badge backgrounds.
-       tokens.css has no white constant (--surface is dark in dark mode), so
-       this single variable is defined here rather than in tokens.css. ── */
-    :root { --icon-on-color: #fff; }
+    /* ── local token ── */
+    :root {
+      --icon-on-color: #fff;
+      --nav-h: 52px;
+    }
 
-    /* ── focus ring (WCAG 2.1 AA, AC2) ── */
-    :focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:var(--radius-sm)}
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:14px;padding:28px 24px;min-height:100vh}
-    .home{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
-    /* page header */
-    .page-hdr{display:flex;align-items:center;gap:10px;padding:14px 24px;background:var(--surface);border-bottom:1px solid var(--border)}
-    .page-hdr-brand{font-size:15px;font-weight:800;letter-spacing:-.01em;color:var(--text)}
+    /* ── reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* card anatomy meta row (progress + last-activity in pbrief-head) */
-    .card-meta{display:flex;align-items:center;gap:8px;margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-muted)}
-    .card-meta-item{display:inline-flex;align-items:center;gap:4px}
+    /* ── focus ring (WCAG 2.1 AA) ── */
+    :focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+      border-radius: var(--radius-sm);
+    }
 
-    /* brief header */
-    .brief-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-    .brief-l{flex:1;min-width:200px}
-    .brief-kicker{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text-sub)}
-    .brief-date{font-size:24px;font-weight:800;margin-top:2px}
-    .brief-cover{font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-top:3px}
-    .brief-nav{display:flex;gap:5px;align-items:center;position:relative}
-    .nav-btn{font-family:var(--mono);font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
-    .nav-btn:hover{background:var(--surface-hover);color:var(--text)}
-    .nav-btn.today{background:var(--text);color:var(--surface);border-color:var(--text)}
-    /* the date picker overlays its trigger so the native UI anchors correctly */
-    .date-pick-wrap{position:relative;display:inline-flex}
-    .date-pick-wrap input[type=date]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:0}
+    /* ── base ── */
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
 
-    /* kpi strip (global) */
-    .kpis{display:flex;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-    .kpi{flex:1;background:var(--surface);padding:13px 16px}
-    .kpi-v{font-size:22px;font-weight:700;font-family:var(--mono)}
-    .kpi-l{font-size:11px;color:var(--text-sub);letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
-    .kpi .g{color:var(--green)} .kpi .a{color:var(--amber)}
+    /* ── top nav ── */
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: var(--z-nav);
+      height: var(--nav-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+    }
+    .top-nav-brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+    .top-nav-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .top-nav-page {
+      font-size: 13px;
+      color: var(--text-muted);
+      flex: 1;
+    }
+    .top-nav-date-nav {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .nav-btn {
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .nav-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+    .nav-btn.today {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+    }
+    .nav-btn.today:hover { opacity: 0.85; }
+    .nav-btn.today:disabled { opacity: 0.45; cursor: default; }
+    .date-pick-wrap { position: relative; display: inline-flex; }
+    .date-pick-wrap input[type=date] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
 
-    .sec-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:7px}
-    .sec-title .ti{color:var(--text-muted);font-size:16px}
-    .sec-title .count{font-family:var(--mono);font-size:11px;color:var(--text-sub);font-weight:500}
-    .planner-see-more{margin-top:6px;background:none;border:none;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-sub);display:inline-flex;align-items:center;gap:4px;padding:4px 2px}
-    .planner-see-more:hover{color:var(--text)}
-    .planner-see-more .ti{font-size:14px}
+    /* ── page layout ── */
+    .page-body {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 24px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
 
-    /* needs decision (global) */
-    .decisions{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-    .dec-row{display:flex;align-items:center;gap:11px;padding:12px 15px;border-top:1px solid var(--border)}
-    .dec-row:first-child{border-top:none}
-    .dec-ic{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;background:var(--amber-bg);color:var(--amber)}
-    .dec-ic.go{background:var(--green-bg);color:var(--green)}
-    .dec-ic.red{background:var(--red-bg);color:var(--red)}
-    .dec-txt{flex:1;font-size:13px;line-height:1.4}
-    .dec-txt .mono{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
-    .dec-act{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 11px;cursor:pointer;white-space:nowrap;background:var(--surface)}
-    .dec-act:hover{background:var(--surface-hover)}
-    .dec-act.primary{background:var(--text);color:var(--surface);border-color:var(--text)}
-    .dec-act[disabled]{opacity:.6;cursor:default}
-    .dec-empty{padding:14px 15px;color:var(--text-muted);font-size:13px}
+    /* ── brief header ── */
+    .brief-head {
+      padding: 24px 0 20px;
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brief-l { flex: 1; min-width: 180px; }
+    .brief-date {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      line-height: 1.1;
+      text-wrap: balance;
+    }
+    .brief-cover {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      margin-top: 4px;
+    }
 
-    /* planner state (issue #864): ran overnight + waiting on you */
-    .planner-list{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-    .planner-row{display:flex;align-items:center;gap:11px;padding:12px 16px;border-top:1px solid var(--border)}
-    .planner-row:first-child{border-top:none}
-    .planner-row .label{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
-    .planner-meta{font-size:12px;color:var(--text-muted)}
-    .planner-meta .mono{font-family:var(--mono)}
-    .planner-spacer{margin-left:auto}
-    .outcome-badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0}
-    .outcome-badge.success{background:var(--green-bg);color:var(--green)}
-    .outcome-badge.failure{background:var(--red-bg);color:var(--red)}
-    .outcome-badge.partial{background:var(--amber-bg);color:var(--amber)}
-    .planner-link{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 11px;cursor:pointer;white-space:nowrap;background:var(--surface);text-decoration:none;display:inline-flex;align-items:center;gap:5px}
-    .planner-link:hover{background:var(--surface-hover)}
+    /* ── status bar (replaces KPI hero strip) ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .stat-cell {
+      flex: 1;
+      padding: 12px 16px;
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      border-right: 1px solid var(--border);
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-v {
+      font-size: 20px;
+      font-weight: 700;
+      font-family: var(--mono);
+      line-height: 1;
+    }
+    .stat-v.g { color: var(--green); }
+    .stat-v.a { color: var(--amber); }
+    .stat-v.r { color: var(--red); }
+    .stat-l {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
 
-    /* ===== per-project brief card ===== */
-    .pbrief{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;transition:transform .15s,box-shadow .15s}
-    .pbrief:hover{transform:translateY(-2px);box-shadow:var(--shadow-card)}
-    .pbrief-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
-    .pbic{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;color:var(--icon-on-color)}
-    .pb-title-link{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:inherit;min-width:0}
-    .pb-title-link:hover .pbname{color:var(--blue)}
-    .pbname{font-weight:700;font-size:16px;transition:color .12s}
-    .pbname-go{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);background:var(--surface);flex-shrink:0;transition:color .12s,border-color .12s,background .12s}
-    .pb-title-link:hover .pbname-go{color:var(--blue);border-color:var(--blue);background:var(--blue-bg)}
-    .pbstatus{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
-    .pbstatus.run{background:var(--green-bg);color:var(--green)}
-    .pbstatus.idle{background:var(--surface-2);color:var(--text-muted)}
-    .pbstatus.blocked{background:var(--red-bg);color:var(--red)}
-    .pbstatus.run .d{width:5px;height:5px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite}
-    @keyframes glow{0%,100%{box-shadow:0 0 0 2px var(--green-bg)}50%{box-shadow:0 0 0 5px var(--green-bg)}}
-    .pbstatus{margin-left:auto}
+    /* ── section headers — no all-caps eyebrows ── */
+    .sec-hdr {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .sec-hdr .ti { color: var(--text-muted); font-size: 15px; }
+    .sec-hdr .count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+      font-weight: 400;
+      margin-left: 2px;
+    }
 
-    /* active-milestone progress indicator (issue #880) — compact, never dominant */
-    .pb-milestone{display:none;margin-left:auto;align-items:center;gap:8px;text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-muted);font-size:12px;max-width:48%;transition:border-color .12s,color .12s}
-    /* Milestones hidden for now (operator request) — remove .show override to restore */
-    .pb-milestone.show{display:none}
-    .pb-milestone .ti{font-size:13px;flex-shrink:0}
-    .pb-ms-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .pb-milestone:hover{border-color:var(--blue);color:var(--blue)}
-    .pb-milestone:hover .pb-ms-name{color:var(--blue)}
-    .pb-ms-count{font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0}
-    .pb-milestone + .pbstatus{margin-left:10px}
+    /* ── section wrapper ── */
+    .sec { margin-bottom: 20px; }
 
-    /* 2×2 project grid: summary | to-do / shipped | activity */
-    .pb-grid{display:grid;grid-template-columns:3fr 2fr;grid-template-rows:auto auto;align-items:stretch}
-    @media(max-width:740px){.pb-grid{grid-template-columns:1fr;grid-template-rows:auto}}
-    .pb-cell{display:flex;flex-direction:column;min-height:0;padding:14px 18px}
-    .pb-cell-summary{grid-column:1;grid-row:1;border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
-    /* Recent Activity sits top-right (compact); TO-DO drops to bottom-right where
-       it has room to grow (it tends to be the longest cell). */
-    .pb-cell-activity{grid-column:2;grid-row:1;border-bottom:1px solid var(--border)}
-    .pb-cell-shipped{grid-column:1;grid-row:2;border-right:1px solid var(--border)}
-    .pb-cell-todo{grid-column:2;grid-row:2}
-    /* Hide the bottom row (shipped detail + to-do) for a compact summary view. */
+    /* ── planner list (ran overnight / waiting on you) ── */
+    .planner-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .planner-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 15px;
+      border-top: 1px solid var(--border);
+    }
+    .planner-row:first-child { border-top: none; }
+    .planner-row .label {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .planner-meta { font-size: 12px; color: var(--text-muted); }
+    .planner-meta .mono { font-family: var(--mono); }
+    .planner-spacer { margin-left: auto; }
+
+    .outcome-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .outcome-badge.success { background: var(--green-bg); color: var(--green); }
+    .outcome-badge.failure { background: var(--red-bg); color: var(--red); }
+    .outcome-badge.partial { background: var(--amber-bg); color: var(--amber); }
+
+    .planner-link {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 4px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      background: transparent;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .planner-link:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+
+    .planner-see-more {
+      margin-top: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 2px;
+      transition: color 0.12s;
+    }
+    .planner-see-more:hover { color: var(--text); }
+    .planner-see-more .ti { font-size: 13px; }
+
+    /* ── decisions ── */
+    .decisions {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .dec-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 15px;
+      border-top: 1px solid var(--border);
+    }
+    .dec-row:first-child { border-top: none; }
+    .dec-ic {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+      background: var(--amber-bg);
+      color: var(--amber);
+    }
+    .dec-ic.go { background: var(--green-bg); color: var(--green); }
+    .dec-ic.red { background: var(--red-bg); color: var(--red); }
+    .dec-txt { flex: 1; font-size: 13px; line-height: 1.45; }
+    .dec-txt .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+    .dec-act {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 4px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      background: transparent;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .dec-act:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+    .dec-act.primary {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+    }
+    .dec-act.primary:hover { opacity: 0.85; }
+    .dec-act[disabled] { opacity: 0.5; cursor: default; pointer-events: none; }
+    .dec-empty {
+      padding: 14px 15px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* ── project brief cards ── */
+    .pbrief {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-2xl);
+      overflow: hidden;
+      margin-bottom: 12px;
+      transition: border-color 0.15s;
+    }
+    .pbrief:hover { border-color: var(--text-sub); }
+    .pbrief-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .pbic {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+      color: var(--icon-on-color);
+    }
+    .pb-title-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: inherit;
+      min-width: 0;
+    }
+    .pb-title-link:hover .pbname { color: var(--blue); }
+    .pbname {
+      font-weight: 600;
+      font-size: 15px;
+      transition: color 0.12s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pbname-go {
+      width: 22px;
+      height: 22px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--text-sub);
+      background: transparent;
+      flex-shrink: 0;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .pb-title-link:hover .pbname-go { color: var(--blue); border-color: var(--blue); background: var(--blue-bg); }
+
+    /* card meta (progress + timestamp) */
+    .card-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .card-meta-item { display: inline-flex; align-items: center; gap: 3px; }
+
+    /* status pill */
+    .pbstatus {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .pbstatus.run { background: var(--green-bg); color: var(--green); }
+    .pbstatus.idle { background: var(--surface-2); color: var(--text-muted); }
+    .pbstatus.blocked { background: var(--red-bg); color: var(--red); }
+    .pbstatus.run .d {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { box-shadow: 0 0 0 2px var(--green-bg); }
+      50% { box-shadow: 0 0 0 5px var(--green-bg); }
+    }
+
+    /* collapse toggle */
+    .pb-bottom-toggle {
+      width: 24px;
+      height: 24px;
+      min-width: var(--space-12);
+      min-height: var(--space-12);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-sub);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: color 0.12s, border-color 0.12s;
+    }
+    .pb-bottom-toggle:hover { color: var(--text); border-color: var(--text-muted); }
+    .pb-bottom-toggle .ti { transition: transform 0.15s; }
+    .pbrief.hide-bottom .pb-bottom-toggle .ti { transform: rotate(-90deg); }
+
+    /* 2×2 grid */
+    .pb-grid {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      grid-template-rows: auto auto;
+      align-items: stretch;
+    }
+    @media (max-width: 740px) {
+      .pb-grid { grid-template-columns: 1fr; grid-template-rows: auto; }
+    }
+    .pb-cell {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 14px 16px;
+    }
+    .pb-cell-summary { grid-column: 1; grid-row: 1; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .pb-cell-activity { grid-column: 2; grid-row: 1; border-bottom: 1px solid var(--border); }
+    .pb-cell-shipped { grid-column: 1; grid-row: 2; border-right: 1px solid var(--border); }
+    .pb-cell-todo { grid-column: 2; grid-row: 2; }
     .pbrief.hide-bottom .pb-cell-shipped,
-    .pbrief.hide-bottom .pb-cell-todo{display:none}
-    .pb-bottom-toggle{width:24px;height:24px;min-width:var(--space-12);min-height:var(--space-12);border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:color .12s,border-color .12s}
-    .pb-bottom-toggle:hover{color:var(--text);border-color:var(--text-muted)}
-    .pb-bottom-toggle .ti{transition:transform .15s}
-    .pbrief.hide-bottom .pb-bottom-toggle .ti{transform:rotate(-90deg)}
-    @media(max-width:740px){
-      .pb-cell-summary,.pb-cell-shipped{border-right:none}
-      .pb-cell-summary,.pb-cell-todo,.pb-cell-shipped{border-bottom:1px solid var(--border)}
+    .pbrief.hide-bottom .pb-cell-todo { display: none; }
+    @media (max-width: 740px) {
+      .pb-cell-summary, .pb-cell-shipped { border-right: none; }
+      .pb-cell-summary, .pb-cell-todo, .pb-cell-shipped { border-bottom: 1px solid var(--border); }
     }
-    .pb-cell-todo .todo{padding:0;min-height:0;flex:1}
-    .pb-cell-todo .todo.compact{max-height:none}
+    .pb-cell-todo .todo { padding: 0; min-height: 0; flex: 1; }
+    .pb-cell-todo .todo.compact { max-height: none; }
 
-    /* always-visible: summary + status line */
-    .pb-summary{padding:0 0 10px;display:flex;gap:11px;align-items:flex-start}
-    .pb-sum-ic{width:26px;height:26px;border-radius:7px;background:var(--blue-bg);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:1px}
-    .pb-sum-body{flex:1}
-    .pb-sum-tag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;background:var(--purple-bg);color:var(--purple);display:inline-flex;align-items:center;gap:3px;margin-bottom:5px}
-    .pb-sum-text{font-size:14px;line-height:1.6}
-    .pb-sum-text strong{font-weight:700}
-    .pb-sum-loading{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px}
-    .pb-sum-loading .ti{animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    /* ── loading state (AC4) ── */
-    .loading-state{display:flex;align-items:center;justify-content:center;gap:var(--space-2);padding:var(--space-10) var(--space-4);color:var(--text-muted);font-size:14px}
-    .loading-state .ti{font-size:20px;animation:spin 1s linear infinite}
+    /* summary cell */
+    .pb-summary { padding: 0 0 10px; display: flex; gap: 10px; align-items: flex-start; }
+    .pb-sum-ic {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--radius-lg);
+      background: var(--blue-bg);
+      color: var(--blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .pb-sum-body { flex: 1; }
+    .pb-sum-tag {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      background: var(--purple-bg);
+      color: var(--purple);
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-bottom: 5px;
+    }
+    .pb-sum-text { font-size: 13px; line-height: 1.6; color: var(--text); }
+    .pb-sum-text strong { font-weight: 600; }
+    .pb-sum-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .pb-sum-loading .ti { animation: spin 1s linear infinite; }
 
-    /* ── .pbic colour modifier classes — token-based, dark-mode-safe (AC8) ── */
-    .pbic--gray{background:var(--text-sub)}.pbic--blue{background:var(--blue)}.pbic--green{background:var(--green)}.pbic--purple{background:var(--purple)}.pbic--red{background:var(--red)}.pbic--orange,.pbic--amber,.pbic--yellow{background:var(--amber)}.pbic--pink{background:var(--pink)}.pbic--cyan,.pbic--teal{background:var(--teal)}.pbic--indigo{background:var(--indigo)}
+    /* loading state */
+    .loading-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: var(--space-10) var(--space-4);
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .loading-state .ti { font-size: 18px; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    @media (prefers-reduced-motion: reduce) {
-      .pbstatus.run .d, .pulse { animation: none; }
-      .pb-sum-loading .ti { animation: none; }
-      .loading-state .ti { animation: none; }
-      .pbrief, .nav-btn, .dec-act, .open-proj, .add-proj,
-      .pb-milestone, .pbname-go, .pb-bottom-toggle { transition: none; }
-      .pbrief:hover { transform: none; }
+    /* project icon color classes */
+    .pbic--gray { background: var(--text-sub); }
+    .pbic--blue { background: var(--blue); }
+    .pbic--green { background: var(--green); }
+    .pbic--purple { background: var(--purple); }
+    .pbic--red { background: var(--red); }
+    .pbic--orange, .pbic--amber, .pbic--yellow { background: var(--amber); }
+    .pbic--pink { background: var(--pink); }
+    .pbic--cyan, .pbic--teal { background: var(--teal); }
+    .pbic--indigo { background: var(--indigo); }
+
+    /* status line */
+    .pb-statusline {
+      margin: 0;
+      padding: 9px 12px;
+      background: var(--surface-2);
+      border-radius: var(--radius-lg);
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .pb-statusline .mono { font-family: var(--mono); font-size: 12px; color: var(--text); }
+    .pb-statusline.run { background: var(--green-bg); color: var(--text); }
+    .pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .agent-tag {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: var(--radius-xs);
+      background: var(--purple-bg);
+      color: var(--purple);
+    }
+    .pb-pct {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--green);
     }
 
-    .pb-statusline{margin:0;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-    .pb-statusline .mono{font-family:var(--mono);font-size:12px;color:var(--text)}
-    .pb-statusline.run{background:var(--green-bg);color:var(--text)}
-    .pulse{width:7px;height:7px;border-radius:50%;background:var(--green);animation:glow 2s ease-in-out infinite;flex-shrink:0}
-    .agent-tag{font-family:var(--mono);font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--purple-bg);color:var(--purple)}
-    .pb-pct{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--green)}
+    /* drill section label */
+    .drill-sec {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin: 0 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .pb-cell-shipped .relbox, .pb-cell-activity .timeline { flex: 1; min-height: 0; }
 
-    .drill-sec{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-sub);margin:0 0 8px;display:flex;align-items:center;gap:6px;flex-shrink:0}
-    .pb-cell-shipped .relbox,.pb-cell-activity .timeline{flex:1;min-height:0}
+    /* relbox (shipped detail) */
+    .relbox {
+      background: var(--surface-2);
+      border-radius: var(--radius-lg);
+      padding: 10px 12px;
+    }
+    .rel-name {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rel-name .cnt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text-sub); font-weight: 400; }
+    .feat { display: flex; gap: 7px; font-size: 13px; padding: 2px 0; }
+    .feat .plus { color: var(--green); font-weight: 700; font-family: var(--mono); }
+    .muted { color: var(--text-sub); font-size: 13px; }
 
-    .relbox{background:var(--surface-2);border-radius:8px;padding:11px 13px}
-    .rel-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px}
-    .rel-name .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-sub);font-weight:400}
-    .feat{display:flex;gap:8px;font-size:13px;padding:2px 0}
-    .feat .plus{color:var(--green);font-weight:700;font-family:var(--mono)}
-    .muted{color:var(--text-sub);font-size:13px}
+    /* timeline (recent activity) */
+    .timeline { background: var(--surface-2); border-radius: var(--radius-lg); overflow: hidden; }
+    .tl-row {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 6px 11px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .tl-row:first-child { border-top: none; }
+    .tl-time { font-family: var(--mono); font-size: 10px; color: var(--text-sub); min-width: 36px; }
+    .tl-badge {
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: var(--radius-xs);
+      flex-shrink: 0;
+      background: var(--green-bg);
+      color: var(--green);
+    }
+    .tl-badge.github { background: var(--purple-bg); color: var(--purple); }
+    .tl-txt { flex: 1; color: var(--text-muted); }
+    .tl-txt .mono { font-size: 11px; }
+    .tl-more { padding: 5px 11px; font-size: 11px; color: var(--text-sub); border-top: 1px solid var(--border); }
+    .tl-foot { padding: 5px 11px; border-top: 1px solid var(--border); font-size: 11px; }
+    .tl-foot a { color: var(--text-sub); text-decoration: none; font-family: var(--mono); transition: color 0.12s; }
+    .tl-foot a:hover { color: var(--text); }
 
-    .timeline{background:var(--surface-2);border-radius:8px;overflow:hidden}
-    .tl-row{display:flex;gap:9px;align-items:baseline;padding:7px 12px;border-top:1px solid var(--border);font-size:12px}
-    .tl-row:first-child{border-top:none}
-    .tl-time{font-family:var(--mono);font-size:10px;color:var(--text-sub);min-width:40px}
-    .tl-badge{font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;flex-shrink:0;background:var(--green-bg);color:var(--green)}
-    .tl-badge.github{background:var(--purple-bg);color:var(--purple)}
-    .tl-txt{flex:1;color:var(--text-muted)}.tl-txt .mono{font-size:11px}
-    .tl-more{padding:6px 12px;font-size:11px;color:var(--text-sub);border-top:1px solid var(--border)}
-    .tl-foot{padding:6px 12px;border-top:1px solid var(--border);font-size:11px}
-    .tl-foot a{color:var(--text-muted);text-decoration:none;font-family:var(--mono)}
-    .tl-foot a:hover{color:var(--text)}
-    .pb-foot{display:flex;justify-content:flex-end;padding:10px 18px 14px;border-top:1px solid var(--border)}
-    /* Bolder primary "open project" button: filled, weighted, clear affordance. */
-    .open-proj{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--surface);border:1px solid var(--text);background:var(--text);border-radius:6px;padding:7px 14px;cursor:pointer;text-decoration:none}
-    .open-proj:hover{opacity:.88}
+    /* project card footer */
+    .pb-foot {
+      display: flex;
+      justify-content: flex-end;
+      padding: 10px 16px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .open-proj {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--bg);
+      border: 1px solid var(--text);
+      background: var(--text);
+      border-radius: var(--radius-md);
+      padding: 6px 13px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.12s;
+    }
+    .open-proj:hover { opacity: 0.82; }
 
     /* add project */
-    .add-proj{border:1px dashed var(--border);border-radius:12px;padding:16px;text-align:center;color:var(--text-muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
-    .add-proj:hover{color:var(--text);border-color:var(--text-muted);background:var(--surface)}
+    .add-proj {
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-2xl);
+      padding: 14px;
+      text-align: center;
+      color: var(--text-sub);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      text-decoration: none;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .add-proj:hover { color: var(--text); border-color: var(--text-muted); background: var(--surface); }
 
-    .empty-note{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;color:var(--text-muted);font-size:13px;text-align:center}
+    .empty-note {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 16px;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+    }
 
-    /* responsive: narrow / mobile (Tailscale) — KPI strip wraps, no h-scroll */
-    @media(max-width:560px){
-      body{padding:18px 12px}
-      .kpis{flex-wrap:wrap}
-      .kpi{flex:1 1 50%;min-width:120px}
-      .brief-nav{width:100%}
+    /* ── reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .pbstatus.run .d,
+      .pulse,
+      .pb-sum-loading .ti,
+      .loading-state .ti { animation: none; }
+      .pbrief,
+      .nav-btn,
+      .dec-act,
+      .open-proj,
+      .add-proj,
+      .pbname-go,
+      .pb-bottom-toggle,
+      .planner-link,
+      .tl-foot a { transition: none; }
+    }
+
+    /* ── responsive ── */
+    @media (max-width: 560px) {
+      .page-body { padding: 16px 12px 40px; }
+      .status-bar { flex-wrap: wrap; }
+      .stat-cell { flex: 1 1 50%; min-width: 110px; }
+      .top-nav-date-nav { gap: 3px; }
+      .brief-date { font-size: 22px; }
+      /* hide the breadcrumb label so nav fits on small screens */
+      .top-nav-sep,
+      .top-nav-page { display: none; }
     }
   </style>
 </head>
 <body>
-  <header class="page-hdr" aria-label="Commander">
-    <span class="page-hdr-brand">Commander</span>
-  </header>
+  <nav class="top-nav" aria-label="Commander">
+    <span class="top-nav-brand">Commander</span>
+    <span class="top-nav-sep" aria-hidden="true" role="presentation"></span>
+    <span class="top-nav-page" id="top-nav-brief-label">Daily Brief</span>
+    <div class="top-nav-date-nav">
+      <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:13px"></i></button>
+      <button class="nav-btn today" onclick="gotoToday()" id="today-btn">Today</button>
+      <button class="nav-btn" id="refresh-btn" onclick="refreshBrief()">Refresh</button>
+      <span class="date-pick-wrap">
+        <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:12px"></i></button>
+        <input type="date" id="date-pick" aria-label="Pick a date" max="" onchange="onDatePick(event)">
+      </span>
+    </div>
+  </nav>
 
-  <div class="home" id="home">
-    <div class="loading-state" id="boot-note"><i class="ti ti-loader-2"></i> Loading daily brief…</div>
+  <div class="page-body">
+    <div id="home">
+      <div class="loading-state" id="boot-note"><i class="ti ti-loader-2"></i> Loading daily brief…</div>
+    </div>
   </div>
 
+  <script src="/static/visibility.js"></script>
   <script src="/static/add-project-modal.js"></script>
   <script src="/static/project-todo.js"></script>
   <script>
   // ── issue #842: client-side assembly of the CEO daily brief ──────────────
-  // Data sources (no hardcoded content):
-  //   • /api/brief/daily         — the stored home roll-up artifact (#841)
-  //   • /api/projects/<slug>/brief/summary — stored per-project AI summary (#840)
-  //   • /api/home                — slug → owner/repo map (for action endpoints)
   const MONTHS = ['January','February','March','April','May','June','July',
                   'August','September','October','November','December'];
   const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-  let _repoBySlug = {};   // slug -> owner/repo, for action endpoints
-  let _projBySlug = {};   // slug -> { name, icon, color } from /api/home
-  let _curDate = null;    // YYYY-MM-DD currently displayed
+  let _repoBySlug = {};
+  let _projBySlug = {};
+  let _curDate = null;
 
   const PBIC_PALETTE = new Set(['gray','blue','green','purple','red','orange','amber','yellow','pink','cyan','teal','indigo']);
   function _projectBadgeHtml(slug){
@@ -261,10 +801,13 @@
     return '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
   }
 
-  // Per-project collapse state for the bottom row (shipped detail + to-do).
   function _bottomHidden(slug){
-    try { return localStorage.getItem('pb_hide_bottom_' + slug) === '1'; }
-    catch(_){ return false; }
+    try {
+      const v = localStorage.getItem('pb_hide_bottom_' + slug);
+      if (v === null) return true; // first visit: default to hidden
+      return v === '1';
+    }
+    catch(_){ return true; }
   }
   function toggleBottom(slug){
     const card = document.querySelector('.pbrief[data-slug="' + (window.CSS && CSS.escape ? CSS.escape(slug) : slug) + '"]');
@@ -288,7 +831,6 @@
       .replace(/"/g,'&quot;');
   }
 
-  // Parse YYYY-MM-DD as a *local* date (avoid UTC shift on toLocale*).
   function parseDate(s){
     const [y,m,d] = String(s).split('-').map(Number);
     return new Date(y, m - 1, d);
@@ -300,11 +842,6 @@
   function todayIso(){ return fmtIso(new Date()); }
 
   // ── boot ──────────────────────────────────────────────────────────────────
-  // Deck/monitoring deep links open `/?project=<P>&view=<V>[&filter=errors]`.
-  // `/` serves this home page, so translate that into the canonical project URL
-  // and bounce there; project.html reads ?view= / ?filter= to pick the pane.
-  // view -> tab segment; the sub-view (board/running/history/summary) and the
-  // errors filter are carried in the query for project.html to apply.
   function _deckRedirect(){
     const p = new URLSearchParams(window.location.search);
     const project = p.get('project');
@@ -312,7 +849,7 @@
     const view = (p.get('view') || '').toLowerCase();
     const tab = (view === 'activity') ? 'logs'
               : (view === 'tickets')  ? 'tickets'
-              : 'sprint';   // running / board / history / summary all live here
+              : 'sprint';
     const q = new URLSearchParams();
     if (view) q.set('view', view);
     const filter = p.get('filter');
@@ -325,43 +862,21 @@
   }
 
   async function init(){
-    if (_deckRedirect()) return;   // bounced to the project view; stop here
-    try {
-      const home = await (await fetch('/api/home')).json();
-      (home.projects || []).forEach(p => {
-        if (!p.slug) return;
-        if (p.repo) _repoBySlug[p.slug] = p.repo;
-        _projBySlug[p.slug] = {
-          name: p.name || p.slug,
-          icon: p.icon || 'ti-folder',
-          color: p.color || p.icon_color || 'gray',
-        };
-      });
-    } catch(_) { /* repo map is best-effort; actions degrade gracefully */ }
-
+    if (_deckRedirect()) return;
     const url = new URL(window.location.href);
-    // No explicit ?date= → let the backend resolve the current brief day.
-    // The brief day rolls at the 6 AM anchor, so the calendar date is wrong
-    // between midnight and the anchor (it asked for a not-yet-started day
-    // and rendered empty).
     const d = url.searchParams.get('date');
     await loadBrief(d);
   }
 
   function summaryLoadingHtml(){
-    return '<span class="pb-sum-loading"><i class="ti ti-loader-2" style="font-size:14px"></i> Loading summary…</span>';
+    return '<span class="pb-sum-loading"><i class="ti ti-loader-2" style="font-size:13px"></i> Loading summary…</span>';
   }
 
   async function loadBrief(date){
     _curDate = date;
     const root = document.getElementById('home');
-    // Full-page boot spinner only on first paint; date changes keep the shell
-    // and show per-block summary loading instead.
     const isBoot = root.querySelector('#boot-note') && root.children.length === 1;
     if (isBoot) {
-      // Paint the layout shell (KPI strip + section headers + per-section
-      // spinners) immediately so the page appears instantly while the brief —
-      // which can be slow to assemble server-side — loads behind it.
       root.innerHTML = renderSkeleton(date);
     }
 
@@ -373,70 +888,86 @@
       root.innerHTML = '<div class="empty-note">Could not load the daily brief.</div>';
       return;
     }
-    // Adopt the backend-resolved brief day for the header and the date nav.
     date = date || (artifact && artifact.date) || todayIso();
     _curDate = date;
 
+    // sync date nav controls
+    const pick = document.getElementById('date-pick');
+    if (pick) { pick.value = date; pick.max = todayIso(); }
+    const todayBtn = document.getElementById('today-btn');
+    if (todayBtn) todayBtn.disabled = (date === todayIso());
+    // update nav breadcrumb
+    const navLabel = document.getElementById('top-nav-brief-label');
+    if (navLabel) {
+      const dt = parseDate(date);
+      navLabel.textContent = DOW[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
+    }
+
     const brief = (artifact && artifact.brief) || {};
-    const gk = brief.global_kpis || {};
     const decisions = brief.decisions || [];
     const projects = brief.projects || [];
+    const ranOvernight = brief.ran_overnight || [];
+    const overnight_failures = ranOvernight.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
+    const gk = Object.assign({}, brief.global_kpis || {}, { overnight_failures });
+
+    // Populate project metadata from enriched brief before rendering so
+    // renderProjectsShell can merge artifact + live slugs (issue #1778 AC1/AC5).
+    projects.forEach(p => {
+      const slug = p.project;
+      if (!slug) return;
+      if (p.repo) _repoBySlug[slug] = p.repo;
+      _projBySlug[slug] = {
+        name: p.name || slug,
+        icon: p.icon || 'ti-folder',
+        color: p.color || 'gray',
+      };
+    });
 
     let html = '';
     html += renderHeader(date, artifact, projects.length);
     html += renderKpis(gk);
-    // issue #864: planner state — what ran overnight + what's awaiting sign-off.
-    // Both the morning brief and the evening flow render from this same shared
-    // brief payload, so the "Waiting on you" list is identical across flows.
-    html += renderRanOvernight(brief.ran_overnight || []);
+    html += renderRanOvernight(ranOvernight);
     html += renderWaitingOnYou(brief.waiting_on_you || []);
     html += renderDecisions(decisions, projects);
     html += renderProjectsShell(projects, artifact.available);
-    // issue #884: advisor suggestions at end of brief body
     html += renderSuggestedNext(brief.suggested_next || []);
     root.innerHTML = html;
 
-    // hydrate per-project AI summaries from the stored summary store
-    projects.forEach(p => loadProjectSummary(p.project, date));
-
-    // AC1/AC3: mount the per-project to-do panel on the right of each block,
-    // keyed by slug so it shows the same list as the project view (#844).
+    // Populate brief summary from embedded data; fall back to per-project fetch
+    // only when the field was not embedded (issue #1778 AC1/AC5).
     projects.forEach(p => {
-      const slug = p.project;
-      const el = document.getElementById('todo-' + slug);
-      if (el && window.CommanderTodo) CommanderTodo.mount(el, slug);
+      const el = document.getElementById('sum-' + p.project);
+      if (!el) return;
+      if (p.briefSummary != null) {
+        el.textContent = p.briefSummary || 'No summary available.';
+      } else {
+        loadProjectSummary(p.project, date);
+      }
     });
 
-    // #880: hydrate the active-milestone progress indicator on each card.
-    projects.forEach(p => loadMilestone(p.project, p.repo));
+    // Batch-load todos and mount with preloaded data (issue #1778 AC1/AC3/AC4).
+    if (projects.length && window.CommanderTodo) {
+      const slugs = projects.map(p => p.project).filter(Boolean);
+      let todosMap = {};
+      try {
+        const tr = await fetch('/api/todos?projects=' + slugs.map(encodeURIComponent).join(','));
+        if (tr.ok) todosMap = await tr.json();
+      } catch(_) {}
+      projects.forEach(p => {
+        const slug = p.project;
+        const el = document.getElementById('todo-' + slug);
+        if (el) CommanderTodo.mount(el, slug, { preloadedData: todosMap[slug] || [] });
+      });
+    }
   }
 
-  // #880: fetch the active milestone for a project and reveal the indicator.
-  // No active milestone → the element stays hidden, card renders normally (AC3).
-  async function loadMilestone(slug, repo){
-    const el = document.getElementById('ms-' + slug);
-    if (!el || !repo) return;
-    try {
-      const r = await fetch('/api/home/milestone?repo=' + encodeURIComponent(repo));
-      if (!r.ok) return;
-      const m = await r.json();
-      if (!m || !m.label) return;
-      const name = m.title || 'Milestone';
-      el.querySelector('.pb-ms-name').textContent = name;
-      el.querySelector('.pb-ms-count').textContent = m.label;
-      el.setAttribute('aria-label', name + ': ' + m.label + ', open Roadmap tab');
-      el.classList.add('show');
-    } catch(_) { /* leave indicator hidden on error */ }
-  }
-
-  // ── AC1: brief header (date + covering-since subtitle) ─────────────────────
+  // ── brief header ──────────────────────────────────────────────────────────
   function renderHeader(date, artifact, projCount){
     const dt = parseDate(date);
     const dateStr = DOW[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
-    const prev = new Date(dt); prev.setDate(prev.getDate() - 1);
-    const prevLabel = DOW_SHORT[prev.getDay()] + ' ' + prev.getDate();
-    const isToday = date === todayIso();
-
     let cover = '';
     if (artifact && artifact.covering_since){
       cover = 'covering since ' + esc(artifact.covering_since) +
@@ -444,51 +975,44 @@
     } else {
       cover = projCount + ' project' + (projCount === 1 ? '' : 's');
     }
-
     return `
     <div class="brief-head">
       <div class="brief-l">
-        <div class="brief-kicker">Daily Brief</div>
         <div class="brief-date" id="brief-date">${esc(dateStr)}</div>
         <div class="brief-cover" id="brief-cover">${cover}</div>
       </div>
-      <div class="brief-nav">
-        <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:14px"></i> ${esc(prevLabel)}</button>
-        <button class="nav-btn today" onclick="gotoToday()"${isToday ? ' disabled' : ''}>Today</button>
-        <span class="date-pick-wrap">
-          <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:13px"></i></button>
-          <input type="date" id="date-pick" aria-label="Pick a date" value="${esc(date)}" max="${esc(todayIso())}" onchange="onDatePick(event)">
-        </span>
-      </div>
     </div>`;
   }
 
-  // ── AC3: global KPI strip ──────────────────────────────────────────────────
-  // Layout shell shown immediately on first paint while the brief loads (#1).
+  // ── skeleton ──────────────────────────────────────────────────────────────
   function renderSkeleton(date){
     return `<div class="brief-skeleton">
       ${renderKpis({})}
-      <div><div class="sec-title"><i class="ti ti-moon-stars"></i> Ran overnight</div>
+      <div class="sec"><div class="sec-hdr"><i class="ti ti-moon-stars"></i> Ran overnight</div>
         <div class="loading-state"><i class="ti ti-loader-2"></i> Loading…</div></div>
-      <div><div class="sec-title"><i class="ti ti-hourglass-high"></i> Waiting on you</div>
+      <div class="sec"><div class="sec-hdr"><i class="ti ti-hourglass-high"></i> Waiting on you</div>
         <div class="loading-state"><i class="ti ti-loader-2"></i> Loading…</div></div>
     </div>`;
   }
 
+  // ── KPI strip ─────────────────────────────────────────────────────────────
   function renderKpis(gk){
     const n = v => (v == null ? 0 : v);
+    const failures = n(gk.overnight_failures);
+    const failCell = failures > 0
+      ? `<div class="stat-cell"><span class="stat-v r">${failures}</span><span class="stat-l">Failed</span></div>`
+      : '';
     return `
-    <div class="kpis">
-      <div class="kpi"><div class="kpi-v g">${n(gk.sprints_shipped)}</div><div class="kpi-l">Sprints shipped</div></div>
-      <div class="kpi"><div class="kpi-v">${n(gk.tickets_done)}</div><div class="kpi-l">Tickets done</div></div>
-      <div class="kpi"><div class="kpi-v">${n(gk.in_progress)}</div><div class="kpi-l">In progress</div></div>
-      <div class="kpi"><div class="kpi-v a">${n(gk.needs_your_call)}</div><div class="kpi-l">Need your call</div></div>
+    <div class="status-bar">
+      ${failCell}
+      <div class="stat-cell"><span class="stat-v g">${n(gk.sprints_shipped)}</span><span class="stat-l">Sprints shipped</span></div>
+      <div class="stat-cell"><span class="stat-v">${n(gk.tickets_done)}</span><span class="stat-l">Tickets done</span></div>
+      <div class="stat-cell"><span class="stat-v">${n(gk.in_progress)}</span><span class="stat-l">In progress</span></div>
+      <div class="stat-cell"><span class="stat-v a">${n(gk.needs_your_call)}</span><span class="stat-l">Need your call</span></div>
     </div>`;
   }
 
-  // ── issue #864: ran overnight + waiting on you ─────────────────────────────
-  // Resolve the clickable target for a "ran overnight" entry: prefer the
-  // sprint's summary issue on GitHub; fall back to the project's board.
+  // ── ran overnight / waiting on you ────────────────────────────────────────
   function _briefLinkHref(entry){
     const repo = _repoBySlug[entry.project] || '';
     if (entry.summary_issue_number && repo){
@@ -497,11 +1021,15 @@
     return '/project/' + encodeURIComponent(entry.project || '') + '/sprint-mgmt';
   }
 
-  // AC1 / AC7: each scheduled sprint that ran overnight, its outcome, and a
-  // direct link to its sprint brief. Hidden entirely when nothing ran (AC4).
   function renderRanOvernight(list){
     if (!list || !list.length) return '';
-    const rows = list.map(e => {
+    const _ORDER = {failure: 0, partial: 1, success: 2};
+    const sorted = [...list].sort((a, b) => {
+      const oa = _ORDER[String(a.outcome || '').toLowerCase()] ?? 1;
+      const ob = _ORDER[String(b.outcome || '').toLowerCase()] ?? 1;
+      return oa - ob;
+    });
+    const rows = sorted.map(e => {
       const outcome = String(e.outcome || '').toLowerCase();
       const cls = ['success','failure','partial'].includes(outcome) ? outcome : 'partial';
       const ic = outcome === 'success' ? 'ti-circle-check'
@@ -512,26 +1040,30 @@
         ? ' target="_blank" rel="noopener"' : '';
       return `
         <div class="planner-row">
-          <span class="outcome-badge ${cls}"><i class="ti ${ic}" style="font-size:11px"></i>${esc(outcome || 'ran')}</span>
+          <span class="outcome-badge ${cls}"><i class="ti ${ic}" style="font-size:10px"></i>${esc(outcome || 'ran')}</span>
           <span class="label">${esc(prettyLabel(e.label))}</span>
           ${proj}
-          <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+          <a class="planner-link planner-spacer" href="${esc(_briefLinkHref(e))}"${external}>Sprint brief <i class="ti ti-arrow-up-right" style="font-size:11px"></i></a>
         </div>`;
     });
+    // Failures and partials must never be hidden — keep them all visible
+    const neverHide = sorted.filter(e => {
+      const o = String(e.outcome || '').toLowerCase();
+      return o === 'failure' || o === 'partial';
+    }).length;
     return `
-    <div>
-      <div class="sec-title"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
-      ${_briefCollapsibleRows(rows, 'ran')}
+    <div class="sec">
+      <div class="sec-hdr"><i class="ti ti-moon-stars"></i> Ran overnight <span class="count">${list.length}</span></div>
+      ${_briefCollapsibleRows(rows, 'ran', neverHide)}
     </div>`;
   }
 
-  // Show the first 3 rows; collapse the rest behind a "See N more" toggle so a
-  // long Ran-overnight / Waiting-on-you list doesn't dominate the home page.
-  function _briefCollapsibleRows(rowsArr, id){
-    if (rowsArr.length <= 3) return `<div class="planner-list">${rowsArr.join('')}</div>`;
-    const head = rowsArr.slice(0, 3).join('');
-    const rest = rowsArr.slice(3).join('');
-    const n = rowsArr.length - 3;
+  function _briefCollapsibleRows(rowsArr, id, neverHide){
+    const threshold = Math.max(3, neverHide || 0);
+    if (rowsArr.length <= threshold) return `<div class="planner-list">${rowsArr.join('')}</div>`;
+    const head = rowsArr.slice(0, threshold).join('');
+    const rest = rowsArr.slice(threshold).join('');
+    const n = rowsArr.length - threshold;
     return `<div class="planner-list">${head}</div>
       <div class="planner-list planner-more" id="${id}-more" style="display:none">${rest}</div>
       <button type="button" class="planner-see-more" id="${id}-btn" onclick="_briefToggleMore('${id}', ${n})">See ${n} more <i class="ti ti-chevron-down"></i></button>`;
@@ -547,9 +1079,6 @@
       : `See ${n} more <i class="ti ti-chevron-down"></i>`;
   }
 
-  // AC2 / AC8: every sprint awaiting human sign-off, with ticket count and
-  // estimated hours. Hidden entirely when nothing is pending (AC3). The same
-  // payload feeds the evening flow, so the list matches across both.
   function renderWaitingOnYou(list){
     if (!list || !list.length) return '';
     const rows = list.map(w => {
@@ -558,24 +1087,20 @@
       const proj = w.project ? ` · <span class="mono">${esc(w.project)}</span>` : '';
       return `
         <div class="planner-row">
-          <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:11px"></i>sign-off</span>
+          <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:10px"></i>sign-off</span>
           <span class="label">${esc(prettyLabel(w.label))}</span>
           <span class="planner-meta">${tc} ticket${tc === 1 ? '' : 's'} · <span class="mono">~${esc(hrs)}h</span>${proj}</span>
-          <a class="planner-link planner-spacer" href="/project/${esc(w.project || '')}/sprint-mgmt">Sign off <i class="ti ti-arrow-right" style="font-size:12px"></i></a>
+          <a class="planner-link planner-spacer" href="/project/${esc(w.project || '')}/sprint-mgmt">Sign off <i class="ti ti-arrow-right" style="font-size:11px"></i></a>
         </div>`;
     });
     return `
-    <div>
-      <div class="sec-title"><i class="ti ti-hourglass-high"></i> Waiting on you <span class="count">${list.length}</span></div>
+    <div class="sec">
+      <div class="sec-hdr"><i class="ti ti-hourglass-high"></i> Waiting on you <span class="count">${list.length}</span></div>
       ${_briefCollapsibleRows(rows, 'waiting')}
     </div>`;
   }
 
-  // ── AC4 / AC5: needs your decision ─────────────────────────────────────────
-  // Each decision type maps to one existing endpoint:
-  //   run_ready      → POST /api/sprints/run                  (Run sprint)
-  //   rework         → GET  /api/sprints/<label>/rerun-preview (Review rework)
-  //   branch_cleanup → POST /cleanup-stale-branches            (Clean up branches)
+  // ── decisions ─────────────────────────────────────────────────────────────
   function _sprintLabelFor(slug, projects){
     const p = (projects || []).find(x => x.project === slug) || {};
     return (p.in_progress && p.in_progress.sprint_label) ||
@@ -603,7 +1128,7 @@
         } else if (dec.type === 'branch_cleanup'){
           ic = '<span class="dec-ic"><i class="ti ti-git-branch-deleted"></i></span>';
           btn = `<button class="dec-act" id="dec-${i}" onclick="cleanupBranchesAction('${esc(repo)}',${i})">Clean up</button>`;
-        } else { // empty_sprint and any other advisory item — navigate to the board
+        } else {
           ic = '<span class="dec-ic"><i class="ti ti-clipboard-plus"></i></span>';
           btn = `<a class="dec-act" href="/project/${esc(dec.project)}/sprint-mgmt">Open</a>`;
         }
@@ -616,43 +1141,38 @@
       });
     }
     return `
-    <div>
-      <div class="sec-title"><i class="ti ti-gavel"></i> Needs your decision <span class="count">${decisions.length}</span></div>
+    <div class="sec">
+      <div class="sec-hdr"><i class="ti ti-gavel"></i> Needs your decision <span class="count">${decisions.length}</span></div>
       <div class="decisions">${rows}</div>
     </div>`;
   }
 
-  // ── issue #884: advisor "Suggested Next" section ───────────────────────────
-  // Rendered at the end of the brief body. Each item links to the project's
-  // Roadmap tab where the full advisor suggestions panel lives (issue #882).
-  // Section omitted entirely when the list is empty (AC5).
+  // ── suggested next ────────────────────────────────────────────────────────
   function renderSuggestedNext(list){
     if (!list || !list.length) return '';
     const rows = list.map(function(s){
       const slug = s.slug || '';
       const href = '/project/' + encodeURIComponent(slug) + '/roadmap';
-      const ic = s.type === 'look_ahead'
-        ? 'ti-arrow-right'
-        : 'ti-bulb';
+      const ic = s.type === 'look_ahead' ? 'ti-arrow-right' : 'ti-bulb';
       const badge = s.type === 'look_ahead'
         ? '<span class="outcome-badge partial" style="font-size:9px;padding:1px 6px"><i class="ti ti-arrow-right" style="font-size:9px"></i>look-ahead</span>'
         : '';
       return `
         <div class="planner-row">
-          <i class="ti ${ic}" style="font-size:14px;color:var(--text-muted);flex-shrink:0"></i>
+          <i class="ti ${ic}" style="font-size:13px;color:var(--text-muted);flex-shrink:0"></i>
           ${badge}
           <span style="flex:1;font-size:13px;color:var(--text)">${esc(s.text || '')}</span>
-          <a class="planner-link planner-spacer" href="${esc(href)}">Roadmap <i class="ti ti-arrow-up-right" style="font-size:12px"></i></a>
+          <a class="planner-link planner-spacer" href="${esc(href)}">Roadmap <i class="ti ti-arrow-up-right" style="font-size:11px"></i></a>
         </div>`;
     }).join('');
     return `
-    <div>
-      <div class="sec-title"><i class="ti ti-stars"></i> Suggested Next <span class="count">${list.length}</span></div>
+    <div class="sec">
+      <div class="sec-hdr"><i class="ti ti-stars"></i> Suggested next <span class="count">${list.length}</span></div>
       <div class="planner-list">${rows}</div>
     </div>`;
   }
 
-  // ── AC6–AC13: per-project brief blocks ─────────────────────────────────────
+  // ── project brief blocks ──────────────────────────────────────────────────
   function renderProjectsShell(projects, available){
     const artifactSlugs = new Set((projects || []).map(p => p.project));
     const liveSlugs = Object.keys(_repoBySlug);
@@ -678,14 +1198,13 @@
       blocks = mergedProjects.map(renderProject).join('');
     }
     return `
-    <div>
-      <div class="sec-title"><i class="ti ti-clipboard-text"></i> Project briefs <span class="count">${mergedProjects.length} project${mergedProjects.length === 1 ? '' : 's'}</span></div>
+    <div class="sec">
+      <div class="sec-hdr"><i class="ti ti-clipboard-text"></i> Projects <span class="count">${mergedProjects.length}</span></div>
       ${blocks}
       <a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>
     </div>`;
   }
 
-  // card-meta: compact progress % + last-activity timestamp in the card head (AC4)
   function _cardMeta(p){
     const pr = (p.in_progress && p.in_progress.progress) || {};
     const pct = pr.percent != null ? esc(pr.percent) + '%' : null;
@@ -720,7 +1239,6 @@
     return m ? ('Sprint ' + m[1]) : String(label || '');
   }
 
-  // AC9: permanent one-line status — running strip text, or idle "last shipped"
   function _statusLine(p){
     const ip = p.in_progress;
     if (ip && ip.sprint_label){
@@ -732,7 +1250,6 @@
       const pct = `<span class="pb-pct">${pr.percent || 0}% · ${pr.done || 0}/${pr.total || 0}</span>`;
       return `<div class="pb-statusline run"><span class="pulse"></span>${tnum}${ttitle} ${agent}${pct}</div>`;
     }
-    // idle — surface the last shipped sprint
     const last = (p.shipped || [])[0];
     let txt = 'idle';
     if (last && last.label){
@@ -780,7 +1297,6 @@
         : '';
       return `<div class="tl-row"><span class="tl-time">${esc(timeFmt)}</span><span class="tl-badge ${badge}">${esc(lbl)}</span><span class="tl-txt">${esc(a.message || '')}</span></div>`;
     }).join('');
-    // The "N more in Logs" row was redundant with the foot link below.
     const foot = `<div class="tl-foot"><a href="/project/${esc(p.project)}/logs">View all in Logs →</a></div>`;
     return `<div class="timeline">${rows}${foot}</div>`;
   }
@@ -791,22 +1307,16 @@
       <div class="pbrief${_bottomHidden(slug) ? ' hide-bottom' : ''}" data-slug="${esc(slug)}">
         <div class="pbrief-head">
           ${_projectTitleLinkHtml(slug)}
-          <a class="pb-milestone" id="ms-${esc(slug)}" href="/project/${esc(slug)}/roadmap"
-             title="Active milestone — open Roadmap"
-             aria-label="Active milestone progress, open Roadmap tab">
-            <i class="ti ti-flag-3"></i>
-            <span class="pb-ms-name"></span>
-            <span class="pb-ms-count"></span>
-          </a>
           ${_cardMeta(p)}
           ${_statusPill(p)}
-          <button class="pb-bottom-toggle" title="Hide/show shipped detail + to-do"
+          <button class="pb-bottom-toggle" title="Hide/show shipped detail and to-do"
                   aria-label="Toggle bottom row" onclick="toggleBottom('${esc(slug)}')">
             <i class="ti ti-chevron-up"></i></button>
         </div>
 
         <div class="pb-grid">
           <div class="pb-cell pb-cell-summary">
+            ${_statusLine(p)}
             <div class="pb-summary">
               <span class="pb-sum-ic"><i class="ti ti-clipboard-text"></i></span>
               <div class="pb-sum-body">
@@ -814,28 +1324,26 @@
                 <div class="pb-sum-text" id="sum-${esc(slug)}">${summaryLoadingHtml()}</div>
               </div>
             </div>
-            ${_statusLine(p)}
           </div>
           <div class="pb-cell pb-cell-todo">
             <div class="todo" id="todo-${esc(slug)}" data-project="${esc(slug)}"></div>
           </div>
           <div class="pb-cell pb-cell-shipped">
-            <div class="drill-sec"><i class="ti ti-rocket" style="font-size:13px"></i> Shipped detail</div>
+            <div class="drill-sec"><i class="ti ti-rocket" style="font-size:12px"></i> Shipped detail</div>
             ${_shippedDetail(p)}
           </div>
           <div class="pb-cell pb-cell-activity">
-            <div class="drill-sec"><i class="ti ti-timeline-event" style="font-size:13px"></i> Recent activity</div>
+            <div class="drill-sec"><i class="ti ti-timeline-event" style="font-size:12px"></i> Recent activity</div>
             ${_timeline(p)}
           </div>
         </div>
 
         <div class="pb-foot">
-          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt" aria-label="Open ${esc(slug)} project">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:13px" aria-hidden="true"></i></a>
+          <a class="open-proj" href="/project/${esc(slug)}/sprint-mgmt" aria-label="Open ${esc(slug)} project">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:12px" aria-hidden="true"></i></a>
         </div>
       </div>`;
   }
 
-  // AC8: hydrate the AI summary paragraph from the stored summary store
   async function loadProjectSummary(slug, date){
     const el = document.getElementById('sum-' + slug);
     if (!el) return;
@@ -850,7 +1358,7 @@
     }
   }
 
-  // ── AC2: date navigation ────────────────────────────────────────────────────
+  // ── date navigation ───────────────────────────────────────────────────────
   function _go(date){
     const url = new URL(window.location.href);
     if (date) url.searchParams.set('date', date);
@@ -863,15 +1371,20 @@
     dt.setDate(dt.getDate() - 1);
     _go(fmtIso(dt));
   }
-  // null → backend resolves the current brief day (6 AM anchor), not the
-  // calendar date, which is one day ahead between midnight and the anchor.
   function gotoToday(){ _go(null); }
+  async function refreshBrief(){
+    const b = document.getElementById('refresh-btn');
+    if (b) b.disabled = true;
+    try { await fetch('/api/brief/daily/regenerate', {method:'POST'}); } catch(_) {}
+    if (b) b.disabled = false;
+    loadBrief(_curDate);
+  }
   function onDatePick(ev){
     const v = ev.target.value;
     if (v) _go(v);
   }
 
-  // ── AC5: decision actions (one-tap, no full-page reload) ────────────────────
+  // ── decision actions ──────────────────────────────────────────────────────
   function _busy(id, text){
     const b = document.getElementById('dec-' + id);
     if (b){ b.disabled = true; b.textContent = text; }
@@ -909,7 +1422,6 @@
   async function cleanupBranchesAction(repo, id){
     const b = _busy(id, 'Scanning…');
     try {
-      // 1) scan for stale (merged) feature branches on this repo
       const scan = await fetch('/scan-stale-branches?repo=' + encodeURIComponent(repo));
       if (!scan.ok){ _fail(b, 'Clean up', true); return; }
       const sd = await scan.json();
@@ -917,7 +1429,6 @@
       (sd.sprints || sd.groups || []).forEach(g => (g.branches || []).forEach(x => branches.push(x)));
       (sd.branches || []).forEach(x => branches.push(x));
       if (!branches.length){ _done(b, 'Nothing stale ✓'); return; }
-      // 2) dry-run to see what is safe to delete (merged only)
       const dry = await (await fetch('/cleanup-stale-branches', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({repo, branches, confirm: false}),
@@ -927,7 +1438,6 @@
       if (!confirm('Delete ' + toDelete.length + ' merged branch(es)?\n\n' + toDelete.join('\n'))){
         _fail(b, 'Clean up', true); return;
       }
-      // 3) confirmed delete
       const res = await fetch('/cleanup-stale-branches', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({repo, branches, confirm: true}),
@@ -937,7 +1447,6 @@
     } catch(_) { _fail(b, 'Clean up', true); }
   }
 
-  // AC13: Add new project — navigation only (creation flow is a separate ticket)
   function openAdd(ev){
     if (typeof openAddProjectFlow === 'function' &&
         document.getElementById('apm-backdrop')){
@@ -945,7 +1454,7 @@
       openAddProjectFlow();
       return false;
     }
-    return true; // fall back to navigating to the existing add-project page
+    return true;
   }
 
   init();

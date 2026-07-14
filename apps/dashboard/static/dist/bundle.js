@@ -1,4 +1,84 @@
 (() => {
+  // apps/dashboard/static/src/activity-grouping.js
+  var _SPRINT_TYPE_PREFIX = "sprint_";
+  function _evlGetSprintLabel(ev) {
+    if (ev.sprint_label)
+      return ev.sprint_label;
+    const d = ev.detail || {};
+    if (d.sprint_label)
+      return d.sprint_label;
+    if (d.sprint_id)
+      return d.sprint_id;
+    if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target)
+      return ev.target;
+    return null;
+  }
+  function _isRunError(ev) {
+    const type = ev.type || "";
+    if (type === "ticket_failed")
+      return true;
+    if (type === "agent_finished") {
+      const st = (ev.detail || {}).status || "";
+      return st === "error" || st === "timed_out";
+    }
+    return false;
+  }
+  function evlGroupEventsByRun(events) {
+    if (!events || events.length === 0)
+      return [];
+    const order = [];
+    const map = {};
+    for (const ev of events) {
+      const sl = _evlGetSprintLabel(ev);
+      if (sl) {
+        const key = "sprint:" + sl;
+        if (!map[key]) {
+          map[key] = {
+            key,
+            sprint_label: sl,
+            isOther: false,
+            dayKey: null,
+            events: [],
+            hasErrors: false,
+            errorCount: 0,
+            outcome: null
+          };
+          order.push(key);
+        }
+        const g = map[key];
+        g.events.push(ev);
+        if (_isRunError(ev)) {
+          g.hasErrors = true;
+          g.errorCount += 1;
+        }
+        if (ev.type === "sprint_finished") {
+          const d = ev.detail || {};
+          const failed = d.failed || 0;
+          g.outcome = failed > 0 ? "failed" : "completed";
+        }
+      } else {
+        const ts = ev.timestamp || "";
+        const dayKey = ts.substring(0, 10) || "unknown";
+        const key = "other:" + dayKey;
+        if (!map[key]) {
+          map[key] = {
+            key,
+            sprint_label: "",
+            isOther: true,
+            dayKey,
+            events: [],
+            hasErrors: false,
+            errorCount: 0,
+            outcome: null
+          };
+          order.push(key);
+        }
+        map[key].events.push(ev);
+      }
+    }
+    return order.map((k) => map[k]);
+  }
+
   // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
@@ -650,7 +730,7 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["logs", "deploy", "metrics", "bulk-create"],
+    manage: ["logs", "deploy", "bulk-create"],
     planning: [
       "timeline",
       "compare",
@@ -663,7 +743,7 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
@@ -709,6 +789,7 @@
     const _topLevelTabs = [
       "sprint-mgmt",
       "tickets",
+      "metrics",
       "manage",
       "planning",
       "settings"
@@ -843,11 +924,30 @@
     const group = document.getElementById("stab-group-" + name);
     const isOpen = group.classList.contains("open");
     closeAllStabDropdowns();
-    if (!isOpen)
+    if (!isOpen) {
       group.classList.add("open");
+      if (window.innerWidth <= 430) {
+        const trigger = group.querySelector(".stab-trigger");
+        const dropdown = group.querySelector(".stab-dropdown");
+        if (trigger && dropdown) {
+          const rect = trigger.getBoundingClientRect();
+          dropdown.style.setProperty("position", "fixed");
+          dropdown.style.setProperty("top", rect.bottom + 2 + "px");
+          dropdown.style.setProperty("left", rect.left + "px");
+        }
+      }
+    }
   }
   function closeAllStabDropdowns() {
-    document.querySelectorAll(".stab-group.open").forEach((g) => g.classList.remove("open"));
+    document.querySelectorAll(".stab-group.open").forEach((g) => {
+      g.classList.remove("open");
+      const dropdown = g.querySelector(".stab-dropdown");
+      if (dropdown) {
+        dropdown.style.removeProperty("position");
+        dropdown.style.removeProperty("top");
+        dropdown.style.removeProperty("left");
+      }
+    });
   }
   document.addEventListener("click", closeAllStabDropdowns);
   var _subTabsEl = document.getElementById("sub-tabs");
@@ -953,6 +1053,142 @@
       const group = document.getElementById("stab-group-planning");
       if (group)
         group.style.display = "none";
+    }
+  }
+
+  // apps/dashboard/static/src/shell/visibility.js
+  var _viHandles = /* @__PURE__ */ new Map();
+  var _viIdSeq = 1e6;
+  function visibilityInterval(fn, delay) {
+    const fakeId = ++_viIdSeq;
+    let realId = null;
+    function stop() {
+      if (realId === null)
+        return;
+      clearInterval(realId);
+      realId = null;
+    }
+    function onVisChange() {
+      if (typeof document === "undefined")
+        return;
+      if (document.hidden) {
+        stop();
+      } else {
+        stop();
+        fn();
+        realId = setInterval(fn, delay);
+      }
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisChange);
+      if (!document.hidden) {
+        realId = setInterval(fn, delay);
+      }
+    }
+    _viHandles.set(fakeId, { stop, onVisChange });
+    return fakeId;
+  }
+  function installVisibilityGuard() {
+    if (typeof window === "undefined")
+      return;
+    const _orig = window.clearInterval.bind(window);
+    window.clearInterval = (id) => {
+      if (_viHandles.has(id)) {
+        const { stop, onVisChange } = _viHandles.get(id);
+        stop();
+        if (typeof document !== "undefined") {
+          document.removeEventListener("visibilitychange", onVisChange);
+        }
+        _viHandles.delete(id);
+      } else {
+        _orig(id);
+      }
+    };
+  }
+
+  // apps/dashboard/static/src/shell/snav-cache.js
+  var _snavNavStatusCache = {};
+  var _SNAV_NAV_STATUS_TTL = 15e3;
+  async function snavNavStatusFetch(url) {
+    const cached = _snavNavStatusCache[url];
+    if (cached && Date.now() - cached.ts < _SNAV_NAV_STATUS_TTL) {
+      return cached.data;
+    }
+    const res = await fetch(url);
+    if (!res.ok)
+      throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    _snavNavStatusCache[url] = { data, ts: Date.now() };
+    return data;
+  }
+  function snavNavStatusCacheClear(url) {
+    if (url) {
+      delete _snavNavStatusCache[url];
+    } else {
+      for (const k of Object.keys(_snavNavStatusCache)) {
+        delete _snavNavStatusCache[k];
+      }
+    }
+  }
+
+  // apps/dashboard/static/src/api.js
+  var _envPromise = null;
+  var _versionPromise = null;
+  var _settingsPromise = null;
+  function getEnvironment() {
+    if (!_envPromise) {
+      _envPromise = fetch("/api/environment").then((r) => r.json()).catch((err) => {
+        _envPromise = null;
+        throw err;
+      });
+    }
+    return _envPromise;
+  }
+  function getVersion() {
+    if (!_versionPromise) {
+      _versionPromise = fetch("/api/version", { cache: "no-store" }).then((r) => {
+        if (!r.ok)
+          throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }).catch((err) => {
+        _versionPromise = null;
+        throw err;
+      });
+    }
+    return _versionPromise;
+  }
+  function getSettings() {
+    if (!_settingsPromise) {
+      _settingsPromise = fetch("/api/settings").then((r) => {
+        if (!r.ok)
+          throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }).catch((err) => {
+        _settingsPromise = null;
+        throw err;
+      });
+    }
+    return _settingsPromise;
+  }
+  function invalidateSettings() {
+    _settingsPromise = null;
+  }
+
+  // apps/dashboard/static/src/device-login.js
+  var GH_AUTH_POLL_INTERVAL_MS = 2e3;
+  var _timer = null;
+  function startGhAuthPoll(pollFn) {
+    if (_timer != null) {
+      clearInterval(_timer);
+      _timer = null;
+    }
+    pollFn();
+    _timer = setInterval(pollFn, GH_AUTH_POLL_INTERVAL_MS);
+  }
+  function stopGhAuthPoll() {
+    if (_timer != null) {
+      clearInterval(_timer);
+      _timer = null;
     }
   }
 
@@ -1429,6 +1665,63 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
+  // apps/dashboard/static/src/sprint-board/health-strip.js
+  function _fmtPct(rate) {
+    return Math.round((rate || 0) * 100) + "%";
+  }
+  function _fmtDur(minutes) {
+    minutes = minutes || 0;
+    return minutes < 60 ? Math.round(minutes) + "m" : (minutes / 60).toFixed(1) + "h";
+  }
+  function _sHealthBuildHtml(data) {
+    const fpr = data && data.first_pass_rate || {};
+    const rwr = data && data.rework_rate || {};
+    const thr = data && data.throughput || {};
+    if ((fpr.total_completed || 0) <= 0)
+      return null;
+    const fprPct = _fmtPct(fpr.rate);
+    const rwrPct = _fmtPct(rwr.rate);
+    const durStr = _fmtDur(thr.avg_sprint_length_minutes);
+    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + `</span><span class="shs-label">avg sprint</span></span><a class="shs-see-more" href="#" onclick="switchTab('metrics');if(typeof anlShowTab==='function')anlShowTab('metrics');return false;">See more \u2192</a>`;
+  }
+  function _sHealthStripRender(data) {
+    const el = document.getElementById("sprint-health-strip");
+    if (!el)
+      return;
+    const html = _sHealthBuildHtml(data);
+    if (html === null) {
+      el.hidden = true;
+      return;
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+  }
+  function sprintHealthStripInit2(slug) {
+    if (!slug)
+      return;
+    if (typeof window !== "undefined" && window._anlHealthData) {
+      _sHealthStripRender(window._anlHealthData);
+      return;
+    }
+    if (typeof window !== "undefined" && window._anlHealthPromise)
+      return;
+    const url = "/api/projects/" + encodeURIComponent(slug) + "/analytics/metrics";
+    const p = fetch(url).then(function(r) {
+      return r.ok ? r.json() : null;
+    }).then(function(d) {
+      if (d) {
+        if (typeof window !== "undefined")
+          window._anlHealthData = d;
+        _sHealthStripRender(d);
+      }
+      return d;
+    }).catch(function() {
+      return null;
+    });
+    if (typeof window !== "undefined")
+      window._anlHealthPromise = p;
+  }
+
   // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
@@ -1898,7 +2191,9 @@ Replace the existing draft (${data.existing_label})?`
       return;
     _histExpanded.add(label);
     _histRenderLedger(_histLedgerData);
-    const el = document.querySelector(`.hist-card[data-label="${CSS.escape(label)}"]`);
+    const el = document.querySelector(
+      `.hist-card[data-label="${CSS.escape(label)}"]`
+    );
     if (el)
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -2075,7 +2370,13 @@ Replace the existing draft (${data.existing_label})?`
     if (wall != null)
       chips.push(_histStatChip("ti-clock", "wall", _histFmtSecs(wall)));
     if (hasRuns) {
-      chips.push(_histStatChip("ti-robot", "agent time", _histFmtSecs(stats.agent_total_seconds)));
+      chips.push(
+        _histStatChip(
+          "ti-robot",
+          "agent time",
+          _histFmtSecs(stats.agent_total_seconds)
+        )
+      );
     }
     if (tokens != null) {
       let tokVal = _histFmtTokens(tokens);
@@ -2089,34 +2390,44 @@ Replace the existing draft (${data.existing_label})?`
       if (stats.fix_round_count > 0) {
         const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
         const word = stats.fix_round_count === 1 ? "fix round" : "fix rounds";
-        chips.push(_histStatChip(
-          "ti-refresh",
-          "",
-          stats.fix_round_count + " " + word + (refs ? " (" + refs + ")" : ""),
-          "stat-chip--fix"
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-refresh",
+            "",
+            stats.fix_round_count + " " + word + (refs ? " (" + refs + ")" : ""),
+            "stat-chip--fix"
+          )
+        );
       }
       if (stats.slowest_ticket) {
-        chips.push(_histStatChip(
-          "ti-hourglass-low",
-          "slowest",
-          "#" + stats.slowest_ticket.ticket + " \xB7 " + _histFmtSecs(stats.slowest_ticket.seconds)
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-hourglass-low",
+            "slowest",
+            "#" + stats.slowest_ticket.ticket + " \xB7 " + _histFmtSecs(stats.slowest_ticket.seconds)
+          )
+        );
       }
       if (stats.parallel_saved_seconds != null) {
-        chips.push(_histStatChip(
-          "ti-arrows-split",
-          "parallel saved",
-          "~" + _histFmtSecs(stats.parallel_saved_seconds)
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-arrows-split",
+            "parallel saved",
+            "~" + _histFmtSecs(stats.parallel_saved_seconds)
+          )
+        );
       }
       if (stats.coder_backend_split && stats.coder_backend_split.cline_count > 0) {
         const bs = stats.coder_backend_split;
         const parts = [];
         if (bs.cline_count > 0)
-          parts.push("cline: " + bs.cline_count + " \xB7 " + _histFmtSecs(bs.cline_seconds));
+          parts.push(
+            "cline: " + bs.cline_count + " \xB7 " + _histFmtSecs(bs.cline_seconds)
+          );
         if (bs.claude_code_count > 0)
-          parts.push("claude-code: " + bs.claude_code_count + " \xB7 " + _histFmtSecs(bs.claude_code_seconds));
+          parts.push(
+            "claude-code: " + bs.claude_code_count + " \xB7 " + _histFmtSecs(bs.claude_code_seconds)
+          );
         if (parts.length)
           chips.push(_histStatChip("ti-server", "backend", parts.join(" | ")));
       }
@@ -2125,12 +2436,14 @@ Replace the existing draft (${data.existing_label})?`
         const reason = failed ? String(failed.failure_reason || "") : "";
         const crashAgent = /tester/i.test(reason) ? "tester" : "coder";
         const tail = reason ? " \xB7 " + reason.split("\n")[0].slice(0, 40) : "";
-        chips.push(_histStatChip(
-          "ti-alert-triangle",
-          "crash",
-          "#" + stats.crash.ticket + " \xB7 " + crashAgent + tail,
-          "stat-chip--crash"
-        ));
+        chips.push(
+          _histStatChip(
+            "ti-alert-triangle",
+            "crash",
+            "#" + stats.crash.ticket + " \xB7 " + crashAgent + tail,
+            "stat-chip--crash"
+          )
+        );
       }
     }
     const splitHtml = hasRuns ? _histSplitBarHtml(stats) : "";
@@ -2138,6 +2451,15 @@ Replace the existing draft (${data.existing_label})?`
     <div class="stat-chips">${chips.join("")}</div>
     ${splitHtml}
   </div>`;
+  }
+  function _histSeedRunStatsFromInline(sprints) {
+    if (!Array.isArray(sprints))
+      return;
+    for (const s of sprints) {
+      if (s && s.label && s.run_stats != null && !(s.label in _histRunStats)) {
+        _histRunStats[s.label] = s.run_stats;
+      }
+    }
   }
   async function _histLoadRunStats(label) {
     if (label in _histRunStats)
@@ -2204,9 +2526,7 @@ Replace the existing draft (${data.existing_label})?`
       } else if (doc.status === "failed") {
         body = '<span class="ps-skipped">Documenter failed</span>';
       } else if ((doc.files_touched || []).length) {
-        body = (doc.files_touched || []).map(
-          (f) => `<code class="ps-file">${escHtml(String(f))}</code>`
-        ).join("");
+        body = (doc.files_touched || []).map((f) => `<code class="ps-file">${escHtml(String(f))}</code>`).join("");
         if (doc.commit_sha) {
           body += `<div class="ps-meta">Commit ${escHtml(String(doc.commit_sha).slice(0, 8))}</div>`;
         }
@@ -2236,9 +2556,13 @@ Replace the existing draft (${data.existing_label})?`
         }
         const counts = [];
         if (rev.blockers)
-          counts.push(rev.blockers + " blocker" + (rev.blockers !== 1 ? "s" : ""));
+          counts.push(
+            rev.blockers + " blocker" + (rev.blockers !== 1 ? "s" : "")
+          );
         if (rev.suggestions)
-          counts.push(rev.suggestions + " suggestion" + (rev.suggestions !== 1 ? "s" : ""));
+          counts.push(
+            rev.suggestions + " suggestion" + (rev.suggestions !== 1 ? "s" : "")
+          );
         if (rev.nits)
           counts.push(rev.nits + " nit" + (rev.nits !== 1 ? "s" : ""));
         if (counts.length)
@@ -2380,14 +2704,18 @@ Replace the existing draft (${data.existing_label})?`
     const tokens = hasRuns && stats.total_tokens != null ? stats.total_tokens : s.tokens;
     const chips = [];
     if (wall != null)
-      chips.push(`<span class="hist-metric-chip">wall ${_histFmtSecs(wall)}</span>`);
+      chips.push(
+        `<span class="hist-metric-chip">wall ${_histFmtSecs(wall)}</span>`
+      );
     if (hasRuns) {
       chips.push(
         `<span class="hist-metric-chip">agent time ${_histFmtSecs(stats.agent_total_seconds)}</span>`
       );
     }
     if (tokens != null) {
-      chips.push(`<span class="hist-metric-chip">tokens ${_histFmtTokens(tokens)}</span>`);
+      chips.push(
+        `<span class="hist-metric-chip">tokens ${_histFmtTokens(tokens)}</span>`
+      );
     }
     if (hasRuns && stats.fix_round_count > 0) {
       const refs = (stats.fix_round_tickets || []).map((n) => "#" + n).join(", ");
@@ -2415,7 +2743,9 @@ Replace the existing draft (${data.existing_label})?`
     const rows = tickets.map((t) => {
       const dur = Math.max(0, (t.end || 0) - (t.start || 0));
       const fixN = (t.segments || []).filter((seg) => seg.fix_round).length;
-      let durLabel = _histFmtSecs(dur || t.segments?.reduce((n, seg) => n + (seg.duration || 0), 0));
+      let durLabel = _histFmtSecs(
+        dur || t.segments?.reduce((n, seg) => n + (seg.duration || 0), 0)
+      );
       if (fixN)
         durLabel += " \xB7 fix";
       const segs = (t.segments || []).map((seg) => {
@@ -2737,7 +3067,9 @@ Replace the existing draft (${data.existing_label})?`
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
       const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-      const childDisplay = sprintLabelDisplay(_histNextChildLabel(rawLabel)).replace("Sprint ", "");
+      const childDisplay = sprintLabelDisplay(
+        _histNextChildLabel(rawLabel)
+      ).replace("Sprint ", "");
       return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
       onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
       <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
@@ -2897,7 +3229,13 @@ Replace the existing draft (${data.existing_label})?`
         g.children.push(s);
       g.order = Math.min(g.order, i);
     }
-    const _UNSETTLED = /* @__PURE__ */ new Set(["needs_rework", "failed", "cancelled", "ready_to_merge", "running"]);
+    const _UNSETTLED = /* @__PURE__ */ new Set([
+      "needs_rework",
+      "failed",
+      "cancelled",
+      "ready_to_merge",
+      "running"
+    ]);
     const _groupUnsettled = (g) => [g.baseSprint, ...g.children || []].filter(Boolean).some((s) => _UNSETTLED.has((s.lifecycle_state || "").toLowerCase()));
     groupOrder.sort((a, b) => {
       const ua = _groupUnsettled(byBase.get(a)) ? 0 : 1;
@@ -2908,7 +3246,9 @@ Replace the existing draft (${data.existing_label})?`
     });
     return groupOrder.map((baseLabel) => {
       const g = byBase.get(baseLabel);
-      g.children.sort((a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub);
+      g.children.sort(
+        (a, b) => _histLabelParts(a.label).sub - _histLabelParts(b.label).sub
+      );
       return { baseLabel, baseSprint: g.baseSprint, children: g.children };
     });
   }
@@ -3043,7 +3383,12 @@ Replace the existing draft (${data.existing_label})?`
         accN += 1;
       }
     });
-    return { done, failed, avgAcc: accN ? accSum / accN : null, count: group.length };
+    return {
+      done,
+      failed,
+      avgAcc: accN ? accSum / accN : null,
+      count: group.length
+    };
   }
   function _histFoldAggHtml(group) {
     const a = _histFoldAgg(group);
@@ -3095,7 +3440,9 @@ Replace the existing draft (${data.existing_label})?`
       btn.disabled = true;
     }
     try {
-      const resp = await fetch("/scan-stale-branches?repo=" + encodeURIComponent(repo));
+      const resp = await fetch(
+        "/scan-stale-branches?repo=" + encodeURIComponent(repo)
+      );
       if (resp.ok) {
         const data = await resp.json();
         _histStaleBySprint = data.by_sprint || {};
@@ -3118,16 +3465,21 @@ Replace the existing draft (${data.existing_label})?`
     const s = (_histLedgerData || []).find((x) => x.label === label);
     if (!s || !s.reconciliation)
       return;
-    const staleCheck = (s.reconciliation.checks || []).find((c) => !c.ok && c.name === "stale_labels");
+    const staleCheck = (s.reconciliation.checks || []).find(
+      (c) => !c.ok && c.name === "stale_labels"
+    );
     if (!staleCheck)
       return;
     const tickets = Array.isArray(staleCheck.tickets) ? staleCheck.tickets : [];
     try {
-      const resp = await fetch("/api/sprints/" + encodeURIComponent(label) + "/clear-stale-labels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, tickets })
-      });
+      const resp = await fetch(
+        "/api/sprints/" + encodeURIComponent(label) + "/clear-stale-labels",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: repo, tickets })
+        }
+      );
       if (resp.ok) {
         await _histLoadLedger2();
       }
@@ -3290,6 +3642,7 @@ Replace the existing draft (${data.existing_label})?`
         const sprints = data.sprints || [];
         _histLedgerData = sprints;
         globalThis._histLedgerData = sprints;
+        _histSeedRunStatsFromInline(sprints);
         _histLedgerCacheRepo = repo;
         _histLedgerCacheAt = Date.now();
         const histOpen = document.getElementById("smgmt-subview-history")?.classList.contains("show");
@@ -3341,7 +3694,9 @@ Replace the existing draft (${data.existing_label})?`
     return _nextSprintSublabel(parentLabel);
   }
   function _histBulkSignOffTargets(sprints) {
-    const groups = _histGroupSprints(sprints || []).filter(_histGroupHasActionable);
+    const groups = _histGroupSprints(sprints || []).filter(
+      _histGroupHasActionable
+    );
     const targets = [];
     const skipLabels = /* @__PURE__ */ new Set();
     for (const g of groups) {
@@ -3386,9 +3741,11 @@ Replace the existing draft (${data.existing_label})?`
       const disp = sprintLabelDisplay(t.label);
       return t.kind === "bulk" ? `${disp} (bulk complete lineage)` : disp;
     }).join("\n");
-    if (!confirm(`Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
+    if (!confirm(
+      `Sign off ${targets.length} sprint(s)? Each will run Complete (merge + close UAT).
 
-${listing}`)) {
+${listing}`
+    )) {
       return;
     }
     if (typeof finishSprintAndWait !== "function") {
@@ -3415,7 +3772,9 @@ ${listing}`)) {
       try {
         if (kind === "bulk") {
           if (typeof bulkCompleteLineageAndWait !== "function") {
-            throw new Error("Bulk complete helper unavailable \u2014 refresh the page.");
+            throw new Error(
+              "Bulk complete helper unavailable \u2014 refresh the page."
+            );
           }
           await bulkCompleteLineageAndWait(label);
         } else {
@@ -3430,7 +3789,10 @@ ${listing}`)) {
       } catch (e) {
         failed = { label, message: e.message || String(e) };
         if (typeof _smgmtBoardLog === "function") {
-          _smgmtBoardLog(`\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`, "err");
+          _smgmtBoardLog(
+            `\u2717 ${sprintLabelDisplay(label)}: ${failed.message}`,
+            "err"
+          );
         }
         break;
       }
@@ -3463,32 +3825,38 @@ ${listing}`)) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: "running",
-      mode: "indeterminate",
-      current: current || "Loading preview\u2026"
-    }, {
-      id: "rr-preview-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: "running",
+        mode: "indeterminate",
+        current: current || "Loading preview\u2026"
+      },
+      {
+        id: "rr-preview-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _rrShowCreateProgress(done, total, current, status, error) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: status || "running",
-      mode: "bar",
-      done: done || 0,
-      total: total || 3,
-      current: current || "",
-      error: error || "",
-      result: status === "done" ? "Sub-sprint created" : ""
-    }, {
-      id: "rr-create-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: status || "running",
+        mode: "bar",
+        done: done || 0,
+        total: total || 3,
+        current: current || "",
+        error: error || "",
+        result: status === "done" ? "Sub-sprint created" : ""
+      },
+      {
+        id: "rr-create-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _rrOpen() {
@@ -3513,9 +3881,13 @@ ${listing}`)) {
     return "rr-cat-queued";
   }
   function _rrUpdateState() {
-    const checkboxes = document.querySelectorAll("#rr-ticket-list input[type=checkbox]");
+    const checkboxes = document.querySelectorAll(
+      "#rr-ticket-list input[type=checkbox]"
+    );
     const checked = Array.from(checkboxes).filter((c) => c.checked);
-    const uatChecked = Array.from(checkboxes).filter((c) => c.checked && c.dataset.cat === "UAT").length;
+    const uatChecked = Array.from(checkboxes).filter(
+      (c) => c.checked && c.dataset.cat === "UAT"
+    ).length;
     const confirmBtn = document.getElementById("rr-confirm-btn");
     if (confirmBtn)
       confirmBtn.disabled = checked.length === 0;
@@ -3536,22 +3908,27 @@ ${listing}`)) {
   }
   async function smgmtRerunSprint(label) {
     const repo = _smgmtRepo();
-    if (!repo)
+    if (!repo) {
+      _smgmtShowToast(
+        "No project loaded \u2014 please refresh and try again.",
+        "warning"
+      );
       return;
+    }
     _rrLabel = label;
     _rrVersionedLabel = null;
-    document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-    _rrShowPreviewLoading("Loading preview\u2026");
-    document.getElementById("rr-content").classList.add("hidden");
-    document.getElementById("rr-error").classList.add("hidden");
-    document.getElementById("rr-error").textContent = "";
-    const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn) {
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = "Create sprint and run";
-    }
     _rrOpen();
     try {
+      document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
+      _rrShowPreviewLoading("Loading preview\u2026");
+      document.getElementById("rr-content").classList.add("hidden");
+      document.getElementById("rr-error").classList.add("hidden");
+      document.getElementById("rr-error").textContent = "";
+      const confirmBtn = document.getElementById("rr-confirm-btn");
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Create sprint and run";
+      }
       const res = await fetch(
         `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
       );
@@ -3585,6 +3962,7 @@ ${listing}`)) {
       const errEl = document.getElementById("rr-error");
       errEl.textContent = "Failed to load preview: " + e.message;
       errEl.classList.remove("hidden");
+      _smgmtShowToast("Re-run preview failed: " + e.message, "error");
     }
   }
   async function _rrConfirm() {
@@ -3592,7 +3970,9 @@ ${listing}`)) {
     if (!_rrLabel || !repo)
       return;
     const parentLabel = _rrLabel;
-    const checkboxes = Array.from(document.querySelectorAll("#rr-ticket-list input[type=checkbox]"));
+    const checkboxes = Array.from(
+      document.querySelectorAll("#rr-ticket-list input[type=checkbox]")
+    );
     const ticketNumbers = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
     if (ticketNumbers.length === 0)
       return;
@@ -3609,7 +3989,10 @@ ${listing}`)) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticket_numbers: ticketNumbers, auto_run: false })
+          body: JSON.stringify({
+            ticket_numbers: ticketNumbers,
+            auto_run: false
+          })
         }
       );
       if (!res.ok) {
@@ -3619,7 +4002,9 @@ ${listing}`)) {
           detail = parsed.detail || detail;
         } catch (_) {
         }
-        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        throw new Error(
+          typeof detail === "string" ? detail : JSON.stringify(detail)
+        );
       }
       const data = await res.json();
       const subLabel = data.sub_label;
@@ -3627,14 +4012,18 @@ ${listing}`)) {
       if (typeof _smgmtApplyRerunOptimistic === "function") {
         _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
       }
-      await loadSprintMgmt(true);
+      loadSprintMgmt(true).catch(() => {
+      });
       if (typeof globalThis._histLoadLedger === "function") {
-        await globalThis._histLoadLedger(repo);
+        globalThis._histLoadLedger(repo).catch(() => {
+        });
       }
       _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
       const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
       if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(`${subDisplay} created with label errors \u2014 check GitHub.`);
+        _smgmtShowToast(
+          `${subDisplay} created with label errors \u2014 check GitHub.`
+        );
       } else {
         _smgmtShowToast(`${subDisplay} ready \u2014 confirm run`);
       }
@@ -3644,12 +4033,14 @@ ${listing}`)) {
       }
       _rrClose();
     } catch (e) {
-      _rrShowCreateProgress(0, 3, "", "error", e.message || "Failed to create re-run sprint");
+      const errMsg = e.message || "Failed to create re-run sprint";
+      _rrShowCreateProgress(0, 3, "", "error", errMsg);
       const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to re-run sprint: " + e.message;
+      errEl.textContent = "Failed to re-run sprint: " + errMsg;
       errEl.classList.remove("hidden");
       document.getElementById("rr-loading").classList.add("hidden");
       document.getElementById("rr-content").classList.remove("hidden");
+      _smgmtShowToast("Re-run failed: " + errMsg, "error");
       if (confirmBtn) {
         confirmBtn.disabled = false;
         confirmBtn.textContent = _rrVersionedLabel ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}` : "Create sprint and run";
@@ -4717,6 +5108,118 @@ Resolve manually and re-run Bulk complete.`,
 
   // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
+  var _smgmtAggregateCards = null;
+  function _smgmtBuildAggCards(agg) {
+    const sections = agg.sections || {};
+    const all = [
+      ...sections.running || [],
+      ...sections.needs_rework || [],
+      ...sections.ready_to_merge || [],
+      ...sections.draft || [],
+      ...sections.lineage || []
+    ];
+    const idx = {};
+    for (const card of all) {
+      if (card.label)
+        idx[card.label] = card;
+      for (const cl of card.chain || []) {
+        if (!idx[cl])
+          idx[cl] = card;
+      }
+    }
+    return idx;
+  }
+  function _smgmtAggToRenderData(agg) {
+    const sections = agg.sections || {};
+    const allCards = [
+      ...sections.running || [],
+      ...sections.needs_rework || [],
+      ...sections.ready_to_merge || [],
+      ...sections.draft || [],
+      ...sections.lineage || []
+    ];
+    const _ranStates = /* @__PURE__ */ new Set([
+      "running",
+      "needs_rework",
+      "ready_to_merge",
+      "partial_finished",
+      "failed",
+      "completed"
+    ]);
+    const issues = [];
+    const sprintLabels = /* @__PURE__ */ new Set();
+    const sprint_has_run = {};
+    const sprint_parents = {};
+    const aggregateBuckets = {};
+    const sectionEntries = [
+      ["running", sections.running || []],
+      ["needs_rework", sections.needs_rework || []],
+      ["ready_to_merge", sections.ready_to_merge || []],
+      ["draft", sections.draft || []],
+      ["lineage", sections.lineage || []]
+    ];
+    for (const [sectionName, cards] of sectionEntries) {
+      for (const card of cards) {
+        const label = card.label;
+        if (!label)
+          continue;
+        sprintLabels.add(label);
+        aggregateBuckets[label] = sectionName;
+        sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+        for (const t of card.tickets || []) {
+          issues.push({ ...t, sprint_label: label });
+        }
+        const chain = card.chain || [];
+        for (let i = 0; i < chain.length; i++) {
+          const cl = chain[i];
+          sprintLabels.add(cl);
+          if (!(cl in aggregateBuckets))
+            aggregateBuckets[cl] = "lineage";
+          if (!(cl in sprint_has_run))
+            sprint_has_run[cl] = sprint_has_run[label];
+        }
+        for (let i = 1; i < chain.length; i++) {
+          if (!sprint_parents[chain[i]])
+            sprint_parents[chain[i]] = chain[i - 1];
+        }
+      }
+    }
+    for (const t of (sections.backlog || {}).tickets || []) {
+      issues.push({ ...t, sprint_label: null });
+    }
+    const order = [...sprintLabels].sort((a, b) => {
+      const ma = String(a).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      const mb = String(b).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+      if (!ma || !mb)
+        return String(a).localeCompare(String(b));
+      const na = parseInt(ma[1], 10);
+      const nb = parseInt(mb[1], 10);
+      if (na !== nb)
+        return na - nb;
+      return parseInt(ma[2] || 0, 10) - parseInt(mb[2] || 0, 10);
+    });
+    const sprintNumSet = /* @__PURE__ */ new Set();
+    for (const l of order) {
+      const m = String(l).match(/^sprint-(\d+)/);
+      if (m)
+        sprintNumSet.add(parseInt(m[1], 10));
+    }
+    const sprints = [...sprintNumSet].sort((a, b) => a - b);
+    const finished_sprints = allCards.filter((c) => c.lifecycle_state === "completed" && c.label).map((c) => c.label);
+    return {
+      sprints,
+      order,
+      issues,
+      finished_sprints,
+      merged_sprints: [...finished_sprints],
+      sprint_parents,
+      sprint_rerun_into: {},
+      sprint_plan_states: {},
+      sprint_has_run,
+      sprint_signoff: {},
+      _aggregateBuckets: aggregateBuckets
+    };
+  }
   function _smgmtSignoffState(label) {
     if (typeof globalThis !== "undefined" && globalThis._commanderFeatures && globalThis._commanderFeatures.signoff !== true) {
       return null;
@@ -4793,23 +5296,29 @@ Resolve manually and re-run Bulk complete.`,
         delete _smgmtFinishCards[k];
     }
     try {
+      if (typeof sprintHealthStripInit === "function") {
+        sprintHealthStripInit(_slug);
+      }
       if (typeof _smgmtEnsureCapData === "function") {
         _smgmtEnsureCapData();
       }
-      const [resp, runningResp] = await Promise.all([
-        fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-        fetch("/api/sprints/running-all").catch(() => null)
-      ]);
-      if (!resp.ok) {
-        let msg = "Failed to load sprints.";
-        const d = await resp.json().catch(() => null);
+      _smgmtAggregateCards = null;
+      const aggResp = await fetch(
+        "/api/board?project=" + encodeURIComponent(repo)
+      );
+      if (!aggResp.ok) {
+        let msg = "Failed to load board.";
+        const d = await aggResp.json().catch(() => null);
         const detail = d && typeof d.detail === "string" ? d.detail : "";
-        if (resp.status === 429 || /rate limit/i.test(detail)) {
+        if (aggResp.status === 429 || /rate limit/i.test(detail)) {
           msg = detail || "GitHub API rate limit reached \u2014 retry shortly.";
         }
         throw new Error(msg);
       }
-      const data = await resp.json();
+      const agg = await aggResp.json();
+      _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+      if (typeof window !== "undefined")
+        window._smgmtAggregateCards = _smgmtAggregateCards;
       if (_smgmtLiveCacheRepo !== repo) {
         _smgmtLiveCacheRepo = repo;
         for (const k of Object.keys(_smgmtLiveCache))
@@ -4817,20 +5326,15 @@ Resolve manually and re-run Bulk complete.`,
       }
       if (typeof _smgmtLingerRestore === "function")
         _smgmtLingerRestore(repo);
-      const prevRunning = new Set(_smgmtRunningLabels);
+      const prevRunningAgg = new Set(_smgmtRunningLabels);
       _smgmtRunningLabels = /* @__PURE__ */ new Set();
       _smgmtAnySprintRunning = false;
-      if (runningResp && runningResp.ok) {
-        const runningData = await runningResp.json();
-        const running = runningData.running || [];
-        running.forEach((r) => {
-          if (r.project === repo) {
-            _smgmtRunningLabels.add(r.sprint_label);
-          }
-        });
-        _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      for (const card of (agg.sections || {}).running || []) {
+        if (card.label)
+          _smgmtRunningLabels.add(card.label);
       }
-      for (const label of prevRunning) {
+      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+      for (const label of prevRunningAgg) {
         if (!_smgmtRunningLabels.has(label) && typeof _smgmtLingerStart === "function") {
           _smgmtLingerStart(label);
         }
@@ -4839,6 +5343,7 @@ Resolve manually and re-run Bulk complete.`,
         _smgmtRunningLabels.add(optimisticRunningLabel);
         _smgmtAnySprintRunning = true;
       }
+      const data = _smgmtAggToRenderData(agg);
       _smgmtRender(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
         _smgmtHydrateSchedToggles(repo);
@@ -4873,7 +5378,9 @@ Resolve manually and re-run Bulk complete.`,
     return m && m[2] ? parseInt(m[2], 10) : 0;
   }
   function _smgmtChildrenForParent(parentLabel, parents, order) {
-    const fromMeta = (order || []).filter((l) => (parents || {})[l] === parentLabel);
+    const fromMeta = (order || []).filter(
+      (l) => (parents || {})[l] === parentLabel
+    );
     const fromLabel = _smgmtSprintSubIndex(parentLabel) === 0 ? (order || []).filter(
       (l) => l !== parentLabel && _smgmtSprintBaseLabel(l) === parentLabel && _smgmtSprintSubIndex(l) > 0
     ) : [];
@@ -4907,7 +5414,9 @@ Resolve manually and re-run Bulk complete.`,
     return [...members].sort(_smgmtCompareSprintLabels)[members.length - 1];
   }
   function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
-    return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+    return Boolean(
+      _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order)
+    );
   }
   function _smgmtShouldCollapseToLineage(label, parents, rerunInto, order) {
     if (_smgmtShouldCollapseParent(label, parents, rerunInto, order))
@@ -4952,7 +5461,12 @@ Resolve manually and re-run Bulk complete.`,
     const _rerunInto = data.sprint_rerun_into || {};
     _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
     const orderedLabels = orderedLabelsRaw.filter((label) => {
-      if (_smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)) {
+      if (_smgmtShouldCollapseToLineage(
+        label,
+        _sprintParents,
+        _rerunInto,
+        orderedLabelsRaw
+      )) {
         const latest = _smgmtLatestLineageLabel(
           _smgmtSprintBaseLabel(label),
           _sprintParents,
@@ -4983,7 +5497,11 @@ Resolve manually and re-run Bulk complete.`,
     _smgmtFinishedLabels = _finishedSet;
     const focusGuideEl = document.getElementById("smgmt-focus-guide");
     if (focusGuideEl) {
-      focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
+      focusGuideEl.innerHTML = _smgmtFocusGuideHtml(
+        data,
+        orderedLabels,
+        bySprint
+      );
     }
     const _planStates = data.sprint_plan_states || {};
     const _buildCard = (label) => {
@@ -5023,8 +5541,12 @@ Resolve manually and re-run Bulk complete.`,
       );
       return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + cardHtml + `</div>`;
     };
-    const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
-    const otherLabels = orderedLabels.filter((l) => !_smgmtResolvedAncestors.has(l));
+    const lineageLabels = orderedLabels.filter(
+      (l) => _smgmtResolvedAncestors.has(l)
+    );
+    const otherLabels = orderedLabels.filter(
+      (l) => !_smgmtResolvedAncestors.has(l)
+    );
     const mergeLabels = [];
     const reworkLabels = [];
     const runningLabels = [];
@@ -5045,12 +5567,18 @@ Resolve manually and re-run Bulk complete.`,
       if (!labels.length)
         return "Lineage";
       const first = sprintLabelDisplay(labels[0]).replace("Sprint ", "");
-      const last = sprintLabelDisplay(labels[labels.length - 1]).replace("Sprint ", "");
+      const last = sprintLabelDisplay(labels[labels.length - 1]).replace(
+        "Sprint ",
+        ""
+      );
       return first === last ? `Lineage ${first}` : `Lineage ${first} \u2192 ${last}`;
     };
     let cards = "";
     if (lineageLabels.length > 0) {
-      cards += sectionLabel(lineageRangeLabel(lineageLabels), "smgmt-section-lineage");
+      cards += sectionLabel(
+        lineageRangeLabel(lineageLabels),
+        "smgmt-section-lineage"
+      );
       cards += `<div class="smgmt-board-section smgmt-board-section--lineage">`;
       cards += lineageLabels.map(_buildCard).join("");
       cards += `</div>`;
@@ -5219,6 +5747,18 @@ Resolve manually and re-run Bulk complete.`,
     }
   }
   function _smgmtCardBucket(label, planStates) {
+    const aggBuckets = _smgmtData && _smgmtData._aggregateBuckets;
+    if (aggBuckets && label in aggBuckets) {
+      if (_smgmtRunningLabels.has(label))
+        return "running";
+      const inLingerAgg = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+      if (inLingerAgg && !(_smgmtData.sprint_has_run || {})[label])
+        return "running";
+      const b = aggBuckets[label];
+      if (b === "running" || b === "needs_rework" || b === "ready_to_merge" || b === "draft") {
+        return b;
+      }
+    }
     if (_smgmtRunningLabels.has(label))
       return "running";
     const inLinger = typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -5254,11 +5794,10 @@ Resolve manually and re-run Bulk complete.`,
   function _smgmtHasLedgerRun(label) {
     return Boolean((_smgmtData?.sprint_has_run || {})[label]);
   }
-  async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
+  async function _smgmtFetchMissingOutcomes(orderedLabels, _bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    const toFetch = [];
     for (const label of orderedLabels) {
       if (_smgmtRunningLabels.has(label))
         continue;
@@ -5266,141 +5805,65 @@ Resolve manually and re-run Bulk complete.`,
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
-      if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label))
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card || card.outcome == null)
         continue;
-      toFetch.push(label);
+      const outcome = card.outcome;
+      _smgmtOutcomeCache[label] = outcome;
+      const isAncestor = _smgmtResolvedAncestors.has(label);
+      if (isAncestor) {
+        _smgmtUpdateAncestorRow(label, outcome);
+      } else {
+        _smgmtInjectOutcomeBand(label, outcome);
+      }
     }
-    await Promise.all(
-      toFetch.map(async (label) => {
-        const isAncestor = _smgmtResolvedAncestors.has(label);
-        const previewQs = isAncestor ? "&preview=1" : "";
-        try {
-          const resp = await fetch(
-            `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}${previewQs}`
-          );
-          if (resp.ok) {
-            const outcome = await resp.json();
-            _smgmtOutcomeCache[label] = outcome;
-            if (isAncestor) {
-              _smgmtUpdateAncestorRow(label, outcome);
-            } else {
-              _smgmtInjectOutcomeBand(label, outcome);
-            }
-            return;
-          }
-          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-          _smgmtOutcomeCache[label] = fallback;
-          if (isAncestor && fallback) {
-            _smgmtUpdateAncestorRow(label, fallback);
-          } else if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, null);
-          }
-        } catch (_) {
-          const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-          _smgmtOutcomeCache[label] = fallback;
-          if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, fallback || null);
-          }
-        }
-      })
-    );
-  }
-  function _smgmtOutcomeFromBoard(label, tickets) {
-    if (!tickets || tickets.length === 0)
-      return null;
-    const issues = tickets.map((t) => {
-      const labelNames = (t.labels || []).map((l) => l.name);
-      let outcome = "skipped";
-      if (labelNames.includes("UAT-approved") || t.status === "done")
-        outcome = "done";
-      else if (labelNames.includes("needs-rework") || labelNames.includes("need-rework"))
-        outcome = "failed";
-      else if (t.status === "uat")
-        outcome = "uat";
-      else if (t.status === "sit" || t.status === "in-progress")
-        outcome = "skipped";
-      return { number: t.number, title: t.title || "", outcome };
-    });
-    const counts = { done: 0, failed: 0, skipped: 0, uat: 0 };
-    for (const iss of issues) {
-      const k = iss.outcome === "uat" ? "uat" : iss.outcome;
-      if (counts[k] !== void 0)
-        counts[k] += 1;
-    }
-    return {
-      sprint_label: label,
-      partial: true,
-      state: "partial",
-      lifecycle: "unknown",
-      counts,
-      wall_clock_secs: 0,
-      issues
-    };
   }
   async function _smgmtLoadEstimates(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    await Promise.all(orderedLabels.map(async (label) => {
-      const tickets = bySprint[label] || [];
-      if (tickets.length === 0)
-        return;
-      for (const t of tickets)
-        _smgmtTicketToSprint[t.number] = label;
-      const issueNums = tickets.map((t) => t.number).join(",");
-      try {
-        const resp = await fetch(
-          `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`
-        );
-        if (!resp.ok)
+    await Promise.all(
+      orderedLabels.map(async (label) => {
+        const tickets = bySprint[label] || [];
+        if (tickets.length === 0)
           return;
-        const data = await resp.json();
+        for (const t of tickets)
+          _smgmtTicketToSprint[t.number] = label;
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+        if (!card)
+          return;
         const estEl = document.getElementById(`smgmt-est-${label}`);
-        if (estEl && data.complete && data.total_hours !== null) {
-          const h = data.total_hours;
+        if (estEl && card.estimate_hours != null) {
+          const h = card.estimate_hours;
           const display = Number.isInteger(h) ? `${h}h` : `${parseFloat(h.toFixed(1))}h`;
           estEl.textContent = `${display} estimated`;
         }
-        _smgmtSetSprintTokenEl(label, data);
-        if (data.issues) {
-          for (const [numStr, est] of Object.entries(data.issues)) {
-            _estDataCache[parseInt(numStr, 10)] = est;
-          }
-          for (const t of tickets) {
-            _smgmtUpdateEstimateBadge(t.number);
-          }
-          _smgmtUpdateColRollup(label, tickets);
-          _smgmtUpdateCapacityGauge(label);
-        }
-      } catch (_) {
-      }
-    }));
+        _smgmtSetSprintTokenEl(label, {});
+      })
+    );
   }
   async function _smgmtLoadConflicts(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label))
-        return;
-      if (_smgmtFinishedLabels.has(label))
-        return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter(
-        (t) => (t.status || "backlog") === "backlog"
-      );
-      if (pending.length < 2)
-        return;
-      for (const t of pending)
-        delete _smgmtConflictsByIssue[t.number];
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`
-        );
-        if (!resp.ok)
+    await Promise.all(
+      orderedLabels.map(async (label) => {
+        if (_smgmtRunningLabels.has(label))
           return;
-        const data = await resp.json();
-        for (const c of data.conflicts || []) {
+        if (_smgmtFinishedLabels.has(label))
+          return;
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+        if (!card || !card.conflicts)
+          return;
+        const tickets = bySprint[label] || [];
+        const pending = tickets.filter(
+          (t) => (t.status || "backlog") === "backlog"
+        );
+        if (pending.length < 2)
+          return;
+        for (const t of pending)
+          delete _smgmtConflictsByIssue[t.number];
+        for (const c of card.conflicts.conflicts || []) {
           if (!_smgmtConflictsByIssue[c.ticket1_id])
             _smgmtConflictsByIssue[c.ticket1_id] = [];
           if (!_smgmtConflictsByIssue[c.ticket2_id])
@@ -5418,36 +5881,33 @@ Resolve manually and re-run Bulk complete.`,
         }
         for (const t of pending)
           _smgmtUpdateConflictBadge(t.number);
-      } catch (_) {
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    await Promise.all(orderedLabels.map(async (label) => {
-      if (_smgmtRunningLabels.has(label))
-        return;
-      if (_smgmtFinishedLabels.has(label))
-        return;
-      const tickets = bySprint[label] || [];
-      const pending = tickets.filter(
-        (t) => (t.status || "backlog") === "backlog"
-      );
-      if (pending.length < 2)
-        return;
-      for (const t of pending)
-        delete _smgmtDepOrderByIssue[t.number];
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`
-        );
-        if (!resp.ok)
+    await Promise.all(
+      orderedLabels.map(async (label) => {
+        if (_smgmtRunningLabels.has(label))
           return;
-        const data = await resp.json();
-        if (data.has_cycle) {
-          const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
+        if (_smgmtFinishedLabels.has(label))
+          return;
+        const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+        if (!card || !card.dep_order)
+          return;
+        const tickets = bySprint[label] || [];
+        const pending = tickets.filter(
+          (t) => (t.status || "backlog") === "backlog"
+        );
+        if (pending.length < 2)
+          return;
+        const depData = card.dep_order;
+        for (const t of pending)
+          delete _smgmtDepOrderByIssue[t.number];
+        if (depData.has_cycle) {
+          const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
           for (const t of pending) {
             if (cycleSet.has(String(t.number))) {
               _smgmtDepOrderByIssue[t.number] = {
@@ -5458,7 +5918,7 @@ Resolve manually and re-run Bulk complete.`,
             }
           }
         } else {
-          for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
+          for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
             const num = parseInt(idStr, 10);
             _smgmtDepOrderByIssue[num] = {
               upstream: hint.upstream || [],
@@ -5469,37 +5929,30 @@ Resolve manually and re-run Bulk complete.`,
         }
         for (const t of pending)
           _smgmtUpdateDepOrderBadge(t.number);
-      } catch (_) {
-      }
-    }));
+      })
+    );
   }
   async function _smgmtLoadGoals(orderedLabels) {
     const repo = _smgmtRepo();
     if (!repo)
       return;
-    await Promise.all(orderedLabels.map(async (label) => {
+    for (const label of orderedLabels) {
       const goalEl = document.getElementById(`smgmt-goal-${label}`);
       if (!goalEl)
-        return;
-      try {
-        const resp = await fetch(
-          `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`
-        );
-        if (!resp.ok)
-          return;
-        const data = await resp.json();
-        const goal = (data.goal || "").trim();
-        if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-          if (goal)
-            goalEl.value = goal;
-        } else if (goal) {
-          goalEl.textContent = goal;
-          goalEl.title = goal;
-          goalEl.style.display = "";
-        }
-      } catch (_) {
+        continue;
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card)
+        continue;
+      const goal = (card.goal || "").trim();
+      if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+        if (goal)
+          goalEl.value = goal;
+      } else if (goal) {
+        goalEl.textContent = goal;
+        goalEl.title = goal;
+        goalEl.style.display = "";
       }
-    }));
+    }
   }
   function _smgmtOutcomeBandHtml(label, outcome) {
     const st = outcome.sprint_status;
@@ -5596,6 +6049,21 @@ Resolve manually and re-run Bulk complete.`,
     const repo = _smgmtRepo();
     if (!repo || !_smgmtData)
       return;
+    if (_smgmtAggregateCards) {
+      for (const [label, card] of Object.entries(_smgmtAggregateCards)) {
+        if (!card || !card.finish_card)
+          continue;
+        if (_smgmtIsFreshRerunSprint(label))
+          continue;
+        const cardData = card.finish_card;
+        if (cardData.state === "no_data")
+          continue;
+        const branchData = card.branch_status || { exists: false };
+        _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+        _smgmtRenderFinishCard(label, cardData, branchData, repo);
+      }
+      return;
+    }
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
     await Promise.allSettled(
       order.map(async (label) => {
@@ -5685,11 +6153,7 @@ Resolve manually and re-run Bulk complete.`,
     }
     return "";
   }
-  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set([
-    "UAT",
-    "UAT-approved",
-    "released"
-  ]);
+  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set(["UAT", "UAT-approved", "released"]);
   function _smgmtHasDispatchableTickets(tickets) {
     return tickets.some((t) => {
       const names = (t.labels || []).map((l) => l.name);
@@ -5713,11 +6177,9 @@ Resolve manually and re-run Bulk complete.`,
     if (isFreshRerun)
       outcome = null;
     const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
-    const planBlocksPostRun = [
-      "planned",
-      "draft",
-      "planning"
-    ].includes(planState);
+    const planBlocksPostRun = ["planned", "draft", "planning"].includes(
+      planState
+    );
     const outcomeLifecycle = (outcome && outcome.lifecycle || "").toLowerCase();
     const outcomeState = outcome && (outcome.state || (outcome.sprint_status === "completed" ? "completed" : null));
     const hasLedgerRun = _smgmtHasLedgerRun(label);
@@ -5805,12 +6267,16 @@ Resolve manually and re-run Bulk complete.`,
         try {
           Object.keys(_smgmtBySprint || {}).forEach((cl) => {
             if (cl !== label && cl.startsWith(label + ".")) {
-              (_smgmtBySprint[cl] || []).forEach((t) => _movedToChild.add(t.number));
+              (_smgmtBySprint[cl] || []).forEach(
+                (t) => _movedToChild.add(t.number)
+              );
             }
           });
         } catch (_) {
         }
-        const issueList = (outcome.issues || []).filter((i) => !_movedToChild.has(i.number));
+        const issueList = (outcome.issues || []).filter(
+          (i) => !_movedToChild.has(i.number)
+        );
         ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
           issueList,
           label,
@@ -6381,14 +6847,21 @@ Resolve manually and re-run Bulk complete.`,
     }
     const sorted = [...filtered].sort((a, b) => b.number - a.number);
     const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
-    if (sorted.length === 0) {
-      const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
-      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
-    } else {
-      ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+    const hasActiveSelection = typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.size > 0;
+    if (!hasActiveSelection) {
+      if (sorted.length === 0) {
+        const msg = _blBacklogAll.length === 0 ? "No backlog tickets \u2014 all caught up" : "No tickets match the active filters";
+        ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
+      } else {
+        ticketsEl.innerHTML = sorted.map((t) => _smgmtBacklogTicketHtml(t, allSprintNums)).join("");
+      }
     }
     _blSyncFilterPills();
-    _blUpdateActions();
+    if (typeof _smgmtUpdateSelectionUI === "function") {
+      _smgmtUpdateSelectionUI();
+    } else {
+      _blUpdateActions();
+    }
   }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
@@ -6581,7 +7054,11 @@ Resolve manually and re-run Bulk complete.`,
       statusText = "Pending";
       statusCls = "slp-pending";
     }
-    const carrySummary = _smgmtAncestorCarrySummary(outcome || null, rerunInto, mergeState);
+    const carrySummary = _smgmtAncestorCarrySummary(
+      outcome || null,
+      rerunInto,
+      mergeState
+    );
     const durationHtml = outcome && outcome.wall_clock_secs != null && outcome.wall_clock_secs > 0 ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>` : "";
     let ticketsHtml;
     if (outcome === void 0) {
@@ -6713,7 +7190,10 @@ Resolve manually and re-run Bulk complete.`,
         priority: "low"
       });
     } else {
-      steps.push({ text: "No draft sprint yet \u2014 create one to start planning.", priority: "low" });
+      steps.push({
+        text: "No draft sprint yet \u2014 create one to start planning.",
+        priority: "low"
+      });
     }
     const resolved = [];
     for (const label of lineageLabels) {
@@ -6783,6 +7263,29 @@ Resolve manually and re-run Bulk complete.`,
           newIcon.className = "ti ti-chevron-down";
       }
     }
+  }
+  var _boardSseTimer = null;
+  var _boardSsePending = false;
+  function _boardSseFireRefetch() {
+    _boardSseTimer = null;
+    loadSprintMgmt2(true);
+  }
+  function _boardSseOnInvalidated(_project) {
+    if (typeof document !== "undefined" && document.hidden) {
+      _boardSsePending = true;
+      return;
+    }
+    if (_boardSseTimer !== null)
+      clearTimeout(_boardSseTimer);
+    _boardSseTimer = setTimeout(_boardSseFireRefetch, 2e3);
+  }
+  function _boardSseOnVisible() {
+    if (!_boardSsePending)
+      return;
+    _boardSsePending = false;
+    if (_boardSseTimer !== null)
+      clearTimeout(_boardSseTimer);
+    _boardSseTimer = setTimeout(_boardSseFireRefetch, 2e3);
   }
 
   // apps/dashboard/static/src/sprint-board/run-controls.js
@@ -7005,7 +7508,7 @@ Proceed anyway?`)) {
       }
       _pfState = "success";
       _pfShowSuccess();
-      _pfStepperAnimate(data);
+      _pfStepperAnimate(data).catch(() => _pfUpdateConfirmBtn());
     } catch (e) {
       if (_pfCurrentLabel !== label)
         return;
@@ -7640,49 +8143,65 @@ Proceed anyway?`)) {
       hideLog: true
     });
   }
+  var AUTOFIX_TIMEOUT_MS = 12e4;
+  function _parsePfSSEFrame(part) {
+    const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
+    if (!m)
+      return null;
+    return { type: m[1], raw: m[2] };
+  }
   async function _pfRunAutoFix(label, repo, onLog) {
-    const resp = await fetch(
-      `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
-      { method: "POST" }
-    );
-    if (!resp.ok)
-      throw new Error(`preflight-fix ${resp.status}`);
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "", filled = 0, estimated = 0, errors = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done)
-        break;
-      buf += dec.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop();
-      for (const part of parts) {
-        const m = part.match(/^event:\s*(\S+)\ndata:\s*([\s\S]*)$/);
-        if (!m)
-          continue;
-        if (m[1] === "log") {
-          try {
-            const d = JSON.parse(m[2]);
-            const msg = typeof d === "string" ? d : d.message || String(d);
-            if (onLog)
-              onLog(msg);
-          } catch (_) {
-            if (onLog)
-              onLog(m[2]);
-          }
-        } else if (m[1] === "done") {
-          try {
-            const d = JSON.parse(m[2]);
-            filled = d.filled || 0;
-            estimated = d.estimated || 0;
-            errors = d.errors || [];
-          } catch (_) {
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), AUTOFIX_TIMEOUT_MS);
+    try {
+      const resp = await fetch(
+        `/api/sprints/${encodeURIComponent(label)}/preflight-fix?project=${encodeURIComponent(repo)}`,
+        { method: "POST", signal: controller.signal }
+      );
+      if (!resp.ok)
+        throw new Error(`preflight-fix ${resp.status}`);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "", filled = 0, estimated = 0, errors = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done)
+          break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (const part of parts) {
+          const m = _parsePfSSEFrame(part);
+          if (!m)
+            continue;
+          if (m.type === "log") {
+            try {
+              const d = JSON.parse(m.raw);
+              const msg = typeof d === "string" ? d : d.message || String(d);
+              if (onLog)
+                onLog(msg);
+            } catch (_) {
+              if (onLog)
+                onLog(m.raw);
+            }
+          } else if (m.type === "done") {
+            try {
+              const d = JSON.parse(m.raw);
+              filled = d.filled || 0;
+              estimated = d.estimated || 0;
+              errors = d.errors || [];
+            } catch (_) {
+            }
           }
         }
       }
+      return { filled, estimated, errors };
+    } catch (err) {
+      const isTimeout = err && err.name === "AbortError";
+      throw isTimeout ? new Error("timed out") : err;
+    } finally {
+      clearTimeout(timerId);
     }
-    return { filled, estimated, errors };
   }
   async function _pfStepperAnimate(data) {
     const label = _pfCurrentLabel;
@@ -7705,8 +8224,10 @@ Proceed anyway?`)) {
       }
     };
     const _finishAutofix = (fix) => {
-      const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "";
-      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "";
+      const errCount = fix.errors && fix.errors.length ? fix.errors.length : 0;
+      const errSuffix = errCount > 0 ? ` (${errCount} could not be fixed)` : "";
+      const acNote = fix.filled > 0 ? `${fix.filled} acceptance criteria generated${errSuffix}` : hasAcIssues ? `${missingAc.length} ticket(s) missing AC${errSuffix}` : "";
+      const estNote = fix.estimated > 0 ? `${fix.estimated} ticket(s) estimated${errSuffix}` : hasEstIssues ? `${unestimated.length} ticket(s) unestimated${errSuffix}` : "";
       _pfStepState("ac", fix.filled > 0 ? "fixed" : "pass", acNote);
       _pfStepState("estimates", fix.estimated > 0 ? "fixed" : "pass", estNote);
       _pfShrinkWarnings(fix, missingAc, unestimated);
@@ -7717,9 +8238,11 @@ Proceed anyway?`)) {
       _pfAutofixPending = true;
       _pfStepState("ac", "checking", hasAcIssues ? `Fixing ${missingAc.length} ticket(s)\u2026` : "");
       _pfStepState("estimates", "checking", hasEstIssues ? `Estimating ${unestimated.length} ticket(s)\u2026` : "");
-      _pfRunAutoFix(label, repo, _routeAutofixLog).then(_finishAutofix).catch(() => {
-        _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC` : "");
-        _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated` : "");
+      _pfRunAutoFix(label, repo, _routeAutofixLog).then(_finishAutofix).catch((err) => {
+        const isTimeout = err && err.message === "timed out";
+        const suffix = isTimeout ? " (timed out)" : "";
+        _pfStepState("ac", "pass", hasAcIssues ? `${missingAc.length} ticket(s) missing AC${suffix}` : "");
+        _pfStepState("estimates", "pass", hasEstIssues ? `${unestimated.length} ticket(s) unestimated${suffix}` : "");
         _pfAutofixPending = false;
         _pfStepperSummary();
       });
@@ -8288,6 +8811,8 @@ Proceed anyway?`)) {
   globalThis.smgmtToggleAncestor = smgmtToggleAncestor;
   globalThis._smgmtUpdateAncestorRow = _smgmtUpdateAncestorRow;
   globalThis.smgmtAddToDraft = smgmtAddToDraft;
+  globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
+  globalThis._boardSseOnVisible = _boardSseOnVisible;
   globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
   globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
   globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
@@ -8313,6 +8838,71 @@ Proceed anyway?`)) {
   globalThis._histSetTtlMin = _histSetTtlMin;
   globalThis._histBulkSignOff = _histBulkSignOff;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
+  globalThis._sHealthBuildHtml = _sHealthBuildHtml;
+  globalThis._sHealthStripRender = _sHealthStripRender;
+  globalThis.sprintHealthStripInit = sprintHealthStripInit2;
+
+  // apps/dashboard/static/src/logs-error-badge.js
+  function logsErrorBadgeKey(slug) {
+    return "commander_logs_last_visit_" + slug;
+  }
+  function logsReadLastVisit(slug) {
+    try {
+      return typeof localStorage !== "undefined" && localStorage.getItem(logsErrorBadgeKey(slug)) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function logsWriteLastVisit(slug) {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(logsErrorBadgeKey(slug), (/* @__PURE__ */ new Date()).toISOString());
+      }
+    } catch (_) {
+    }
+  }
+  function evlIsErrorEvent(ev) {
+    const type = ev.type || "";
+    if (type === "ticket_failed")
+      return true;
+    if (type === "agent_finished") {
+      const st = (ev.detail || {}).status || "";
+      return st === "error" || st === "timed_out";
+    }
+    return false;
+  }
+  function logsCountNewErrors(events) {
+    return events.filter(evlIsErrorEvent).length;
+  }
+  function buildEvlFetchUrl(slug, sinceTs) {
+    const base = "/api/projects/" + encodeURIComponent(slug) + "/events";
+    if (sinceTs) {
+      return base + "?since=" + encodeURIComponent(sinceTs) + "&limit=200";
+    }
+    return base + "?limit=200";
+  }
+
+  // apps/dashboard/static/src/logs-view-controls.js
+  function shouldAutoLoadRaw(viewMode, rawLines, runCount) {
+    return viewMode === "raw" && rawLines === null && runCount > 0;
+  }
+  function pickAutoSprintLabel(runs, filterSprint) {
+    if (filterSprint)
+      return filterSprint;
+    return runs[0] && runs[0].sprint_label || null;
+  }
+  function logsToolbarVisibility(mode) {
+    const isActivity = mode === "activity";
+    const isRaw = mode === "raw";
+    return {
+      agentSelect: isActivity,
+      sourceSelect: isActivity,
+      severitySeg: isActivity,
+      rawLevelSelect: isRaw,
+      sprintSelect: true,
+      searchInput: true
+    };
+  }
 
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
@@ -8336,10 +8926,17 @@ Proceed anyway?`)) {
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
   root.loadCommanderFeatures = loadCommanderFeatures;
+  root.visibilityInterval = visibilityInterval;
+  root.snavNavStatusFetch = snavNavStatusFetch;
+  root.snavNavStatusCacheClear = snavNavStatusCacheClear;
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
+  globalThis.visibilityInterval = visibilityInterval;
+  globalThis.snavNavStatusFetch = snavNavStatusFetch;
+  globalThis.snavNavStatusCacheClear = snavNavStatusCacheClear;
+  installVisibilityGuard();
   root.sprintCleanupPreview = sprintCleanupPreview;
   root.sprintCleanupConfirm = sprintCleanupConfirm;
   root.testFilesCleanupPreview = testFilesCleanupPreview;
@@ -8362,5 +8959,37 @@ Proceed anyway?`)) {
   globalThis._psCleanupModalClose = _psCleanupModalClose;
   globalThis._psCleanupPaneClose = _psCleanupPaneClose;
   globalThis._psCleanupPaneConfirm = _psCleanupPaneConfirm;
+  root.getEnvironment = getEnvironment;
+  root.getVersion = getVersion;
+  root.getSettings = getSettings;
+  root.invalidateSettings = invalidateSettings;
+  globalThis.getEnvironment = getEnvironment;
+  globalThis.getVersion = getVersion;
+  globalThis.getSettings = getSettings;
+  globalThis.invalidateSettings = invalidateSettings;
+  root.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+  root.startGhAuthPoll = startGhAuthPoll;
+  root.stopGhAuthPoll = stopGhAuthPoll;
+  globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
+  globalThis.startGhAuthPoll = startGhAuthPoll;
+  globalThis.stopGhAuthPoll = stopGhAuthPoll;
+  root.evlGroupEventsByRun = evlGroupEventsByRun;
+  globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
+  root.logsReadLastVisit = logsReadLastVisit;
+  root.logsWriteLastVisit = logsWriteLastVisit;
+  root.evlIsErrorEvent = evlIsErrorEvent;
+  root.logsCountNewErrors = logsCountNewErrors;
+  root.buildEvlFetchUrl = buildEvlFetchUrl;
+  globalThis.logsReadLastVisit = logsReadLastVisit;
+  globalThis.logsWriteLastVisit = logsWriteLastVisit;
+  globalThis.evlIsErrorEvent = evlIsErrorEvent;
+  globalThis.logsCountNewErrors = logsCountNewErrors;
+  globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
+  root.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  root.pickAutoSprintLabel = pickAutoSprintLabel;
+  root.logsToolbarVisibility = logsToolbarVisibility;
+  globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
+  globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
+  globalThis.logsToolbarVisibility = logsToolbarVisibility;
 })();
 //# sourceMappingURL=bundle.js.map

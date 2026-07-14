@@ -417,7 +417,7 @@ Clears `<project-root>/.commander/calibration_cache.json` and rescans every `spr
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/project/{slug}/analytics` | Serve the analytics HTML page for a project |
+| `GET` | `/project/{slug}/analytics` | Retired standalone analytics page — permanent **301 redirect** to the in-chrome Analytics tab at `/project/{slug}/metrics` (issue #1846). The old `static/analytics.html` page is deleted |
 | `GET` | `/api/sprint-progress` | Current sprint progress summary (tickets done/total, elapsed) |
 | `GET` | `/api/projects/{slug}/analytics/metrics` | Aggregated sprint metrics: velocity, throughput, cycle time by size |
 | `GET` | `/api/projects/{slug}/analytics/calibration` | Estimate accuracy data: estimated vs actual durations per size bucket |
@@ -491,6 +491,18 @@ script directly, so the button and the command never drift apart.
 |---|---|---|
 | `GET` | `/api/doctor` | Run the pre-sprint host doctor and return its structured report. Shape: `{"ok": bool, "exit_code": int, "checks": [...], "failures": [...]}`. `ok`/`exit_code` reflect whether every check passed; each check carries its name, PASS/FAIL status, and remediation text |
 
+### Debug — API call-volume & cache-hit observability (issue #1787)
+
+In-process counters for tuning API traffic and cache effectiveness, backed by
+`apps/dashboard/api_volume.py`. All counters are module-level integers that
+reset on process restart — no persistence, no DB, no locks beyond the GIL.
+Request paths are counted by a `server.py` HTTP middleware using the matched
+route template (path params normalized, e.g. `/api/sprints/{label}/live`).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/debug/api-volume` | Self-documenting snapshot of in-process observability counters. Query param `n` (default 20) caps the number of top request paths returned. Returns `uptime_seconds`, `top_paths` (`[{path, count}]` sorted descending), `cache_stats` (`github_client` and `board_cache` hit/miss with computed `hit_rate`, plus `mirror_fallback` count of live `gh` calls made when the local issues mirror was absent), and `gh_subprocess_total` (every `gh` CLI invocation since start). Each block carries an inline `_doc` string |
+
 ### Sprint Workspace — Board / Running / History (issues #798–#810)
 
 The Sprint tab is split into three sub-views (Board / Running / History). These
@@ -561,6 +573,34 @@ lists **every active coder** as its own entry in `active_agents` (previously a
 single coder slot), so the project page can render a multi-lane running view
 (issue #1416).
 
+**SSE-driven board (issue #1777).** The per-sprint stream
+`GET /api/sprints/{label}/live/stream` (`routers/sprint_live.py`) now emits a
+`snapshot` event carrying the full live-snapshot JSON — once on connect and then
+every ~5 s (every 10 half-second ticks) — alongside the existing `log_line` and
+`complete` events. This lets the sprint board and inspector bootstrap and refresh
+metrics entirely from the stream, replacing the prior 2 s `/api/sprint-status` +
+`/api/sprints/{label}/live` REST poll. On SSE disconnect the board falls back to
+the sprint-103 `/api/running` slow poll (≥ 15 s) and resumes stream-driven updates
+on reconnect. Steady-state outbound polling for a running sprint drops from
+~60 calls/min to ≤ 4.
+
+**SSE board invalidation (issue #1785).** `invalidate_board(project)`
+(`routers/board_cache.py`) now, besides evicting the project's board-cache entry,
+broadcasts a `{"type": "board_invalidated", "project": <slug>}` message over the
+project SSE stream (via `logs_service.broadcast`; skipped cleanly when no asyncio
+loop is running, e.g. sync test contexts). The issues-mirror sync loop
+(`github_events_sync.py`) calls `invalidate_board(repo)` only when a mirror sync
+returns HTTP 200 (rows actually changed) — a 304 no-change poll broadcasts
+nothing. The project page handles the event by refetching the board, deferring the
+refetch when the event arrives while the tab is hidden and flushing it on the next
+`visibilitychange` back to visible.
+
+**SSE all running labels (issue #1818).** The sprint-management SSE client
+(`project.html`) opens a stream for **every** running sprint label, not just the
+first — a board with multiple concurrent running sprints now receives live
+`snapshot`/`log_line`/`complete` updates for all of them instead of only the
+first-connected label.
+
 **Estimator file-prediction accuracy (issue #1417).** On each merge,
 `finish_feature.py` compares the ticket estimate's `files_likely_affected`
 against the files the merge commit actually changed (`git diff-tree
@@ -603,7 +643,7 @@ block per tracked project from these endpoints.
 | `POST` | `/api/brief/summary/regenerate` | Clear the stored home recap and re-invoke the model |
 | `GET` | `/api/projects/{slug}/brief/daily` | Stored (or lazily generated) daily brief artifact for a project |
 | `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Rebuild and re-store the project daily brief, advancing the timestamp |
-| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact |
+| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact. Each entry in `brief.projects` is enriched (issue #1778) with `repo`, `name`, `icon`, `color`, `briefSummary`, and `milestone` so the home page renders in one request instead of 1+N |
 | `POST` | `/api/brief/daily/regenerate` | Rebuild and re-store the home daily roll-up, advancing the timestamp |
 
 ### Project To-Dos (issue #843)
@@ -622,6 +662,7 @@ ride on the already-mounted `sprints` router so no route lands in `server.py`
 | `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
 | `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
 | `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
+| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Duplicate slugs are silently collapsed and requesting more than `MAX_BATCH_SLUGS=50` unique slugs returns HTTP 400 (issue #1797). Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
 
 The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
 no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
@@ -655,3 +696,81 @@ and asserts no stale running row survives.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/debug/sprint-collisions` | Return the `.commander/runtime/sprint-collisions.json` manifest written by `audit_sprint_collisions.py`. Returns `[]` when the manifest has not been generated yet (or is unreadable). Read-only; reads from disk, no DB query |
+
+### Read-only docs endpoints (issue #1859)
+
+Read-only access to a project's markdown docs from disk — no DB, no GitHub. Backed by `routers/docs.py` + `routers/docs_service.py`. The clone root is resolved from the project slug via `docs_service.resolve_clone_root(slug)`, which honours both nested (`~/dev/<slug>/main/`) and flat (`~/dev/<slug>/`) layouts; `COMMANDER_PROJECTS_BASE` overrides the `~/dev` base.
+
+The **allowed doc set** is `docs/**/*.md` plus the root allowlist `{README.md, CHANGELOG.md}`. `get_doc` enforces, in order: reject absolute paths (400); reject non-`.md` extensions (400); reject any `..` path segment (400); resolve and verify containment inside the clone root (400 on escape); verify membership in the allowed set (400); reject symlinks (400); 404 if the file is missing. Listing skips symlinks.
+
+A file that passes every check but contains non-UTF-8 bytes now returns **HTTP 422** (`File contains non-UTF-8 bytes and cannot be decoded: <reason>`) instead of surfacing an uncaught `UnicodeDecodeError` as a 500 (issue #1879) — `get_doc` wraps `read_text(encoding="utf-8")` in a try/except.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{slug}/docs` | List allowed `.md` docs as `[{path, size, mtime}]` (docs/** then README/CHANGELOG). 404 if the slug is not a tracked project |
+| `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one allowed `.md` file as `{path, content}`. 400 on path-traversal/extension/symlink violations, 404 if absent, 422 if the file is not valid UTF-8 (issue #1879) |
+
+### Agent operate guide (issue #1861)
+
+Serves the canonical agent operate guide (`docs/agent-guide.md`, 5 canonical workflow recipes) as JSON. Backed by `routers/agent_guide.py` + `routers/agent_guide_service.py`. `GUIDE_PATH` is exposed at module level for test monkeypatching.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/agent-guide` | Return `{content, version}` for `docs/agent-guide.md` — `content` is the full markdown, `version` is a 16-hex-char SHA-256 fingerprint of the content (stable across unchanged reads). 404 with a helpful message if the file is absent |
+
+### Static bearer-token auth on write endpoints (issue #1864)
+
+Optional single static token that gates write endpoints. Set `COMMANDER_API_TOKEN` in `apps/dashboard/.env` (read from the environment at request time). When set, all `POST/PUT/PATCH/DELETE` requests must carry `Authorization: Bearer <token>`; `GET`, `HEAD`, `OPTIONS`, and SSE requests are always open, and requests from `127.0.0.1` / `::1` / `localhost` (same-host hooks) are exempt. When the var is unset, every request passes through unchanged (default, no auth). This is the only sanctioned auth in an otherwise single-user, local-only app — no accounts, sessions, OAuth, or per-role permissions.
+
+Enforcement is a single `@app.middleware("http")` (`_bearer_auth` in `server.py`) delegating to `bearer_auth_gate` in `routers/auth.py`, which returns a `401 {"detail": "Unauthorized"}` on failure or `None` to pass through. Served HTML pages have a `<script>` injected via `inject_auth_script` (`routers/auth.py`) that monkey-patches `window.fetch` to add the `Authorization` header on all non-GET requests, so the browser UI keeps working with no frontend changes.
+
+### Async estimate jobs + whole-sprint batch estimate (issue #1863)
+
+Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persisted to `<project>/.commander/estimate-jobs/{job_id}.json` and reload from disk on cache miss (survive restarts). Logic lives in `routers/estimate_jobs.py`.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/issues/{issue_id}/estimate?repo=&async=1` | With `async=1`: returns `202 {"job_id": ...}` immediately and runs the issue estimator in the background. Without it: unchanged synchronous behavior returning `{"ok": true, "size": "S"\|"M"\|"L"\|"XL"}` |
+| `POST` | `/api/sprints/{sprint_label}/estimate?project=` | Start an async batch estimate over every issue in the sprint. Returns `202 {"job_id": ...}`. 400 on an invalid sprint label |
+| `GET` | `/api/estimate-jobs/{job_id}` | Return the job document `{job_id, type, status, progress:[{number, status, size?}], ...}`. 404 if the job is unknown |
+
+### Sprint-finished webhook — optional callback_url on sprint run (issue #1865)
+
+The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
+
+Payload shape (built by `build_webhook_payload` from `plan.json` + `state.json`):
+
+```
+{
+  "project": "owner/repo",
+  "sprint_label": "sprint-N",
+  "outcome": "finished" | "needs_rework" | "killed",
+  "duration_sec": <int>,
+  "tickets": [{"number": <int>, "status": <str>}],
+  "summary_url": <str>   // present only when known
+}
+```
+
+**Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
+
+### Code-state snapshot at sprint finish (issue #1862)
+
+At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`services/sprint_manager/code_state.py`, backed by `scripts/generate_code_state.py`) to regenerate `docs/architecture/code-state.md` and commit/push it to the sprint branch. It runs after the documenter/brief step and is **non-fatal** — it never raises; any failure prints a `[code_state] WARNING` line so the sprint pipeline continues. No new tables or endpoints.
+
+### Sprint merge-conflict status — auto-resolve + human-needed signal (issue #1898)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. |
+
+Response:
+
+```
+200 {"label": "sprint-N", "blocked": false}
+200 {"label": "sprint-N", "blocked": true, "code": "merge_conflict_needs_human",
+     "files": [...], "at": "<iso>"}
+```
+
+**Auto-resolve path.** When a sprint branch is synced into `develop` before merge (`_prepare_sprint_branch_for_develop_merge` in `startup.py`), conflicts are triaged by file: `docs/**.md` files resolve via the existing doc-merge path, and **append-only** conflicts in `SCHEMA.md` / any `models.py` (`_is_union_merge_safe_path`) resolve via `git merge-file --union`. A conflict region is only treated as append-only when its diff3 base section is empty (`_has_overlapping_conflict_in_diff3`); any overlapping edit to existing lines is **not** auto-resolved. Anything else is a needs-human conflict.
+
+**Needs-human path.** `_gh_merge_branch_via_pr` accepts an optional `conflict_detail_out` dict and, on a needs-human conflict, fills `{"code": "merge_conflict_needs_human", "files": [...]}`. `POST .../complete-step` then persists the block into `plan.json` (`conflict_blocked: {files, at}`) and returns a structured **HTTP 409** `{"code": "merge_conflict_needs_human", "files": [...], "label", "message"}` instead of an opaque string. A later successful merge clears the stale flag.

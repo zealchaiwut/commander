@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -137,16 +138,59 @@ def extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def fetch_issue(issue_num: int, repo: str) -> dict:
-    """Fetch issue details from GitHub via REST (gh api).
+def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] = None) -> dict:
+    """Fetch issue details, preferring the local mirror over a live gh api call.
+
+    Reads from the local issues mirror first (issue #1782), falling back to gh
+    api (REST) only when the mirror has no record or the record lacks a body.
+    Write paths (gh issue comment, gh issue edit) are unchanged.
+
+    sync_ts: the mirror's last-sync timestamp; mirror records whose updatedAt
+    is AFTER sync_ts are stale and trigger a live fetch — mirrors the corrected
+    guard in _mirror_issue_body (issue #1813, corrected by #1915).
 
     `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
     shares and exhausts during estimation bursts; REST has a separate budget.
     """
-    result = subprocess.run(
-        ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
-        capture_output=True, text=True, check=True,
-    )
+    # Try mirror first (zero gh quota cost).
+    try:
+        _dash_dir = str(Path(__file__).parent.parent.parent / "apps" / "dashboard")
+        if _dash_dir not in sys.path:
+            sys.path.insert(0, _dash_dir)
+        import github_client as _gc_est  # lazy import; dashboard dir on path
+        _mirror = _gc_est._mirror_issue(repo, issue_num)
+        if _mirror is not None and _mirror.get("body") is not None:
+            # Apply stale-hit guard (mirrors _mirror_issue_body logic — issue #1813,
+            # condition corrected in #1915: fresh = updatedAt <= sync_ts).
+            _is_fresh = True
+            if sync_ts:
+                _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
+                _is_fresh = _record_ts <= sync_ts
+            if _is_fresh:
+                _labels = _mirror.get("labels") or []
+                return {
+                    "number": _mirror.get("number") or issue_num,
+                    "title": _mirror.get("title", ""),
+                    "body": _mirror.get("body") or "",
+                    "labels": [
+                        {"name": lbl.get("name", "") if isinstance(lbl, dict) else str(lbl)}
+                        for lbl in _labels
+                    ],
+                }
+    except Exception:
+        pass  # mirror unavailable or stale — fall through to live fetch
+
+    # Live fetch fallback.
+    if runner is not None:
+        result = runner(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+            capture_output=True, text=True,
+        )
+    else:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+            capture_output=True, text=True, check=True,
+        )
     raw = json.loads(result.stdout)
     return {
         "number": raw.get("number"),
@@ -545,9 +589,10 @@ def main() -> None:
         return
 
     # Fetch issue and run estimator
+    _sync_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     sys.stdout.write(str(f"Fetching issue #{args.issue} from {repo} ...") + "\n")
     try:
-        issue_data = fetch_issue(args.issue, repo)
+        issue_data = fetch_issue(args.issue, repo, sync_ts=_sync_ts)
     except subprocess.CalledProcessError as e:
         sys.stderr.write(str(f"Error: could not fetch issue #{args.issue}: {e}") + "\n")
         sys.exit(1)

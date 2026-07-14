@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -30,7 +31,8 @@ def _bkk_midnight_utc() -> str:
     return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def get_conn() -> sqlite3.Connection:
+@contextlib.contextmanager
+def get_conn():
     # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
     # manager subprocess both write this file concurrently. The rollback
     # journal (sqlite's default) serializes all writers and blocks readers
@@ -44,7 +46,10 @@ def get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -772,10 +777,32 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
     SQLite cannot alter a CHECK constraint in place. Existing rows are copied
     verbatim (forward-only migration — legacy state values stay readable).
     """
+    # Salvage pass: a prior run of this migration can strand rows in
+    # sprints_legacy_check — the RENAME/CREATE (DDL, autocommitted) survived
+    # while the row copy + DROP (DML, transactional) rolled back when the
+    # caller's get_conn() closed without commit (#1749 made close a rollback).
+    leftover = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints_legacy_check'"
+    ).fetchone()
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
     ).fetchone()
-    if row is None or "needs_rework" in (row[0] or ""):
+    if row is not None and "needs_rework" in (row[0] or ""):
+        if leftover is not None:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO sprints
+                    (label, project, state, created_at, started_at, ended_at,
+                     end_reason, parent_label)
+                SELECT label, project, state, created_at, started_at, ended_at,
+                       end_reason, parent_label
+                FROM sprints_legacy_check
+                """
+            )
+            conn.execute("DROP TABLE sprints_legacy_check")
+            conn.commit()
+        return
+    if row is None:
         return
     conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_check")
     conn.execute(_SPRINTS_TABLE_DDL)
@@ -788,6 +815,10 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("DROP TABLE sprints_legacy_check")
+    # Commit immediately: this helper runs inside read-only get_conn() blocks
+    # whose close() otherwise rolls the row copy back while the DDL persists,
+    # silently emptying the sprints table.
+    conn.commit()
 
 
 def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
@@ -860,6 +891,11 @@ def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
         "INSERT INTO _sprint_schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
         (_SPRINTS_COMPOSITE_PK_VERSION,),
     )
+    # Commit immediately — same rollback hazard as _migrate_sprints_state_check:
+    # callers routinely run this inside read-only get_conn() blocks that close
+    # (= rollback) without committing, which would undo the row copy + version
+    # marker while the interleaved DDL persists.
+    conn.commit()
 
 
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
@@ -1638,9 +1674,10 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
     When *project* is given, rows are scoped to it — sprint labels are unique only
     per repo, so an unscoped read mixes a same-numbered sprint from another
     project. Legacy rows written before the project column existed have NULL
-    project; if the project filter finds none, fall back to the label-only read so
-    pre-migration sprints still render (their cross-project bleed, if any, is
-    masked downstream by the issue-mirror filter).
+    project; if the project filter finds none, fall back to a read restricted to
+    those blank/NULL-project rows so pre-migration sprints still render. Rows
+    owned by a *different* project are never returned (issue #1881 — a draft
+    sprint that never ran was rendering another project's same-labelled runs).
     """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
@@ -1652,6 +1689,13 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
             ).fetchall()
             if rows:
                 return [dict(r) for r in rows]
+            rows = conn.execute(
+                "SELECT * FROM agent_runs WHERE sprint_label = ? "
+                "AND (project = '' OR project IS NULL) "
+                "ORDER BY issue_number, id",
+                (sprint_label,),
+            ).fetchall()
+            return [dict(r) for r in rows]
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",
@@ -2056,6 +2100,26 @@ def get_mirrored_issue(repo: str, issue_number: int) -> dict | None:
     return _row_to_issue(row) if row else None
 
 
+def invalidate_mirrored_issue(repo: str, issue_number: int) -> None:
+    """Delete one issue's mirror row so the next read falls back to REST.
+
+    Called after a label write (issue #1814) so _get_issue_labels cannot
+    return a stale label set that predates the write.  The row is
+    repopulated by the next ~60 s ETag sync.  Best-effort: exceptions are
+    swallowed so a missing DB_PATH or locked DB never breaks a transition.
+    """
+    try:
+        with get_conn() as conn:
+            _create_issues_table(conn)
+            conn.execute(
+                "DELETE FROM issues WHERE repo = ? AND issue_number = ?",
+                (repo, int(issue_number)),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def get_sync_etag(key: str) -> str | None:
     """Return the stored ETag for *key*, or None."""
     with get_conn() as conn:
@@ -2064,6 +2128,23 @@ def get_sync_etag(key: str) -> str | None:
             "SELECT etag FROM sync_state WHERE key = ?", (key,)
         ).fetchone()
     return row["etag"] if row and row["etag"] else None
+
+
+def get_sync_updated_at(key: str) -> str | None:
+    """Return the updated_at timestamp for *key* from sync_state, or None.
+
+    Records the wall-clock time at which set_sync_etag last ran for this key
+    (i.e., when the mirror last performed a successful ETag sync). Used by
+    dispatch to get the mirror's last-sync timestamp so the stale-hit guard
+    compares issue updatedAt against when the mirror actually synced, not
+    wall-clock now (issue #1915).
+    """
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT updated_at FROM sync_state WHERE key = ?", (key,)
+        ).fetchone()
+    return row["updated_at"] if row and row["updated_at"] else None
 
 
 def set_sync_etag(key: str, etag: str) -> None:

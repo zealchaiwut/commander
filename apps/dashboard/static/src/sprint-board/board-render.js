@@ -13,8 +13,9 @@
  */
 
 /* eslint-disable no-unused-vars */
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, _smgmtSelectedIssues, _smgmtRowClickSelect, escHtml, sprintLabelDisplay, colorizeLogLine,
-   _smgmtAnySprintRunning:writable, _smgmtOrderedLabels:writable, _smgmtRunningLabels:writable */
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, _smgmtSelectedIssues, _smgmtRowClickSelect, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay, colorizeLogLine,
+   _smgmtAnySprintRunning:writable, _smgmtOrderedLabels:writable, _smgmtRunningLabels:writable,
+   sprintHealthStripInit */
 /* eslint-enable no-unused-vars */
 
 import { renderProgressActivity } from "../progress-activity.js";
@@ -22,10 +23,166 @@ import { renderProgressActivity } from "../progress-activity.js";
 /** Tracks which labels are resolved ancestors on the current board render. */
 let _smgmtResolvedAncestors = new Set();
 
+/**
+ * Per-label card index from the /api/board aggregate response (issue #1638).
+ * Set to a {label → card} object when the aggregate path is active; null on
+ * the legacy multi-call path. Exposed on window._smgmtAggregateCards so that
+ * inline project.html functions (e.g. _smgmtLoadMiniRail) can short-circuit.
+ */
+let _smgmtAggregateCards = null;
+
+/**
+ * Build a {label → card} index from a /api/board aggregate response.
+ * Lineage chain ancestors are registered under their own label so that
+ * per-sprint loaders can look up every sprint regardless of section.
+ * Exported for unit tests (issue #1638).
+ */
+export function _smgmtBuildAggCards(agg) {
+  const sections = agg.sections || {};
+  const all = [
+    ...(sections.running || []),
+    ...(sections.needs_rework || []),
+    ...(sections.ready_to_merge || []),
+    ...(sections.draft || []),
+    ...(sections.lineage || []),
+  ];
+  const idx = {};
+  for (const card of all) {
+    if (card.label) idx[card.label] = card;
+    // Register lineage chain ancestors — their card is the latest member's card
+    for (const cl of card.chain || []) {
+      if (!idx[cl]) idx[cl] = card;
+    }
+  }
+  return idx;
+}
+
+/**
+ * Transform a /api/board aggregate response into the data shape that
+ * _smgmtRender(data) expects.
+ * Exported for unit tests (issue #1638).
+ *
+ * Differences from the legacy shape:
+ *  - _aggregateBuckets: {label → bucket} — server-computed; _smgmtCardBucket
+ *    uses this to skip the outcome-cache–based derivation (issue #1638).
+ *  - sprint_plan_states is always {} — bucket comes from _aggregateBuckets.
+ *  - sprint_rerun_into is always {} — collapse is derived from label patterns
+ *    and sprint_parents, same as the legacy path.
+ */
+export function _smgmtAggToRenderData(agg) {
+  const sections = agg.sections || {};
+  const allCards = [
+    ...(sections.running || []),
+    ...(sections.needs_rework || []),
+    ...(sections.ready_to_merge || []),
+    ...(sections.draft || []),
+    ...(sections.lineage || []),
+  ];
+
+  // Lifecycle states that indicate the sprint has had at least one run attempt
+  const _ranStates = new Set([
+    "running",
+    "needs_rework",
+    "ready_to_merge",
+    "partial_finished",
+    "failed",
+    "completed",
+  ]);
+
+  const issues = [];
+  const sprintLabels = new Set();
+  const sprint_has_run = {};
+  const sprint_parents = {};
+  const aggregateBuckets = {};
+
+  const sectionEntries = [
+    ["running", sections.running || []],
+    ["needs_rework", sections.needs_rework || []],
+    ["ready_to_merge", sections.ready_to_merge || []],
+    ["draft", sections.draft || []],
+    ["lineage", sections.lineage || []],
+  ];
+
+  for (const [sectionName, cards] of sectionEntries) {
+    for (const card of cards) {
+      const label = card.label;
+      if (!label) continue;
+
+      sprintLabels.add(label);
+      aggregateBuckets[label] = sectionName;
+      sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+
+      // Tickets with sprint_label set (only for the card's own label)
+      for (const t of card.tickets || []) {
+        issues.push({ ...t, sprint_label: label });
+      }
+
+      // Lineage chain: register ancestors and set parent links
+      const chain = card.chain || [];
+      for (let i = 0; i < chain.length; i++) {
+        const cl = chain[i];
+        sprintLabels.add(cl);
+        if (!(cl in aggregateBuckets)) aggregateBuckets[cl] = "lineage";
+        if (!(cl in sprint_has_run)) sprint_has_run[cl] = sprint_has_run[label];
+      }
+      // Link each member to its predecessor as parent (child → parent)
+      for (let i = 1; i < chain.length; i++) {
+        if (!sprint_parents[chain[i]]) sprint_parents[chain[i]] = chain[i - 1];
+      }
+    }
+  }
+
+  // Backlog tickets (no sprint_label)
+  for (const t of (sections.backlog || {}).tickets || []) {
+    issues.push({ ...t, sprint_label: null });
+  }
+
+  // Ordered sprint labels (ascending sprint number then sub-index)
+  const order = [...sprintLabels].sort((a, b) => {
+    const ma = String(a).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    const mb = String(b).match(/^sprint-(\d+)(?:\.(\d+))?$/);
+    if (!ma || !mb) return String(a).localeCompare(String(b));
+    const na = parseInt(ma[1], 10);
+    const nb = parseInt(mb[1], 10);
+    if (na !== nb) return na - nb;
+    return parseInt(ma[2] || 0, 10) - parseInt(mb[2] || 0, 10);
+  });
+
+  // Unique base sprint integers
+  const sprintNumSet = new Set();
+  for (const l of order) {
+    const m = String(l).match(/^sprint-(\d+)/);
+    if (m) sprintNumSet.add(parseInt(m[1], 10));
+  }
+  const sprints = [...sprintNumSet].sort((a, b) => a - b);
+
+  // Finished sprints: lifecycle_state === "completed"
+  const finished_sprints = allCards
+    .filter((c) => c.lifecycle_state === "completed" && c.label)
+    .map((c) => c.label);
+
+  return {
+    sprints,
+    order,
+    issues,
+    finished_sprints,
+    merged_sprints: [...finished_sprints],
+    sprint_parents,
+    sprint_rerun_into: {},
+    sprint_plan_states: {},
+    sprint_has_run,
+    sprint_signoff: {},
+    _aggregateBuckets: aggregateBuckets,
+  };
+}
+
 /** Sign-off gate state for a sprint label (issue #862): 'pending' | 'approved' | null. */
 function _smgmtSignoffState(label) {
-  if (typeof globalThis !== 'undefined' && globalThis._commanderFeatures
-      && globalThis._commanderFeatures.signoff !== true) {
+  if (
+    typeof globalThis !== "undefined" &&
+    globalThis._commanderFeatures &&
+    globalThis._commanderFeatures.signoff !== true
+  ) {
     return null;
   }
   return ((_smgmtData && _smgmtData.sprint_signoff) || {})[label] || null;
@@ -61,7 +218,7 @@ export function _smgmtDorMode() {
   const f = typeof globalThis !== "undefined" && globalThis._commanderFeatures;
   if (!f) return "off";
   const m = f.definition_of_ready_mode;
-  return (m === "block" || m === "warn" || m === "off") ? m : "off";
+  return m === "block" || m === "warn" || m === "off" ? m : "off";
 }
 
 /**
@@ -122,7 +279,8 @@ export function _smgmtDorNotReadyTickets(tickets) {
   const result = [];
   for (const t of tickets || []) {
     const { ready, reasons } = _smgmtReadinessCheck(t);
-    if (!ready) result.push({ number: t.number, title: t.title || "", reasons });
+    if (!ready)
+      result.push({ number: t.number, title: t.title || "", reasons });
   }
   return result;
 }
@@ -144,54 +302,53 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
   }
 
   try {
+    // Delivery-health stat strip — one-time fetch per page load (issue #1849).
+    if (typeof sprintHealthStripInit === "function") {
+      sprintHealthStripInit(_slug);
+    }
+
     // Pre-warm capacity data concurrently with sprint data — don't block render on it.
     // The post-DOM-build call at _smgmtEnsureCapData(false) will pick up the result.
     if (typeof _smgmtEnsureCapData === "function") {
       _smgmtEnsureCapData();
     }
 
-    // Fetch sprint management data + running sprint status + summaries in parallel
-    const [resp, runningResp] = await Promise.all([
-      fetch("/api/sprint-management/issues?repo=" + encodeURIComponent(repo)),
-      fetch("/api/sprints/running-all").catch(() => null),
-    ]);
-    if (!resp.ok) {
-      // Surface a GitHub rate-limit failure specifically (status 429 from
-      // _gh_error) so the board says what's wrong instead of "Failed to load".
-      let msg = "Failed to load sprints.";
-      const d = await resp.json().catch(() => null);
+    // Aggregate path: single fetch to /api/board (issue #1789 cutover)
+    _smgmtAggregateCards = null; // reset before fetch
+    const aggResp = await fetch(
+      "/api/board?project=" + encodeURIComponent(repo),
+    );
+    if (!aggResp.ok) {
+      let msg = "Failed to load board.";
+      const d = await aggResp.json().catch(() => null);
       const detail = d && typeof d.detail === "string" ? d.detail : "";
-      if (resp.status === 429 || /rate limit/i.test(detail)) {
+      if (aggResp.status === 429 || /rate limit/i.test(detail)) {
         msg = detail || "GitHub API rate limit reached — retry shortly.";
       }
       throw new Error(msg);
     }
-    const data = await resp.json();
+    const agg = await aggResp.json();
+
+    // Build per-label card index so per-sprint loaders can skip fetches
+    _smgmtAggregateCards = _smgmtBuildAggCards(agg);
+    if (typeof window !== "undefined")
+      window._smgmtAggregateCards = _smgmtAggregateCards;
 
     if (_smgmtLiveCacheRepo !== repo) {
       _smgmtLiveCacheRepo = repo;
       for (const k of Object.keys(_smgmtLiveCache)) delete _smgmtLiveCache[k];
     }
-
     if (typeof _smgmtLingerRestore === "function") _smgmtLingerRestore(repo);
 
-    // Update running labels set; start linger when a label drops off running-all.
-    const prevRunning = new Set(_smgmtRunningLabels);
+    // Derive running labels from aggregate sections
+    const prevRunningAgg = new Set(_smgmtRunningLabels);
     _smgmtRunningLabels = new Set();
     _smgmtAnySprintRunning = false;
-    if (runningResp && runningResp.ok) {
-      const runningData = await runningResp.json();
-      const running = runningData.running || [];
-      running.forEach((r) => {
-        if (r.project === repo) {
-          _smgmtRunningLabels.add(r.sprint_label);
-        }
-      });
-      // Only block Run Sprint if THIS project has a running sprint
-      _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+    for (const card of (agg.sections || {}).running || []) {
+      if (card.label) _smgmtRunningLabels.add(card.label);
     }
-
-    for (const label of prevRunning) {
+    _smgmtAnySprintRunning = _smgmtRunningLabels.size > 0;
+    for (const label of prevRunningAgg) {
       if (
         !_smgmtRunningLabels.has(label) &&
         typeof _smgmtLingerStart === "function"
@@ -199,13 +356,12 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
         _smgmtLingerStart(label);
       }
     }
-
-    // Keep sprint in running UI until /api/sprints/running-all catches up (post-dispatch race).
     if (optimisticRunningLabel) {
       _smgmtRunningLabels.add(optimisticRunningLabel);
       _smgmtAnySprintRunning = true;
     }
 
+    const data = _smgmtAggToRenderData(agg);
     _smgmtRender(data);
 
     // Hydrate Run-on-schedule toggles for approved cards (issue #863).
@@ -256,7 +412,9 @@ export function _smgmtSprintSubIndex(label) {
 }
 
 function _smgmtChildrenForParent(parentLabel, parents, order) {
-  const fromMeta = (order || []).filter((l) => (parents || {})[l] === parentLabel);
+  const fromMeta = (order || []).filter(
+    (l) => (parents || {})[l] === parentLabel,
+  );
   const fromLabel =
     _smgmtSprintSubIndex(parentLabel) === 0
       ? (order || []).filter(
@@ -291,19 +449,33 @@ export function _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order) {
 export function _smgmtLatestLineageLabel(baseLabel, parents, rerunInto, order) {
   const base = _smgmtSprintBaseLabel(baseLabel);
   const members = (order || []).filter(
-    (l) => l === base || (_smgmtSprintBaseLabel(l) === base && _smgmtSprintSubIndex(l) > 0),
+    (l) =>
+      l === base ||
+      (_smgmtSprintBaseLabel(l) === base && _smgmtSprintSubIndex(l) > 0),
   );
   if (!members.length) return null;
   return [...members].sort(_smgmtCompareSprintLabels)[members.length - 1];
 }
 
 /** Collapse parent into Lineage whenever a child sub-sprint exists in order. */
-export function _smgmtShouldCollapseParent(parentLabel, parents, rerunInto, order) {
-  return Boolean(_smgmtChildSprintLabel(parentLabel, parents, rerunInto, order));
+export function _smgmtShouldCollapseParent(
+  parentLabel,
+  parents,
+  rerunInto,
+  order,
+) {
+  return Boolean(
+    _smgmtChildSprintLabel(parentLabel, parents, rerunInto, order),
+  );
 }
 
 /** Lineage row: parent when a child exists, or superseded rerun siblings (85.1 when 85.2 exists). */
-export function _smgmtShouldCollapseToLineage(label, parents, rerunInto, order) {
+export function _smgmtShouldCollapseToLineage(
+  label,
+  parents,
+  rerunInto,
+  order,
+) {
   if (_smgmtShouldCollapseParent(label, parents, rerunInto, order)) return true;
   const base = _smgmtSprintBaseLabel(label);
   const latest = _smgmtLatestLineageLabel(base, parents, rerunInto, order);
@@ -373,7 +545,12 @@ export function _smgmtRender(data) {
   _smgmtResolvedAncestors = new Set();
   const orderedLabels = orderedLabelsRaw.filter((label) => {
     if (
-      _smgmtShouldCollapseToLineage(label, _sprintParents, _rerunInto, orderedLabelsRaw)
+      _smgmtShouldCollapseToLineage(
+        label,
+        _sprintParents,
+        _rerunInto,
+        orderedLabelsRaw,
+      )
     ) {
       // A superseded ancestor stays on the active board only while the lineage is
       // still in play. Once the latest member is finished (whole lineage merged),
@@ -382,7 +559,10 @@ export function _smgmtRender(data) {
       // early and never reached the _finishedSet drop below, so a fully-completed
       // lineage lingered on the board forever.
       const latest = _smgmtLatestLineageLabel(
-        _smgmtSprintBaseLabel(label), _sprintParents, _rerunInto, orderedLabelsRaw,
+        _smgmtSprintBaseLabel(label),
+        _sprintParents,
+        _rerunInto,
+        orderedLabelsRaw,
       );
       if (latest && _finishedSet.has(latest)) return false;
       _smgmtResolvedAncestors.add(label);
@@ -410,11 +590,14 @@ export function _smgmtRender(data) {
   // the nav pill uses. Finished sprints are not "NEXT UP" and skip pre-flight.
   _smgmtFinishedLabels = _finishedSet;
 
-
   // ── Planning board layout (issue #1044): inject Focus Guide ─────────────────
   const focusGuideEl = document.getElementById("smgmt-focus-guide");
   if (focusGuideEl) {
-    focusGuideEl.innerHTML = _smgmtFocusGuideHtml(data, orderedLabels, bySprint);
+    focusGuideEl.innerHTML = _smgmtFocusGuideHtml(
+      data,
+      orderedLabels,
+      bySprint,
+    );
   }
 
   // ── Categorize sprints into Lineage / Ready to merge / Rework / Running / Draft ─
@@ -476,8 +659,12 @@ export function _smgmtRender(data) {
     );
   };
 
-  const lineageLabels = orderedLabels.filter((l) => _smgmtResolvedAncestors.has(l));
-  const otherLabels = orderedLabels.filter((l) => !_smgmtResolvedAncestors.has(l));
+  const lineageLabels = orderedLabels.filter((l) =>
+    _smgmtResolvedAncestors.has(l),
+  );
+  const otherLabels = orderedLabels.filter(
+    (l) => !_smgmtResolvedAncestors.has(l),
+  );
 
   const mergeLabels = [];
   const reworkLabels = [];
@@ -498,7 +685,10 @@ export function _smgmtRender(data) {
   const lineageRangeLabel = (labels) => {
     if (!labels.length) return "Lineage";
     const first = sprintLabelDisplay(labels[0]).replace("Sprint ", "");
-    const last = sprintLabelDisplay(labels[labels.length - 1]).replace("Sprint ", "");
+    const last = sprintLabelDisplay(labels[labels.length - 1]).replace(
+      "Sprint ",
+      "",
+    );
     return first === last ? `Lineage ${first}` : `Lineage ${first} → ${last}`;
   };
 
@@ -506,7 +696,10 @@ export function _smgmtRender(data) {
 
   // Section: Lineage (collapsed ancestor sprints)
   if (lineageLabels.length > 0) {
-    cards += sectionLabel(lineageRangeLabel(lineageLabels), "smgmt-section-lineage");
+    cards += sectionLabel(
+      lineageRangeLabel(lineageLabels),
+      "smgmt-section-lineage",
+    );
     cards += `<div class="smgmt-board-section smgmt-board-section--lineage">`;
     cards += lineageLabels.map(_buildCard).join("");
     cards += `</div>`;
@@ -539,7 +732,9 @@ export function _smgmtRender(data) {
   // Section: Running (live sprint — detail in Running pane)
   if (runningLabels.length > 0) {
     const runLabel =
-      runningLabels.length === 1 ? "Running — 1" : `Running — ${runningLabels.length}`;
+      runningLabels.length === 1
+        ? "Running — 1"
+        : `Running — ${runningLabels.length}`;
     cards += sectionLabel(runLabel, "smgmt-section-running");
     cards += `<div class="smgmt-board-section smgmt-board-section--running">`;
     cards += runningLabels.map(_buildCard).join("");
@@ -749,6 +944,27 @@ export function _smgmtApplyRerunOptimistic(
 
 /** Bucket a sprint label for board section grouping (issue #1044). */
 export function _smgmtCardBucket(label, planStates) {
+  // Aggregate path (issue #1638): server-computed bucket overrides the outcome-cache logic
+  const aggBuckets = _smgmtData && _smgmtData._aggregateBuckets;
+  if (aggBuckets && label in aggBuckets) {
+    // Running labels may have changed since the aggregate snapshot (SSE)
+    if (_smgmtRunningLabels.has(label)) return "running";
+    const inLingerAgg =
+      typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
+    if (inLingerAgg && !(_smgmtData.sprint_has_run || {})[label])
+      return "running";
+    const b = aggBuckets[label];
+    if (
+      b === "running" ||
+      b === "needs_rework" ||
+      b === "ready_to_merge" ||
+      b === "draft"
+    ) {
+      return b;
+    }
+    // "lineage" is not a valid bucket — handled by _smgmtResolvedAncestors; fall through
+  }
+
   if (_smgmtRunningLabels.has(label)) return "running";
   const inLinger =
     typeof _smgmtIsLinger === "function" && _smgmtIsLinger(label);
@@ -761,15 +977,17 @@ export function _smgmtCardBucket(label, planStates) {
     const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
     const st = meta.state;
     if (st === "ready_to_merge" || st === "completed") return "ready_to_merge";
-    if (st === "needs_rework" || st === "partial_finished") return "needs_rework";
+    if (st === "needs_rework" || st === "partial_finished")
+      return "needs_rework";
   }
   if (hasRun && _smgmtFinishedLabels && _smgmtFinishedLabels.has(label)) {
     return "ready_to_merge";
   }
   if (hasRun && outcome) {
-    const lc = ((outcome.lifecycle) || "").toLowerCase();
+    const lc = (outcome.lifecycle || "").toLowerCase();
     if (lc === "ready_to_merge") return "ready_to_merge";
-    if (lc === "needs_rework" || lc === "partial_finished") return "needs_rework";
+    if (lc === "needs_rework" || lc === "partial_finished")
+      return "needs_rework";
   }
   if (hasRun && !outcome && inLinger) return "running";
 
@@ -784,52 +1002,25 @@ function _smgmtHasLedgerRun(label) {
   return Boolean((_smgmtData?.sprint_has_run || {})[label]);
 }
 
-export async function _smgmtFetchMissingOutcomes(orderedLabels, bySprint) {
+export async function _smgmtFetchMissingOutcomes(orderedLabels, _bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  const toFetch = [];
+
   for (const label of orderedLabels) {
     if (_smgmtRunningLabels.has(label)) continue;
     if (_smgmtIsFreshRerunSprint(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
-    // Resolved ancestors always ran; skip the ledger check for them (issue #1043).
-    if (!_smgmtHasLedgerRun(label) && !_smgmtResolvedAncestors.has(label)) continue;
-    toFetch.push(label);
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card || card.outcome == null) continue;
+    const outcome = card.outcome;
+    _smgmtOutcomeCache[label] = outcome;
+    const isAncestor = _smgmtResolvedAncestors.has(label);
+    if (isAncestor) {
+      _smgmtUpdateAncestorRow(label, outcome);
+    } else {
+      _smgmtInjectOutcomeBand(label, outcome);
+    }
   }
-  await Promise.all(
-    toFetch.map(async (label) => {
-      const isAncestor = _smgmtResolvedAncestors.has(label);
-      const previewQs = isAncestor ? "&preview=1" : "";
-      try {
-        const resp = await fetch(
-          `/api/sprints/${encodeURIComponent(label)}/outcome?project=${encodeURIComponent(repo)}${previewQs}`,
-        );
-        if (resp.ok) {
-          const outcome = await resp.json();
-          _smgmtOutcomeCache[label] = outcome;
-          if (isAncestor) {
-            _smgmtUpdateAncestorRow(label, outcome);
-          } else {
-            _smgmtInjectOutcomeBand(label, outcome);
-          }
-          return;
-        }
-        const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-        _smgmtOutcomeCache[label] = fallback;
-        if (isAncestor && fallback) {
-          _smgmtUpdateAncestorRow(label, fallback);
-        } else if (isAncestor) {
-          _smgmtUpdateAncestorRow(label, null);
-        }
-      } catch (_) {
-        const fallback = _smgmtOutcomeFromBoard(label, bySprint[label] || []);
-        _smgmtOutcomeCache[label] = fallback;
-        if (isAncestor) {
-          _smgmtUpdateAncestorRow(label, fallback || null);
-        }
-      }
-    }),
-  );
 }
 
 /** Build a minimal outcome snapshot from board tickets (GitHub label columns). */
@@ -838,11 +1029,16 @@ export function _smgmtOutcomeFromBoard(label, tickets) {
   const issues = tickets.map((t) => {
     const labelNames = (t.labels || []).map((l) => l.name);
     let outcome = "skipped";
-    if (labelNames.includes("UAT-approved") || t.status === "done") outcome = "done";
-    else if (labelNames.includes("needs-rework") || labelNames.includes("need-rework"))
+    if (labelNames.includes("UAT-approved") || t.status === "done")
+      outcome = "done";
+    else if (
+      labelNames.includes("needs-rework") ||
+      labelNames.includes("need-rework")
+    )
       outcome = "failed";
     else if (t.status === "uat") outcome = "uat";
-    else if (t.status === "sit" || t.status === "in-progress") outcome = "skipped";
+    else if (t.status === "sit" || t.status === "in-progress")
+      outcome = "skipped";
     return { number: t.number, title: t.title || "", outcome };
   });
   const counts = { done: 0, failed: 0, skipped: 0, uat: 0 };
@@ -864,64 +1060,44 @@ export function _smgmtOutcomeFromBoard(label, tickets) {
 export async function _smgmtLoadEstimates(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  await Promise.all(orderedLabels.map(async (label) => {
-    const tickets = bySprint[label] || [];
-    if (tickets.length === 0) return;
-    // Populate reverse lookup for reactivity
-    for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
-    const issueNums = tickets.map((t) => t.number).join(",");
-    try {
-      const resp = await fetch(
-        `/api/estimates/batch?project=${encodeURIComponent(repo)}&issues=${issueNums}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
+
+  await Promise.all(
+    orderedLabels.map(async (label) => {
+      const tickets = bySprint[label] || [];
+      if (tickets.length === 0) return;
+      for (const t of tickets) _smgmtTicketToSprint[t.number] = label;
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card) return;
       const estEl = document.getElementById(`smgmt-est-${label}`);
-      if (estEl && data.complete && data.total_hours !== null) {
-        const h = data.total_hours;
+      if (estEl && card.estimate_hours != null) {
+        const h = card.estimate_hours;
         const display = Number.isInteger(h)
           ? `${h}h`
           : `${parseFloat(h.toFixed(1))}h`;
         estEl.textContent = `${display} estimated`;
       }
-      _smgmtSetSprintTokenEl(label, data);
-      // Cache per-issue size/confidence and update visible rows
-      if (data.issues) {
-        for (const [numStr, est] of Object.entries(data.issues)) {
-          _estDataCache[parseInt(numStr, 10)] = est;
-        }
-        for (const t of tickets) {
-          _smgmtUpdateEstimateBadge(t.number);
-        }
-        _smgmtUpdateColRollup(label, tickets);
-        _smgmtUpdateCapacityGauge(label);
-      }
-    } catch (_) {
-      // fail silently — leave as "— estimated"
-    }
-  }));
+      _smgmtSetSprintTokenEl(label, {});
+    }),
+  );
 }
 
 export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  await Promise.all(orderedLabels.map(async (label) => {
-    if (_smgmtRunningLabels.has(label)) return;
-    if (_smgmtFinishedLabels.has(label)) return;
-    const tickets = bySprint[label] || [];
-    const pending = tickets.filter(
-      (t) => (t.status || "backlog") === "backlog",
-    );
-    if (pending.length < 2) return;
-    // Clear stale entries for this sprint's tickets before repopulating
-    for (const t of pending) delete _smgmtConflictsByIssue[t.number];
-    try {
-      const resp = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/conflicts?project=${encodeURIComponent(repo)}`,
+
+  await Promise.all(
+    orderedLabels.map(async (label) => {
+      if (_smgmtRunningLabels.has(label)) return;
+      if (_smgmtFinishedLabels.has(label)) return;
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card || !card.conflicts) return;
+      const tickets = bySprint[label] || [];
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog",
       );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      for (const c of data.conflicts || []) {
+      if (pending.length < 2) return;
+      for (const t of pending) delete _smgmtConflictsByIssue[t.number];
+      for (const c of card.conflicts.conflicts || []) {
         if (!_smgmtConflictsByIssue[c.ticket1_id])
           _smgmtConflictsByIssue[c.ticket1_id] = [];
         if (!_smgmtConflictsByIssue[c.ticket2_id])
@@ -938,32 +1114,29 @@ export async function _smgmtLoadConflicts(orderedLabels, bySprint) {
         });
       }
       for (const t of pending) _smgmtUpdateConflictBadge(t.number);
-    } catch (_) {
-      // fail silently
-    }
-  }));
+    }),
+  );
 }
 
 export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  await Promise.all(orderedLabels.map(async (label) => {
-    if (_smgmtRunningLabels.has(label)) return;
-    if (_smgmtFinishedLabels.has(label)) return;
-    const tickets = bySprint[label] || [];
-    const pending = tickets.filter(
-      (t) => (t.status || "backlog") === "backlog",
-    );
-    if (pending.length < 2) return;
-    for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
-    try {
-      const resp = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/dep-order?project=${encodeURIComponent(repo)}`,
+
+  await Promise.all(
+    orderedLabels.map(async (label) => {
+      if (_smgmtRunningLabels.has(label)) return;
+      if (_smgmtFinishedLabels.has(label)) return;
+      const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+      if (!card || !card.dep_order) return;
+      const tickets = bySprint[label] || [];
+      const pending = tickets.filter(
+        (t) => (t.status || "backlog") === "backlog",
       );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (data.has_cycle) {
-        const cycleSet = new Set((data.in_cycle_tickets || []).map(String));
+      if (pending.length < 2) return;
+      const depData = card.dep_order;
+      for (const t of pending) delete _smgmtDepOrderByIssue[t.number];
+      if (depData.has_cycle) {
+        const cycleSet = new Set((depData.in_cycle_tickets || []).map(String));
         for (const t of pending) {
           if (cycleSet.has(String(t.number))) {
             _smgmtDepOrderByIssue[t.number] = {
@@ -974,7 +1147,7 @@ export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
           }
         }
       } else {
-        for (const [idStr, hint] of Object.entries(data.dep_hints || {})) {
+        for (const [idStr, hint] of Object.entries(depData.dep_hints || {})) {
           const num = parseInt(idStr, 10);
           _smgmtDepOrderByIssue[num] = {
             upstream: hint.upstream || [],
@@ -984,38 +1157,28 @@ export async function _smgmtLoadDepOrder(orderedLabels, bySprint) {
         }
       }
       for (const t of pending) _smgmtUpdateDepOrderBadge(t.number);
-    } catch (_) {
-      // fail silently
-    }
-  }));
+    }),
+  );
 }
 
 export async function _smgmtLoadGoals(orderedLabels) {
   const repo = _smgmtRepo();
   if (!repo) return;
-  await Promise.all(orderedLabels.map(async (label) => {
+
+  for (const label of orderedLabels) {
     const goalEl = document.getElementById(`smgmt-goal-${label}`);
-    if (!goalEl) return;
-    try {
-      const resp = await fetch(
-        `/api/sprints/goal?project=${encodeURIComponent(repo)}&sprint=${encodeURIComponent(label)}`,
-      );
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const goal = (data.goal || "").trim();
-      if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
-        if (goal) goalEl.value = goal;
-        // _smgmtSyncDraftRunBtn was removed when draft cards were retired
-        // (20d60034); the orphaned call is dropped here.
-      } else if (goal) {
-        goalEl.textContent = goal;
-        goalEl.title = goal;
-        goalEl.style.display = "";
-      }
-    } catch (_) {
-      // fail silently
+    if (!goalEl) continue;
+    const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
+    if (!card) continue;
+    const goal = (card.goal || "").trim();
+    if (goalEl.tagName === "INPUT" || goalEl.tagName === "TEXTAREA") {
+      if (goal) goalEl.value = goal;
+    } else if (goal) {
+      goalEl.textContent = goal;
+      goalEl.title = goal;
+      goalEl.style.display = "";
     }
-  }));
+  }
 }
 
 export function _smgmtOutcomeBandHtml(label, outcome) {
@@ -1139,6 +1302,21 @@ export function _smgmtOutcomeTicketListHtml(issues, label, repo) {
 export async function _smgmtLoadFinishCards() {
   const repo = _smgmtRepo();
   if (!repo || !_smgmtData) return;
+
+  // Aggregate path (issue #1744): consume inline finish_card/branch_status — no fetch
+  if (_smgmtAggregateCards) {
+    for (const [label, card] of Object.entries(_smgmtAggregateCards)) {
+      if (!card || !card.finish_card) continue;
+      if (_smgmtIsFreshRerunSprint(label)) continue;
+      const cardData = card.finish_card;
+      if (cardData.state === "no_data") continue;
+      const branchData = card.branch_status || { exists: false };
+      _smgmtFinishCards[label] = { card: cardData, branch: branchData };
+      _smgmtRenderFinishCard(label, cardData, branchData, repo);
+    }
+    return;
+  }
+
   const order =
     _smgmtData.order && _smgmtData.order.length
       ? _smgmtData.order
@@ -1242,11 +1420,7 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
 }
 
 /** Finished pipeline labels — only these block Run Sprint (mirrors sprint_manager._is_dispatchable). */
-const _NON_DISPATCHABLE_LABELS = new Set([
-  "UAT",
-  "UAT-approved",
-  "released",
-]);
+const _NON_DISPATCHABLE_LABELS = new Set(["UAT", "UAT-approved", "released"]);
 
 function _smgmtHasDispatchableTickets(tickets) {
   return tickets.some((t) => {
@@ -1288,11 +1462,9 @@ export function _smgmtCardHtml(
   const planState = (
     ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label] || ""
   ).toLowerCase();
-  const planBlocksPostRun = [
-    "planned",
-    "draft",
-    "planning",
-  ].includes(planState);
+  const planBlocksPostRun = ["planned", "draft", "planning"].includes(
+    planState,
+  );
 
   const outcomeLifecycle = ((outcome && outcome.lifecycle) || "").toLowerCase();
   const outcomeState =
@@ -1307,7 +1479,7 @@ export function _smgmtCardHtml(
   // "All tickets passed. Ready to merge."
   const _badgeState =
     outcome && typeof _smgmtStateMeta === "function"
-      ? (_smgmtStateMeta(outcome, (outcome.issues || []).length).state || "")
+      ? _smgmtStateMeta(outcome, (outcome.issues || []).length).state || ""
       : "";
   const isHasRework =
     hasLedgerRun &&
@@ -1324,8 +1496,7 @@ export function _smgmtCardHtml(
     isReadyToMerge ||
     (finished && !isRunning && !isHasRework && !planBlocksPostRun);
   const showRunningChrome = isRunningView && !isAwaitingMerge;
-  const isPostRun =
-    !isRunningView && !planBlocksPostRun && hasLedgerRun;
+  const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
   // Run is only for first attempts: post-run labels (incl. has-rework) re-run
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
   const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
@@ -1408,7 +1579,11 @@ export function _smgmtCardHtml(
   let ticketsContainerHtml = "";
   let rollupItems = tickets;
 
-  if (outcome && (outcome.sprint_status || outcome.state) && !planBlocksPostRun) {
+  if (
+    outcome &&
+    (outcome.sprint_status || outcome.state) &&
+    !planBlocksPostRun
+  ) {
     const meta = _smgmtStateMeta(outcome, (outcome.issues || []).length);
     outcomeCardClass = " " + meta.cardClass;
     outcomeBadgeHtml = `<span class="smgmt-state-badge ${meta.badgeCls}">${escHtml(meta.badge)}</span>`;
@@ -1438,7 +1613,7 @@ export function _smgmtCardHtml(
                 _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null),
               )
               .join("")
-          : '';
+          : "";
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       // Tickets re-run into a child sprint (e.g. #572/#574 → sprint-63.1) belong
@@ -1448,11 +1623,15 @@ export function _smgmtCardHtml(
       try {
         Object.keys(_smgmtBySprint || {}).forEach((cl) => {
           if (cl !== label && cl.startsWith(label + ".")) {
-            (_smgmtBySprint[cl] || []).forEach((t) => _movedToChild.add(t.number));
+            (_smgmtBySprint[cl] || []).forEach((t) =>
+              _movedToChild.add(t.number),
+            );
           }
         });
       } catch (_) {}
-      const issueList = (outcome.issues || []).filter((i) => !_movedToChild.has(i.number));
+      const issueList = (outcome.issues || []).filter(
+        (i) => !_movedToChild.has(i.number),
+      );
       ticketsContainerHtml = _smgmtOutcomeTicketListHtml(
         issueList,
         label,
@@ -1467,7 +1646,7 @@ export function _smgmtCardHtml(
     ticketsContainerHtml =
       tickets.length > 0
         ? tickets.map((t) => _smgmtTicketRowHtml(t, label)).join("")
-        : '';
+        : "";
     // A summary issue exists but no detailed outcome cached — still mark finished
     // so the board agrees with the nav pill (and NEXT UP/pre-flight are suppressed).
     if (finished) {
@@ -1545,10 +1724,15 @@ export function _smgmtCardHtml(
     escHtml(sprintLabelDisplay(label));
 
   // Apply DAG Order button (issue #1420): shown for planned/draft/planning states only.
-  const showDagOrderBtn = !isRunningView && !isPostRun && !finished
-    && ["planned", "draft", "planning"].includes(planState);
+  const showDagOrderBtn =
+    !isRunningView &&
+    !isPostRun &&
+    !finished &&
+    ["planned", "draft", "planning"].includes(planState);
   const cachedDagData = showDagOrderBtn
-    ? (typeof _smgmtDagDataCache !== "undefined" ? _smgmtDagDataCache[label] : null)
+    ? typeof _smgmtDagDataCache !== "undefined"
+      ? _smgmtDagDataCache[label]
+      : null
     : null;
   const dagHasLevels = cachedDagData && (cachedDagData.levels || []).length > 0;
   const dagHasCycles = cachedDagData && (cachedDagData.cycles || []).length > 0;
@@ -1557,7 +1741,7 @@ export function _smgmtCardHtml(
     ? "Apply DAG Order — disabled: circular dependencies detected"
     : !dagHasLevels
       ? "Apply DAG Order — loading DAG preview…"
-      : (cachedDagData && cachedDagData.partial)
+      : cachedDagData && cachedDagData.partial
         ? "Apply DAG Order (partial preview — some tickets unestimated)"
         : "Apply DAG Order";
   const dagOrderBtn = showDagOrderBtn
@@ -1599,21 +1783,33 @@ export function _smgmtCardHtml(
           ${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
-          ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
+          ${
+            isRunning
+              ? ""
+              : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
                   title="Reconcile this sprint's DB state against GitHub truth"
                   onclick="event.stopPropagation();smgmtReconcileSprint('${escHtml(label)}')">
-            <i class="ti ti-refresh"></i> Reconcile</button>`}
+            <i class="ti ti-refresh"></i> Reconcile</button>`
+          }
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>
         </div>
       </div>
-      ${(function() {
+      ${(function () {
         const _ss = _smgmtCardStatusSentence(label, {
-          isRunning, isLinger, isHasRework, isReadyToMerge,
-          isAwaitingMerge, planState, outcome, tickets, parent,
-          isPostRun, isRunningView,
+          isRunning,
+          isLinger,
+          isHasRework,
+          isReadyToMerge,
+          isAwaitingMerge,
+          planState,
+          outcome,
+          tickets,
+          parent,
+          isPostRun,
+          isRunningView,
         });
         if (!_ss) return "";
         return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
@@ -1645,7 +1841,7 @@ export function _smgmtRunningTicketRowsHtml(label, tickets) {
   const cardRepo = _smgmtRepo();
 
   if (sourceTickets.length === 0) {
-    return '';
+    return "";
   }
 
   let prevLevel = 0;
@@ -1916,7 +2112,7 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
       <div id="smgmt-active-agents-wrap-${escHtml(label)}">${_smgmtActiveAgentsHtml(live, label)}</div>
       <div id="smgmt-levels-wrap-${escHtml(label)}">${_smgmtLevelsHtml(live, label)}</div>
       <div class="smgmt-sprint-tickets" id="smgmt-tickets-${escHtml(label)}">
-        ${ticketRowsHtml || ''}
+        ${ticketRowsHtml || ""}
       </div>
       ${renderProgressActivity(
         {
@@ -1988,9 +2184,17 @@ export function _smgmtTicketHasEstimate(t) {
  */
 export function _smgmtCardStatusSentence(label, opts) {
   const {
-    isRunning, isLinger, isHasRework, isReadyToMerge,
-    isAwaitingMerge, planState, outcome, tickets, parent,
-    isPostRun, isRunningView,
+    isRunning,
+    isLinger,
+    isHasRework,
+    isReadyToMerge,
+    isAwaitingMerge,
+    planState,
+    outcome,
+    tickets,
+    parent,
+    isPostRun,
+    isRunningView,
   } = opts;
   if (isRunning) return "";
   // Rework is checked BEFORE linger so a needs_rework sprint reads as rework even
@@ -2000,7 +2204,8 @@ export function _smgmtCardStatusSentence(label, opts) {
     const c = (outcome && outcome.counts) || {};
     const done = c.done || 0;
     const failed = c.failed || 0;
-    const total = outcome && Array.isArray(outcome.issues) ? outcome.issues.length : 0;
+    const total =
+      outcome && Array.isArray(outcome.issues) ? outcome.issues.length : 0;
     if (total > 0 && failed > 0) {
       return `${done} of ${total} passed, ${failed} need${failed === 1 ? "s" : ""} rework — re-run or merge what passed.`;
     }
@@ -2022,8 +2227,10 @@ export function _smgmtCardStatusSentence(label, opts) {
           ? ` Holds ${n} ticket${n !== 1 ? "s" : ""}.`
           : "";
     if (_smgmtAnySprintRunning) {
-      const blocker = typeof _smgmtRunningBlockerShort === "function"
-        ? _smgmtRunningBlockerShort() : "another sprint";
+      const blocker =
+        typeof _smgmtRunningBlockerShort === "function"
+          ? _smgmtRunningBlockerShort()
+          : "another sprint";
       return `Ready to run.${held} Waiting on ${blocker} to finish.`;
     }
     if (!planState || planState === "draft" || planState === "planning") {
@@ -2140,8 +2347,11 @@ export function _smgmtTicketRowHtml(ticket, label, elapsedSecs = null) {
 
   // Agent chip derived from ticket status for consistent card anatomy (issue #1055)
   const _planningAgent =
-    ticket.status === "in-progress" ? "coder" :
-    ticket.status === "sit" ? "tester" : null;
+    ticket.status === "in-progress"
+      ? "coder"
+      : ticket.status === "sit"
+        ? "tester"
+        : null;
   const planningAgentHtml = _planningAgent
     ? `<span class="smgmt-ticket-agent-tag ${_smgmtAgentTagClass(_planningAgent)}">${escHtml(_planningAgent.toUpperCase())}</span>`
     : "";
@@ -2234,20 +2444,33 @@ export function _smgmtRenderBacklog(tickets) {
   // Build list of sprint labels for "Move to" popup
   const allSprintNums = (_smgmtData?.sprints || []).sort((a, b) => a - b);
 
-  if (sorted.length === 0) {
-    const msg =
-      _blBacklogAll.length === 0
-        ? "No backlog tickets — all caught up"
-        : "No tickets match the active filters";
-    ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
-  } else {
-    ticketsEl.innerHTML = sorted
-      .map((t) => _smgmtBacklogTicketHtml(t, allSprintNums))
-      .join("");
+  // AC2 (issue #1748): skip DOM replacement while the user has an active selection
+  // so mid-click node replacement cannot swallow clicks or orphan checked checkboxes.
+  const hasActiveSelection =
+    typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.size > 0;
+
+  if (!hasActiveSelection) {
+    if (sorted.length === 0) {
+      const msg =
+        _blBacklogAll.length === 0
+          ? "No backlog tickets — all caught up"
+          : "No tickets match the active filters";
+      ticketsEl.innerHTML = `<div style="padding:var(--space-3) var(--space-4);text-align:center;color:var(--text-sub);font-size:12px;">${msg}</div>`;
+    } else {
+      ticketsEl.innerHTML = sorted
+        .map((t) => _smgmtBacklogTicketHtml(t, allSprintNums))
+        .join("");
+    }
   }
 
   _blSyncFilterPills();
-  _blUpdateActions();
+  // AC1 (issue #1748): sync selection bar count + visibility after every render,
+  // including suppressed renders so the bar reflects the live JS Set.
+  if (typeof _smgmtUpdateSelectionUI === "function") {
+    _smgmtUpdateSelectionUI();
+  } else {
+    _blUpdateActions();
+  }
 }
 
 export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
@@ -2264,8 +2487,11 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
   // Determine if there's a current draft sprint to offer "Add to sprint" affordance
   const draftLabel = _smgmtOrderedLabels
     ? _smgmtOrderedLabels.find((l) => {
-        if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l)) return false;
-        const ps = ((_smgmtData?.sprint_plan_states || {})[l] || "").toLowerCase();
+        if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
+          return false;
+        const ps = (
+          (_smgmtData?.sprint_plan_states || {})[l] || ""
+        ).toLowerCase();
         return ["draft", "planned", "planning"].includes(ps);
       })
     : null;
@@ -2278,7 +2504,8 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     : "";
 
   const isSelected =
-    typeof _smgmtSelectedIssues !== "undefined" && _smgmtSelectedIssues.has(ticket.number);
+    typeof _smgmtSelectedIssues !== "undefined" &&
+    _smgmtSelectedIssues.has(ticket.number);
 
   return `
     <div class="smgmt-ticket bl-row bl-row--selectable${isSelected ? " is-selected" : ""}" id="smgmt-ticket-${ticket.number}"
@@ -2320,11 +2547,13 @@ export function _smgmtAncestorMergeState(label, outcome) {
       ? _smgmtStateMeta(outcome, (outcome.issues || []).length)
       : { state: "unknown" };
   const state = meta.state;
-  if (state === "ready_to_merge" || state === "partial_finished") return "needs_merge";
+  if (state === "ready_to_merge" || state === "partial_finished")
+    return "needs_merge";
   if (state === "needs_rework") return "needs_merge";
   if (state === "completed") return "merged";
   // Finished (has summary issue) with passing tickets → merged
-  if (_smgmtFinishedLabels && _smgmtFinishedLabels.has(label) && done > 0) return "merged";
+  if (_smgmtFinishedLabels && _smgmtFinishedLabels.has(label) && done > 0)
+    return "merged";
   return "needs_merge";
 }
 
@@ -2365,14 +2594,16 @@ export function _smgmtAncestorCarrySummary(outcome, childLabel, mergeState) {
   if (mergeState === "needs_merge") {
     let summary = `${done} passed`;
     if (uat > 0) summary += ` · ${uat} awaiting UAT`;
-    if (carried > 0 && childDisplay) summary += ` · ${carried} reworked → ${childDisplay}`;
+    if (carried > 0 && childDisplay)
+      summary += ` · ${carried} reworked → ${childDisplay}`;
     else if (carried > 0) summary += ` · ${carried} reworked`;
     return `${summary} · not merged yet`;
   }
 
   let summary = `${done} merged`;
   if (uat > 0) summary += ` · ${uat} awaiting UAT`;
-  if (carried > 0 && childDisplay) summary += ` · ${carried} reworked → ${childDisplay}`;
+  if (carried > 0 && childDisplay)
+    summary += ` · ${carried} reworked → ${childDisplay}`;
   else if (carried > 0) summary += ` · ${carried} reworked`;
   return summary;
 }
@@ -2469,7 +2700,11 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
     statusCls = "slp-pending";
   }
 
-  const carrySummary = _smgmtAncestorCarrySummary(outcome || null, rerunInto, mergeState);
+  const carrySummary = _smgmtAncestorCarrySummary(
+    outcome || null,
+    rerunInto,
+    mergeState,
+  );
   const durationHtml =
     outcome && outcome.wall_clock_secs != null && outcome.wall_clock_secs > 0
       ? `<span class="slp-ancestor-duration">${escHtml(_fmtRunningTime(outcome.wall_clock_secs))}</span>`
@@ -2550,7 +2785,9 @@ export function smgmtToggleAncestor(label) {
   const isExpanded = !body.hidden;
   body.hidden = isExpanded;
   if (toggleIcon) {
-    toggleIcon.className = isExpanded ? "ti ti-chevron-right" : "ti ti-chevron-down";
+    toggleIcon.className = isExpanded
+      ? "ti ti-chevron-right"
+      : "ti ti-chevron-down";
   }
   try {
     localStorage.setItem(`slp_ancestor_${label}`, isExpanded ? "0" : "1");
@@ -2566,7 +2803,7 @@ export function smgmtToggleAncestor(label) {
 export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
   const steps = [];
   const planStates = data.sprint_plan_states || {};
-  const rerunInto  = data.sprint_rerun_into  || {};
+  const rerunInto = data.sprint_rerun_into || {};
   const finishedSet = new Set(data.finished_sprints || []);
   const lineageLabels = (orderedLabels || []).filter((l) =>
     _smgmtResolvedAncestors.has(l),
@@ -2588,16 +2825,17 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
   }
 
   const draftLabel = (orderedLabels || []).find((l) => {
-    if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l)) return false;
+    if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
+      return false;
     const ps = (planStates[l] || "").toLowerCase();
     return ["draft", "planned", "planning"].includes(ps);
   });
 
   const upNextCandidates = (orderedLabels || []).filter((l) => {
     if (_smgmtResolvedAncestors.has(l)) return false;
-    if (_smgmtRunningLabels.has(l))     return false;
-    if (l === draftLabel)               return false;
-    if (finishedSet.has(l))             return false;
+    if (_smgmtRunningLabels.has(l)) return false;
+    if (l === draftLabel) return false;
+    if (finishedSet.has(l)) return false;
     return (bySprint[l] || []).length > 0;
   });
 
@@ -2629,7 +2867,10 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
       priority: "low",
     });
   } else {
-    steps.push({ text: "No draft sprint yet — create one to start planning.", priority: "low" });
+    steps.push({
+      text: "No draft sprint yet — create one to start planning.",
+      priority: "low",
+    });
   }
 
   const resolved = [];
@@ -2679,8 +2920,7 @@ export function _smgmtFocusGuideHtml(data, orderedLabels, bySprint) {
     .join("");
 
   return (
-    `<div class="smgmt-focus-guide-title">What to do, in order</div>` +
-    stepHtml
+    `<div class="smgmt-focus-guide-title">What to do, in order</div>` + stepHtml
   );
 }
 
@@ -2714,7 +2954,8 @@ function _smgmtFmtBudgetHours(minutes) {
 export function _smgmtBudgetBarHtml(tickets, capHours = 3) {
   const { totalMin, sizeCounts } = _smgmtTicketsEstBreakdown(tickets);
   const capMin = capHours * 60;
-  const pct = capMin > 0 ? Math.min(100, Math.round((totalMin / capMin) * 100)) : 0;
+  const pct =
+    capMin > 0 ? Math.min(100, Math.round((totalMin / capMin) * 100)) : 0;
   const headroomMin = capMin - totalMin;
   const overBudget = totalMin > capMin;
   const fillClass = overBudget
@@ -2738,9 +2979,7 @@ export function _smgmtBudgetBarHtml(tickets, capHours = 3) {
     headroomText = `${headroomMin}m headroom`;
   }
 
-  const subLine = breakdown
-    ? `${breakdown} — ${headroomText}`
-    : headroomText;
+  const subLine = breakdown ? `${breakdown} — ${headroomText}` : headroomText;
 
   return (
     `<div class="smgmt-budget-bar">` +
@@ -2765,7 +3004,8 @@ export function smgmtAddToDraft(issueNum, draftLabel) {
   // or delegate directly to the sprint assign endpoint.
   if (!draftLabel) return;
   const fakeEvt = {
-    currentTarget: document.getElementById(`smgmt-ticket-${issueNum}`) || document.body,
+    currentTarget:
+      document.getElementById(`smgmt-ticket-${issueNum}`) || document.body,
     stopPropagation() {},
     preventDefault() {},
   };
@@ -2796,4 +3036,42 @@ export function _smgmtUpdateAncestorRow(label, outcome) {
       if (newIcon) newIcon.className = "ti ti-chevron-down";
     }
   }
+}
+
+// ── SSE board_invalidated handler (issue #1785) ───────────────────────────────
+
+let _boardSseTimer = null;
+let _boardSsePending = false;
+
+function _boardSseFireRefetch() {
+  _boardSseTimer = null;
+  loadSprintMgmt(true);
+}
+
+/**
+ * Handle a `board_invalidated` SSE event (issue #1785 / #1789 cutover).
+ *
+ * When the tab is visible, schedules a debounced refetch of `/api/board` (≥ 2 s).
+ * Rapid events collapse to one request; events while the tab is hidden are
+ * deferred until the tab shows. Exported for unit tests.
+ */
+export function _boardSseOnInvalidated(_project) {
+  if (typeof document !== "undefined" && document.hidden) {
+    _boardSsePending = true;
+    return;
+  }
+  if (_boardSseTimer !== null) clearTimeout(_boardSseTimer);
+  _boardSseTimer = setTimeout(_boardSseFireRefetch, 2000);
+}
+
+/**
+ * Called when the tab becomes visible — fires a deferred board refetch if a
+ * `board_invalidated` arrived while the tab was hidden (issue #1785).
+ * Exported for unit tests.
+ */
+export function _boardSseOnVisible() {
+  if (!_boardSsePending) return;
+  _boardSsePending = false;
+  if (_boardSseTimer !== null) clearTimeout(_boardSseTimer);
+  _boardSseTimer = setTimeout(_boardSseFireRefetch, 2000);
 }

@@ -209,6 +209,16 @@ except ImportError:  # pragma: no cover
     _BRIEF_GENERATOR_AVAILABLE = False
 
 try:
+    # issue #1862
+    from services.sprint_manager.code_state import (
+        generate_code_state_snapshot as _generate_code_state_snapshot,
+    )
+    _CODE_STATE_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _generate_code_state_snapshot = None  # type: ignore[assignment]
+    _CODE_STATE_AVAILABLE = False
+
+try:
     from services.sprint_manager import suite_health_gate as _suite_health_gate
     _SUITE_HEALTH_AVAILABLE = True
 except ImportError:  # pragma: no cover
@@ -317,6 +327,7 @@ from services.sprint_manager.dispatch import (  # noqa: E402, F401
     _dispatch_tester,
     _doctor_probe_auth,
     _dispatch_doctor,
+    _mirror_issue_body,  # issue #1782: mirror-first body fetch
 )
 
 # Summary generation helpers extracted to summary.py (issue #1287); re-exported
@@ -351,6 +362,10 @@ from services.sprint_manager.post_sprint import (  # noqa: E402, F401
     _BA_DISPATCH_TIMEOUT,
     _ESTIMATOR_DISPATCH_TIMEOUT,
     _ESTIMATE_ISSUE_SCRIPT_SM,
+)
+
+from services.sprint_manager.api_client import (  # noqa: E402
+    is_retryable_rate_limit as _is_retryable_rate_limit,
 )
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
@@ -866,11 +881,6 @@ def _assert_run_mutable(labels: list[str], op: str) -> None:
 # Rate-limit retry constants
 _RATE_LIMIT_MAX_RETRIES     = 3
 _RATE_LIMIT_BACKOFF_DELAYS  = [30, 60, 120]   # seconds per attempt
-
-from services.sprint_manager.api_client import (  # noqa: E402
-    is_retryable_rate_limit as _is_retryable_rate_limit,
-)
-
 
 def _is_rate_limit_error(output: str) -> tuple[bool, Optional[int]]:
     """Detect rate-limit / quota-exceeded errors in agent subprocess output.
@@ -1482,11 +1492,17 @@ def _post_success_comment(issue_num: int, results: list[GateResult],
 # gates.py (issue #1281); re-imported above via the gates import block.
 
 
-def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> None:
+def _create_sprint_branch(
+    sprint_branch: str,
+    parent_ref: str = "develop",
+    fallback_ref: str = "",
+) -> None:
     """Create sprint/<label> off parent_ref and push to origin (idempotent).
 
     Base sprints (sprint-N) are created off develop; child sprints (sprint-N.M)
-    off the base sprint branch (sprint/sprint-N). See sprint-lifecycle.md.
+    off their immediate parent sub-sprint branch (from plan.json ``parent``).
+    If ``parent_ref`` cannot be resolved on origin and ``fallback_ref`` is
+    provided, falls back to ``fallback_ref`` with a WARN. See sprint-lifecycle.md.
     """
     # Check if branch already exists on remote
     ok, _, _ = _try("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{sprint_branch}")
@@ -1507,11 +1523,20 @@ def _create_sprint_branch(sprint_branch: str, parent_ref: str = "develop") -> No
     if not ok or not parent_sha:
         ok, parent_sha, _ = _try("git", "rev-parse", parent_ref)
     if not ok or not parent_sha:
-        structured_log.warn(
-            "sprint_branch_sha_resolve_failed",
-            f"could not resolve {parent_ref!r} SHA — using HEAD for sprint branch",
-        )
-        parent_sha = "HEAD"
+        if fallback_ref:
+            structured_log.warn(
+                "sprint_branch_parent_missing",
+                f"parent branch {parent_ref!r} not found on origin — falling back to {fallback_ref!r}",
+            )
+            ok, parent_sha, _ = _try("git", "rev-parse", f"origin/{fallback_ref}")
+            if not ok or not parent_sha:
+                ok, parent_sha, _ = _try("git", "rev-parse", fallback_ref)
+        if not ok or not parent_sha:
+            structured_log.warn(
+                "sprint_branch_sha_resolve_failed",
+                f"could not resolve {parent_ref!r} SHA — using HEAD for sprint branch",
+            )
+            parent_sha = "HEAD"
     _run("git", "branch", sprint_branch, parent_sha)
     _run("git", "push", "-u", "origin", sprint_branch)
     sys.stdout.write(str(f"  Sprint branch {sprint_branch!r} created and pushed.") + "\n")
@@ -1642,7 +1667,6 @@ def _call_finish_feature(
                 f"  [rebase] rebase conflict for #{issue_num} in "
                 f"{len(conflict_files)} file(s): {conflict_files}"
             ) + "\n")
-            _try("git", "rebase", "--abort", cwd=wt_root)
             return False, conflict_files
 
         # Rebase succeeded — push the rebased branch so finish_feature.py can merge it.
@@ -2251,29 +2275,10 @@ def _build_design_block(
 
     # Fetch issue body to extract ## Design Refs via parse_ticket_spec (AC-6).
     # When caller already has the body (issue #1541), skip the subprocess call.
+    # Routes through _mirror_issue_body (issue #1813) so all body-fetch call sites
+    # share the same mirror → live-fallback logic with consistent error logging.
     if issue_body is None:
-        issue_body = ""
-        if eff_repo:
-            try:
-                result = subprocess.run(
-                    ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
-                    capture_output=True, text=True, timeout=30,
-                )
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
-                    issue_body = data.get("body", "") or ""
-                else:
-                    sys.stdout.write(
-                        f"WARNING: gh fetch failed for issue #{issue_num}"
-                        f" (exit {result.returncode}); falling back to heading index\n"
-                    )
-                    sys.stdout.flush()
-            except Exception as _exc:
-                sys.stdout.write(
-                    f"WARNING: gh fetch error for issue #{issue_num}"
-                    f" ({_exc!r}); falling back to heading index\n"
-                )
-                sys.stdout.flush()
+        issue_body = _mirror_issue_body(eff_repo, issue_num) or ""
 
     spec = parse_ticket_spec(issue_body)
     design_refs = spec.get("design_refs", [])
@@ -2780,6 +2785,7 @@ class _SprintPreflightResult:
     pipeline_on: bool
     start_time: float
     early_exit: bool = False
+    rerun_dispatch_error: bool = False
 
 
 def _read_active_llm_provider() -> str:
@@ -2856,8 +2862,10 @@ def run_sprint_preflight(
         sys.stdout.write(str(f"  api-url:      {cfg.api_url}") + "\n")
 
     # Determine the sprint branch name and per-ticket merge target.
-    # Child sprint branches (sprint/sprint-N.M) are created off the base branch;
-    # per-ticket merges land on THIS sprint's branch (gates fail → no merge).
+    # Child sprint branches (sprint/sprint-N.M) are created off their immediate
+    # parent sub-sprint branch (plan.json ``parent``), falling back to the root
+    # sprint branch when no parent is recorded; per-ticket merges land on THIS
+    # sprint's branch (gates fail → no merge).
     # Passing --target-branch develop explicitly is still supported as a
     # deliberate override (AC-5 of issue #269).
     sprint_branch = _sprint_branch_for_label(label)
@@ -2915,7 +2923,21 @@ def run_sprint_preflight(
             if d["action"] != "skip"
         ]
         if not raw_issues:
-            sys.stdout.write(str("No issues to dispatch for this re-run (all skipped).") + "\n")
+            # AC-3 (issue #1827): when the rerun endpoint confirmed all_moved=True,
+            # 0 dispatchable tickets is a dispatch error — not a quiet no-op.
+            _is_dispatch_error = bool(
+                rerun_manifest.get("all_moved")
+                and rerun_manifest.get("decisions")
+            )
+            if _is_dispatch_error:
+                _missing = [d["issue_num"] for d in rerun_manifest.get("decisions", [])]
+                sys.stdout.write(str(
+                    f"ERROR: rerun manifest reported all_moved=True for "
+                    f"{len(_missing)} ticket(s) but none are dispatchable. "
+                    f"Missing: {', '.join(f'#{n}' for n in _missing)}"
+                ) + "\n")
+            else:
+                sys.stdout.write(str("No issues to dispatch for this re-run (all skipped).") + "\n")
             state = SprintState(
                 sprint_label    = label,
                 sprint_number   = sprint_num,
@@ -2931,6 +2953,7 @@ def run_sprint_preflight(
                 eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
                 dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
                 start_time=time.monotonic(), early_exit=True,
+                rerun_dispatch_error=_is_dispatch_error,
             )
 
         state = SprintState(
@@ -3024,13 +3047,18 @@ def run_sprint_preflight(
 
     # Create sprint branch (idempotent). Skip when merging directly into develop.
     if target_branch != "develop":
-        parent_ref = base_merge_target if _is_child_sprint_label(label) else "develop"
+        if _is_child_sprint_label(label):
+            parent_ref = _immediate_parent_branch(label, cfg)
+            fallback_ref = base_merge_target if parent_ref != base_merge_target else ""
+        else:
+            parent_ref = "develop"
+            fallback_ref = ""
         if dry_run:
             sys.stdout.write(str(
                 f"  [dry-run] would create sprint branch {sprint_branch!r} off {parent_ref}"
             ) + "\n")
         else:
-            _create_sprint_branch(sprint_branch, parent_ref=parent_ref)
+            _create_sprint_branch(sprint_branch, parent_ref=parent_ref, fallback_ref=fallback_ref)
     else:
         sys.stdout.write(str(f"  Using custom target branch {target_branch!r} — sprint branch creation skipped.") + "\n")
 
@@ -4246,6 +4274,17 @@ def run_sprint(
         max_tester_slots=max_tester_slots,
     )
     if pf.early_exit:
+        if pf.rerun_dispatch_error:
+            _ended_at = datetime.now(timezone.utc).isoformat()
+            _plan_json_set_state_sm(
+                label, "needs_rework", cfg=cfg,
+                ended_at=_ended_at, end_reason="rerun-dispatch-error",
+            )
+            _sprint_db_set_state_sm(
+                label, "needs_rework", project=pf.eff_repo or "",
+                ended_at=_ended_at, end_reason="rerun-dispatch-error",
+            )
+            raise SystemExit(1)
         return pf.summary, pf.state
 
     state              = pf.state
@@ -4896,6 +4935,20 @@ def main() -> None:
         except Exception as e_brief:
             structured_log.warn("brief_generator_failed", f"write_sprint_brief failed (non-fatal): {e_brief}", exc=str(e_brief))
             sys.stdout.write(str(f"  [brief_generator] WARNING: brief generation failed: {e_brief}") + "\n")
+
+    # Generate code-state snapshot after documenter/brief (issue #1862) — non-fatal.
+    if not args.dry_run and state.issues and _CODE_STATE_AVAILABLE:
+        _cs_cwd = Path(cfg.worktree_tester) if cfg else Path.cwd()
+        try:
+            _generate_code_state_snapshot(
+                sprint_label=state.sprint_label,
+                sprint_branch=effective_target,
+                cwd=_cs_cwd,
+            )
+        except Exception as e_cs:
+            structured_log.warn("code_state_snapshot_failed", f"code-state snapshot failed (non-fatal): {e_cs}", exc=str(e_cs))
+            sys.stdout.write(str(f"  [code_state] WARNING: snapshot failed: {e_cs}") + "\n")
+            sys.stdout.flush()
 
     # AC6, AC7: child sprints get an open PR into the base branch at sprint end.
     # develop is reached only at Merge Sprint — no auto-merge here.

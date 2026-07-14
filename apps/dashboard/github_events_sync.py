@@ -626,7 +626,21 @@ async def run_issues_sync_loop(
     while True:
         for repo in repos:
             try:
-                sync_issues_mirror(repo, db_module=db_module)
+                result = sync_issues_mirror(repo, db_module=db_module)
+                # Broadcast board_invalidated when mirror actually changed (issue #1785).
+                # 304 → no change → no broadcast; 200 → rows updated → invalidate.
+                if result.get("status") == 200:
+                    try:
+                        # Prefer the already-loaded standalone module (test path); fall
+                        # back to the routers package (production — fully initialised by
+                        # the time this loop runs, so no __init__ cascade).
+                        try:
+                            from board_cache import invalidate_board as _inv  # noqa: PLC0415
+                        except ImportError:
+                            from routers.board_cache import invalidate_board as _inv  # type: ignore[no-redef]  # noqa: PLC0415,F811
+                        _inv(repo)
+                    except Exception as _exc:
+                        logger.warning("board invalidation failed for %s: %s", repo, _exc)
             except Exception as exc:  # never let the background task die
                 logger.warning("issues mirror sync error for %s: %s", repo, exc)
             # Milestones mirror (issue #877): kept fresh on the same sweep so the

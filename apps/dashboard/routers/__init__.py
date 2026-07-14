@@ -50,7 +50,6 @@ from .sprint_dispatch import router as sprint_dispatch_router
 from .estimates import router as estimates_router
 from .calibration import router as calibration_router
 from .metrics import router as metrics_router
-from .reports import router as reports_router
 from .finish_card import router as finish_card_router
 from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
@@ -58,6 +57,12 @@ from .xl_suggestions import router as xl_suggestions_router
 from .sprint_collisions import router as sprint_collisions_router
 from .resolve_conflict import router as resolve_conflict_router
 from .llm_provider import router as llm_provider_router
+from .running import router as running_router
+from .api_volume import router as api_volume_router
+from .docs import router as docs_router
+from .agent_guide import router as agent_guide_router
+from .changelog import router as changelog_router
+from .estimate_jobs import router as estimate_jobs_router
 
 __all__ = [
     "activity_router",
@@ -104,7 +109,6 @@ __all__ = [
     "estimates_router",
     "calibration_router",
     "metrics_router",
-    "reports_router",
     "finish_card_router",
     "deploy_router",
     "mis_sizing_router",
@@ -112,4 +116,10 @@ __all__ = [
     "sprint_collisions_router",
     "resolve_conflict_router",
     "llm_provider_router",
+    "running_router",
+    "api_volume_router",
+    "docs_router",
+    "agent_guide_router",
+    "changelog_router",
+    "estimate_jobs_router",
 ]

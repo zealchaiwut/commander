@@ -79,3 +79,13 @@ separated by `---` exactly as the splitter expects.
 - [2026-06-11-5-advisor.md](2026-06-11-5-advisor.md) — phase 3: daily advisor suggestions, accept→BA flow, 2–5 sprint look-ahead, brief hook
 - [2026-06-11-6-test-suite-rehab.md](2026-06-11-6-test-suite-rehab.md) — pytest-timeout + hang fix, schema-drift fixtures, failure burn-down, per-sprint suite-health gate
 - [2026-06-20-1-sprint-speed-phases.md](2026-06-20-1-sprint-speed-phases.md) — Phase 1 runner quick wins, Phase 2 concurrent engine, Phase 3 preview-dag plan order + XL split
+- [2026-06-29-1-board-aggregate-api.md](2026-06-29-1-board-aggregate-api.md) — board aggregate API
+- [2026-06-29-2-running-history-aggregate.md](2026-06-29-2-running-history-aggregate.md) — running+history aggregate refactor (sprint 2)
+- [2026-07-02-1-p1-critical-bugs.md](2026-07-02-1-p1-critical-bugs.md) — P1s from 2026-07-02 audit: milestones POST bug, composite-PK poisoning, scheduler deadlock, RETRY_FREE drop
+- [2026-07-02-2-p2-backend-orchestrator-bugs.md](2026-07-02-2-p2-backend-orchestrator-bugs.md) — P2 backend/orchestrator bugs from the same audit
+- [2026-07-02-3-p2-scripts-hooks-frontend-bugs.md](2026-07-02-3-p2-scripts-hooks-frontend-bugs.md) — P2 scripts/hooks/frontend bugs from the same audit
+- [2026-07-03-1-dead-code-purge.md](2026-07-03-1-dead-code-purge.md) — delete dead files/endpoints, last 'planned'-state writer, archive orphaned one-shot scripts
+- [2026-07-03-2-frontend-call-reduction.md](2026-07-03-2-frontend-call-reduction.md) — visibility guard, timer dedup, SSE-driven board, home N+1 batch (26→8 calls/min idle)
+- [2026-07-03-3-github-mirror-routing.md](2026-07-03-3-github-mirror-routing.md) — route mirror-bypassing gh call sites through the issues/milestones mirror
+- [2026-07-03-4-aggregate-coherence.md](2026-07-03-4-aggregate-coherence.md) — SSE invalidation push, shared aggregate cache, api-volume observability, call-budget harness, flag cutover, cache-inventory doc
+- [2026-07-03-5-mobile-nav-modals.md](2026-07-03-5-mobile-nav-modals.md) — mobile 390px fixes: swipeable tab strip, modal height cap, 44px touch targets, horizontal-overflow purge, deploy pane

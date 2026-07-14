@@ -348,29 +348,101 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
-def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
-    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+def _get_sync_updated_at_from_db(key: str) -> Optional[str]:
+    """Return sync_state.updated_at for *key*, or None if unavailable.
 
-    Returns the body string on success. On failure (non-zero gh exit or an
-    exception), returns the sentinel "" (empty string, NOT None) and logs the
-    failure at WARN level — so _build_design_block skips its own fallback gh
-    fetch instead of issuing a second subprocess round-trip per ticket
-    (issue #1573). Returns None only when there is no repo to query, preserving
-    the legacy path where _build_design_block performs the fetch itself.
+    Thin shim so tests can patch this independently of the DB module (issue #1915).
     """
-    if not eff_repo:
+    try:
+        import db as _db
+        return _db.get_sync_updated_at(key)
+    except Exception:
+        return None
+
+
+def _get_mirror_sync_ts(repo: Optional[str]) -> Optional[str]:
+    """Return the mirror's last-sync timestamp for this repo's issues, or None.
+
+    Reads sync_state.updated_at for key "issues:{repo}" — the wall-clock time
+    at which the most recent ETag sync stored a new ETag. Used as sync_ts in
+    _mirror_issue_body so the stale-hit guard compares the issue's GitHub
+    updatedAt against when the mirror actually ran, not wall-clock now
+    (issue #1915 — replaces the previous _utcnow() approach).
+
+    Returns None when:
+    - repo is empty/None
+    - The DB is unavailable
+    - No ETag sync has run yet for this repo
+    In that case the stale check is skipped and the mirror body is used as-is.
+    """
+    if not repo:
         return None
     try:
-        _gh_result = subprocess.run(
-            ["gh", "api", f"repos/{eff_repo}/issues/{issue_num}"],
+        return _get_sync_updated_at_from_db(f"issues:{repo}")
+    except Exception:
+        return None
+
+
+def _mirror_issue_body(
+    repo: str,
+    issue_num: int,
+    runner=None,
+    sync_ts: Optional[str] = None,
+) -> Optional[str]:
+    """Return issue body from the mirror, falling back to a live gh api fetch.
+
+    Falls back to live fetch when:
+    - The mirror has no record for this issue (miss).
+    - The mirror record has no body field.
+    - sync_ts is provided and the mirror record's updatedAt is AFTER sync_ts
+      (stale-hit guard: the issue was modified after the mirror last synced,
+      so the mirror body may be outdated — issue #1782, corrected by #1915).
+
+    Guard semantics: a mirror record is FRESH when updatedAt <= sync_ts (the
+    issue was last modified at or before the mirror's last sync, so the sync
+    captured the current state). It is STALE when updatedAt > sync_ts. When
+    sync_ts is None the guard is skipped and the mirror body is always used.
+
+    On live-fetch success returns the body string (may be "").
+    On live-fetch failure returns "" (sentinel — distinguishes "attempted but
+    failed" from "no repo to query").
+    Returns None only when repo is falsy (no repo to query).
+    """
+    if not repo:
+        return None
+
+    # Try mirror first (zero gh quota cost).
+    _mirror = None
+    try:
+        import github_client as _gc  # lazy: _DASHBOARD_DIR already on sys.path
+        _mirror = _gc._mirror_issue(repo, issue_num)
+    except Exception:
+        pass
+
+    if _mirror is not None:
+        _body = _mirror.get("body")
+        if _body is not None:
+            if sync_ts:
+                _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
+                if _record_ts <= sync_ts:
+                    return _body  # fresh: issue not modified since last mirror sync
+                # else stale: issue modified after mirror sync → fall through to live fetch
+            else:
+                return _body  # no stale check → use mirror
+
+    # Live fetch fallback (miss or stale).
+    _run = runner if runner is not None else subprocess.run
+    try:
+        _gh_result = _run(
+            ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
             capture_output=True, text=True, timeout=30,
         )
         if _gh_result.returncode == 0:
             return json.loads(_gh_result.stdout).get("body", "") or ""
         structured_log.warn(
-            "coder_dispatch_issue_body_fetch_failed",
-            f"[coder] gh fetch of issue body failed for issue #{issue_num}"
-            f" (exit {_gh_result.returncode}); passing sentinel to skip re-fetch",
+            "mirror_issue_body_fetch_failed",
+            f"[mirror] gh fetch of issue body failed for issue #{issue_num}"
+            f" (exit {_gh_result.returncode})",
             issue_num=issue_num,
             exit_code=_gh_result.returncode,
             stderr=(_gh_result.stderr or "").strip()[:500],
@@ -378,13 +450,35 @@ def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optio
         return ""
     except Exception as _exc:
         structured_log.warn(
-            "coder_dispatch_issue_body_fetch_failed",
-            f"[coder] gh fetch of issue body errored for issue #{issue_num}"
-            f" ({_exc}); passing sentinel to skip re-fetch",
+            "mirror_issue_body_fetch_failed",
+            f"[mirror] gh fetch of issue body errored for issue #{issue_num}"
+            f" ({_exc})",
             issue_num=issue_num,
             error=repr(_exc),
         )
         return ""
+
+
+def _fetch_dispatch_issue_body(
+    eff_repo: Optional[str],
+    issue_num: int,
+    sync_ts: Optional[str] = None,
+) -> Optional[str]:
+    """Fetch the issue body once for dispatch, to pass into _build_design_block.
+
+    Reads from the local issues mirror first (issue #1782), falling back to a
+    live gh api subprocess call only on a mirror miss. On fetch failure returns
+    "" (sentinel) so _build_design_block skips its own fallback gh fetch
+    (issue #1573). Returns None only when eff_repo is empty/None, preserving
+    the legacy path where _build_design_block performs the fetch itself.
+
+    sync_ts: the mirror's last-sync timestamp; passed to _mirror_issue_body so
+    the stale-hit guard fires only for issues modified after the last sync
+    (issue #1813, semantics corrected in #1915).
+    """
+    if not eff_repo:
+        return None
+    return _mirror_issue_body(eff_repo, issue_num, sync_ts=sync_ts)
 
 
 def _build_design_block(*args, **kwargs):
@@ -650,7 +744,14 @@ def _dispatch_coder(
     # skip the redundant per-dispatch gh api subprocess call (issue #1541).
     # On fetch failure the helper returns the "" sentinel (not None) and logs the
     # failure, so _build_design_block does not issue a second gh call (issue #1573).
-    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(eff_repo, issue_num)
+    # sync_ts is the mirror's last-sync timestamp so the stale-hit guard in
+    # _mirror_issue_body answers "was this record captured by the latest sync?"
+    # rather than the incorrect "was the issue edited after dispatch began?" that
+    # _utcnow() produced (issue #1915, fixing #1813).
+    _dispatch_sync_ts: Optional[str] = _get_mirror_sync_ts(eff_repo)
+    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(
+        eff_repo, issue_num, sync_ts=_dispatch_sync_ts
+    )
 
     _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 

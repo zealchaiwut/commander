@@ -64,6 +64,8 @@ def _serve_html(path: Path) -> HTMLResponse:
     except OSError:
         raise HTTPException(status_code=404, detail="Not found")
     content = _inject_version_into_html(content)
+    from routers.auth import inject_auth_script  # noqa: PLC0415
+    content = inject_auth_script(content)
     return HTMLResponse(content=content, headers=_HTML_NO_CACHE_HEADERS)
 
 
@@ -117,8 +119,8 @@ async def project_slug_no_tab(slug: str):
 
 @router.get("/project/{slug}/analytics")
 async def project_slug_analytics(slug: str):
-    """Retired standalone analytics page — redirect to in-chrome Analytics tab."""
-    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=302)
+    """Retired standalone analytics page — permanent redirect to in-chrome Analytics tab."""
+    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=301)
 
 
 @router.get("/project/{slug}/{tab}")

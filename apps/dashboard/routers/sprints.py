@@ -20,6 +20,7 @@ from . import brief
 from . import scheduler
 from . import sprints_service
 from . import todos
+from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprints"])
 
@@ -33,6 +34,10 @@ router.include_router(brief.router)
 # router for the same reason — todos carries its own ``/api/projects`` prefix,
 # so include_router mounts the routes unchanged without growing server.py.
 router.include_router(todos.router)
+
+# Batch todos endpoint (issue #1778 AC3) — separate router so the full path
+# /api/todos is declared without inheriting the /api/projects prefix.
+router.include_router(todos.batch_router)
 
 # Scheduled overnight sprint queue endpoints (issue #863) ride on this
 # already-mounted router for the same reason — scheduler declares full
@@ -72,7 +77,9 @@ def get_sprint_goal(project: str, sprint: str):
 @router.post("/api/sprints/goal")
 def save_sprint_goal(body: SprintGoalBody):
     """Persist sprint goal to .commander/sprints/<label>-goal.txt."""
-    return sprints_service.save_sprint_goal(body.project, body.sprint_label, body.goal)
+    result = sprints_service.save_sprint_goal(body.project, body.sprint_label, body.goal)
+    invalidate_board(body.project)
+    return result
 
 
 @router.get("/api/sprints/order")
@@ -84,7 +91,9 @@ def get_sprint_order(project: str):
 @router.post("/api/sprints/order")
 def save_sprint_order(project: str, body: SprintOrderBody):
     """Persist sprint display order for a project slug."""
-    return sprints_service.save_sprint_order(project, body.order)
+    result = sprints_service.save_sprint_order(project, body.order)
+    invalidate_board(project)
+    return result
 
 
 @router.post("/api/sprints/plan-next")
@@ -99,7 +108,9 @@ def plan_next_sprint(body: PlanNextSprintBody):
     """
     if config.sprint_planning_disabled():
         raise HTTPException(404, detail="Sprint planning is disabled")
-    return sprints_service.plan_next_sprint(body.project, body.replace)
+    result = sprints_service.plan_next_sprint(body.project, body.replace)
+    invalidate_board(body.project)
+    return result
 
 
 @router.get("/api/sprints/pending-signoff")

@@ -32,6 +32,8 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 import db          # noqa: E402
 import github_client  # noqa: E402
+from .board_cache import invalidate_board  # noqa: E402
+from services.sprint_manager.sprint_creation import SprintCreationError  # noqa: E402
 
 router = APIRouter(tags=["sprint_crud"])
 
@@ -81,12 +83,13 @@ async def create_sprint_label(body: SprintCreateBody):
     sprints_service; a failed step surfaces as a loud, step-named HTTP error.
     """
     from routers import sprints_service  # noqa: PLC0415 — deferred (router import cycle)
+    from services.sprint_manager.sprint_creation import SprintCreationError  # noqa: PLC0415
     srv = _server()
     try:
         sprint_label = sprints_service.create_sprint_verified(
             body.project, body.sprint_number, body.goal, body.tickets,
         )
-    except sprints_service.SprintCreationError as e:
+    except SprintCreationError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     srv._emit_dashboard_event(
         project=body.project or "dashboard",
@@ -95,6 +98,7 @@ async def create_sprint_label(body: SprintCreateBody):
         detail={"sprint_name": sprint_label},
         action_id=str(uuid.uuid4()),
     )
+    invalidate_board(body.project)
     return {"ok": True, "sprint_label": sprint_label}
 
 
@@ -167,6 +171,7 @@ async def rename_sprint_label(sprint_label: str, body: SprintRenameBody):
     except Exception:
         pass
 
+    invalidate_board(body.project)
     return {"ok": True, "old_label": sprint_label, "new_label": new_label}
 
 
@@ -197,6 +202,7 @@ def reorder_sprint_tickets(sprint_label: str, body: SprintTicketReorderBody):
     except Exception:
         pass
 
+    invalidate_board(body.project)
     return {"ok": True}
 
 
@@ -224,6 +230,7 @@ async def save_sprint_plan(sprint_label: str, project: str, request: Request):
         db.set_sprint_ticket_order(sprint_label, body)
     except Exception:
         pass
+    invalidate_board(project)
     return {"ok": True}
 
 
@@ -295,6 +302,7 @@ async def delete_empty_sprints(body: SprintDeleteBody):
             errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
 
     github_client.invalidate("sprints:")
+    invalidate_board(body.project)
     result: dict = {"ok": True, "deleted": deleted}
     if errors:
         result["errors"] = errors
@@ -360,6 +368,7 @@ async def cleanup_empty_sprints(body: SprintCleanupBody):
             errors.append(f"{label}: {e.stderr.strip() if e.stderr else str(e)}")
 
     github_client.invalidate("sprints:")
+    invalidate_board(body.project)
     result: dict = {"ok": True, "deleted": deleted}
     if errors:
         result["errors"] = errors
@@ -413,6 +422,7 @@ def delete_sprint(sprint_label: str, project: str):
     for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
         github_client.invalidate(_ck)
 
+    invalidate_board(project)
     result: dict = {
         "deleted_label": sprint_label,
         "unlabelled_count": unlabelled_count,

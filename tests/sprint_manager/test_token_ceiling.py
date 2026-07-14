@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -27,7 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "sprint_manager"))
 if "github_client" not in sys.modules:
     sys.modules["github_client"] = MagicMock()
 
-from services.sprint_manager.state import IssueState, SprintState
+from services.sprint_manager.state import SprintState
 
 
 # ── AC-4/AC-6: ceiling_hit serialisation ─────────────────────────────────────

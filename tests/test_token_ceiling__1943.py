@@ -25,8 +25,6 @@ def test_token_ceiling__cli_flag_accepted(client):
     repo_root = Path(__file__).parent.parent
     sys.path.insert(0, str(repo_root))
 
-    import argparse
-    import services.sprint_manager.sprint_manager as sm
 
     # Verify the main() function sets up the --token-ceiling argument
     # by checking the argparse definition (AC-1 is CLI surface)

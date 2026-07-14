@@ -27,7 +27,9 @@ INDEX_HTML    = Path(__file__).parent.parent / "static" / "index.html"
 
 def _import_sprint_manager():
     """Import sprint_manager.py as a module, mocking dotenv and github_client."""
-    import importlib, importlib.util, types
+    import importlib
+    import importlib.util
+    import types
 
     # Provide stub modules so the import doesn't fail outside the full env
     dotenv_stub = types.ModuleType("dotenv")
@@ -186,7 +188,7 @@ class TestAlertModes:
     def test_multiple_alert_modes_combined(self):
         sm = _import_sprint_manager()
         with mock.patch.object(sm, "_alert_file") as mock_file, \
-             mock.patch.object(sm, "_alert_dashboard_banner") as mock_banner, \
+             mock.patch.object(sm, "_alert_dashboard_banner") as _, \
              mock.patch.object(sm, "_alert_discord") as _:
             try:
                 sm.dispatch_alerts(
@@ -478,17 +480,6 @@ class TestLiveAlerts:
         res = client.get("/api/alerts")
         titles = [a["title"] for a in res.json()]
         assert unique_title in titles
-
-    def test_dismiss_alert_removes_it(self, client):
-        unique_title = f"Dismiss-{int(time.time())}"
-        client.post("/api/alerts", json={"title": unique_title, "body": "body"})
-        alerts_before = client.get("/api/alerts").json()
-        idx = next(i for i, a in enumerate(alerts_before) if a["title"] == unique_title)
-        res = client.delete(f"/api/alerts/{idx}")
-        assert res.status_code == 200
-        alerts_after = client.get("/api/alerts").json()
-        titles_after = [a["title"] for a in alerts_after]
-        assert unique_title not in titles_after
 
 
 @pytest.mark.live

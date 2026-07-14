@@ -70,8 +70,11 @@ def test_ac1_fetch_dispatch_accepts_sync_ts_in_signature():
 # ── AC2: stale record + sync_ts triggers live fetch ──────────────────────────
 
 def test_ac2_fetch_dispatch_stale_record_sync_ts_triggers_live_fetch():
-    """AC2: _fetch_dispatch_issue_body with stale mirror record and sync_ts triggers live fetch."""
-    stale_issue = _make_mirror_issue(101, body="Old body", updated_at="2026-01-01T00:00:00Z")
+    """AC2: _fetch_dispatch_issue_body with stale mirror record and sync_ts triggers live fetch.
+
+    Stale = issue modified AFTER the mirror last synced (updatedAt > sync_ts). #1915.
+    """
+    stale_issue = _make_mirror_issue(101, body="Old body", updated_at="2026-07-09T13:00:00Z")
     live_calls = []
 
     def direct_runner(args, **kwargs):
@@ -105,8 +108,11 @@ def test_ac2_fetch_dispatch_stale_record_sync_ts_triggers_live_fetch():
 # ── AC3: fresh record + sync_ts uses mirror ───────────────────────────────────
 
 def test_ac3_fetch_dispatch_fresh_record_sync_ts_uses_mirror():
-    """AC3: _fetch_dispatch_issue_body with fresh mirror record and sync_ts uses mirror, no live fetch."""
-    fresh_issue = _make_mirror_issue(102, body="Fresh mirror body", updated_at="2026-07-09T12:00:00Z")
+    """AC3: _fetch_dispatch_issue_body with fresh mirror record and sync_ts uses mirror, no live fetch.
+
+    Fresh = issue modified BEFORE the mirror last synced (updatedAt <= sync_ts). #1915.
+    """
+    fresh_issue = _make_mirror_issue(102, body="Fresh mirror body", updated_at="2026-07-09T09:00:00Z")
     live_calls = []
 
     def direct_runner(args, **kwargs):
@@ -193,8 +199,11 @@ def test_ac5_fetch_issue_accepts_sync_ts_in_signature():
 # ── AC6: fetch_issue + stale record + sync_ts triggers live fetch ─────────────
 
 def test_ac6_fetch_issue_stale_record_sync_ts_triggers_live_fetch():
-    """AC6: fetch_issue with stale mirror record and sync_ts triggers live fetch."""
-    stale_issue = _make_mirror_issue(201, body="Old body", updated_at="2026-01-01T00:00:00Z")
+    """AC6: fetch_issue with stale mirror record and sync_ts triggers live fetch.
+
+    Stale = issue modified AFTER mirror last synced (updatedAt > sync_ts). #1915.
+    """
+    stale_issue = _make_mirror_issue(201, body="Old body", updated_at="2026-07-09T13:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):
@@ -221,8 +230,11 @@ def test_ac6_fetch_issue_stale_record_sync_ts_triggers_live_fetch():
 # ── AC7: fetch_issue + fresh record + sync_ts uses mirror ────────────────────
 
 def test_ac7_fetch_issue_fresh_record_sync_ts_uses_mirror():
-    """AC7: fetch_issue with fresh mirror record and sync_ts uses mirror, no live fetch."""
-    fresh_issue = _make_mirror_issue(202, body="Fresh mirror body", updated_at="2026-07-09T12:00:00Z")
+    """AC7: fetch_issue with fresh mirror record and sync_ts uses mirror, no live fetch.
+
+    Fresh = issue modified BEFORE mirror last synced (updatedAt <= sync_ts). #1915.
+    """
+    fresh_issue = _make_mirror_issue(202, body="Fresh mirror body", updated_at="2026-07-09T09:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):

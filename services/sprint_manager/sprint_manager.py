@@ -2335,6 +2335,28 @@ def _pool_release(slot: Optional[Path]) -> None:
         _ACTIVE_WORKTREE_POOL.release(slot)
 
 
+def _apply_token_ceiling(state: "SprintState", token_ceiling: int) -> bool:
+    """Check cumulative token spend against the configured ceiling (issue #1943).
+
+    Sets state.ceiling_hit = True and logs once on first breach.
+    Returns True when the ceiling is active (> 0) and spent >= ceiling.
+    Returns False when the ceiling is disabled (0 or negative) or not yet reached.
+    """
+    if token_ceiling <= 0:
+        return False
+    spent = state.total_tokens_in + state.total_tokens_out
+    if spent >= token_ceiling:
+        if not state.ceiling_hit:
+            state.ceiling_hit = True
+            sys.stdout.write(
+                f"  [token-ceiling] Token ceiling reached "
+                f"({spent:,} tokens used, limit {token_ceiling:,}). "
+                f"No further tickets will be dispatched.\n"
+            )
+        return True
+    return False
+
+
 
 # ── sprint summary report — extracted to summary.py (issue #1287) ────────────
 # LEARNINGS_STUB, _follow_up_action, _build_screenshots_section,
@@ -3266,6 +3288,7 @@ def run_sprint_loop(
     gate_scope: str,
     alert_modes: list,
     cfg: "Optional[SprintConfig]",
+    token_ceiling: int = 0,
 ) -> None:
     """Per-ticket iteration loop for run_sprint.
 
@@ -3305,6 +3328,7 @@ def run_sprint_loop(
     _prev_level_idx = -1
     _level_merged_before = 0
     _level_skipped_before = 0
+    _ceiling_stop = False  # set True after a ticket that exceeds token_ceiling (issue #1943)
     for _flat_pos, (_cur_level_idx, issue_state) in enumerate(_flat_dispatch):
         if _cur_level_idx != _prev_level_idx:
             if _prev_level_idx >= 0:
@@ -3338,6 +3362,10 @@ def run_sprint_loop(
             except Exception:
                 pass
             sys.stdout.write(str(f"\n=== Dispatch level {_cur_level_idx}: tickets {_level_nums_by_idx[_cur_level_idx]} ===") + "\n")
+        # Token ceiling: if the previous ticket's spend pushed us over the limit,
+        # stop dispatching any further tickets (issue #1943).
+        if _ceiling_stop:
+            break
         idx = _flat_pos + 1
         num   = issue_state.number
         title = issue_state.title
@@ -4185,6 +4213,7 @@ def run_sprint_loop(
                     "attempts": issue_state.fix_attempts,
                     "last_error": issue_state.last_error,
                 })
+            _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -4202,10 +4231,14 @@ def run_sprint_loop(
                     num, _TicketState.NEEDS_REWORK,
                     actor="sprint_manager:infra_fail", repo_name=eff_repo,
                 )
+            _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
+            if _ceiling_stop:
+                state.save(state_path)
             continue
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
+        _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
@@ -4253,6 +4286,7 @@ def run_sprint(
     pipeline_mode: Optional[bool] = None,
     max_coder_slots: Optional[int] = None,
     max_tester_slots: Optional[int] = None,
+    token_ceiling: int = 0,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -4334,6 +4368,7 @@ def run_sprint(
             gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
         )
 
+    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     run_sprint_loop(
         pf,
         label=label,
@@ -4352,6 +4387,7 @@ def run_sprint(
         gate_scope=gate_scope,
         alert_modes=alert_modes,
         cfg=cfg,
+        token_ceiling=_eff_token_ceiling,
     )
 
     # Final elapsed time
@@ -4516,6 +4552,16 @@ def main() -> None:
         default=0,
         metavar="TOKENS",
         help="Token estimate from the planning view. Stored in sprint state and broadcast to dashboard.",
+    )
+
+    # Token ceiling (issue #1943)
+    p.add_argument(
+        "--token-ceiling",
+        type=int,
+        default=0,
+        metavar="TOKENS",
+        dest="token_ceiling",
+        help="Hard token ceiling. Stops dispatching new tickets once cumulative tokens_in+tokens_out exceeds this value. 0 = disabled.",
     )
 
     # Gate scope (AC-9)
@@ -4746,6 +4792,7 @@ def main() -> None:
             rerun_manifest       = _rerun_manifest,
             max_coder_slots      = args.max_coder_slots,
             max_tester_slots     = args.max_tester_slots,
+            token_ceiling        = args.token_ceiling,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)

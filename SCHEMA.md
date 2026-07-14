@@ -703,10 +703,12 @@ Read-only access to a project's markdown docs from disk — no DB, no GitHub. Ba
 
 The **allowed doc set** is `docs/**/*.md` plus the root allowlist `{README.md, CHANGELOG.md}`. `get_doc` enforces, in order: reject absolute paths (400); reject non-`.md` extensions (400); reject any `..` path segment (400); resolve and verify containment inside the clone root (400 on escape); verify membership in the allowed set (400); reject symlinks (400); 404 if the file is missing. Listing skips symlinks.
 
+A file that passes every check but contains non-UTF-8 bytes now returns **HTTP 422** (`File contains non-UTF-8 bytes and cannot be decoded: <reason>`) instead of surfacing an uncaught `UnicodeDecodeError` as a 500 (issue #1879) — `get_doc` wraps `read_text(encoding="utf-8")` in a try/except.
+
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/projects/{slug}/docs` | List allowed `.md` docs as `[{path, size, mtime}]` (docs/** then README/CHANGELOG). 404 if the slug is not a tracked project |
-| `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one allowed `.md` file as `{path, content}`. 400 on path-traversal/extension/symlink violations, 404 if absent |
+| `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one allowed `.md` file as `{path, content}`. 400 on path-traversal/extension/symlink violations, 404 if absent, 422 if the file is not valid UTF-8 (issue #1879) |
 
 ### Agent operate guide (issue #1861)
 

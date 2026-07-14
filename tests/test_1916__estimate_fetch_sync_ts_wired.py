@@ -23,7 +23,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 sys.path.insert(0, str(_REPO_ROOT / "services" / "sprint_manager"))
 
-import dispatch  # noqa: E402 - imports apps/dashboard/config.py so github_client import resolves correctly
+import dispatch  # noqa: E402, F401 - side-effect import: loads config.py so github_client import resolves
 import estimate_issue  # noqa: E402
 
 

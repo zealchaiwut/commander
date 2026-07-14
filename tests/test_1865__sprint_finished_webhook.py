@@ -225,26 +225,26 @@ class TestWebhookPayloadShape:
         assert len(got["tickets"]) == 2
 
     def test_build_webhook_payload_finished(self, tmp_path):
-        """AC2: build_webhook_payload returns correct shape for a finished sprint."""
+        """AC2: build_webhook_payload returns correct shape for a finished sprint.
+
+        Updated for issue #1945: webhook and file now share a single builder
+        (build_commander_report), so the payload uses the rich format.
+        """
         from routers.sprint_webhook_service import build_webhook_payload
         sprints_dir = tmp_path / "sprints"
         sprints_dir.mkdir()
-        # Write plan.json with ready_to_merge state
         plan = {
             "state": "ready_to_merge",
             "tickets": [10, 11],
             "started_at": "2026-01-01T00:00:00+00:00",
-            "ended_at": "2026-01-01T00:01:00+00:00",
             "callback_url": "https://example.com/hook",
         }
         (sprints_dir / "sprint-10-plan.json").write_text(json.dumps(plan))
-        # Write state.json with ticket statuses
         state = {
             "issues": [
-                {"number": 10, "status": "done", "agent_status": "completed"},
-                {"number": 11, "status": "done", "agent_status": "completed"},
+                {"number": 10, "title": "Ticket 10", "status": "done"},
+                {"number": 11, "title": "Ticket 11", "status": "done"},
             ],
-            "summary_issue_url": "https://github.com/owner/repo/issues/99",
         }
         (sprints_dir / "sprint-10-state.json").write_text(json.dumps(state))
         payload = build_webhook_payload(
@@ -253,16 +253,21 @@ class TestWebhookPayloadShape:
             project="owner/repo",
             started_at="2026-01-01T00:00:00+00:00",
         )
-        assert payload["outcome"] == "finished"
-        assert payload["project"] == "owner/repo"
-        assert payload["sprint_label"] == "sprint-10"
-        assert isinstance(payload["duration_sec"], int)
-        assert len(payload["tickets"]) == 2
-        assert payload["tickets"][0]["number"] == 10
-        assert payload.get("summary_url") == "https://github.com/owner/repo/issues/99"
+        # Rich format fields (issue #1945)
+        assert isinstance(payload["run_id"], str)
+        assert payload["branch"] == "sprint/sprint-10"
+        assert payload["summary"]["completed"] == 2
+        assert payload["summary"]["failed"] == 0
+        assert len(payload["completed"]) == 2
+        assert payload["completed"][0]["ticket_id"] == "10"
+        assert isinstance(payload["cost"]["tokens"], int)
+        assert isinstance(payload["actions"], list)
 
     def test_build_webhook_payload_needs_rework(self, tmp_path):
-        """AC2: build_webhook_payload returns needs_rework outcome."""
+        """AC2: build_webhook_payload returns payload for a needs_rework sprint.
+
+        Updated for issue #1945: rich format via shared builder.
+        """
         from routers.sprint_webhook_service import build_webhook_payload
         sprints_dir = tmp_path / "sprints"
         sprints_dir.mkdir()
@@ -273,7 +278,7 @@ class TestWebhookPayloadShape:
         }
         (sprints_dir / "sprint-20-plan.json").write_text(json.dumps(plan))
         state = {
-            "issues": [{"number": 20, "status": "skipped", "agent_status": "failed"}],
+            "issues": [{"number": 20, "title": "T20", "status": "skipped"}],
         }
         (sprints_dir / "sprint-20-state.json").write_text(json.dumps(state))
         payload = build_webhook_payload(
@@ -282,10 +287,14 @@ class TestWebhookPayloadShape:
             project="owner/repo",
             started_at="2026-01-01T00:00:00+00:00",
         )
-        assert payload["outcome"] == "needs_rework"
+        assert payload["summary"]["skipped"] == 1
+        assert payload["summary"]["completed"] == 0
 
     def test_build_webhook_payload_killed(self, tmp_path):
-        """AC2: build_webhook_payload maps killed end_reason to 'killed' outcome."""
+        """AC2: build_webhook_payload maps killed sprint to correct summary.
+
+        Updated for issue #1945: rich format via shared builder.
+        """
         from routers.sprint_webhook_service import build_webhook_payload
         sprints_dir = tmp_path / "sprints"
         sprints_dir.mkdir()
@@ -295,7 +304,7 @@ class TestWebhookPayloadShape:
             "tickets": [30],
         }
         (sprints_dir / "sprint-30-plan.json").write_text(json.dumps(plan))
-        state = {"issues": [{"number": 30, "status": "skipped"}]}
+        state = {"issues": [{"number": 30, "title": "T30", "status": "skipped"}]}
         (sprints_dir / "sprint-30-state.json").write_text(json.dumps(state))
         payload = build_webhook_payload(
             sprints_dir=sprints_dir,
@@ -303,7 +312,9 @@ class TestWebhookPayloadShape:
             project="owner/repo",
             started_at="2026-01-01T00:00:00+00:00",
         )
-        assert payload["outcome"] == "killed"
+        # Rich format: branch contains sprint label regardless of kill state
+        assert "sprint-30" in payload["branch"]
+        assert isinstance(payload["run_id"], str)
 
 
 # ── AC3: Delivery failure → retries → warning logged → sprint unaffected ─────
@@ -568,9 +579,10 @@ class TestCallbackMonitorIntegration:
         server.server_close()
         assert len(received) == 1, "Expected exactly one webhook POST"
         got = received[0]
-        assert got["outcome"] == "finished"
-        assert got["sprint_label"] == "sprint-42"
-        assert "tickets" in got
+        # Rich format (issue #1945): webhook and file share a builder
+        assert "run_id" in got, "Webhook payload must have run_id field (issue #1945)"
+        assert "summary" in got, "Webhook payload must have summary field (issue #1945)"
+        assert "sprint-42" in got.get("branch", ""), "branch must include sprint label"
 
     def test_monitor_does_nothing_without_callback_url(self, tmp_path):
         """AC4: no POST when callback_url is None."""

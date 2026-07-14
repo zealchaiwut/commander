@@ -109,8 +109,12 @@ def test_ac2_no_repo_returns_none():
 # ── AC3: stale-hit guard ──────────────────────────────────────────────────────
 
 def test_ac3_stale_hit_triggers_live_fetch():
-    """AC3: mirror record with updated_at < sync_ts triggers live fetch."""
-    issue = _make_mirror_issue(456, body="Old body", updated_at="2026-01-01T00:00:00Z")
+    """AC3: mirror record with updatedAt > sync_ts triggers live fetch.
+
+    Stale = issue was modified AFTER the mirror last synced (sync_ts), so the
+    mirror body may be outdated. Correct semantics per issue #1915.
+    """
+    issue = _make_mirror_issue(456, body="Old body", updated_at="2026-07-09T13:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):
@@ -125,7 +129,7 @@ def test_ac3_stale_hit_triggers_live_fetch():
         result = dispatch._mirror_issue_body(
             "owner/repo", 456,
             runner=counting_runner,
-            sync_ts="2026-07-09T00:00:00Z",
+            sync_ts="2026-07-09T12:00:00Z",
         )
 
     assert len(live_calls) == 1, f"Expected 1 live fetch for stale record, got {len(live_calls)}"
@@ -133,8 +137,12 @@ def test_ac3_stale_hit_triggers_live_fetch():
 
 
 def test_ac3b_fresh_mirror_record_no_live_fetch():
-    """AC3b: mirror record with updated_at >= sync_ts is fresh — no live fetch."""
-    issue = _make_mirror_issue(789, body="Fresh body", updated_at="2026-07-09T12:00:00Z")
+    """AC3b: mirror record with updatedAt <= sync_ts is fresh — no live fetch.
+
+    Fresh = issue was last modified at or before the mirror's last sync time,
+    so the mirror body is current. Correct semantics per issue #1915.
+    """
+    issue = _make_mirror_issue(789, body="Fresh body", updated_at="2026-07-09T09:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):
@@ -231,11 +239,14 @@ def test_ac8_n_missing_tickets_trigger_n_live_fetches():
 # ── AC9: stale hit → exactly one live fetch per stale ticket ──────────────────
 
 def test_ac9_stale_hit_triggers_exactly_one_live_fetch_per_stale_ticket():
-    """AC9: each stale mirror record (updated_at < sync_ts) triggers exactly 1 live fetch."""
+    """AC9: each stale mirror record (updatedAt > sync_ts) triggers exactly 1 live fetch.
+
+    Stale = issue was modified AFTER the mirror last synced. Correct semantics per #1915.
+    """
     sync_ts = "2026-07-09T12:00:00Z"
     stale_issues = {
-        300: _make_mirror_issue(300, body="Old 300", updated_at="2026-01-01T00:00:00Z"),
-        301: _make_mirror_issue(301, body="Old 301", updated_at="2026-01-02T00:00:00Z"),
+        300: _make_mirror_issue(300, body="Old 300", updated_at="2026-07-09T13:00:00Z"),
+        301: _make_mirror_issue(301, body="Old 301", updated_at="2026-07-09T14:00:00Z"),
     }
     live_calls = []
 

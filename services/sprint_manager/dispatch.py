@@ -348,6 +348,41 @@ def _build_estimate_paths_block(*args, **kwargs):
     return ""
 
 
+def _get_sync_updated_at_from_db(key: str) -> Optional[str]:
+    """Return sync_state.updated_at for *key*, or None if unavailable.
+
+    Thin shim so tests can patch this independently of the DB module (issue #1915).
+    """
+    try:
+        import db as _db
+        return _db.get_sync_updated_at(key)
+    except Exception:
+        return None
+
+
+def _get_mirror_sync_ts(repo: Optional[str]) -> Optional[str]:
+    """Return the mirror's last-sync timestamp for this repo's issues, or None.
+
+    Reads sync_state.updated_at for key "issues:{repo}" — the wall-clock time
+    at which the most recent ETag sync stored a new ETag. Used as sync_ts in
+    _mirror_issue_body so the stale-hit guard compares the issue's GitHub
+    updatedAt against when the mirror actually ran, not wall-clock now
+    (issue #1915 — replaces the previous _utcnow() approach).
+
+    Returns None when:
+    - repo is empty/None
+    - The DB is unavailable
+    - No ETag sync has run yet for this repo
+    In that case the stale check is skipped and the mirror body is used as-is.
+    """
+    if not repo:
+        return None
+    try:
+        return _get_sync_updated_at_from_db(f"issues:{repo}")
+    except Exception:
+        return None
+
+
 def _mirror_issue_body(
     repo: str,
     issue_num: int,
@@ -359,9 +394,14 @@ def _mirror_issue_body(
     Falls back to live fetch when:
     - The mirror has no record for this issue (miss).
     - The mirror record has no body field.
-    - sync_ts is provided and the mirror record's updated_at predates it
-      (stale-hit guard: the record predates the start-of-dispatch mirror-sync
-      timestamp, so a fresh fetch is required — issue #1782).
+    - sync_ts is provided and the mirror record's updatedAt is AFTER sync_ts
+      (stale-hit guard: the issue was modified after the mirror last synced,
+      so the mirror body may be outdated — issue #1782, corrected by #1915).
+
+    Guard semantics: a mirror record is FRESH when updatedAt <= sync_ts (the
+    issue was last modified at or before the mirror's last sync, so the sync
+    captured the current state). It is STALE when updatedAt > sync_ts. When
+    sync_ts is None the guard is skipped and the mirror body is always used.
 
     On live-fetch success returns the body string (may be "").
     On live-fetch failure returns "" (sentinel — distinguishes "attempted but
@@ -384,9 +424,9 @@ def _mirror_issue_body(
         if _body is not None:
             if sync_ts:
                 _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
-                if _record_ts >= sync_ts:
-                    return _body  # fresh mirror hit
-                # else stale: record predates sync_ts — fall through to live fetch
+                if _record_ts <= sync_ts:
+                    return _body  # fresh: issue not modified since last mirror sync
+                # else stale: issue modified after mirror sync → fall through to live fetch
             else:
                 return _body  # no stale check → use mirror
 
@@ -432,9 +472,9 @@ def _fetch_dispatch_issue_body(
     (issue #1573). Returns None only when eff_repo is empty/None, preserving
     the legacy path where _build_design_block performs the fetch itself.
 
-    sync_ts: when provided, passed to _mirror_issue_body so the stale-hit guard
-    is active — mirror records whose updated_at predates sync_ts trigger a live
-    fetch (issue #1813).
+    sync_ts: the mirror's last-sync timestamp; passed to _mirror_issue_body so
+    the stale-hit guard fires only for issues modified after the last sync
+    (issue #1813, semantics corrected in #1915).
     """
     if not eff_repo:
         return None
@@ -704,9 +744,11 @@ def _dispatch_coder(
     # skip the redundant per-dispatch gh api subprocess call (issue #1541).
     # On fetch failure the helper returns the "" sentinel (not None) and logs the
     # failure, so _build_design_block does not issue a second gh call (issue #1573).
-    # sync_ts marks start-of-dispatch so the stale-hit guard in _mirror_issue_body
-    # is active: mirror records predating this timestamp trigger a live fetch (#1813).
-    _dispatch_sync_ts: str = _utcnow()
+    # sync_ts is the mirror's last-sync timestamp so the stale-hit guard in
+    # _mirror_issue_body answers "was this record captured by the latest sync?"
+    # rather than the incorrect "was the issue edited after dispatch began?" that
+    # _utcnow() produced (issue #1915, fixing #1813).
+    _dispatch_sync_ts: Optional[str] = _get_mirror_sync_ts(eff_repo)
     _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(
         eff_repo, issue_num, sync_ts=_dispatch_sync_ts
     )

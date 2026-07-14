@@ -22,7 +22,11 @@ def resolve_clone_root(slug: str) -> Path:
     """Resolve a project slug to the primary clone root on disk.
 
     Raises HTTPException(404) if the slug does not match any tracked project.
-    Supports nested layout (~/dev/<slug>/main/) and flat layout (~/dev/<slug>/).
+    Supports nested layout (~/dev/<slug>/main/), the prd/uat sub-clone layout
+    (~/dev/<slug>/prd/), and flat layout (~/dev/<slug>/ is itself the clone).
+    The project root is only used as a fallback when it is a git clone itself —
+    a bare container directory (e.g. PRD's ~/dev/commander holding prd/, uat/,
+    coder/) would otherwise serve an orphaned stale docs/ tree.
     """
     import projects as _projects  # noqa: PLC0415 — lazy to avoid circular imports
     projs = _projects.load_projects()
@@ -33,10 +37,21 @@ def resolve_clone_root(slug: str) -> Path:
     if proj is None:
         raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
     project_root = _PROJECTS_BASE / slug
-    main_clone = project_root / "main"
-    if main_clone.is_dir() and (main_clone / ".git").exists():
-        return main_clone
-    return project_root
+    for sub in ("main", "prd"):
+        clone = project_root / sub
+        if clone.is_dir() and (clone / ".git").exists():
+            return clone
+    # Flat layout: the project root itself is the clone (takes precedence over
+    # a uat/ sub-clone living inside it, as on the local authoring machine).
+    if (project_root / ".git").exists():
+        return project_root
+    uat_clone = project_root / "uat"
+    if uat_clone.is_dir() and (uat_clone / ".git").exists():
+        return uat_clone
+    raise HTTPException(
+        status_code=404,
+        detail=f"No git clone found for project '{slug}' under {project_root}",
+    )
 
 
 def list_docs(clone_root: Path) -> list[dict]:

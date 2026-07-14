@@ -19,6 +19,10 @@ if not _db_path_raw:
 
 DB_PATH = Path(_db_path_raw)
 
+# Default local-backup directory — sibling .commander/db-backups/ of the DB.
+# Tests can monkeypatch this directly.
+_LOCAL_BACKUP_DIR = DB_PATH.parent / ".commander" / "db-backups"
+
 # Asia/Bangkok is UTC+7 (no DST)
 _BKK_OFFSET = timezone(timedelta(hours=7))
 
@@ -29,6 +33,33 @@ def _bkk_midnight_utc() -> str:
     midnight  = now_bkk.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_mid   = midnight.astimezone(timezone.utc)
     return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def check_db_integrity(db_path: Path) -> str:
+    """Run PRAGMA integrity_check on db_path. Returns 'ok' or an error string."""
+    if not db_path.exists():
+        return f"error: file not found: {db_path}"
+    if db_path.stat().st_size == 0:
+        return "error: database file is empty"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        return row[0] if row else "error: no result from integrity_check"
+    except sqlite3.DatabaseError as exc:
+        return f"error: {exc}"
+    finally:
+        conn.close()
+
+
+def run_wal_checkpoint(db_path: "Path | None" = None) -> tuple:
+    """Run PRAGMA wal_checkpoint(PASSIVE) and return (busy, log, checkpointed)."""
+    path = db_path if db_path is not None else DB_PATH
+    conn = sqlite3.connect(str(path))
+    try:
+        row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        return tuple(row) if row else (0, 0, 0)
+    finally:
+        conn.close()
 
 
 @contextlib.contextmanager
@@ -61,6 +92,24 @@ def init_db():
         raise RuntimeError(
             f"DB_PATH '{DB_PATH.resolve()}' is not writable: {exc}"
         ) from exc
+
+    # Integrity check (issue #1901): abort loudly on a corrupt DB rather than
+    # silently 500-looping on every mirror sync.
+    if DB_PATH.exists() and DB_PATH.stat().st_size > 0:
+        result = check_db_integrity(DB_PATH)
+        if result != "ok":
+            try:
+                from backup import list_local_backups as _list_backups  # noqa: PLC0415
+                backups = _list_backups(_LOCAL_BACKUP_DIR)
+            except Exception:
+                backups = []
+            msg = (
+                f"commander.db is corrupt (integrity_check: {result!r}). "
+                f"Backup dir: {_LOCAL_BACKUP_DIR}"
+            )
+            if backups:
+                msg += f". Most recent backup: {backups[0]}"
+            raise RuntimeError(msg)
 
     with get_conn() as conn:
         conn.execute("""

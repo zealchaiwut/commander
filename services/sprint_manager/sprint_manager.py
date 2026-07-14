@@ -3700,6 +3700,9 @@ def run_sprint_loop(
                         _fix_history.append({
                             "attempt": _fix_attempt, "category": category, "reason": reason,
                         })
+                        issue_state.fix_attempts += 1
+                        issue_state.last_error = reason
+                        state.save(state_path)
                         if _sig == _last_failure_sig:
                             sys.stdout.write(str(f"  [fix-loop] consecutive identical coder failure ({_sig}): "
                                 f"aborting early") + "\n")
@@ -3812,6 +3815,9 @@ def run_sprint_loop(
                     _fix_history.append({
                         "attempt": _fix_attempt, "category": category, "reason": reason,
                     })
+                    issue_state.fix_attempts += 1
+                    issue_state.last_error = reason
+                    state.save(state_path)
                     if _sig == _last_failure_sig:
                         sys.stdout.write(str("  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
                         sys.stdout.flush()
@@ -4070,6 +4076,9 @@ def run_sprint_loop(
                 _fix_history.append({
                     "attempt": _fix_attempt, "category": category, "summary": summary_line,
                 })
+                issue_state.fix_attempts += 1
+                issue_state.last_error = summary_line
+                state.save(state_path)
                 if _sig == _last_failure_sig:
                     sys.stdout.write(str(f"  [fix-loop] consecutive identical gate failure ({category}): "
                         f"aborting early") + "\n")
@@ -4168,6 +4177,14 @@ def run_sprint_loop(
             # failure recorded during the fix loop (issue #701).
             _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
+            if not any(d.get("ticket_id") == num for d in state.dead_letter):
+                state.dead_letter.append({
+                    "ticket_id": num,
+                    "title": issue_state.title,
+                    "attempts": issue_state.fix_attempts,
+                    "last_error": issue_state.last_error,
+                })
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue

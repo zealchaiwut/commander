@@ -473,16 +473,21 @@ def _build_finish_card_inline(label: str, project: str, lifecycle_state: str) ->
         return no_data
 
 
-def _build_branch_status_inline(label: str, project: str) -> dict:
+def _build_branch_status_inline(label: str, project: str, lifecycle_state: str = "") -> dict:
     """Branch status with zero gh/subprocess calls.
 
-    Aggregate path: branch existence is not checked (returns exists=False).
-    PR info is sourced from the DB row if available.
+    Infers exists=True from lifecycle_state=='running' (branch must be alive)
+    or from a non-null pr_number in the DB row (branch was alive when PR opened).
+    exists=False only when neither zero-quota source confirms existence.
     """
     branch = f"sprint/{label}"
     base: dict = {"exists": False, "branch": branch}
     try:
         row = db.get_sprint(label, project=project)
+        if lifecycle_state == "running":
+            base["exists"] = True
+        elif row and row.get("pr_number"):
+            base["exists"] = True
         if row and row.get("pr_number"):
             pr_number = row["pr_number"]
             base["pr_number"] = pr_number
@@ -514,7 +519,7 @@ def _build_sprint_card(
     outcome = _build_outcome_inline(label, project, lifecycle_state)
     conflicts = _build_conflicts_inline(sprint_issues, est_dir)
     finish_card = _build_finish_card_inline(label, project, lifecycle_state)
-    branch_status = _build_branch_status_inline(label, project)
+    branch_status = _build_branch_status_inline(label, project, lifecycle_state)
 
     return {
         "label": label,

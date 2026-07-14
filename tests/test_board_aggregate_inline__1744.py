@@ -404,11 +404,13 @@ def test_ac1_branch_status_has_exists_field(tmp_path):
         assert "branch" in bs_data, f"branch_status missing 'branch' for {card.get('label')}"
 
 
-def test_ac1_branch_status_has_false_exists(tmp_path):
-    """branch_status.exists is False in aggregate (no gh call) (AC1)."""
+def test_ac1_branch_status_exists_is_bool(tmp_path):
+    """branch_status.exists is always a bool (AC1)."""
     board = _build_board(tmp_path)
     for card in _collect_sprint_cards(board):
-        assert card["branch_status"]["exists"] is False
+        assert isinstance(card["branch_status"]["exists"], bool), (
+            f"branch_status.exists must be bool for {card.get('label')}"
+        )
 
 
 def test_ac1_branch_name_matches_sprint_label(tmp_path):
@@ -562,3 +564,129 @@ def test_ac2_bundle_contains_aggregate_guards_in_all_loaders():
         assert fn_name in bundle, f"bundle must contain {fn_name}"
     # The aggregate cards variable must also be in the bundle (ensures guard compiled in)
     assert "_smgmtAggregateCards" in bundle
+
+
+# ── Issue #1752: branch_status.exists inferred from zero-quota sources ────────
+
+
+def test_1752_ac1_running_sprint_exists_true(tmp_path):
+    """Running sprint gets branch_status.exists=True without any gh calls (issue #1752 AC1)."""
+    board = _build_board(tmp_path)
+    running_cards = board["sections"]["running"]
+    sprint2 = next((c for c in running_cards if c["label"] == "sprint-2"), None)
+    assert sprint2 is not None, "Expected sprint-2 in running section"
+    assert sprint2["branch_status"]["exists"] is True, (
+        "Running sprint must have exists=True — branch must be alive while sprint is running"
+    )
+
+
+def test_1752_ac2_sprint_with_pr_number_exists_true(tmp_path):
+    """Sprint with non-null pr_number gets branch_status.exists=True (issue #1752 AC2)."""
+    sprint3_with_pr = dict(_SPRINT_3_DB_ROW, pr_number=99)
+    mock_db = _make_mock_db(sprint3_row=sprint3_with_pr)
+    mock_gc = _make_mock_github()
+    mock_ss = _make_mock_sprint_state()
+
+    if "board_service" in sys.modules:
+        bs = sys.modules["board_service"]
+    else:
+        import importlib.util
+        spec = importlib.util.find_spec("board_service")
+        bs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bs)
+        sys.modules["board_service"] = bs
+
+    mock_run_stats = MagicMock()
+    mock_run_stats.sprint_run_stats.return_value = {"label": "x", "has_runs": False, "split": [], "tickets": []}
+    mock_server = MagicMock()
+    mock_server._DAG_BUILDER_AVAILABLE = False
+    mock_server._build_dag = None
+    mock_server.build_effective_response.return_value = {}
+    mock_server._settings_repo = MagicMock()
+    mock_server._settings_repo.get_setting.return_value = {}
+    mock_server.APP_CONFIG_KEY = "app_config"
+
+    sprints_dir = tmp_path / ".commander" / "sprints"
+
+    with (
+        patch.object(bs, "db", mock_db),
+        patch.object(bs, "github_client", mock_gc),
+        patch.object(bs, "_run_stats_service", return_value=mock_run_stats),
+        patch.dict(sys.modules, {"sprint_state": mock_ss}),
+        patch.object(bs, "_server", return_value=mock_server),
+        patch.object(bs, "_sprints_dir", return_value=sprints_dir),
+    ):
+        board = bs.assemble_board(_PROJECT)
+
+    rework_cards = board["sections"]["needs_rework"]
+    sprint3 = next((c for c in rework_cards if c["label"] == "sprint-3"), None)
+    assert sprint3 is not None, "Expected sprint-3 in needs_rework section"
+    assert sprint3["branch_status"]["exists"] is True, (
+        "Sprint with non-null pr_number must have exists=True (branch was alive when PR opened)"
+    )
+    assert sprint3["branch_status"]["pr_number"] == 99
+
+
+def test_1752_ac3_draft_sprint_no_pr_exists_false(tmp_path):
+    """Draft sprint with no pr_number gets branch_status.exists=False (issue #1752 AC3)."""
+    board = _build_board(tmp_path)
+    draft_cards = board["sections"]["draft"]
+    sprint1 = next((c for c in draft_cards if c["label"] == "sprint-1"), None)
+    assert sprint1 is not None, "Expected sprint-1 in draft section"
+    assert sprint1["branch_status"]["exists"] is False, (
+        "Draft sprint with no pr_number must have exists=False — no zero-quota source confirms existence"
+    )
+
+
+def test_1752_ac3_needs_rework_sprint_no_pr_exists_false(tmp_path):
+    """needs_rework sprint with null pr_number gets branch_status.exists=False (issue #1752 AC3)."""
+    board = _build_board(tmp_path)
+    rework_cards = board["sections"]["needs_rework"]
+    sprint3 = next((c for c in rework_cards if c["label"] == "sprint-3"), None)
+    assert sprint3 is not None, "Expected sprint-3 in needs_rework section"
+    assert sprint3["branch_status"]["exists"] is False, (
+        "needs_rework sprint with null pr_number must have exists=False"
+    )
+
+
+def test_1752_ac5_assemble_board_zero_subprocess_calls(tmp_path):
+    """assemble_board makes zero subprocess.run calls — _build_branch_status_inline never calls gh (issue #1752 AC5)."""
+    with patch("subprocess.run") as mock_run:
+        _build_board(tmp_path)
+    mock_run.assert_not_called()
+
+
+def test_1752_ac6_all_cards_have_branch_status_exists_bool_and_branch_str(tmp_path):
+    """Every sprint card has branch_status with exists (bool) and branch (string) (issue #1752 AC6)."""
+    board = _build_board(tmp_path)
+    cards = _collect_sprint_cards(board)
+    assert cards, "Need at least one sprint card"
+    for card in cards:
+        bs_data = card["branch_status"]
+        assert "exists" in bs_data, f"branch_status missing 'exists' for {card.get('label')}"
+        assert "branch" in bs_data, f"branch_status missing 'branch' for {card.get('label')}"
+        assert isinstance(bs_data["exists"], bool), (
+            f"branch_status.exists must be bool for {card.get('label')}, got {type(bs_data['exists'])}"
+        )
+        assert isinstance(bs_data["branch"], str), (
+            f"branch_status.branch must be str for {card.get('label')}"
+        )
+
+
+def test_1752_ac4_js_reads_branch_status_exists_from_inline_card():
+    """_smgmtLoadFinishCards reads branch_status.exists from inline card data (issue #1752 AC4)."""
+    src = _BOARD_RENDER.read_text(encoding="utf-8")
+    fn_start = src.find("export async function _smgmtLoadFinishCards")
+    assert fn_start != -1, "_smgmtLoadFinishCards not found in board-render.js"
+    # Find the aggregate path block
+    agg_start = src.find("_smgmtAggregateCards", fn_start)
+    assert agg_start != -1
+    # The aggregate block must read branch_status from the card
+    agg_block_end = src.find("return;", agg_start)
+    agg_block = src[agg_start:agg_block_end]
+    assert "branch_status" in agg_block, (
+        "_smgmtLoadFinishCards aggregate path must read card.branch_status"
+    )
+    assert ".exists" in agg_block or "exists" in agg_block, (
+        "_smgmtLoadFinishCards aggregate path must use branch_status (which carries exists)"
+    )

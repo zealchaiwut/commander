@@ -777,10 +777,32 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
     SQLite cannot alter a CHECK constraint in place. Existing rows are copied
     verbatim (forward-only migration — legacy state values stay readable).
     """
+    # Salvage pass: a prior run of this migration can strand rows in
+    # sprints_legacy_check — the RENAME/CREATE (DDL, autocommitted) survived
+    # while the row copy + DROP (DML, transactional) rolled back when the
+    # caller's get_conn() closed without commit (#1749 made close a rollback).
+    leftover = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints_legacy_check'"
+    ).fetchone()
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='sprints'"
     ).fetchone()
-    if row is None or "needs_rework" in (row[0] or ""):
+    if row is not None and "needs_rework" in (row[0] or ""):
+        if leftover is not None:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO sprints
+                    (label, project, state, created_at, started_at, ended_at,
+                     end_reason, parent_label)
+                SELECT label, project, state, created_at, started_at, ended_at,
+                       end_reason, parent_label
+                FROM sprints_legacy_check
+                """
+            )
+            conn.execute("DROP TABLE sprints_legacy_check")
+            conn.commit()
+        return
+    if row is None:
         return
     conn.execute("ALTER TABLE sprints RENAME TO sprints_legacy_check")
     conn.execute(_SPRINTS_TABLE_DDL)
@@ -793,6 +815,10 @@ def _migrate_sprints_state_check(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("DROP TABLE sprints_legacy_check")
+    # Commit immediately: this helper runs inside read-only get_conn() blocks
+    # whose close() otherwise rolls the row copy back while the DDL persists,
+    # silently emptying the sprints table.
+    conn.commit()
 
 
 def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
@@ -865,6 +891,11 @@ def _migrate_sprints_to_composite_pk(conn: sqlite3.Connection) -> None:
         "INSERT INTO _sprint_schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
         (_SPRINTS_COMPOSITE_PK_VERSION,),
     )
+    # Commit immediately — same rollback hazard as _migrate_sprints_state_check:
+    # callers routinely run this inside read-only get_conn() blocks that close
+    # (= rollback) without committing, which would undo the row copy + version
+    # marker while the interleaved DDL persists.
+    conn.commit()
 
 
 def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:

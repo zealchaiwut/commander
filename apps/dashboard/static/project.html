@@ -22196,6 +22196,7 @@ async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
     } else if (data.applied > 0) {
       _smgmtShowToast(`Moved ${data.applied} issue${data.applied !== 1 ? 's' : ''} to ${dest}.`);
     }
+    if (isNew) _smgmtClearSelection();
     await loadSprintMgmt();
   } catch (e) {
     _smgmtShowToast('Failed to move issues: ' + e.message);

@@ -33,8 +33,6 @@ def test_retry_estimation_validation__endpoint_accepts_repo_param(client):
     # AC: The endpoint /api/issues/{issue}/estimate accepts a repo parameter.
     # We check by comparing responses with and without repo param.
     # With repo: endpoint will either process it or return a valid error (not 400 missing-param)
-    # Without repo: should return 400 or 422 (missing required param)
-    r_no_repo = client.post("/api/issues/1/estimate", params={})
     r_with_repo = client.post("/api/issues/1/estimate", params={"repo": "test/repo"})
     # Request WITH repo should not be a 400 missing-param error
     assert r_with_repo.status_code != 400, "Endpoint should accept repo parameter"

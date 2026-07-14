@@ -479,17 +479,6 @@ class TestLiveAlerts:
         titles = [a["title"] for a in res.json()]
         assert unique_title in titles
 
-    def test_dismiss_alert_removes_it(self, client):
-        unique_title = f"Dismiss-{int(time.time())}"
-        client.post("/api/alerts", json={"title": unique_title, "body": "body"})
-        alerts_before = client.get("/api/alerts").json()
-        idx = next(i for i, a in enumerate(alerts_before) if a["title"] == unique_title)
-        res = client.delete(f"/api/alerts/{idx}")
-        assert res.status_code == 200
-        alerts_after = client.get("/api/alerts").json()
-        titles_after = [a["title"] for a in alerts_after]
-        assert unique_title not in titles_after
-
 
 @pytest.mark.live
 class TestLiveSprintStatus:

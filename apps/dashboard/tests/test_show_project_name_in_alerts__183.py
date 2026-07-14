@@ -26,17 +26,8 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _clear_test_alerts(client):
-    """Remove any alerts posted by this test run after each test."""
+    """Teardown stub — DELETE /api/alerts/{idx} was removed in #1772 (issue #1793)."""
     yield
-    # Best-effort cleanup: fetch and delete any alert we may have posted
-    try:
-        resp = client.get("/api/alerts")
-        if resp.status_code == 200:
-            # Delete from last to first so indices stay valid
-            for idx in reversed(range(len(resp.json()))):
-                client.delete(f"/api/alerts/{idx}")
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------

@@ -127,9 +127,7 @@ class TestAC3PerProjectAlerts:
         return r.json()
 
     def _cleanup_alerts(self, client):
-        alerts = client.get("/api/alerts").json()
-        for idx in range(len(alerts) - 1, -1, -1):
-            client.delete(f"/api/alerts/{idx}")
+        pass  # DELETE /api/alerts/{idx} removed in #1772; cleanup is a no-op
 
     def test_alert_with_repo_field_accepted(self, client):
         r = client.post("/api/alerts", json={
@@ -139,10 +137,6 @@ class TestAC3PerProjectAlerts:
             "category": "blocked",
         })
         assert r.status_code == 201
-        # Cleanup
-        alerts = client.get("/api/alerts").json()
-        for idx in range(len(alerts) - 1, -1, -1):
-            client.delete(f"/api/alerts/{idx}")
 
     def test_get_alerts_returns_repo_field(self, client):
         """GET /api/alerts returns the repo field on each alert object."""

@@ -177,7 +177,6 @@ class TestLocalBackup:
     def test_local_backup_scheduler_starts(self, monkeypatch):
         """start_local_backup_scheduler registers a timer without blocking."""
         monkeypatch.setattr(backup, "_local_scheduler_started", False)
-        monkeypatch.setattr(backup, "_local_scheduler_timer", None)
 
         backup.start_local_backup_scheduler()
 

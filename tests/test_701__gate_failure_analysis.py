@@ -13,19 +13,15 @@ AC items verified:
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import services.sprint_manager.sprint_manager as sm
+import services.sprint_manager.sprint_manager as sm  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

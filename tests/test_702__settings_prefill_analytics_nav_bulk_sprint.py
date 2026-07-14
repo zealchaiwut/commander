@@ -118,7 +118,6 @@ def test_ac2_analytics_route_exists_in_pages_router():
         if "routers.pages" in mod or mod == "routers.pages":
             del sys.modules[mod]
 
-    import importlib  # noqa: PLC0415
     import routers.pages as pages  # noqa: PLC0415
 
     routes = [r.path for r in pages.router.routes]

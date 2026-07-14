@@ -666,7 +666,8 @@ def _run_pipeline_dispatch(
     target_branch, sprint_branch, alert_modes, cfg, run_id,
     eff_sprints_dir, rerun_decisions,
     skip_gates, gate_pytest, gate_lint, gate_merge_preview,
-    gate_typecheck, gate_design, gate_frontend_lint, gate_monolith, gate_scope,
+    gate_typecheck, gate_design, gate_frontend_lint, gate_monolith,
+    gate_coder_no_test_edits, gate_scope,
     resume, retry_failed,
 ) -> None:
     """Process dispatch levels with one coder + one tester worker concurrently.
@@ -1006,6 +1007,7 @@ def _run_pipeline_dispatch(
                 gate_pytest=gate_pytest, gate_lint=gate_lint, gate_merge_preview=gate_merge_preview,
                 gate_typecheck=gate_typecheck, gate_design=gate_design,
                 gate_frontend_lint=gate_frontend_lint, gate_monolith=gate_monolith,
+                gate_coder_no_test_edits=gate_coder_no_test_edits,
                 target_branch=target_branch,
                 repo_name=eff_repo, cfg=cfg, base_branch=target_branch or "develop",
                 gate_scope=gate_scope, documentor_enabled=cfg.documentor_enabled if cfg else False,

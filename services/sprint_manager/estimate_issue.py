@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -587,9 +588,10 @@ def main() -> None:
         return
 
     # Fetch issue and run estimator
+    _sync_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     sys.stdout.write(str(f"Fetching issue #{args.issue} from {repo} ...") + "\n")
     try:
-        issue_data = fetch_issue(args.issue, repo)
+        issue_data = fetch_issue(args.issue, repo, sync_ts=_sync_ts)
     except subprocess.CalledProcessError as e:
         sys.stderr.write(str(f"Error: could not fetch issue #{args.issue}: {e}") + "\n")
         sys.exit(1)

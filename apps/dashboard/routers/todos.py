@@ -190,6 +190,8 @@ def delete_todo_attachment(project: str, todo_id: int, filename: str):
 # Separate router so the full path /api/todos is declared without inheriting
 # the /api/projects prefix from the per-project router above.
 
+MAX_BATCH_SLUGS = 50
+
 batch_router = APIRouter(tags=["todos-batch"])
 
 
@@ -199,9 +201,16 @@ def batch_list_todos(projects: str = "") -> dict:
 
     ``projects`` is a comma-separated list of slugs. Unknown slugs are included
     with an empty list so callers don't need to distinguish "not fetched" from
-    "has no todos".
+    "has no todos". Duplicate slugs are silently collapsed; more than
+    MAX_BATCH_SLUGS unique slugs returns 400 (issue #1797).
     """
-    slugs = [s.strip() for s in projects.split(",") if s.strip()]
+    raw = [s.strip() for s in projects.split(",") if s.strip()]
+    slugs = list(dict.fromkeys(raw))
+    if len(slugs) > MAX_BATCH_SLUGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many slugs: {len(slugs)} requested, max is {MAX_BATCH_SLUGS}.",
+        )
     result: dict[str, list] = {}
     for slug in slugs:
         result[slug] = [_todo_out(t) for t in todo_repo.list_todos(slug)]

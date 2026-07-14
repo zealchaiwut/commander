@@ -137,12 +137,16 @@ def extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def fetch_issue(issue_num: int, repo: str, runner=None) -> dict:
+def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] = None) -> dict:
     """Fetch issue details, preferring the local mirror over a live gh api call.
 
     Reads from the local issues mirror first (issue #1782), falling back to gh
     api (REST) only when the mirror has no record or the record lacks a body.
     Write paths (gh issue comment, gh issue edit) are unchanged.
+
+    sync_ts: when provided, mirror records whose updated_at predates sync_ts are
+    treated as stale and trigger a live fetch — mirrors the guard in
+    _mirror_issue_body (issue #1813).
 
     `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
     shares and exhausts during estimation bursts; REST has a separate budget.
@@ -155,18 +159,24 @@ def fetch_issue(issue_num: int, repo: str, runner=None) -> dict:
         import github_client as _gc_est  # lazy import; dashboard dir on path
         _mirror = _gc_est._mirror_issue(repo, issue_num)
         if _mirror is not None and _mirror.get("body") is not None:
-            _labels = _mirror.get("labels") or []
-            return {
-                "number": _mirror.get("number") or issue_num,
-                "title": _mirror.get("title", ""),
-                "body": _mirror.get("body") or "",
-                "labels": [
-                    {"name": lbl.get("name", "") if isinstance(lbl, dict) else str(lbl)}
-                    for lbl in _labels
-                ],
-            }
+            # Apply stale-hit guard (mirrors _mirror_issue_body logic — issue #1813).
+            _is_fresh = True
+            if sync_ts:
+                _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
+                _is_fresh = _record_ts >= sync_ts
+            if _is_fresh:
+                _labels = _mirror.get("labels") or []
+                return {
+                    "number": _mirror.get("number") or issue_num,
+                    "title": _mirror.get("title", ""),
+                    "body": _mirror.get("body") or "",
+                    "labels": [
+                        {"name": lbl.get("name", "") if isinstance(lbl, dict) else str(lbl)}
+                        for lbl in _labels
+                    ],
+                }
     except Exception:
-        pass  # mirror unavailable — fall through to live fetch
+        pass  # mirror unavailable or stale — fall through to live fetch
 
     # Live fetch fallback.
     if runner is not None:

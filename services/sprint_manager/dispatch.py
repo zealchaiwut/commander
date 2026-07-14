@@ -419,7 +419,11 @@ def _mirror_issue_body(
         return ""
 
 
-def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optional[str]:
+def _fetch_dispatch_issue_body(
+    eff_repo: Optional[str],
+    issue_num: int,
+    sync_ts: Optional[str] = None,
+) -> Optional[str]:
     """Fetch the issue body once for dispatch, to pass into _build_design_block.
 
     Reads from the local issues mirror first (issue #1782), falling back to a
@@ -427,10 +431,14 @@ def _fetch_dispatch_issue_body(eff_repo: Optional[str], issue_num: int) -> Optio
     "" (sentinel) so _build_design_block skips its own fallback gh fetch
     (issue #1573). Returns None only when eff_repo is empty/None, preserving
     the legacy path where _build_design_block performs the fetch itself.
+
+    sync_ts: when provided, passed to _mirror_issue_body so the stale-hit guard
+    is active — mirror records whose updated_at predates sync_ts trigger a live
+    fetch (issue #1813).
     """
     if not eff_repo:
         return None
-    return _mirror_issue_body(eff_repo, issue_num)
+    return _mirror_issue_body(eff_repo, issue_num, sync_ts=sync_ts)
 
 
 def _build_design_block(*args, **kwargs):
@@ -696,7 +704,12 @@ def _dispatch_coder(
     # skip the redundant per-dispatch gh api subprocess call (issue #1541).
     # On fetch failure the helper returns the "" sentinel (not None) and logs the
     # failure, so _build_design_block does not issue a second gh call (issue #1573).
-    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(eff_repo, issue_num)
+    # sync_ts marks start-of-dispatch so the stale-hit guard in _mirror_issue_body
+    # is active: mirror records predating this timestamp trigger a live fetch (#1813).
+    _dispatch_sync_ts: str = _utcnow()
+    _fetched_issue_body: Optional[str] = _fetch_dispatch_issue_body(
+        eff_repo, issue_num, sync_ts=_dispatch_sync_ts
+    )
 
     _design_block = _build_design_block(issue_num, eff_repo, cwd_path, issue_body=_fetched_issue_body)
 

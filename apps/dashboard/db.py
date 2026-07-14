@@ -2069,6 +2069,26 @@ def get_mirrored_issue(repo: str, issue_number: int) -> dict | None:
     return _row_to_issue(row) if row else None
 
 
+def invalidate_mirrored_issue(repo: str, issue_number: int) -> None:
+    """Delete one issue's mirror row so the next read falls back to REST.
+
+    Called after a label write (issue #1814) so _get_issue_labels cannot
+    return a stale label set that predates the write.  The row is
+    repopulated by the next ~60 s ETag sync.  Best-effort: exceptions are
+    swallowed so a missing DB_PATH or locked DB never breaks a transition.
+    """
+    try:
+        with get_conn() as conn:
+            _create_issues_table(conn)
+            conn.execute(
+                "DELETE FROM issues WHERE repo = ? AND issue_number = ?",
+                (repo, int(issue_number)),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def get_sync_etag(key: str) -> str | None:
     """Return the stored ETag for *key*, or None."""
     with get_conn() as conn:

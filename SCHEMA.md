@@ -738,20 +738,42 @@ Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persis
 
 The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
 
-Payload shape (built by `build_webhook_payload` from `plan.json` + `state.json`):
+Payload shape: as of issue #1945 the webhook and the on-disk report share a single builder (`build_commander_report`), so both emit the richer shape documented under **File-based sprint outcome report** below (`build_webhook_payload` now delegates to it). The pre-#1945 flat shape (`project`, `sprint_label`, `outcome`, `duration_sec`, `tickets`, `summary_url`) is no longer emitted.
+
+**Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
+
+### File-based sprint outcome report — commander_report.latest.json (issue #1945)
+
+At every sprint terminal state (normal finish, `kill_sprint`, or error) a daemon monitor thread (`start_report_monitor` → `_report_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and writes a JSON snapshot **atomically** (write-to-temp + `rename`) to `COMMANDER_REPORT_PATH` (env var, default `/var/run/commander/commander_report.latest.json`; documented in `.env.example`). This is unconditional — it runs regardless of whether `callback_url` is configured — so external pollers (Hermes) always have a consistent artifact even when webhook delivery fails. If the target's parent directory does not exist, `write_commander_report` logs a clear error and returns without crashing the run (a previous file is left untouched).
+
+The same `build_commander_report(sprints_dir, sprint_label, project, started_at)` builds both this file and the webhook payload (no field drift), reading `plan.json` + `state.json`:
 
 ```
 {
-  "project": "owner/repo",
-  "sprint_label": "sprint-N",
-  "outcome": "finished" | "needs_rework" | "killed",
-  "duration_sec": <int>,
-  "tickets": [{"number": <int>, "status": <str>}],
-  "summary_url": <str>   // present only when known
+  "run_id": <str>,                       // plan.started_at (or started_at fallback)
+  "triggered_by": <str | null>,          // echoes the run's `by` (issue #1946)
+  "trigger": {"by": <str>, "confirmed_at": <ISO-8601>, "mode": <str>},
+  "branch": "sprint/<label>",
+  "summary": {"attempted": <int>, "completed": <int>, "failed": <int>, "skipped": <int>},
+  "completed":    [{"ticket_id", "title", "commits": [], "tests": [], "merged_to", "pr_url"}],
+  "needs_review": [{"ticket_id", "title", "commits": [], "tests": []}],
+  "dead_letter":  [{"ticket_id", "title", "attempts": <int>, "last_error": <str>}],
+  "cost": {"tokens": <int>, "usd": <float>, "ceiling_hit": <bool>},
+  "actions": [{"type": "rerun", "ticket_id": <str>}]   // one per failed/errored ticket
 }
 ```
 
-**Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
+### Trigger-owner metadata + overnight run mode (issue #1946)
+
+`SprintMgmtRunBody` (`routers/sprint_run_service.py`) gains three optional fields on `POST /api/sprints/run`:
+
+| Field | Type | Effect |
+|---|---|---|
+| `by` | `str` | Stored as `triggered_by` in `plan.json`; echoed in the report's `triggered_by` and `trigger.by`. |
+| `mode` | `str` | Only `"overnight"` is accepted; any other value → **HTTP 400** (validated in the route handler, not a 422). Stored as `run_mode` in `plan.json`. |
+| `target_branch` | `str` | Explicit merge-target override passed through as `--target-branch`. |
+
+When `mode=overnight` and no explicit `target_branch` is supplied, the run defaults `--target-branch` to `develop` and appends `--overnight` to the `sprint_manager.py` argv; in overnight mode the full test suite is run against the target branch after **each** ticket merges (`_run_per_ticket_tests_overnight`, best-effort — a failure or timeout is logged but never stops the run). Absent/other `mode` values leave behavior unchanged.
 
 ### Code-state snapshot at sprint finish (issue #1862)
 

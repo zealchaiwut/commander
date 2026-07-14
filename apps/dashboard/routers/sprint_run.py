@@ -627,6 +627,15 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
         started_at=_started_at,
     )
 
+    # AC1 (issue #1945): always write commander_report.latest.json on sprint end.
+    sprint_webhook_service.start_report_monitor(
+        proc=proc,
+        sprint_label=body.sprint_label,
+        project=body.project,
+        sprints_dir=pid_dir,
+        started_at=_started_at,
+    )
+
     srv._slog.event(
         "sprint.dispatch",
         project="dashboard",
@@ -779,14 +788,15 @@ def kill_sprint(sprint_label: str, project: str):
     invalidate_board(project)
 
     # AC2 (issue #1865): fire webhook with outcome="killed" in a background thread.
+    # AC1 (issue #1945): always write commander_report.latest.json on kill.
+    import threading as _threading
+    _kill_payload = sprint_webhook_service.build_commander_report(
+        sprints_dir=sprints_dir,
+        sprint_label=sprint_label,
+        project=project or "",
+        started_at=_kill_started_at,
+    )
     if _kill_callback_url:
-        import threading as _threading
-        _kill_payload = sprint_webhook_service.build_webhook_payload(
-            sprints_dir=sprints_dir,
-            sprint_label=sprint_label,
-            project=project or "",
-            started_at=_kill_started_at,
-        )
         _t = _threading.Thread(
             target=sprint_webhook_service.deliver_sprint_webhook,
             args=(_kill_callback_url, _kill_payload),
@@ -794,6 +804,13 @@ def kill_sprint(sprint_label: str, project: str):
             name=f"sprint-webhook-kill-{sprint_label}",
         )
         _t.start()
+    _t_report = _threading.Thread(
+        target=sprint_webhook_service.write_commander_report,
+        args=(_kill_payload, sprint_webhook_service._get_report_path()),
+        daemon=True,
+        name=f"sprint-report-kill-{sprint_label}",
+    )
+    _t_report.start()
 
     return {"ok": True}
 

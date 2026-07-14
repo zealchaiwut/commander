@@ -5,12 +5,17 @@ POSTs a JSON outcome document to that URL when the sprint reaches a terminal
 state (finished, needs_rework, killed).  Delivery is best-effort: up to
 3 attempts with exponential back-off; failures are logged and never affect
 the sprint pipeline.
+
+Issue #1945: also writes commander_report.latest.json atomically to
+COMMANDER_REPORT_PATH at sprint end, using the same payload builder as the
+webhook so both outputs are always structurally identical.
 """
 from __future__ import annotations
 
 import ipaddress
 import json
 import logging
+import os
 import socket
 import threading
 import time
@@ -219,6 +224,125 @@ def _duration_sec(started_at: Optional[str]) -> int:
         return 0
 
 
+_DEFAULT_REPORT_PATH = "/var/run/commander/commander_report.latest.json"
+
+
+def _get_report_path() -> Path:
+    """Return the path for commander_report.latest.json (COMMANDER_REPORT_PATH env var)."""
+    return Path(os.environ.get("COMMANDER_REPORT_PATH") or _DEFAULT_REPORT_PATH)
+
+
+def build_commander_report(
+    *,
+    sprints_dir: Path,
+    sprint_label: str,
+    project: str,
+    started_at: Optional[str] = None,
+) -> dict:
+    """Build the rich commander report payload from plan.json + state.json (issue #1945).
+
+    Returned shape::
+
+        {
+            "run_id": <str>,
+            "trigger": {"by": <str>, "confirmed_at": <ISO-8601>, "mode": <str>},
+            "branch": <str>,
+            "summary": {"attempted": <int>, "completed": <int>, "failed": <int>, "skipped": <int>},
+            "completed": [{"ticket_id", "title", "commits", "tests", "merged_to", "pr_url"}],
+            "needs_review": [{"ticket_id", "title", "commits", "tests"}],
+            "dead_letter": [{"ticket_id", "title", "attempts", "last_error"}],
+            "cost": {"tokens": <int>, "usd": <float>, "ceiling_hit": <bool>},
+            "actions": [{"type": <str>, "ticket_id": <str>}],
+        }
+    """
+    plan = _read_plan_json_local(sprints_dir, sprint_label)
+    state_data = _read_state_json_local(sprints_dir, sprint_label)
+
+    confirmed_at = plan.get("started_at") or started_at or datetime.now(timezone.utc).isoformat()
+
+    issues = state_data.get("issues") or []
+    completed_list: list = []
+    needs_review_list: list = []
+    dead_letter_list: list = []
+    n_completed = n_failed = n_skipped = 0
+
+    for iss in issues:
+        ticket_id = str(iss.get("number") or iss.get("ticket_id") or "")
+        title = str(iss.get("title") or "")
+        status = str(iss.get("status") or "")
+
+        if status == "done":
+            n_completed += 1
+            completed_list.append({
+                "ticket_id": ticket_id,
+                "title": title,
+                "commits": [],
+                "tests": [],
+                "merged_to": f"sprint/{sprint_label}",
+                "pr_url": str(iss.get("pr_url") or ""),
+            })
+        elif status in ("failed", "error"):
+            n_failed += 1
+            dead_letter_list.append({
+                "ticket_id": ticket_id,
+                "title": title,
+                "attempts": int(iss.get("tester_attempt_count") or 1),
+                "last_error": str(iss.get("failure_reason") or ""),
+            })
+        elif status == "skipped":
+            n_skipped += 1
+        elif status == "needs_review":
+            needs_review_list.append({
+                "ticket_id": ticket_id,
+                "title": title,
+                "commits": [],
+                "tests": [],
+            })
+        # pending / queued / other statuses are not yet attempted — excluded from counts
+
+    n_attempted = n_completed + n_failed + n_skipped + len(needs_review_list)
+
+    # Token totals: prefer top-level state fields; fall back to per-issue sum.
+    total_in = int(state_data.get("total_tokens_in") or 0)
+    total_out = int(state_data.get("total_tokens_out") or 0)
+    if total_in == 0 and total_out == 0:
+        total_in = sum(int(iss.get("tokens_in") or 0) for iss in issues)
+        total_out = sum(int(iss.get("tokens_out") or 0) for iss in issues)
+
+    actions = [
+        {"type": "rerun", "ticket_id": str(iss.get("number") or iss.get("ticket_id") or "")}
+        for iss in issues
+        if str(iss.get("status") or "") in ("failed", "error")
+    ]
+
+    return {
+        "run_id": confirmed_at,
+        "trigger": {
+            "by": "sprint_manager",
+            "confirmed_at": confirmed_at,
+            "mode": "auto",
+        },
+        "branch": f"sprint/{sprint_label}",
+        "summary": {
+            "attempted": n_attempted,
+            "completed": n_completed,
+            "failed": n_failed,
+            "skipped": n_skipped,
+        },
+        "completed": completed_list,
+        "needs_review": needs_review_list,
+        "dead_letter": dead_letter_list,
+        "cost": {
+            "tokens": total_in + total_out,
+            "usd": 0.0,
+            "ceiling_hit": bool(
+                plan.get("token_budget_exceeded") or state_data.get("ceiling_hit")
+            ),
+        },
+        "actions": actions,
+    }
+
+
 def build_webhook_payload(
     *,
     sprints_dir: Path,
@@ -226,50 +350,93 @@ def build_webhook_payload(
     project: str,
     started_at: Optional[str] = None,
 ) -> dict:
-    """Build the outcome JSON document from plan.json + state.json.
+    """Build the outcome JSON document — delegates to build_commander_report (issue #1945).
 
-    Returned shape::
-
-        {
-            "project": "owner/repo",
-            "sprint_label": "sprint-N",
-            "outcome": "finished" | "needs_rework" | "killed",
-            "duration_sec": <int>,
-            "tickets": [{"number": <int>, "status": <str>}],
-            "summary_url": <str | absent>,
-        }
+    Webhook and file payloads share a single builder so they are always
+    structurally identical with no field drift between the two.
     """
-    plan = _read_plan_json_local(sprints_dir, sprint_label)
-    state_data = _read_state_json_local(sprints_dir, sprint_label)
+    return build_commander_report(
+        sprints_dir=sprints_dir,
+        sprint_label=sprint_label,
+        project=project,
+        started_at=started_at,
+    )
 
-    plan_state = plan.get("state", "")
-    end_reason = (plan.get("end_reason") or "").lower()
 
-    if end_reason in _KILL_END_REASONS:
-        outcome = "killed"
-    else:
-        outcome = _OUTCOME_MAP.get(plan_state, "needs_rework")
+def write_commander_report(payload: dict, path: Path) -> None:
+    """Atomically write payload as JSON to path (write-to-temp + rename).
 
-    effective_started_at = started_at or plan.get("started_at")
-    tickets = [
-        {"number": iss.get("number", iss.get("ticket_id")), "status": iss.get("status", "unknown")}
-        for iss in (state_data.get("issues") or [])
-        if iss.get("number") or iss.get("ticket_id")
-    ]
+    If the parent directory does not exist, logs a clear error and returns
+    without crashing — the sprint run is unaffected (AC5, issue #1945).
+    """
+    if not path.parent.exists():
+        logger.error(
+            "commander report: parent directory %s does not exist — report not written",
+            path.parent,
+        )
+        return
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.rename(path)
+        logger.info("commander report written to %s", path)
+    except Exception as exc:
+        logger.error("commander report: failed to write %s: %s", path, exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-    payload: dict = {
-        "project": project,
-        "sprint_label": sprint_label,
-        "outcome": outcome,
-        "duration_sec": _duration_sec(effective_started_at),
-        "tickets": tickets,
-    }
 
-    summary_url = state_data.get("summary_issue_url") or plan.get("summary_issue_url")
-    if summary_url:
-        payload["summary_url"] = summary_url
+def _report_monitor_worker(
+    proc,
+    sprint_label: str,
+    project: str,
+    sprints_dir: Path,
+    started_at: str,
+) -> None:
+    """Background thread: wait for subprocess exit, then write commander report file."""
+    try:
+        proc.wait()
+    except Exception as exc:
+        logger.debug("sprint report monitor: proc.wait() raised %s", exc)
 
-    return payload
+    try:
+        payload = build_commander_report(
+            sprints_dir=sprints_dir,
+            sprint_label=sprint_label,
+            project=project,
+            started_at=started_at,
+        )
+    except Exception as exc:
+        logger.warning(
+            "sprint report: failed to build payload for %s: %s", sprint_label, exc
+        )
+        return
+
+    write_commander_report(payload, _get_report_path())
+
+
+def start_report_monitor(
+    *,
+    proc,
+    sprint_label: str,
+    project: str,
+    sprints_dir: Path,
+    started_at: str,
+) -> threading.Thread:
+    """Start a daemon thread that writes commander_report.latest.json when the sprint subprocess exits.
+
+    Always starts a thread regardless of callback_url configuration (issue #1945).
+    """
+    t = threading.Thread(
+        target=_report_monitor_worker,
+        args=(proc, sprint_label, project, sprints_dir, started_at),
+        daemon=True,
+        name=f"sprint-report-{sprint_label}",
+    )
+    t.start()
+    return t
 
 
 def _monitor_worker(
@@ -287,7 +454,7 @@ def _monitor_worker(
         logger.debug("sprint webhook monitor: proc.wait() raised %s", exc)
 
     try:
-        payload = build_webhook_payload(
+        payload = build_commander_report(
             sprints_dir=sprints_dir,
             sprint_label=sprint_label,
             project=project,
@@ -296,11 +463,15 @@ def _monitor_worker(
     except Exception as exc:
         logger.warning("sprint webhook: failed to build payload for %s: %s", sprint_label, exc)
         payload = {
-            "project": project,
-            "sprint_label": sprint_label,
-            "outcome": "unknown",
-            "duration_sec": _duration_sec(started_at),
-            "tickets": [],
+            "run_id": started_at or sprint_label,
+            "trigger": {"by": "sprint_manager", "confirmed_at": started_at or "", "mode": "auto"},
+            "branch": f"sprint/{sprint_label}",
+            "summary": {"attempted": 0, "completed": 0, "failed": 0, "skipped": 0},
+            "completed": [],
+            "needs_review": [],
+            "dead_letter": [],
+            "cost": {"tokens": 0, "usd": 0.0, "ceiling_hit": False},
+            "actions": [],
         }
 
     deliver_sprint_webhook(callback_url, payload)

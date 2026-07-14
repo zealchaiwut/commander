@@ -3,8 +3,6 @@ import os
 import sys
 import inspect
 from pathlib import Path
-from unittest.mock import patch
-import pytest
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.
 # Default kept only as a last-resort fallback if BASE_URL not exported.

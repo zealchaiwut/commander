@@ -186,6 +186,7 @@ class TestRunQualityGatesOrder:
             return gate
 
         with patch.multiple("sprint_manager",
+                            _gate_coder_no_test_edits=pass_gate("coder-no-test-edits"),
                             _gate_typecheck=fail_gate("typecheck"),
                             _gate_lint=pass_gate("lint"),
                             _gate_design=fail_gate("design"),
@@ -206,9 +207,9 @@ class TestRunQualityGatesOrder:
 
         # Every gate ran despite typecheck failing first.
         assert call_log == [
-            "typecheck", "lint", "design", "pytest", "merge-preview", "monolith"
+            "coder-no-test-edits", "typecheck", "lint", "design", "pytest", "merge-preview", "monolith"
         ], f"All gates must run; got: {call_log}"
-        assert len(results) == 6
+        assert len(results) == 7
         failed = [r.gate for r in results if not r.passed]
         assert failed == ["typecheck", "design", "merge-preview"]
 

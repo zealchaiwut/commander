@@ -3275,6 +3275,60 @@ def run_sprint_preflight(
     )
 
 
+def _run_per_ticket_tests_overnight(
+    issue_num: int,
+    target_branch: Optional[str],
+    cfg: "Optional[SprintConfig]",
+) -> None:
+    """Run the full test suite after a ticket merges in overnight mode (AC5, issue #1946).
+
+    Best-effort: a test failure or timeout is logged but never stops the sprint run.
+    The suite is run in the tester worktree so it sees the up-to-date target branch.
+    """
+    tester_wt = getattr(cfg, "worktree_tester", None) if cfg is not None else None
+    if not tester_wt or not Path(str(tester_wt)).exists():
+        sys.stdout.write(
+            f"  [overnight] tester worktree not configured — "
+            f"skipping per-ticket test run for #{issue_num}\n"
+        )
+        sys.stdout.flush()
+        return
+    branch_label = target_branch or "develop"
+    sys.stdout.write(
+        f"  [overnight] running test suite against {branch_label!r} "
+        f"after #{issue_num} merged\n"
+    )
+    sys.stdout.flush()
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-x", "--tb=short", "-q"],
+            cwd=str(tester_wt),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            sys.stdout.write(
+                f"  [overnight] per-ticket tests PASSED for #{issue_num}\n"
+            )
+        else:
+            sys.stdout.write(
+                f"  [overnight] per-ticket tests FAILED for #{issue_num} "
+                f"(rc={result.returncode})\n"
+            )
+            if result.stdout:
+                sys.stdout.write(result.stdout[-2000:])
+    except subprocess.TimeoutExpired:
+        sys.stdout.write(
+            f"  [overnight] per-ticket test run TIMED OUT for #{issue_num}\n"
+        )
+    except Exception as exc:
+        sys.stdout.write(
+            f"  [overnight] per-ticket test run error for #{issue_num}: {exc}\n"
+        )
+    sys.stdout.flush()
+
+
 def run_sprint_loop(
     pf: "_SprintPreflightResult",
     *,
@@ -3296,6 +3350,7 @@ def run_sprint_loop(
     alert_modes: list,
     cfg: "Optional[SprintConfig]",
     token_ceiling: int = 0,
+    overnight: bool = False,
 ) -> None:
     """Per-ticket iteration loop for run_sprint.
 
@@ -4246,6 +4301,11 @@ def run_sprint_loop(
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
+        # Per-ticket test run in overnight mode (AC5, issue #1946): after each
+        # successful merge, run the full test suite against the target branch to
+        # ensure develop stays green between tickets.
+        if overnight:
+            _run_per_ticket_tests_overnight(num, target_branch, cfg)
         _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4296,6 +4356,7 @@ def run_sprint(
     max_coder_slots: Optional[int] = None,
     max_tester_slots: Optional[int] = None,
     token_ceiling: int = 0,
+    overnight: bool = False,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -4399,6 +4460,7 @@ def run_sprint(
         alert_modes=alert_modes,
         cfg=cfg,
         token_ceiling=_eff_token_ceiling,
+        overnight=overnight,
     )
 
     # Final elapsed time
@@ -4673,6 +4735,17 @@ def main() -> None:
         help=argparse.SUPPRESS,
     )
 
+    # Overnight mode (issue #1946): run per-ticket test suite after each merge.
+    p.add_argument(
+        "--overnight",
+        action="store_true",
+        default=False,
+        help=(
+            "Overnight mode: run the test suite against the target branch after "
+            "each individual ticket is merged, in addition to per-ticket quality gates."
+        ),
+    )
+
     args = p.parse_args()
     install_orchestrator_stdout_timestamps()
 
@@ -4811,6 +4884,7 @@ def main() -> None:
             max_coder_slots      = args.max_coder_slots,
             max_tester_slots     = args.max_tester_slots,
             token_ceiling        = args.token_ceiling,
+            overnight            = args.overnight,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)

@@ -260,6 +260,10 @@ def build_commander_report(
 
     confirmed_at = plan.get("started_at") or started_at or datetime.now(timezone.utc).isoformat()
 
+    # Trigger-owner metadata (issue #1946): read from plan.json if stored at run start.
+    _triggered_by: Optional[str] = plan.get("triggered_by") or None
+    _run_mode: str = str(plan.get("run_mode") or "auto")
+
     issues = state_data.get("issues") or []
     completed_list: list = []
     needs_review_list: list = []
@@ -317,10 +321,11 @@ def build_commander_report(
 
     return {
         "run_id": confirmed_at,
+        "triggered_by": _triggered_by,
         "trigger": {
-            "by": "sprint_manager",
+            "by": _triggered_by or "sprint_manager",
             "confirmed_at": confirmed_at,
-            "mode": "auto",
+            "mode": _run_mode,
         },
         "branch": f"sprint/{sprint_label}",
         "summary": {

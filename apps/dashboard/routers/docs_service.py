@@ -116,5 +116,11 @@ def get_doc(clone_root: Path, rel_path: str) -> dict:
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
-    content = candidate.read_text(encoding="utf-8")
+    try:
+        content = candidate.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File contains non-UTF-8 bytes and cannot be decoded: {exc.reason}",
+        ) from exc
     return {"path": str(rel), "content": content}

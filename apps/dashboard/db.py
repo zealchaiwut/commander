@@ -2099,6 +2099,23 @@ def get_sync_etag(key: str) -> str | None:
     return row["etag"] if row and row["etag"] else None
 
 
+def get_sync_updated_at(key: str) -> str | None:
+    """Return the updated_at timestamp for *key* from sync_state, or None.
+
+    Records the wall-clock time at which set_sync_etag last ran for this key
+    (i.e., when the mirror last performed a successful ETag sync). Used by
+    dispatch to get the mirror's last-sync timestamp so the stale-hit guard
+    compares issue updatedAt against when the mirror actually synced, not
+    wall-clock now (issue #1915).
+    """
+    with get_conn() as conn:
+        _create_sync_state_table(conn)
+        row = conn.execute(
+            "SELECT updated_at FROM sync_state WHERE key = ?", (key,)
+        ).fetchone()
+    return row["updated_at"] if row and row["updated_at"] else None
+
+
 def set_sync_etag(key: str, etag: str) -> None:
     """Store the ETag for *key* (used as If-None-Match on the next poll)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")

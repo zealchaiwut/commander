@@ -145,9 +145,9 @@ def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] =
     api (REST) only when the mirror has no record or the record lacks a body.
     Write paths (gh issue comment, gh issue edit) are unchanged.
 
-    sync_ts: when provided, mirror records whose updated_at predates sync_ts are
-    treated as stale and trigger a live fetch — mirrors the guard in
-    _mirror_issue_body (issue #1813).
+    sync_ts: the mirror's last-sync timestamp; mirror records whose updatedAt
+    is AFTER sync_ts are stale and trigger a live fetch — mirrors the corrected
+    guard in _mirror_issue_body (issue #1813, corrected by #1915).
 
     `gh issue view` goes through GraphQL, whose 5000/hr budget the dashboard
     shares and exhausts during estimation bursts; REST has a separate budget.
@@ -160,11 +160,12 @@ def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] =
         import github_client as _gc_est  # lazy import; dashboard dir on path
         _mirror = _gc_est._mirror_issue(repo, issue_num)
         if _mirror is not None and _mirror.get("body") is not None:
-            # Apply stale-hit guard (mirrors _mirror_issue_body logic — issue #1813).
+            # Apply stale-hit guard (mirrors _mirror_issue_body logic — issue #1813,
+            # condition corrected in #1915: fresh = updatedAt <= sync_ts).
             _is_fresh = True
             if sync_ts:
                 _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
-                _is_fresh = _record_ts >= sync_ts
+                _is_fresh = _record_ts <= sync_ts
             if _is_fresh:
                 _labels = _mirror.get("labels") or []
                 return {

@@ -9,6 +9,7 @@ remain unmodified.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import subprocess
@@ -1110,6 +1111,101 @@ def _gate_monolith(
     )
 
 
+# ── coder-no-test-edits gate ──────────────────────────────────────────────────
+
+_CODER_BLOCKED_DEFAULT_PATTERNS: list[str] = ["tests/**"]
+
+
+def _coder_no_test_edits_gate_enabled() -> bool:
+    """COMMANDER_GATE_CODER_NO_TEST_EDITS defaults on; 'false'/'0'/'no'/'off' disables."""
+    return os.environ.get("COMMANDER_GATE_CODER_NO_TEST_EDITS", "1").strip().lower() not in (
+        "false", "0", "no", "off"
+    )
+
+
+def _get_coder_blocked_patterns() -> list[str]:
+    """Return blocked path glob patterns from CODER_BLOCKED_PATH_PATTERNS or defaults."""
+    env = os.environ.get("CODER_BLOCKED_PATH_PATTERNS", "").strip()
+    if env:
+        return [p.strip() for p in env.split(",") if p.strip()]
+    return list(_CODER_BLOCKED_DEFAULT_PATTERNS)
+
+
+def _get_coder_test_allowlist() -> list[str]:
+    """Return allowlisted paths from CODER_TEST_PATH_ALLOWLIST (comma-separated)."""
+    env = os.environ.get("CODER_TEST_PATH_ALLOWLIST", "").strip()
+    if not env:
+        return []
+    return [p.strip() for p in env.split(",") if p.strip()]
+
+
+def _gate_coder_no_test_edits(
+    issue_num: int,
+    worktester_root: Path,
+    skip: bool,
+    base_branch: str = "develop",
+    repo_name: Optional[str] = None,
+    blocked_patterns: Optional[list[str]] = None,
+    allowlist: Optional[list[str]] = None,
+) -> "GateResult":
+    """Gate: fail if the coder's diff touches any path matching blocked_patterns.
+
+    Defaults to blocking any change under tests/**. Paths listed in allowlist
+    are exempted unconditionally (e.g. shared fixtures, conftest stubs that a
+    coder is explicitly permitted to touch).
+
+    blocked_patterns: fnmatch glob patterns; reads CODER_BLOCKED_PATH_PATTERNS
+    when None.  allowlist: exact path matches; reads CODER_TEST_PATH_ALLOWLIST
+    when None.
+    """
+    if skip:
+        sys.stdout.write(str("  [gate:coder-no-test-edits] skipped") + "\n")
+        return GateResult(gate="coder-no-test-edits", passed=True, skipped=True)
+
+    _post_agent_event("gate:coder-no-test-edits")
+
+    if blocked_patterns is None:
+        blocked_patterns = _get_coder_blocked_patterns()
+    if allowlist is None:
+        allowlist = _get_coder_test_allowlist()
+
+    rc, out, _ = _run_timed(
+        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        cwd=worktester_root,
+    )
+    if rc != 0 or not out.strip():
+        sys.stdout.write(str("  [gate:coder-no-test-edits] empty diff — PASS") + "\n")
+        return GateResult(gate="coder-no-test-edits", passed=True, output="empty diff")
+
+    changed_paths = [p for p in out.splitlines() if p.strip()]
+    allowlist_set = set(allowlist)
+
+    blocked: list[str] = []
+    for path in changed_paths:
+        if path in allowlist_set:
+            continue
+        if any(fnmatch.fnmatch(path, pat) for pat in blocked_patterns):
+            blocked.append(path)
+
+    if not blocked:
+        sys.stdout.write(str("  [gate:coder-no-test-edits] PASS") + "\n")
+        return GateResult(gate="coder-no-test-edits", passed=True)
+
+    msg = (
+        f"Coder modified {len(blocked)} grading test file(s) — "
+        f"coders may not modify grading tests:\n"
+        + "\n".join(f"  {p}" for p in blocked)
+    )
+    structured_log.error(
+        "gate_failed",
+        f"[gate:coder-no-test-edits] FAIL — {len(blocked)} blocked path(s): "
+        + ", ".join(blocked[:3]),
+        gate="coder-no-test-edits", issue_num=issue_num,
+    )
+    _revert_to_sit(issue_num, "coder-no-test-edits", msg, repo_name=repo_name)
+    return GateResult(gate="coder-no-test-edits", passed=False, output=msg)
+
+
 def _log_gate_result(r: "GateResult", issue_num: int) -> None:
     """Uniform per-gate outcome logging. Skipped gates are not logged."""
     try:
@@ -1144,6 +1240,7 @@ def _run_quality_gates(
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
     gate_monolith: bool = True,
+    gate_coder_no_test_edits: bool = True,
     target_branch: str = "develop",
     repo_name: Optional[str] = None,
     base_branch: str = "develop",
@@ -1169,6 +1266,7 @@ def _run_quality_gates(
         remote = _lookup_in_sm(name, local_fn)
         return remote if remote is not None else local_fn
 
+    fn_coder_test = _resolve(_gate_coder_no_test_edits, "_gate_coder_no_test_edits")
     fn_tc = _resolve(_gate_typecheck, "_gate_typecheck")
     fn_lint = _resolve(_gate_lint, "_gate_lint")
     fn_design = _resolve(_gate_design, "_gate_design")
@@ -1185,6 +1283,17 @@ def _run_quality_gates(
     global _REVERT_SUPPRESSED
     _prev_suppressed = _REVERT_SUPPRESSED
     _REVERT_SUPPRESSED = True
+
+    # Gate 0 -- coder-no-test-edits (cheapest: pure git diff path scan)
+    r_coder_test = fn_coder_test(
+        issue_num,
+        worktester_root,
+        skip=(skip_all or not gate_coder_no_test_edits),
+        base_branch=base_branch,
+        repo_name=repo_name,
+    )
+    results.append(r_coder_test)
+    fn_log(r_coder_test, issue_num)
 
     # Gate 1 -- typecheck (cheap, deterministic)
     r_tc = fn_tc(

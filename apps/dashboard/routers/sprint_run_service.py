@@ -34,6 +34,16 @@ class SprintMgmtRunBody(BaseModel):
     # Optional webhook URL called on sprint terminal state (issue #1865).
     # Must be an http/https URL; omit to disable.
     callback_url: Optional[str] = None
+    # Trigger-owner metadata (issue #1946): who or what initiated this run.
+    # Stored as triggered_by in plan.json and echoed in end-of-run report.
+    by: Optional[str] = None
+    # Run mode (issue #1946): controls sprint behaviour. Only "overnight" is
+    # accepted; absent/None means standard behaviour unchanged.
+    # Validation is done in the route handler to return HTTP 400 (not 422).
+    mode: Optional[str] = None
+    # Explicit merge target branch override (issue #1946). When mode=overnight
+    # and this is absent, the run defaults --target-branch to "develop".
+    target_branch: Optional[str] = None
 
     @field_validator("callback_url", mode="before")
     @classmethod

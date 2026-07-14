@@ -47,6 +47,9 @@ class IssueState:
     coder_pid:            Optional[int] = None  # OS PID of the coder subprocess (issue #777)
     tester_pid:           Optional[int] = None  # OS PID of the tester subprocess (issue #777)
     coder_provider:       Optional[str] = None  # CCPROXY_PROFILE value, e.g. 'ICA' (issue #1673)
+    # Dead-letter registry fields (issue #1942)
+    fix_attempts:         int            = 0
+    last_error:           Optional[str]  = None
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +75,8 @@ class IssueState:
             "coder_pid":          self.coder_pid,
             "tester_pid":         self.tester_pid,
             "coder_provider":     self.coder_provider,
+            "fix_attempts":       self.fix_attempts,
+            "last_error":         self.last_error,
         }
 
     @staticmethod
@@ -100,6 +105,8 @@ class IssueState:
         iss.coder_pid = d.get("coder_pid")
         iss.tester_pid = d.get("tester_pid")
         iss.coder_provider = d.get("coder_provider")
+        iss.fix_attempts = int(d.get("fix_attempts", 0))
+        iss.last_error = d.get("last_error")
         return iss
 
     def set_agent_status(self, status: str) -> None:
@@ -146,6 +153,11 @@ class SprintState:
     # LLM provider active at sprint start (issue #1670). Persisted so historical
     # run views show the provider that was in use, not the current global setting.
     llm_provider:            Optional[str]       = None
+    # Dead-letter registry for fix-loop-exhausted tickets (issue #1942).
+    # Each entry: {ticket_id, title, attempts, last_error}
+    dead_letter:             list                = field(default_factory=list)
+    # Token ceiling was exceeded during this run (issue #1943).
+    ceiling_hit:             bool                = False
 
     def __post_init__(self) -> None:
         # Not a dataclass field — excluded from to_dict/from_dict and serialization.
@@ -180,6 +192,8 @@ class SprintState:
             "max_tester_slots":          self.max_tester_slots,
             "active_coder_slots":        self.active_coder_slots,
             "llm_provider":              self.llm_provider,
+            "dead_letter":               self.dead_letter,
+            "ceiling_hit":               self.ceiling_hit,
         }
 
     @staticmethod
@@ -212,6 +226,8 @@ class SprintState:
         s.max_tester_slots         = int(d.get("max_tester_slots", 1))
         s.active_coder_slots       = int(d.get("active_coder_slots", 0))
         s.llm_provider             = d.get("llm_provider")
+        s.dead_letter              = list(d.get("dead_letter", []))
+        s.ceiling_hit              = bool(d.get("ceiling_hit", False))
         return s
 
     def save(self, path: Path) -> None:

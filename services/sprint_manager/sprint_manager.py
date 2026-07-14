@@ -276,6 +276,10 @@ from services.sprint_manager.gates import (  # noqa: E402, F401
     _gate_design,
     _gate_merge_preview,
     _gate_monolith,
+    _gate_coder_no_test_edits,
+    _coder_no_test_edits_gate_enabled,
+    _get_coder_blocked_patterns,
+    _get_coder_test_allowlist,
     _run_quality_gates,
     _log_gate_result,
     MONOLITH_GUARDED_FILE,
@@ -1789,6 +1793,7 @@ def handle_post_tester(
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
     gate_monolith: bool = True,
+    gate_coder_no_test_edits: bool = True,
     worktester_root: Optional[Path] = None,
     worktester_dashboard: Optional[Path] = None,
     target_branch: str = "develop",
@@ -1969,6 +1974,7 @@ def handle_post_tester(
         gate_design=gate_design,
         gate_frontend_lint=gate_frontend_lint,
         gate_monolith=gate_monolith,
+        gate_coder_no_test_edits=gate_coder_no_test_edits,
         target_branch=target_branch,
         repo_name=eff_repo,
         base_branch=base_branch,
@@ -2333,6 +2339,28 @@ def _pool_release(slot: Optional[Path]) -> None:
     """Return a pool slot acquired by _pool_acquire (issue #1411)."""
     if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
         _ACTIVE_WORKTREE_POOL.release(slot)
+
+
+def _apply_token_ceiling(state: "SprintState", token_ceiling: int) -> bool:
+    """Check cumulative token spend against the configured ceiling (issue #1943).
+
+    Sets state.ceiling_hit = True and logs once on first breach.
+    Returns True when the ceiling is active (> 0) and spent >= ceiling.
+    Returns False when the ceiling is disabled (0 or negative) or not yet reached.
+    """
+    if token_ceiling <= 0:
+        return False
+    spent = state.total_tokens_in + state.total_tokens_out
+    if spent >= token_ceiling:
+        if not state.ceiling_hit:
+            state.ceiling_hit = True
+            sys.stdout.write(
+                f"  [token-ceiling] Token ceiling reached "
+                f"({spent:,} tokens used, limit {token_ceiling:,}). "
+                f"No further tickets will be dispatched.\n"
+            )
+        return True
+    return False
 
 
 
@@ -3247,6 +3275,60 @@ def run_sprint_preflight(
     )
 
 
+def _run_per_ticket_tests_overnight(
+    issue_num: int,
+    target_branch: Optional[str],
+    cfg: "Optional[SprintConfig]",
+) -> None:
+    """Run the full test suite after a ticket merges in overnight mode (AC5, issue #1946).
+
+    Best-effort: a test failure or timeout is logged but never stops the sprint run.
+    The suite is run in the tester worktree so it sees the up-to-date target branch.
+    """
+    tester_wt = getattr(cfg, "worktree_tester", None) if cfg is not None else None
+    if not tester_wt or not Path(str(tester_wt)).exists():
+        sys.stdout.write(
+            f"  [overnight] tester worktree not configured — "
+            f"skipping per-ticket test run for #{issue_num}\n"
+        )
+        sys.stdout.flush()
+        return
+    branch_label = target_branch or "develop"
+    sys.stdout.write(
+        f"  [overnight] running test suite against {branch_label!r} "
+        f"after #{issue_num} merged\n"
+    )
+    sys.stdout.flush()
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-x", "--tb=short", "-q"],
+            cwd=str(tester_wt),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            sys.stdout.write(
+                f"  [overnight] per-ticket tests PASSED for #{issue_num}\n"
+            )
+        else:
+            sys.stdout.write(
+                f"  [overnight] per-ticket tests FAILED for #{issue_num} "
+                f"(rc={result.returncode})\n"
+            )
+            if result.stdout:
+                sys.stdout.write(result.stdout[-2000:])
+    except subprocess.TimeoutExpired:
+        sys.stdout.write(
+            f"  [overnight] per-ticket test run TIMED OUT for #{issue_num}\n"
+        )
+    except Exception as exc:
+        sys.stdout.write(
+            f"  [overnight] per-ticket test run error for #{issue_num}: {exc}\n"
+        )
+    sys.stdout.flush()
+
+
 def run_sprint_loop(
     pf: "_SprintPreflightResult",
     *,
@@ -3263,9 +3345,12 @@ def run_sprint_loop(
     gate_design: bool,
     gate_frontend_lint: bool,
     gate_monolith: bool,
+    gate_coder_no_test_edits: bool,
     gate_scope: str,
     alert_modes: list,
     cfg: "Optional[SprintConfig]",
+    token_ceiling: int = 0,
+    overnight: bool = False,
 ) -> None:
     """Per-ticket iteration loop for run_sprint.
 
@@ -3305,6 +3390,7 @@ def run_sprint_loop(
     _prev_level_idx = -1
     _level_merged_before = 0
     _level_skipped_before = 0
+    _ceiling_stop = False  # set True after a ticket that exceeds token_ceiling (issue #1943)
     for _flat_pos, (_cur_level_idx, issue_state) in enumerate(_flat_dispatch):
         if _cur_level_idx != _prev_level_idx:
             if _prev_level_idx >= 0:
@@ -3338,6 +3424,10 @@ def run_sprint_loop(
             except Exception:
                 pass
             sys.stdout.write(str(f"\n=== Dispatch level {_cur_level_idx}: tickets {_level_nums_by_idx[_cur_level_idx]} ===") + "\n")
+        # Token ceiling: if the previous ticket's spend pushed us over the limit,
+        # stop dispatching any further tickets (issue #1943).
+        if _ceiling_stop:
+            break
         idx = _flat_pos + 1
         num   = issue_state.number
         title = issue_state.title
@@ -3700,6 +3790,9 @@ def run_sprint_loop(
                         _fix_history.append({
                             "attempt": _fix_attempt, "category": category, "reason": reason,
                         })
+                        issue_state.fix_attempts += 1
+                        issue_state.last_error = reason
+                        state.save(state_path)
                         if _sig == _last_failure_sig:
                             sys.stdout.write(str(f"  [fix-loop] consecutive identical coder failure ({_sig}): "
                                 f"aborting early") + "\n")
@@ -3812,6 +3905,9 @@ def run_sprint_loop(
                     _fix_history.append({
                         "attempt": _fix_attempt, "category": category, "reason": reason,
                     })
+                    issue_state.fix_attempts += 1
+                    issue_state.last_error = reason
+                    state.save(state_path)
                     if _sig == _last_failure_sig:
                         sys.stdout.write(str("  [fix-loop] consecutive identical CODER_NO_WORK: aborting early") + "\n")
                         sys.stdout.flush()
@@ -4020,24 +4116,25 @@ def run_sprint_loop(
 
             # -- Post-tester gates --
             merged, summary_line, gate_category = handle_post_tester(
-                issue_num          = num,
-                tester_exit_code   = tester_rc,
-                skip_gates         = skip_gates,
-                gate_pytest        = gate_pytest,
-                gate_lint          = gate_lint,
-                gate_merge_preview = gate_merge_preview,
-                gate_typecheck     = gate_typecheck,
-                gate_design        = gate_design,
-                gate_frontend_lint = gate_frontend_lint,
-                gate_monolith      = gate_monolith,
-                target_branch      = target_branch,
-                repo_name          = eff_repo,
-                cfg                = cfg,
-                base_branch        = target_branch or "develop",
-                gate_scope         = gate_scope,
-                documentor_enabled = cfg.documentor_enabled if cfg else False,
-                alert_modes        = alert_modes,
-                sprint_label       = label,
+                issue_num               = num,
+                tester_exit_code        = tester_rc,
+                skip_gates              = skip_gates,
+                gate_pytest             = gate_pytest,
+                gate_lint               = gate_lint,
+                gate_merge_preview      = gate_merge_preview,
+                gate_typecheck          = gate_typecheck,
+                gate_design             = gate_design,
+                gate_frontend_lint      = gate_frontend_lint,
+                gate_monolith           = gate_monolith,
+                gate_coder_no_test_edits= gate_coder_no_test_edits,
+                target_branch           = target_branch,
+                repo_name               = eff_repo,
+                cfg                     = cfg,
+                base_branch             = target_branch or "develop",
+                gate_scope              = gate_scope,
+                documentor_enabled      = cfg.documentor_enabled if cfg else False,
+                alert_modes             = alert_modes,
+                sprint_label            = label,
             )
             sys.stdout.write(str(f"  {summary_line}") + "\n")
             try:
@@ -4070,6 +4167,9 @@ def run_sprint_loop(
                 _fix_history.append({
                     "attempt": _fix_attempt, "category": category, "summary": summary_line,
                 })
+                issue_state.fix_attempts += 1
+                issue_state.last_error = summary_line
+                state.save(state_path)
                 if _sig == _last_failure_sig:
                     sys.stdout.write(str(f"  [fix-loop] consecutive identical gate failure ({category}): "
                         f"aborting early") + "\n")
@@ -4168,6 +4268,15 @@ def run_sprint_loop(
             # failure recorded during the fix loop (issue #701).
             _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+            # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
+            if not any(d.get("ticket_id") == num for d in state.dead_letter):
+                state.dead_letter.append({
+                    "ticket_id": num,
+                    "title": issue_state.title,
+                    "attempts": issue_state.fix_attempts,
+                    "last_error": issue_state.last_error,
+                })
+            _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
             continue
@@ -4185,10 +4294,19 @@ def run_sprint_loop(
                     num, _TicketState.NEEDS_REWORK,
                     actor="sprint_manager:infra_fail", repo_name=eff_repo,
                 )
+            _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
+            if _ceiling_stop:
+                state.save(state_path)
             continue
 
         elapsed = time.monotonic() - start_time
         state.wall_clock_secs = elapsed
+        # Per-ticket test run in overnight mode (AC5, issue #1946): after each
+        # successful merge, run the full test suite against the target branch to
+        # ensure develop stays green between tickets.
+        if overnight:
+            _run_per_ticket_tests_overnight(num, target_branch, cfg)
+        _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
         state.save(state_path)
         _post_sprint_status(state, api_url=api_url, project=eff_repo)
 
@@ -4221,6 +4339,7 @@ def run_sprint(
     gate_design: bool = True,
     gate_frontend_lint: bool = True,
     gate_monolith: bool = True,
+    gate_coder_no_test_edits: bool = True,
     alert_modes: Optional[list[str]] = None,
     repo_name: Optional[str] = None,
     dry_run: bool = False,
@@ -4236,6 +4355,8 @@ def run_sprint(
     pipeline_mode: Optional[bool] = None,
     max_coder_slots: Optional[int] = None,
     max_tester_slots: Optional[int] = None,
+    token_ceiling: int = 0,
+    overnight: bool = False,
 ) -> tuple[SprintSummary, SprintState]:
     """Main sprint loop -- processes backlog issues sequentially.
 
@@ -4314,9 +4435,11 @@ def run_sprint(
             gate_merge_preview=gate_merge_preview, gate_typecheck=gate_typecheck,
             gate_design=gate_design, gate_frontend_lint=gate_frontend_lint,
             gate_monolith=gate_monolith,
+            gate_coder_no_test_edits=gate_coder_no_test_edits,
             gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
         )
 
+    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     run_sprint_loop(
         pf,
         label=label,
@@ -4332,9 +4455,12 @@ def run_sprint(
         gate_design=gate_design,
         gate_frontend_lint=gate_frontend_lint,
         gate_monolith=gate_monolith,
+        gate_coder_no_test_edits=gate_coder_no_test_edits,
         gate_scope=gate_scope,
         alert_modes=alert_modes,
         cfg=cfg,
+        token_ceiling=_eff_token_ceiling,
+        overnight=overnight,
     )
 
     # Final elapsed time
@@ -4457,6 +4583,12 @@ def main() -> None:
         help="Enable/disable monolith gate — rejects server.py growth (default: enabled; env: COMMANDER_GATE_MONOLITH=false to disable)",
     )
     p.add_argument(
+        "--gate-coder-no-test-edits",
+        action=argparse.BooleanOptionalAction,
+        default=_coder_no_test_edits_gate_enabled(),
+        help="Enable/disable coder-no-test-edits gate — rejects coder diffs that touch tests/ (default: enabled; env: COMMANDER_GATE_CODER_NO_TEST_EDITS=false to disable)",
+    )
+    p.add_argument(
         "--gate-merge-preview",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -4499,6 +4631,16 @@ def main() -> None:
         default=0,
         metavar="TOKENS",
         help="Token estimate from the planning view. Stored in sprint state and broadcast to dashboard.",
+    )
+
+    # Token ceiling (issue #1943)
+    p.add_argument(
+        "--token-ceiling",
+        type=int,
+        default=0,
+        metavar="TOKENS",
+        dest="token_ceiling",
+        help="Hard token ceiling. Stops dispatching new tickets once cumulative tokens_in+tokens_out exceeds this value. 0 = disabled.",
     )
 
     # Gate scope (AC-9)
@@ -4591,6 +4733,17 @@ def main() -> None:
         default=None,
         metavar="PATH",
         help=argparse.SUPPRESS,
+    )
+
+    # Overnight mode (issue #1946): run per-ticket test suite after each merge.
+    p.add_argument(
+        "--overnight",
+        action="store_true",
+        default=False,
+        help=(
+            "Overnight mode: run the test suite against the target branch after "
+            "each individual ticket is merged, in addition to per-ticket quality gates."
+        ),
     )
 
     args = p.parse_args()
@@ -4711,11 +4864,12 @@ def main() -> None:
             gate_pytest          = args.gate_pytest,
             gate_lint            = args.gate_lint,
             gate_merge_preview   = args.gate_merge_preview,
-            gate_typecheck       = args.gate_typecheck,
-            gate_design          = args.gate_design,
-            gate_frontend_lint   = args.gate_frontend_lint,
-            gate_monolith        = args.gate_monolith,
-            alert_modes          = alert_modes,
+            gate_typecheck            = args.gate_typecheck,
+            gate_design               = args.gate_design,
+            gate_frontend_lint        = args.gate_frontend_lint,
+            gate_monolith             = args.gate_monolith,
+            gate_coder_no_test_edits  = args.gate_coder_no_test_edits,
+            alert_modes               = alert_modes,
             repo_name            = eff_repo,
             dry_run              = args.dry_run,
             resume               = args.resume,
@@ -4729,6 +4883,8 @@ def main() -> None:
             rerun_manifest       = _rerun_manifest,
             max_coder_slots      = args.max_coder_slots,
             max_tester_slots     = args.max_tester_slots,
+            token_ceiling        = args.token_ceiling,
+            overnight            = args.overnight,
         )
 
         # Derive sprint_branch for summary (mirrors run_sprint logic)

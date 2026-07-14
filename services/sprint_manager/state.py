@@ -156,6 +156,8 @@ class SprintState:
     # Dead-letter registry for fix-loop-exhausted tickets (issue #1942).
     # Each entry: {ticket_id, title, attempts, last_error}
     dead_letter:             list                = field(default_factory=list)
+    # Token ceiling was exceeded during this run (issue #1943).
+    ceiling_hit:             bool                = False
 
     def __post_init__(self) -> None:
         # Not a dataclass field — excluded from to_dict/from_dict and serialization.
@@ -191,6 +193,7 @@ class SprintState:
             "active_coder_slots":        self.active_coder_slots,
             "llm_provider":              self.llm_provider,
             "dead_letter":               self.dead_letter,
+            "ceiling_hit":               self.ceiling_hit,
         }
 
     @staticmethod
@@ -224,6 +227,7 @@ class SprintState:
         s.active_coder_slots       = int(d.get("active_coder_slots", 0))
         s.llm_provider             = d.get("llm_provider")
         s.dead_letter              = list(d.get("dead_letter", []))
+        s.ceiling_hit              = bool(d.get("ceiling_hit", False))
         return s
 
     def save(self, path: Path) -> None:

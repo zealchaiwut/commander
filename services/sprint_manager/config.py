@@ -109,6 +109,9 @@ class SprintConfig:
     # (existing serial behaviour).  Explicit values override the default.
     max_coder_slots:  Optional[int] = None
     max_tester_slots: Optional[int] = None
+    # Hard token ceiling — stop dispatching new tickets when cumulative
+    # tokens_in + tokens_out exceeds this value.  0 = disabled (issue #1943).
+    token_ceiling: int = 0
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -352,6 +355,14 @@ def load_config(path: Path) -> "SprintConfig":
         except (TypeError, ValueError):
             pass
 
+    # ── token_ceiling (issue #1943) ───────────────────────────────────────────
+    token_ceiling: int = 0
+    if data.get("token_ceiling") is not None:
+        try:
+            token_ceiling = int(data["token_ceiling"])
+        except (TypeError, ValueError):
+            pass
+
     return SprintConfig(
         repo_name=repo_name,
         worktree_coder=worktree_coder,
@@ -385,6 +396,7 @@ def load_config(path: Path) -> "SprintConfig":
         tester_profile=tester_profile,
         max_coder_slots=max_coder_slots,
         max_tester_slots=max_tester_slots,
+        token_ceiling=token_ceiling,
     )
 
 

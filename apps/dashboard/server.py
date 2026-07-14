@@ -164,6 +164,7 @@ async def lifespan(app: FastAPI):
         try:
             _backup_module.start_backup_scheduler()
             _backup_module.schedule_startup_backup(delay_seconds=30)
+            _backup_module.start_local_backup_scheduler()
         except Exception:
             pass
     task1 = asyncio.create_task(_cache_refresh_loop())

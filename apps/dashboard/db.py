@@ -26,6 +26,44 @@ _LOCAL_BACKUP_DIR = DB_PATH.parent / ".commander" / "db-backups"
 # Asia/Bangkok is UTC+7 (no DST)
 _BKK_OFFSET = timezone(timedelta(hours=7))
 
+_log = logging.getLogger(__name__)
+
+
+def set_local_backup_dir(path: Path) -> None:
+    """Called by backup.py to register where local rolling backups live."""
+    global _LOCAL_BACKUP_DIR
+    _LOCAL_BACKUP_DIR = path
+
+
+def _startup_integrity_check() -> None:
+    """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt."""
+    if not DB_PATH.exists():
+        return
+    status = check_db_integrity(DB_PATH)
+    if status == "ok":
+        return
+    restore_hint = ""
+    backup_dir = _LOCAL_BACKUP_DIR
+    if backup_dir is not None and backup_dir.is_dir():
+        baks = sorted(backup_dir.glob("*.bak"), reverse=True)
+        if baks:
+            restore_hint = (
+                f"\n  Most recent local backup: {baks[0]}"
+                f"\n  Restore: cp {baks[0]} {DB_PATH}"
+                f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
+            )
+        else:
+            restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
+    else:
+        restore_hint = (
+            f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."
+        )
+    _log.critical("FATAL: commander.db corrupt at startup: %s%s", status, restore_hint)
+    raise RuntimeError(
+        f"commander.db is corrupt (PRAGMA integrity_check: {status})."
+        f" The database cannot be used.{restore_hint}"
+    )
+
 
 def _bkk_midnight_utc() -> str:
     """Return the ISO-8601 UTC timestamp of midnight Asia/Bangkok today."""
@@ -84,6 +122,10 @@ def get_conn():
 
 
 def init_db():
+    # Integrity guard: detect corruption before DDL so we never silently
+    # 500-loop on a truncated/corrupt DB (issue #1901).
+    _startup_integrity_check()
+
     # Write-access guard: verify the path is writable before attempting DDL.
     try:
         with open(DB_PATH, "a"):
@@ -92,24 +134,6 @@ def init_db():
         raise RuntimeError(
             f"DB_PATH '{DB_PATH.resolve()}' is not writable: {exc}"
         ) from exc
-
-    # Integrity check (issue #1901): abort loudly on a corrupt DB rather than
-    # silently 500-looping on every mirror sync.
-    if DB_PATH.exists() and DB_PATH.stat().st_size > 0:
-        result = check_db_integrity(DB_PATH)
-        if result != "ok":
-            try:
-                from backup import list_local_backups as _list_backups  # noqa: PLC0415
-                backups = _list_backups(_LOCAL_BACKUP_DIR)
-            except Exception:
-                backups = []
-            msg = (
-                f"commander.db is corrupt (integrity_check: {result!r}). "
-                f"Backup dir: {_LOCAL_BACKUP_DIR}"
-            )
-            if backups:
-                msg += f". Most recent backup: {backups[0]}"
-            raise RuntimeError(msg)
 
     with get_conn() as conn:
         conn.execute("""

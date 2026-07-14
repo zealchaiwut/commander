@@ -47,6 +47,11 @@ log = logging.getLogger(__name__)
 
 _BACKUP_INTERVAL_SECONDS = 6 * 60 * 60  # 6 hours
 
+# Local rolling backup: hourly, keep 5 most-recent copies (issue #1901).
+_LOCAL_BACKUP_INTERVAL_SECONDS = 60 * 60  # 1 hour
+_LOCAL_BACKUP_N_KEEP = 5
+_LOCAL_BACKUP_DIR_NAME = "db-backups"
+
 # Env var naming the private repo that holds the authority-DB SQL dump.
 _BACKUP_REPO_ENV = "COMMANDER_BACKUP_REPO"
 
@@ -430,6 +435,127 @@ def _snapshot_db(db_path: Path) -> sqlite3.Connection:
     finally:
         src.close()
     return snap
+
+
+# ---------------------------------------------------------------------------
+# Local rolling DB backup (AC3, issue #1901)
+# ---------------------------------------------------------------------------
+
+def _local_backup_dir() -> Path:
+    """Default local backup directory: .commander/db-backups/."""
+    return _COMMANDER_DIR / _LOCAL_BACKUP_DIR_NAME
+
+
+def backup_db_local(
+    db_path: Path,
+    backup_dir: Path | None = None,
+    *,
+    n_keep: int = _LOCAL_BACKUP_N_KEEP,
+) -> Path:
+    """Atomic snapshot of db_path written to backup_dir as a .bak file.
+
+    Uses the SQLite online-backup API so the copy is consistent even under
+    concurrent writers. Prunes all but the n_keep newest .bak files.
+    Returns the path of the new backup file.
+    """
+    dest_dir = backup_dir if backup_dir is not None else _local_backup_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    stem = db_path.stem
+    dest = dest_dir / f"{stem}.db.{ts}.bak"
+
+    src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        dst_conn = sqlite3.connect(str(dest))
+        try:
+            src.backup(dst_conn)
+        finally:
+            dst_conn.close()
+    finally:
+        src.close()
+
+    _prune_local_backups(dest_dir, n_keep=n_keep)
+    log.debug("local backup written: %s", dest)
+    return dest
+
+
+def _prune_local_backups(backup_dir: Path, *, n_keep: int) -> None:
+    """Delete oldest .bak files beyond n_keep."""
+    baks = sorted(backup_dir.glob("*.bak"), reverse=True)
+    for old in baks[n_keep:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
+def list_local_backups(backup_dir: Path | None = None) -> list[Path]:
+    """Return .bak files in backup_dir sorted newest-first."""
+    d = backup_dir if backup_dir is not None else _local_backup_dir()
+    if not d.is_dir():
+        return []
+    return sorted(d.glob("*.bak"), reverse=True)
+
+
+def _run_local_backup_in_thread() -> None:
+    """Run a local DB backup; never raises (called from timer thread)."""
+    db_path = _resolve_db_path()
+    if db_path is None:
+        log.debug("local backup: DB_PATH not found, skipping")
+        return
+    try:
+        result = backup_db_local(db_path)
+        log.info("local backup: %s", result)
+    except Exception as exc:
+        log.error("local backup failed: %s", exc)
+
+
+# Local backup scheduler state
+_local_scheduler_lock = threading.Lock()
+_local_scheduler_timer: Optional[threading.Timer] = None
+_local_scheduler_started = False
+
+
+def _local_schedule_next() -> None:
+    """Self-rescheduling hourly tick for local DB backups."""
+    global _local_scheduler_timer
+    _run_local_backup_in_thread()
+    with _local_scheduler_lock:
+        _local_scheduler_timer = threading.Timer(
+            _LOCAL_BACKUP_INTERVAL_SECONDS, _local_schedule_next
+        )
+        _local_scheduler_timer.daemon = True
+        _local_scheduler_timer.start()
+
+
+def start_local_backup_scheduler() -> None:
+    """Start the hourly local-backup timer. Safe to call multiple times."""
+    global _local_scheduler_started, _local_scheduler_timer
+    with _local_scheduler_lock:
+        if _local_scheduler_started:
+            return
+        _local_scheduler_started = True
+
+    # Register backup dir with db.py so integrity errors show the restore path.
+    try:
+        import sys as _sys
+        _dash = Path(__file__).resolve().parent.parent.parent / "apps" / "dashboard"
+        if str(_dash) not in _sys.path:
+            _sys.path.insert(0, str(_dash))
+        import db as _db_module
+        _db_module.set_local_backup_dir(_local_backup_dir())
+    except Exception:
+        pass
+
+    timer = threading.Timer(_LOCAL_BACKUP_INTERVAL_SECONDS, _local_schedule_next)
+    timer.daemon = True
+    timer.start()
+
+    with _local_scheduler_lock:
+        _local_scheduler_timer = timer
+
+    log.info("local backup: hourly scheduler started (dir=%s)", _local_backup_dir())
 
 
 def _table_row_counts(conn: sqlite3.Connection, tables: list[str]) -> dict[str, int]:

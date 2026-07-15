@@ -34,7 +34,7 @@ def _run(label, merge_ok=True, is_base_merge_calls=None, parent="sprint-94.3"):
 
     merge_calls = is_base_merge_calls if is_base_merge_calls is not None else []
 
-    def fake_merge(repo, head, base, title, delete_branch=True):
+    def fake_merge(repo, head, base, title, delete_branch=True, **kw):
         merge_calls.append((head, base))
         return (merge_ok, "merged" if merge_ok else "CONFLICT", 1 if merge_ok else None)
 

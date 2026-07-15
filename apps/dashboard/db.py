@@ -610,8 +610,10 @@ _GUARD_TO: frozenset[str] = frozenset({"ready_to_merge", "needs_rework", "comple
 # needs_rework→completed (B2): a superseded ancestor whose entire lineage has
 # merged into develop is completed even though its own tickets show rework — the
 # rework moved to a child that has since merged up. Guarded by a real
-# merge-to-develop check in the reconciler, so this edge can never auto-complete
-# a sprint whose work is not actually in develop.
+# merge-to-develop check in the reconciler (sprint_reconcile_service requires a
+# strictly-later completed lineage member AND the lineage base branch in the
+# merged-PR-head set), so this edge can never auto-complete a sprint whose work
+# is not actually in develop.
 _RECONCILE_ONLY_EDGES: frozenset[tuple[str, str]] = frozenset({
     ("needs_rework", "ready_to_merge"),
     ("needs_rework", "completed"),

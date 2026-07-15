@@ -93,7 +93,7 @@ def test_dead_pid_settles_state(fresh_db, pid_dir):
 
     transition_calls: list[dict] = []
 
-    def _capture(lbl: str, state: str, actor: str, end_reason: str | None = None, project: str = "") -> bool:
+    def _capture(lbl: str, state: str, actor: str, end_reason: str | None = None, project: str = "", ended_at: str | None = None) -> bool:
         transition_calls.append({"label": lbl, "state": state, "actor": actor})
         # actually apply the transition so downstream assertions can check DB state
         if state == "needs_rework":
@@ -143,9 +143,9 @@ def test_reconcile_uses_transition_sprint_state_not_direct_db(fresh_db, pid_dir)
     transition_calls: list[str] = []
     original_transition = _srs.transition_sprint_state
 
-    def _spy(lbl, state, actor, end_reason=None, project=""):
+    def _spy(lbl, state, actor, end_reason=None, project="", ended_at=None):
         transition_calls.append(actor)
-        return original_transition(lbl, state, actor, end_reason, project)
+        return original_transition(lbl, state, actor, end_reason, project, ended_at)
 
     import server as srv  # noqa: PLC0415
 

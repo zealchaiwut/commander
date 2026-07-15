@@ -98,6 +98,7 @@ def transition_sprint_state(
     actor: str,
     end_reason: str | None = None,
     project: str = "",
+    ended_at: str | None = None,
 ) -> bool:
     """Route a reconciler state transition through the DB state machine.
 
@@ -114,6 +115,7 @@ def transition_sprint_state(
     """
     res = _db().transition_sprint_state(
         label, state, actor=actor, end_reason=end_reason, project=project,
+        ended_at=ended_at,
     )
     return bool(getattr(res, "accepted", False))
 
@@ -153,14 +155,19 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
         return {"state": "ready_to_merge", "end_reason": "reconcile-orphan"}
 
     canonical = _db().canonical_lifecycle(stored)
-    # needs_rework→completed is never driven by THIS background sweep: parent/
-    # ancestor sprints stay open until an explicit Merge Sprint, Bulk complete,
-    # or Complete-step. Those call sites verify the merge themselves (each has
-    # its own _branch_has_unmerged_commits check or a full chain-pending scan)
-    # before invoking startup._sprint_db_mark_merged_completed(actor="reconcile"
-    # or "manager") — that write satisfies the DB edge guard but is not
-    # reconciler-*driven* in the sense of this sweep deciding to complete
-    # anything on its own (issue #1694).
+    # Sweep-driven completion is allowed in exactly ONE guarded case — the
+    # "real merge-to-develop check in the reconciler" anticipated by db.py's
+    # B2-edge comment: the sprint is a superseded ancestor, i.e.
+    #   • no open rework tickets (mirror-backed has_rework=False), AND
+    #   • a strictly-later member of its lineage is state='completed' (a
+    #     verified merge flow blessed the chain tip AFTER this member ended), AND
+    #   • the lineage BASE branch (sprint/<base>) is a merged PR head (cached
+    #     list_merged_sprint_branches — zero extra GitHub quota).
+    # Without this, a superseded ancestor could only ever be promoted to
+    # ready_to_merge and sat there forever advertising a Complete CTA for work
+    # already in develop (hermes-agent sprint-1/1.1/1.2 zombie lineage). All
+    # other completions still come only from Merge Sprint / Bulk complete /
+    # Complete-step (issue #1694).
     if has_rework and canonical in ("ready_to_merge", "completed"):
         # A natural successful run end must not be downgraded because GitHub
         # labels lag (e.g. ticket still OPEN in UAT before Finish sprint).
@@ -178,18 +185,28 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
             except Exception:
                 pass
         return {"state": "needs_rework", "end_reason": end_reason or "github-reconcile"}
-    if not has_rework and canonical == "needs_rework" and stored in ("needs_rework", "failed", "cancelled"):
-        # GitHub shows no open rework / unfinished work tickets → the sprint's work
-        # has settled, so promote to ready_to_merge.
-        #
-        # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
-        # stale snapshot from the ORIGINAL run and survives even after the failed
-        # ticket was re-run and passed in a child sprint. Trusting it left
-        # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
-        # would_change=false), which disabled Bulk complete. The live GitHub signal
-        # (has_rework) is authoritative; a genuinely-unfinished ticket would still
-        # be open/not-done and keep has_rework True.
-        return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
+    if not has_rework and stored in ("needs_rework", "failed", "cancelled", "ready_to_merge"):
+        if _lineage_has_later_completed(label, project) and _base_branch_merged_to_develop(label, project):
+            # Superseded ancestor whose chain verifiably shipped → completed.
+            # Preserve the original run-end timestamp: the silent ended_at
+            # rewrite was part of the hermes zombie-lineage corruption.
+            return {
+                "state": "completed",
+                "end_reason": "superseded",
+                "ended_at": row.get("ended_at"),
+            }
+        if canonical == "needs_rework":
+            # GitHub shows no open rework / unfinished work tickets → the sprint's
+            # work has settled, so promote to ready_to_merge.
+            #
+            # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
+            # stale snapshot from the ORIGINAL run and survives even after the failed
+            # ticket was re-run and passed in a child sprint. Trusting it left
+            # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
+            # would_change=false), which disabled Bulk complete. The live GitHub signal
+            # (has_rework) is authoritative; a genuinely-unfinished ticket would still
+            # be open/not-done and keep has_rework True.
+            return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
 
 
@@ -390,13 +407,36 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
         # reconcile transitions (terminal<->terminal) keep actor="reconcile"
         # per the original AC4 contract.
         _actor = "manager" if (row.get("state") or "") == "running" else "reconcile"
+        _state_before = row.get("state") or ""
         lifecycle_updated = transition_sprint_state(
             label,
             patch["state"],
             actor=_actor,
             end_reason=patch.get("end_reason"),
             project=_eff_project,
+            ended_at=patch.get("ended_at"),
         )
+        if lifecycle_updated and patch["state"] == "completed":
+            # Audit trail for sweep-driven completion of a superseded ancestor —
+            # the silent, event-less lifecycle rewrite was half the hermes
+            # zombie-lineage bug. Writer-side only: reconcile_preview calls
+            # _github_reconcile_row dry-run and must stay side-effect free.
+            try:
+                import uuid  # noqa: PLC0415
+                import server as _srv  # noqa: PLC0415
+                _srv._emit_dashboard_event(
+                    project=_eff_project,
+                    type="sprint_lineage_superseded",
+                    target=label,
+                    detail={
+                        "from_state": _state_before,
+                        "end_reason": patch.get("end_reason"),
+                        "trigger": "reconcile_sweep",
+                    },
+                    action_id=str(uuid.uuid4()),
+                )
+            except Exception:
+                pass
         if lifecycle_updated:
             # Re-fetch so _reconcile_counts sees the updated state.
             row = _db().get_sprint(label, project=_eff_project or None) or row
@@ -415,6 +455,48 @@ def _parse_sprint_label(label: str) -> tuple[str, tuple[int, ...]]:
     if not parts:
         return "", ()
     return f"sprint-{parts[0]}", parts
+
+
+def _lineage_has_later_completed(label: str, project: str) -> bool:
+    """True when a strictly-later member of *label*'s lineage is completed.
+
+    Label-parsing based (parent_label can be NULL on rows terminalized without a
+    run). Strictly-later mirrors _terminalize_superseded_orphans: sprint-1.3
+    completed counts for sprint-1, 1.1 and 1.2, nothing counts for 1.3 itself.
+    Project-scoped — sprints are keyed (label, project).
+    """
+    base, parts = _parse_sprint_label(label)
+    if not base:
+        return False
+    for row in _db().list_sprints_lifecycle():
+        if project and (row.get("project") or "") != project:
+            continue
+        if (row.get("state") or "").lower() != "completed":
+            continue
+        sib_base, sib_parts = _parse_sprint_label(row.get("label") or "")
+        if sib_base == base and sib_parts > parts:
+            return True
+    return False
+
+
+def _base_branch_merged_to_develop(label: str, project: str) -> bool:
+    """Zero-quota check: is the lineage BASE branch a merged PR head?
+
+    Always keys on the BASE label — intermediate members (e.g. sprint/sprint-1.2
+    in a stacked chain) may never get their own develop PR; the base branch
+    merge is what ships the whole chain. Uses the cached merged-PR-head set
+    (github_client.list_merged_sprint_branches). Empty set or any error → False:
+    never complete on doubt.
+    """
+    base, _parts = _parse_sprint_label(label)
+    if not base:
+        return False
+    try:
+        import github_client as gh  # noqa: PLC0415
+        merged = gh.list_merged_sprint_branches(repo_name=project) or set()
+    except Exception:
+        return False
+    return f"sprint/{base}" in merged
 
 
 def _terminalize_superseded_orphans(project: str) -> list[str]:

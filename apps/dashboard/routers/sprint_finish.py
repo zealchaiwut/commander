@@ -622,6 +622,51 @@ class CompleteStepBody(BaseModel):
     confirmed: bool = True
 
 
+# Lineage members in these canonical states are superseded once the base branch
+# merges to develop: their own run didn't ship, but their work reached develop
+# via a descendant. Stored failed/cancelled canonicalize to needs_rework.
+_CASCADE_SOURCE_CANONICAL = frozenset({"needs_rework", "ready_to_merge", "partial_finished"})
+
+
+def _cascade_complete_lineage(
+    srv, repo: str, project_root: Path, base_label: str, exclude: str, ended_at: str,
+) -> tuple[list[str], list[str]]:
+    """After the BASE branch merged to develop, complete leftover lineage members.
+
+    Without this, superseded ancestors (e.g. sprint-1/1.1/1.2 after 1.3 shipped)
+    stay needs_rework forever and the reconcile sweep later rebrands them
+    ready_to_merge — the hermes-agent zombie-lineage bug.
+    """
+    cascaded: list[str] = []
+    errors: list[str] = []
+    for lbl in srv.children_of(base_label, project_root, project=repo):
+        if lbl == exclude:
+            continue
+        row = srv.db.get_sprint(lbl, project=repo)
+        if not row:
+            # plan.json-only orphans are handled by _terminalize_superseded_orphans
+            continue
+        canonical = srv.db.canonical_lifecycle(row.get("state") or "")
+        if canonical not in _CASCADE_SOURCE_CANONICAL:
+            continue
+        if srv._is_sprint_running(project_root, lbl):
+            continue
+        try:
+            srv._plan_json_set_state(
+                project_root, lbl, "completed", ended_at=ended_at, end_reason="superseded",
+            )
+        except Exception as exc:
+            errors.append(f"{lbl}: plan.json update failed: {exc}")
+        ok = srv._sprint_db_mark_merged_completed(
+            lbl, repo, ended_at=ended_at, end_reason="superseded",
+        )
+        if ok is False:
+            errors.append(f"{lbl}: DB transition to completed rejected by state machine")
+        else:
+            cascaded.append(lbl)
+    return cascaded, errors
+
+
 @router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/complete-step")
 def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteStepBody):
     """Complete ONE lineage step and finalise that sprint.
@@ -761,6 +806,32 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
                    f"state machine (illegal edge) — lifecycle left unchanged",
         )
 
+    # 5) Base step: the whole lineage's work is now in develop — complete the
+    # superseded ancestors/siblings too (never fail the request here; the merge
+    # already landed, so surface errors in the payload instead).
+    cascaded: list[str] = []
+    cascade_errors: list[str] = []
+    if is_base:
+        cascaded, cascade_errors = _cascade_complete_lineage(
+            srv, repo, project_root, label, exclude=label, ended_at=now,
+        )
+        if cascaded:
+            try:
+                srv._emit_dashboard_event(
+                    project=repo,
+                    type="sprint_lineage_superseded",
+                    target=label,
+                    detail={
+                        "base_label": label,
+                        "cascaded": cascaded,
+                        "end_reason": "superseded",
+                        "trigger": "complete_step",
+                    },
+                    action_id=str(uuid.uuid4()),
+                )
+            except Exception:
+                pass
+
     for _k in ("open_issues_body:", "open_issues:", "issues:", "recent_closed:", "summary_issues:"):
         try:
             srv.github_client.invalidate(_k)
@@ -776,6 +847,8 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         "merged": merged,
         "closed_summary": closed_summary,
         "closed_tickets": closed_tickets,
+        "cascaded_completed": cascaded,
+        "cascade_errors": cascade_errors,
     }
 
 

@@ -452,6 +452,27 @@ def generate_sprint_summary(
             lines.append(f"- **#{issue.number} {issue.title}** ({issue.category or 'unknown'}): {action}")
         lines.append("")
 
+    # -- Dead Letter (issue #1942) --
+    _dead_letter = getattr(state, "dead_letter", []) or []
+    if _dead_letter:
+        lines += [
+            "## Dead Letter",
+            "",
+            "Tickets that exhausted all fix rounds:",
+            "",
+            "| Issue # | Title | Attempts | Last Error |",
+            "|---|---|---|---|",
+        ]
+        for dl in _dead_letter:
+            tid      = dl.get("ticket_id", "?")
+            title    = dl.get("title", "")
+            attempts = dl.get("attempts", 0)
+            last_err = (dl.get("last_error") or "").replace("|", "/")
+            if len(last_err) > 120:
+                last_err = last_err[:120] + "…"
+            lines.append(f"| #{tid} | {title} | {attempts} | {last_err} |")
+        lines.append("")
+
     # -- Stats --
     cost_str = "$0.00 (all agents subscription-funded via Claude Code)"
 

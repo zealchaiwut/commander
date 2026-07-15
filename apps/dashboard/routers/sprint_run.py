@@ -334,6 +334,25 @@ def rerun_sprint_preview_v2(sprint_label: str, project: str):
 # ── Write/dispatch routes (issue #1263) ───────────────────────────────────────
 
 
+def _build_run_argv_extras(body: "SprintMgmtRunBody", base_argv: list[str]) -> list[str]:
+    """Append overnight / target-branch flags to sprint_manager argv (issue #1946).
+
+    When mode=overnight and no explicit target_branch, defaults --target-branch
+    to "develop" (the legacy-behaviour flag wired to the overnight default).
+    Always appends --overnight when mode=overnight so sprint_manager runs
+    per-ticket test invocations after each merge.
+    """
+    argv = list(base_argv)
+    effective_target = body.target_branch
+    if effective_target is None and body.mode == "overnight":
+        effective_target = "develop"
+    if effective_target is not None:
+        argv.extend(["--target-branch", effective_target])
+    if body.mode == "overnight":
+        argv.append("--overnight")
+    return argv
+
+
 @router.post("/api/sprints/run", status_code=202)
 def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
@@ -367,6 +386,16 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             error="invalid sprint label",
         )
         raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+    # mode validation (issue #1946): return 400 immediately for unknown values.
+    _VALID_RUN_MODES: frozenset[str] = frozenset({"overnight"})
+    if body.mode is not None and body.mode not in _VALID_RUN_MODES:
+        raise HTTPException(
+            400,
+            detail=(
+                f"Invalid mode {body.mode!r}. "
+                f"Valid values: {sorted(_VALID_RUN_MODES)}"
+            ),
+        )
     # Per-run provider (anthropic | ica) — same validation as the global toggle.
     # Omitted (None) resolves to the global llmProvider setting so the global
     # toggle is the default and the modal choice is a per-run override.
@@ -588,6 +617,11 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     }
     if body.callback_url:
         _plan_extra["callback_url"] = body.callback_url
+    # Store trigger-owner and mode so end-of-run report can echo them (issue #1946).
+    if body.by:
+        _plan_extra["triggered_by"] = body.by
+    if body.mode:
+        _plan_extra["run_mode"] = body.mode
     try:
         srv._plan_json_set_state(
             project_root,
@@ -606,8 +640,11 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     if goal_path.exists():
         stripped_env["SPRINT_GOAL"] = goal_path.read_text(encoding="utf-8").strip()
 
+    _run_argv = _build_run_argv_extras(
+        body, srv._sprint_manager_argv(body.sprint_label, body.project, project_root)
+    )
     proc = sprint_run_service.spawn_sprint_process(
-        srv._sprint_manager_argv(body.sprint_label, body.project, project_root),
+        _run_argv,
         cwd=str(coder_path),
         env=stripped_env,
         log_path=log_path,
@@ -621,6 +658,15 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     sprint_webhook_service.start_callback_monitor(
         proc=proc,
         callback_url=body.callback_url,
+        sprint_label=body.sprint_label,
+        project=body.project,
+        sprints_dir=pid_dir,
+        started_at=_started_at,
+    )
+
+    # AC1 (issue #1945): always write commander_report.latest.json on sprint end.
+    sprint_webhook_service.start_report_monitor(
+        proc=proc,
         sprint_label=body.sprint_label,
         project=body.project,
         sprints_dir=pid_dir,
@@ -779,14 +825,15 @@ def kill_sprint(sprint_label: str, project: str):
     invalidate_board(project)
 
     # AC2 (issue #1865): fire webhook with outcome="killed" in a background thread.
+    # AC1 (issue #1945): always write commander_report.latest.json on kill.
+    import threading as _threading
+    _kill_payload = sprint_webhook_service.build_commander_report(
+        sprints_dir=sprints_dir,
+        sprint_label=sprint_label,
+        project=project or "",
+        started_at=_kill_started_at,
+    )
     if _kill_callback_url:
-        import threading as _threading
-        _kill_payload = sprint_webhook_service.build_webhook_payload(
-            sprints_dir=sprints_dir,
-            sprint_label=sprint_label,
-            project=project or "",
-            started_at=_kill_started_at,
-        )
         _t = _threading.Thread(
             target=sprint_webhook_service.deliver_sprint_webhook,
             args=(_kill_callback_url, _kill_payload),
@@ -794,6 +841,13 @@ def kill_sprint(sprint_label: str, project: str):
             name=f"sprint-webhook-kill-{sprint_label}",
         )
         _t.start()
+    _t_report = _threading.Thread(
+        target=sprint_webhook_service.write_commander_report,
+        args=(_kill_payload, sprint_webhook_service._get_report_path()),
+        daemon=True,
+        name=f"sprint-report-kill-{sprint_label}",
+    )
+    _t_report.start()
 
     return {"ok": True}
 

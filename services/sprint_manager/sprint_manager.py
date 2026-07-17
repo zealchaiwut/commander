@@ -3345,7 +3345,7 @@ def run_sprint_loop(
     gate_design: bool,
     gate_frontend_lint: bool,
     gate_monolith: bool,
-    gate_coder_no_test_edits: bool = True,
+    gate_coder_no_test_edits: bool,
     gate_scope: str,
     alert_modes: list,
     cfg: "Optional[SprintConfig]",

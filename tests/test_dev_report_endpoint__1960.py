@@ -80,7 +80,7 @@ def test_dev_report_endpoint__force_regenerate(client):
     """AC3: GET /api/dev-report?force=1 regenerates & stores for today."""
     today = _bkk_today()
     # Generate with force=1.
-    r = client.get(f"/api/dev-report?force=1")
+    r = client.get("/api/dev-report?force=1")
     assert r.status_code == 200
     payload = r.json()
     assert payload["for_date"] == today

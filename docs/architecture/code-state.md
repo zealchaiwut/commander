@@ -1,4 +1,4 @@
-# Code State — sprint-120
+# Code State — sprint-1002
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,14 +15,14 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-120)
+## Recent Deltas (sprint-1002)
 
-Files changed: **22**
+Files changed: **7**
 
-- `tests/` — 10 file(s)
-- `services/` — 6 file(s)
-- `(root)/` — 3 file(s)
-- `apps/` — 3 file(s)
+- `tests/` — 3 file(s)
+- `apps/` — 2 file(s)
+- `(root)/` — 1 file(s)
+- `scripts/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
@@ -34,10 +34,10 @@ Files changed: **22**
 | `apps/dashboard/static/dist/bundle.js.map` | 186 |
 | `apps/dashboard/static/dist/bundle.js` | 176 |
 | `apps/dashboard/static/app.js` | 106 |
-| `CHANGELOG.md` | 95 |
+| `CHANGELOG.md` | 96 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 88 |
 | `apps/dashboard/static/index.html` | 75 |
-| `apps/dashboard/db.py` | 63 |
+| `apps/dashboard/db.py` | 64 |
 | `README.md` | 48 |
 | `apps/dashboard/routers/__init__.py` | 47 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 46 |
@@ -51,6 +51,6 @@ Files changed: **22**
 
 ## Generated
 
-Sprint: `sprint-120`  
-Timestamp: `2026-07-14T15:58:20Z`  
+Sprint: `sprint-1002`  
+Timestamp: `2026-07-17T05:24:44Z`  
 _Generated deterministically — no LLM required._

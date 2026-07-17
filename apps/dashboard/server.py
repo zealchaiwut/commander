@@ -253,7 +253,6 @@ from routers import (  # noqa: E402
     system_router,
     tickets_router,
     timeline_router,
-    dev_report_router,
 )
 from routers.bulk_tickets import _get_bulk_job  # noqa: E402
 from routers.logs_service import broadcast, _subscribers  # noqa: E402
@@ -318,7 +317,6 @@ app.include_router(docs_router)
 app.include_router(agent_guide_router)
 app.include_router(changelog_router)
 app.include_router(estimate_jobs_router)
-app.include_router(dev_report_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

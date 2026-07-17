@@ -20,7 +20,7 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from export_hermes_report import build_contract  # noqa: E402  # type: ignore[import-untyped]
+from export_hermes_report import build_contract  # noqa: E402
 
 
 def _db():

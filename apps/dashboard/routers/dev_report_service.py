@@ -52,7 +52,7 @@ def assemble_dev_report(date: str, db_path: str | None = None) -> dict:
     contract: dict = build_contract(
         resolved_db_path,
         now=now,
-        projects_list=[],
+        projects_list=None,
         price_map=None,
     )
     contract.pop("_new_state", None)

@@ -226,6 +226,7 @@ from routers import (  # noqa: E402
     resolve_conflict_router,
     llm_provider_router,
     running_router,
+    dev_report_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -311,6 +312,7 @@ app.include_router(bulk_tickets_router)
 app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
 app.include_router(running_router)
+app.include_router(dev_report_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
 app.include_router(changelog_router)

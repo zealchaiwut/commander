@@ -498,6 +498,7 @@ Documentation files to consider updating (only if relevant changes shipped):
 - README.md — new features, changed commands, updated usage examples
 - CHANGELOG.md — one-line entry per merged ticket (format: "- #N: <title>")
 - SCHEMA.md — any new or changed DB tables/columns/endpoints
+- docs/features/api.md — API endpoints, parameters, response shapes (MUST review if diff touches apps/dashboard/routers/)
 
 ## Step 1 — Review the diff
 
@@ -515,6 +516,17 @@ gh api repos/{repo_name}/issues/<N>
 ```
 
 Only document tickets that are in a merged/done state.
+
+### Router Changes → API Doc Update (Mandatory)
+
+**If the sprint diff touches any file under `apps/dashboard/routers/`, you MUST review and update `docs/features/api.md`.**
+
+This includes:
+- New endpoint routes (e.g., `GET /api/dev-report`)
+- Modified endpoint signatures or parameters
+- Changed response shapes or status codes
+
+The Hermes commander-api skill consumes `docs/features/api.md` live, so stale API docs directly impact users. Do not skip this step even if the endpoint seems simple or internal.
 
 ## Step 3 — Update docs
 

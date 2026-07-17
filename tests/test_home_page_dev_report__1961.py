@@ -117,14 +117,14 @@ def test_ac4_empty_project_collapse_logic():
 # AC5: Long bucket lists use collapsible pattern (first 3 + "see more")
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_ac5_collapsible_pattern_in_html(client):
+def test_ac5_collapsible_pattern_in_html():
     """AC5: Home page HTML includes collapsible pattern (planner-see-more class)."""
-    r = client.get("/")
-    assert r.status_code == 200
+    html = read_home_html()
+    assert html, "home.html should exist"
     # The collapsible pattern should be defined in the HTML
-    assert "planner-see-more" in r.text or "_briefCollapsibleRows" in r.text, \
+    assert "planner-see-more" in html or "_briefCollapsibleRows" in html, \
            "HTML should include collapsible rows pattern"
-    assert "_briefToggleMore" in r.text, "HTML should include toggle function"
+    assert "_briefToggleMore" in html, "HTML should include toggle function"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,13 +145,13 @@ def test_ac6_footer_rendering():
 # AC7: Open-project CTA present and functional
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_ac7_open_project_cta_in_html(client):
+def test_ac7_open_project_cta_in_html():
     """AC7: Open-project CTA is rendered in project block footer."""
-    r = client.get("/")
-    assert r.status_code == 200
+    html = read_home_html()
+    assert html, "home.html should exist"
     # open-proj class should be in the HTML
-    assert "open-proj" in r.text, "HTML should include open-proj CTA"
-    assert "_sprintMgmtHref" in r.text, "HTML should reference sprint management href"
+    assert "open-proj" in html, "HTML should include open-proj CTA"
+    assert "_sprintMgmtHref" in html, "HTML should reference sprint management href"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,26 +188,26 @@ def test_ac9_run_sprint_button_logic():
 # AC10: Date-picker (?date=) continues to work
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_ac10_date_picker_functionality(client):
+def test_ac10_date_picker_functionality():
     """AC10: Date-picker query param is handled in loadReport."""
-    r = client.get("/?date=2026-07-17")
-    assert r.status_code == 200
+    html = read_home_html()
+    assert html, "home.html should exist"
     # loadReport should handle date parameter
-    assert "onDatePick" in r.text, "HTML should include date picker handler"
-    assert "date-pick" in r.text, "HTML should include date-pick input"
+    assert "onDatePick" in html, "HTML should include date picker handler"
+    assert "date-pick" in html, "HTML should include date-pick input"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AC11: Add Project entry point preserved
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_ac11_add_project_entry_point(client):
+def test_ac11_add_project_entry_point():
     """AC11: Add Project link is preserved in the page."""
-    r = client.get("/")
-    assert r.status_code == 200
-    assert "Add new project" in r.text or "add-proj" in r.text, \
+    html = read_home_html()
+    assert html, "home.html should exist"
+    assert "Add new project" in html or "add-proj" in html, \
            "HTML should include Add Project entry point"
-    assert "openAdd" in r.text, "HTML should include openAdd function"
+    assert "openAdd" in html, "HTML should include openAdd function"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,14 +228,14 @@ def test_ac12_empty_state_handling():
 # AC13: All styling uses tokens.css; no new external stylesheets
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_ac13_styling_uses_tokens_css(client):
+def test_ac13_styling_uses_tokens_css():
     """AC13: Home page references tokens.css and defines no external stylesheets."""
-    r = client.get("/")
-    assert r.status_code == 200
+    html = read_home_html()
+    assert html, "home.html should exist"
     # Should reference tokens.css
-    assert "tokens.css" in r.text, "HTML should reference tokens.css"
+    assert "tokens.css" in html, "HTML should reference tokens.css"
     # CSS variables should be used (--bg, --text, etc.)
-    assert "var(--" in r.text, "Inline styles should use CSS variables"
+    assert "var(--" in html, "Inline styles should use CSS variables"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

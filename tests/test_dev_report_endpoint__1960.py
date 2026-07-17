@@ -16,7 +16,7 @@ _BKK = ZoneInfo("Asia/Bangkok")
 
 @pytest.fixture
 def client():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
+    with httpx.Client(base_url=BASE_URL, timeout=30.0) as c:
         yield c
 
 

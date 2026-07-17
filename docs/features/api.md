@@ -115,6 +115,238 @@ Called by the Claude Code hooks in `hooks/`.
 | `POST` | `/api/brief/daily/regenerate` | Regenerate the home daily artifact |
 | `GET` | `/api/projects/{slug}/brief/daily` | Per-project daily artifact |
 | `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Regenerate a project's daily artifact |
+| `GET` | `/api/dev-report` | Per-project dev report: shipped, stale, waiting, and run-ready sprints |
+
+---
+
+## Dev Report
+
+Aggregated, actionable per-project snapshots of shipped sprints, stale blockers,
+waiting sign-offs, and run-ready backlog. Data is sourced from the local DB
+and brief artifacts, without GitHub calls. Returns `404` when no projects are
+configured.
+
+### `GET /api/dev-report`
+
+Serves a structured view of each project's current status and pending work.
+
+**Query Parameters:**
+
+| Parameter | Type | Optional | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `date` | string (YYYY-MM-DD) | Yes | Today's date (UTC) | Brief date to query; window is anchored at 6 AM in Asia/Bangkok timezone |
+
+**Response: `200 OK`**
+
+```json
+{
+  "for_date": "2026-07-17",
+  "window_start": "2026-07-16T06:00:00",
+  "window_end": "2026-07-17T06:00:00",
+  "cost": null,
+  "projects": [
+    {
+      "project": "commander",
+      "name": "Commander",
+      "status": "idle",
+      "in_progress": null,
+      "up_next": null,
+      "shipped": [
+        {
+          "label": "sprint-119",
+          "goal": "Finalize dev report UI",
+          "done": 5,
+          "pr_number": 1234
+        }
+      ],
+      "fixed": [],
+      "stale": [
+        {
+          "kind": "blocked",
+          "issue_number": 1200,
+          "title": "Fix auth token leak",
+          "age_days": 4.5
+        }
+      ],
+      "waiting": [
+        {
+          "label": "sprint-120",
+          "ticket_count": 2,
+          "estimated_hours": 6.5
+        }
+      ],
+      "counts": {
+        "shipped": 1,
+        "fixed": 0,
+        "stale": 1,
+        "waiting": 1
+      }
+    }
+  ]
+}
+```
+
+**Response fields:**
+
+- `for_date` (string): The brief date (YYYY-MM-DD, in Bangkok timezone).
+- `window_start` (string): ISO-8601 start of the 24-hour brief window (Bangkok midnight).
+- `window_end` (string): ISO-8601 end of the 24-hour brief window.
+- `cost` (string | null): Optional cost estimate (not currently populated).
+- `projects` (array): Per-project summaries.
+
+**Projects array fields:**
+
+- `project` (string): Project slug (repo name).
+- `name` (string): Human-friendly project name.
+- `status` (string): One of `"idle"`, `"running"`, `"blocked"`.
+- `in_progress` (object | null): Currently running sprint, if any.
+  - `sprint_label` (string | null): Sprint label (e.g., `"sprint-120"`).
+  - `started_at` (string | null): ISO-8601 start timestamp (null in current implementation).
+- `up_next` (object | null): Next backlog sprint ready to queue, if any.
+  - `label` (string | null): Sprint label.
+  - `ticket_count` (integer): Number of tickets in the sprint.
+  - `ready` (boolean): Whether all preflight checks pass.
+- `shipped` (array): Recently completed sprints with merged PRs.
+  - `label` (string | null): Sprint label.
+  - `goal` (string): Sprint goal from issue.
+  - `done` (integer): Number of completed tickets.
+  - `pr_number` (integer | null): GitHub PR number for the sprint's develop → master merge.
+- `fixed` (array): Issues that were previously blocked but are now resolved (empty in current implementation).
+- `stale` (array): Issues stuck in blocked/rework state beyond configured thresholds.
+  - `kind` (string): One of `"blocked"`, `"rework"`, `"failed"`, etc.
+  - `issue_number` (integer | null): GitHub issue number.
+  - `title` (string): Issue title.
+  - `age_days` (float | null): Days since last update.
+- `waiting` (array): Sprints in `ready_to_merge` state waiting for sign-off.
+  - `label` (string | null): Sprint label.
+  - `ticket_count` (integer): Number of tickets awaiting sign-off.
+  - `estimated_hours` (float): Summed estimated hours for tickets.
+- `counts` (object): Summary counts.
+  - `shipped` (integer): Count of shipped sprints.
+  - `fixed` (integer): Count of fixed issues.
+  - `stale` (integer): Count of stale issues.
+  - `waiting` (integer): Count of waiting sprints.
+
+**Response: `404 Not Found`**
+
+Returned when no projects are configured in `apps/dashboard/projects.json`.
+
+```json
+{
+  "detail": "No report yet — runs nightly at 05:45"
+}
+```
+
+---
+
+## Nightly Hermes Dev-Report Exporter
+
+Exports an immutable dev-report contract for consumption by external agents
+(e.g. Hermes). Runs nightly (time configurable) to produce a timestamped JSON
+file with shipped/in-progress/blocked/waiting status across all tracked projects.
+
+### Script: `scripts/export_hermes_report.py`
+
+**Description:**
+
+Queries the Commander DB and writes a versioned JSON contract to a configurable
+path. Designed to degrade gracefully on failure — errors are logged but the
+script exits 0, leaving any existing report file untouched.
+
+**CLI Invocation:**
+
+```bash
+python3 scripts/export_hermes_report.py [--dry-run] [--output PATH] [--db-path PATH] \
+  [--stale-blocked-days N] [--stale-waiting-days N] [--stale-backlog-days N]
+```
+
+**Arguments:**
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--dry-run` | flag | (not set) | Print JSON to stdout without writing any files; exits 0 |
+| `--output` | path | (see resolution order below) | Override output file path |
+| `--db-path` | path | (see resolution order below) | Override SQLite DB path |
+| `--stale-blocked-days` | integer | 3 | Days before a blocked/rework issue is marked stale |
+| `--stale-waiting-days` | integer | 2 | Days before a ready_to_merge sprint is marked stale |
+| `--stale-backlog-days` | integer | 7 | Days before a planning-state sprint is marked stale backlog |
+
+**Output Path Resolution (first match wins):**
+
+1. `--output` flag
+2. `$COMMANDER_REPORT_PATH` environment variable
+3. `$HERMES_HOME/contracts/commander_report.latest.json` (if `HERMES_HOME` is set)
+4. `~/.hermes/contracts/commander_report.latest.json` (default)
+
+**DB Path Resolution (first match wins):**
+
+1. `--db-path` flag
+2. `$DB_PATH` environment variable
+
+If no DB path is available, the script logs a warning and exits 0 (no error).
+
+**Exit Codes:**
+
+- `0` — Contract written successfully, or error encountered and logged (graceful
+  degradation per AC11 — errors do not cause non-zero exit).
+- `0` — `--dry-run` mode; JSON printed to stdout.
+- `0` — DB path not available; warning logged.
+
+**Example Output:**
+
+```json
+{
+  "for_date": "2026-07-17",
+  "generated_at": "2026-07-17T15:32:45Z",
+  "window_start": "2026-07-16T18:45:00Z",
+  "window_end": "2026-07-17T18:45:00Z",
+  "projects": [
+    {
+      "name": "Commander",
+      "status": "idle",
+      "in_progress": null,
+      "shipped": [
+        {"issue_number": 305, "title": "Lock sprint card"}
+      ],
+      "fixed": [],
+      "stale": [
+        {"kind": "blocked", "issue_number": 1200, "title": "Fix auth token leak", "age_days": 4.5}
+      ],
+      "waiting": [
+        {"issue_number": 307, "title": "Review UAT"}
+      ],
+      "counts": {
+        "shipped": 1,
+        "in_progress": 0,
+        "blocked": 1,
+        "waiting": 1,
+        "stale": 1,
+        "fixed": 0
+      }
+    }
+  ],
+  "cost": "$1.23",
+  "cost_source": "price_map",
+  "completed": ["Commander: 1 shipped"],
+  "needs_review": ["Commander: 1 awaiting sign-off"],
+  "dead_letter": ["Commander: 1 stale blocked"]
+}
+```
+
+**Failure Semantics:**
+
+- **Missing DB**: Script logs `"export_hermes_report: no DB path — set --db-path or $DB_PATH"` and exits 0.
+- **DB not found**: Script logs `"export_hermes_report: DB not found: <path>"` and exits 0.
+- **JSON build error**: Script logs `"export_hermes_report: <exception>"` and exits 0; existing output file (if any) is left untouched.
+- **Atomic write error**: Script logs error and exits 0; output file is not created.
+
+All errors are written to stderr; stdout is reserved for `--dry-run` JSON output.
+
+**Persistence:**
+
+The exporter also persists the contract to the `brief_artifacts` table in the
+DB (scope: `"dev_report"`, date-keyed) so the `/api/dev-report` endpoint can
+serve historical reports without re-running the exporter.
 
 ---
 

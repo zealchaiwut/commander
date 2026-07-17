@@ -18,7 +18,7 @@ router = APIRouter(tags=["dev-report"])
 @router.get("/api/dev-report")
 def get_dev_report(
     date: Optional[str] = None,
-    force: Optional[int] = 0,
+    force: bool = False,
 ):
     """Return the stored dev_report artifact for a given date.
 

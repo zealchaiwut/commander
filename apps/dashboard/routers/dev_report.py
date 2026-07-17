@@ -19,7 +19,7 @@ from . import brief_service
 router = APIRouter(tags=["dev-report"])
 
 
-# ── Pydantic response models ──────────────────────────────────────────────────
+# ── Pydantic response models ─────────────────────────────────────────────────
 
 class ShippedEntry(BaseModel):
     label: Optional[str] = None
@@ -85,7 +85,7 @@ class DevReport(BaseModel):
     projects: list[ProjectEntry] = []
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _project_status(brief: dict) -> str:
     if brief.get("in_progress"):
@@ -164,11 +164,11 @@ def _build_project_entry(slug: str, proj_meta: dict, brief: dict) -> dict:
     }
 
 
-# ── route ─────────────────────────────────────────────────────────────────────
+# ── route ────────────────────────────────────────────────────────────────────
 
 @router.get("/api/dev-report", response_model=DevReport)
 def get_dev_report(date: Optional[str] = None):
-    """Per-project dev report: shipped, stale, waiting, and run-ready sprints."""
+    """Per-project dev report: shipped, stale, waiting, run-ready sprints."""
     try:
         project_list = brief_service._load_projects()
     except Exception:

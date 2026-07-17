@@ -1,9 +1,5 @@
 """Tests for issue #1963: Document GET /api/dev-report and nightly exporter (runs against UAT)"""
-import json
 import os
-import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest

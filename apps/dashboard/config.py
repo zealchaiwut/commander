@@ -87,6 +87,17 @@ def definition_of_ready_mode() -> str:
     return val if val in ("block", "warn", "off") else "off"
 
 
+def running_aggregate_enabled() -> bool:
+    """True when COMMANDER_RUNNING_AGGREGATE=1.
+
+    When enabled the frontend uses the consolidated GET /api/running endpoint
+    (issue #1645 backend) instead of fanning out per-agent requests, reducing
+    latency and server load. Default OFF so the legacy fan-out code path runs
+    as the safe fallback until the flag is explicitly set (issue #1646).
+    """
+    return _env_bool("COMMANDER_RUNNING_AGGREGATE", default="0")
+
+
 def commander_features() -> dict:
     """Feature flags exposed to the dashboard UI (/api/environment)."""
     return {
@@ -95,4 +106,8 @@ def commander_features() -> dict:
         "planning": not sprint_planning_disabled(),
         "goal_required": not sprint_goal_required_disabled(),
         "definition_of_ready_mode": definition_of_ready_mode(),
+        # When True the Running tab uses the consolidated /api/running endpoint
+        # instead of fanning out per-agent requests (issue #1646).
+        # Set COMMANDER_RUNNING_AGGREGATE=1 in .env to enable.
+        "running_aggregate": running_aggregate_enabled(),
     }

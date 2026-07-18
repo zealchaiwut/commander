@@ -30,7 +30,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _DASHBOARD = _REPO_ROOT / "apps" / "dashboard"
 for _p in (str(_REPO_ROOT), str(_DASHBOARD)):
     if _p not in sys.path:

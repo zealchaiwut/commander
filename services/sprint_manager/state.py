@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -269,3 +270,25 @@ class SprintSummary:
     merged: list[str] = field(default_factory=list)
     gate_failures: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+
+
+def _apply_token_ceiling(state: "SprintState", token_ceiling: int) -> bool:
+    """Check cumulative token spend against the configured ceiling (issue #1943/#1948).
+
+    Sets state.ceiling_hit = True and logs once on first breach.
+    Returns True when the ceiling is active (> 0) and spent >= ceiling.
+    Returns False when the ceiling is disabled (0 or negative) or not yet reached.
+    """
+    if token_ceiling <= 0:
+        return False
+    spent = state.total_tokens_in + state.total_tokens_out
+    if spent >= token_ceiling:
+        if not state.ceiling_hit:
+            state.ceiling_hit = True
+            sys.stdout.write(
+                f"  [token-ceiling] Token ceiling reached "
+                f"({spent:,} tokens used, limit {token_ceiling:,}). "
+                f"No further tickets will be dispatched.\n"
+            )
+        return True
+    return False

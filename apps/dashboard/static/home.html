@@ -1,671 +1,941 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dev Report — Commander</title>
-  <script>
-    try {
-      document.documentElement.setAttribute(
-        'data-theme', localStorage.getItem('theme') || 'dark');
-    } catch (_) { document.documentElement.setAttribute('data-theme', 'dark'); }
-    document.addEventListener('DOMContentLoaded', function(){
-      var p = document.getElementById('date-pick');
-      if (p) {
-        var t = new Date();
-        var iso = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
-        p.max = iso;
-        p.value = iso;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev Report — Commander</title>
+    <script>
+      try {
+        document.documentElement.setAttribute(
+          "data-theme",
+          localStorage.getItem("theme") || "dark",
+        );
+      } catch (_) {
+        document.documentElement.setAttribute("data-theme", "dark");
       }
-    });
-  </script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css">
-  <link rel="stylesheet" href="/static/css/tokens.css">
-  <style>
-    /* ── local token ── */
-    :root {
-      --icon-on-color: #fff;
-      --nav-h: 52px;
-    }
+      document.addEventListener("DOMContentLoaded", function () {
+        var p = document.getElementById("date-pick");
+        if (p) {
+          var t = new Date();
+          var iso =
+            t.getFullYear() +
+            "-" +
+            String(t.getMonth() + 1).padStart(2, "0") +
+            "-" +
+            String(t.getDate()).padStart(2, "0");
+          p.max = iso;
+          p.value = iso;
+        }
+      });
+    </script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css"
+    />
+    <link rel="stylesheet" href="/static/css/tokens.css" />
+    <style>
+      /* ── local token ── */
+      :root {
+        --icon-on-color: #fff;
+        --nav-h: 52px;
+      }
 
-    /* ── reset ── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      /* ── reset ── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-    /* ── focus ring (WCAG 2.1 AA) ── */
-    :focus-visible {
-      outline: 2px solid var(--blue);
-      outline-offset: 2px;
-      border-radius: var(--radius-sm);
-    }
+      /* ── focus ring (WCAG 2.1 AA) ── */
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+        border-radius: var(--radius-sm);
+      }
 
-    /* ── base ── */
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      font-size: 14px;
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-    }
+      /* ── base ── */
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+      }
 
-    /* ── top nav ── */
-    .top-nav {
-      position: sticky;
-      top: 0;
-      z-index: var(--z-nav);
-      height: var(--nav-h);
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      padding: 0 24px;
-      gap: 16px;
-    }
-    .top-nav-brand {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      color: var(--text);
-      flex-shrink: 0;
-    }
-    .top-nav-sep {
-      width: 1px;
-      height: 18px;
-      background: var(--border);
-      flex-shrink: 0;
-    }
-    .top-nav-page {
-      font-size: 13px;
-      color: var(--text-muted);
-      flex: 1;
-    }
-    .top-nav-date-nav {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-    }
-    .nav-btn {
-      font-family: var(--mono);
-      font-size: 12px;
-      padding: 5px 10px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      background: transparent;
-      color: var(--text-muted);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
-      white-space: nowrap;
-    }
-    .nav-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
-    .nav-btn.today {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-    }
-    .nav-btn.today:hover { opacity: 0.85; }
-    .nav-btn.today:disabled { opacity: 0.45; cursor: default; }
-    .date-pick-wrap { position: relative; display: inline-flex; }
-    .date-pick-wrap input[type=date] {
-      position: absolute;
-      inset: 0;
-      opacity: 0;
-      cursor: pointer;
-      width: 100%;
-      height: 100%;
-      border: 0;
-    }
+      /* ── top nav ── */
+      .top-nav {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-nav);
+        height: var(--nav-h);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 16px;
+      }
+      .top-nav-brand {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--text);
+        flex-shrink: 0;
+      }
+      .top-nav-sep {
+        width: 1px;
+        height: 18px;
+        background: var(--border);
+        flex-shrink: 0;
+      }
+      .top-nav-page {
+        font-size: 13px;
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .top-nav-date-nav {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .nav-btn {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition:
+          background 0.15s,
+          color 0.15s,
+          border-color 0.15s;
+        white-space: nowrap;
+      }
+      .nav-btn:hover {
+        background: var(--surface-hover);
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+      .nav-btn.today {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+      }
+      .nav-btn.today:hover {
+        opacity: 0.85;
+      }
+      .nav-btn.today:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .date-pick-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+      .date-pick-wrap input[type="date"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
 
-    /* ── page layout ── */
-    .page-body {
-      max-width: 1040px;
-      margin: 0 auto;
-      padding: 24px 24px 48px;
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-    }
+      /* ── page layout ── */
+      .page-body {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 24px 24px 48px;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
 
-    /* ── report header ── */
-    .report-head {
-      padding: 24px 0 20px;
-      display: flex;
-      align-items: flex-end;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    .report-l { flex: 1; min-width: 180px; }
-    .report-date {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text);
-      line-height: 1.1;
-      text-wrap: balance;
-    }
-    .report-footer {
-      font-size: 12px;
-      color: var(--text-muted);
-      font-family: var(--mono);
-      margin-top: 4px;
-    }
+      /* ── report header ── */
+      .report-head {
+        padding: 24px 0 20px;
+        display: flex;
+        align-items: flex-end;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .report-l {
+        flex: 1;
+        min-width: 180px;
+      }
+      .report-date {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        line-height: 1.1;
+        text-wrap: balance;
+      }
+      .report-footer {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-family: var(--mono);
+        margin-top: 4px;
+      }
 
-    /* ── loading state ── */
-    .loading-state {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: var(--space-10) var(--space-4);
-      color: var(--text-muted);
-      font-size: 14px;
-    }
-    .loading-state .ti { font-size: 18px; animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+      /* ── loading state ── */
+      .loading-state {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: var(--space-10) var(--space-4);
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+      .loading-state .ti {
+        font-size: 18px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
 
-    /* ── empty / error note ── */
-    .empty-note {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      padding: 32px 24px;
-      color: var(--text-muted);
-      font-size: 14px;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-    }
-    .empty-note .ti { font-size: 28px; color: var(--text-sub); }
+      /* ── empty / error note ── */
+      .empty-note {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        padding: 32px 24px;
+        color: var(--text-muted);
+        font-size: 14px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      .empty-note .ti {
+        font-size: 28px;
+        color: var(--text-sub);
+      }
 
-    /* ── project blocks ── */
-    .pbrief {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-2xl);
-      overflow: hidden;
-      margin-bottom: 12px;
-      transition: border-color 0.15s;
-    }
-    .pbrief:hover { border-color: var(--text-sub); }
+      /* ── project blocks ── */
+      .pbrief {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-2xl);
+        overflow: hidden;
+        margin-bottom: 12px;
+        transition: border-color 0.15s;
+      }
+      .pbrief:hover {
+        border-color: var(--text-sub);
+      }
 
-    /* header row */
-    .pbrief-head {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 13px 16px;
-    }
-    .pbrief.has-body .pbrief-head {
-      border-bottom: 1px solid var(--border);
-    }
-    .pbrief.collapsed .pbrief-head { border-bottom: none; }
+      /* header row */
+      .pbrief-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 13px 16px;
+      }
+      .pbrief.has-body .pbrief-head {
+        border-bottom: 1px solid var(--border);
+      }
+      .pbrief.collapsed .pbrief-head {
+        border-bottom: none;
+      }
 
-    /* project badge */
-    .pbic {
-      width: 28px;
-      height: 28px;
-      border-radius: var(--radius-lg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      flex-shrink: 0;
-      color: var(--icon-on-color);
-    }
-    .pbic--gray { background: var(--text-sub); }
-    .pbic--blue { background: var(--blue); }
-    .pbic--green { background: var(--green); }
-    .pbic--purple { background: var(--purple); }
-    .pbic--red { background: var(--red); }
-    .pbic--orange, .pbic--amber, .pbic--yellow { background: var(--amber); }
-    .pbic--pink { background: var(--pink); }
-    .pbic--cyan, .pbic--teal { background: var(--teal); }
-    .pbic--indigo { background: var(--indigo); }
+      /* project badge */
+      .pbic {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-lg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        flex-shrink: 0;
+        color: var(--icon-on-color);
+      }
+      .pbic--gray {
+        background: var(--text-sub);
+      }
+      .pbic--blue {
+        background: var(--blue);
+      }
+      .pbic--green {
+        background: var(--green);
+      }
+      .pbic--purple {
+        background: var(--purple);
+      }
+      .pbic--red {
+        background: var(--red);
+      }
+      .pbic--orange,
+      .pbic--amber,
+      .pbic--yellow {
+        background: var(--amber);
+      }
+      .pbic--pink {
+        background: var(--pink);
+      }
+      .pbic--cyan,
+      .pbic--teal {
+        background: var(--teal);
+      }
+      .pbic--indigo {
+        background: var(--indigo);
+      }
 
-    /* title link */
-    .pb-title-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      text-decoration: none;
-      color: inherit;
-      min-width: 0;
-    }
-    .pb-title-link:hover .pbname { color: var(--blue); }
-    .pbname {
-      font-weight: 600;
-      font-size: 15px;
-      transition: color 0.12s;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .pbname-go {
-      width: 22px;
-      height: 22px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      color: var(--text-sub);
-      background: transparent;
-      flex-shrink: 0;
-      transition: color 0.12s, border-color 0.12s, background 0.12s;
-    }
-    .pb-title-link:hover .pbname-go { color: var(--blue); border-color: var(--blue); background: var(--blue-bg); }
+      /* title link */
+      .pb-title-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-decoration: none;
+        color: inherit;
+        min-width: 0;
+      }
+      .pb-title-link:hover .pbname {
+        color: var(--blue);
+      }
+      .pbname {
+        font-weight: 600;
+        font-size: 15px;
+        transition: color 0.12s;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .pbname-go {
+        width: 22px;
+        height: 22px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: var(--text-sub);
+        background: transparent;
+        flex-shrink: 0;
+        transition:
+          color 0.12s,
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .pb-title-link:hover .pbname-go {
+        color: var(--blue);
+        border-color: var(--blue);
+        background: var(--blue-bg);
+      }
 
-    /* status pill */
-    .pbstatus {
-      font-family: var(--mono);
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: var(--radius-full);
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      flex-shrink: 0;
-    }
-    .pbstatus.run { background: var(--green-bg); color: var(--green); }
-    .pbstatus.idle { background: var(--surface-2); color: var(--text-muted); }
-    .pbstatus.blocked { background: var(--red-bg); color: var(--red); }
-    .pbstatus.run .d {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--green);
-      animation: pulse-dot 2s ease-in-out infinite;
-    }
-    @keyframes pulse-dot {
-      0%, 100% { box-shadow: 0 0 0 2px var(--green-bg); }
-      50% { box-shadow: 0 0 0 5px var(--green-bg); }
-    }
+      /* status pill */
+      .pbstatus {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .pbstatus.run {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .pbstatus.idle {
+        background: var(--surface-2);
+        color: var(--text-muted);
+      }
+      .pbstatus.blocked {
+        background: var(--red-bg);
+        color: var(--red);
+      }
+      .pbstatus.run .d {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--green);
+        animation: pulse-dot 2s ease-in-out infinite;
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          box-shadow: 0 0 0 2px var(--green-bg);
+        }
+        50% {
+          box-shadow: 0 0 0 5px var(--green-bg);
+        }
+      }
 
-    /* counts summary */
-    .pb-counts {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--text-sub);
-    }
-    .pb-counts .cnt-item { display: inline-flex; align-items: center; gap: 3px; }
-    .pb-counts .cnt-item.hi { color: var(--amber); }
-    .pb-counts .cnt-item.go { color: var(--green); }
+      /* counts summary */
+      .pb-counts {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-sub);
+      }
+      .pb-counts .cnt-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+      }
+      .pb-counts .cnt-item.hi {
+        color: var(--amber);
+      }
+      .pb-counts .cnt-item.go {
+        color: var(--green);
+      }
 
-    /* collapse toggle */
-    .pb-collapse-btn {
-      width: 24px;
-      height: 24px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--text-sub);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      flex-shrink: 0;
-      margin-left: auto;
-      transition: color 0.12s, border-color 0.12s;
-    }
-    .pb-collapse-btn:hover { color: var(--text); border-color: var(--text-muted); }
-    .pb-collapse-btn .ti { transition: transform 0.15s; }
-    .pbrief.collapsed .pb-collapse-btn .ti { transform: rotate(-90deg); }
+      /* collapse toggle */
+      .pb-collapse-btn {
+        width: 24px;
+        height: 24px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-sub);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        margin-left: auto;
+        transition:
+          color 0.12s,
+          border-color 0.12s;
+      }
+      .pb-collapse-btn:hover {
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+      .pb-collapse-btn .ti {
+        transition: transform 0.15s;
+      }
+      .pbrief.collapsed .pb-collapse-btn .ti {
+        transform: rotate(-90deg);
+      }
 
-    /* body */
-    .pbrief-body {
-      padding: 0 16px 12px;
-    }
-    .pbrief.collapsed .pbrief-body { display: none; }
+      /* body */
+      .pbrief-body {
+        padding: 0 16px 12px;
+      }
+      .pbrief.collapsed .pbrief-body {
+        display: none;
+      }
 
-    /* bucket section */
-    .bucket {
-      margin-top: 12px;
-    }
-    .bucket-hdr {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-sub);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 5px;
-    }
-    .bucket-hdr .ti { font-size: 12px; }
+      /* bucket section */
+      .bucket {
+        margin-top: 12px;
+      }
+      .bucket-hdr {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-sub);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 5px;
+      }
+      .bucket-hdr .ti {
+        font-size: 12px;
+      }
 
-    /* planner list (reused pattern) */
-    .planner-list {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      overflow: hidden;
-    }
-    .planner-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 13px;
-      border-top: 1px solid var(--border);
-      font-size: 13px;
-    }
-    .planner-row:first-child { border-top: none; }
-    .planner-row .label {
-      font-family: var(--mono);
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      flex-shrink: 0;
-    }
-    .planner-meta { font-size: 12px; color: var(--text-muted); flex: 1; }
-    .planner-meta .mono { font-family: var(--mono); }
-    .planner-spacer { margin-left: auto; flex-shrink: 0; }
+      /* planner list (reused pattern) */
+      .planner-list {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+      }
+      .planner-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 13px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+      }
+      .planner-row:first-child {
+        border-top: none;
+      }
+      .planner-row .label {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+        flex-shrink: 0;
+      }
+      .planner-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        flex: 1;
+      }
+      .planner-meta .mono {
+        font-family: var(--mono);
+      }
+      .planner-spacer {
+        margin-left: auto;
+        flex-shrink: 0;
+      }
 
-    /* see-more toggle */
-    .planner-see-more {
-      margin-top: 4px;
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-sub);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 2px;
-      transition: color 0.12s;
-    }
-    .planner-see-more:hover { color: var(--text); }
-    .planner-see-more .ti { font-size: 13px; }
+      /* see-more toggle */
+      .planner-see-more {
+        margin-top: 4px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-sub);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 2px;
+        transition: color 0.12s;
+      }
+      .planner-see-more:hover {
+        color: var(--text);
+      }
+      .planner-see-more .ti {
+        font-size: 13px;
+      }
 
-    /* outcome badges */
-    .outcome-badge {
-      font-family: var(--mono);
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 7px;
-      border-radius: var(--radius-full);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      flex-shrink: 0;
-    }
-    .outcome-badge.success { background: var(--green-bg); color: var(--green); }
-    .outcome-badge.partial { background: var(--amber-bg); color: var(--amber); }
-    .outcome-badge.blocked { background: var(--red-bg); color: var(--red); }
+      /* outcome badges */
+      .outcome-badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: var(--radius-full);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .outcome-badge.success {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .outcome-badge.partial {
+        background: var(--amber-bg);
+        color: var(--amber);
+      }
+      .outcome-badge.blocked {
+        background: var(--red-bg);
+        color: var(--red);
+      }
 
-    /* action links */
-    .planner-link {
-      font-family: var(--mono);
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 4px 10px;
-      cursor: pointer;
-      white-space: nowrap;
-      background: transparent;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.12s, color 0.12s, border-color 0.12s;
-    }
-    .planner-link:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
-    .planner-link.primary {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-    }
-    .planner-link.primary:hover { opacity: 0.85; }
-    .planner-link[disabled] { opacity: 0.5; cursor: default; pointer-events: none; }
+      /* action links */
+      .planner-link {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 4px 10px;
+        cursor: pointer;
+        white-space: nowrap;
+        background: transparent;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition:
+          background 0.12s,
+          color 0.12s,
+          border-color 0.12s;
+      }
+      .planner-link:hover {
+        background: var(--surface-hover);
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+      .planner-link.primary {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+      }
+      .planner-link.primary:hover {
+        opacity: 0.85;
+      }
+      .planner-link[disabled] {
+        opacity: 0.5;
+        cursor: default;
+        pointer-events: none;
+      }
 
-    /* project footer */
-    .pbrief-foot {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      padding: 10px 16px 12px;
-      border-top: 1px solid var(--border);
-      margin-top: 12px;
-    }
-    .pbrief.collapsed .pbrief-foot { display: none; }
-    .open-proj {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-family: var(--mono);
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--bg);
-      border: 1px solid var(--text);
-      background: var(--text);
-      border-radius: var(--radius-md);
-      padding: 6px 13px;
-      cursor: pointer;
-      text-decoration: none;
-      transition: opacity 0.12s;
-    }
-    .open-proj:hover { opacity: 0.82; }
+      /* project footer */
+      .pbrief-foot {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 10px 16px 12px;
+        border-top: 1px solid var(--border);
+        margin-top: 12px;
+      }
+      .pbrief.collapsed .pbrief-foot {
+        display: none;
+      }
+      .open-proj {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--bg);
+        border: 1px solid var(--text);
+        background: var(--text);
+        border-radius: var(--radius-md);
+        padding: 6px 13px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: opacity 0.12s;
+      }
+      .open-proj:hover {
+        opacity: 0.82;
+      }
 
-    /* add project */
-    .add-proj {
-      border: 1px dashed var(--border);
-      border-radius: var(--radius-2xl);
-      padding: 14px;
-      text-align: center;
-      color: var(--text-sub);
-      font-size: 13px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      text-decoration: none;
-      transition: color 0.12s, border-color 0.12s, background 0.12s;
-    }
-    .add-proj:hover { color: var(--text); border-color: var(--text-muted); background: var(--surface); }
+      /* add project */
+      .add-proj {
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-2xl);
+        padding: 14px;
+        text-align: center;
+        color: var(--text-sub);
+        font-size: 13px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        text-decoration: none;
+        transition:
+          color 0.12s,
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .add-proj:hover {
+        color: var(--text);
+        border-color: var(--text-muted);
+        background: var(--surface);
+      }
 
-    /* ── reduced motion ── */
-    @media (prefers-reduced-motion: reduce) {
-      .pbstatus.run .d,
-      .loading-state .ti { animation: none; }
-      .pbrief, .nav-btn, .open-proj, .add-proj,
-      .pbname-go, .pb-collapse-btn, .planner-link,
-      .planner-see-more { transition: none; }
-    }
+      /* ── reduced motion ── */
+      @media (prefers-reduced-motion: reduce) {
+        .pbstatus.run .d,
+        .loading-state .ti {
+          animation: none;
+        }
+        .pbrief,
+        .nav-btn,
+        .open-proj,
+        .add-proj,
+        .pbname-go,
+        .pb-collapse-btn,
+        .planner-link,
+        .planner-see-more {
+          transition: none;
+        }
+      }
 
-    /* ── responsive ── */
-    @media (max-width: 560px) {
-      .page-body { padding: 16px 12px 40px; }
-      .top-nav-date-nav { gap: 3px; }
-      .report-date { font-size: 22px; }
-      .top-nav-sep, .top-nav-page { display: none; }
-    }
-  </style>
-</head>
-<body>
-  <nav class="top-nav" aria-label="Commander">
-    <span class="top-nav-brand">Commander</span>
-    <span class="top-nav-sep" aria-hidden="true" role="presentation"></span>
-    <span class="top-nav-page" id="top-nav-label">Dev Report</span>
-    <div class="top-nav-date-nav">
-      <button class="nav-btn" onclick="gotoPrevDay()" aria-label="Previous day"><i class="ti ti-chevron-left" style="font-size:13px"></i></button>
-      <button class="nav-btn today" onclick="gotoToday()" id="today-btn">Today</button>
-      <button class="nav-btn" id="refresh-btn" onclick="loadReport(_curDate)">Refresh</button>
-      <span class="date-pick-wrap">
-        <button class="nav-btn" type="button" aria-hidden="true" tabindex="-1"><i class="ti ti-calendar" style="font-size:12px"></i></button>
-        <input type="date" id="date-pick" aria-label="Pick a date" max="" onchange="onDatePick(event)">
-      </span>
+      /* ── responsive ── */
+      @media (max-width: 560px) {
+        .page-body {
+          padding: 16px 12px 40px;
+        }
+        .top-nav-date-nav {
+          gap: 3px;
+        }
+        .report-date {
+          font-size: 22px;
+        }
+        .top-nav-sep,
+        .top-nav-page {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="top-nav" aria-label="Commander">
+      <span class="top-nav-brand">Commander</span>
+      <span class="top-nav-sep" aria-hidden="true" role="presentation"></span>
+      <span class="top-nav-page" id="top-nav-label">Dev Report</span>
+      <div class="top-nav-date-nav">
+        <button
+          class="nav-btn"
+          onclick="gotoPrevDay()"
+          aria-label="Previous day"
+        >
+          <i class="ti ti-chevron-left" style="font-size: 13px"></i>
+        </button>
+        <button class="nav-btn today" onclick="gotoToday()" id="today-btn">
+          Today
+        </button>
+        <button class="nav-btn" id="refresh-btn" onclick="loadReport(_curDate)">
+          Refresh
+        </button>
+        <span class="date-pick-wrap">
+          <button
+            class="nav-btn"
+            type="button"
+            aria-hidden="true"
+            tabindex="-1"
+          >
+            <i class="ti ti-calendar" style="font-size: 12px"></i>
+          </button>
+          <input
+            type="date"
+            id="date-pick"
+            aria-label="Pick a date"
+            max=""
+            onchange="onDatePick(event)"
+          />
+        </span>
+      </div>
+    </nav>
+
+    <div class="page-body">
+      <div id="home">
+        <div class="loading-state" id="boot-note">
+          <i class="ti ti-loader-2"></i> Loading dev report…
+        </div>
+      </div>
     </div>
-  </nav>
 
-  <div class="page-body">
-    <div id="home">
-      <div class="loading-state" id="boot-note"><i class="ti ti-loader-2"></i> Loading dev report…</div>
-    </div>
-  </div>
+    <script src="/static/visibility.js"></script>
+    <script src="/static/add-project-modal.js"></script>
+    <script>
+      // ── Dev Report home page (issue #1961) ───────────────────────────────────────
 
-  <script src="/static/visibility.js"></script>
-  <script src="/static/add-project-modal.js"></script>
-  <script>
-  // ── Dev Report home page (issue #1961) ───────────────────────────────────────
+      const MONTHS = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+      const DOW = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
 
-  const MONTHS = ['January','February','March','April','May','June','July',
-                  'August','September','October','November','December'];
-  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      let _curDate = null;
+      let _projBySlug = {};
 
-  let _curDate = null;
-  let _projBySlug = {};
+      const PBIC_PALETTE = new Set([
+        "gray",
+        "blue",
+        "green",
+        "purple",
+        "red",
+        "orange",
+        "amber",
+        "yellow",
+        "pink",
+        "cyan",
+        "teal",
+        "indigo",
+      ]);
 
-  const PBIC_PALETTE = new Set(['gray','blue','green','purple','red','orange','amber','yellow','pink','cyan','teal','indigo']);
-
-  function esc(s){
-    return String(s == null ? '' : s)
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;');
-  }
-
-  function parseDate(s){
-    const [y,m,d] = String(s).split('-').map(Number);
-    return new Date(y, m - 1, d);
-  }
-  function fmtIso(dt){
-    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
-           '-' + String(dt.getDate()).padStart(2,'0');
-  }
-  function todayIso(){ return fmtIso(new Date()); }
-
-  function prettyLabel(label){
-    const m = /^sprint-(\d+)$/.exec(String(label || ''));
-    return m ? ('Sprint ' + m[1]) : String(label || '');
-  }
-
-  // ── project metadata map ──────────────────────────────────────────────────
-  function _buildProjBySlug(projects){
-    const map = {};
-    (projects || []).forEach(function(p){
-      if (p.project) {
-        map[p.project] = {
-          repo:  p.repo  || p.project,
-          icon:  p.icon  || 'ti-folder',
-          color: p.color || 'gray',
-          name:  p.name,
-        };
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
       }
-    });
-    return map;
-  }
 
-  // ── project badge ──────────────────────────────────────────────────────────
-  function _projectBadgeHtml(slug){
-    const proj = _projBySlug[slug] || {};
-    const raw = (proj.color || proj.icon_color || 'gray').toLowerCase().replace(/[^a-z]/g, '');
-    const color = PBIC_PALETTE.has(raw) ? raw : 'gray';
-    const icon = proj.icon || 'ti-folder';
-    return `<span class="pbic pbic--${esc(color)}" aria-hidden="true"><i class="ti ${esc(icon)}"></i></span>`;
-  }
-
-  function _projectDisplayName(p){
-    return p.name || _projBySlug[p.project]?.name || p.project;
-  }
-
-  function _sprintMgmtHref(slug){
-    return '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
-  }
-
-  // ── boot / redirect ────────────────────────────────────────────────────────
-  function _deckRedirect(){
-    const p = new URLSearchParams(window.location.search);
-    const project = p.get('project');
-    if (!project) return false;
-    const view = (p.get('view') || '').toLowerCase();
-    const tab = (view === 'activity') ? 'logs'
-              : (view === 'tickets')  ? 'tickets'
-              : 'sprint';
-    const q = new URLSearchParams();
-    if (view) q.set('view', view);
-    const filter = p.get('filter');
-    if (filter) q.set('filter', filter);
-    const qs = q.toString();
-    window.location.replace(
-      '/project/' + encodeURIComponent(project) + '/' + tab + (qs ? '?' + qs : '')
-    );
-    return true;
-  }
-
-  async function init(){
-    if (_deckRedirect()) return;
-    const url = new URL(window.location.href);
-    const d = url.searchParams.get('date');
-    await loadReport(d);
-  }
-
-  // ── report load ────────────────────────────────────────────────────────────
-  async function loadReport(date){
-    _curDate = date;
-    const root = document.getElementById('home');
-
-    const pick = document.getElementById('date-pick');
-    const today = todayIso();
-    if (pick) { pick.max = today; if (date) pick.value = date; else pick.value = today; }
-    const todayBtn = document.getElementById('today-btn');
-    if (todayBtn) todayBtn.disabled = (!date || date === today);
-    const navLabel = document.getElementById('top-nav-label');
-    if (navLabel && date) {
-      const dt = parseDate(date);
-      navLabel.textContent = DOW[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
-    } else if (navLabel) {
-      navLabel.textContent = 'Dev Report';
-    }
-
-    let report;
-    try {
-      const q = date ? ('?date=' + encodeURIComponent(date)) : '';
-      const resp = await fetch('/api/dev-report' + q);
-      if (resp.status === 404) {
-        root.innerHTML = _renderEmpty();
-        return;
+      function parseDate(s) {
+        const [y, m, d] = String(s).split("-").map(Number);
+        return new Date(y, m - 1, d);
       }
-      if (!resp.ok) {
-        root.innerHTML = '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-        return;
+      function fmtIso(dt) {
+        return (
+          dt.getFullYear() +
+          "-" +
+          String(dt.getMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(dt.getDate()).padStart(2, "0")
+        );
       }
-      report = await resp.json();
-    } catch(_) {
-      root.innerHTML = '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-      return;
-    }
+      function todayIso() {
+        return fmtIso(new Date());
+      }
 
-    _projBySlug = _buildProjBySlug(report.projects);
-    root.innerHTML = _renderReport(report);
-  }
+      function prettyLabel(label) {
+        const m = /^sprint-(\d+)$/.exec(String(label || ""));
+        return m ? "Sprint " + m[1] : String(label || "");
+      }
 
-  // ── empty state ────────────────────────────────────────────────────────────
-  function _renderEmpty(){
-    return `<div class="empty-note"><i class="ti ti-moon-stars"></i>No report yet — runs nightly at 05:45</div>`;
-  }
+      // ── project metadata map ──────────────────────────────────────────────────
+      function _buildProjBySlug(projects) {
+        const map = {};
+        (projects || []).forEach(function (p) {
+          if (p.project) {
+            map[p.project] = {
+              repo: p.repo || p.project,
+              icon: p.icon || "ti-folder",
+              color: p.color || "gray",
+              name: p.name,
+            };
+          }
+        });
+        return map;
+      }
 
-  // ── report render ──────────────────────────────────────────────────────────
-  function _renderReport(report){
-    const projects = report.projects || [];
-    const forDate = report.for_date || todayIso();
-    const dt = parseDate(forDate);
-    const dateStr = DOW[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
+      // ── project badge ──────────────────────────────────────────────────────────
+      function _projectBadgeHtml(slug) {
+        const proj = _projBySlug[slug] || {};
+        const raw = (proj.color || proj.icon_color || "gray")
+          .toLowerCase()
+          .replace(/[^a-z]/g, "");
+        const color = PBIC_PALETTE.has(raw) ? raw : "gray";
+        const icon = proj.icon || "ti-folder";
+        return `<span class="pbic pbic--${esc(color)}" aria-hidden="true"><i class="ti ${esc(icon)}"></i></span>`;
+      }
 
-    let html = `
+      function _projectDisplayName(p) {
+        return p.name || _projBySlug[p.project]?.name || p.project;
+      }
+
+      function _sprintMgmtHref(slug) {
+        return "/project/" + encodeURIComponent(slug) + "/sprint-mgmt";
+      }
+
+      // ── boot / redirect ────────────────────────────────────────────────────────
+      function _deckRedirect() {
+        const p = new URLSearchParams(window.location.search);
+        const project = p.get("project");
+        if (!project) return false;
+        const view = (p.get("view") || "").toLowerCase();
+        const tab =
+          view === "activity"
+            ? "logs"
+            : view === "tickets"
+              ? "tickets"
+              : "sprint";
+        const q = new URLSearchParams();
+        if (view) q.set("view", view);
+        const filter = p.get("filter");
+        if (filter) q.set("filter", filter);
+        const qs = q.toString();
+        window.location.replace(
+          "/project/" +
+            encodeURIComponent(project) +
+            "/" +
+            tab +
+            (qs ? "?" + qs : ""),
+        );
+        return true;
+      }
+
+      async function init() {
+        if (_deckRedirect()) return;
+        const url = new URL(window.location.href);
+        const d = url.searchParams.get("date");
+        await loadReport(d);
+      }
+
+      // ── report load ────────────────────────────────────────────────────────────
+      async function loadReport(date) {
+        _curDate = date;
+        const root = document.getElementById("home");
+
+        const pick = document.getElementById("date-pick");
+        const today = todayIso();
+        if (pick) {
+          pick.max = today;
+          if (date) pick.value = date;
+          else pick.value = today;
+        }
+        const todayBtn = document.getElementById("today-btn");
+        if (todayBtn) todayBtn.disabled = !date || date === today;
+        const navLabel = document.getElementById("top-nav-label");
+        if (navLabel && date) {
+          const dt = parseDate(date);
+          navLabel.textContent =
+            DOW[dt.getDay()] +
+            ", " +
+            MONTHS[dt.getMonth()] +
+            " " +
+            dt.getDate();
+        } else if (navLabel) {
+          navLabel.textContent = "Dev Report";
+        }
+
+        let report;
+        try {
+          const q = date ? "?date=" + encodeURIComponent(date) : "";
+          const resp = await fetch("/api/dev-report" + q);
+          if (resp.status === 404) {
+            root.innerHTML = _renderEmpty();
+            return;
+          }
+          if (!resp.ok) {
+            root.innerHTML =
+              '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
+            return;
+          }
+          report = await resp.json();
+        } catch (_) {
+          root.innerHTML =
+            '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
+          return;
+        }
+
+        _projBySlug = _buildProjBySlug(report.projects);
+        root.innerHTML = _renderReport(report);
+      }
+
+      // ── empty state ────────────────────────────────────────────────────────────
+      function _renderEmpty() {
+        return `<div class="empty-note"><i class="ti ti-moon-stars"></i>No report yet — runs nightly at 05:45</div>`;
+      }
+
+      // ── report render ──────────────────────────────────────────────────────────
+      function _renderReport(report) {
+        const projects = report.projects || [];
+        const forDate = report.for_date || todayIso();
+        const dt = parseDate(forDate);
+        const dateStr =
+          DOW[dt.getDay()] + ", " + MONTHS[dt.getMonth()] + " " + dt.getDate();
+
+        let html = `
     <div class="report-head">
       <div class="report-l">
         <div class="report-date">${esc(dateStr)}</div>
@@ -673,49 +943,54 @@
       </div>
     </div>`;
 
-    if (!projects.length){
-      html += '<div class="empty-note"><i class="ti ti-folder-off"></i>No projects in this report.</div>';
-    } else {
-      projects.forEach(p => { html += _renderProject(p); });
-    }
+        if (!projects.length) {
+          html +=
+            '<div class="empty-note"><i class="ti ti-folder-off"></i>No projects in this report.</div>';
+        } else {
+          projects.forEach((p) => {
+            html += _renderProject(p);
+          });
+        }
 
-    html += `<a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>`;
-    return html;
-  }
+        html += `<a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>`;
+        return html;
+      }
 
-  function _renderFooter(report){
-    const cost = report.cost ? `Cost today: ${esc(report.cost)} · ` : '';
-    const ws = report.window_start ? esc(report.window_start) : '';
-    const we = report.window_end   ? esc(report.window_end)   : '';
-    if (!ws && !we) return '';
-    return `${cost}window ${ws}&rarr;${we}`;
-  }
+      function _renderFooter(report) {
+        const cost = report.cost ? `Cost today: ${esc(report.cost)} · ` : "";
+        const ws = report.window_start ? esc(report.window_start) : "";
+        const we = report.window_end ? esc(report.window_end) : "";
+        if (!ws && !we) return "";
+        return `${cost}window ${ws}&rarr;${we}`;
+      }
 
-  // ── project block ──────────────────────────────────────────────────────────
-  function _renderProject(p){
-    const slug = p.project;
-    const name = _projectDisplayName(p);
-    const counts = p.counts || {};
+      // ── project block ──────────────────────────────────────────────────────────
+      function _renderProject(p) {
+        const slug = p.project;
+        const name = _projectDisplayName(p);
+        const counts = p.counts || {};
 
-    const statusPill = _statusPill(p);
-    const countsHtml = _countsHtml(counts);
-    const hasBody = _projectHasBody(p);
+        const statusPill = _statusPill(p);
+        const countsHtml = _countsHtml(counts);
+        const hasBody = _projectHasBody(p);
 
-    const collapseKey = 'dr_collapse_' + slug;
-    let collapsed = false;
-    try { collapsed = localStorage.getItem(collapseKey) === '1'; } catch(_){}
-    if (!hasBody) collapsed = true;
+        const collapseKey = "dr_collapse_" + slug;
+        let collapsed = false;
+        try {
+          collapsed = localStorage.getItem(collapseKey) === "1";
+        } catch (_) {}
+        if (!hasBody) collapsed = true;
 
-    const collapsedCls = collapsed ? ' collapsed' : '';
-    const hasBodyCls   = hasBody   ? ' has-body'  : '';
+        const collapsedCls = collapsed ? " collapsed" : "";
+        const hasBodyCls = hasBody ? " has-body" : "";
 
-    const toggleBtn = hasBody
-      ? `<button class="pb-collapse-btn" title="Toggle details"
+        const toggleBtn = hasBody
+          ? `<button class="pb-collapse-btn" title="Toggle details"
            aria-label="Toggle details" onclick="toggleProject('${esc(slug)}')">
            <i class="ti ti-chevron-up"></i></button>`
-      : '';
+          : "";
 
-    let html = `
+        let html = `
     <div class="pbrief${collapsedCls}${hasBodyCls}" data-slug="${esc(slug)}">
       <div class="pbrief-head">
         <a class="pb-title-link" href="${esc(_sprintMgmtHref(slug))}" title="Open sprint management">
@@ -728,238 +1003,284 @@
         ${toggleBtn}
       </div>`;
 
-    if (hasBody){
-      html += `<div class="pbrief-body">`;
-      html += _renderBuckets(p, slug);
-      html += `</div>
+        if (hasBody) {
+          html += `<div class="pbrief-body">`;
+          html += _renderBuckets(p, slug);
+          html += `</div>
       <div class="pbrief-foot">
         ${_reviewLink(p, slug)}
         ${_runSprintBtn(p, slug)}
         <a class="open-proj" href="${esc(_sprintMgmtHref(slug))}" aria-label="Open ${esc(slug)} project">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:12px" aria-hidden="true"></i></a>
       </div>`;
-    }
+        }
 
-    html += `</div>`;
-    return html;
-  }
+        html += `</div>`;
+        return html;
+      }
 
-  function _projectHasBody(p){
-    const counts = p.counts || {};
-    return (counts.shipped || 0) > 0 ||
-           (counts.fixed   || 0) > 0 ||
-           (counts.stale   || 0) > 0 ||
-           (counts.waiting || 0) > 0;
-  }
+      function _projectHasBody(p) {
+        const counts = p.counts || {};
+        return (
+          (counts.shipped || 0) > 0 ||
+          (counts.fixed || 0) > 0 ||
+          (counts.stale || 0) > 0 ||
+          (counts.waiting || 0) > 0
+        );
+      }
 
-  function _statusPill(p){
-    const s = (p.status || 'idle').toLowerCase();
-    if (s === 'running') {
-      const lbl = p.in_progress && p.in_progress.sprint_label
-        ? prettyLabel(p.in_progress.sprint_label) + ' running'
-        : 'running';
-      return `<span class="pbstatus run"><span class="d"></span> ${esc(lbl)}</span>`;
-    }
-    if (s === 'blocked') return '<span class="pbstatus blocked">blocked</span>';
-    return '<span class="pbstatus idle">idle</span>';
-  }
+      function _statusPill(p) {
+        const s = (p.status || "idle").toLowerCase();
+        if (s === "running") {
+          const lbl =
+            p.in_progress && p.in_progress.sprint_label
+              ? prettyLabel(p.in_progress.sprint_label) + " running"
+              : "running";
+          return `<span class="pbstatus run"><span class="d"></span> ${esc(lbl)}</span>`;
+        }
+        if (s === "blocked")
+          return '<span class="pbstatus blocked">blocked</span>';
+        return '<span class="pbstatus idle">idle</span>';
+      }
 
-  function _countsHtml(counts){
-    const shipped = counts.shipped || 0;
-    const stale   = counts.stale   || 0;
-    const waiting = counts.waiting || 0;
-    const fixed   = counts.fixed   || 0;
-    if (!shipped && !stale && !waiting && !fixed) return '';
-    let parts = [];
-    if (shipped) parts.push(`<span class="cnt-item go"><i class="ti ti-rocket" style="font-size:10px"></i>${shipped} shipped</span>`);
-    if (waiting) parts.push(`<span class="cnt-item hi"><i class="ti ti-clock" style="font-size:10px"></i>${waiting} waiting</span>`);
-    if (stale)   parts.push(`<span class="cnt-item"><i class="ti ti-alert-circle" style="font-size:10px"></i>${stale} stale</span>`);
-    if (fixed)   parts.push(`<span class="cnt-item"><i class="ti ti-circle-check" style="font-size:10px"></i>${fixed} fixed</span>`);
-    return `<div class="pb-counts">${parts.join('')}</div>`;
-  }
+      function _countsHtml(counts) {
+        const shipped = counts.shipped || 0;
+        const stale = counts.stale || 0;
+        const waiting = counts.waiting || 0;
+        const fixed = counts.fixed || 0;
+        if (!shipped && !stale && !waiting && !fixed) return "";
+        let parts = [];
+        if (shipped)
+          parts.push(
+            `<span class="cnt-item go"><i class="ti ti-rocket" style="font-size:10px"></i>${shipped} shipped</span>`,
+          );
+        if (waiting)
+          parts.push(
+            `<span class="cnt-item hi"><i class="ti ti-clock" style="font-size:10px"></i>${waiting} waiting</span>`,
+          );
+        if (stale)
+          parts.push(
+            `<span class="cnt-item"><i class="ti ti-alert-circle" style="font-size:10px"></i>${stale} stale</span>`,
+          );
+        if (fixed)
+          parts.push(
+            `<span class="cnt-item"><i class="ti ti-circle-check" style="font-size:10px"></i>${fixed} fixed</span>`,
+          );
+        return `<div class="pb-counts">${parts.join("")}</div>`;
+      }
 
-  // ── buckets ────────────────────────────────────────────────────────────────
-  function _renderBuckets(p, slug){
-    let html = '';
+      // ── buckets ────────────────────────────────────────────────────────────────
+      function _renderBuckets(p, slug) {
+        let html = "";
 
-    if ((p.shipped || []).length) html += _renderShipped(p.shipped, slug);
-    if ((p.fixed   || []).length) html += _renderFixed(p.fixed, slug);
-    if ((p.stale   || []).length) html += _renderStale(p.stale, slug);
-    if ((p.waiting || []).length) html += _renderWaiting(p.waiting, slug, p);
+        if ((p.shipped || []).length) html += _renderShipped(p.shipped, slug);
+        if ((p.fixed || []).length) html += _renderFixed(p.fixed, slug);
+        if ((p.stale || []).length) html += _renderStale(p.stale, slug);
+        if ((p.waiting || []).length)
+          html += _renderWaiting(p.waiting, slug, p);
 
-    return html;
-  }
+        return html;
+      }
 
-  function _renderShipped(items, slug){
-    const rows = items.map(s => {
-      const label = prettyLabel(s.label || '');
-      const goal  = s.goal  ? esc(s.goal)  : '';
-      const done  = s.done  != null ? `${s.done} done` : '';
-      const pr    = s.pr_number != null ? `PR #${s.pr_number}` : '';
-      const meta  = [goal, done, pr].filter(Boolean).join(' · ');
-      return `
+      function _renderShipped(items, slug) {
+        const rows = items.map((s) => {
+          const label = prettyLabel(s.label || "");
+          const goal = s.goal ? esc(s.goal) : "";
+          const done = s.done != null ? `${s.done} done` : "";
+          const pr = s.pr_number != null ? `PR #${s.pr_number}` : "";
+          const meta = [goal, done, pr].filter(Boolean).join(" · ");
+          return `
         <div class="planner-row">
           <span class="outcome-badge success"><i class="ti ti-rocket" style="font-size:10px"></i>shipped</span>
           <span class="label">${esc(label)}</span>
           <span class="planner-meta">${esc(meta)}</span>
         </div>`;
-    });
-    return `<div class="bucket">
+        });
+        return `<div class="bucket">
       <div class="bucket-hdr"><i class="ti ti-rocket"></i> Shipped</div>
-      ${_briefCollapsibleRows(rows, slug + '-shipped')}
+      ${_briefCollapsibleRows(rows, slug + "-shipped")}
     </div>`;
-  }
+      }
 
-  function _renderFixed(items, slug){
-    const rows = items.map(f => {
-      const ref = f.issue_number != null ? `#${f.issue_number}` : '';
-      return `
+      function _renderFixed(items, slug) {
+        const rows = items.map((f) => {
+          const ref = f.issue_number != null ? `#${f.issue_number}` : "";
+          return `
         <div class="planner-row">
           <span class="outcome-badge success"><i class="ti ti-circle-check" style="font-size:10px"></i>fixed</span>
           <span class="label">${esc(ref)}</span>
-          <span class="planner-meta">${esc(f.title || '')}</span>
+          <span class="planner-meta">${esc(f.title || "")}</span>
         </div>`;
-    });
-    return `<div class="bucket">
+        });
+        return `<div class="bucket">
       <div class="bucket-hdr"><i class="ti ti-circle-check"></i> Fixed</div>
-      ${_briefCollapsibleRows(rows, slug + '-fixed')}
+      ${_briefCollapsibleRows(rows, slug + "-fixed")}
     </div>`;
-  }
+      }
 
-  function _renderStale(items, slug){
-    const rows = items.map(st => {
-      const kind = esc(st.kind || 'blocked');
-      const ref  = st.issue_number != null ? `#${st.issue_number}`
-                 : st.sprint_label ? prettyLabel(st.sprint_label) : '';
-      const age  = st.age_days != null ? `${st.age_days}d` : '';
-      return `
+      function _renderStale(items, slug) {
+        const rows = items.map((st) => {
+          const kind = esc(st.kind || "blocked");
+          const ref =
+            st.issue_number != null
+              ? `#${st.issue_number}`
+              : st.sprint_label
+                ? prettyLabel(st.sprint_label)
+                : "";
+          const age = st.age_days != null ? `${st.age_days}d` : "";
+          return `
         <div class="planner-row">
           <span class="outcome-badge blocked"><i class="ti ti-alert-circle" style="font-size:10px"></i>${kind}</span>
           <span class="label">${esc(ref)}</span>
-          <span class="planner-meta">${esc(st.title || '')}${age ? ` · ${esc(age)}` : ''}</span>
+          <span class="planner-meta">${esc(st.title || "")}${age ? ` · ${esc(age)}` : ""}</span>
         </div>`;
-    });
-    return `<div class="bucket">
+        });
+        return `<div class="bucket">
       <div class="bucket-hdr"><i class="ti ti-alert-circle"></i> Stale</div>
-      ${_briefCollapsibleRows(rows, slug + '-stale')}
+      ${_briefCollapsibleRows(rows, slug + "-stale")}
     </div>`;
-  }
+      }
 
-  function _renderWaiting(items, slug, p){
-    const rows = items.map(w => {
-      const label = prettyLabel(w.label || '');
-      const tc    = w.ticket_count != null ? `${w.ticket_count} ticket${w.ticket_count === 1 ? '' : 's'}` : '';
-      const hrs   = w.estimated_hours != null ? `~${w.estimated_hours}h` : '';
-      const meta  = [tc, hrs].filter(Boolean).join(' · ');
-      return `
+      function _renderWaiting(items, slug, p) {
+        const rows = items.map((w) => {
+          const label = prettyLabel(w.label || "");
+          const tc =
+            w.ticket_count != null
+              ? `${w.ticket_count} ticket${w.ticket_count === 1 ? "" : "s"}`
+              : "";
+          const hrs = w.estimated_hours != null ? `~${w.estimated_hours}h` : "";
+          const meta = [tc, hrs].filter(Boolean).join(" · ");
+          return `
         <div class="planner-row">
           <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:10px"></i>sign-off</span>
           <span class="label">${esc(label)}</span>
           <span class="planner-meta">${esc(meta)}</span>
         </div>`;
-    });
-    return `<div class="bucket">
+        });
+        return `<div class="bucket">
       <div class="bucket-hdr"><i class="ti ti-hourglass-high"></i> Waiting</div>
-      ${_briefCollapsibleRows(rows, slug + '-waiting')}
+      ${_briefCollapsibleRows(rows, slug + "-waiting")}
     </div>`;
-  }
+      }
 
-  // ── collapsible rows (existing pattern) ───────────────────────────────────
-  function _briefCollapsibleRows(rowsArr, id){
-    const threshold = 3;
-    if (rowsArr.length <= threshold) return `<div class="planner-list">${rowsArr.join('')}</div>`;
-    const head = rowsArr.slice(0, threshold).join('');
-    const rest = rowsArr.slice(threshold).join('');
-    const n = rowsArr.length - threshold;
-    return `<div class="planner-list">${head}</div>
+      // ── collapsible rows (existing pattern) ───────────────────────────────────
+      function _briefCollapsibleRows(rowsArr, id) {
+        const threshold = 3;
+        if (rowsArr.length <= threshold)
+          return `<div class="planner-list">${rowsArr.join("")}</div>`;
+        const head = rowsArr.slice(0, threshold).join("");
+        const rest = rowsArr.slice(threshold).join("");
+        const n = rowsArr.length - threshold;
+        return `<div class="planner-list">${head}</div>
       <div class="planner-list planner-more" id="${id}-more" style="display:none">${rest}</div>
       <button type="button" class="planner-see-more" id="${id}-btn" onclick="_briefToggleMore('${id}', ${n})">See ${n} more <i class="ti ti-chevron-down"></i></button>`;
-  }
-  function _briefToggleMore(id, n){
-    const more = document.getElementById(id + '-more');
-    const btn  = document.getElementById(id + '-btn');
-    if (!more) return;
-    const show = more.style.display === 'none';
-    more.style.display = show ? '' : 'none';
-    if (btn) btn.innerHTML = show
-      ? 'See less <i class="ti ti-chevron-up"></i>'
-      : `See ${n} more <i class="ti ti-chevron-down"></i>`;
-  }
-
-  // ── action buttons ────────────────────────────────────────────────────────
-  function _reviewLink(p, slug){
-    if (!(p.waiting && p.waiting.length)) return '';
-    const href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
-    return `<a class="planner-link" href="${esc(href)}">Review <i class="ti ti-arrow-right" style="font-size:11px"></i></a>`;
-  }
-
-  function _runSprintBtn(p, slug){
-    const up = p.up_next;
-    if (!up || !up.ready || p.status === 'running') return '';
-    const repo = _projBySlug[slug] ? _projBySlug[slug].repo : slug;
-    const label = up.label || '';
-    const id = 'run-' + esc(slug);
-    return `<button class="planner-link primary" id="${id}"
-      onclick="runSprintAction('${esc(repo || slug)}','${esc(label)}','${esc(id)}')">Run sprint</button>`;
-  }
-
-  // ── collapse toggle ───────────────────────────────────────────────────────
-  function toggleProject(slug){
-    const card = document.querySelector(`.pbrief[data-slug="${CSS.escape ? CSS.escape(slug) : slug}"]`);
-    if (!card) return;
-    const collapsed = card.classList.toggle('collapsed');
-    try { localStorage.setItem('dr_collapse_' + slug, collapsed ? '1' : '0'); } catch(_){}
-  }
-
-  // ── date navigation ───────────────────────────────────────────────────────
-  function _go(date){
-    const url = new URL(window.location.href);
-    if (date) url.searchParams.set('date', date);
-    else url.searchParams.delete('date');
-    window.history.replaceState({}, '', url);
-    loadReport(date);
-  }
-  function gotoPrevDay(){
-    const dt = parseDate(_curDate || todayIso());
-    dt.setDate(dt.getDate() - 1);
-    _go(fmtIso(dt));
-  }
-  function gotoToday(){ _go(null); }
-  function onDatePick(ev){
-    const v = ev.target.value;
-    if (v) _go(v);
-  }
-
-  // ── run sprint action (reuse existing handler) ────────────────────────────
-  async function runSprintAction(repo, label, id){
-    const b = document.getElementById(id);
-    if (b){ b.disabled = true; b.textContent = 'Starting…'; }
-    try {
-      const r = await fetch('/api/sprints/run', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project: repo, sprint_label: label}),
-      });
-      if (r.ok || r.status === 202){
-        if (b){ b.textContent = 'Started ✓'; }
-      } else {
-        if (b){ b.textContent = 'Retry'; b.disabled = false; }
       }
-    } catch(_){
-      if (b){ b.textContent = 'Retry'; b.disabled = false; }
-    }
-  }
+      function _briefToggleMore(id, n) {
+        const more = document.getElementById(id + "-more");
+        const btn = document.getElementById(id + "-btn");
+        if (!more) return;
+        const show = more.style.display === "none";
+        more.style.display = show ? "" : "none";
+        if (btn)
+          btn.innerHTML = show
+            ? 'See less <i class="ti ti-chevron-up"></i>'
+            : `See ${n} more <i class="ti ti-chevron-down"></i>`;
+      }
 
-  // ── add project ───────────────────────────────────────────────────────────
-  function openAdd(ev){
-    if (typeof openAddProjectFlow === 'function' &&
-        document.getElementById('apm-backdrop')){
-      ev.preventDefault();
-      openAddProjectFlow();
-      return false;
-    }
-    return true;
-  }
+      // ── action buttons ────────────────────────────────────────────────────────
+      function _reviewLink(p, slug) {
+        if (!(p.waiting && p.waiting.length)) return "";
+        const href = "/project/" + encodeURIComponent(slug) + "/sprint-mgmt";
+        return `<a class="planner-link" href="${esc(href)}">Review <i class="ti ti-arrow-right" style="font-size:11px"></i></a>`;
+      }
 
-  init();
-  </script>
-</body>
+      function _runSprintBtn(p, slug) {
+        const up = p.up_next;
+        if (!up || !up.ready || p.status === "running") return "";
+        const repo = _projBySlug[slug] ? _projBySlug[slug].repo : slug;
+        const label = up.label || "";
+        const id = "run-" + esc(slug);
+        return `<button class="planner-link primary" id="${id}"
+      onclick="runSprintAction('${esc(repo || slug)}','${esc(label)}','${esc(id)}')">Run sprint</button>`;
+      }
+
+      // ── collapse toggle ───────────────────────────────────────────────────────
+      function toggleProject(slug) {
+        const card = document.querySelector(
+          `.pbrief[data-slug="${CSS.escape ? CSS.escape(slug) : slug}"]`,
+        );
+        if (!card) return;
+        const collapsed = card.classList.toggle("collapsed");
+        try {
+          localStorage.setItem("dr_collapse_" + slug, collapsed ? "1" : "0");
+        } catch (_) {}
+      }
+
+      // ── date navigation ───────────────────────────────────────────────────────
+      function _go(date) {
+        const url = new URL(window.location.href);
+        if (date) url.searchParams.set("date", date);
+        else url.searchParams.delete("date");
+        window.history.replaceState({}, "", url);
+        loadReport(date);
+      }
+      function gotoPrevDay() {
+        const dt = parseDate(_curDate || todayIso());
+        dt.setDate(dt.getDate() - 1);
+        _go(fmtIso(dt));
+      }
+      function gotoToday() {
+        _go(null);
+      }
+      function onDatePick(ev) {
+        const v = ev.target.value;
+        if (v) _go(v);
+      }
+
+      // ── run sprint action (reuse existing handler) ────────────────────────────
+      async function runSprintAction(repo, label, id) {
+        const b = document.getElementById(id);
+        if (b) {
+          b.disabled = true;
+          b.textContent = "Starting…";
+        }
+        try {
+          const r = await fetch("/api/sprints/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project: repo, sprint_label: label }),
+          });
+          if (r.ok || r.status === 202) {
+            if (b) {
+              b.textContent = "Started ✓";
+            }
+          } else {
+            if (b) {
+              b.textContent = "Retry";
+              b.disabled = false;
+            }
+          }
+        } catch (_) {
+          if (b) {
+            b.textContent = "Retry";
+            b.disabled = false;
+          }
+        }
+      }
+
+      // ── add project ───────────────────────────────────────────────────────────
+      function openAdd(ev) {
+        if (
+          typeof openAddProjectFlow === "function" &&
+          document.getElementById("apm-backdrop")
+        ) {
+          ev.preventDefault();
+          openAddProjectFlow();
+          return false;
+        }
+        return true;
+      }
+
+      init();
+    </script>
+  </body>
 </html>

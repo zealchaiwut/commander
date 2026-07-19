@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import socket
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -380,10 +381,12 @@ def write_commander_report(payload: dict, path: Path) -> None:
             path.parent,
         )
         return
-    tmp = path.with_suffix(".tmp")
+    fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_str)
     try:
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.rename(path)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2))
+        os.replace(tmp, path)
         logger.info("commander report written to %s", path)
     except Exception as exc:
         logger.error("commander report: failed to write %s: %s", path, exc)

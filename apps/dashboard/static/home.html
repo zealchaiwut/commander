@@ -553,6 +553,22 @@
     return m ? ('Sprint ' + m[1]) : String(label || '');
   }
 
+  // ── project metadata map ──────────────────────────────────────────────────
+  function _buildProjBySlug(projects){
+    const map = {};
+    (projects || []).forEach(function(p){
+      if (p.project) {
+        map[p.project] = {
+          repo:  p.repo  || p.project,
+          icon:  p.icon  || 'ti-folder',
+          color: p.color || 'gray',
+          name:  p.name,
+        };
+      }
+    });
+    return map;
+  }
+
   // ── project badge ──────────────────────────────────────────────────────────
   function _projectBadgeHtml(slug){
     const proj = _projBySlug[slug] || {};
@@ -633,6 +649,7 @@
       return;
     }
 
+    _projBySlug = _buildProjBySlug(report.projects);
     root.innerHTML = _renderReport(report);
   }
 

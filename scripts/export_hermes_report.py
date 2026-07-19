@@ -309,7 +309,10 @@ def _build_project_entry(
 ) -> tuple[dict, dict]:
     """Return (entry, project_state_for_save)."""
     repo = project.get("repo", "")
-    name = project.get("name", repo.split("/")[-1] if "/" in repo else repo)
+    slug = repo.split("/")[-1] if "/" in repo else repo
+    name = project.get("name", slug)
+    icon = project.get("icon", "ti-folder")
+    color = project.get("color", "gray")
 
     issues = _query_issues(conn, repo)
     sprints = _query_sprints(conn, repo)
@@ -350,6 +353,10 @@ def _build_project_entry(
     status = _project_status(shipped, in_progress_sprint, blocked_numbers, stale)
 
     entry = {
+        "project": slug,
+        "repo": repo,
+        "icon": icon,
+        "color": color,
         "name": name,
         "status": status,
         "in_progress": in_progress_sprint,

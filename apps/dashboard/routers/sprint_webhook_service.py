@@ -386,7 +386,7 @@ def write_commander_report(payload: dict, path: Path) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(json.dumps(payload, indent=2))
-        os.replace(tmp, path)
+        tmp.rename(path)
         logger.info("commander report written to %s", path)
     except Exception as exc:
         logger.error("commander report: failed to write %s: %s", path, exc)

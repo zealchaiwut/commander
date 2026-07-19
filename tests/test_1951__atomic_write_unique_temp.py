@@ -1,12 +1,12 @@
 """Tests for issue #1951: write_commander_report must use a unique temp file per call.
 
 The fix replaces the shared fixed temp path (path.with_suffix('.tmp')) with a
-per-call unique file from tempfile.mkstemp(dir=path.parent), then os.replace.
+per-call unique file from tempfile.mkstemp(dir=path.parent), then tmp.rename.
 This prevents concurrent writers from corrupting each other's temp file.
 
 AC1: Each write_commander_report call creates a unique temp file, not a shared fixed path.
 AC2: Concurrent writes for the same destination both finish; final file is valid JSON.
-AC3: Failed os.replace cleans up the unique temp file; destination is not written.
+AC3: Failed rename cleans up the unique temp file; destination is not written.
 AC4: No .tmp files remain in the directory after a successful write.
 """
 from __future__ import annotations
@@ -18,8 +18,6 @@ import sys
 import threading
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
@@ -131,42 +129,40 @@ class TestConcurrentWrites:
         )
 
 
-class TestOsReplace:
-    """AC3: failed os.replace cleans up the unique temp file; destination not written."""
+class TestAtomicRenameFailure:
+    """AC3: failed rename cleans up the unique temp file; destination not written."""
 
-    def test_failed_replace_cleans_unique_temp(self, tmp_path):
-        """If os.replace fails, the unique temp file must be removed."""
+    def test_failed_rename_cleans_unique_temp(self, tmp_path):
+        """If rename fails, the unique temp file must be removed."""
         from routers import sprint_webhook_service
 
         report_path = tmp_path / "commander_report.latest.json"
 
-        real_replace = os.replace
+        def _fail_rename(self, target):
+            raise OSError("simulated rename failure")
 
-        def failing_replace(src, dst):
-            raise OSError("simulated replace failure")
-
-        with patch("os.replace", side_effect=failing_replace):
+        with patch.object(Path, "rename", _fail_rename):
             sprint_webhook_service.write_commander_report({"run_id": "fail"}, report_path)
 
         leftover_tmps = glob.glob(str(tmp_path / "*.tmp"))
         assert leftover_tmps == [], (
-            f"Unique temp file must be cleaned up after failed os.replace; found: {leftover_tmps}"
+            f"Unique temp file must be cleaned up after failed rename; found: {leftover_tmps}"
         )
 
-    def test_failed_replace_does_not_write_destination(self, tmp_path):
-        """If os.replace fails, the destination file must not be left in a partial state."""
+    def test_failed_rename_does_not_write_destination(self, tmp_path):
+        """If rename fails, the destination file must not be left in a partial state."""
         from routers import sprint_webhook_service
 
         report_path = tmp_path / "commander_report.latest.json"
 
-        def failing_replace(src, dst):
-            raise OSError("simulated replace failure")
+        def _fail_rename(self, target):
+            raise OSError("simulated rename failure")
 
-        with patch("os.replace", side_effect=failing_replace):
+        with patch.object(Path, "rename", _fail_rename):
             sprint_webhook_service.write_commander_report({"run_id": "fail"}, report_path)
 
         assert not report_path.exists(), (
-            "Destination must not exist if os.replace failed"
+            "Destination must not exist if rename failed"
         )
 
 

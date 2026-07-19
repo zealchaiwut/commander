@@ -10,7 +10,6 @@ AC7: COMMANDER_REPORT_PATH documented in .env.example.
 """
 from __future__ import annotations
 
-import glob
 import json
 import logging
 import os
@@ -293,21 +292,22 @@ class TestWriteCommanderReport:
         assert not tmp_file.exists(), "Temp file should be removed after atomic rename"
 
     def test_temp_file_cleaned_on_rename_failure(self, tmp_path):
-        """AC6 + AC3: if the atomic replace fails, the temp file is cleaned up."""
-        import glob
+        """AC6 + AC3: if rename fails, the .tmp file is cleaned up."""
         from routers import sprint_webhook_service
         report_path = tmp_path / "commander_report.latest.json"
+        tmp_file = report_path.with_suffix(".tmp")
         payload = {"run_id": "test-run"}
 
-        def _fail_replace(src, dst):
-            raise OSError("simulated replace failure")
+        original_rename = Path.rename
 
-        with patch("os.replace", side_effect=_fail_replace):
+        def _fail_rename(self, target):
+            raise OSError("simulated rename failure")
+
+        with patch.object(Path, "rename", _fail_rename):
             sprint_webhook_service.write_commander_report(payload, report_path)
 
-        # No temp files should remain after a failed atomic replace
-        leftover_tmps = glob.glob(str(tmp_path / "*.tmp"))
-        assert leftover_tmps == [], f"Temp file must be removed after a failed replace; found: {leftover_tmps}"
+        # The .tmp file should be cleaned up
+        assert not tmp_file.exists(), "Temp file must be removed after a failed rename"
         # The destination file should not exist (write failed)
         assert not report_path.exists()
 

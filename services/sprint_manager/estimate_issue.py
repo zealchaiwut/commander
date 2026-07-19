@@ -200,6 +200,25 @@ def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] =
     }
 
 
+def _get_mirror_sync_ts(repo: Optional[str]) -> Optional[str]:
+    """Return the mirror's last-sync timestamp from the DB, or None (issue #1937).
+
+    Same contract as dispatch._get_mirror_sync_ts — returns None when the DB
+    is unavailable or no ETag sync has run yet. When None, the stale-hit guard
+    in fetch_issue is skipped and the mirror body is used as-is.
+    """
+    if not repo:
+        return None
+    try:
+        _dash_dir = str(Path(__file__).parent.parent.parent / "apps" / "dashboard")
+        if _dash_dir not in sys.path:
+            sys.path.insert(0, _dash_dir)
+        import db as _db_mod
+        return _db_mod.get_sync_updated_at(f"issues:{repo}")
+    except Exception:
+        return None
+
+
 _ESTIMATOR_MAX_RETRIES = 3
 _ESTIMATOR_RETRY_DELAYS = [2, 4, 8]  # exponential backoff seconds before retry attempts 2, 3, 4
 
@@ -589,7 +608,10 @@ def main() -> None:
         return
 
     # Fetch issue and run estimator
-    _sync_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Use the mirror's actual last-sync timestamp so the stale-hit guard in
+    # fetch_issue can trigger a live fetch when the issue was modified after
+    # the mirror ran (issue #1937 — wall-clock now made the guard a no-op).
+    _sync_ts = _get_mirror_sync_ts(repo)
     sys.stdout.write(str(f"Fetching issue #{args.issue} from {repo} ...") + "\n")
     try:
         issue_data = fetch_issue(args.issue, repo, sync_ts=_sync_ts)

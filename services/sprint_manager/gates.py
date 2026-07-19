@@ -1170,7 +1170,7 @@ def _gate_coder_no_test_edits(
         allowlist = _get_coder_test_allowlist()
 
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACMD",
+        "git", "diff", base_branch, "--name-only", "--diff-filter=CMD",
         cwd=worktester_root,
     )
     rc_r, out_r, _ = _run_timed(

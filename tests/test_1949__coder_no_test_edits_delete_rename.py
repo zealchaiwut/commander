@@ -17,7 +17,6 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "services" / "sprint_manager"))
 
 from sprint_manager import (  # noqa: E402
-    GateResult,
     _gate_coder_no_test_edits,
 )
 

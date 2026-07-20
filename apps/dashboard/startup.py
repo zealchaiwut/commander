@@ -3580,13 +3580,6 @@ def _count_rework_tickets(sprint_label: str, project: str) -> int:
 
 # ── Analytics metrics endpoint (issue #648 / ANL-3) ──────────────────────────
 
-# Per-token prices in USD (input, output). Update when model pricing changes.
-MODEL_PRICE_MAP: dict[str, tuple[float, float]] = {
-    "claude-haiku-4-5":              (0.80 / 1_000_000, 4.00 / 1_000_000),
-    "claude-haiku-4-5-20251001":     (0.80 / 1_000_000, 4.00 / 1_000_000),
-    "claude-sonnet-4-6":             (3.00 / 1_000_000, 15.00 / 1_000_000),
-    "claude-opus-4-8":               (15.00 / 1_000_000, 75.00 / 1_000_000),
-}
 
 
 def _parse_iso_date(date_str: str, name: str, *, end_of_day: bool = False) -> datetime:
@@ -3659,10 +3652,11 @@ def _compute_analytics_metrics(project_root: Path,
                                 since: str | None = None,
                                 until: str | None = None,
                                 sprint_filter: str | None = None) -> dict:
-    """Aggregate delivery-health metrics from sprint state files and token_usage.
+    """Aggregate delivery-health metrics from sprint state files.
 
     Returns a dict with keys: first_pass_rate, rework_rate, avg_duration,
-    throughput, cost. All numeric fields are 0 when no data is available.
+    throughput, most_reworked, by_sprint. All numeric fields are 0 when no
+    data is available.
     """
     datetime.now(tz=timezone.utc).date()
 
@@ -3684,11 +3678,6 @@ def _compute_analytics_metrics(project_root: Path,
     sprint_lengths: list[float] = []
     by_sprint: list[dict] = []
     issue_rejections: list[dict] = []
-
-    # Token counts are sourced from the status files (model_name is joined from
-    # the token_usage table below for pricing only).
-    status_tokens_in = 0
-    status_tokens_out = 0
 
     estimates_dir = _commander_dir(project_root) / "estimates"
 
@@ -3730,9 +3719,6 @@ def _compute_analytics_metrics(project_root: Path,
             sprint_ticket_counts.append(len(sprint_done))
             if wall_clock_secs > 0:
                 sprint_lengths.append(wall_clock_secs / 86400.0)
-
-            status_tokens_in += int(state_data.get("total_tokens_in") or 0)
-            status_tokens_out += int(state_data.get("total_tokens_out") or 0)
 
             for issue in sprint_done:
                 total_completed += 1
@@ -3828,53 +3814,6 @@ def _compute_analytics_metrics(project_root: Path,
     avg_tickets = sum(sprint_ticket_counts) / len(sprint_ticket_counts) if sprint_ticket_counts else 0
     avg_length = sum(sprint_lengths) / len(sprint_lengths) if sprint_lengths else 0
 
-    # Cost: token counts come from the status files (status_tokens_in/out).
-    # model_name is joined from the token_usage table for pricing only — we
-    # derive a blended per-token price (exact when a single model is used) and
-    # apply it to the status-file token totals.
-    cost_by_role: dict[str, float] = {"coder": 0.0, "tester": 0.0, "estimator": 0.0}
-    tu_in = tu_out = 0
-    tu_cost_in = tu_cost_out = 0.0
-    role_tokens: dict[str, int] = {"coder": 0, "tester": 0, "estimator": 0}
-    try:
-        rows = db.get_token_usage_by_agent_model()
-        for row in rows:
-            try:
-                role = (row.get("agent_role") or "unknown").lower()
-                model = (row.get("model_name") or "").lower()
-                price_in, price_out = MODEL_PRICE_MAP.get(model, (0.0, 0.0))
-                in_tokens = int(row.get("total_input", 0) or 0)
-                out_tokens = int(row.get("total_output", 0) or 0)
-                tu_in += in_tokens
-                tu_out += out_tokens
-                tu_cost_in += in_tokens * price_in
-                tu_cost_out += out_tokens * price_out
-                if role in role_tokens:
-                    role_tokens[role] += in_tokens + out_tokens
-            except (KeyError, ValueError, TypeError) as exc:
-                logger.debug("token-usage cost: skipping row %r — %s", row, exc)
-    except Exception as exc:
-        logger.debug("token-usage cost: db query failed — %s", exc)
-
-    blended_price_in = (tu_cost_in / tu_in) if tu_in else 0.0
-    blended_price_out = (tu_cost_out / tu_out) if tu_out else 0.0
-    cost_per_sprint_total = (status_tokens_in * blended_price_in +
-                             status_tokens_out * blended_price_out)
-
-    # Distribute the total cost across roles by their token_usage share.
-    total_role_tokens = sum(role_tokens.values())
-    if total_role_tokens > 0:
-        for r in cost_by_role:
-            cost_by_role[r] = cost_per_sprint_total * role_tokens[r] / total_role_tokens
-
-    num_sprints = len(sprint_ticket_counts) if sprint_ticket_counts else 1
-    cost_per_sprint_avg = cost_per_sprint_total / num_sprints
-    cost_per_ticket_avg = cost_per_sprint_total / total_completed if total_completed else 0
-
-    rework_cost_annotation = (
-        round(cost_per_ticket_avg * 0.32, 4) if rework_count > 0 else 0.0
-    )
-
     most_reworked = sorted(issue_rejections, key=lambda x: x["rejections"], reverse=True)[:5]
 
     return {
@@ -3898,20 +3837,6 @@ def _compute_analytics_metrics(project_root: Path,
             "avg_tickets_per_sprint": round(avg_tickets, 2),
             "avg_sprint_length_days": round(avg_length, 4),
             "avg_sprint_length_minutes": round(avg_length * 1440, 2),
-        },
-        "cost": {
-            "per_sprint": {
-                "total": round(cost_per_sprint_avg, 4),
-                "by_role": {k: round(v / num_sprints, 4) for k, v in cost_by_role.items()},
-            },
-            "per_ticket": {
-                "avg": round(cost_per_ticket_avg, 4),
-                "by_role": {
-                    k: round(v / total_completed, 4) if total_completed else 0.0
-                    for k, v in cost_by_role.items()
-                },
-                "rework_cost_annotation": rework_cost_annotation,
-            },
         },
         "most_reworked": most_reworked,
         "by_sprint": by_sprint,

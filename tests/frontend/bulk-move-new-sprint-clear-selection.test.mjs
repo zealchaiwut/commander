@@ -12,6 +12,10 @@
  *        while a selection was active: after clearing, the next render reflects
  *        the updated ticket list.
  *
+ * Issue #1924: the simulation shim (_simulateBulkMoveNewSprintSuccess) that
+ * re-implemented the clear logic instead of calling the real function has been
+ * replaced with direct calls to the exported _smgmtMoveModalPickBulk function.
+ *
  * Run with: node --test tests/frontend/bulk-move-new-sprint-clear-selection.test.mjs
  */
 
@@ -178,8 +182,21 @@ globalThis._smgmtHydrateSchedToggles   = _noop;
 globalThis._smgmtAnySprintRunning      = false;
 globalThis._smgmtRowActivity           = {};
 
+// ── Globals required by _smgmtMoveModalPickBulk ───────────────────────────────
+
+globalThis._smgmtRender        = _noop;
+globalThis._smgmtBoardLock     = _noop;
+globalThis._smgmtBoardUnlock   = _noop;
+globalThis._smgmtShowInlineError = _noop;
+globalThis._smgmtShowToast     = _noop;
+globalThis.loadSprintMgmt      = async () => {};
+
 const { _smgmtRenderBacklog } = await import(
   '../../apps/dashboard/static/src/sprint-board/board-render.js'
+);
+
+const { _smgmtMoveModalPickBulk } = await import(
+  '../../apps/dashboard/static/src/sprint-board/bulk-move.js'
 );
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -195,39 +212,7 @@ function _reset() {
   _selCount.textContent = '';
 }
 
-/**
- * Simulate the _smgmtMoveModalPickBulk success path for isNew=true.
- *
- * This mirrors what the fixed function does:
- *   1. batch-labels fetch succeeds
- *   2. _smgmtClearSelection() is called  ← THE FIX (absent pre-fix)
- *   3. loadSprintMgmt() triggers _smgmtRenderBacklog
- *
- * Returns true if clear was called, false if simulating pre-fix (no clear).
- */
-async function _simulateBulkMoveNewSprintSuccess(tickets, applyFix) {
-  // Pre-condition: selection has issues
-  _selectionSet.add(101);
-  _selectionSet.add(102);
-
-  // First render — DOM gets written while no selection active (before user selects)
-  _reset();
-  _selectionSet.add(101);
-  _selectionSet.add(102);
-  // At this point DOM was written before selection; simulate it:
-  _ticketsEl.innerHTML = tickets.map(t => `<div data-issue="${t.number}">#${t.number}</div>`).join('');
-
-  // batch-labels succeeded — apply fix or not
-  if (applyFix) {
-    globalThis._smgmtClearSelection();  // THE FIX: clears _smgmtSelectedIssues
-  }
-  // loadSprintMgmt → _smgmtRenderBacklog is called with fresh ticket list
-  // (moved tickets are now absent from backlog tickets list)
-  const freshTickets = tickets.filter(t => ![101, 102].includes(t.number));
-  _smgmtRenderBacklog(freshTickets);
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests: _smgmtRenderBacklog suppression / lifting (issue #1760 regression) ─
 
 test('AC1 pre-fix: selection NOT cleared → _smgmtRenderBacklog suppresses DOM (demonstrates the bug)', async () => {
   _reset();
@@ -363,4 +348,65 @@ test('AC1: proj-selection-bar is hidden after _smgmtClearSelection()', () => {
     'selection bar hidden after _smgmtClearSelection()');
   assert.equal(_selCount.textContent, '0 issues selected',
     'selection count text reset');
+});
+
+// ── Tests: _smgmtMoveModalPickBulk direct invocation (issue #1924) ────────────
+//
+// These tests call the exported function directly — no simulation shim —
+// so a regression removing `if (isNew) _smgmtClearSelection()` will fail here.
+
+test('#1924 AC: _smgmtMoveModalPickBulk isNew=true success clears selection', async () => {
+  _reset();
+  _selectionSet.add(701);
+  _selectionSet.add(702);
+  assert.equal(_selectionSet.size, 2, 'pre-call: 2 issues selected');
+
+  globalThis.fetch = async (url) => {
+    if (url.includes('/api/sprints/create')) {
+      return { ok: true, json: async () => ({ sprint_label: 'sprint-50' }) };
+    }
+    if (url.includes('/api/sprints/batch-labels')) {
+      return { ok: true, json: async () => ({ applied: 2, failed: 0, errors: [] }) };
+    }
+    throw new Error('Unexpected URL: ' + url);
+  };
+
+  await _smgmtMoveModalPickBulk([701, 702], null, true);
+
+  assert.equal(_selectionSet.size, 0,
+    '#1924 AC: selection cleared after successful isNew=true move');
+});
+
+test('#1924 AC: _smgmtMoveModalPickBulk fetch error leaves selection intact', async () => {
+  _reset();
+  _selectionSet.add(801);
+  _selectionSet.add(802);
+
+  globalThis.fetch = async () => { throw new Error('Network error'); };
+
+  await _smgmtMoveModalPickBulk([801, 802], null, true);
+
+  assert.equal(_selectionSet.size, 2,
+    '#1924 AC: selection intact after fetch error (user can retry)');
+});
+
+test('#1924 AC: _smgmtMoveModalPickBulk isNew=false does not clear via isNew branch', async () => {
+  _reset();
+  _selectionSet.add(901);
+  _selectionSet.add(902);
+  // Keep _smgmtData null so the optimistic-update clear at line ~22168 is skipped,
+  // isolating the `if (isNew) _smgmtClearSelection()` branch at ~22204.
+  globalThis._smgmtData = null;
+
+  globalThis.fetch = async (url) => {
+    if (url.includes('/api/sprints/batch-labels')) {
+      return { ok: true, json: async () => ({ applied: 2, failed: 0, errors: [] }) };
+    }
+    throw new Error('Unexpected URL: ' + url);
+  };
+
+  await _smgmtMoveModalPickBulk([901, 902], 'sprint-50', false);
+
+  assert.equal(_selectionSet.size, 2,
+    '#1924 AC: isNew=false does not trigger the isNew clear; selection unchanged');
 });

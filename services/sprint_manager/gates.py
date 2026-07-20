@@ -1170,14 +1170,27 @@ def _gate_coder_no_test_edits(
         allowlist = _get_coder_test_allowlist()
 
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        "git", "diff", base_branch, "--name-only", "--diff-filter=CMD",
         cwd=worktester_root,
     )
-    if rc != 0 or not out.strip():
+    rc_r, out_r, _ = _run_timed(
+        "git", "diff", base_branch, "--name-status", "--diff-filter=R",
+        cwd=worktester_root,
+    )
+
+    changed_paths = [p for p in out.splitlines() if p.strip()] if rc == 0 else []
+    for line in (out_r.splitlines() if rc_r == 0 else []):
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].startswith("R"):
+            old_path, new_path = parts[1].strip(), parts[2].strip()
+            if old_path:
+                changed_paths.append(old_path)
+            if new_path:
+                changed_paths.append(new_path)
+
+    if not changed_paths:
         sys.stdout.write(str("  [gate:coder-no-test-edits] empty diff — PASS") + "\n")
         return GateResult(gate="coder-no-test-edits", passed=True, output="empty diff")
-
-    changed_paths = [p for p in out.splitlines() if p.strip()]
     allowlist_set = set(allowlist)
 
     blocked: list[str] = []

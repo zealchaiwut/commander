@@ -5,11 +5,9 @@
  * Exported for unit tests; exposed on globalThis via index.js.
  */
 
-/* eslint-disable no-unused-vars */
 /* global _smgmtRepo, _smgmtData, _smgmtClearSelection, _smgmtRender,
    _smgmtBoardLock, _smgmtBoardUnlock, _smgmtShowInlineError, _smgmtShowToast,
    loadSprintMgmt */
-/* eslint-enable no-unused-vars */
 
 /** Bulk move — same batch API as the former selection-bar dropdown. */
 export async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {

@@ -8,7 +8,6 @@ AC1: main() calls _get_mirror_sync_ts(repo) so the real mirror last-sync
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -18,7 +17,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
 sys.path.insert(0, str(_REPO_ROOT / "services" / "sprint_manager"))
 
-import dispatch  # noqa: E402 — side-effect import: loads config so github_client resolves
+import dispatch  # noqa: E402, F401 — side-effect import: loads config so github_client resolves
 import estimate_issue  # noqa: E402
 
 

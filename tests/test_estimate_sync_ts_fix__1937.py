@@ -3,7 +3,6 @@ import os
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
 
 # Resolved from UAT .env at runtime; see tester skill Step 0.
 # Default kept only as a last-resort fallback if BASE_URL not exported.
@@ -42,10 +41,8 @@ def test_ac1_estimate_issue_main_uses_mirror_sync_ts():
 def test_ac1_get_mirror_sync_ts_returns_db_value_or_none():
     """AC1: _get_mirror_sync_ts helper returns the DB's last-sync timestamp, or None on error."""
     # Test 1: When DB is available and has a sync timestamp
-    with patch("sys.path", sys.path + ["/mock"]), \
-         patch("db.get_sync_updated_at", return_value="2026-07-09T12:00:00Z") as mock_db_get:
-
-        # This will fail to import db, but we can test the logic by mocking the import
+    with patch("sys.path", sys.path + ["/mock"]):
+        # DB import will fail in test env; the real logic is tested in test 3 below.
         pass
 
     # Test 2: When DB is unavailable, _get_mirror_sync_ts returns None
@@ -90,7 +87,7 @@ def test_ac2_ac3_stale_mirror_triggers_live_fetch():
         return result
 
     with patch("github_client._mirror_issue", return_value=stale_issue_data):
-        result = estimate_issue.fetch_issue(
+        estimate_issue.fetch_issue(
             1916, "owner/repo",
             runner=mock_runner,
             sync_ts="2026-07-09T10:00:00Z"  # sync_ts is EARLIER than updatedAt
@@ -135,7 +132,7 @@ def test_ac2_ac4_fresh_mirror_uses_cache_no_live_fetch():
         return result
 
     with patch("github_client._mirror_issue", return_value=fresh_issue_data):
-        result = estimate_issue.fetch_issue(
+        estimate_issue.fetch_issue(
             1916, "owner/repo",
             runner=mock_runner,
             sync_ts="2026-07-09T12:00:00Z"  # sync_ts is LATER than updatedAt

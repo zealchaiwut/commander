@@ -63,6 +63,7 @@ function makeContext(runningLabels) {
     EventSource: MockEventSource,
     _smgmtSseHandleSnapshot: () => {},
     _smgmtSseHandleLogLine: () => {},
+    visibilityInterval: (fn, delay) => 999,
     setInterval: () => 999,
     clearInterval: () => {},
     fetch: async () => ({ ok: false }),

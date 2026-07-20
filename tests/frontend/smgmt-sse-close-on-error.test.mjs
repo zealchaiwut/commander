@@ -51,6 +51,7 @@ function makeContext() {
     EventSource: MockEventSource,
     _smgmtSseHandleSnapshot: () => {},
     _smgmtSseHandleLogLine: () => {},
+    visibilityInterval: (fn, delay) => null,
     setInterval: () => null,
     clearInterval: () => {},
     fetch: async () => ({ ok: false }),

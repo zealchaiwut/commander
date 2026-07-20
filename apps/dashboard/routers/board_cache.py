@@ -51,8 +51,8 @@ async def _guarded_broadcast(
     broadcast_fn: Callable[[dict], Coroutine[Any, Any, None]],
     payload: dict,
 ) -> None:
-    """Await *broadcast_fn(payload)* and log any exception instead of letting it
-    surface as an unhandled asyncio task warning at GC time."""
+    """Await *broadcast_fn(payload)* and log any exception instead of
+    surfacing it as an unhandled asyncio task warning at GC time."""
     try:
         await broadcast_fn(payload)
     except Exception as exc:
@@ -66,8 +66,8 @@ async def _guarded_broadcast(
 # ── Main-loop reference for threadpool broadcast (issue #1897) ───────────────
 
 # Captured at server startup so invalidate_board can schedule SSE broadcasts
-# via run_coroutine_threadsafe when called from threadpool (sync) route handlers
-# where asyncio.get_running_loop() raises RuntimeError.
+# via run_coroutine_threadsafe when called from threadpool (sync) route
+# handlers where asyncio.get_running_loop() raises RuntimeError.
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
@@ -82,7 +82,7 @@ def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     _main_loop = loop
 
 
-# ── TTL ───────────────────────────────────────────────────────────────────────
+# ── TTL ──────────────────────────────────────────────────────────────────────
 
 
 def current_ttl() -> int:
@@ -97,14 +97,15 @@ def current_ttl() -> int:
         return 8
 
 
-# ── Store ─────────────────────────────────────────────────────────────────────
+# ── Store ────────────────────────────────────────────────────────────────────
 
 # Each value: {"snapshot": dict, "expires_at": float (monotonic)}
 _cache: dict[str, dict[str, Any]] = {}
 
 
 def get_board_cache(project: str) -> Optional[tuple[dict, float]]:
-    """Return ``(snapshot, remaining_ttl_s)`` for *project*, or ``None`` on miss/expiry.
+    """Return ``(snapshot, remaining_ttl_s)`` for *project*, or ``None`` on
+    miss/expiry.
 
     Keys must be fully-qualified ``owner/repo`` strings. A separate cached
     entry exists for each project — no state is shared across projects.
@@ -136,15 +137,18 @@ def store_board_cache(project: str, snapshot: dict) -> None:
 
 
 def invalidate_board(project: str) -> None:
-    """Evict *project*'s cache entry and broadcast board_invalidated over SSE (issue #1785).
+    """Evict *project*'s cache entry and broadcast board_invalidated over SSE
+    (issue #1785).
 
     Also evicts the home-cache entry for the same project so sprint mutations
     invalidate both caches from a single call site (issue #1786).
 
     Broadcast path (issue #1897):
-    - Async context (async route): asyncio.get_running_loop() succeeds → create_task.
-    - Threadpool context (sync ``def`` route): get_running_loop() raises RuntimeError →
-      fall back to run_coroutine_threadsafe on the main loop captured at startup.
+    - Async context (async route): asyncio.get_running_loop() succeeds →
+      create_task.
+    - Threadpool context (sync ``def`` route): get_running_loop() raises
+      RuntimeError → fall back to run_coroutine_threadsafe on the main loop
+      captured at startup.
     - No main loop captured (test / script context): skip broadcast silently.
     """
     _cache.pop(project, None)
@@ -157,7 +161,7 @@ def invalidate_board(project: str) -> None:
         from .logs_service import broadcast as _bc  # noqa: PLC0415
     except ImportError:
         try:
-            from logs_service import broadcast as _bc  # type: ignore[no-redef]  # noqa: PLC0415
+            from logs_service import broadcast as _bc  # noqa: PLC0415
         except ImportError:
             return
     _payload = {"type": "board_invalidated", "project": project}
@@ -167,7 +171,7 @@ def invalidate_board(project: str) -> None:
         return
     except RuntimeError:
         pass
-    # Called from a threadpool (sync route handler) — schedule on the main loop.
+    # Called from a threadpool (sync route handler) — schedule on main loop.
     if _main_loop is not None and not _main_loop.is_closed():
         asyncio.run_coroutine_threadsafe(
             _guarded_broadcast(_bc, _payload),

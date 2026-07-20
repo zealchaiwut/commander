@@ -17,11 +17,14 @@ Public API::
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Coroutine, Optional
+
+logger = logging.getLogger(__name__)
 
 # aggregate_cache lives in apps/dashboard/ (parent of this routers/ package).
 # Force it to position 0 so `import api_volume` resolves to
@@ -40,6 +43,25 @@ try:
     import api_volume as _api_volume
 except ImportError:
     _api_volume = None  # type: ignore[assignment]
+
+# ── Guarded broadcast helper (issue #1826) ───────────────────────────────────
+
+
+async def _guarded_broadcast(
+    broadcast_fn: Callable[[dict], Coroutine[Any, Any, None]],
+    payload: dict,
+) -> None:
+    """Await *broadcast_fn(payload)* and log any exception instead of letting it
+    surface as an unhandled asyncio task warning at GC time."""
+    try:
+        await broadcast_fn(payload)
+    except Exception as exc:
+        logger.warning(
+            "board_invalidated broadcast failed for %s: %s",
+            payload.get("project"),
+            exc,
+        )
+
 
 # ── Main-loop reference for threadpool broadcast (issue #1897) ───────────────
 
@@ -138,15 +160,16 @@ def invalidate_board(project: str) -> None:
             from logs_service import broadcast as _bc  # type: ignore[no-redef]  # noqa: PLC0415
         except ImportError:
             return
+    _payload = {"type": "board_invalidated", "project": project}
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_bc({"type": "board_invalidated", "project": project}))
+        loop.create_task(_guarded_broadcast(_bc, _payload))
         return
     except RuntimeError:
         pass
     # Called from a threadpool (sync route handler) — schedule on the main loop.
     if _main_loop is not None and not _main_loop.is_closed():
         asyncio.run_coroutine_threadsafe(
-            _bc({"type": "board_invalidated", "project": project}),
+            _guarded_broadcast(_bc, _payload),
             _main_loop,
         )

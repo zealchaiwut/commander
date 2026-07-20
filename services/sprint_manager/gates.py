@@ -1148,11 +1148,12 @@ def _gate_coder_no_test_edits(
     blocked_patterns: Optional[list[str]] = None,
     allowlist: Optional[list[str]] = None,
 ) -> "GateResult":
-    """Gate: fail if the coder's diff touches any path matching blocked_patterns.
+    """Gate: fail if the coder's diff modifies any path matching blocked_patterns.
 
-    Defaults to blocking any change under tests/**. Paths listed in allowlist
-    are exempted unconditionally (e.g. shared fixtures, conftest stubs that a
-    coder is explicitly permitted to touch).
+    Uses --diff-filter=CMD (Modified, Deleted, Copied) so TDD-written new test
+    files (Added) are allowed through while edits, deletions, and copies of
+    existing grading tests are blocked. Renamed files are caught via a separate
+    --diff-filter=R pass. Paths listed in allowlist are exempted unconditionally.
 
     blocked_patterns: fnmatch glob patterns; reads CODER_BLOCKED_PATH_PATTERNS
     when None.  allowlist: exact path matches; reads CODER_TEST_PATH_ALLOWLIST

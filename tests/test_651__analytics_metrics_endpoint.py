@@ -20,8 +20,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
 

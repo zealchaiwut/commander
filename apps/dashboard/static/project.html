@@ -27174,13 +27174,8 @@ const _logsState = {
     rawLevel: '',
     issue: '',
   },
-  expanded: new Set(),
   events: {},
   loadingEvents: new Set(),
-  ticketStats: {},
-  loadingStats: new Set(),
-  icaCost: {},
-  loadingIcaCost: new Set(),
   issues: null,
   viewMode: 'activity',
   pollTimer: null,
@@ -27530,61 +27525,6 @@ function _logsFmtTokens(n) {
   return _histFmtTokens(n);
 }
 
-// Per-ticket timing / token / failure strip for an expanded Logs-tab run (#858).
-// One row per ticket: coder time, tester time, token count, and — for failed
-// tickets only — the failure class + message inline (AC4), so no log file needs
-// opening to see where time went or why a ticket broke (AC6).
-function _logsTicketStatsHtml(stats) {
-  const tickets = (stats && stats.tickets) || [];
-  if (tickets.length === 0) return '';
-  return tickets.map(t => {
-    const fail = t.failed
-      ? `<div class="logs-ticket-fail">` +
-          `<span class="logs-ticket-fail-class">${escHtml(t.failure_class || 'FAILED')}</span>` +
-          (t.failure_message ? `<span class="logs-ticket-fail-msg">${escHtml(t.failure_message)}</span>` : '') +
-        `</div>`
-      : '';
-    return `<div class="logs-ticket-row${t.failed ? ' failed' : ''}">` +
-      `<span class="logs-ticket-num">#${escHtml(String(t.issue_number))}</span>` +
-      `<span class="logs-ticket-metric" title="Coder duration"><i class="ti ti-code"></i>${escHtml(_histFmtSecs(t.coder_seconds))}</span>` +
-      `<span class="logs-ticket-metric" title="Tester duration"><i class="ti ti-flask"></i>${escHtml(_histFmtSecs(t.tester_seconds))}</span>` +
-      `<span class="logs-ticket-metric" title="Total tokens"><i class="ti ti-coin"></i>${escHtml(_logsFmtTokens(t.total_tokens))}</span>` +
-      fail +
-    `</div>`;
-  }).join('');
-}
-
-async function _logsFetchTicketStats(sprintLabel, project) {
-  try {
-    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ticket-stats?project=${encodeURIComponent(project)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) return { tickets: [] };
-    return await resp.json();
-  } catch (_) { return { tickets: [] }; }
-}
-
-function _logsIcaCostHtml(summary) {
-  if (!summary || !summary.is_ica) return '';
-  const cost = (typeof summary.cost_usd === 'number') ? `$${summary.cost_usd.toFixed(6)}` : '—';
-  const tokens = (typeof summary.total_tokens === 'number') ? summary.total_tokens.toLocaleString() : '—';
-  const runs = summary.run_count || 0;
-  return `<div class="logs-ica-cost-row">` +
-    `<span class="logs-ica-badge">ICA</span>` +
-    `<span class="logs-ica-metric" title="Successful ICA agent runs"><i class="ti ti-robot"></i>${escHtml(String(runs))} runs</span>` +
-    `<span class="logs-ica-metric" title="Total tokens (ICA path)"><i class="ti ti-coin"></i>${escHtml(tokens)}</span>` +
-    `<span class="logs-ica-metric logs-ica-cost-val" title="USD cost (ICA meter rates)"><i class="ti ti-currency-dollar"></i>${escHtml(cost)}</span>` +
-  `</div>`;
-}
-
-async function _logsFetchIcaCost(sprintLabel, project) {
-  try {
-    const url = `/api/logs/runs/${encodeURIComponent(sprintLabel)}/ica-cost?project=${encodeURIComponent(project)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) return { is_ica: false };
-    return await resp.json();
-  } catch (_) { return { is_ica: false }; }
-}
-
 function _logsEventsHtml(events) {
   const filtered = _logsFilterEvents(events);
   if (filtered.length === 0) {
@@ -27597,69 +27537,6 @@ function _logsEventsHtml(events) {
     `<span class="logs-event-msg">${colorizeLogLine(e.message, repo)}</span>` +
     `</div>`
   ).join('');
-}
-
-async function logsToggleRun(headerEl) {
-  const row = headerEl.closest('[data-run-id]');
-  if (!row) return;
-  const runId = row.dataset.runId;
-  const sprintLabel = row.dataset.sprint;
-  const project = row.dataset.project;
-
-  if (_logsState.expanded.has(runId)) {
-    _logsState.expanded.delete(runId);
-    row.classList.remove('expanded');
-    if (_logsState.liveRunId === runId) _logsDisconnectLive();
-    return;
-  }
-
-  _logsState.expanded.add(runId);
-  row.classList.add('expanded');
-
-  // Per-ticket timing / token / failure strip (#858) — fetched once per run.
-  if (_logsState.ticketStats[runId]) {
-    const statsEl = document.getElementById(`logs-stats-${runId}`);
-    if (statsEl) statsEl.innerHTML = _logsTicketStatsHtml(_logsState.ticketStats[runId]);
-  } else if (!_logsState.loadingStats.has(runId)) {
-    _logsState.loadingStats.add(runId);
-    _logsFetchTicketStats(sprintLabel, project).then(stats => {
-      _logsState.loadingStats.delete(runId);
-      _logsState.ticketStats[runId] = stats;
-      const el = document.getElementById(`logs-stats-${runId}`);
-      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsTicketStatsHtml(stats);
-    });
-  }
-
-  // ICA cost summary (#1672) — fetched once per run, shown only for ICA sprints.
-  if (_logsState.icaCost[runId]) {
-    const icaEl = document.getElementById(`logs-ica-cost-${runId}`);
-    if (icaEl) icaEl.innerHTML = _logsIcaCostHtml(_logsState.icaCost[runId]);
-  } else if (!_logsState.loadingIcaCost.has(runId)) {
-    _logsState.loadingIcaCost.add(runId);
-    _logsFetchIcaCost(sprintLabel, project).then(summary => {
-      _logsState.loadingIcaCost.delete(runId);
-      _logsState.icaCost[runId] = summary;
-      const el = document.getElementById(`logs-ica-cost-${runId}`);
-      if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsIcaCostHtml(summary);
-    });
-  }
-
-  const eventsEl = document.getElementById(`logs-events-${runId}`);
-
-  if (_logsState.events[runId]) {
-    if (eventsEl) eventsEl.innerHTML = _logsEventsHtml(_logsState.events[runId]);
-  } else if (!_logsState.loadingEvents.has(runId)) {
-    _logsState.loadingEvents.add(runId);
-    const events = await _logsFetchRunEvents(sprintLabel, project);
-    _logsState.loadingEvents.delete(runId);
-    _logsState.events[runId] = events;
-    const el = document.getElementById(`logs-events-${runId}`);
-    if (el && _logsState.expanded.has(runId)) el.innerHTML = _logsEventsHtml(events);
-  }
-
-  if (_smgmtRunningLabels && _smgmtRunningLabels.has(sprintLabel)) {
-    _logsConnectLive(runId, sprintLabel, project);
-  }
 }
 
 async function _logsFetchRunEvents(sprintLabel, project) {
@@ -27755,42 +27632,6 @@ function _logsRenderRawStream() {
     `<div class="logs-raw-line">${colorizeLogLine(line, project)}</div>`
   ).join('');
   streamEl.scrollTop = streamEl.scrollHeight;
-}
-
-function _logsConnectLive(runId, sprintLabel, project) {
-  _logsDisconnectLive();
-  _logsState.liveRunId = runId;
-  const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/live/stream?project=${encodeURIComponent(project)}`;
-  const es = new EventSource(url);
-  _logsState.liveEs = es;
-
-  es.addEventListener('log_line', ev => {
-    try {
-      const entry = JSON.parse(ev.data);
-      if (!_logsState.events[runId]) _logsState.events[runId] = [];
-      _logsState.events[runId].push(entry);
-      if (_logsState.expanded.has(runId)) {
-        const eventsEl = document.getElementById(`logs-events-${runId}`);
-        if (eventsEl) {
-          const filtered = _logsFilterEvents([entry]);
-          if (filtered.length > 0) {
-            const div = document.createElement('div');
-            div.className = `logs-event-line ${escHtml(entry.type)}`;
-            div.innerHTML = `<span class="logs-event-ts">${escHtml(entry.timestamp)}</span><span class="logs-event-msg">${escHtml(entry.message)}</span>`;
-            eventsEl.appendChild(div);
-            eventsEl.scrollTop = eventsEl.scrollHeight;
-          }
-        }
-      }
-    } catch (_) {}
-  });
-
-  es.addEventListener('complete', () => {
-    _logsDisconnectLive();
-    logsFetchRuns();
-  });
-
-  es.onerror = () => _logsDisconnectLive();
 }
 
 function _logsDisconnectLive() {

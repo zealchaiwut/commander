@@ -5344,7 +5344,7 @@ Resolve manually and re-run Bulk complete.`,
         _smgmtAnySprintRunning = true;
       }
       const data = _smgmtAggToRenderData(agg);
-      _smgmtRender(data);
+      _smgmtRender2(data);
       if (typeof _smgmtHydrateSchedToggles === "function") {
         _smgmtHydrateSchedToggles(repo);
       }
@@ -5427,7 +5427,7 @@ Resolve manually and re-run Bulk complete.`,
       return false;
     return _smgmtCompareSprintLabels(label, latest) < 0;
   }
-  function _smgmtRender(data) {
+  function _smgmtRender2(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
     if (!listEl)
       return;
@@ -8607,7 +8607,7 @@ Proceed anyway?`)) {
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   }
-  function _smgmtBoardUnlock() {
+  function _smgmtBoardUnlock2() {
     _smgmtMoveLock = false;
     _smgmtBoardOverlayHasProgress = false;
     const overlay = document.getElementById("smgmt-move-overlay");
@@ -8690,7 +8690,7 @@ Proceed anyway?`)) {
       if (btn) {
         btn.disabled = false;
         btn.onclick = () => {
-          _smgmtBoardUnlock();
+          _smgmtBoardUnlock2();
           if (typeof onDone === "function") {
             try {
               onDone();
@@ -8703,6 +8703,65 @@ Proceed anyway?`)) {
   }
   function _smgmtBoardHalt(message, onDone) {
     _smgmtBoardFinish2({ ok: false, message, onDone });
+  }
+
+  // apps/dashboard/static/src/sprint-board/bulk-move.js
+  async function _smgmtMoveModalPickBulk(nums, targetLabel, isNew) {
+    const repo = _smgmtRepo();
+    if (!repo || nums.length === 0)
+      return;
+    let sprintLabel = targetLabel || "backlog";
+    let dest = sprintLabel === "backlog" ? "Backlog" : `Sprint ${sprintLabel.split("-")[1]}`;
+    if (!isNew && _smgmtData) {
+      const targetNum = sprintLabel === "backlog" ? null : parseInt(sprintLabel.split("-")[1], 10);
+      nums.forEach((n) => {
+        const iss = _smgmtData.issues.find((i) => i.number === n);
+        if (iss)
+          iss.sprint = targetNum;
+      });
+      _smgmtClearSelection();
+      _smgmtRender(_smgmtData);
+    }
+    _smgmtBoardLock(`Moving ${nums.length} issue${nums.length !== 1 ? "s" : ""} to ${dest}\u2026`);
+    try {
+      if (isNew) {
+        const createRes = await fetch("/api/sprints/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project: repo })
+        });
+        if (!createRes.ok) {
+          const d = await createRes.json().catch(() => ({}));
+          throw new Error(d.detail || "HTTP " + createRes.status);
+        }
+        const createData = await createRes.json();
+        sprintLabel = createData.sprint_label;
+        dest = `Sprint ${sprintLabel.split("-")[1]}`;
+      }
+      const changes = nums.map((n) => ({ issue_num: n, sprint_label: sprintLabel }));
+      const res = await fetch("/api/sprints/batch-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes, project: repo })
+      });
+      if (!res.ok)
+        throw new Error(await res.text());
+      const data = await res.json();
+      if (data.failed > 0 && data.errors?.length) {
+        _smgmtShowInlineError(`${data.failed} issue${data.failed !== 1 ? "s" : ""} failed to move:
+${data.errors.join("\n")}`);
+      } else if (data.applied > 0) {
+        _smgmtShowToast(`Moved ${data.applied} issue${data.applied !== 1 ? "s" : ""} to ${dest}.`);
+      }
+      if (isNew)
+        _smgmtClearSelection();
+      await loadSprintMgmt();
+    } catch (e) {
+      _smgmtShowToast("Failed to move issues: " + e.message);
+      await loadSprintMgmt();
+    } finally {
+      _smgmtBoardUnlock();
+    }
   }
 
   // apps/dashboard/static/src/sprint-board/index.js
@@ -8770,15 +8829,16 @@ Proceed anyway?`)) {
   globalThis._pfStepperSummary = _pfStepperSummary;
   globalThis.smgmtKickoffRun = smgmtKickoffRun;
   globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
+  globalThis._smgmtMoveModalPickBulk = _smgmtMoveModalPickBulk;
   globalThis._smgmtBoardLock = _smgmtBoardLock2;
-  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock;
+  globalThis._smgmtBoardUnlock = _smgmtBoardUnlock2;
   globalThis._smgmtBoardProgress = _smgmtBoardProgress2;
   globalThis._smgmtBoardLog = _smgmtBoardLog2;
   globalThis._smgmtBoardFinish = _smgmtBoardFinish2;
   globalThis._smgmtBoardHalt = _smgmtBoardHalt;
   globalThis.loadSprintMgmt = loadSprintMgmt2;
   globalThis._smgmtSprintLabelSortKey = _smgmtSprintLabelSortKey;
-  globalThis._smgmtRender = _smgmtRender;
+  globalThis._smgmtRender = _smgmtRender2;
   globalThis._smgmtLabelFilterRender = _smgmtLabelFilterRender;
   globalThis._smgmtLabelFilterApply = _smgmtLabelFilterApply;
   globalThis._smgmtFetchMissingOutcomes = _smgmtFetchMissingOutcomes;

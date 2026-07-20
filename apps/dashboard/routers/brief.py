@@ -10,6 +10,7 @@ added to ``server.py`` (COMMANDER_GATE_MONOLITH, issue #761).
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import config
@@ -20,6 +21,8 @@ import projects as _projects_module
 from . import brief_artifact
 from . import brief_service
 from . import brief_summary
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["brief"])
 
@@ -271,6 +274,7 @@ def _enrich_home_artifact(artifact: dict) -> None:
     try:
         all_projects = _projects_module.load_projects()
     except Exception:
+        _log.warning("_enrich_home_artifact: load_projects failed; falling back to []", exc_info=True)
         all_projects = []
     proj_by_slug: dict = {
         p["repo"].split("/")[-1]: p
@@ -293,6 +297,12 @@ def _enrich_home_artifact(artifact: dict) -> None:
                     slug, date=date)
                 p["briefSummary"] = (summary or {}).get("summary", "")
             except Exception:
+                _log.warning(
+                    "_enrich_home_artifact: get_or_create_project_summary failed for %s; "
+                    "falling back to empty summary",
+                    slug,
+                    exc_info=True,
+                )
                 p["briefSummary"] = ""
 
 

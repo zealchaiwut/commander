@@ -30,11 +30,14 @@ No caching is added here — caching is deferred to the next ticket.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -404,7 +407,8 @@ def _build_outcome_inline(label: str, project: str, lifecycle_state: str) -> Opt
             "summary_issue_num": row.get("summary_issue_num"),
             "pr_number": row.get("pr_number"),
         }
-    except Exception:
+    except Exception as exc:
+        log.warning("_build_outcome_inline failed for %s: %s", label, exc, exc_info=True)
         return None
 
 
@@ -469,7 +473,8 @@ def _build_finish_card_inline(label: str, project: str, lifecycle_state: str) ->
             "summary_issue_url": row.get("summary_issue_url"),
             "summary_issue_num": row.get("summary_issue_num"),
         }
-    except Exception:
+    except Exception as exc:
+        log.warning("_build_finish_card_inline failed for %s: %s", label, exc, exc_info=True)
         return no_data
 
 
@@ -492,8 +497,8 @@ def _build_branch_status_inline(label: str, project: str, lifecycle_state: str =
             pr_number = row["pr_number"]
             base["pr_number"] = pr_number
             base["pr_url"] = f"https://github.com/{project}/pull/{pr_number}"
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("_build_branch_status_inline failed for %s: %s", label, exc, exc_info=True)
     return base
 
 

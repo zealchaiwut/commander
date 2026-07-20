@@ -146,9 +146,10 @@ def _compute_cost(
     conn: sqlite3.Connection, price_map: dict | None
 ) -> tuple[str, str]:
     """Return (cost_str, cost_source) per AC8."""
+    rows = _query_token_usage(conn)
+
     if price_map:
         try:
-            rows = _query_token_usage(conn)
             total_usd = 0.0
             matched = False
             for row in rows:
@@ -167,7 +168,6 @@ def _compute_cost(
             pass
 
     try:
-        rows = _query_token_usage(conn)
         total = sum(
             int(r["total_input"] or 0) + int(r["total_output"] or 0) for r in rows
         )

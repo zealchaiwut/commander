@@ -81,6 +81,7 @@ def _run_main_capture_fetch(tmp_path, issue_num=42):
     estimates_dir.mkdir()
 
     with patch.object(estimate_issue, "fetch_issue", side_effect=fake_fetch_issue), \
+         patch.object(estimate_issue, "_get_mirror_sync_ts", return_value="2026-07-09T12:00:00Z"), \
          patch.object(estimate_issue, "run_estimator", return_value=(fake_estimate, "")), \
          patch.object(estimate_issue, "load_calibration") as mock_cal, \
          patch.object(estimate_issue, "sqlite_calibration_records", return_value=[]), \
@@ -124,8 +125,9 @@ def test_ac2_sync_ts_is_valid_iso8601_utc(tmp_path):
 # ── AC3: stale mirror record triggers live fetch ─────────────────────────────
 
 def test_ac3_stale_mirror_record_triggers_live_fetch():
-    """AC3: when the mirror record predates sync_ts, fetch_issue falls through to a live call."""
-    stale_issue = _make_mirror_issue(1916, body="Old body", updated_at="2026-01-01T00:00:00Z")
+    """AC3: stale mirror record (updatedAt > sync_ts) triggers a live fetch."""
+    # Stale: issue was modified AFTER the mirror last synced → updatedAt > sync_ts.
+    stale_issue = _make_mirror_issue(1916, body="Old body", updated_at="2026-07-09T12:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):
@@ -138,10 +140,10 @@ def test_ac3_stale_mirror_record_triggers_live_fetch():
         r.stderr = ""
         return r
 
-    # Pass a sync_ts well after the stale record's updated_at.
+    # sync_ts is earlier than the record's updatedAt → stale.
     with patch("github_client._mirror_issue", return_value=stale_issue):
         result = estimate_issue.fetch_issue(
-            1916, "owner/repo", runner=counting_runner, sync_ts="2026-07-09T12:00:00Z"
+            1916, "owner/repo", runner=counting_runner, sync_ts="2026-07-09T10:00:00Z"
         )
 
     assert len(live_calls) == 1, (
@@ -153,8 +155,9 @@ def test_ac3_stale_mirror_record_triggers_live_fetch():
 # ── AC4: fresh mirror record uses mirror, no live fetch ──────────────────────
 
 def test_ac4_fresh_mirror_record_uses_mirror_no_live_fetch():
-    """AC4: when the mirror record is newer than sync_ts, mirror is used with no live call."""
-    fresh_issue = _make_mirror_issue(1916, body="Fresh mirror body", updated_at="2026-07-09T12:00:00Z")
+    """AC4: fresh mirror record (updatedAt <= sync_ts) is served from mirror with no live call."""
+    # Fresh: issue was NOT modified after the mirror last synced → updatedAt <= sync_ts.
+    fresh_issue = _make_mirror_issue(1916, body="Fresh mirror body", updated_at="2026-01-01T00:00:00Z")
     live_calls = []
 
     def counting_runner(args, **kwargs):
@@ -165,10 +168,10 @@ def test_ac4_fresh_mirror_record_uses_mirror_no_live_fetch():
         r.stderr = ""
         return r
 
-    # Pass a sync_ts older than the fresh record's updated_at.
+    # sync_ts is later than the record's updatedAt → fresh.
     with patch("github_client._mirror_issue", return_value=fresh_issue):
         result = estimate_issue.fetch_issue(
-            1916, "owner/repo", runner=counting_runner, sync_ts="2026-07-09T10:00:00Z"
+            1916, "owner/repo", runner=counting_runner, sync_ts="2026-07-09T12:00:00Z"
         )
 
     assert live_calls == [], (

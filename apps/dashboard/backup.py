@@ -19,10 +19,12 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 _logger = logging.getLogger("backup.local")
 
 _local_scheduler_started: bool = False
+_local_scheduler_timer: Optional[threading.Timer] = None
 _BACKUP_INTERVAL_SECS: int = 3600  # 1 hour
 
 
@@ -86,9 +88,11 @@ def _run_local_backup_in_thread() -> None:
 
 
 def _schedule_next() -> None:
+    global _local_scheduler_timer
     t = threading.Timer(_BACKUP_INTERVAL_SECS, _run_local_backup_in_thread)
     t.daemon = True
     t.start()
+    _local_scheduler_timer = t
 
 
 def start_local_backup_scheduler() -> None:

@@ -7,8 +7,8 @@ AC coverage:
   AC4  — first_pass_rate.passed + rework_rate.count == first_pass_rate.total_completed
   AC5  — avg_duration: overall coder_minutes, tester_minutes; coder_by_size breakdown
   AC6  — throughput: includes avg_sprint_length_days (not only minutes)
-  AC7  — [RETIRED via issue #1871] cost.per_sprint.by_role AND cost.per_ticket.by_role
-  AC8  — [RETIRED via issue #1871] MODEL_PRICE_MAP constant exists with a comment about updating for price changes
+  AC7  — cost.per_sprint.by_role AND cost.per_ticket.by_role both present with coder/tester/estimator
+  AC8  — MODEL_PRICE_MAP constant exists with a comment about updating for price changes
   AC9  — since, until, sprint filters narrow all metrics to the requested window
   AC10 — when project_events has no rows, all numeric fields return 0 (not null, not 500)
   AC11 — unknown slug returns HTTP 404
@@ -128,10 +128,10 @@ class TestHttp200:
         assert resp.status_code == 200
 
     def test_response_has_all_top_level_keys(self, tmp_path):
-        """AC1: response has all metric sections (excluding cost, removed in #1871)."""
+        """AC1: response has all five metric sections."""
         _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
         data = _call(tmp_path).json()
-        for key in ("first_pass_rate", "rework_rate", "avg_duration", "throughput"):
+        for key in ("first_pass_rate", "rework_rate", "avg_duration", "throughput", "cost"):
             assert key in data, f"Missing top-level key: {key}"
 
 
@@ -313,8 +313,94 @@ class TestThroughput:
 
 
 # ---------------------------------------------------------------------------
-# AC7 & AC8 RETIRED (issue #1871) — cost and MODEL_PRICE_MAP removed
+# AC7 — cost: per_sprint.by_role AND per_ticket.by_role
 # ---------------------------------------------------------------------------
+
+class TestCost:
+    def test_per_sprint_has_total_and_by_role(self, tmp_path):
+        """AC7: cost.per_sprint has total and by_role."""
+        _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
+        cost = _call(tmp_path).json()["cost"]
+        assert "per_sprint" in cost
+        ps = cost["per_sprint"]
+        assert "total" in ps
+        assert "by_role" in ps
+
+    def test_per_sprint_by_role_has_agent_keys(self, tmp_path):
+        """AC7: cost.per_sprint.by_role has coder, tester, estimator."""
+        _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
+        by_role = _call(tmp_path).json()["cost"]["per_sprint"]["by_role"]
+        assert "coder" in by_role
+        assert "tester" in by_role
+        assert "estimator" in by_role
+
+    def test_per_ticket_has_avg_and_by_role(self, tmp_path):
+        """AC7: cost.per_ticket has avg and by_role breakdown."""
+        _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
+        pt = _call(tmp_path).json()["cost"]["per_ticket"]
+        assert "avg" in pt
+        assert "by_role" in pt, "cost.per_ticket must include by_role breakdown"
+
+    def test_per_ticket_by_role_has_agent_keys(self, tmp_path):
+        """AC7: cost.per_ticket.by_role has coder, tester, estimator."""
+        _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
+        by_role = _call(tmp_path).json()["cost"]["per_ticket"]["by_role"]
+        assert "coder" in by_role
+        assert "tester" in by_role
+        assert "estimator" in by_role
+
+    def test_per_ticket_by_role_values_are_numeric(self, tmp_path):
+        """AC7: per_ticket.by_role values are numeric (float/int)."""
+        _make_sprint_state(tmp_path, "sprint-1", [_ISSUE_FIRST_PASS])
+        by_role = _call(tmp_path).json()["cost"]["per_ticket"]["by_role"]
+        for role, val in by_role.items():
+            assert isinstance(val, (int, float)), \
+                f"per_ticket.by_role.{role} must be numeric, got {type(val)}"
+
+
+# ---------------------------------------------------------------------------
+# AC8 — MODEL_PRICE_MAP constant with update comment
+# ---------------------------------------------------------------------------
+
+class TestModelPriceMap:
+    def test_constant_exists(self):
+        """AC8: MODEL_PRICE_MAP is defined in server.py."""
+        import server
+        assert hasattr(server, "MODEL_PRICE_MAP"), \
+            "server.py must define MODEL_PRICE_MAP constant"
+        assert isinstance(server.MODEL_PRICE_MAP, dict)
+        assert len(server.MODEL_PRICE_MAP) > 0
+
+    def test_constant_has_haiku_and_sonnet(self):
+        """AC8: MODEL_PRICE_MAP includes both haiku and sonnet entries."""
+        import server
+        keys = list(server.MODEL_PRICE_MAP.keys())
+        haiku_keys = [k for k in keys if "haiku" in k]
+        sonnet_keys = [k for k in keys if "sonnet" in k]
+        assert haiku_keys, "MODEL_PRICE_MAP must include at least one haiku entry"
+        assert sonnet_keys, "MODEL_PRICE_MAP must include at least one sonnet entry"
+
+    def test_each_entry_is_tuple_of_two_floats(self):
+        """AC8: each map entry is (input_price, output_price) per token."""
+        import server
+        for model, prices in server.MODEL_PRICE_MAP.items():
+            assert isinstance(prices, tuple) and len(prices) == 2, \
+                f"{model}: expected (input_price, output_price) tuple"
+            assert all(isinstance(p, float) for p in prices), \
+                f"{model}: prices must be floats"
+
+    def test_update_comment_in_source(self):
+        """AC8: server.py source contains an inline comment about updating MODEL_PRICE_MAP."""
+        server_src = (_DASHBOARD_ROOT / "server.py").read_text(encoding="utf-8")
+        # AC requires a comment near MODEL_PRICE_MAP indicating the map may need updating
+        assert "MODEL_PRICE_MAP" in server_src
+        # Find the block around MODEL_PRICE_MAP and check for an update-reminder comment
+        idx = server_src.index("MODEL_PRICE_MAP")
+        surrounding = server_src[max(0, idx - 300): idx + 300]
+        assert any(
+            phrase in surrounding.lower()
+            for phrase in ("update", "pricing", "may need", "pricing changes")
+        ), "MODEL_PRICE_MAP must have a nearby comment mentioning updates/pricing changes"
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +492,13 @@ class TestEmptyData:
         thr = data["throughput"]
         assert thr["avg_tickets_per_sprint"] == 0
         assert thr["avg_sprint_length_days"] == 0
+
+    def test_no_data_cost_is_zero(self, tmp_path):
+        """AC10: cost all zeros when no data."""
+        data = _call(tmp_path).json()
+        cost = data["cost"]
+        assert cost["per_sprint"]["total"] == 0
+        assert cost["per_ticket"]["avg"] == 0
 
     def test_no_data_fields_not_null(self, tmp_path):
         """AC10: numeric fields are 0 (int/float), not None/null."""

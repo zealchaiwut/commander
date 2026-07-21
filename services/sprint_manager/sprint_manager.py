@@ -192,6 +192,7 @@ from services.sprint_manager.state import (  # noqa: E402
     SprintState,
     GateResult,
     SprintSummary,
+    _apply_token_ceiling,
 )
 from services.sprint_manager.ica_preflight import (  # noqa: E402
     check_ica_readiness,
@@ -991,12 +992,49 @@ def _sweep_stale_in_progress(
     _sweep_stale_status("in-progress", sprint_label, repo_name, active_issue)
 
 
+def _ls_remote_feature_branch(issue_num: int) -> tuple[Optional[str], bool]:
+    """Query origin live for feature/<N>-* branches (no tracking-ref staleness).
+
+    Returns:
+        (branch_name, True)  — branch found on remote
+        (None, True)         — ls-remote succeeded, no matching branch
+        (None, False)        — ls-remote failed (network/infra error)
+
+    When multiple branches match, applies the same issue-commit disambiguation
+    as ``_find_feature_branch``.
+    """
+    ok, out, _ = _try("git", "ls-remote", "origin", f"refs/heads/feature/{issue_num}-*")
+    if not ok:
+        return None, False
+    if not out.strip():
+        return None, True
+    candidates: list[str] = []
+    for line in out.strip().splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and parts[1].startswith("refs/heads/"):
+            candidates.append(parts[1].removeprefix("refs/heads/"))
+    if not candidates:
+        return None, True
+    if len(candidates) == 1:
+        return candidates[0], True
+    for branch in candidates:
+        ref = f"origin/{branch}"
+        rev_ok, _, _ = _try("git", "rev-parse", "--verify", ref)
+        if not rev_ok:
+            ref = branch
+        msg_ok, msg, _ = _try("git", "log", "-1", "--format=%s%n%b", ref)
+        if msg_ok and f"issue #{issue_num}" in (msg or ""):
+            return branch, True
+    return candidates[0], True
+
+
 def _find_feature_branch(issue_num: int) -> Optional[str]:
     """Return feature/<N>-* branch name, preferring origin/ remote over local.
 
-    Prefers the remote tracking ref so we get the current authoritative tip
-    (e.g. after a tester's finish_feature.py pushed the final commit) rather
-    than a potentially stale local copy.
+    Uses git ls-remote as the primary (authoritative) check so freshly-pushed
+    branches are found even when local remote-tracking refs are stale (issue
+    #1935). Falls back to tracking refs when ls-remote fails (e.g. transient
+    network error) to preserve behaviour at non-CODER_NO_WORK call sites.
 
     When MORE THAN ONE feature/<N>-* branch exists (a stale mismatched-slug
     leftover next to the real one), pick the branch whose tip commit references
@@ -1005,6 +1043,12 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     unrelated work (the saga's feature/117-display-bangkok-time vs
     feature/117-chunk-overlap-fix).
     """
+    # Primary: live authoritative check via ls-remote (issue #1935)
+    ls_branch, ls_ok = _ls_remote_feature_branch(issue_num)
+    if ls_ok and ls_branch is not None:
+        return ls_branch
+
+    # Fallback: remote tracking refs (may be stale; graceful degradation on ls-remote failure)
     candidates: list[str] = []
     ok, out, _ = _try("git", "branch", "-r", "--list", f"origin/feature/{issue_num}-*")
     if ok and out.strip():
@@ -2341,26 +2385,8 @@ def _pool_release(slot: Optional[Path]) -> None:
         _ACTIVE_WORKTREE_POOL.release(slot)
 
 
-def _apply_token_ceiling(state: "SprintState", token_ceiling: int) -> bool:
-    """Check cumulative token spend against the configured ceiling (issue #1943).
-
-    Sets state.ceiling_hit = True and logs once on first breach.
-    Returns True when the ceiling is active (> 0) and spent >= ceiling.
-    Returns False when the ceiling is disabled (0 or negative) or not yet reached.
-    """
-    if token_ceiling <= 0:
-        return False
-    spent = state.total_tokens_in + state.total_tokens_out
-    if spent >= token_ceiling:
-        if not state.ceiling_hit:
-            state.ceiling_hit = True
-            sys.stdout.write(
-                f"  [token-ceiling] Token ceiling reached "
-                f"({spent:,} tokens used, limit {token_ceiling:,}). "
-                f"No further tickets will be dispatched.\n"
-            )
-        return True
-    return False
+# _apply_token_ceiling moved to state.py (issue #1948) so pipeline.py can import
+# it without circular dependency. Re-imported above from state.py.
 
 
 
@@ -3895,7 +3921,46 @@ def run_sprint_loop(
                     break
 
                 # -- Detect CODER_NO_WORK: coder exited 0 but created no feature branch --
-                if _find_feature_branch(num) is None:
+                # AC1/AC2 (issue #1935): use ls-remote (live authoritative query) before
+                # declaring CODER_NO_WORK — stale remote-tracking refs cause false-fails
+                # when the branch was pushed but not yet fetched locally.
+                _coder_live_branch, _coder_ls_ok = _ls_remote_feature_branch(num)
+                if not _coder_ls_ok:
+                    # ls-remote itself failed (network/infra error): classify as ENV_ERROR,
+                    # not CODER_NO_WORK, so the ticket is not mistakenly retried.
+                    category = FailureCategory.ENV_ERROR
+                    reason = (
+                        f"git ls-remote failed while checking feature/{num}-* branch "
+                        "(network/infra error — not CODER_NO_WORK)"
+                    )
+                    sys.stdout.write(str(f"  {reason}") + "\n")
+                    sys.stdout.flush()
+                    issue_state.set_agent_status("failed")
+                    issue_state.coder_finished_at = issue_state.status_changed_at
+                    issue_state.failure_reason    = reason
+                    issue_state.status            = "skipped"
+                    issue_state.skip_reason       = reason
+                    issue_state.category          = category
+                    summary.skipped.append(f"#{num} (coder failed)")
+                    dispatch_alerts(
+                        alert_modes,
+                        title=f"Issue #{num} skipped: {category}",
+                        body=reason,
+                        issue_num=num,
+                        category=category,
+                        cfg=cfg,
+                        repo=eff_repo,
+                    )
+                    _emit_ticket_failed(
+                        num, "coder", reason, category,
+                        project=eff_repo or label, action_id=_run_id, cfg=cfg, sprint_label=label,
+                    )
+                    _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
+                    state.save(state_path)
+                    _post_sprint_status(state, api_url=api_url, project=eff_repo)
+                    _infra_exit = True
+                    break
+                elif _coder_live_branch is None:
                     category = FailureCategory.CODER_NO_WORK
                     reason   = f"Coder exited 0 but no feature/{num}-* branch was created"
                     sys.stdout.write(str(f"  {reason}") + "\n")
@@ -4423,6 +4488,7 @@ def run_sprint(
     _level_nums_by_idx = pf.level_nums_by_idx
     _pipeline_on       = pf.pipeline_on
     start_time         = pf.start_time
+    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     if _pipeline_on:
         _run_pipeline_dispatch(
             state=state, state_path=state_path, summary=summary,
@@ -4437,9 +4503,8 @@ def run_sprint(
             gate_monolith=gate_monolith,
             gate_coder_no_test_edits=gate_coder_no_test_edits,
             gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
+            token_ceiling=_eff_token_ceiling,  # issue #1948: enforce ceiling in pipeline mode
         )
-
-    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     run_sprint_loop(
         pf,
         label=label,

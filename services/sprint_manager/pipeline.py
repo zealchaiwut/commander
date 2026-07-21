@@ -39,6 +39,7 @@ from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     tester_worktree_guard,
 )
+from services.sprint_manager.state import _apply_token_ceiling  # noqa: E402
 
 if TYPE_CHECKING:
     from services.sprint_manager.state import IssueState
@@ -669,6 +670,7 @@ def _run_pipeline_dispatch(
     gate_typecheck, gate_design, gate_frontend_lint, gate_monolith,
     gate_coder_no_test_edits, gate_scope,
     resume, retry_failed,
+    token_ceiling: int = 0,
 ) -> None:
     """Process dispatch levels with one coder + one tester worker concurrently.
 
@@ -1189,6 +1191,13 @@ def _run_pipeline_dispatch(
                 level_nums, _coder_stage, _tester_stage, pipeline=True,
                 on_merged=_on_merged, on_needs_rework=_on_needs_rework,
             )
+
+        # Token ceiling guard (issue #1948): stop dispatching further levels
+        # once cumulative spend crosses the ceiling. The current level already
+        # completed; this prevents starting the next one.
+        if _apply_token_ceiling(state, token_ceiling):
+            _save_state()
+            break
 
     if prev_level_idx >= 0:
         try:

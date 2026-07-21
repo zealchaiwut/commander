@@ -192,6 +192,7 @@ from services.sprint_manager.state import (  # noqa: E402
     SprintState,
     GateResult,
     SprintSummary,
+    _apply_token_ceiling,
 )
 from services.sprint_manager.ica_preflight import (  # noqa: E402
     check_ica_readiness,
@@ -2341,26 +2342,8 @@ def _pool_release(slot: Optional[Path]) -> None:
         _ACTIVE_WORKTREE_POOL.release(slot)
 
 
-def _apply_token_ceiling(state: "SprintState", token_ceiling: int) -> bool:
-    """Check cumulative token spend against the configured ceiling (issue #1943).
-
-    Sets state.ceiling_hit = True and logs once on first breach.
-    Returns True when the ceiling is active (> 0) and spent >= ceiling.
-    Returns False when the ceiling is disabled (0 or negative) or not yet reached.
-    """
-    if token_ceiling <= 0:
-        return False
-    spent = state.total_tokens_in + state.total_tokens_out
-    if spent >= token_ceiling:
-        if not state.ceiling_hit:
-            state.ceiling_hit = True
-            sys.stdout.write(
-                f"  [token-ceiling] Token ceiling reached "
-                f"({spent:,} tokens used, limit {token_ceiling:,}). "
-                f"No further tickets will be dispatched.\n"
-            )
-        return True
-    return False
+# _apply_token_ceiling moved to state.py (issue #1948) so pipeline.py can import
+# it without circular dependency. Re-imported above from state.py.
 
 
 
@@ -4423,6 +4406,7 @@ def run_sprint(
     _level_nums_by_idx = pf.level_nums_by_idx
     _pipeline_on       = pf.pipeline_on
     start_time         = pf.start_time
+    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     if _pipeline_on:
         _run_pipeline_dispatch(
             state=state, state_path=state_path, summary=summary,
@@ -4437,9 +4421,8 @@ def run_sprint(
             gate_monolith=gate_monolith,
             gate_coder_no_test_edits=gate_coder_no_test_edits,
             gate_scope=gate_scope, resume=resume, retry_failed=retry_failed,
+            token_ceiling=_eff_token_ceiling,  # issue #1948: enforce ceiling in pipeline mode
         )
-
-    _eff_token_ceiling = token_ceiling if token_ceiling > 0 else (cfg.token_ceiling if cfg is not None else 0)
     run_sprint_loop(
         pf,
         label=label,

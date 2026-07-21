@@ -135,6 +135,7 @@ Serves a structured view of each project's current status and pending work.
 | Parameter | Type | Optional | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `date` | string (YYYY-MM-DD) | Yes | Today's date (UTC) | Brief date to query; window is anchored at 6 AM in Asia/Bangkok timezone |
+| `force` | boolean | Yes | `false` | When `true` (or `1`), regenerates the dev-report artifact inline, persists it to the brief-artifacts store, then returns it. Without `force`, the endpoint returns the stored artifact or `404` if none exists for the requested date. |
 
 **Response: `200 OK`**
 

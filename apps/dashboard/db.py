@@ -19,8 +19,50 @@ if not _db_path_raw:
 
 DB_PATH = Path(_db_path_raw)
 
+# Default local-backup directory — sibling .commander/db-backups/ of the DB.
+# Tests can monkeypatch this directly.
+_LOCAL_BACKUP_DIR = DB_PATH.parent / ".commander" / "db-backups"
+
 # Asia/Bangkok is UTC+7 (no DST)
 _BKK_OFFSET = timezone(timedelta(hours=7))
+
+_log = logging.getLogger(__name__)
+
+
+def set_local_backup_dir(path: Path) -> None:
+    """Called by backup.py to register where local rolling backups live."""
+    global _LOCAL_BACKUP_DIR
+    _LOCAL_BACKUP_DIR = path
+
+
+def _startup_integrity_check() -> None:
+    """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt."""
+    if not DB_PATH.exists():
+        return
+    status = check_db_integrity(DB_PATH)
+    if status == "ok":
+        return
+    restore_hint = ""
+    backup_dir = _LOCAL_BACKUP_DIR
+    if backup_dir is not None and backup_dir.is_dir():
+        baks = sorted(backup_dir.glob("*.bak"), reverse=True)
+        if baks:
+            restore_hint = (
+                f"\n  Most recent local backup: {baks[0]}"
+                f"\n  Restore: cp {baks[0]} {DB_PATH}"
+                f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
+            )
+        else:
+            restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
+    else:
+        restore_hint = (
+            f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."
+        )
+    _log.critical("FATAL: commander.db corrupt at startup: %s%s", status, restore_hint)
+    raise RuntimeError(
+        f"commander.db is corrupt (PRAGMA integrity_check: {status})."
+        f" The database cannot be used.{restore_hint}"
+    )
 
 
 def _bkk_midnight_utc() -> str:
@@ -29,6 +71,33 @@ def _bkk_midnight_utc() -> str:
     midnight  = now_bkk.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_mid   = midnight.astimezone(timezone.utc)
     return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def check_db_integrity(db_path: Path) -> str:
+    """Run PRAGMA integrity_check on db_path. Returns 'ok' or an error string."""
+    if not db_path.exists():
+        return f"error: file not found: {db_path}"
+    if db_path.stat().st_size == 0:
+        return "error: database file is empty"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        return row[0] if row else "error: no result from integrity_check"
+    except sqlite3.DatabaseError as exc:
+        return f"error: {exc}"
+    finally:
+        conn.close()
+
+
+def run_wal_checkpoint(db_path: "Path | None" = None) -> tuple:
+    """Run PRAGMA wal_checkpoint(PASSIVE) and return (busy, log, checkpointed)."""
+    path = db_path if db_path is not None else DB_PATH
+    conn = sqlite3.connect(str(path))
+    try:
+        row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        return tuple(row) if row else (0, 0, 0)
+    finally:
+        conn.close()
 
 
 @contextlib.contextmanager
@@ -53,6 +122,10 @@ def get_conn():
 
 
 def init_db():
+    # Integrity guard: detect corruption before DDL so we never silently
+    # 500-loop on a truncated/corrupt DB (issue #1901).
+    _startup_integrity_check()
+
     # Write-access guard: verify the path is writable before attempting DDL.
     try:
         with open(DB_PATH, "a"):

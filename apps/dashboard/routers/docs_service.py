@@ -123,8 +123,9 @@ def get_doc(clone_root: Path, rel_path: str) -> dict:
     if not (in_docs or is_root_allowlist):
         raise HTTPException(status_code=400, detail="Path is not in the allowed doc set")
 
-    # 6. No symlinks
-    if candidate.is_symlink():
+    # 6. No symlinks — test the pre-resolve path; candidate is already resolved and
+    #    Path.resolve() follows every symlink, so candidate.is_symlink() is always False.
+    if (clone_root / rel_path).is_symlink():
         raise HTTPException(status_code=400, detail="Symlinks are not allowed")
 
     # 7. File must exist

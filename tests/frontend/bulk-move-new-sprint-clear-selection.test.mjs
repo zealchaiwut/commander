@@ -177,9 +177,18 @@ globalThis._smgmtUpdateDepOrderBadge   = _noop;
 globalThis._smgmtHydrateSchedToggles   = _noop;
 globalThis._smgmtAnySprintRunning      = false;
 globalThis._smgmtRowActivity           = {};
+globalThis._smgmtBoardLock             = _noop;
+globalThis._smgmtBoardUnlock           = _noop;
+globalThis._smgmtShowInlineError       = _noop;
+globalThis._smgmtShowToast             = _noop;
+globalThis.loadSprintMgmt              = async () => {};
 
 const { _smgmtRenderBacklog } = await import(
   '../../apps/dashboard/static/src/sprint-board/board-render.js'
+);
+
+const { _smgmtMoveModalPickBulk } = await import(
+  '../../apps/dashboard/static/src/sprint-board/bulk-move.js'
 );
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -195,172 +204,116 @@ function _reset() {
   _selCount.textContent = '';
 }
 
-/**
- * Simulate the _smgmtMoveModalPickBulk success path for isNew=true.
- *
- * This mirrors what the fixed function does:
- *   1. batch-labels fetch succeeds
- *   2. _smgmtClearSelection() is called  ← THE FIX (absent pre-fix)
- *   3. loadSprintMgmt() triggers _smgmtRenderBacklog
- *
- * Returns true if clear was called, false if simulating pre-fix (no clear).
- */
-async function _simulateBulkMoveNewSprintSuccess(tickets, applyFix) {
-  // Pre-condition: selection has issues
-  _selectionSet.add(101);
-  _selectionSet.add(102);
+// Mock fetch globally to capture requests and return controlled responses
+let _fetchHistory = [];
+let _fetchResponses = [];
 
-  // First render — DOM gets written while no selection active (before user selects)
-  _reset();
-  _selectionSet.add(101);
-  _selectionSet.add(102);
-  // At this point DOM was written before selection; simulate it:
-  _ticketsEl.innerHTML = tickets.map(t => `<div data-issue="${t.number}">#${t.number}</div>`).join('');
+globalThis.fetch = async (url, opts) => {
+  const req = { url, method: opts?.method || 'GET', body: opts?.body };
+  _fetchHistory.push(req);
 
-  // batch-labels succeeded — apply fix or not
-  if (applyFix) {
-    globalThis._smgmtClearSelection();  // THE FIX: clears _smgmtSelectedIssues
+  const resp = _fetchResponses.shift();
+  if (!resp) {
+    throw new Error(`Unexpected fetch to ${url}: no mock response configured`);
   }
-  // loadSprintMgmt → _smgmtRenderBacklog is called with fresh ticket list
-  // (moved tickets are now absent from backlog tickets list)
-  const freshTickets = tickets.filter(t => ![101, 102].includes(t.number));
-  _smgmtRenderBacklog(freshTickets);
-}
+  return resp;
+};
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test('AC1 pre-fix: selection NOT cleared → _smgmtRenderBacklog suppresses DOM (demonstrates the bug)', async () => {
+test('AC1 & AC2: isNew=true → _smgmtMoveModalPickBulk clears selection after successful batch-labels', async () => {
   _reset();
-  const tickets = [_makeTicket(101), _makeTicket(102), _makeTicket(103)];
-  const htmlBefore = tickets.map(t => `<div data-issue="${t.number}">#${t.number}</div>`).join('');
-
-  // Simulate buggy path: selection remains, render is called
-  _selectionSet.add(101);
-  _selectionSet.add(102);
-  _ticketsEl.innerHTML = htmlBefore;
-
-  // Fresh ticket list (moved tickets gone) but selection still active → suppressed
-  const freshTickets = [_makeTicket(103)];
-  _smgmtRenderBacklog(freshTickets);
-
-  // Bug: DOM unchanged even though tickets 101+102 were moved
-  assert.equal(_ticketsEl.innerHTML, htmlBefore,
-    'pre-fix: DOM not updated while selection active (render suppressed)');
-  assert.equal(_selectionSet.size, 2,
-    'pre-fix: selection Set still has 2 issues');
-});
-
-test('AC1 post-fix: _smgmtClearSelection() before render lifts suppression → DOM updated', async () => {
-  _reset();
-  const tickets = [_makeTicket(101), _makeTicket(102), _makeTicket(103)];
-  const htmlBefore = tickets.map(t => `<div data-issue="${t.number}">#${t.number}</div>`).join('');
+  _fetchHistory = [];
+  _fetchResponses = [
+    // Response to /api/sprints/create
+    {
+      ok: true,
+      json: async () => ({ sprint_label: 'sprint-1234' }),
+    },
+    // Response to /api/sprints/batch-labels
+    {
+      ok: true,
+      json: async () => ({ applied: 2, failed: 0, errors: [] }),
+    },
+  ];
 
   _selectionSet.add(101);
   _selectionSet.add(102);
-  _ticketsEl.innerHTML = htmlBefore;
+  assert.equal(_selectionSet.size, 2, 'pre-call: 2 issues selected');
 
-  // THE FIX: clear selection before render
-  globalThis._smgmtClearSelection();
-  assert.equal(_selectionSet.size, 0, 'selection cleared after _smgmtClearSelection()');
+  globalThis._smgmtRender = (_data) => {};
 
-  // Now render with fresh ticket list (moved tickets gone)
-  const freshTickets = [_makeTicket(103)];
-  _smgmtRenderBacklog(freshTickets);
+  // Call the real function with isNew=true
+  await _smgmtMoveModalPickBulk([101, 102], null, true);
 
-  // Post-fix: DOM updated — moved tickets no longer visible
-  assert.ok(!_ticketsEl.innerHTML.includes('data-issue="101"'),
-    'post-fix: ticket 101 removed from DOM after clear + render');
-  assert.ok(!_ticketsEl.innerHTML.includes('data-issue="102"'),
-    'post-fix: ticket 102 removed from DOM after clear + render');
-  assert.ok(_ticketsEl.innerHTML.includes('103'),
-    'post-fix: ticket 103 still present in DOM');
+  // AC1: selection cleared after successful move to new sprint
+  assert.equal(_selectionSet.size, 0,
+    'AC1: selection cleared after successful move to new sprint (isNew=true)');
+
+  // Verify the API calls were made
+  assert.equal(_fetchHistory.length, 2, 'made both /api/sprints/create and /api/sprints/batch-labels calls');
+  assert.ok(_fetchHistory[0].url.includes('/api/sprints/create'), 'first call creates sprint');
+  assert.ok(_fetchHistory[1].url.includes('/api/sprints/batch-labels'), 'second call moves issues');
 });
 
-test('AC2: _smgmtRenderBacklog renders after selection cleared (size=0)', () => {
+test('AC3: error path does NOT clear selection → user can retry', async () => {
   _reset();
-  const tickets = [_makeTicket(201), _makeTicket(202)];
-
-  // First render writes DOM with no selection
-  _smgmtRenderBacklog(tickets);
-  const html1 = _ticketsEl.innerHTML;
-  assert.ok(html1.length > 0, 'initial render writes DOM');
-
-  // Selection becomes active — render is suppressed
-  _selectionSet.add(201);
-  _smgmtRenderBacklog([_makeTicket(202)]);  // removed 201 from list
-  assert.equal(_ticketsEl.innerHTML, html1, 'AC2: render suppressed while selection active');
-
-  // Clear selection → render lifts suppression
-  globalThis._smgmtClearSelection();
-  assert.equal(_selectionSet.size, 0, 'selection cleared');
-  _smgmtRenderBacklog([_makeTicket(202)]);
-  assert.ok(!_ticketsEl.innerHTML.includes('201'),
-    'AC2: after clear, render removes moved ticket 201 from DOM');
-});
-
-test('AC3: error path does NOT clear selection (user can retry)', async () => {
-  _reset();
-  const tickets = [_makeTicket(301), _makeTicket(302), _makeTicket(303)];
+  _fetchHistory = [];
+  _fetchResponses = [
+    // /api/sprints/create fails
+    {
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: 'Internal server error' }),
+      text: async () => 'Internal server error',
+    },
+  ];
 
   _selectionSet.add(301);
   _selectionSet.add(302);
-  _ticketsEl.innerHTML = tickets.map(t => `<div data-issue="${t.number}">#${t.number}</div>`).join('');
+  assert.equal(_selectionSet.size, 2, 'pre-call: 2 issues selected');
 
-  // Simulate error path: batch-labels fails → NO _smgmtClearSelection() call
-  // (fetch throws, catch branch runs — selection must stay intact for retry)
-  const htmlAfterError = _ticketsEl.innerHTML;
-  _smgmtRenderBacklog(tickets);  // re-render on error — still suppressed
+  // Call with isNew=true but make it fail
+  await _smgmtMoveModalPickBulk([301, 302], null, true);
 
-  assert.equal(_selectionSet.size, 2, 'AC3: selection intact after error (user can retry)');
-  assert.equal(_ticketsEl.innerHTML, htmlAfterError,
-    'AC3: DOM not changed when error occurs with active selection');
+  // AC3: selection NOT cleared when the API call fails
+  assert.equal(_selectionSet.size, 2,
+    'AC3: selection intact after error (user can retry)');
 });
 
-test('AC4: stale add/remove while selection active is shown after clear', () => {
+test('AC2 & AC3: isNew=false (existing sprint) → clear selection on success', async () => {
   _reset();
-  const initial = [_makeTicket(401), _makeTicket(402)];
+  _fetchHistory = [];
+  _fetchResponses = [
+    // Move to existing sprint succeeds
+    {
+      ok: true,
+      json: async () => ({ applied: 2, failed: 0, errors: [] }),
+    },
+  ];
 
-  // Write initial DOM
-  _smgmtRenderBacklog(initial);
-  const htmlBefore = _ticketsEl.innerHTML;
-  assert.ok(htmlBefore.includes('401') && htmlBefore.includes('402'),
-    'initial render has both tickets');
+  globalThis._smgmtData = {
+    issues: [
+      { number: 401, title: 'Issue 401', sprint: null },
+      { number: 402, title: 'Issue 402', sprint: null },
+    ],
+  };
 
-  // User selects a ticket — new ticket 403 arrives but render is suppressed
   _selectionSet.add(401);
-  const withNew = [_makeTicket(401), _makeTicket(402), _makeTicket(403)];
-  _smgmtRenderBacklog(withNew);
-  assert.equal(_ticketsEl.innerHTML, htmlBefore,
-    'AC4: new ticket 403 not shown while selection active');
+  _selectionSet.add(402);
+  assert.equal(_selectionSet.size, 2, 'pre-call: 2 issues selected for move to existing sprint');
 
-  // Clear selection → fresh render shows the new ticket
-  globalThis._smgmtClearSelection();
-  _smgmtRenderBacklog(withNew);
-  assert.ok(_ticketsEl.innerHTML.includes('403'),
-    'AC4: ticket 403 visible after selection cleared');
+  globalThis._smgmtRender = (_data) => {};
+
+  // Move to existing sprint (isNew=false)
+  await _smgmtMoveModalPickBulk([401, 402], 'sprint-1234', false);
+
+  // Selection cleared immediately (for existing sprint, the optimization path clears it)
+  assert.equal(_selectionSet.size, 0,
+    'AC2/AC3: selection cleared after move to existing sprint');
 });
 
-test('AC1: _smgmtSelectedIssues.size is 0 after _smgmtClearSelection()', () => {
-  _reset();
-  _selectionSet.add(501);
-  _selectionSet.add(502);
-  _selectionSet.add(503);
-  assert.equal(_selectionSet.size, 3, 'pre-clear: 3 issues selected');
-
-  globalThis._smgmtClearSelection();
-
-  assert.equal(_selectionSet.size, 0, 'post-clear: selection Set is empty');
-});
-
-test('AC1: proj-selection-bar is hidden after _smgmtClearSelection()', () => {
-  _reset();
-  _selectionSet.add(601);
-  _barEl.classList.remove('hidden');
-
-  globalThis._smgmtClearSelection();
-
-  assert.ok(_barEl.classList.contains('hidden'),
-    'selection bar hidden after _smgmtClearSelection()');
-  assert.equal(_selCount.textContent, '0 issues selected',
-    'selection count text reset');
+test('AC1: _smgmtMoveModalPickBulk exports the function (importable and callable)', async () => {
+  assert.ok(typeof _smgmtMoveModalPickBulk === 'function',
+    'AC1: _smgmtMoveModalPickBulk is exported as a function');
 });

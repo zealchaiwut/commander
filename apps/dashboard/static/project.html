@@ -12371,7 +12371,8 @@ function _smgmtSseFallbackStop(label) {
 /** Start the ≥15 s fallback poll for a label. Polls /api/running and attempts SSE reconnect. */
 function _smgmtSseStartFallback(label, repo) {
   _smgmtSseFallbackStop(label);
-  _smgmtSseFallbackId.set(label, visibilityInterval(async function() {
+  const _vi = typeof visibilityInterval === 'function' ? visibilityInterval : setInterval;
+  _smgmtSseFallbackId.set(label, _vi(async function() {
     if (_smgmtSseEs.has(label)) { _smgmtSseFallbackStop(label); return; }  // SSE came back
     // Attempt SSE reconnect first
     _smgmtSseConnect(label, repo);
@@ -19516,7 +19517,8 @@ function _smgmtLivePollRestart() {
   // First paint: always use /api/running snapshot (issue #1789 cutover from flag #1647).
   _smgmtRunningFirstPaint();
   // Periodic timeline re-fetch (every 10 min) for size/estimate drift.
-  _smgmtTimelineRefreshId = visibilityInterval(_smgmtTimelineRefreshTick, _SMGMT_TIMELINE_REFRESH_MS);
+  const _vi = typeof visibilityInterval === 'function' ? visibilityInterval : setInterval;
+  _smgmtTimelineRefreshId = _vi(_smgmtTimelineRefreshTick, _SMGMT_TIMELINE_REFRESH_MS);
 }
 
 /** First-paint for the Running view via single /api/running snapshot (issue #1789 cutover).
@@ -25780,7 +25782,8 @@ function _bcStopPostPoll() {
 }
 function _bcStartPostPoll() {
   _bcStopPostPoll();
-  _bcPostPollId = visibilityInterval(async () => {
+  const _vi = typeof visibilityInterval === 'function' ? visibilityInterval : setInterval;
+  _bcPostPollId = _vi(async () => {
     if (!_bcPosting || !_bcJobId) { _bcStopPostPoll(); return; }
     try {
       const r = await fetch(`/api/tickets/bulk/${_bcJobId}`);

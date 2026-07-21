@@ -1,4 +1,4 @@
-# Code State — sprint-1005
+# Code State — sprint-1005.2
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,27 +15,28 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1005)
+## Recent Deltas (sprint-1005.2)
 
-Files changed: **7**
+Files changed: **24**
 
-- `tests/` — 3 file(s)
+- `tests/` — 11 file(s)
+- `apps/` — 8 file(s)
+- `docs/` — 2 file(s)
 - `(root)/` — 1 file(s)
-- `apps/` — 1 file(s)
-- `docs/` — 1 file(s)
+- `scripts/` — 1 file(s)
 - `services/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 514 |
+| `apps/dashboard/static/project.html` | 515 |
 | `apps/dashboard/server.py` | 391 |
 | `services/sprint_manager/sprint_manager.py` | 271 |
-| `apps/dashboard/static/dist/bundle.js.map` | 186 |
-| `apps/dashboard/static/dist/bundle.js` | 176 |
+| `apps/dashboard/static/dist/bundle.js.map` | 188 |
+| `apps/dashboard/static/dist/bundle.js` | 178 |
 | `apps/dashboard/static/app.js` | 106 |
-| `CHANGELOG.md` | 100 |
+| `CHANGELOG.md` | 101 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 88 |
 | `apps/dashboard/static/index.html` | 75 |
 | `apps/dashboard/db.py` | 64 |
@@ -44,14 +45,14 @@ Files changed: **7**
 | `apps/dashboard/static/src/sprint-board/history.js` | 46 |
 | `SCHEMA.md` | 41 |
 | `apps/dashboard/github_client.py` | 40 |
-| `apps/dashboard/static/src/sprint-board/index.js` | 38 |
+| `apps/dashboard/static/src/sprint-board/index.js` | 39 |
 | `apps/dashboard/routers/sprint_history_service.py` | 36 |
+| `apps/dashboard/startup.py` | 35 |
 | `services/sprint_manager/estimate_issue.py` | 35 |
-| `apps/dashboard/startup.py` | 34 |
 | `CLAUDE.md` | 30 |
 
 ## Generated
 
-Sprint: `sprint-1005`  
-Timestamp: `2026-07-20T08:27:13Z`  
+Sprint: `sprint-1005.2`  
+Timestamp: `2026-07-21T15:31:39Z`  
 _Generated deterministically — no LLM required._

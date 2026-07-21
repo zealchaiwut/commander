@@ -62,6 +62,7 @@ import {
   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress,
   _smgmtBoardLog, _smgmtBoardFinish, _smgmtBoardHalt,
 } from './board-overlay.js';
+import { _smgmtMoveModalPickBulk } from './bulk-move.js';
 import {
   loadSprintMgmt, _smgmtSprintLabelSortKey, _smgmtRender,
   _smgmtLabelFilterRender, _smgmtLabelFilterApply,
@@ -155,6 +156,9 @@ globalThis._pfStepperSummary = _pfStepperSummary;
 // Kickoff stepper (issue #932)
 globalThis.smgmtKickoffRun = smgmtKickoffRun;
 globalThis.smgmtKickoffRetry = smgmtKickoffRetry;
+
+// Bulk-move modal handler (issue #1924)
+globalThis._smgmtMoveModalPickBulk = _smgmtMoveModalPickBulk;
 
 // Board move-lock overlay (issue #276)
 globalThis._smgmtBoardLock = _smgmtBoardLock;

@@ -4,7 +4,7 @@ Verifies that exceptions in _enrich_home_artifact helper are logged but still ca
 (graceful fallback with observability).
 """
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

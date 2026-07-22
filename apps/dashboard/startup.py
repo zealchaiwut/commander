@@ -113,6 +113,19 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
+# Local rolling backup (issue #1901) — apps/dashboard/backup.py, separate from
+# the gist/repo authority-DB backup above. Loaded by file path so it is not
+# shadowed by the services/sprint_manager/backup.py already on sys.path.
+try:
+    _LOCAL_BAK_PATH = Path(__file__).parent / "backup.py"
+    if _LOCAL_BAK_PATH.exists():
+        _spec = _importlib_util.spec_from_file_location("_dashboard_backup_local", _LOCAL_BAK_PATH)
+        _local_backup_module = _importlib_util.module_from_spec(_spec)
+        _spec.loader.exec_module(_local_backup_module)
+        _local_backup_module.start_local_backup_scheduler()
+except Exception:
+    pass  # local backup is best-effort; never block startup
+
 # Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
 # (and only live) store. Neon is now an optional export target reached solely via
 # scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to

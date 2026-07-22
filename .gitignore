@@ -31,6 +31,9 @@ codedb.snapshot
 *.pid
 *.log
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.bak
 :memory:
 logs/

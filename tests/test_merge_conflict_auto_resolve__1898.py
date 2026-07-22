@@ -432,7 +432,6 @@ class TestConflictStatusEndpoint:
         # Re-import client (already set up above)
         import server as srv
         from fastapi.testclient import TestClient
-        import db as _db
         client2 = TestClient(srv.app, raise_server_exceptions=False)
 
         resp = client2.get("/api/projects/owner/repo/sprints/sprint-104/conflict-status")

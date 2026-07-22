@@ -12,13 +12,10 @@ Acceptance Criteria:
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import httpx
@@ -311,7 +308,7 @@ class TestCompleteStepStructured409:
         import server as srv
 
         db_file = tmp_path / "test_1898.db"
-        monkeypatch.setattr(_db, "DB_PATH", str(db_file))
+        monkeypatch.setattr(_db, "DB_PATH", db_file)
         _db.init_db()
 
         from fastapi.testclient import TestClient
@@ -389,7 +386,7 @@ class TestConflictStatusEndpoint:
         import server as srv
 
         db_file = tmp_path / "test_1898_status.db"
-        monkeypatch.setattr(_db, "DB_PATH", str(db_file))
+        monkeypatch.setattr(_db, "DB_PATH", db_file)
         _db.init_db()
 
         project_root = tmp_path / "project"
@@ -410,7 +407,6 @@ class TestConflictStatusEndpoint:
 
     def test_blocked_after_set(self, client_and_project_root):
         """After _sprint_set_conflict_blocked is called, the endpoint reports blocked=true."""
-        import server as srv
         client, project_root = client_and_project_root
 
         startup._sprint_set_conflict_blocked(project_root, "sprint-104", ["SCHEMA.md", "models.py"])
@@ -451,7 +447,7 @@ class TestLoopDriverContract:
         import server as srv
 
         db_file = tmp_path / "test_1898_loop.db"
-        monkeypatch.setattr(_db, "DB_PATH", str(db_file))
+        monkeypatch.setattr(_db, "DB_PATH", db_file)
         _db.init_db()
 
         from fastapi.testclient import TestClient

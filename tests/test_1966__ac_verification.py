@@ -5,8 +5,6 @@ Acceptance Criteria:
 2. gates._lint_autofix_commit uses git diff --name-only (not git add -A) for staging
 3. Only tracked modified files are staged; untracked files are never swept in
 """
-import os
-import sys
 from pathlib import Path
 
 # Verify the stray test files are removed

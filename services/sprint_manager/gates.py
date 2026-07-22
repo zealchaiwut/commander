@@ -365,7 +365,14 @@ def _lint_autofix_commit(
         branch = br_out.strip()
         if rc_br != 0 or not branch or branch in ("HEAD", base_branch, "master", "develop"):
             return  # detached / on a protected branch — never auto-commit here
-        _run_timed("git", "add", "-A", cwd=git_root)
+        # Stage only tracked files modified by the fixers (not untracked files).
+        # git diff --name-only lists working-tree changes vs index for tracked files only;
+        # untracked files never appear, so stray files cannot be swept in.
+        rc_df, df_out, _ = _run_timed("git", "diff", "--name-only", cwd=git_root)
+        tracked_modified = [f.strip() for f in df_out.splitlines() if f.strip()]
+        if not tracked_modified:
+            return  # fixers made no tracked-file changes — nothing to commit
+        _run_timed("git", "add", "--", *tracked_modified, cwd=git_root)
         rc_ci, _, _ = _run_timed(
             "git", "commit", "-m", f"style: auto-fix lint (issue #{issue_num})",
             cwd=git_root)

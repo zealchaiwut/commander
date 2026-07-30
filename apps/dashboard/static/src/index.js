@@ -187,3 +187,16 @@ root.logsToolbarVisibility = logsToolbarVisibility;
 globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
 globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
 globalThis.logsToolbarVisibility = logsToolbarVisibility;
+
+// Failures inbox tab (issue #2020)
+import {
+  fetchFailures,
+  failuresInit,
+  failuresCategoryChange,
+} from "./failures/failures.js";
+root.fetchFailures = fetchFailures;
+root.failuresInit = failuresInit;
+root.failuresCategoryChange = failuresCategoryChange;
+globalThis.fetchFailures = fetchFailures;
+globalThis.failuresInit = failuresInit;
+globalThis.failuresCategoryChange = failuresCategoryChange;

@@ -8993,6 +8993,26 @@ Proceed anyway?`)) {
     return resp.json();
   }
 
+  // apps/dashboard/static/src/home/live-refresh.js
+  var REPORT_REFRESH_INTERVAL_MS = 2e4;
+  function startDevReportAutoRefresh({
+    fetchFn,
+    interval = REPORT_REFRESH_INTERVAL_MS,
+    onUpdate
+  } = {}) {
+    const tick = async () => {
+      try {
+        await fetchFn();
+        if (typeof onUpdate === "function") {
+          onUpdate((/* @__PURE__ */ new Date()).toISOString());
+        }
+      } catch (_) {
+      }
+    };
+    const handle = visibilityInterval(tick, interval);
+    return () => clearInterval(handle);
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -9088,5 +9108,9 @@ Proceed anyway?`)) {
   globalThis.failuresCategoryChange = failuresCategoryChange;
   root.fetchRunReasoning = fetchRunReasoning;
   globalThis.fetchRunReasoning = fetchRunReasoning;
+  root.startDevReportAutoRefresh = startDevReportAutoRefresh;
+  root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+  globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
+  globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
 })();
 //# sourceMappingURL=bundle.js.map

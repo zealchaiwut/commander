@@ -642,6 +642,16 @@
         background: var(--surface);
       }
 
+      /* ── live-refresh indicator (issue #2023) ── */
+      .dr-live-ts {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: var(--mono);
+        white-space: nowrap;
+        margin-left: 2px;
+        min-width: 0;
+      }
+
       /* ── reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
         .pbstatus.run .d,
@@ -697,6 +707,13 @@
         <button class="nav-btn" id="refresh-btn" onclick="loadReport(_curDate)">
           Refresh
         </button>
+        <span
+          id="dr-live-ts"
+          class="dr-live-ts"
+          aria-live="polite"
+          role="status"
+          title="Last auto-refreshed"
+        ></span>
         <span class="date-pick-wrap">
           <button
             class="nav-btn"
@@ -756,6 +773,9 @@
 
       let _curDate = null;
       let _projBySlug = {};
+
+      // ── live auto-refresh (issue #2023) ──────────────────────────────────────
+      var REPORT_REFRESH_INTERVAL_MS = 20000; // 20 s
 
       const PBIC_PALETTE = new Set([
         "gray",
@@ -1280,7 +1300,29 @@
         return true;
       }
 
-      init();
+      // ── live-refresh badge helper (issue #2023) ───────────────────────────────
+      function _updateLiveBadge() {
+        var el = document.getElementById("dr-live-ts");
+        if (!el) return;
+        var t = new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        el.textContent = "live \xB7 " + t; // "live · HH:MM"
+      }
+
+      // Start visibility-aware auto-refresh after the initial report loads.
+      // visibilityInterval() is provided by /static/visibility.js (already
+      // loaded above) — it pauses while the tab is hidden and fires a
+      // catch-up tick when the tab becomes visible again.
+      init()
+        .then(function () {
+          visibilityInterval(async function _devReportTick() {
+            await loadReport(_curDate);
+            _updateLiveBadge();
+          }, REPORT_REFRESH_INTERVAL_MS);
+        })
+        .catch(function () {});
     </script>
   </body>
 </html>

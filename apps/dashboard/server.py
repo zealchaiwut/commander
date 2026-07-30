@@ -227,6 +227,7 @@ from routers import (  # noqa: E402
     llm_provider_router,
     running_router,
     dev_report_router,
+    failures_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -317,6 +318,7 @@ app.include_router(docs_router)
 app.include_router(agent_guide_router)
 app.include_router(changelog_router)
 app.include_router(estimate_jobs_router)
+app.include_router(failures_router)
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

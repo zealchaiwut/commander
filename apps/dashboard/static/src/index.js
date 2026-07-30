@@ -205,3 +205,13 @@ globalThis.failuresCategoryChange = failuresCategoryChange;
 import { fetchRunReasoning } from "./reasoning.js";
 root.fetchRunReasoning = fetchRunReasoning;
 globalThis.fetchRunReasoning = fetchRunReasoning;
+
+// Dev Report live auto-refresh (issue #2023)
+import {
+  startDevReportAutoRefresh,
+  REPORT_REFRESH_INTERVAL_MS,
+} from "./home/live-refresh.js";
+root.startDevReportAutoRefresh = startDevReportAutoRefresh;
+root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
+globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;

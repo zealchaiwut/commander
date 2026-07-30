@@ -8985,6 +8985,14 @@ Proceed anyway?`)) {
     failuresInit2();
   }
 
+  // apps/dashboard/static/src/reasoning.js
+  async function fetchRunReasoning(runId) {
+    const resp = await fetch("/api/runs/" + encodeURIComponent(runId) + "/reasoning");
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -9078,5 +9086,7 @@ Proceed anyway?`)) {
   globalThis.fetchFailures = fetchFailures;
   globalThis.failuresInit = failuresInit2;
   globalThis.failuresCategoryChange = failuresCategoryChange;
+  root.fetchRunReasoning = fetchRunReasoning;
+  globalThis.fetchRunReasoning = fetchRunReasoning;
 })();
 //# sourceMappingURL=bundle.js.map

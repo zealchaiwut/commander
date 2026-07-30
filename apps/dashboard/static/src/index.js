@@ -200,3 +200,8 @@ root.failuresCategoryChange = failuresCategoryChange;
 globalThis.fetchFailures = fetchFailures;
 globalThis.failuresInit = failuresInit;
 globalThis.failuresCategoryChange = failuresCategoryChange;
+
+// Run reasoning panel fetch helper (issue #2022)
+import { fetchRunReasoning } from "./reasoning.js";
+root.fetchRunReasoning = fetchRunReasoning;
+globalThis.fetchRunReasoning = fetchRunReasoning;

@@ -32,6 +32,7 @@ from .runs_service import (  # noqa: E402
     DEFAULT_TAIL_LINES,
     get_issue_log_tail,
     get_log_path_from_db,
+    get_run_reasoning,
     list_runs,
     read_log_page,
     read_log_tail,
@@ -157,6 +158,34 @@ def get_issue_log_tail_endpoint(
     {found: false, candidate_paths: [...], tail: ""}.
     """
     return get_issue_log_tail(sprint, issue, project, tail_lines)
+
+
+@router.get("/api/runs/{agent_run_id}/reasoning")
+def get_run_reasoning_endpoint(agent_run_id: int) -> Any:
+    """Return the persisted reasoning narrative for a completed agent run (issue #2022).
+
+    Reads ``final_message``, ``transcript_path``, and a fresh ``log_tail`` from
+    the ``agent_runs`` row keyed by ``agent_run_id``.
+
+    Returns
+    -------
+    {
+      "final_message": str | null,
+      "transcript_path": str | null,
+      "log_tail": str | null
+    }
+
+    Status codes:
+      200  — run found; fields may be null when the run closed before #2021 shipped
+      404  — no agent_runs row with this id
+    """
+    result = get_run_reasoning(agent_run_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run {agent_run_id} not found",
+        )
+    return result
 
 
 @router.get("/runs/{sprint}/{issue}/{agent}/log/tail")

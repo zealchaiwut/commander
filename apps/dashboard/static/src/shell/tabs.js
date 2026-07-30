@@ -5,10 +5,10 @@
  */
 /* global _slug, _activeTab, _cachedFullRepo, _ticketsLoaded, _sprintMgmtLoaded,
           loadSprintMgmt, loadTickets, _smgmtArInit, _smgmtArStartTicker,
-          _smgmtLivePollId, _smgmtLogPollId, _statusRefreshId, logsDestroy, deployTabDestroy,
-          deployTabInit, metricsInit,
+          _smgmtLivePollId, _smgmtLogPollId, deployTabDestroy,
+          deployTabInit,
           roadmapInit, advInit, projSettingsInit, settingsInitValues, settingsPopulateRepos,
-          globalSettingsLoad, _bcInitTab, _lpRenderBc, logsInit, _deepLinkSprintSubView,
+          globalSettingsLoad, _bcInitTab, _lpRenderBc, _deepLinkSprintSubView,
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
           _globalSettingsLinkActive, _evlState, parseUrl, _arTickerId, _arInterval,
           failuresInit */
@@ -17,7 +17,7 @@
 // can assign tabIndex=0 to the group trigger without relying on .active class
 // state being set first (fixes issue #1175).
 const _GROUP_CHILDREN = {
-  manage: ["logs", "deploy", "bulk-create"],
+  manage: ["deploy", "bulk-create"],
   planning: [
     "roadmap",
     "advisor",
@@ -31,7 +31,7 @@ const _GROUP_CHILDREN = {
  */
 export function computeRovingTabindex(tab, onGlobalSettings) {
   return Object.fromEntries(
-    ["sprint-mgmt", "tickets", "metrics", "failures", "manage", "planning", "settings"].map((t) => {
+    ["sprint-mgmt", "tickets", "failures", "manage", "planning", "settings"].map((t) => {
       const ownsTab =
         !onGlobalSettings &&
         (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
@@ -41,10 +41,9 @@ export function computeRovingTabindex(tab, onGlobalSettings) {
 }
 
 export function switchTab(tab, pushHistory) {
-  let _statusDeepLink = false;
-  if (tab === "status") {
-    tab = "metrics";
-    _statusDeepLink = true;
+  // Removed tabs (#2025): redirect to failures instead of blank pane.
+  if (tab === "metrics" || tab === "logs" || tab === "status") {
+    tab = "failures";
   }
 
   if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {
@@ -55,17 +54,6 @@ export function switchTab(tab, pushHistory) {
     if (_smgmtLogPollId !== null) {
       clearInterval(_smgmtLogPollId);
       _smgmtLogPollId = null;
-    }
-  }
-
-  if (_activeTab === "logs" && tab !== "logs") {
-    logsDestroy();
-  }
-
-  if (_activeTab === "metrics" && tab !== "metrics") {
-    if (_statusRefreshId !== null) {
-      clearInterval(_statusRefreshId);
-      _statusRefreshId = null;
     }
   }
 
@@ -85,7 +73,6 @@ export function switchTab(tab, pushHistory) {
   const _topLevelTabs = [
     "sprint-mgmt",
     "tickets",
-    "metrics",
     "failures",
     "manage",
     "planning",
@@ -94,10 +81,8 @@ export function switchTab(tab, pushHistory) {
   [
     "sprint-mgmt",
     "tickets",
-    "logs",
     "deploy",
     "bulk-create",
-    "metrics",
     "roadmap",
     "advisor",
     "failures",
@@ -125,7 +110,7 @@ export function switchTab(tab, pushHistory) {
     btn.tabIndex = _rovingMap[t];
   });
   closeAllStabDropdowns();
-  ["analytics", "more", "planning", "manage"].forEach((groupName) => {
+  ["planning", "manage"].forEach((groupName) => {
     const group = document.getElementById("stab-group-" + groupName);
     if (!group) return;
     const trigger = group.querySelector(".stab-trigger");
@@ -136,10 +121,8 @@ export function switchTab(tab, pushHistory) {
   [
     "sprint-mgmt",
     "tickets",
-    "logs",
     "deploy",
     "bulk-create",
-    "metrics",
     "roadmap",
     "advisor",
     "failures",
@@ -177,14 +160,7 @@ export function switchTab(tab, pushHistory) {
     _bcInitTab();
     _lpRenderBc();
   }
-  if (tab === "logs") logsInit();
   if (tab === "deploy") deployTabInit();
-  if (tab === "metrics") {
-    metricsInit();
-    if (_statusDeepLink && typeof window.anlShowTab === "function") {
-      window.anlShowTab("status");
-    }
-  }
   if (tab === "roadmap") roadmapInit();
   if (tab === "advisor") advInit();
   if (tab === "failures") failuresInit();
@@ -251,10 +227,8 @@ if (_subTabsEl) {
     const enabledTabs = [
       "sprint-mgmt",
       "tickets",
-      "metrics",
       "failures",
       "manage",
-      "logs",
       "deploy",
       "planning",
       "roadmap",

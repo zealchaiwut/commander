@@ -743,7 +743,7 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "metrics", "failures", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
@@ -790,6 +790,7 @@
       "sprint-mgmt",
       "tickets",
       "metrics",
+      "failures",
       "manage",
       "planning",
       "settings"
@@ -808,6 +809,7 @@
       "notes",
       "roadmap",
       "advisor",
+      "failures",
       "settings"
     ].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
@@ -848,6 +850,7 @@
       "notes",
       "roadmap",
       "advisor",
+      "failures",
       "settings",
       "global-settings"
     ].forEach((t) => {
@@ -905,6 +908,8 @@
       roadmapInit();
     if (tab === "advisor")
       advInit();
+    if (tab === "failures")
+      failuresInit();
     if (tab === "settings")
       projSettingsInit();
     if (tab === "global-settings") {
@@ -956,10 +961,11 @@
       const enabledTabs = [
         "sprint-mgmt",
         "tickets",
+        "metrics",
+        "failures",
         "manage",
         "logs",
         "deploy",
-        "metrics",
         "planning",
         "roadmap",
         "advisor",
@@ -8904,6 +8910,81 @@ Proceed anyway?`)) {
     };
   }
 
+  // apps/dashboard/static/src/failures/failures.js
+  async function fetchFailures(project, category) {
+    let url = "/api/failures?project=" + encodeURIComponent(project);
+    if (category)
+      url += "&category=" + encodeURIComponent(category);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  function _escHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _fmtTs(ts) {
+    if (!ts)
+      return "";
+    try {
+      const d = new Date(ts);
+      return d.toLocaleString(void 0, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch (_) {
+      return String(ts);
+    }
+  }
+  function _renderRows(rows) {
+    if (!rows || rows.length === 0) {
+      return '<tr><td colspan="7" class="fbox-empty">No failures</td></tr>';
+    }
+    return rows.map(function(r) {
+      const issueLink = r.issue_number ? '<span class="fbox-issue">#' + _escHtml(r.issue_number) + "</span>" : "<span>\u2014</span>";
+      const sprint = r.sprint_label ? _escHtml(r.sprint_label) : "\u2014";
+      const agent = r.agent ? _escHtml(r.agent) : "\u2014";
+      const category = r.category ? _escHtml(r.category) : "\u2014";
+      const reason = r.reason ? '<span title="' + _escHtml(r.reason) + '">' + _escHtml(r.reason.length > 60 ? r.reason.slice(0, 60) + "\u2026" : r.reason) + "</span>" : "\u2014";
+      const ts = _fmtTs(r.ts);
+      const logCell = r.log_url ? '<a class="fbox-log-link" href="' + _escHtml(r.log_url) + '" target="_blank" rel="noopener">View log</a>' : "\u2014";
+      return "<tr><td>" + issueLink + "</td><td>" + sprint + "</td><td>" + agent + '</td><td><span class="fbox-cat">' + category + "</span></td><td>" + reason + '</td><td class="fbox-ts">' + ts + "</td><td>" + logCell + "</td></tr>";
+    }).join("");
+  }
+  function _setLoading(el, msg) {
+    el.innerHTML = '<div class="fbox-state"><i class="ti ti-loader fbox-spinner"></i>' + _escHtml(msg) + "</div>";
+  }
+  function _setError(el, msg) {
+    el.innerHTML = '<div class="fbox-state fbox-state-error"><i class="ti ti-alert-circle"></i>' + _escHtml(msg) + "</div>";
+  }
+  var _currentCategory = "";
+  function _getProject() {
+    return typeof _projectData !== "undefined" && _projectData ? _projectData.repo || "" : "";
+  }
+  function failuresInit2() {
+    const root2 = document.getElementById("fbox-root");
+    if (!root2)
+      return;
+    const project = _getProject();
+    if (!project) {
+      _setError(root2, "No project selected.");
+      return;
+    }
+    _setLoading(root2, "Loading failures\u2026");
+    const cat = _currentCategory;
+    fetchFailures(project, cat).then(function(rows) {
+      root2.innerHTML = '<table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table>";
+    }).catch(function(err) {
+      _setError(root2, "Failed to load failures");
+    });
+  }
+  function failuresCategoryChange(value) {
+    _currentCategory = value || "";
+    failuresInit2();
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -8991,5 +9072,11 @@ Proceed anyway?`)) {
   globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
   globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
   globalThis.logsToolbarVisibility = logsToolbarVisibility;
+  root.fetchFailures = fetchFailures;
+  root.failuresInit = failuresInit2;
+  root.failuresCategoryChange = failuresCategoryChange;
+  globalThis.fetchFailures = fetchFailures;
+  globalThis.failuresInit = failuresInit2;
+  globalThis.failuresCategoryChange = failuresCategoryChange;
 })();
 //# sourceMappingURL=bundle.js.map

@@ -27,6 +27,7 @@ _HTML_NO_CACHE_HEADERS = {
 _VALID_PROJECT_TABS = {
     "sprint-mgmt", "tickets", "logs", "sprint-history",
     "status", "metrics", "notes", "settings", "global-settings", "roadmap",
+    "failures",
 }
 
 

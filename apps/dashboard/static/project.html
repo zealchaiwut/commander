@@ -10029,6 +10029,65 @@
       .deploy-card__confirm-msg { min-width: 0; }
     }
 
+    /* ── Failures inbox tab (issue #2020) ── */
+    .fbox-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+    }
+    .fbox-title {
+      font-size: 18px; font-weight: 700; color: var(--text); margin: 0;
+    }
+    .fbox-controls { display: flex; align-items: center; gap: 8px; }
+    .fbox-cat-label { font-size: 13px; color: var(--text-sub); }
+    .fbox-cat-select {
+      font-size: 13px; padding: 4px 8px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    .fbox-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .fbox-table th {
+      text-align: left; padding: 8px 12px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .fbox-table td {
+      padding: 10px 12px; border-bottom: 1px solid var(--border-faint, var(--border));
+      color: var(--text); vertical-align: middle;
+    }
+    .fbox-table tr:last-child td { border-bottom: none; }
+    .fbox-table tr:hover td { background: var(--surface-hover); }
+    .fbox-issue { font-weight: 600; color: var(--accent); }
+    .fbox-cat {
+      font-size: 11px; font-weight: 600; padding: 2px 7px;
+      border-radius: 4px; background: var(--amber-bg, #fde68a);
+      color: var(--amber, #92400e);
+    }
+    .fbox-ts { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+    .fbox-log-link {
+      color: var(--accent); text-decoration: none; font-size: 12px;
+    }
+    .fbox-log-link:hover { text-decoration: underline; }
+    .fbox-state {
+      display: flex; align-items: center; gap: 10px;
+      padding: 32px 0; color: var(--text-muted); font-size: 14px;
+    }
+    .fbox-state-error { color: var(--red, #ef4444); }
+    .fbox-spinner { animation: fbox-spin 1s linear infinite; }
+    @keyframes fbox-spin { to { transform: rotate(360deg); } }
+    .fbox-empty {
+      text-align: center; padding: 40px 0;
+      color: var(--text-muted); font-size: 14px;
+    }
+    @media (max-width: 600px) {
+      .fbox-table th:nth-child(3),
+      .fbox-table td:nth-child(3),
+      .fbox-table th:nth-child(5),
+      .fbox-table td:nth-child(5) { display: none; }
+    }
+
   </style>
 </head>
 <body>
@@ -10225,6 +10284,11 @@
         <button class="stab" role="tab" id="stab-metrics"
                 aria-selected="false" tabindex="-1" onclick="switchTab('metrics')">
           <i class="ti ti-chart-bar"></i>Analytics
+        </button>
+        <!-- Failures inbox: top-level tab (issue #2020) -->
+        <button class="stab" role="tab" id="stab-failures"
+                aria-selected="false" tabindex="-1" onclick="switchTab('failures')">
+          <i class="ti ti-alert-circle"></i>Failures
         </button>
         <!-- Manage: Logs + Deploy -->
         <div class="stab-group" id="stab-group-manage">
@@ -11851,6 +11915,29 @@
           <div class="adv-empty">No suggestions yet — click <strong>Run advisor</strong> to generate recommendations.</div>
         </div>
       </div><!-- /pane-advisor -->
+
+      <!-- Failures inbox tab (issue #2020) -->
+      <div class="tab-pane" id="pane-failures" role="tabpanel" aria-labelledby="stab-failures">
+        <div class="fbox-header">
+          <h2 class="fbox-title"><i class="ti ti-alert-circle" style="margin-right:8px;vertical-align:-2px;"></i>Failures</h2>
+          <div class="fbox-controls">
+            <label class="fbox-cat-label" for="fbox-cat-select">Category</label>
+            <select id="fbox-cat-select" class="fbox-cat-select"
+                    aria-label="Filter by category"
+                    onchange="failuresCategoryChange(this.value)">
+              <option value="">All categories</option>
+              <option value="timed_out">timed_out</option>
+              <option value="failed">failed</option>
+              <option value="gate_failed">gate_failed</option>
+              <option value="design_docs_missing">design_docs_missing</option>
+              <option value="no_tests">no_tests</option>
+            </select>
+          </div>
+        </div>
+        <div id="fbox-root">
+          <div class="fbox-state"><i class="ti ti-loader fbox-spinner"></i>Loading failures…</div>
+        </div>
+      </div><!-- /pane-failures -->
 
     </div>
   </div>

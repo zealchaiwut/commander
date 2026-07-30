@@ -732,11 +732,6 @@
   var _GROUP_CHILDREN = {
     manage: ["logs", "deploy", "bulk-create"],
     planning: [
-      "timeline",
-      "compare",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor"
     ]
@@ -801,12 +796,7 @@
       "logs",
       "deploy",
       "bulk-create",
-      "timeline",
-      "compare",
       "metrics",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor",
       "failures",
@@ -842,12 +832,7 @@
       "logs",
       "deploy",
       "bulk-create",
-      "timeline",
-      "compare",
       "metrics",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor",
       "failures",
@@ -888,22 +873,12 @@
       logsInit();
     if (tab === "deploy")
       deployTabInit();
-    if (tab === "timeline")
-      ganttInit();
-    if (tab === "compare")
-      compareInit();
     if (tab === "metrics") {
       metricsInit();
       if (_statusDeepLink && typeof window.anlShowTab === "function") {
         window.anlShowTab("status");
       }
     }
-    if (tab === "est-vs-actual")
-      evaInit();
-    if (tab === "calibration")
-      calibInit();
-    if (tab === "notes")
-      notesInit();
     if (tab === "roadmap")
       roadmapInit();
     if (tab === "advisor")

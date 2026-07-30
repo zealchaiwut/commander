@@ -730,7 +730,7 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["logs", "deploy", "bulk-create"],
+    manage: ["deploy", "bulk-create"],
     planning: [
       "roadmap",
       "advisor"
@@ -738,17 +738,15 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "metrics", "failures", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "failures", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
     );
   }
   function switchTab(tab, pushHistory) {
-    let _statusDeepLink = false;
-    if (tab === "status") {
-      tab = "metrics";
-      _statusDeepLink = true;
+    if (tab === "metrics" || tab === "logs" || tab === "status") {
+      tab = "failures";
     }
     if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {
       if (_smgmtLivePollId !== null) {
@@ -758,15 +756,6 @@
       if (_smgmtLogPollId !== null) {
         clearInterval(_smgmtLogPollId);
         _smgmtLogPollId = null;
-      }
-    }
-    if (_activeTab === "logs" && tab !== "logs") {
-      logsDestroy();
-    }
-    if (_activeTab === "metrics" && tab !== "metrics") {
-      if (_statusRefreshId !== null) {
-        clearInterval(_statusRefreshId);
-        _statusRefreshId = null;
       }
     }
     if (_activeTab === "deploy" && tab !== "deploy") {
@@ -784,7 +773,6 @@
     const _topLevelTabs = [
       "sprint-mgmt",
       "tickets",
-      "metrics",
       "failures",
       "manage",
       "planning",
@@ -793,10 +781,8 @@
     [
       "sprint-mgmt",
       "tickets",
-      "logs",
       "deploy",
       "bulk-create",
-      "metrics",
       "roadmap",
       "advisor",
       "failures",
@@ -818,7 +804,7 @@
       btn.tabIndex = _rovingMap[t];
     });
     closeAllStabDropdowns();
-    ["analytics", "more", "planning", "manage"].forEach((groupName) => {
+    ["planning", "manage"].forEach((groupName) => {
       const group = document.getElementById("stab-group-" + groupName);
       if (!group)
         return;
@@ -829,10 +815,8 @@
     [
       "sprint-mgmt",
       "tickets",
-      "logs",
       "deploy",
       "bulk-create",
-      "metrics",
       "roadmap",
       "advisor",
       "failures",
@@ -869,16 +853,8 @@
       _bcInitTab();
       _lpRenderBc();
     }
-    if (tab === "logs")
-      logsInit();
     if (tab === "deploy")
       deployTabInit();
-    if (tab === "metrics") {
-      metricsInit();
-      if (_statusDeepLink && typeof window.anlShowTab === "function") {
-        window.anlShowTab("status");
-      }
-    }
     if (tab === "roadmap")
       roadmapInit();
     if (tab === "advisor")
@@ -936,10 +912,8 @@
       const enabledTabs = [
         "sprint-mgmt",
         "tickets",
-        "metrics",
         "failures",
         "manage",
-        "logs",
         "deploy",
         "planning",
         "roadmap",

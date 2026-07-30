@@ -25,9 +25,10 @@ _HTML_NO_CACHE_HEADERS = {
 }
 
 _VALID_PROJECT_TABS = {
-    "sprint-mgmt", "tickets", "logs", "sprint-history",
-    "status", "metrics", "notes", "settings", "global-settings", "roadmap",
+    "sprint-mgmt", "tickets", "sprint-history",
+    "notes", "settings", "global-settings", "roadmap",
     "failures",
+    # "logs", "metrics", "status" removed in #2025 — kept as redirects below
 }
 
 
@@ -120,8 +121,30 @@ async def project_slug_no_tab(slug: str):
 
 @router.get("/project/{slug}/analytics")
 async def project_slug_analytics(slug: str):
-    """Retired standalone analytics page — permanent redirect to in-chrome Analytics tab."""
-    return RedirectResponse(url=f"/project/{slug}/metrics", status_code=301)
+    """Retired standalone analytics page — redirect to Failures inbox."""
+    return RedirectResponse(url=f"/project/{slug}/failures", status_code=301)
+
+
+# ── Removed-tab redirects (issue #2025) ──────────────────────────────────────
+# Analytics (metrics), Logs, and Status deep-links redirect to Failures inbox.
+# Backend routes for these areas are preserved in their respective routers.
+
+@router.get("/project/{slug}/metrics")
+async def project_slug_metrics(slug: str):
+    """Analytics tab removed (#2025) — redirect to Failures inbox."""
+    return RedirectResponse(url=f"/project/{slug}/failures", status_code=302)
+
+
+@router.get("/project/{slug}/logs")
+async def project_slug_logs(slug: str):
+    """Logs tab removed (#2025) — redirect to Failures inbox."""
+    return RedirectResponse(url=f"/project/{slug}/failures", status_code=302)
+
+
+@router.get("/project/{slug}/status")
+async def project_slug_status(slug: str):
+    """Status deep-link removed (#2025) — redirect to Failures inbox."""
+    return RedirectResponse(url=f"/project/{slug}/failures", status_code=302)
 
 
 @router.get("/project/{slug}/{tab}")

@@ -6,7 +6,7 @@
 /* global _slug, _activeTab, _cachedFullRepo, _ticketsLoaded, _sprintMgmtLoaded,
           loadSprintMgmt, loadTickets, _smgmtArInit, _smgmtArStartTicker,
           _smgmtLivePollId, _smgmtLogPollId, _statusRefreshId, logsDestroy, deployTabDestroy,
-          deployTabInit, ganttInit, compareInit, metricsInit, evaInit, calibInit, notesInit,
+          deployTabInit, metricsInit,
           roadmapInit, advInit, projSettingsInit, settingsInitValues, settingsPopulateRepos,
           globalSettingsLoad, _bcInitTab, _lpRenderBc, logsInit, _deepLinkSprintSubView,
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
@@ -19,11 +19,6 @@
 const _GROUP_CHILDREN = {
   manage: ["logs", "deploy", "bulk-create"],
   planning: [
-    "timeline",
-    "compare",
-    "est-vs-actual",
-    "calibration",
-    "notes",
     "roadmap",
     "advisor",
   ],
@@ -102,12 +97,7 @@ export function switchTab(tab, pushHistory) {
     "logs",
     "deploy",
     "bulk-create",
-    "timeline",
-    "compare",
     "metrics",
-    "est-vs-actual",
-    "calibration",
-    "notes",
     "roadmap",
     "advisor",
     "failures",
@@ -149,12 +139,7 @@ export function switchTab(tab, pushHistory) {
     "logs",
     "deploy",
     "bulk-create",
-    "timeline",
-    "compare",
     "metrics",
-    "est-vs-actual",
-    "calibration",
-    "notes",
     "roadmap",
     "advisor",
     "failures",
@@ -194,17 +179,12 @@ export function switchTab(tab, pushHistory) {
   }
   if (tab === "logs") logsInit();
   if (tab === "deploy") deployTabInit();
-  if (tab === "timeline") ganttInit();
-  if (tab === "compare") compareInit();
   if (tab === "metrics") {
     metricsInit();
     if (_statusDeepLink && typeof window.anlShowTab === "function") {
       window.anlShowTab("status");
     }
   }
-  if (tab === "est-vs-actual") evaInit();
-  if (tab === "calibration") calibInit();
-  if (tab === "notes") notesInit();
   if (tab === "roadmap") roadmapInit();
   if (tab === "advisor") advInit();
   if (tab === "failures") failuresInit();

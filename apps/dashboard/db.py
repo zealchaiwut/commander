@@ -1485,7 +1485,9 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             log_path         TEXT,
             provider         TEXT,
             is_ica           INTEGER DEFAULT 0,
-            cost_usd         REAL
+            cost_usd         REAL,
+            final_message    TEXT,
+            transcript_path  TEXT
         )
         """
     )
@@ -1517,6 +1519,11 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         # cost_usd is the pre-computed USD estimate stored atomically at run close.
         ("is_ica", "INTEGER DEFAULT 0"),
         ("cost_usd", "REAL"),
+        # Durable agent narrative tail + Claude Code transcript path (issue #2021).
+        # final_message: last ~4 KB of the run log, populated at run close.
+        # transcript_path: absolute path to the Claude Code session JSONL, when known.
+        ("final_message", "TEXT"),
+        ("transcript_path", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -1600,6 +1607,40 @@ def _duration_between(started_at: str | None, finished_at: str | None) -> int | 
     return round((f - s).total_seconds())
 
 
+def _read_log_tail(log_path: str | None, max_bytes: int = 4096) -> str | None:
+    """Return the last ``max_bytes`` of a log file as a decoded UTF-8 string.
+
+    Called at run-close to populate ``final_message`` in ``agent_runs``
+    (issue #2021 AC2). The bound (default 4 KB ≈ ~100 lines) prevents the
+    87 MB DB from bloating over many runs.
+
+    Best-effort: returns ``None`` when ``log_path`` is absent, unreadable,
+    or the file is empty — never raises, so a missing log can never break
+    run recording or the sprint loop.
+
+    Testable entry-point (AC4): import and call directly with a fake log path
+    and a temp ``agent_runs`` DB — no full sprint required.
+    """
+    if not log_path:
+        return None
+    try:
+        with open(log_path, "rb") as fh:
+            fh.seek(0, 2)  # seek to end
+            size = fh.tell()
+            if size == 0:
+                return None
+            seek_to = max(0, size - max_bytes)
+            fh.seek(seek_to)
+            raw = fh.read(max_bytes)
+        text = raw.decode("utf-8", errors="replace")
+        # If we seeked mid-file, drop the likely-truncated first line.
+        if seek_to > 0 and "\n" in text:
+            text = text[text.index("\n") + 1:]
+        return text.strip() or None
+    except Exception:
+        return None
+
+
 def record_agent_start(
     issue_number: int,
     sprint_label: str,
@@ -1657,6 +1698,7 @@ def record_agent_finish(
     run_id: int | None = None,
     is_ica: bool = False,
     cost_usd: float | None = None,
+    transcript_path: str | None = None,
 ) -> None:
     """Close the open agent_runs row with finish time, duration and outcome (#764).
 
@@ -1666,6 +1708,9 @@ def record_agent_finish(
     monotonic measurement — issue #764 AC3); when omitted it is computed from the
     start/finish timestamps. `is_ica` and `cost_usd` are written atomically with
     the finish record for ICA metered-path runs (issue #1672 AC4).
+    `final_message` is populated from the tail of the stored `log_path` via
+    `_read_log_tail` (issue #2021 AC2). `transcript_path` is stored when
+    supplied by the caller (issue #2021 AC2).
     Best-effort: never raises into the sprint loop.
     """
     finished_at = finished_at or _now_iso()
@@ -1673,11 +1718,11 @@ def record_agent_finish(
         _create_agent_runs_table(conn)
         if run_id is not None:
             row = conn.execute(
-                "SELECT id, started_at FROM agent_runs WHERE id = ?", (run_id,)
+                "SELECT id, started_at, log_path FROM agent_runs WHERE id = ?", (run_id,)
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT id, started_at FROM agent_runs "
+                "SELECT id, started_at, log_path FROM agent_runs "
                 "WHERE issue_number = ? AND sprint_label = ? AND agent = ? "
                 "AND finished_at IS NULL "
                 "ORDER BY id DESC LIMIT 1",
@@ -1687,9 +1732,11 @@ def record_agent_finish(
             return
         if duration_seconds is None:
             duration_seconds = _duration_between(row["started_at"], finished_at)
+        final_message = _read_log_tail(row["log_path"])
         conn.execute(
             "UPDATE agent_runs SET finished_at = ?, duration_seconds = ?, "
-            "outcome = ?, total_tokens = ?, is_ica = ?, cost_usd = ? WHERE id = ?",
+            "outcome = ?, total_tokens = ?, is_ica = ?, cost_usd = ?, "
+            "final_message = ?, transcript_path = ? WHERE id = ?",
             (
                 finished_at,
                 None if duration_seconds is None else int(duration_seconds),
@@ -1697,6 +1744,8 @@ def record_agent_finish(
                 None if total_tokens is None else int(total_tokens),
                 1 if is_ica else 0,
                 cost_usd,
+                final_message,
+                transcript_path,
                 row["id"],
             ),
         )

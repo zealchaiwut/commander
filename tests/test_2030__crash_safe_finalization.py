@@ -11,6 +11,21 @@ AC-3  Behavioral tests: inject a documenter/worktree RuntimeError → assert a
 All tests use mocked boundaries and assert observed behavior, not source-text
 patterns.  Per CLAUDE.md issue #1746.
 
+Git-isolation guarantee
+-----------------------
+Every test in this module is guarded by the ``git_no_mutation`` autouse fixture.
+That fixture records ``git rev-parse HEAD`` before each test and asserts it is
+identical afterward.  Any test that inadvertently lets the sprint-end machinery
+run ``git commit`` or ``git add`` against the repo will FAIL with a clear message
+showing the before/after SHAs.
+
+The root cause that motivated this guard: ``_generate_code_state_snapshot``
+(and ``_write_sprint_brief``) were not stubbed in the first revision of the test
+file.  Because ``_CODE_STATE_AVAILABLE`` is True in this repo, the snapshot step
+ran for real on every documenter-crash test and committed a new
+``docs/architecture/code-state.md`` revision, leaving 3 junk commits per run.
+Both functions are now stubbed in ``_run_main_with_patches``.
+
 How these tests FAIL against pre-fix code
 ------------------------------------------
 TestRunSprintCrashTerminalState
@@ -33,6 +48,7 @@ TestDocumenterCrashDownstreamSteps
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -61,6 +77,42 @@ from services.sprint_manager.state import (  # noqa: E402
 )
 
 
+# ── git-isolation guard ───────────────────────────────────────────────────────
+
+def _git_head_sha() -> str:
+    """Return current HEAD SHA for the working repo."""
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+    ).strip()
+
+
+@pytest.fixture(autouse=True)
+def git_no_mutation():
+    """Assert that no test in this module commits to the repository.
+
+    Records ``git rev-parse HEAD`` before each test and asserts it is
+    unchanged afterward.  If HEAD moved, the fixture fails loudly with the
+    before/after SHAs so the offending test is immediately obvious.
+
+    This guard catches any future regression where a code-path in the sprint
+    finalization machinery (e.g. _generate_code_state_snapshot, _write_sprint_brief,
+    or any other git-touching step) is accidentally left unmocked.
+    """
+    sha_before = _git_head_sha()
+    yield
+    sha_after = _git_head_sha()
+    assert sha_before == sha_after, (
+        f"Test mutated the git repository!\n"
+        f"  HEAD before: {sha_before}\n"
+        f"  HEAD after:  {sha_after}\n"
+        "An unmocked code path ran 'git commit' or 'git add'.\n"
+        "Ensure _generate_code_state_snapshot and _write_sprint_brief are\n"
+        "stubbed in _run_main_with_patches."
+    )
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _make_clean_state() -> tuple[SprintSummary, SprintState]:
@@ -72,10 +124,24 @@ def _make_clean_state() -> tuple[SprintSummary, SprintState]:
 
 
 def _run_main_with_patches(monkeypatch, tmp_path: Path, *, extra_patches: dict) -> None:
-    """Call sm.main() after applying the minimal set of mocks.
+    """Call sm.main() after applying the minimal complete set of boundary mocks.
 
     Callers pass ``extra_patches`` to override specific behaviours
     (e.g. run_sprint crashing, documenter crashing).
+
+    IMPORTANT — every git-touching sprint-end step is stubbed here so no test
+    in this module can accidentally commit to the repository:
+
+      _generate_code_state_snapshot — writes docs/architecture/code-state.md
+        and makes a git commit; _CODE_STATE_AVAILABLE is True in this repo so
+        without this stub it runs for real on every documenter-crash test.
+
+      _write_sprint_brief — may write docs/sprint-briefs/* and commit; default-
+        disabled via COMMANDER_DISABLE_BRIEF=1 in the environment, but stubbed
+        here defensively.
+
+      SprintState.save — writes a JSON state file to disk; stubbed to prevent
+        spurious file creation in tmp_path siblings.
     """
     import services.sprint_manager.sprint_manager as sm
 
@@ -92,6 +158,18 @@ def _run_main_with_patches(monkeypatch, tmp_path: Path, *, extra_patches: dict) 
     monkeypatch.setattr(sm, "_db_agent_finish_sm", lambda *a, **kw: None)
     monkeypatch.setattr(sm, "_state_path",
                         lambda *a, **kw: tmp_path / "sprint-99-state.json")
+
+    # ── git-touching sprint-end steps: MUST be stubbed to keep the repo clean ──
+    # _generate_code_state_snapshot shells out to git-add + git-commit under
+    # docs/architecture/code-state.md.  Without this mock, every documenter-crash
+    # test commits a new code-state revision to the branch (_CODE_STATE_AVAILABLE
+    # is True in this repo).
+    monkeypatch.setattr(sm, "_generate_code_state_snapshot", lambda **kw: None)
+    # _write_sprint_brief may also commit to docs/sprint-briefs/; stub it
+    # defensively even though COMMANDER_DISABLE_BRIEF=1 normally skips it.
+    monkeypatch.setattr(sm, "_write_sprint_brief", lambda **kw: None)
+    # SprintState.save writes a JSON file; stub it to avoid tmp_path side-effects.
+    monkeypatch.setattr(sm.SprintState, "save", lambda self, p: None)
 
     for attr, val in extra_patches.items():
         monkeypatch.setattr(sm, attr, val)
@@ -115,10 +193,8 @@ class TestRunSprintCrashTerminalState:
 
         Pre-fix failure: RuntimeError propagates out of main() → pytest.raises(SystemExit)
         fails because the wrong exception type is raised.  And needs_rework is never
-        written to written_plan_states.
+        written to written_plan_states because the terminal-state block is never reached.
         """
-        import services.sprint_manager.sprint_manager as sm
-
         written_plan_states: list[str] = []
 
         def _crash_run_sprint(**kw):
@@ -149,8 +225,6 @@ class TestRunSprintCrashTerminalState:
 
         Pre-fix failure: same as above — RuntimeError re-raises, DB write skipped.
         """
-        import services.sprint_manager.sprint_manager as sm
-
         written_db_states: list[str] = []
 
         def _crash_run_sprint(**kw):
@@ -178,8 +252,6 @@ class TestRunSprintCrashTerminalState:
 
         Pre-fix failure: terminal-state block never reached → end_reason never set.
         """
-        import services.sprint_manager.sprint_manager as sm
-
         captured_kwargs: list[dict] = []
 
         def _capture_plan(label, state, **kw):
@@ -211,12 +283,7 @@ class TestRunSprintCrashTerminalState:
         Post-fix: sprint_crashed is still emitted, then falls through.
         This test verifies the fix does not hide the crash.
         """
-        import services.sprint_manager.sprint_manager as sm
-
         crash_events: list[str] = []
-
-        def _capture_error(event_name, *args, **kwargs):
-            crash_events.append(event_name)
 
         def _crash_run_sprint(**kw):
             raise RuntimeError("worktree pool slot missing")
@@ -251,28 +318,6 @@ class TestDocumenterCrashDownstreamSteps:
     and left those post-sprint steps permanently skipped for that run.
     """
 
-    def _make_patches_for_doc_crash(
-        self,
-        tmp_path: Path,
-        written_plan_states: list,
-        reviewer_calls: list,
-    ) -> dict:
-        """Build extra_patches for the documenter-crash scenario."""
-        mock_summary, mock_state = _make_clean_state()
-
-        return {
-            "run_sprint": lambda **kw: (mock_summary, mock_state),
-            "write_sprint_summary": lambda **kw: None,
-            "_dispatch_documenter": lambda **kw: (_ for _ in ()).throw(
-                RuntimeError("documenter agent timed out")
-            ),
-            "_dispatch_reviewer": lambda **kw: reviewer_calls.append(True),
-            "_plan_json_set_state_sm": lambda label, state, **kw:
-                written_plan_states.append(state),
-            "_sprint_db_set_state_sm": lambda *a, **kw: None,
-            "SprintState.save": lambda self, p: None,
-        }
-
     def test_documenter_crash_writes_needs_rework(self, monkeypatch, tmp_path):
         """AC-1: documenter RuntimeError overwrites terminal state to needs_rework.
 
@@ -282,35 +327,21 @@ class TestDocumenterCrashDownstreamSteps:
         (ready_to_merge from clean ticket run) remains, and 'documenter-crash'
         never appears.
         """
-        import services.sprint_manager.sprint_manager as sm
-
-        written_plan_states: list[str] = []
-        reviewer_calls: list[bool] = []
-
         mock_summary, mock_state = _make_clean_state()
+        written_plan_states: list[str] = []
 
-        # Patch SprintState.save instance method via the class.
-        original_save = sm.SprintState.save
-
-        def _noop_save(self, p):
-            pass
-        monkeypatch.setattr(sm.SprintState, "save", _noop_save)
-
-        try:
-            _run_main_with_patches(
-                monkeypatch, tmp_path,
-                extra_patches={
-                    "run_sprint": lambda **kw: (mock_summary, mock_state),
-                    "write_sprint_summary": lambda **kw: None,
-                    "_dispatch_documenter": _make_doc_crash(),
-                    "_dispatch_reviewer": lambda **kw: reviewer_calls.append(True),
-                    "_plan_json_set_state_sm": lambda label, state, **kw:
-                        written_plan_states.append(state),
-                    "_sprint_db_set_state_sm": lambda *a, **kw: None,
-                },
-            )
-        finally:
-            monkeypatch.setattr(sm.SprintState, "save", original_save)
+        _run_main_with_patches(
+            monkeypatch, tmp_path,
+            extra_patches={
+                "run_sprint": lambda **kw: (mock_summary, mock_state),
+                "write_sprint_summary": lambda **kw: None,
+                "_dispatch_documenter": _make_doc_crash(),
+                "_dispatch_reviewer": lambda **kw: None,
+                "_plan_json_set_state_sm": lambda label, state, **kw:
+                    written_plan_states.append(state),
+                "_sprint_db_set_state_sm": lambda *a, **kw: None,
+            },
+        )
 
         assert "needs_rework" in written_plan_states, (
             "terminal state must be overwritten to needs_rework after documenter crash; "
@@ -324,27 +355,20 @@ class TestDocumenterCrashDownstreamSteps:
         causing the reviewer block to be skipped entirely.  reviewer_calls stays
         empty, failing the assertion.
         """
-        import services.sprint_manager.sprint_manager as sm
-
-        reviewer_calls: list[bool] = []
         mock_summary, mock_state = _make_clean_state()
+        reviewer_calls: list[bool] = []
 
-        monkeypatch.setattr(sm.SprintState, "save", lambda self, p: None)
-
-        try:
-            _run_main_with_patches(
-                monkeypatch, tmp_path,
-                extra_patches={
-                    "run_sprint": lambda **kw: (mock_summary, mock_state),
-                    "write_sprint_summary": lambda **kw: None,
-                    "_dispatch_documenter": _make_doc_crash(),
-                    "_dispatch_reviewer": lambda **kw: reviewer_calls.append(True),
-                    "_plan_json_set_state_sm": lambda *a, **kw: None,
-                    "_sprint_db_set_state_sm": lambda *a, **kw: None,
-                },
-            )
-        finally:
-            monkeypatch.setattr(sm.SprintState, "save", lambda self, p: None)
+        _run_main_with_patches(
+            monkeypatch, tmp_path,
+            extra_patches={
+                "run_sprint": lambda **kw: (mock_summary, mock_state),
+                "write_sprint_summary": lambda **kw: None,
+                "_dispatch_documenter": _make_doc_crash(),
+                "_dispatch_reviewer": lambda **kw: reviewer_calls.append(True),
+                "_plan_json_set_state_sm": lambda *a, **kw: None,
+                "_sprint_db_set_state_sm": lambda *a, **kw: None,
+            },
+        )
 
         assert reviewer_calls, (
             "_dispatch_reviewer must be called even after documenter RuntimeError; "
@@ -357,31 +381,24 @@ class TestDocumenterCrashDownstreamSteps:
         Pre-fix failure: the end_reason kwarg is never passed because the
         _plan_json_set_state_sm call inside the except block was not there.
         """
-        import services.sprint_manager.sprint_manager as sm
-
+        mock_summary, mock_state = _make_clean_state()
         captured_kwargs: list[dict] = []
 
         def _capture_plan(label, state, **kw):
             if state == "needs_rework":
                 captured_kwargs.append(kw)
 
-        mock_summary, mock_state = _make_clean_state()
-        monkeypatch.setattr(sm.SprintState, "save", lambda self, p: None)
-
-        try:
-            _run_main_with_patches(
-                monkeypatch, tmp_path,
-                extra_patches={
-                    "run_sprint": lambda **kw: (mock_summary, mock_state),
-                    "write_sprint_summary": lambda **kw: None,
-                    "_dispatch_documenter": _make_doc_crash(),
-                    "_dispatch_reviewer": lambda **kw: None,
-                    "_plan_json_set_state_sm": _capture_plan,
-                    "_sprint_db_set_state_sm": lambda *a, **kw: None,
-                },
-            )
-        finally:
-            monkeypatch.setattr(sm.SprintState, "save", lambda self, p: None)
+        _run_main_with_patches(
+            monkeypatch, tmp_path,
+            extra_patches={
+                "run_sprint": lambda **kw: (mock_summary, mock_state),
+                "write_sprint_summary": lambda **kw: None,
+                "_dispatch_documenter": _make_doc_crash(),
+                "_dispatch_reviewer": lambda **kw: None,
+                "_plan_json_set_state_sm": _capture_plan,
+                "_sprint_db_set_state_sm": lambda *a, **kw: None,
+            },
+        )
 
         assert any(kw.get("end_reason") == "documenter-crash" for kw in captured_kwargs), (
             "end_reason must be 'documenter-crash' when documenter raises RuntimeError; "

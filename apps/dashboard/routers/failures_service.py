@@ -231,6 +231,11 @@ _SCRATCHPAD_DIR_PREFIXES: tuple[str, ...] = (
     "/private/tmp/",
     "/var/folders/",
     "/var/tmp/",
+    # On macOS /var is a symlink to /private/var, so paths resolved by the OS
+    # arrive as /private/var/... rather than /var/...  Mirror every /var/ entry
+    # with its /private/var/ twin so both spellings are caught (issue #2042).
+    "/private/var/folders/",
+    "/private/var/tmp/",
 )
 
 

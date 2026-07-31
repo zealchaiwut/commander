@@ -371,3 +371,68 @@ def test_scratchpad_agent_excluded_both_filter_paths(isolated_db):
         "when a project filter is requested.  Showing it in every project's inbox "
         "is worse than hiding it (issue #2042 AC2)."
     )
+
+
+# ── macOS /private/var symlink gap (issue #2042 follow-up) ───────────────────
+
+def test_is_scratchpad_private_var_folders():
+    """Unit: /private/var/folders/ (macOS resolved form of /var/folders/) is scratchpad."""
+    assert _is_scratchpad_working_dir(
+        "/private/var/folders/xt/trx8_vyj6y513y0y35svdhfc0000gn/T/pytest-of-user/pytest-2/agent"
+    ) is True
+
+
+def test_is_scratchpad_private_var_tmp():
+    """Unit: /private/var/tmp/ (macOS resolved form of /var/tmp/) is scratchpad."""
+    assert _is_scratchpad_working_dir("/private/var/tmp/some-test/agent") is True
+
+
+def test_private_var_folders_excluded_without_project_filter(isolated_db):
+    """Behavioral: /private/var/folders/ agent excluded even with NO project filter.
+
+    This is the critical path that the fallback None→False filter in
+    _project_matches does NOT cover — _project_matches only runs when a project
+    filter is active.  Without a project filter the only gate is the
+    _is_scratchpad_working_dir check in _rows_from_agents.
+
+    Live row that triggered this gap (confirmed by coordinator):
+        working_dir = /private/var/folders/xt/trx8_.../T/pytest-of-.../test_concurrent...
+
+    PRE-FIX FAILURE (against the commit before this follow-up):
+        /private/var/folders/ was not in _SCRATCHPAD_DIR_PREFIXES (only /var/folders/
+        was listed).  _is_scratchpad_working_dir returned False → the row entered the
+        union with project=None.  With no project filter the _project_matches gate
+        never runs → the row appeared in results → assertion FAILS.
+    """
+    with _db.get_conn() as conn:
+        _insert_agent(
+            conn,
+            session_id="sess-private-var-2042-i",
+            name="agent·test_concurrent_processes_boun0··#db1efb",
+            working_dir=(
+                "/private/var/folders/xt/trx8_vyj6y513y0y35svdhfc0000gn/T"
+                "/pytest-of-chaiwutchaianuchittrakul/pytest-2/test_concurrent_processes_boun0"
+            ),
+        )
+        # Also seed a genuine agent so we can confirm the filter is specific
+        _insert_agent(
+            conn,
+            session_id="sess-genuine-2042-j",
+            name="genuine-no-filter-agent",
+            working_dir="/Users/chaiwutchaianuchittrakul/dev/commander/coder",
+        )
+        conn.commit()
+
+    result = get_failures()  # NO project filter — tests the prefix path, not fallback
+    agent_names = [r.get("agent") for r in result]
+
+    assert "agent·test_concurrent_processes_boun0··#db1efb" not in agent_names, (
+        "Agent with /private/var/folders/ working_dir must be excluded even without "
+        "a project filter.  On macOS /var is a symlink to /private/var, so OS-resolved "
+        "paths arrive as /private/var/...; the prefix list must include both spellings. "
+        "Pre-fix: only /var/folders/ was listed → /private/var/folders/ slipped through "
+        "and appeared in the no-filter results."
+    )
+    assert "genuine-no-filter-agent" in agent_names, (
+        "A genuine project agent must still appear when no project filter is active."
+    )

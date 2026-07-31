@@ -822,7 +822,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = (
     else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
 )
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 

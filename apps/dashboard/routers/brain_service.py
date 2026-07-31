@@ -6,6 +6,12 @@ Indexes four content sources:
   docs/decisions/   — ADR entries (source="decisions")
   docs/changelog/uat/ — committed retros (source="retros")
 
+Content is discovered via ``docs_service.list_docs`` and retrieved via
+``docs_service.get_doc`` — the same security-checked reader used by the rest
+of the dashboard (path-containment, symlink rejection, UTF-8 validation).
+This ensures any future hardening of docs_service applies here automatically
+(AC3 reuse requirement).
+
 The index is built in memory on each search call (no background daemon,
 no persistent cache file) — cheap for small docs trees.
 
@@ -53,101 +59,90 @@ _DECISION_MARKER = "⟶ DECISION"
 _SNIPPET_CHARS = 300
 
 
-# ── Document collection ───────────────────────────────────────────────────────
+# ── Source classification ─────────────────────────────────────────────────────
+
+def _classify_source(rel_path: str) -> str | None:
+    """Return the source category for a relative doc path, or None to skip.
+
+    Paths returned by docs_service.list_docs() are either:
+      - Root allowlist files: "README.md", "CHANGELOG.md"  (→ None: skip)
+      - Docs tree files:      "docs/<anything>.md"
+
+    Within docs/:
+      docs/changelog/uat/YYYY-MM-DD-sprint-*.md → retros
+      docs/decisions/**/*.md                    → decisions
+      docs/bulk-create/**/*.md                  → bulk-create
+      everything else under docs/               → docs
+    """
+    parts = Path(rel_path).parts
+
+    # Root allowlist (README.md, CHANGELOG.md) — not indexed by brain
+    if len(parts) == 1:
+        return None
+
+    # All docs_service paths are either root or under docs/
+    if parts[0] != "docs":
+        return None
+
+    if len(parts) < 2:
+        return None
+
+    # Retros: docs/changelog/uat/YYYY-MM-DD-sprint-*.md
+    if len(parts) >= 4 and parts[1] == "changelog" and parts[2] == "uat":
+        return _SOURCE_RETROS if _RETRO_FILENAME_RE.match(parts[-1]) else None
+
+    # Decisions: docs/decisions/**
+    if parts[1] == "decisions":
+        return _SOURCE_DECISIONS
+
+    # Bulk-create: docs/bulk-create/**
+    if parts[1] == "bulk-create":
+        return _SOURCE_BULK
+
+    # Everything else under docs/ (milestones, features, architecture, etc.)
+    return _SOURCE_DOCS
+
+
+# ── Document collection (via docs_service) ────────────────────────────────────
 
 def _collect_docs(docs_root: Path) -> list[tuple[str, str, str]]:
     """Collect (path_str, source, content) for all indexed .md files.
 
-    Sources and their discovery logic:
-      docs/       — docs_root/docs/**/*.md  (excludes bulk-create/ and decisions/)
-      bulk-create — docs_root/docs/bulk-create/**/*.md
-      decisions   — docs_root/docs/decisions/**/*.md
-      retros      — docs_root/docs/changelog/uat/YYYY-MM-DD-sprint-*.md
+    File discovery uses ``docs_service.list_docs`` (same rules as the docs
+    endpoints). Content retrieval uses ``docs_service.get_doc`` which carries
+    path-containment, symlink rejection, and UTF-8 validation — the same
+    security envelope as the rest of the dashboard (AC3).
 
-    Files in _SKIP_NAMES are always excluded.
+    Files in _SKIP_NAMES and files whose source cannot be classified are
+    excluded.  Files that raise on get_doc (e.g. a race-condition deletion
+    between list and read) are silently skipped.
     """
+    from . import docs_service  # noqa: PLC0415 — lazy to match docs_service's own pattern
+
+    try:
+        entries = docs_service.list_docs(docs_root)
+    except Exception:
+        # docs_root missing or unreadable — return empty; search() will return []
+        return []
+
     rows: list[tuple[str, str, str]] = []
+    for entry in entries:
+        rel_path: str = entry["path"]
 
-    docs_dir = docs_root / "docs"
-    if not docs_dir.is_dir():
-        return rows
-
-    bulk_dir = docs_dir / "bulk-create"
-    decisions_dir = docs_dir / "decisions"
-    retros_dir = docs_dir / "changelog" / "uat"
-
-    # ── retros ────────────────────────────────────────────────────────────────
-    if retros_dir.is_dir():
-        for p in sorted(retros_dir.iterdir()):
-            if p.name in _SKIP_NAMES or p.suffix != ".md":
-                continue
-            if _RETRO_FILENAME_RE.match(p.name):
-                try:
-                    rows.append((
-                        str(p.relative_to(docs_root)),
-                        _SOURCE_RETROS,
-                        p.read_text(encoding="utf-8"),
-                    ))
-                except OSError:
-                    pass
-
-    # ── decisions ─────────────────────────────────────────────────────────────
-    if decisions_dir.is_dir():
-        for p in sorted(decisions_dir.rglob("*.md")):
-            if p.name in _SKIP_NAMES:
-                continue
-            try:
-                rows.append((
-                    str(p.relative_to(docs_root)),
-                    _SOURCE_DECISIONS,
-                    p.read_text(encoding="utf-8"),
-                ))
-            except OSError:
-                pass
-
-    # ── bulk-create ───────────────────────────────────────────────────────────
-    if bulk_dir.is_dir():
-        for p in sorted(bulk_dir.rglob("*.md")):
-            if p.name in _SKIP_NAMES:
-                continue
-            try:
-                rows.append((
-                    str(p.relative_to(docs_root)),
-                    _SOURCE_BULK,
-                    p.read_text(encoding="utf-8"),
-                ))
-            except OSError:
-                pass
-
-    # ── docs (everything else in docs/, excluding the above subdirs) ──────────
-    for p in sorted(docs_dir.rglob("*.md")):
-        if p.name in _SKIP_NAMES or p.suffix != ".md":
+        # Skip template / index files before paying the cost of get_doc
+        if Path(rel_path).name in _SKIP_NAMES:
             continue
-        # Skip files already covered by more specific sources
+
+        source = _classify_source(rel_path)
+        if source is None:
+            continue  # root allowlist or unclassifiable path
+
         try:
-            p.relative_to(bulk_dir)
-            continue  # in bulk-create/
-        except ValueError:
-            pass
-        try:
-            p.relative_to(decisions_dir)
-            continue  # in decisions/
-        except ValueError:
-            pass
-        try:
-            p.relative_to(retros_dir)
-            if _RETRO_FILENAME_RE.match(p.name):
-                continue  # already indexed as retros
-        except ValueError:
-            pass
-        try:
-            rows.append((
-                str(p.relative_to(docs_root)),
-                _SOURCE_DOCS,
-                p.read_text(encoding="utf-8"),
-            ))
-        except OSError:
-            pass
+            result = docs_service.get_doc(docs_root, rel_path)
+            rows.append((rel_path, source, result["content"]))
+        except Exception:
+            # HTTPException from security checks, or file gone since listing
+            continue
 
     return rows
 
@@ -155,7 +150,12 @@ def _collect_docs(docs_root: Path) -> list[tuple[str, str, str]]:
 # ── FTS5 index building ───────────────────────────────────────────────────────
 
 def _build_index(conn: sqlite3.Connection, rows: list[tuple[str, str, str]]) -> None:
-    """Create and populate an FTS5 virtual table in the given connection."""
+    """Create and populate an FTS5 virtual table in the given connection.
+
+    Raises sqlite3.OperationalError if FTS5 is unavailable or INSERT fails.
+    The caller (search()) handles this as an infrastructure error, not a query
+    error, and re-raises so it surfaces as a 500 rather than silent [] .
+    """
     conn.execute(
         "CREATE VIRTUAL TABLE docs_fts USING fts5(path UNINDEXED, source UNINDEXED, content)"
     )
@@ -168,12 +168,12 @@ def _build_index(conn: sqlite3.Connection, rows: list[tuple[str, str, str]]) -> 
 # ── Query sanitization ────────────────────────────────────────────────────────
 
 def _sanitize_q(q: str) -> str | None:
-    """Return a safe FTS5 query string, or None when the query is empty/unsearchable.
+    """Return a sanitized FTS5 query string, or None for empty/blank input.
 
-    FTS5 accepts most operator syntax.  The only protection we apply is to
-    reject blank queries (after stripping whitespace) so the caller can return
-    an empty result quickly.  Malformed queries (unbalanced quotes, bare AND/OR)
-    are caught by the sqlite3.OperationalError guard in search().
+    Blank queries are rejected early to avoid a cheap-but-pointless FTS5 scan.
+    All other sanitization is handled by the OperationalError guard in search()
+    — FTS5 raises on unbalanced quotes, bare operators, etc., and that guard
+    returns [] rather than propagating the exception.
     """
     q = q.strip()
     if not q:
@@ -190,7 +190,15 @@ def search(q: str, docs_root: Path) -> list[dict[str, Any]]:
       {path, source, snippet}
 
     At most 50 results are returned, ordered by FTS5 relevance rank.
-    Malformed queries (unbalanced quotes etc.) return [] rather than raising.
+
+    Error handling:
+      - Empty / blank q          → [] (fast path, no index built)
+      - No docs found            → []
+      - Malformed FTS5 MATCH     → [] (OperationalError from the MATCH call)
+      - Index BUILD failure      → re-raised as RuntimeError (surfaces as 500)
+        This distinction matters: a bad query silently returns no results
+        (correct UX), but a failed index build is an infrastructure problem
+        that must not be swallowed and silently return empty results forever.
     """
     safe_q = _sanitize_q(q)
     if safe_q is None:
@@ -202,7 +210,16 @@ def search(q: str, docs_root: Path) -> list[dict[str, Any]]:
 
     conn = sqlite3.connect(":memory:")
     try:
-        _build_index(conn, rows)
+        # ── Index build — infrastructure error: surface loudly ────────────────
+        try:
+            _build_index(conn, rows)
+        except sqlite3.OperationalError as exc:
+            raise RuntimeError(
+                f"Brain FTS5 index build failed — FTS5 may be unavailable "
+                f"or data is corrupt: {exc}"
+            ) from exc
+
+        # ── MATCH query — malformed query: return empty, not 500 ──────────────
         try:
             cur = conn.execute(
                 "SELECT path, source, content FROM docs_fts"
@@ -211,7 +228,7 @@ def search(q: str, docs_root: Path) -> list[dict[str, Any]]:
                 (safe_q,),
             )
         except sqlite3.OperationalError:
-            # Malformed FTS5 query — return empty result, not a 500
+            # Unbalanced quotes, bare AND/OR/NOT, col:syntax, etc.
             return []
 
         hits: list[dict[str, Any]] = []
@@ -225,8 +242,6 @@ def search(q: str, docs_root: Path) -> list[dict[str, Any]]:
 
 def _extract_snippet(content: str, q: str) -> str:
     """Return a short context window around the first query term match."""
-    # Try to find the first keyword from the query in the content
-    # Strip FTS5 operators to get plain words for matching
     words = re.sub(r'["\^*()OR AND NOT+-]', " ", q).split()
     text = content
     pos = -1
@@ -237,10 +252,8 @@ def _extract_snippet(content: str, q: str) -> str:
             break
 
     if pos < 0:
-        # No word found — return the opening of the document
         return (text[:_SNIPPET_CHARS] + "…") if len(text) > _SNIPPET_CHARS else text
 
-    # Context window centred on pos
     start = max(0, pos - _SNIPPET_CHARS // 3)
     end = min(len(text), start + _SNIPPET_CHARS)
     snippet = text[start:end].strip()
@@ -261,6 +274,8 @@ def get_panels(docs_root: Path) -> dict[str, Any]:
       open_decisions   — snippets containing the ⟶ DECISION marker
       last_learnings   — ## Key Learnings section from the most recent retro
       backlog_rationale — ADR entries that mention backlog/planned items
+
+    Content retrieval routes through docs_service.get_doc (AC3).
     """
     return {
         "recent_decisions": _panel_recent_decisions(docs_root),
@@ -271,68 +286,82 @@ def get_panels(docs_root: Path) -> dict[str, Any]:
 
 
 def _panel_recent_decisions(docs_root: Path) -> list[dict[str, str]]:
-    """Return the 5 most recent ADR entries with title and path."""
-    decisions_dir = docs_root / "docs" / "decisions"
-    if not decisions_dir.is_dir():
+    """Return the 5 most recent ADR entries with title and path.
+
+    Discovery via docs_service.list_docs; content via docs_service.get_doc.
+    """
+    from . import docs_service  # noqa: PLC0415
+
+    try:
+        entries = docs_service.list_docs(docs_root)
+    except Exception:
         return []
 
-    adrs: list[tuple[str, Path]] = []
-    for p in decisions_dir.iterdir():
-        if p.name in _SKIP_NAMES or p.suffix != ".md":
+    adrs: list[tuple[str, str]] = []  # (filename, rel_path)
+    for entry in entries:
+        rel_path = entry["path"]
+        parts = Path(rel_path).parts
+        if len(parts) < 3 or parts[0] != "docs" or parts[1] != "decisions":
             continue
-        if _ADR_FILENAME_RE.match(p.name):
-            adrs.append((p.name, p))
+        name = parts[-1]
+        if name in _SKIP_NAMES or not _ADR_FILENAME_RE.match(name):
+            continue
+        adrs.append((name, rel_path))
 
-    # Sort descending (newest first)
     adrs.sort(key=lambda t: t[0], reverse=True)
     adrs = adrs[:5]
 
     result: list[dict[str, str]] = []
-    for name, p in adrs:
+    for name, rel_path in adrs:
         try:
-            content = p.read_text(encoding="utf-8")
-        except OSError:
+            doc = docs_service.get_doc(docs_root, rel_path)
+            content = doc["content"]
+        except Exception:
             continue
         title = _extract_h1(content) or name
         decision = _extract_decision_line(content)
-        result.append({
-            "path": str(p.relative_to(docs_root)),
-            "title": title,
-            "decision": decision,
-        })
+        result.append({"path": rel_path, "title": title, "decision": decision})
     return result
 
 
 def _panel_open_decisions(docs_root: Path) -> list[dict[str, str]]:
-    """Return snippets from docs that contain the ⟶ DECISION marker."""
-    items: list[dict[str, str]] = []
-    docs_dir = docs_root / "docs"
-    if not docs_dir.is_dir():
-        return items
+    """Return snippets from docs that contain the ⟶ DECISION marker.
 
-    for p in sorted(docs_dir.rglob("*.md")):
-        if p.name in _SKIP_NAMES:
+    Discovery via docs_service.list_docs; content via docs_service.get_doc.
+    """
+    from . import docs_service  # noqa: PLC0415
+
+    try:
+        entries = docs_service.list_docs(docs_root)
+    except Exception:
+        return []
+
+    items: list[dict[str, str]] = []
+    for entry in sorted(entries, key=lambda e: e["path"]):
+        rel_path = entry["path"]
+        if Path(rel_path).name in _SKIP_NAMES:
             continue
         try:
-            content = p.read_text(encoding="utf-8")
-        except OSError:
+            doc = docs_service.get_doc(docs_root, rel_path)
+            content = doc["content"]
+        except Exception:
             continue
         if _DECISION_MARKER not in content:
             continue
-        # Extract the lines containing the marker
         for line in content.splitlines():
             if _DECISION_MARKER in line:
-                items.append({
-                    "path": str(p.relative_to(docs_root)),
-                    "line": line.strip(),
-                })
+                items.append({"path": rel_path, "line": line.strip()})
                 if len(items) >= 20:
                     return items
     return items
 
 
 def _panel_last_learnings(docs_root: Path) -> list[str]:
-    """Return the ## Key Learnings bullets from the most recent retro."""
+    """Return the ## Key Learnings bullets from the most recent retro.
+
+    Uses load_recent_retros from services/sprint_manager/retro.py (correct
+    reuse per task instructions — retro.py owns the "last N retros" logic).
+    """
     try:
         from services.sprint_manager.retro import load_recent_retros  # noqa: PLC0415
     except ImportError:
@@ -348,30 +377,35 @@ def _panel_last_learnings(docs_root: Path) -> list[str]:
 
 
 def _panel_backlog_rationale(docs_root: Path) -> list[dict[str, str]]:
-    """Return ADR entries that mention backlog, planned, or roadmap items."""
-    decisions_dir = docs_root / "docs" / "decisions"
-    if not decisions_dir.is_dir():
+    """Return ADR entries that mention backlog, planned, or roadmap items.
+
+    Discovery via docs_service.list_docs; content via docs_service.get_doc.
+    """
+    from . import docs_service  # noqa: PLC0415
+
+    try:
+        entries = docs_service.list_docs(docs_root)
+    except Exception:
         return []
 
     keywords = ("backlog", "planned", "roadmap", "future", "todo")
     items: list[dict[str, str]] = []
-    for p in sorted(decisions_dir.iterdir()):
-        if p.name in _SKIP_NAMES or p.suffix != ".md":
+
+    for entry in sorted(entries, key=lambda e: e["path"]):
+        rel_path = entry["path"]
+        parts = Path(rel_path).parts
+        if len(parts) < 3 or parts[0] != "docs" or parts[1] != "decisions":
+            continue
+        if Path(rel_path).name in _SKIP_NAMES:
             continue
         try:
-            content = p.read_text(encoding="utf-8").lower()
-        except OSError:
+            doc = docs_service.get_doc(docs_root, rel_path)
+            content = doc["content"]
+        except Exception:
             continue
-        if any(kw in content for kw in keywords):
-            try:
-                full = p.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            title = _extract_h1(full) or p.name
-            items.append({
-                "path": str(p.relative_to(docs_root)),
-                "title": title,
-            })
+        if any(kw in content.lower() for kw in keywords):
+            title = _extract_h1(content) or parts[-1]
+            items.append({"path": rel_path, "title": title})
             if len(items) >= 10:
                 break
     return items
@@ -389,7 +423,7 @@ def _extract_h1(content: str) -> str:
 
 
 def _extract_decision_line(content: str) -> str:
-    """Return the first line after '## Decision' heading."""
+    """Return the first non-blank body line after '## Decision' heading."""
     in_section = False
     for line in content.splitlines():
         stripped = line.strip()
@@ -399,13 +433,12 @@ def _extract_decision_line(content: str) -> str:
         if in_section and stripped.startswith("## "):
             break
         if in_section and stripped and not stripped.startswith("#"):
-            # Return first non-blank, non-heading line
             return stripped[:200]
     return ""
 
 
 def _extract_key_learnings(content: str) -> list[str]:
-    """Return bullet points from '## Key Learnings' section."""
+    """Return bullet points from the '## Key Learnings' section."""
     in_section = False
     bullets: list[str] = []
     for line in content.splitlines():

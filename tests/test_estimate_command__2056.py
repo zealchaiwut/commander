@@ -1,7 +1,5 @@
 """Tests for issue #2056: estimate slash command (documentation/command file task)"""
-import os
 import re
-import sys
 from pathlib import Path
 
 

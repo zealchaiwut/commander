@@ -112,6 +112,12 @@ class SprintConfig:
     # Hard token ceiling — stop dispatching new tickets when cumulative
     # tokens_in + tokens_out exceeds this value.  0 = disabled (issue #1943).
     token_ceiling: int = 0
+    # Dead-letter escalation threshold (issue #2033).
+    # A ticket dead-lettered >= this many times (across all sprint runs) triggers
+    # a LOUD escalation alert and is routed out of auto-rerun (set to 'blocked').
+    # Configurable via sprint.yaml ``dead_letter_escalation_threshold:`` or the
+    # COMMANDER_DEAD_LETTER_THRESHOLD env-var.  Default: 2.
+    dead_letter_escalation_threshold: int = 2
 
     @property
     def worktree_tester_app(self) -> Path:
@@ -363,6 +369,21 @@ def load_config(path: Path) -> "SprintConfig":
         except (TypeError, ValueError):
             pass
 
+    # ── dead_letter_escalation_threshold (issue #2033) ───────────────────────
+    # Env-var takes priority; yaml value next; default = 2.
+    dead_letter_escalation_threshold: int = 2
+    _dl_env = os.environ.get("COMMANDER_DEAD_LETTER_THRESHOLD", "").strip()
+    if _dl_env:
+        try:
+            dead_letter_escalation_threshold = max(1, int(_dl_env))
+        except (TypeError, ValueError):
+            pass
+    elif data.get("dead_letter_escalation_threshold") is not None:
+        try:
+            dead_letter_escalation_threshold = max(1, int(data["dead_letter_escalation_threshold"]))
+        except (TypeError, ValueError):
+            pass
+
     return SprintConfig(
         repo_name=repo_name,
         worktree_coder=worktree_coder,
@@ -397,6 +418,7 @@ def load_config(path: Path) -> "SprintConfig":
         max_coder_slots=max_coder_slots,
         max_tester_slots=max_tester_slots,
         token_ceiling=token_ceiling,
+        dead_letter_escalation_threshold=dead_letter_escalation_threshold,
     )
 
 

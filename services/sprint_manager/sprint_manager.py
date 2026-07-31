@@ -2952,6 +2952,46 @@ def run_sprint_preflight(
                 start_time=time.monotonic(), early_exit=True,
             )
 
+    # ── Auth/OAuth preflight (issue #2029) ────────────────────────────────────
+    # For non-ICA providers, probe the coder CLI before loading any tickets.
+    # An expired OAuth session causes every ticket to CRASH with the same error
+    # ("OAuth session expired"); detecting it here lets us fail fast and emit a
+    # single alert instead of dispatching every ticket into the same wall.
+    if _sprint_llm_provider != "ica":
+        _auth_backend = cfg.coder_backend if cfg is not None else "claude-code"
+        _auth_err = _doctor_probe_auth(backend=_auth_backend)
+        if _auth_err:
+            _auth_msg = f"[auth-preflight] auth check failed — {_auth_err}"
+            sys.stdout.write(_auth_msg + "\n")
+            dispatch_alerts(
+                alert_modes,
+                title="sprint-blocked: auth/OAuth preflight failed",
+                body=(
+                    f"Sprint {label} blocked before dispatching any tickets.\n\n"
+                    f"Auth probe error: {_auth_err}\n\n"
+                    f"Fix: re-authenticate (e.g. `claude login`) then retry the sprint."
+                ),
+                category="auth-preflight-failed",
+                cfg=cfg,
+                repo=eff_repo,
+                sprint_label=label,
+            )
+            _auth_blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            return _SprintPreflightResult(
+                state=_auth_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+            )
+
     # Build rerun decisions map (issue → action) when running from a rerun manifest
     rerun_decisions: dict[int, str] = {}
     if rerun_manifest:

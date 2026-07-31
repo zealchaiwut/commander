@@ -2635,7 +2635,15 @@ def _is_dispatchable(labels: set[str]) -> bool:
     Re-run sub-sprints often carry SIT / in-progress / needs-rework from a prior
     attempt; treating only pure backlog tickets as dispatchable caused instant
     no-op runs (``No backlog issues found``) on labels like sprint-68.3.
+
+    'blocked' is always non-dispatchable regardless of other labels (issue #2033).
+    A ticket carrying 'blocked' has been routed to the manual queue — it must not
+    re-enter auto-dispatch until the operator resets the label to 'backlog'.
+    This guard must come before _classify / _REWORK_LABELS checks so that
+    'blocked' + 'needs-rework' (or any other combination) is also excluded.
     """
+    if "blocked" in labels:
+        return False
     cls = _classify(labels)
     if cls in ("backlog", "sit", "in-progress"):
         return True

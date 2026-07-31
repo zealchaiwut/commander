@@ -452,3 +452,196 @@ class TestSprintConfigThreshold:
             from services.sprint_manager.sprint_manager import check_dead_letter_escalation  # noqa: F401
             cfg_val = _FakeCfg()
             assert int(getattr(cfg_val, "dead_letter_escalation_threshold", 2)) == 5
+
+
+# ── AC-2 integration: blocked label excludes ticket from dispatch ──────────────
+#
+# These tests are BEHAVIORAL per CLAUDE.md #1746 — they call the real
+# _is_dispatchable function and assert observed exclusion behavior.
+#
+# How they FAIL against commit 61f4d054 (before the _is_dispatchable fix):
+#   _is_dispatchable({"blocked"}) returns True (classified as "backlog")
+#   so `assert result is False` immediately fails.
+#
+# How they FAIL against _rerun_policy pre-fix:
+#   _rerun_policy({"blocked"}) returns ("dispatch_coder", []) not ("skip", [])
+#   so `assert action == "skip"` immediately fails.
+
+class TestBlockedExcludesDispatch:
+    """Integration: 'blocked' label makes a ticket non-dispatchable in all paths.
+
+    Pre-fix failure (against 61f4d054):
+      _is_dispatchable({"blocked"}) → True  (classified as 'backlog', no guard)
+      assertion `is False` fails immediately.
+    """
+
+    def test_blocked_alone_is_not_dispatchable(self):
+        """_is_dispatchable({"blocked"}) is False (AC-2 guard)."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"blocked"})
+        assert result is False, (
+            "_is_dispatchable must return False for a blocked-only label set; "
+            f"got {result!r} (pre-fix: classifies as 'backlog' and returns True)"
+        )
+
+    def test_blocked_plus_needs_rework_is_not_dispatchable(self):
+        """_is_dispatchable({"blocked", "needs-rework"}) is False.
+
+        Proves the blocked guard short-circuits before the _REWORK_LABELS path,
+        which would otherwise return True for needs-rework tickets.
+        """
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"blocked", "needs-rework"})
+        assert result is False, (
+            "_is_dispatchable must return False even when 'blocked' accompanies "
+            f"'needs-rework'; got {result!r} (pre-fix: rework path returns True)"
+        )
+
+    def test_blocked_plus_sit_is_not_dispatchable(self):
+        """_is_dispatchable({"blocked", "SIT"}) is False."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"blocked", "SIT"})
+        assert result is False, (
+            f"blocked+SIT must be non-dispatchable; got {result!r}"
+        )
+
+    def test_blocked_plus_in_progress_is_not_dispatchable(self):
+        """_is_dispatchable({"blocked", "in-progress"}) is False."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"blocked", "in-progress"})
+        assert result is False, (
+            f"blocked+in-progress must be non-dispatchable; got {result!r}"
+        )
+
+    def test_non_blocked_backlog_still_dispatchable(self):
+        """Regression: plain backlog ticket (no 'blocked') remains dispatchable."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        assert _is_dispatchable(set()) is True, "empty label set (backlog) must be dispatchable"
+        assert _is_dispatchable({"backlog"}) is True, "explicit backlog label must be dispatchable"
+
+    def test_non_blocked_rework_still_dispatchable(self):
+        """Regression: needs-rework without 'blocked' is still dispatchable."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"needs-rework"})
+        assert result is True, (
+            f"needs-rework without blocked must remain dispatchable; got {result!r}"
+        )
+
+    def test_non_blocked_sit_still_dispatchable(self):
+        """Regression: SIT without 'blocked' is still dispatchable."""
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+        result = _is_dispatchable({"SIT"})
+        assert result is True, f"SIT without blocked must remain dispatchable; got {result!r}"
+
+
+# ── AC-2 integration: _rerun_policy also excludes blocked tickets ─────────────
+#
+# How these FAIL against startup.py before the _rerun_policy fix:
+#   _rerun_policy({"blocked"}) falls through to return ("dispatch_coder", [])
+#   assertion `action == "skip"` fails.
+
+class TestBlockedExcludesRerunPolicy:
+    """Integration: 'blocked' label causes _rerun_policy to skip the ticket.
+
+    The dashboard's rerun endpoint uses _rerun_policy (not _is_dispatchable) to
+    build the sub-sprint manifest.  Without a guard here a blocked ticket is still
+    included in the manifest with action='dispatch_coder'.
+
+    Pre-fix failure (against startup.py before the _rerun_policy fix):
+      _rerun_policy({"blocked"}) → ("dispatch_coder", [])  not ("skip", [])
+      `assert action == "skip"` fails.
+    """
+
+    def _policy(self, labels: set) -> tuple:
+        from apps.dashboard.startup import _rerun_policy  # type: ignore[import]
+        return _rerun_policy(labels)
+
+    def test_blocked_alone_returns_skip(self):
+        """_rerun_policy({"blocked"}) returns action='skip'."""
+        action, _ = self._policy({"blocked"})
+        assert action == "skip", (
+            f"_rerun_policy must return 'skip' for a blocked ticket; got {action!r}"
+        )
+
+    def test_blocked_plus_needs_rework_returns_skip(self):
+        """_rerun_policy beats the needs-rework branch when 'blocked' present."""
+        action, _ = self._policy({"blocked", "needs-rework"})
+        assert action == "skip", (
+            f"blocked+needs-rework must skip, not dispatch_coder; got {action!r}"
+        )
+
+    def test_blocked_plus_sit_returns_skip(self):
+        """_rerun_policy({"blocked", "SIT"}) returns 'skip' (beats the SIT tester path)."""
+        action, _ = self._policy({"blocked", "SIT"})
+        assert action == "skip", (
+            f"blocked+SIT must skip, not dispatch_tester; got {action!r}"
+        )
+
+    def test_non_blocked_uat_still_skipped(self):
+        """Regression: UAT tickets without 'blocked' are still skipped."""
+        action, _ = self._policy({"UAT"})
+        assert action == "skip"
+
+    def test_non_blocked_sit_dispatches_tester(self):
+        """Regression: SIT without 'blocked' still dispatches tester."""
+        action, _ = self._policy({"SIT"})
+        assert action == "dispatch_tester"
+
+    def test_non_blocked_rework_dispatches_coder(self):
+        """Regression: needs-rework without 'blocked' still dispatches coder."""
+        action, _ = self._policy({"needs-rework"})
+        assert action == "dispatch_coder"
+
+
+# ── End-to-end: escalation outcome makes ticket non-dispatchable ──────────────
+
+class TestEndToEndEscalationBlocksDispatch:
+    """End-to-end: after escalation fires (N dead-letters), the resulting
+    label set {'blocked', 'needs-rework'} makes the ticket non-dispatchable.
+
+    This test chains:
+      1. check_dead_letter_escalation fires escalation → _add_blocked_label called
+      2. We build the resulting label set (what GitHub would carry after the
+         transition: {'blocked', sprint-N, needs-rework})
+      3. _is_dispatchable on that label set returns False
+
+    Pre-fix failure (against 61f4d054):
+      Step 3: _is_dispatchable({"blocked", "needs-rework"}) → True
+      assert result is False FAILS.
+    """
+
+    def test_escalated_label_set_is_not_dispatchable(self, tmp_path):
+        """After escalation, the label set carrying 'blocked' excludes dispatch.
+
+        Drives the real code path (check_dead_letter_escalation × 2) with mocked
+        boundaries, then asserts _is_dispatchable on the resulting label set.
+        """
+        from services.sprint_manager.sprint_manager import _is_dispatchable
+
+        mock_blocked_calls: list[set] = []
+
+        def _fake_add_blocked(issue_num, reason, repo_name=None, sprint_label=None):
+            # Simulate what GitHub/state machine does: add 'blocked', remove stale labels.
+            # The resulting live label set from a needs-rework ticket becomes:
+            #   {'blocked', 'sprint-N'}  (needs-rework removed by transition)
+            # We use 'blocked' + 'needs-rework' to prove the guard covers the worst case.
+            mock_blocked_calls.append({"blocked", "needs-rework"})
+
+        with (
+            patch("services.sprint_manager.sprint_manager.dispatch_alerts", MagicMock()),
+            patch("services.sprint_manager.sprint_manager._add_blocked_label", _fake_add_blocked),
+        ):
+            # First dead-letter: no escalation
+            _call_escalation(tmp_path, ticket_id=99, threshold=2)
+            # Second dead-letter: escalation fires, _fake_add_blocked records label set
+            _call_escalation(tmp_path, ticket_id=99, threshold=2)
+
+        assert mock_blocked_calls, "escalation must have called _add_blocked_label"
+        resulting_labels = mock_blocked_calls[-1]  # {'blocked', 'needs-rework'}
+
+        # The real _is_dispatchable check on those labels
+        result = _is_dispatchable(resulting_labels)
+        assert result is False, (
+            f"After escalation, label set {resulting_labels!r} must be non-dispatchable; "
+            f"got {result!r} — blocked guard must short-circuit before the rework path"
+        )

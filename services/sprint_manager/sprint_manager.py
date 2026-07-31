@@ -946,6 +946,7 @@ from services.sprint_manager.alerts import (  # noqa: E402
 
 from services.sprint_manager.dead_letter_escalation import (  # noqa: E402
     check_dead_letter_escalation,
+    get_escalation_threshold,
 )
 
 # ── subprocess helpers ────────────────────────────────────────────────────────
@@ -4397,7 +4398,7 @@ def run_sprint_loop(
                 })
             # Dead-letter escalation: check cross-run count; fire LOUD alert +
             # flag as blocked when threshold is reached (issue #2033).
-            _dl_threshold = int(getattr(cfg, "dead_letter_escalation_threshold", 2))
+            _dl_threshold = get_escalation_threshold(cfg)
             check_dead_letter_escalation(
                 ticket_id=num,
                 title=issue_state.title,

@@ -144,7 +144,7 @@ export function failuresInit() {
   fetchFailures(project, cat)
     .then(function (rows) {
       root.innerHTML =
-        '<table class="fbox-table">' +
+        '<div class="fbox-table-wrap"><table class="fbox-table">' +
         "<thead><tr>" +
         "<th>Issue</th>" +
         "<th>Sprint</th>" +
@@ -157,7 +157,7 @@ export function failuresInit() {
         "<tbody id=\"fbox-tbody\">" +
         _renderRows(rows) +
         "</tbody>" +
-        "</table>";
+        "</table></div>";
     })
     .catch(function (err) {
       _setError(root, "Failed to load failures");

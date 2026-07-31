@@ -2855,6 +2855,11 @@ class _SprintPreflightResult:
     start_time: float
     early_exit: bool = False
     rerun_dispatch_error: bool = False
+    # When early_exit is True and the cause is a preflight check (not just
+    # "no tickets"), this carries a machine-readable reason token so main()
+    # can persist the correct end_reason and print the right operator message.
+    # Values: "auth-preflight-failed" | "ica-preflight-failed" | None
+    early_exit_reason: Optional[str] = None
 
 
 def _read_active_llm_provider() -> str:
@@ -2957,6 +2962,9 @@ def run_sprint_preflight(
                 project=eff_repo or "",
                 start_timestamp=_utcnow(),
             )
+            # Transient attribute read by main() to write the correct end_reason
+            # (issue #2045). Not serialized by SprintState.to_dict().
+            _blocked_state._preflight_exit_reason = "ica-preflight-failed"
             return _SprintPreflightResult(
                 state=_blocked_state, state_path=state_path, summary=summary,
                 sprint_num=sprint_num, sprint_branch=sprint_branch,
@@ -2965,6 +2973,7 @@ def run_sprint_preflight(
                 eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
                 dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
                 start_time=time.monotonic(), early_exit=True,
+                early_exit_reason="ica-preflight-failed",
             )
 
     # ── Auth/OAuth preflight (issue #2029) ────────────────────────────────────
@@ -2997,6 +3006,9 @@ def run_sprint_preflight(
                 project=eff_repo or "",
                 start_timestamp=_utcnow(),
             )
+            # Transient attribute read by main() to write the correct end_reason
+            # (issue #2045). Not serialized by SprintState.to_dict().
+            _auth_blocked_state._preflight_exit_reason = "auth-preflight-failed"
             return _SprintPreflightResult(
                 state=_auth_blocked_state, state_path=state_path, summary=summary,
                 sprint_num=sprint_num, sprint_branch=sprint_branch,
@@ -3005,6 +3017,7 @@ def run_sprint_preflight(
                 eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
                 dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
                 start_time=time.monotonic(), early_exit=True,
+                early_exit_reason="auth-preflight-failed",
             )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
@@ -4540,6 +4553,9 @@ def run_sprint(
                 ended_at=_ended_at, end_reason="rerun-dispatch-error",
             )
             raise SystemExit(1)
+        # pf.state._preflight_exit_reason is already set inside
+        # run_sprint_preflight() for auth/ICA failures (issue #2045).
+        # main() reads it to choose the right end_reason and operator message.
         return pf.summary, pf.state
 
     state              = pf.state
@@ -5099,13 +5115,14 @@ def main() -> None:
                 ended_at=_ended_at, end_reason="hard-crash",
             )
         elif not state or not state.issues:
-            # No dispatchable tickets → the run did no work (nothing was queued).
-            # main() set the sprint to 'running' before the run, so reset it back
-            # to a fresh, runnable DRAFT — drop the lifecycle row and set plan
-            # state to draft — instead of marking needs_rework, which implies
-            # failed work and offers a pointless "Re-run → N.1". The operator just
-            # fixes the ticket labels and Runs the same sprint again. (Mirrors the
-            # manual recovery for a no-dispatch misfire, e.g. sprint-95.)
+            # No work was done (nothing dispatched). Reset to a runnable DRAFT
+            # instead of needs_rework, which implies failed work. The operator
+            # fixes whatever blocked the run and tries again.
+            # Two sub-cases:
+            #   (a) Auth or ICA preflight failed — write a specific end_reason
+            #       so the operator sees the real diagnosis, not "check labels".
+            #   (b) Genuinely no dispatchable tickets — existing behaviour.
+            _preflight_reason = getattr(state, "_preflight_exit_reason", None) if state else None
             try:
                 import db  # apps/dashboard on sys.path (line 142)
                 db.transition_sprint_state(
@@ -5114,14 +5131,36 @@ def main() -> None:
                 )
             except Exception:
                 pass
-            _plan_json_set_state_sm(
-                args.label, "draft", cfg=cfg,
-                end_reason="no-dispatchable-tickets",
-            )
-            sys.stdout.write(str(
-                "No dispatchable tickets — sprint left as a runnable draft "
-                "(not marked needs_rework). Check ticket labels and Run again."
-            ) + "\n")
+            if _preflight_reason == "auth-preflight-failed":
+                # issue #2045 (AC-1): auth/OAuth preflight blocked the sprint.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="auth-preflight-failed",
+                )
+                sys.stdout.write(str(
+                    "Sprint blocked — auth/OAuth preflight failed. "
+                    "Re-authenticate (e.g. `claude login`) and retry the sprint."
+                ) + "\n")
+            elif _preflight_reason == "ica-preflight-failed":
+                # issue #2045 (AC-2): ICA preflight blocked the sprint.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="ica-preflight-failed",
+                )
+                sys.stdout.write(str(
+                    "Sprint blocked — ICA readiness check failed. "
+                    "Check ICA configuration and retry the sprint."
+                ) + "\n")
+            else:
+                # Genuinely no dispatchable tickets — original behaviour.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="no-dispatchable-tickets",
+                )
+                sys.stdout.write(str(
+                    "No dispatchable tickets — sprint left as a runnable draft "
+                    "(not marked needs_rework). Check ticket labels and Run again."
+                ) + "\n")
         else:
             # A sprint is a clean (ready_to_merge) finish only when every ticket
             # landed. Besides an explicit agent failure, a ticket left SKIPPED by a

@@ -738,7 +738,7 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "failures", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
@@ -774,6 +774,7 @@
       "sprint-mgmt",
       "tickets",
       "failures",
+      "brain",
       "manage",
       "planning",
       "settings"
@@ -786,6 +787,7 @@
       "roadmap",
       "advisor",
       "failures",
+      "brain",
       "settings"
     ].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
@@ -820,6 +822,7 @@
       "roadmap",
       "advisor",
       "failures",
+      "brain",
       "settings",
       "global-settings"
     ].forEach((t) => {
@@ -861,6 +864,8 @@
       advInit();
     if (tab === "failures")
       failuresInit();
+    if (tab === "brain")
+      brainInit();
     if (tab === "settings")
       projSettingsInit();
     if (tab === "global-settings") {
@@ -913,6 +918,7 @@
         "sprint-mgmt",
         "tickets",
         "failures",
+        "brain",
         "manage",
         "deploy",
         "planning",
@@ -8962,6 +8968,122 @@ Proceed anyway?`)) {
     return () => clearInterval(handle);
   }
 
+  // apps/dashboard/static/src/brain/brain.js
+  async function fetchBrainSearch(q, project) {
+    let url = "/api/brain/search?q=" + encodeURIComponent(q);
+    if (project)
+      url += "&project=" + encodeURIComponent(project);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  async function fetchBrainPanels(project) {
+    let url = "/api/brain/panels";
+    if (project)
+      url += "?project=" + encodeURIComponent(project);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  function _esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _sourceLabel(source) {
+    const map = {
+      decisions: "Decision",
+      "bulk-create": "Bulk create",
+      retros: "Retro",
+      docs: "Docs"
+    };
+    return map[source] || source;
+  }
+  function _sourceClass(source) {
+    return "brain-badge brain-badge-" + source;
+  }
+  function _renderHits(hits) {
+    if (!hits || hits.length === 0) {
+      return '<div class="brain-empty">No results found.</div>';
+    }
+    return hits.map(function(h) {
+      const badge = '<span class="' + _sourceClass(h.source) + '">' + _esc(_sourceLabel(h.source)) + "</span>";
+      const path = _esc(h.path || "");
+      const snippet = _esc(h.snippet || "");
+      return '<div class="brain-hit"><div class="brain-hit-header">' + badge + '<span class="brain-hit-path">' + path + '</span></div><div class="brain-hit-snippet">' + snippet + "</div></div>";
+    }).join("");
+  }
+  function _renderRecentDecisions(items) {
+    if (!items || items.length === 0) {
+      return "<p>No decisions found.</p>";
+    }
+    return items.map(function(d) {
+      return '<div class="brain-panel-item"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div>" + (d.decision ? '<div class="brain-panel-item-sub">' + _esc(d.decision) + "</div>" : "") + "</div>";
+    }).join("");
+  }
+  function _renderOpenDecisions(items) {
+    if (!items || items.length === 0) {
+      return "<p>No open decision items found.</p>";
+    }
+    return items.map(function(d) {
+      return '<div class="brain-panel-item"><div class="brain-panel-item-path">' + _esc(d.path) + '</div><div class="brain-panel-item-line">' + _esc(d.line) + "</div></div>";
+    }).join("");
+  }
+  function _renderLastLearnings(items) {
+    if (!items || items.length === 0) {
+      return "<p>No learnings recorded.</p>";
+    }
+    return "<ul>" + items.map(function(l) {
+      return "<li>" + _esc(l) + "</li>";
+    }).join("") + "</ul>";
+  }
+  function _renderBacklogRationale(items) {
+    if (!items || items.length === 0) {
+      return "<p>No ADR entries found.</p>";
+    }
+    return items.map(function(d) {
+      return '<div class="brain-panel-item"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div></div>";
+    }).join("");
+  }
+  var _panelsLoaded = false;
+  function _getProject2() {
+    return typeof _projectData !== "undefined" && _projectData ? _projectData.repo || null : null;
+  }
+  function brainSearch() {
+    const inputEl = document.getElementById("brain-search-input");
+    const resultsEl = document.getElementById("brain-results");
+    if (!inputEl || !resultsEl)
+      return;
+    const q = (inputEl.value || "").trim();
+    if (!q) {
+      resultsEl.innerHTML = "";
+      return;
+    }
+    resultsEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Searching\u2026</div>';
+    fetchBrainSearch(q, _getProject2()).then(function(hits) {
+      resultsEl.innerHTML = _renderHits(hits);
+    }).catch(function() {
+      resultsEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Search failed.</div>';
+    });
+  }
+  function brainInit2() {
+    const root2 = document.getElementById("brain-root");
+    if (!root2)
+      return;
+    if (_panelsLoaded)
+      return;
+    _panelsLoaded = true;
+    const panelsEl = document.getElementById("brain-panels");
+    if (!panelsEl)
+      return;
+    panelsEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading panels\u2026</div>';
+    fetchBrainPanels(_getProject2()).then(function(data) {
+      panelsEl.innerHTML = '<div class="brain-panel-grid"><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-book"></i> Recent Decisions</h3><div class="brain-panel-body">' + _renderRecentDecisions(data.recent_decisions) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-arrow-right"></i> Open \u27F6 DECISION Items</h3><div class="brain-panel-body">' + _renderOpenDecisions(data.open_decisions) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-bulb"></i> Last Sprint Learnings</h3><div class="brain-panel-body">' + _renderLastLearnings(data.last_learnings) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-list-check"></i> Backlog with Rationale</h3><div class="brain-panel-body">' + _renderBacklogRationale(data.backlog_rationale) + "</div></section></div>";
+    }).catch(function() {
+      panelsEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Failed to load panels.</div>';
+    });
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -9061,5 +9183,13 @@ Proceed anyway?`)) {
   root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
   globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
   globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+  root.fetchBrainSearch = fetchBrainSearch;
+  root.fetchBrainPanels = fetchBrainPanels;
+  root.brainInit = brainInit2;
+  root.brainSearch = brainSearch;
+  globalThis.fetchBrainSearch = fetchBrainSearch;
+  globalThis.fetchBrainPanels = fetchBrainPanels;
+  globalThis.brainInit = brainInit2;
+  globalThis.brainSearch = brainSearch;
 })();
 //# sourceMappingURL=bundle.js.map

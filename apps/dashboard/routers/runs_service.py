@@ -167,6 +167,7 @@ def list_runs() -> list[dict]:
             }
         ticket = sprints[sl]["tickets"][inum]
         ticket["agents"].append({
+            "id": r["id"],
             "agent": r["agent"],
             "outcome": r["outcome"],
             "started_at": r["started_at"],
@@ -217,14 +218,21 @@ def list_runs() -> list[dict]:
 
 
 def get_log_path_from_db(sprint: str, issue: int, agent: str) -> Optional[str]:
-    """Return the log_path stored in agent_runs for this sprint/issue/agent combo."""
+    """Return the log_path stored in agent_runs for this sprint/issue/agent combo.
+
+    ``agent`` is normalised to lowercase before the SQL match because
+    ``events.detail`` records role names as UPPERCASE (e.g. ``CODER``) while
+    ``agent_runs.agent`` is always lowercase.  Normalising at this lookup
+    boundary fixes all callers regardless of how the URL was constructed.
+    (issue #2039)
+    """
     with _db.get_conn() as conn:
         _db._create_agent_runs_table(conn)
         row = conn.execute(
             "SELECT log_path FROM agent_runs "
             "WHERE sprint_label = ? AND issue_number = ? AND agent = ? "
             "ORDER BY id DESC LIMIT 1",
-            (sprint, issue, agent),
+            (sprint, issue, agent.lower()),
         ).fetchone()
     if row is None:
         return None
@@ -298,4 +306,35 @@ def read_log_tail(log_file: Path, kb: int = 32) -> dict:
         "content": text,
         "file_size": file_size,
         "kb_returned": kb,
+    }
+
+
+def get_run_reasoning(agent_run_id: int) -> Optional[dict]:
+    """Return the reasoning narrative for a completed agent run (issue #2022).
+
+    Reads ``final_message``, ``transcript_path``, and ``log_path`` from the
+    ``agent_runs`` row keyed by ``id``.  Uses ``_db._read_log_tail`` to build
+    a fresh ``log_tail`` from the on-disk log (the persisted ``final_message``
+    is the same content stored at run-close, but the live tail may differ if
+    the log was appended after close).
+
+    Returns ``None`` when the ``agent_run_id`` does not exist; the caller
+    converts that to a 404.
+
+    Zero GitHub API calls; DB-only.
+    """
+    with _db.get_conn() as conn:
+        _db._create_agent_runs_table(conn)
+        row = conn.execute(
+            "SELECT id, final_message, transcript_path, log_path "
+            "FROM agent_runs WHERE id = ?",
+            (int(agent_run_id),),
+        ).fetchone()
+    if row is None:
+        return None
+    log_tail = _db._read_log_tail(row["log_path"])
+    return {
+        "final_message": row["final_message"],
+        "transcript_path": row["transcript_path"],
+        "log_tail": log_tail,
     }

@@ -31,6 +31,15 @@ load_dotenv(DASHBOARD_DIR / ".env")
 import github_client
 from sizing import SIZE_TO_MINUTES
 
+# Retro helpers (issue #2026 AC-3) — surfaces last N committed retros at plan
+# time so past outcomes feed future planning.  Import lazily if unavailable.
+try:
+    from retro import RECENT_RETROS_N, load_recent_retros  # type: ignore[import]
+    _RETRO_AVAILABLE = True
+except ImportError:  # pragma: no cover — retro module not on path
+    _RETRO_AVAILABLE = False
+    RECENT_RETROS_N = 3  # fallback default so the argparse default is numeric
+
 
 # ── size estimation ───────────────────────────────────────────────────────────
 
@@ -183,6 +192,16 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="Print plan only — do not apply any labels")
     parser.add_argument("--repo", default=None, help="owner/repo override")
+    parser.add_argument(
+        "--recent-retros",
+        type=int,
+        default=RECENT_RETROS_N,
+        metavar="N",
+        help=(
+            f"Surface the last N committed retros from docs/changelog/uat/ "
+            f"before planning (default: {RECENT_RETROS_N}; 0 to suppress)"
+        ),
+    )
     args = parser.parse_args()
 
     repo_name = args.repo
@@ -192,6 +211,28 @@ def main() -> None:
     sys.stdout.write(str("═" * 60) + "\n")
     sys.stdout.write(str("  Sprint Planner") + "\n")
     sys.stdout.write(str("═" * 60) + "\n")
+
+    # ── Step 0: Surface recent retros (issue #2026 AC-3) ──────────
+    if _RETRO_AVAILABLE and args.recent_retros > 0:
+        _docs_uat = REPO_ROOT / "docs" / "changelog" / "uat"
+        _retros = load_recent_retros(_docs_uat, n=args.recent_retros)
+        if _retros:
+            sys.stdout.write(str(f"\nRecent Retros (last {len(_retros)})") + "\n")
+            sys.stdout.write(str("─" * 60) + "\n")
+            for _fname, _content in _retros:
+                sys.stdout.write(str(f"\n--- {_fname} ---") + "\n")
+                # Surface Key Learnings section if present; else first 20 lines
+                _kl_match = re.search(
+                    r"## Key Learnings\n(.*?)(?=\n## |\Z)",
+                    _content,
+                    re.DOTALL,
+                )
+                if _kl_match:
+                    sys.stdout.write(_kl_match.group(0).strip() + "\n")
+                else:
+                    _preview = "\n".join(_content.splitlines()[:20])
+                    sys.stdout.write(_preview + "\n")
+            sys.stdout.write(str("─" * 60) + "\n")
 
     # ── Step 1: Load issues ────────────────────────────────────────
     sys.stdout.write(str("\nFetching open issues…") + "\n")

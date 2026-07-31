@@ -19,8 +19,103 @@ if not _db_path_raw:
 
 DB_PATH = Path(_db_path_raw)
 
+# ── Relative-path guard (issue #2047) ─────────────────────────────────────────
+# A relative DB_PATH is dangerous: its resolved location is determined by the
+# CWD at the time the process starts, so a pytest run from the repo root would
+# write to <repo-root>/commander.db instead of apps/dashboard/commander.db.
+# Resolve it to absolute (relative to this file's directory = apps/dashboard/)
+# and log a loud warning so operators know to switch to an absolute path.
+if not DB_PATH.is_absolute():
+    _resolved_db = (Path(__file__).parent / DB_PATH).resolve()
+    logging.warning(
+        "DB_PATH %r is relative — resolved to absolute %r. "
+        "Relative paths are unsafe: the CWD at process startup determines which "
+        "database file gets written.  Set DB_PATH to an absolute path in your "
+        ".env to eliminate CWD-dependent behaviour and suppress this warning.",
+        _db_path_raw,
+        str(_resolved_db),
+    )
+    DB_PATH = _resolved_db
+
+# Default local-backup directory — sibling .commander/db-backups/ of the DB.
+# Tests can monkeypatch this directly.
+_LOCAL_BACKUP_DIR = DB_PATH.parent / ".commander" / "db-backups"
+
 # Asia/Bangkok is UTC+7 (no DST)
 _BKK_OFFSET = timezone(timedelta(hours=7))
+
+_log = logging.getLogger(__name__)
+
+
+def set_local_backup_dir(path: Path) -> None:
+    """Called by backup.py to register where local rolling backups live."""
+    global _LOCAL_BACKUP_DIR
+    _LOCAL_BACKUP_DIR = path
+
+
+def _find_best_backup(backup_dir: Path) -> "Path | None":
+    """Return the most recent verified non-empty .bak file, or None.
+
+    Iterates candidates newest-first, skipping zero-byte files and any that
+    fail PRAGMA integrity_check.  Returns the first that passes both checks.
+    If none pass, returns None so the caller can emit a safe "no valid backup"
+    message instead of naming a corrupt file in a restore hint (issue #2036).
+    """
+    baks = sorted(backup_dir.glob("*.bak"), key=lambda p: p.name, reverse=True)
+    for bak in baks:
+        try:
+            if bak.stat().st_size == 0:
+                continue
+        except OSError:
+            continue
+        if check_db_integrity(bak) == "ok":
+            return bak
+    return None
+
+
+def _startup_integrity_check() -> None:
+    """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt.
+
+    The restore hint names the most recent VERIFIED non-empty backup (issue #2036).
+    If the backup dir contains only empty or corrupt files, the message says so
+    explicitly rather than printing a cp command that would destroy data.
+    """
+    if not DB_PATH.exists():
+        return
+    status = check_db_integrity(DB_PATH)
+    if status == "ok":
+        return
+    restore_hint = ""
+    backup_dir = _LOCAL_BACKUP_DIR
+    if backup_dir is not None and backup_dir.is_dir():
+        best = _find_best_backup(backup_dir)
+        if best is not None:
+            restore_hint = (
+                f"\n  Most recent verified backup: {best}"
+                f"\n  Restore: cp {best} {DB_PATH}"
+                f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
+            )
+        else:
+            # Check whether backups exist but are all invalid
+            all_baks = list(backup_dir.glob("*.bak"))
+            if all_baks:
+                restore_hint = (
+                    f"\n  WARNING: No verified non-empty backup found in {backup_dir}."
+                    f"\n  {len(all_baks)} backup file(s) exist but all are empty or"
+                    f" failed integrity_check — do NOT restore from them."
+                    f"\n  Check off-site backups or attempt: sqlite3 commander.db .recover"
+                )
+            else:
+                restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
+    else:
+        restore_hint = (
+            f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."
+        )
+    _log.critical("FATAL: commander.db corrupt at startup: %s%s", status, restore_hint)
+    raise RuntimeError(
+        f"commander.db is corrupt (PRAGMA integrity_check: {status})."
+        f" The database cannot be used.{restore_hint}"
+    )
 
 
 def _bkk_midnight_utc() -> str:
@@ -29,6 +124,33 @@ def _bkk_midnight_utc() -> str:
     midnight  = now_bkk.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_mid   = midnight.astimezone(timezone.utc)
     return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def check_db_integrity(db_path: Path) -> str:
+    """Run PRAGMA integrity_check on db_path. Returns 'ok' or an error string."""
+    if not db_path.exists():
+        return f"error: file not found: {db_path}"
+    if db_path.stat().st_size == 0:
+        return "error: database file is empty"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("PRAGMA integrity_check").fetchone()
+        return row[0] if row else "error: no result from integrity_check"
+    except sqlite3.DatabaseError as exc:
+        return f"error: {exc}"
+    finally:
+        conn.close()
+
+
+def run_wal_checkpoint(db_path: "Path | None" = None) -> tuple:
+    """Run PRAGMA wal_checkpoint(PASSIVE) and return (busy, log, checkpointed)."""
+    path = db_path if db_path is not None else DB_PATH
+    conn = sqlite3.connect(str(path))
+    try:
+        row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        return tuple(row) if row else (0, 0, 0)
+    finally:
+        conn.close()
 
 
 @contextlib.contextmanager
@@ -53,6 +175,10 @@ def get_conn():
 
 
 def init_db():
+    # Integrity guard: detect corruption before DDL so we never silently
+    # 500-loop on a truncated/corrupt DB (issue #1901).
+    _startup_integrity_check()
+
     # Write-access guard: verify the path is writable before attempting DDL.
     try:
         with open(DB_PATH, "a"):
@@ -1412,7 +1538,9 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
             log_path         TEXT,
             provider         TEXT,
             is_ica           INTEGER DEFAULT 0,
-            cost_usd         REAL
+            cost_usd         REAL,
+            final_message    TEXT,
+            transcript_path  TEXT
         )
         """
     )
@@ -1444,6 +1572,11 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         # cost_usd is the pre-computed USD estimate stored atomically at run close.
         ("is_ica", "INTEGER DEFAULT 0"),
         ("cost_usd", "REAL"),
+        # Durable agent narrative tail + Claude Code transcript path (issue #2021).
+        # final_message: last ~4 KB of the run log, populated at run close.
+        # transcript_path: absolute path to the Claude Code session JSONL, when known.
+        ("final_message", "TEXT"),
+        ("transcript_path", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
@@ -1527,6 +1660,40 @@ def _duration_between(started_at: str | None, finished_at: str | None) -> int | 
     return round((f - s).total_seconds())
 
 
+def _read_log_tail(log_path: str | None, max_bytes: int = 4096) -> str | None:
+    """Return the last ``max_bytes`` of a log file as a decoded UTF-8 string.
+
+    Called at run-close to populate ``final_message`` in ``agent_runs``
+    (issue #2021 AC2). The bound (default 4 KB ≈ ~100 lines) prevents the
+    87 MB DB from bloating over many runs.
+
+    Best-effort: returns ``None`` when ``log_path`` is absent, unreadable,
+    or the file is empty — never raises, so a missing log can never break
+    run recording or the sprint loop.
+
+    Testable entry-point (AC4): import and call directly with a fake log path
+    and a temp ``agent_runs`` DB — no full sprint required.
+    """
+    if not log_path:
+        return None
+    try:
+        with open(log_path, "rb") as fh:
+            fh.seek(0, 2)  # seek to end
+            size = fh.tell()
+            if size == 0:
+                return None
+            seek_to = max(0, size - max_bytes)
+            fh.seek(seek_to)
+            raw = fh.read(max_bytes)
+        text = raw.decode("utf-8", errors="replace")
+        # If we seeked mid-file, drop the likely-truncated first line.
+        if seek_to > 0 and "\n" in text:
+            text = text[text.index("\n") + 1:]
+        return text.strip() or None
+    except Exception:
+        return None
+
+
 def record_agent_start(
     issue_number: int,
     sprint_label: str,
@@ -1584,6 +1751,7 @@ def record_agent_finish(
     run_id: int | None = None,
     is_ica: bool = False,
     cost_usd: float | None = None,
+    transcript_path: str | None = None,
 ) -> None:
     """Close the open agent_runs row with finish time, duration and outcome (#764).
 
@@ -1593,6 +1761,9 @@ def record_agent_finish(
     monotonic measurement — issue #764 AC3); when omitted it is computed from the
     start/finish timestamps. `is_ica` and `cost_usd` are written atomically with
     the finish record for ICA metered-path runs (issue #1672 AC4).
+    `final_message` is populated from the tail of the stored `log_path` via
+    `_read_log_tail` (issue #2021 AC2). `transcript_path` is stored when
+    supplied by the caller (issue #2021 AC2).
     Best-effort: never raises into the sprint loop.
     """
     finished_at = finished_at or _now_iso()
@@ -1600,11 +1771,11 @@ def record_agent_finish(
         _create_agent_runs_table(conn)
         if run_id is not None:
             row = conn.execute(
-                "SELECT id, started_at FROM agent_runs WHERE id = ?", (run_id,)
+                "SELECT id, started_at, log_path FROM agent_runs WHERE id = ?", (run_id,)
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT id, started_at FROM agent_runs "
+                "SELECT id, started_at, log_path FROM agent_runs "
                 "WHERE issue_number = ? AND sprint_label = ? AND agent = ? "
                 "AND finished_at IS NULL "
                 "ORDER BY id DESC LIMIT 1",
@@ -1614,9 +1785,11 @@ def record_agent_finish(
             return
         if duration_seconds is None:
             duration_seconds = _duration_between(row["started_at"], finished_at)
+        final_message = _read_log_tail(row["log_path"])
         conn.execute(
             "UPDATE agent_runs SET finished_at = ?, duration_seconds = ?, "
-            "outcome = ?, total_tokens = ?, is_ica = ?, cost_usd = ? WHERE id = ?",
+            "outcome = ?, total_tokens = ?, is_ica = ?, cost_usd = ?, "
+            "final_message = ?, transcript_path = ? WHERE id = ?",
             (
                 finished_at,
                 None if duration_seconds is None else int(duration_seconds),
@@ -1624,6 +1797,8 @@ def record_agent_finish(
                 None if total_tokens is None else int(total_tokens),
                 1 if is_ica else 0,
                 cost_usd,
+                final_message,
+                transcript_path,
                 row["id"],
             ),
         )

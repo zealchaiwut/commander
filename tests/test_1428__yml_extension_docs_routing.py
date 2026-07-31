@@ -20,7 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 from services.sprint_manager.model_routing import _DOCS_PATH_EXTENSIONS, _is_docs_only  # noqa: E402
 

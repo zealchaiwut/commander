@@ -1148,15 +1148,12 @@ def _gate_coder_no_test_edits(
     blocked_patterns: Optional[list[str]] = None,
     allowlist: Optional[list[str]] = None,
 ) -> "GateResult":
-    """Gate: fail if the coder's diff modifies a pre-existing path matching
-    blocked_patterns.
+    """Gate: fail if the coder's diff modifies any path matching blocked_patterns.
 
-    Defaults to blocking changes under tests/**, but only for files that
-    already exist on base_branch (grading tests authored by the tester/BA).
-    Files the coder itself created (absent on base_branch) are its own TDD
-    tests and pass the gate. Paths listed in allowlist are exempted
-    unconditionally (e.g. shared fixtures, conftest stubs that a coder is
-    explicitly permitted to touch).
+    Uses --diff-filter=CMD (Modified, Deleted, Copied) so TDD-written new test
+    files (Added) are allowed through while edits, deletions, and copies of
+    existing grading tests are blocked. Renamed files are caught via a separate
+    --diff-filter=R pass. Paths listed in allowlist are exempted unconditionally.
 
     blocked_patterns: fnmatch glob patterns; reads CODER_BLOCKED_PATH_PATTERNS
     when None.  allowlist: exact path matches; reads CODER_TEST_PATH_ALLOWLIST
@@ -1174,32 +1171,35 @@ def _gate_coder_no_test_edits(
         allowlist = _get_coder_test_allowlist()
 
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        "git", "diff", base_branch, "--name-only", "--diff-filter=CMD",
         cwd=worktester_root,
     )
-    if rc != 0 or not out.strip():
+    rc_r, out_r, _ = _run_timed(
+        "git", "diff", base_branch, "--name-status", "--diff-filter=R",
+        cwd=worktester_root,
+    )
+
+    changed_paths = [p for p in out.splitlines() if p.strip()] if rc == 0 else []
+    for line in (out_r.splitlines() if rc_r == 0 else []):
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].startswith("R"):
+            old_path, new_path = parts[1].strip(), parts[2].strip()
+            if old_path:
+                changed_paths.append(old_path)
+            if new_path:
+                changed_paths.append(new_path)
+
+    if not changed_paths:
         sys.stdout.write(str("  [gate:coder-no-test-edits] empty diff — PASS") + "\n")
         return GateResult(gate="coder-no-test-edits", passed=True, output="empty diff")
-
-    changed_paths = [p for p in out.splitlines() if p.strip()]
     allowlist_set = set(allowlist)
 
     blocked: list[str] = []
     for path in changed_paths:
         if path in allowlist_set:
             continue
-        if not any(fnmatch.fnmatch(path, pat) for pat in blocked_patterns):
-            continue
-        # Only pre-existing files are protected grading tests. A file absent
-        # on base_branch was created by the coder (its own TDD test) and is
-        # allowed — the TDD coder prompt requires writing new tests.
-        rc_exists, _, _ = _run_timed(
-            "git", "cat-file", "-e", f"{base_branch}:{path}",
-            cwd=worktester_root,
-        )
-        if rc_exists != 0:
-            continue
-        blocked.append(path)
+        if any(fnmatch.fnmatch(path, pat) for pat in blocked_patterns):
+            blocked.append(path)
 
     if not blocked:
         sys.stdout.write(str("  [gate:coder-no-test-edits] PASS") + "\n")

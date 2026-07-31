@@ -113,6 +113,19 @@ except ImportError:
     _backup_module = None  # type: ignore[assignment]
     _BACKUP_AVAILABLE = False
 
+# Local rolling backup (issue #1901) — apps/dashboard/backup.py, separate from
+# the gist/repo authority-DB backup above. Loaded by file path so it is not
+# shadowed by the services/sprint_manager/backup.py already on sys.path.
+try:
+    _LOCAL_BAK_PATH = Path(__file__).parent / "backup.py"
+    if _LOCAL_BAK_PATH.exists():
+        _spec = _importlib_util.spec_from_file_location("_dashboard_backup_local", _LOCAL_BAK_PATH)
+        _local_backup_module = _importlib_util.module_from_spec(_spec)
+        _spec.loader.exec_module(_local_backup_module)
+        _local_backup_module.start_local_backup_scheduler()
+except Exception:
+    pass  # local backup is best-effort; never block startup
+
 # Neon dual-write was removed in issue #758 — SQLite + local JSON is the primary
 # (and only live) store. Neon is now an optional export target reached solely via
 # scripts/export_to_neon.py, so there is no startup sync or per-flow Neon write to
@@ -771,6 +784,54 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
             _proj_root = _project_root_path(project) if project else None
             if _proj_root is not None and _live_manager_pid(_proj_root, label) is not None:
                 continue
+        except Exception:
+            pass
+        # (#2031): If plan.json already carries a terminal (non-running) state,
+        # the sprint manager wrote its outcome before the process exited.  The DB
+        # row is stale — a failed or not-yet-applied DB write, or a restart race.
+        # Do NOT overwrite with "orphaned (no live process)"; that would lie about
+        # a sprint that completed normally or crashed with a known end_reason (e.g.
+        # "hard-crash" from #2030's crash handler).
+        # Genuinely orphaned sprints still have plan.json=running (manager crashed
+        # before writing terminal state) and fall through to the existing orphan path.
+        try:
+            if project:
+                _plan_root = _project_root_path(project)
+                _plan_file = (
+                    _commander_dir(_plan_root) / "sprints" / f"{label}-plan.json"
+                )
+                if _plan_file.exists():
+                    _plan_data = json.loads(_plan_file.read_text(encoding="utf-8"))
+                    if isinstance(_plan_data, dict):
+                        _plan_state = _plan_data.get("state") or ""
+                        if _plan_state and _plan_state != "running":
+                            # Sprint is already terminal — DB row is stale.
+                            # Sync DB silently so the board shows the right state.
+                            _plan_end_reason = _plan_data.get("end_reason")
+                            _plan_ended_at = _plan_data.get("ended_at")
+                            try:
+                                if _plan_state in ("ready_to_merge", "completed"):
+                                    db.record_sprint_ready_to_merge(
+                                        label,
+                                        end_reason=_plan_end_reason,
+                                        ended_at=_plan_ended_at,
+                                        project=project,
+                                    )
+                                elif _plan_state in ("needs_rework", "cancelled", "failed"):
+                                    db.record_sprint_needs_rework(
+                                        label,
+                                        end_reason=_plan_end_reason,
+                                        ended_at=_plan_ended_at,
+                                        project=project,
+                                    )
+                            except Exception:
+                                pass
+                            logger.info(
+                                "[orphan-db-sweep] sprint %s: plan.json=%s — "
+                                "DB was stale-running; synced, not orphaned",
+                                label, _plan_state,
+                            )
+                            continue  # not an orphan — do not add to swept
         except Exception:
             pass
         started = (row.get("started_at") or "").strip()
@@ -3226,10 +3287,16 @@ def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
 
     action:
-        'skip'             — UAT / UAT-approved; leave ticket and labels untouched
+        'skip'             — UAT / UAT-approved / blocked; leave ticket untouched
         'dispatch_tester'  — SIT ticket; send to tester directly; SIT label preserved
         'dispatch_coder'   — all other states; send to coder; strip appropriate labels
+
+    'blocked' tickets are skipped even when they also carry needs-rework or SIT:
+    the operator must manually reset the label before the ticket re-enters auto-rerun
+    (issue #2033, AC-2).
     """
+    if "blocked" in labels:
+        return "skip", []
     if labels & {"UAT", "UAT-approved"}:
         return "skip", []
     if "SIT" in labels:

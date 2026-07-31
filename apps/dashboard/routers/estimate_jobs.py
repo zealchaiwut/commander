@@ -92,20 +92,27 @@ def _prune_old_job_files() -> None:
 
 
 def _evict_if_needed() -> None:
-    """Evict oldest done/failed jobs when _estimate_jobs reaches _MAX_JOBS (issue #1897).
+    """Evict oldest jobs when _estimate_jobs reaches _MAX_JOBS (issues #1897, #1906).
 
-    Running and queued jobs are never evicted — only completed (done/failed) ones
-    are candidates. After evicting from memory, prune old disk files by age.
+    Terminal (done/failed) jobs are evicted first; if the store is still at or
+    above _MAX_JOBS after exhausting terminal candidates, the oldest
+    queued/running entries are shed too — preventing unbounded growth when a
+    hung subprocess parks all jobs in non-terminal states.
     """
     if len(_estimate_jobs) < _MAX_JOBS:
         return
-    evictable = sorted(
+    n_to_evict = max(1, len(_estimate_jobs) - _MAX_JOBS + 1)
+    terminal = sorted(
         (j.get("created_at", ""), jid)
         for jid, j in _estimate_jobs.items()
         if j.get("status") in ("done", "failed")
     )
-    n_to_evict = max(1, len(_estimate_jobs) - _MAX_JOBS + 1)
-    for _, jid in evictable[:n_to_evict]:
+    non_terminal = sorted(
+        (j.get("created_at", ""), jid)
+        for jid, j in _estimate_jobs.items()
+        if j.get("status") not in ("done", "failed")
+    )
+    for _, jid in (terminal + non_terminal)[:n_to_evict]:
         _estimate_jobs.pop(jid, None)
     _prune_old_job_files()
 
@@ -120,6 +127,7 @@ def get_estimate_job(job_id: str) -> dict | None:
         if path.exists():
             job = json.loads(path.read_text(encoding="utf-8"))
             _estimate_jobs[job_id] = job
+            _evict_if_needed()  # enforce cap on lazy-load path (issue #1906)
             return job
     except Exception:
         pass

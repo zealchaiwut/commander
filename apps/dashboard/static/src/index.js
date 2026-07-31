@@ -38,6 +38,7 @@ import {
   closeAllStabDropdowns,
 } from "./shell/tabs.js";
 import { loadCommanderFeatures } from "./shell/features.js";
+import { parseUrl } from "./shell/url-parser.js";
 import {
   visibilityInterval,
   installVisibilityGuard,
@@ -97,6 +98,7 @@ injectProgressActivityCss();
 root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
+root.parseUrl = parseUrl;
 root.loadCommanderFeatures = loadCommanderFeatures;
 root.visibilityInterval = visibilityInterval;
 root.snavNavStatusFetch = snavNavStatusFetch;
@@ -104,6 +106,7 @@ root.snavNavStatusCacheClear = snavNavStatusCacheClear;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+globalThis.parseUrl = parseUrl;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.visibilityInterval = visibilityInterval;
 globalThis.snavNavStatusFetch = snavNavStatusFetch;
@@ -187,3 +190,47 @@ root.logsToolbarVisibility = logsToolbarVisibility;
 globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
 globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
 globalThis.logsToolbarVisibility = logsToolbarVisibility;
+
+// Failures inbox tab (issue #2020)
+import {
+  fetchFailures,
+  failuresInit,
+  failuresCategoryChange,
+} from "./failures/failures.js";
+root.fetchFailures = fetchFailures;
+root.failuresInit = failuresInit;
+root.failuresCategoryChange = failuresCategoryChange;
+globalThis.fetchFailures = fetchFailures;
+globalThis.failuresInit = failuresInit;
+globalThis.failuresCategoryChange = failuresCategoryChange;
+
+// Run reasoning panel fetch helper (issue #2022)
+import { fetchRunReasoning } from "./reasoning.js";
+root.fetchRunReasoning = fetchRunReasoning;
+globalThis.fetchRunReasoning = fetchRunReasoning;
+
+// Dev Report live auto-refresh (issue #2023)
+import {
+  startDevReportAutoRefresh,
+  REPORT_REFRESH_INTERVAL_MS,
+} from "./home/live-refresh.js";
+root.startDevReportAutoRefresh = startDevReportAutoRefresh;
+root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
+globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+
+// Brain search tab (issue #2028)
+import {
+  fetchBrainSearch,
+  fetchBrainPanels,
+  brainInit,
+  brainSearch,
+} from "./brain/brain.js";
+root.fetchBrainSearch = fetchBrainSearch;
+root.fetchBrainPanels = fetchBrainPanels;
+root.brainInit = brainInit;
+root.brainSearch = brainSearch;
+globalThis.fetchBrainSearch = fetchBrainSearch;
+globalThis.fetchBrainPanels = fetchBrainPanels;
+globalThis.brainInit = brainInit;
+globalThis.brainSearch = brainSearch;

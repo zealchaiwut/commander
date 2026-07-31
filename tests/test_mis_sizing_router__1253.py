@@ -15,7 +15,7 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SERVER_PY = DASHBOARD_DIR / "server.py"
 ROUTERS_DIR = DASHBOARD_DIR / "routers"
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
 
 # Ensure dashboard dir is first in sys.path so `from config import ...` resolves

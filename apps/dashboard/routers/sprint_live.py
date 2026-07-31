@@ -774,6 +774,7 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
         current_offset = file_size
 
         # Emit initial snapshot so the board can bootstrap without a separate REST call.
+        snap = None
         try:
             snap = get_sprint_live_snapshot(sprint_label, project)
             yield f"event: snapshot\ndata: {json.dumps(snap)}\n\n"
@@ -783,10 +784,10 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
         # Track per-issue log files: {issue_num: current_offset}
         issue_log_offsets: dict[int, int] = {}
 
-        # Seed per-issue log tracking from the initial snapshot's issues list.
+        # Seed per-issue log tracking from the initial snapshot — reuse snap so
+        # get_sprint_live_snapshot is not called a second time on connect.
         try:
-            _seed_snap = get_sprint_live_snapshot(sprint_label, project)
-            for iss in (_seed_snap.get("issues") or []):
+            for iss in ((snap or {}).get("issues") or []):
                 num = iss.get("number")
                 if num is not None:
                     p = _find_issue_log(log_dir, num)

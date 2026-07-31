@@ -36,7 +36,7 @@ ROUTER_FILE = ROUTERS_DIR / "project_branches.py"
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 
 def _make_proc(stdout: str = "", returncode: int = 0, stderr: str = ""):

@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SM_DIR = REPO_ROOT / "services" / "sprint_manager"
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 for _p in (str(REPO_ROOT), str(DASHBOARD_DIR), str(SM_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)

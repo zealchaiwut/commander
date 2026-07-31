@@ -9652,6 +9652,16 @@
       .stab-group { position: static; }
       .sub-tabs { overflow-x: auto; scrollbar-width: none; }
       .sub-tabs::-webkit-scrollbar { display: none; }
+      /* AC4/#2043: right-fade gradient cues that the tab strip can be scrolled */
+      .sub-tabs-row::after {
+        content: '';
+        position: absolute;
+        right: 0; top: 0; bottom: 0;
+        width: 48px;
+        background: linear-gradient(to right, transparent, var(--surface));
+        pointer-events: none;
+        z-index: 2;
+      }
       /* AC1–AC2/#1768: clamp page-level horizontal scrollWidth to the viewport */
       body { overflow-x: hidden; }
       /* AC4/#1768: subnav pill row wraps so it does not widen the page */
@@ -9667,6 +9677,9 @@
       /* AC7: inline confirm dialog stacks so both buttons fit without clipping */
       .deploy-card__confirm { flex-direction: column; }
       .deploy-card__confirm-msg { min-width: 0; }
+      /* AC2/#2043: Brain search input/button and Failures category select ≥44px touch target */
+      .brain-search-input, .brain-search-btn { min-height: 44px; }
+      .fbox-cat-select { min-height: 44px; }
     }
 
     /* ── Brain search tab (issue #2028) ── */
@@ -9683,12 +9696,12 @@
     .brain-search-input {
       flex: 1; padding: 8px 12px; border: 1px solid var(--border);
       border-radius: 6px; background: var(--surface); color: var(--text);
-      font-size: 14px; outline: none;
+      font-size: 16px; outline: none; /* ≥16px prevents iOS auto-zoom (#2043 AC3) */
     }
     .brain-search-input:focus { border-color: var(--accent); }
     .brain-search-btn {
       padding: 8px 16px; background: var(--accent); color: #fff;
-      border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;
+      border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 500;
     }
     .brain-search-btn:hover { opacity: 0.88; }
     .brain-results { margin-bottom: 32px; }
@@ -9790,10 +9803,12 @@
     .fbox-controls { display: flex; align-items: center; gap: 8px; }
     .fbox-cat-label { font-size: 13px; color: var(--text-sub); }
     .fbox-cat-select {
-      font-size: 13px; padding: 4px 8px;
+      font-size: 16px; padding: 4px 8px; /* ≥16px prevents iOS auto-zoom (#2043 AC3) */
       border: 1px solid var(--border); border-radius: 6px;
       background: var(--surface); color: var(--text); cursor: pointer;
     }
+    /* Failures table horizontal-scroll wrapper (issue #2043 AC1) */
+    .fbox-table-wrap { overflow-x: auto; }
     .fbox-table {
       width: 100%; border-collapse: collapse; font-size: 13px;
     }

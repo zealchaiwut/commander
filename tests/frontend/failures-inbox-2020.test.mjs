@@ -412,6 +412,54 @@ test('fetchFailures() encodes special characters in project and category', async
   );
 });
 
+// ── AC1/#2043: scroll wrapper is present in generated markup ────────────────
+// Behavioral: failuresInit() must inject a .fbox-table-wrap container around
+// the table so overflow-x: auto applies at the container level, not the page.
+
+test('AC1/#2043: failuresInit() wraps table in .fbox-table-wrap scroll container', async () => {
+  let renderedHtml = '';
+  const fboxRoot = {
+    innerHTML: '',
+    get innerHTML() { return renderedHtml; },
+    set innerHTML(html) { renderedHtml = html; },
+  };
+
+  globalThis.document.getElementById = (id) => {
+    if (id === 'fbox-root') return fboxRoot;
+    return null;
+  };
+
+  globalThis._projectData = { repo: 'owner/test-repo' };
+
+  _installFetchSpy(
+    new Map([
+      ['/api/failures', [_makeFakeRow()]],
+    ])
+  );
+
+  failuresInit();
+  await _waitForRender();
+
+  // The wrapper must be present
+  const wrapIdx = renderedHtml.indexOf('fbox-table-wrap');
+  assert.ok(
+    wrapIdx !== -1,
+    `Rendered HTML must contain fbox-table-wrap wrapper: ${renderedHtml.slice(0, 120)}`
+  );
+  // The table class (standalone, not as substring of the wrapper class) must appear after the wrapper
+  // Search for 'class="fbox-table"' to avoid matching inside 'fbox-table-wrap'
+  const tableClassIdx = renderedHtml.indexOf('class="fbox-table"');
+  assert.ok(
+    tableClassIdx !== -1 && tableClassIdx > wrapIdx,
+    `class="fbox-table" must appear after fbox-table-wrap in the markup`
+  );
+  // The wrapper must also close after the table (closing </div> present)
+  assert.ok(
+    renderedHtml.endsWith('</table></div>'),
+    `Rendered HTML must close with </table></div>: ...${renderedHtml.slice(-30)}`
+  );
+});
+
 test('fetchFailures() returns the parsed JSON from the response', async () => {
   const rows = [
     _makeFakeRow({ issue_number: 200 }),

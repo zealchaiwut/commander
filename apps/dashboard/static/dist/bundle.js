@@ -8949,7 +8949,7 @@ Proceed anyway?`)) {
     _setLoading(root2, "Loading failures\u2026");
     const cat = _currentCategory;
     fetchFailures(project, cat).then(function(rows) {
-      root2.innerHTML = '<table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table>";
+      root2.innerHTML = '<div class="fbox-table-wrap"><table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table></div>";
     }).catch(function(err) {
       _setError(root2, "Failed to load failures");
     });

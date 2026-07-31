@@ -9006,6 +9006,13 @@ Proceed anyway?`)) {
       throw new Error("HTTP " + resp.status);
     return resp.json();
   }
+  async function fetchBrainDoc(slug, path) {
+    const url = "/api/projects/" + encodeURIComponent(slug) + "/docs/" + path;
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
   function _esc(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -9029,7 +9036,7 @@ Proceed anyway?`)) {
       const badge = '<span class="' + _sourceClass(h.source) + '">' + _esc(_sourceLabel(h.source)) + "</span>";
       const path = _esc(h.path || "");
       const snippet = _esc(h.snippet || "");
-      return '<div class="brain-hit"><div class="brain-hit-header">' + badge + '<span class="brain-hit-path">' + path + '</span></div><div class="brain-hit-snippet">' + snippet + "</div></div>";
+      return '<div class="brain-hit brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-hit-header">' + badge + '<span class="brain-hit-path">' + path + '</span></div><div class="brain-hit-snippet">' + snippet + "</div></div>";
     }).join("");
   }
   function _renderRecentDecisions(items) {
@@ -9037,7 +9044,8 @@ Proceed anyway?`)) {
       return "<p>No decisions found.</p>";
     }
     return items.map(function(d) {
-      return '<div class="brain-panel-item"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div>" + (d.decision ? '<div class="brain-panel-item-sub">' + _esc(d.decision) + "</div>" : "") + "</div>";
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div>" + (d.decision ? '<div class="brain-panel-item-sub">' + _esc(d.decision) + "</div>" : "") + "</div>";
     }).join("");
   }
   function _renderOpenDecisions(items) {
@@ -9045,7 +9053,8 @@ Proceed anyway?`)) {
       return "<p>No open decision items found.</p>";
     }
     return items.map(function(d) {
-      return '<div class="brain-panel-item"><div class="brain-panel-item-path">' + _esc(d.path) + '</div><div class="brain-panel-item-line">' + _esc(d.line) + "</div></div>";
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-path">' + path + '</div><div class="brain-panel-item-line">' + _esc(d.line) + "</div></div>";
     }).join("");
   }
   function _renderLastLearnings(items) {
@@ -9061,12 +9070,63 @@ Proceed anyway?`)) {
       return "<p>No ADR entries found.</p>";
     }
     return items.map(function(d) {
-      return '<div class="brain-panel-item"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div></div>";
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div></div>";
     }).join("");
   }
   var _panelsLoaded = false;
+  var _delegationSetup = false;
   function _getProject2() {
     return typeof _projectData !== "undefined" && _projectData ? _projectData.repo || null : null;
+  }
+  function _getSlug() {
+    const repo = _getProject2();
+    return repo ? repo.split("/").pop() : null;
+  }
+  function openBrainDoc(path) {
+    const viewerEl = document.getElementById("brain-doc-viewer");
+    const contentEl = document.getElementById("brain-doc-content");
+    const pathLabelEl = document.getElementById("brain-doc-path-label");
+    const resultsEl = document.getElementById("brain-results");
+    const rootEl = document.getElementById("brain-root");
+    if (!viewerEl || !contentEl)
+      return;
+    if (resultsEl)
+      resultsEl.style.display = "none";
+    if (rootEl)
+      rootEl.style.display = "none";
+    viewerEl.style.display = "";
+    if (pathLabelEl)
+      pathLabelEl.textContent = path;
+    contentEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading\u2026</div>';
+    const slug = _getSlug();
+    if (!slug) {
+      contentEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>No project selected.</div>';
+      return;
+    }
+    fetchBrainDoc(slug, path).then(function(data) {
+      const content = data.content || "";
+      const rendered = typeof _mdToHtml === "function" ? '<div class="md-body">' + _mdToHtml(content) + "</div>" : '<pre class="brain-doc-pre">' + _esc(content) + "</pre>";
+      contentEl.innerHTML = rendered;
+    }).catch(function() {
+      contentEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Failed to load document.</div>';
+    });
+  }
+  function _handleDocActivation(e) {
+    if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ")
+      return;
+    const item = e.target && typeof e.target.closest === "function" ? e.target.closest("[data-doc-path]") : null;
+    if (!item)
+      return;
+    if (e.type === "keydown")
+      e.preventDefault();
+    openBrainDoc(item.getAttribute("data-doc-path"));
+  }
+  function _setupDocDelegation(container) {
+    if (!container)
+      return;
+    container.addEventListener("click", _handleDocActivation);
+    container.addEventListener("keydown", _handleDocActivation);
   }
   function brainSearch() {
     const inputEl = document.getElementById("brain-search-input");
@@ -9092,6 +9152,11 @@ Proceed anyway?`)) {
     if (_panelsLoaded)
       return;
     _panelsLoaded = true;
+    if (!_delegationSetup) {
+      _delegationSetup = true;
+      _setupDocDelegation(document.getElementById("brain-results"));
+      _setupDocDelegation(document.getElementById("brain-panels"));
+    }
     const panelsEl = document.getElementById("brain-panels");
     if (!panelsEl)
       return;

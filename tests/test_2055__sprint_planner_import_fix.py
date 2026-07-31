@@ -31,10 +31,6 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"

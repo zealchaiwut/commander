@@ -4712,7 +4712,7 @@ def _sprint_set_conflict_blocked(project_root: Path, sprint_label: str, files: l
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["conflict_blocked"] = {
         "files": files,
-        "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "at": datetime.now(timezone.utc).isoformat(),
     }
     _write_plan_json(project_root, sprint_label, existing)
 

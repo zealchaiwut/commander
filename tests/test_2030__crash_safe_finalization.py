@@ -64,7 +64,7 @@ for _p in (
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "apps" / "dashboard" / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 # Stub github_client before any sprint_manager imports.
 if "github_client" not in sys.modules:

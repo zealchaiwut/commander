@@ -23,7 +23,7 @@ _DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 _PROJ = "owner/perf-coach"
 

@@ -45,7 +45,7 @@ for _p in (str(REPO_ROOT), str(SM_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "apps" / "dashboard" / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 # These imports FAIL against pre-fix code (module doesn't exist).
 from services.sprint_manager.dead_letter_escalation import (  # noqa: E402

@@ -21,7 +21,7 @@ DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "test_orphan_sweep_1887.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 
 @pytest.fixture()

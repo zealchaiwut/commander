@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SM_DIR = REPO_ROOT / "services" / "sprint_manager"
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
@@ -165,7 +165,7 @@ class TestHelpExits:
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
-            env={**os.environ, "DB_PATH": str(REPO_ROOT / "commander.db")},
+            env={**os.environ},  # DB_PATH already forced to tmp path by conftest (#2047)
         )
         assert result.returncode == 0, (
             f"sprint_manager.py --help exited {result.returncode}\n"
@@ -178,7 +178,7 @@ class TestHelpExits:
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
-            env={**os.environ, "DB_PATH": str(REPO_ROOT / "commander.db")},
+            env={**os.environ},  # DB_PATH already forced to tmp path by conftest (#2047)
         )
         assert "sprint" in result.stdout.lower(), (
             "Help text must reference 'sprint' — output may have changed"

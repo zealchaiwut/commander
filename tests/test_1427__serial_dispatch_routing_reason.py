@@ -69,7 +69,7 @@ def test_issue_state_to_dict_reflects_routing_reason_after_assignment():
     import os
     import sys
     sys.path.insert(0, str(REPO_ROOT))
-    os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+    os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
     import services.sprint_manager.state as state_mod
 
     ist = state_mod.IssueState(number=42, title="Test issue")
@@ -86,7 +86,7 @@ def test_issue_state_to_dict_routing_reason_non_empty_when_set():
     import os
     import sys
     sys.path.insert(0, str(REPO_ROOT))
-    os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+    os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
     import services.sprint_manager.state as state_mod
 
     ist = state_mod.IssueState(number=7, title="Serial ticket")
@@ -104,7 +104,7 @@ def test_issue_state_to_dict_includes_coder_routing_reason_key():
     import os
     import sys
     sys.path.insert(0, str(REPO_ROOT))
-    os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+    os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
     import services.sprint_manager.state as state_mod
 
     ist = state_mod.IssueState(number=1, title="badge test")
@@ -119,7 +119,7 @@ def test_issue_state_to_dict_routing_reason_none_by_default():
     import os
     import sys
     sys.path.insert(0, str(REPO_ROOT))
-    os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+    os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
     import services.sprint_manager.state as state_mod
 
     ist = state_mod.IssueState(number=99, title="no routing override")

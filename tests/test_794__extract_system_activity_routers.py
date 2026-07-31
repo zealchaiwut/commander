@@ -33,7 +33,7 @@ if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
 import os
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 from fastapi import APIRouter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

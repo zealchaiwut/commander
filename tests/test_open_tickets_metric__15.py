@@ -27,7 +27,7 @@ DASHBOARD_DIR = Path(__file__).parent.parent / "apps" / "dashboard"
 # projects.py imports db, which sys.exit(1)s at import when DB_PATH is unset —
 # that kills pytest collection. Same convention as the other suite files.
 import os  # noqa: E402
-os.environ.setdefault("DB_PATH", str(Path(__file__).parent.parent / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))

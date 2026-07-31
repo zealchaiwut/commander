@@ -215,3 +215,19 @@ root.startDevReportAutoRefresh = startDevReportAutoRefresh;
 root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
 globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
 globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+
+// Brain search tab (issue #2028)
+import {
+  fetchBrainSearch,
+  fetchBrainPanels,
+  brainInit,
+  brainSearch,
+} from "./brain/brain.js";
+root.fetchBrainSearch = fetchBrainSearch;
+root.fetchBrainPanels = fetchBrainPanels;
+root.brainInit = brainInit;
+root.brainSearch = brainSearch;
+globalThis.fetchBrainSearch = fetchBrainSearch;
+globalThis.fetchBrainPanels = fetchBrainPanels;
+globalThis.brainInit = brainInit;
+globalThis.brainSearch = brainSearch;

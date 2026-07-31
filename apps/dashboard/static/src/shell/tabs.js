@@ -11,7 +11,7 @@
           globalSettingsLoad, _bcInitTab, _lpRenderBc, _deepLinkSprintSubView,
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
           _globalSettingsLinkActive, _evlState, parseUrl, _arTickerId, _arInterval,
-          failuresInit */
+          failuresInit, brainInit */
 
 // Maps each dropdown group to its child tab ids so the roving tabindex
 // can assign tabIndex=0 to the group trigger without relying on .active class
@@ -31,7 +31,7 @@ const _GROUP_CHILDREN = {
  */
 export function computeRovingTabindex(tab, onGlobalSettings) {
   return Object.fromEntries(
-    ["sprint-mgmt", "tickets", "failures", "manage", "planning", "settings"].map((t) => {
+    ["sprint-mgmt", "tickets", "failures", "brain", "manage", "planning", "settings"].map((t) => {
       const ownsTab =
         !onGlobalSettings &&
         (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
@@ -74,6 +74,7 @@ export function switchTab(tab, pushHistory) {
     "sprint-mgmt",
     "tickets",
     "failures",
+    "brain",
     "manage",
     "planning",
     "settings",
@@ -86,6 +87,7 @@ export function switchTab(tab, pushHistory) {
     "roadmap",
     "advisor",
     "failures",
+    "brain",
     "settings",
   ].forEach((t) => {
     const btn = document.getElementById("stab-" + t);
@@ -126,6 +128,7 @@ export function switchTab(tab, pushHistory) {
     "roadmap",
     "advisor",
     "failures",
+    "brain",
     "settings",
     "global-settings",
   ].forEach((t) => {
@@ -164,6 +167,7 @@ export function switchTab(tab, pushHistory) {
   if (tab === "roadmap") roadmapInit();
   if (tab === "advisor") advInit();
   if (tab === "failures") failuresInit();
+  if (tab === "brain") brainInit();
   if (tab === "settings") projSettingsInit();
   if (tab === "global-settings") {
     settingsInitValues();
@@ -228,6 +232,7 @@ if (_subTabsEl) {
       "sprint-mgmt",
       "tickets",
       "failures",
+      "brain",
       "manage",
       "deploy",
       "planning",

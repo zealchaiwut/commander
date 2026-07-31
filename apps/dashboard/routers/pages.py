@@ -28,6 +28,7 @@ _VALID_PROJECT_TABS = {
     "sprint-mgmt", "tickets", "sprint-history",
     "notes", "settings", "global-settings", "roadmap",
     "failures",
+    "brain",
     # "logs", "metrics", "status" removed in #2025 — kept as redirects below
 }
 

@@ -53,8 +53,33 @@ def set_local_backup_dir(path: Path) -> None:
     _LOCAL_BACKUP_DIR = path
 
 
+def _find_best_backup(backup_dir: Path) -> "Path | None":
+    """Return the most recent verified non-empty .bak file, or None.
+
+    Iterates candidates newest-first, skipping zero-byte files and any that
+    fail PRAGMA integrity_check.  Returns the first that passes both checks.
+    If none pass, returns None so the caller can emit a safe "no valid backup"
+    message instead of naming a corrupt file in a restore hint (issue #2036).
+    """
+    baks = sorted(backup_dir.glob("*.bak"), key=lambda p: p.name, reverse=True)
+    for bak in baks:
+        try:
+            if bak.stat().st_size == 0:
+                continue
+        except OSError:
+            continue
+        if check_db_integrity(bak) == "ok":
+            return bak
+    return None
+
+
 def _startup_integrity_check() -> None:
-    """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt."""
+    """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt.
+
+    The restore hint names the most recent VERIFIED non-empty backup (issue #2036).
+    If the backup dir contains only empty or corrupt files, the message says so
+    explicitly rather than printing a cp command that would destroy data.
+    """
     if not DB_PATH.exists():
         return
     status = check_db_integrity(DB_PATH)
@@ -63,15 +88,25 @@ def _startup_integrity_check() -> None:
     restore_hint = ""
     backup_dir = _LOCAL_BACKUP_DIR
     if backup_dir is not None and backup_dir.is_dir():
-        baks = sorted(backup_dir.glob("*.bak"), reverse=True)
-        if baks:
+        best = _find_best_backup(backup_dir)
+        if best is not None:
             restore_hint = (
-                f"\n  Most recent local backup: {baks[0]}"
-                f"\n  Restore: cp {baks[0]} {DB_PATH}"
+                f"\n  Most recent verified backup: {best}"
+                f"\n  Restore: cp {best} {DB_PATH}"
                 f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
             )
         else:
-            restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
+            # Check whether backups exist but are all invalid
+            all_baks = list(backup_dir.glob("*.bak"))
+            if all_baks:
+                restore_hint = (
+                    f"\n  WARNING: No verified non-empty backup found in {backup_dir}."
+                    f"\n  {len(all_baks)} backup file(s) exist but all are empty or"
+                    f" failed integrity_check — do NOT restore from them."
+                    f"\n  Check off-site backups or attempt: sqlite3 commander.db .recover"
+                )
+            else:
+                restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
     else:
         restore_hint = (
             f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."

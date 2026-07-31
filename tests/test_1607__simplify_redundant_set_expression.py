@@ -20,7 +20,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "apps" / "dashboard"))
-os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import github_client as gc  # noqa: E402
 

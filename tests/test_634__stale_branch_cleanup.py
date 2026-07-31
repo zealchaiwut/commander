@@ -41,7 +41,7 @@ PROJECT_HTML = REPO_ROOT / "apps" / "dashboard" / "static" / "project.html"
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 _HTML = PROJECT_HTML.read_text()
 

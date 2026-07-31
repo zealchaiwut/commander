@@ -36,7 +36,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import services.sprint_manager.sprint_manager as sm
 from services.sprint_manager.model_routing import get_role_profile

@@ -34,9 +34,12 @@ DASHBOARD_ROOT = REPO_ROOT / "apps" / "dashboard"
 SERVICES_ROOT = REPO_ROOT / "services"
 
 # Provide a dummy DB_PATH so db.py doesn't sys.exit at import time.
-_orig_db_path = os.environ.get("DB_PATH")
+# Use a safe tmp path — the dashboard conftest (apps/dashboard/tests/conftest.py)
+# already forces DB_PATH to /tmp/commander-pytest.db at import time, so this
+# branch should be unreachable.  It is kept as a belt-and-braces fallback
+# that uses a safe path rather than the production commander.db (issue #2047).
 if not os.environ.get("DB_PATH"):
-    os.environ["DB_PATH"] = str(DASHBOARD_ROOT / "commander.db")
+    os.environ["DB_PATH"] = "/tmp/commander-pytest.db"
 
 for p in (str(DASHBOARD_ROOT), str(REPO_ROOT)):
     if p not in sys.path:

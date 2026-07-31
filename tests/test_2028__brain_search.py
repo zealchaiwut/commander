@@ -32,7 +32,7 @@ for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-os.environ.setdefault("DB_PATH", str(DASHBOARD_DIR / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
 os.environ.setdefault("COMMANDER_DISABLE_AUTO_RECONCILE", "1")
 

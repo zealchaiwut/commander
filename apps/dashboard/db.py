@@ -19,6 +19,24 @@ if not _db_path_raw:
 
 DB_PATH = Path(_db_path_raw)
 
+# ── Relative-path guard (issue #2047) ─────────────────────────────────────────
+# A relative DB_PATH is dangerous: its resolved location is determined by the
+# CWD at the time the process starts, so a pytest run from the repo root would
+# write to <repo-root>/commander.db instead of apps/dashboard/commander.db.
+# Resolve it to absolute (relative to this file's directory = apps/dashboard/)
+# and log a loud warning so operators know to switch to an absolute path.
+if not DB_PATH.is_absolute():
+    _resolved_db = (Path(__file__).parent / DB_PATH).resolve()
+    logging.warning(
+        "DB_PATH %r is relative — resolved to absolute %r. "
+        "Relative paths are unsafe: the CWD at process startup determines which "
+        "database file gets written.  Set DB_PATH to an absolute path in your "
+        ".env to eliminate CWD-dependent behaviour and suppress this warning.",
+        _db_path_raw,
+        str(_resolved_db),
+    )
+    DB_PATH = _resolved_db
+
 # Default local-backup directory — sibling .commander/db-backups/ of the DB.
 # Tests can monkeypatch this directly.
 _LOCAL_BACKUP_DIR = DB_PATH.parent / ".commander" / "db-backups"

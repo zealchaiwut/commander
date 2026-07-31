@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 os.environ["COMMANDER_MAX_FIX_ROUNDS"] = "1"
 
 import services.sprint_manager.sprint_manager as sm

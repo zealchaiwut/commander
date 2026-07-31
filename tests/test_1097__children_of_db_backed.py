@@ -25,7 +25,7 @@ if str(DASHBOARD_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import db as _db_module  # noqa: E402
 

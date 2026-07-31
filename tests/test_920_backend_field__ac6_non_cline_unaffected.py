@@ -18,7 +18,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SM_DIR))
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import db as _db_module  # noqa: E402
 
@@ -68,6 +68,8 @@ def test_non_cline_sprint_records_claude_code_backend(tmp_path):
     When use_cline_followups is False, agent_runs rows for the coder agent
     must store 'claude-code' (or NULL, which implies claude-code by default).
     """
+    # Save + restore so this test does not affect global state (issue #2047)
+    _original_db_path = _db_module.DB_PATH
     _db_module.DB_PATH = tmp_path / "test_ac6.db"
     _db_module.init_db()
 
@@ -80,9 +82,8 @@ def test_non_cline_sprint_records_claude_code_backend(tmp_path):
         f"non-Cline sprint must record claude-code or NULL backend, got {backend!r}"
     )
 
-    # Reset
-    import db as dbm
-    dbm.DB_PATH = REPO_ROOT / "commander.db"
+    # Restore to the conftest-set tmp path (never the production DB path)
+    _db_module.DB_PATH = _original_db_path
 
 
 def test_no_escalation_event_for_non_cline_sprint():

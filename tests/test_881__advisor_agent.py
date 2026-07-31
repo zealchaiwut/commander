@@ -29,7 +29,7 @@ _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "apps" / "dashboard"))
 
-os.environ.setdefault("DB_PATH", str(_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import db as _db_module  # noqa: E402
 from services.sprint_manager import advisor as adv  # noqa: E402

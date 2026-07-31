@@ -27,7 +27,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_REPO_ROOT)):
         sys.path.insert(0, _p)
 
 import os
-os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
 
 from routers import sprint_nav  # noqa: E402

@@ -216,6 +216,39 @@ def _rows_from_agent_runs(
     return rows
 
 
+# ── Scratchpad / test-harness dir filter (issue #2042) ───────────────────────
+
+# Directories that are exclusively used by test harnesses, pytest scratchpads,
+# or the Claude Code CLI's own tmp workspaces.  Agents whose working_dir starts
+# with any of these prefixes are excluded from the Failures inbox because they
+# are noise produced by test suites, not real sprint failures.
+#
+# We prefer the structural working_dir signal over agent-name patterns because
+# agent names are free-form text (set by the spawning process) and can collide
+# with real agent names; working_dir paths are OS-enforced and stable.
+_SCRATCHPAD_DIR_PREFIXES: tuple[str, ...] = (
+    "/tmp/",
+    "/private/tmp/",
+    "/var/folders/",
+    "/var/tmp/",
+    # On macOS /var is a symlink to /private/var, so paths resolved by the OS
+    # arrive as /private/var/... rather than /var/...  Mirror every /var/ entry
+    # with its /private/var/ twin so both spellings are caught (issue #2042).
+    "/private/var/folders/",
+    "/private/var/tmp/",
+)
+
+
+def _is_scratchpad_working_dir(working_dir: Optional[str]) -> bool:
+    """Return True when working_dir is a system temp / pytest-scratchpad path.
+
+    Exported so the test suite can verify the helper directly (issue #2042 AC3).
+    """
+    if not working_dir:
+        return False
+    return any(working_dir.startswith(prefix) for prefix in _SCRATCHPAD_DIR_PREFIXES)
+
+
 # ── Source: agents.status='timed_out' ────────────────────────────────────────
 
 def _rows_from_agents(
@@ -238,6 +271,12 @@ def _rows_from_agents(
     try:
         cursor = conn.execute(sql, params)
         for session_id, name, working_dir, last_seen in cursor.fetchall():
+            # Skip test-harness / scratchpad agents (issue #2042).
+            # These sessions are spawned by pytest inside /tmp or /private/tmp
+            # and have project=None — they pollute every project's Failures inbox.
+            if _is_scratchpad_working_dir(working_dir):
+                continue
+
             # Best-effort: derive project slug from working directory path.
             project: Optional[str] = None
             try:
@@ -301,9 +340,16 @@ def get_failures(
     # Apply project filter post-union for agents rows.
     # Events and agent_runs are already filtered at SQL level (they have a project column).
     # Agents has no project column — project is inferred from working_dir.
-    # When the inferred project is unknown (None) we include the row anyway (can't
-    # determine project = possibly relevant). When it IS known but doesn't match,
-    # we exclude it. Slug matching: "commander" matches "zealchaiwut/commander".
+    #
+    # Issue #2042: when the caller requests a specific project, we EXCLUDE agents
+    # whose project cannot be determined (None).  The old behaviour was to include
+    # unknown-project rows ("can't determine → possibly relevant"), but that caused
+    # every project's Failures inbox to show the same unknowns — cross-project
+    # bleed that is worse than occasionally hiding a genuinely ambiguous row.
+    # Scratchpad agents are already filtered out in _rows_from_agents above, so
+    # the only remaining None-project rows are agents with an unresolvable path
+    # (no /dev/ segment).  Excluding them when a project filter is active is
+    # the safer default.  Slug matching: "commander" matches "zealchaiwut/commander".
     if project:
         _slug = project.split("/")[-1]
 
@@ -312,7 +358,10 @@ def get_failures(
                 return True  # already filtered at SQL level
             row_project = row.get("project")
             if row_project is None:
-                return True  # unknown — keep it
+                # Unknown project — exclude when caller requests a specific project.
+                # Showing ambiguous rows in every project's inbox causes cross-project
+                # bleed (issue #2042 AC2).
+                return False
             return row_project == project or row_project == _slug
 
         results = [r for r in results if _project_matches(r)]

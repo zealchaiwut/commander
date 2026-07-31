@@ -24,8 +24,8 @@ REPO_ROOT = SCRIPTS_DIR.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SPRINT_MANAGER_DIR = REPO_ROOT / "services" / "sprint_manager"
 
-sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SPRINT_MANAGER_DIR))
+sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client

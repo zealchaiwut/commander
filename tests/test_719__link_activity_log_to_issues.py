@@ -27,7 +27,7 @@ for p in (str(DASHBOARD_DIR), str(REPO_ROOT), str(HOOKS_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import db as _db_module  # noqa: E402
 import services.sprint_manager.sprint_manager as sm  # noqa: E402

@@ -668,157 +668,6 @@
     /* Sprint Mgmt pane manages its own padding via toolbar + smgmt-content */
     #pane-sprint-mgmt { padding: 0; }
 
-    /* ── Compare Sprints tab (issue #435) ── */
-    .cmp-page-hdr { margin-bottom: 24px; }
-    .cmp-page-hdr h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
-    .cmp-page-hdr p  { font-size: 13px; color: var(--text-sub); margin: 0; }
-    .cmp-picker-row {
-      display: flex; align-items: center; gap: 12px;
-      margin-bottom: 28px; flex-wrap: wrap;
-    }
-    .cmp-picker-label { font-size: 13px; font-weight: 600; color: var(--text-sub); white-space: nowrap; }
-    .cmp-picker-select {
-      appearance: none; background: var(--surface); color: var(--text);
-      border: 1px solid var(--border); border-radius: 6px;
-      padding: 7px 32px 7px 10px; font-size: 13px; cursor: pointer;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-      background-repeat: no-repeat; background-position: right 10px center; min-width: 160px;
-    }
-    .cmp-picker-select:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .cmp-picker-vs { font-size: 13px; font-weight: 700; color: var(--text-sub); padding: 0 4px; }
-    .cmp-warn-banner {
-      display: flex; align-items: center; gap: 8px;
-      background: color-mix(in srgb, #f59e0b 12%, transparent);
-      border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
-      border-radius: 6px; padding: 10px 14px; font-size: 13px; margin-bottom: 20px;
-    }
-    .cmp-warn-banner .ti { color: #f59e0b; flex-shrink: 0; }
-    .cmp-columns {
-      display: grid; grid-template-columns: 1fr 1fr;
-      gap: 16px; margin-bottom: 32px;
-    }
-    @media (max-width: 680px) { .cmp-columns { grid-template-columns: 1fr; } }
-    .cmp-col {
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 20px; background: var(--surface);
-    }
-    .cmp-col-hdr {
-      display: flex; align-items: center; gap: 10px;
-      margin-bottom: 16px;
-    }
-    .cmp-col-label { font-size: 16px; font-weight: 700; flex: 1; }
-    .cmp-badge {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .04em;
-    }
-    .cmp-badge-success { background: color-mix(in srgb, #16a34a 15%, transparent); color: #16a34a; }
-    .cmp-badge-partial  { background: color-mix(in srgb, #f59e0b 15%, transparent); color: #d97706; }
-    .cmp-badge-failed   { background: color-mix(in srgb, #dc2626 15%, transparent); color: #dc2626; }
-    .cmp-badge-unknown  { background: color-mix(in srgb, #6b7280 15%, transparent); color: #6b7280; }
-    .cmp-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .cmp-metric {
-      background: var(--bg); border-radius: 6px; padding: 12px;
-    }
-    .cmp-metric-val { font-size: 20px; font-weight: 700; line-height: 1.1; }
-    .cmp-metric-lbl { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
-    .cmp-section-title {
-      font-size: 13px; font-weight: 700; color: var(--text-sub);
-      text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px;
-    }
-    .cmp-ticket-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .cmp-ticket-table thead th {
-      text-align: left; padding: 8px 12px;
-      font-size: 11px; font-weight: 700; color: var(--text-sub);
-      border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .05em;
-    }
-    .cmp-ticket-table tbody td {
-      padding: 9px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-      vertical-align: middle;
-    }
-    .cmp-ticket-table tbody tr:last-child td { border-bottom: none; }
-    .cmp-ticket-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-    .cmp-ticket-num { color: var(--text-sub); font-size: 11px; }
-    .cmp-cell-done    { color: #16a34a; font-weight: 600; }
-    .cmp-cell-skipped { color: #f59e0b; font-weight: 600; }
-    .cmp-cell-failed  { color: #dc2626; font-weight: 600; }
-    .cmp-cell-absent  { color: var(--text-sub); }
-    .cmp-empty-state {
-      text-align: center; padding: 64px 0; color: var(--text-sub);
-    }
-    .cmp-empty-state .ti { font-size: 40px; display: block; margin-bottom: 12px; color: var(--text-sub); }
-    .cmp-empty-state p { margin: 0; font-size: 14px; line-height: 1.6; }
-    @keyframes cmp-spin { to { transform: rotate(360deg); } }
-    .cmp-spin { display: inline-block; animation: cmp-spin .9s linear infinite; }
-
-    /* ── Calibration tab (issue #576) ── */
-    .calib-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      padding: 0 0 32px;
-    }
-    .calib-bucket {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px 20px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .calib-bucket-size {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: var(--text-sub);
-    }
-    .calib-bucket-avg {
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1.1;
-    }
-    .calib-bucket-avg.calib-no-data {
-      font-size: 14px;
-      font-weight: 400;
-      color: var(--text-sub);
-      font-style: italic;
-    }
-    .calib-bucket-unit {
-      font-size: 12px;
-      color: var(--text-sub);
-      margin-left: 3px;
-    }
-    .calib-bucket-canonical {
-      font-size: 11px;
-      color: var(--text-sub);
-    }
-    .calib-bucket-count {
-      font-size: 11px;
-      color: var(--text-sub);
-    }
-    .calib-bias {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 1px 6px;
-      border-radius: 4px;
-      margin-top: 2px;
-      width: fit-content;
-    }
-    .calib-bias-over  { background: var(--red-bg);   color: var(--red); }
-    .calib-bias-under { background: var(--green-bg); color: var(--green); }
-    .calib-bias-ok    { background: var(--surface);  color: var(--text-sub); border: 1px solid var(--border); }
-    .calib-section-note {
-      font-size: 12px;
-      color: var(--text-sub);
-      margin-bottom: 20px;
-    }
-
     /* Placeholder text */
     .placeholder-msg {
       padding: 48px 0;
@@ -969,68 +818,6 @@
     .status-last-updated {
       font-size: 11px; color: var(--text-sub); text-align: right; margin-top: 16px;
     }
-
-    /* ── Notes tab ── */
-    .notes-hdr {
-      display: flex; align-items: flex-start; justify-content: space-between;
-      margin-bottom: 16px; gap: 16px;
-    }
-    .notes-hdr-left h2 { font-size: 18px; font-weight: 700; margin: 0 0 4px; }
-    .notes-hdr-left p  { font-size: 13px; color: var(--text-sub); margin: 0; }
-    .notes-hdr-actions { display: flex; gap: 8px; flex-shrink: 0; }
-    .notes-refresh-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text-muted);
-      font-size: 13px; cursor: pointer; transition: background .15s;
-    }
-    .notes-refresh-btn:hover { background: var(--surface-2); }
-    .notes-refresh-btn.spinning .ti { animation: bc-badge-spin .7s linear infinite; }
-    .notes-save-btn { display: inline-flex; align-items: center; gap: 5px; }
-    .notes-conflict-banner {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      padding: 10px 14px; margin-bottom: 12px;
-      background: var(--color-warning); color: var(--color-warning-fg);
-      border-radius: 8px; font-size: 13px;
-    }
-    .notes-conflict-banner .ti { font-size: 16px; flex-shrink: 0; }
-    .notes-conflict-banner > span { flex: 1; min-width: 0; }
-    .notes-conflict-actions { display: flex; gap: 6px; margin-left: auto; }
-    .notes-conflict-btn {
-      padding: 4px 10px; border-radius: 5px; border: 1px solid currentColor;
-      background: transparent; color: inherit; font-size: 12px; cursor: pointer;
-    }
-    .notes-conflict-btn--danger {
-      background: var(--color-error); color: var(--color-error-fg);
-      border-color: var(--color-error-fg);
-    }
-    .notes-status-bar {
-      font-size: 12px; color: var(--text-sub); min-height: 18px;
-      margin-bottom: 8px;
-    }
-    .notes-status-bar.ok   { color: var(--color-success-fg); }
-    .notes-status-bar.err  { color: var(--color-error-fg); }
-    .notes-editor-wrap { position: relative; }
-    .notes-empty-state {
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; text-align: center;
-      padding: 48px 24px; color: var(--text-muted); font-size: 13px;
-      border: 2px dashed var(--border); border-radius: 10px;
-      background: var(--surface);
-    }
-    .notes-empty-state code {
-      background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
-      font-family: var(--mono); font-size: 12px;
-    }
-    .notes-textarea {
-      width: 100%; min-height: 480px; padding: 14px 16px;
-      border: 1px solid var(--border); border-radius: 8px;
-      background: var(--surface); color: var(--text);
-      font-family: var(--mono); font-size: 13px; line-height: 1.6;
-      resize: vertical; outline: none; transition: border-color .15s;
-    }
-    .notes-textarea:focus { border-color: var(--blue); }
-    .notes-textarea.hidden { display: none; }
 
     /* ── Project Settings tab (issue #642) ── */
     .proj-settings-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 860px; padding-top: 8px; }
@@ -8114,19 +7901,7 @@
     .mrw-link:hover { text-decoration: underline; }
     .mrw-count { font-size: 11px; color: var(--text-sub); font-family: var(--mono); }
     .src-note { font-size: 11px; color: var(--text-sub); font-family: var(--mono); line-height: 1.6; padding-top: 10px; }
-    /* ── Analytics page (mirrors analytics mock) ── */
-    .anl-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .anl-head-gap { flex: 1; }
-    .anl-scope { display: flex; gap: 8px; }
-    .anl-scope-pill { font-family: var(--mono); font-size: 12px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
-    .anl-scope-pill select { background: none; border: none; outline: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
-    .anl-tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-    .anl-tab-btn { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: color .15s, border-bottom-color .15s; white-space: nowrap; }
-    .anl-tab-btn.active { color: var(--text); font-weight: 600; border-bottom-color: var(--blue); }
-    .anl-tab-btn:hover:not(.active) { color: var(--text); }
-    .anl-tab-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
-    .anl-panel { display: none; flex-direction: column; gap: 16px; }
-    .anl-panel.show { display: flex; }
+    /* ── Analytics CSS removed in #2025 (anl-* classes were analytics-tab-only) ── */
     /* Sprint sub-nav: Board / Running / History (issue #798) */
     .subnav { display: flex; align-items: center; gap: 6px; padding: 14px 20px 0; }
     /* Delivery-health stat strip (issue #1849) */
@@ -9005,138 +8780,11 @@
       .subtab:active,
       .smgmt-collapse-btn:active { transform: none; }
     }
-    .anl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-    .anl-card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
-    .anl-card-head .ti { color: var(--text-muted); font-size: 16px; flex-shrink: 0; }
-    .anl-card-title { font-size: 14px; font-weight: 700; }
-    .anl-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
-    .anl-card-body { padding: 16px; }
-    .anl-scatter-wrap { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
-    .anl-scatter-legend { display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-muted); padding-top: 22px; }
-    .anl-legend-item { display: flex; align-items: center; gap: 6px; }
-    .anl-legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-    .anl-sz-S-dot { background: var(--green); } .anl-sz-M-dot { background: var(--blue); }
-    .anl-sz-L-dot { background: var(--amber); } .anl-sz-XL-dot { background: var(--red); }
-    .anl-cal-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .anl-cal-table th { text-align: right; font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-sub); padding: 7px 12px; border-bottom: 1px solid var(--border); }
-    .anl-cal-table th:first-child, .anl-cal-table th:last-child { text-align: left; }
-    .anl-cal-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: right; font-family: var(--mono); }
-    .anl-cal-table td:first-child, .anl-cal-table td:last-child { text-align: left; }
-    .anl-cal-table td:first-child { font-family: inherit; }
-    .anl-cal-table tr:last-child td { border-bottom: none; }
-    .sz-badge { font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
-    .sz-S { background: var(--green-bg); color: var(--green); } .sz-M { background: var(--blue-bg); color: var(--blue); }
-    .sz-L { background: var(--amber-bg); color: var(--amber); } .sz-XL { background: var(--red-bg); color: var(--red); }
-    .verdict { font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
-    .v-over { background: var(--amber-bg); color: var(--amber); } .v-under { background: var(--blue-bg); color: var(--blue); } .v-ok { background: var(--green-bg); color: var(--green); }
+    /* anl-card / metrics-grid / sz-badge / verdict CSS removed in #2025 */
+    /* .btn-apply kept — also used by Project Settings calibration apply buttons */
     .btn-apply { font-family: var(--mono); font-size: 10px; color: var(--text-sub); border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; background: var(--surface); cursor: pointer; margin-left: 6px; transition: border-color .15s, color .15s; }
     .btn-apply:hover { border-color: var(--text-muted); color: var(--text); }
     .btn-apply:disabled { opacity: .5; cursor: default; }
-    .anl-cal-note { font-size: 11px; color: var(--text-sub); margin-top: 12px; display: flex; align-items: flex-start; gap: 6px; line-height: 1.5; }
-    .anl-cal-note .ti { margin-top: 1px; flex-shrink: 0; }
-    .anl-cal-empty { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 40px 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
-    .anl-cal-empty i { font-size: 28px; display: block; margin-bottom: 10px; color: var(--text-sub); }
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-      gap: 20px;
-    }
-    .metrics-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 20px;
-    }
-    .metrics-card-title {
-      font-size: 13px; font-weight: 700; color: var(--text);
-      margin: 0 0 16px; text-transform: uppercase; letter-spacing: .04em;
-    }
-    .metrics-chart-wrap {
-      position: relative; width: 100%; height: 220px;
-    }
-    .metrics-empty {
-      display: flex; align-items: center; justify-content: center;
-      height: 180px; color: var(--text-sub); font-size: 13px;
-    }
-    .metrics-fallback-table {
-      width: 100%; border-collapse: collapse; font-size: 12px;
-      color: var(--text); font-family: var(--mono);
-    }
-    .metrics-fallback-table th {
-      text-align: left; padding: 6px 10px;
-      border-bottom: 1px solid var(--border);
-      color: var(--text-sub); font-weight: 600; text-transform: uppercase;
-      letter-spacing: .04em; font-size: 11px;
-    }
-    .metrics-fallback-table td {
-      padding: 6px 10px; border-bottom: 1px solid var(--border);
-    }
-    .metrics-fallback-table tr:last-child td { border-bottom: none; }
-    @media (max-width: 900px) {
-      .metrics-grid { grid-template-columns: 1fr; }
-    }
-
-    /* ── Timeline / Gantt tab (issue #431) ── */
-    #pane-timeline { overflow-y: auto; }
-    .gantt-wrap { padding: 28px; }
-    .gantt-empty {
-      display: flex; align-items: center; justify-content: center;
-      height: 180px; color: var(--text-sub); font-size: 14px; gap: 8px;
-    }
-    .gantt-scroller { overflow-x: auto; overflow-y: hidden; }
-    .gantt-chart {
-      position: relative; min-width: 600px;
-    }
-    .gantt-row {
-      display: flex; align-items: center; margin-bottom: 10px; min-height: 36px;
-    }
-    .gantt-label {
-      width: 84px; flex-shrink: 0; font-size: 12px; font-weight: 600;
-      color: var(--text); text-align: right; padding-right: 12px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .gantt-track {
-      flex: 1; position: relative; height: 32px; background: var(--surface-2);
-      border-radius: 4px; overflow: visible;
-    }
-    .gantt-bar {
-      position: absolute; top: 4px; height: 24px; border-radius: 4px;
-      min-width: 4px; cursor: default;
-      transition: filter .15s, box-shadow .15s;
-    }
-    .gantt-bar:hover { filter: brightness(1.08); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
-    .gantt-bar--running  { background: var(--green); }
-    .gantt-bar--completed{ background: var(--steel); }
-    .gantt-bar--has_rework { background: var(--yellow); }
-    .gantt-bar--cancelled{ background: var(--amber); }
-    .gantt-bar-label {
-      position: absolute; top: 50%; transform: translateY(-50%);
-      left: 8px; font-size: 10px; font-weight: 600; color: #fff;
-      white-space: nowrap; pointer-events: none; line-height: 1;
-    }
-    .gantt-tooltip {
-      position: fixed; z-index: 9999;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.16);
-      font-size: 12px; pointer-events: none; max-width: 260px;
-      display: none;
-    }
-    .gantt-tooltip.visible { display: block; }
-    .gantt-tooltip-name { font-weight: 700; font-size: 13px; color: var(--text); margin-bottom: 6px; }
-    .gantt-tooltip-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-muted); margin-bottom: 3px; }
-    .gantt-tooltip-row:last-child { margin-bottom: 0; }
-    .gantt-tooltip-key { color: var(--text-sub); }
-    .gantt-tooltip-outcome {
-      display: inline-block; padding: 1px 7px; border-radius: 10px;
-      font-size: 11px; font-weight: 600;
-    }
-    .gantt-tooltip-outcome--running   { background: var(--green-bg); color: var(--green); }
-    .gantt-tooltip-outcome--completed { background: var(--steel-bg); color: var(--steel); }
-    .gantt-tooltip-outcome--has_rework{ background: var(--yellow-bg); color: var(--yellow); }
-    .gantt-tooltip-outcome--cancelled { background: var(--amber-bg); color: var(--amber); }
-    .gantt-axis {
-      display: flex; margin-left: 84px; padding-bottom: 4px;
-      border-bottom: 1px solid var(--border); margin-bottom: 10px;
-      font-size: 10px; color: var(--text-muted); user-select: none;
-    }
 
     /* ── Roadmap tab (issue #878) ──────────────────────────────────────────── */
     #pane-roadmap { padding: 16px 0; display: flex; flex-direction: column; gap: 16px; }
@@ -9888,14 +9536,6 @@
     .proj-settings-card-head { padding: 12px 14px; }
     .proj-settings-card-title { font-size: 13.5px; }
 
-    /* ── Notes tab ───────────────────────────────────────────────────────── */
-    .notes-textarea { border-radius: 9px; }
-    .notes-hdr-left h2 { font-size: 17px; font-weight: 700; }
-
-    /* ── Compare sprints tab ─────────────────────────────────────────────── */
-    .cmp-col { border-radius: 9px; }
-    .cmp-col-label { font-size: 15px; }
-
     /* ── Ticket detail panel ─────────────────────────────────────────────── */
     .tdp { top: 48px; }
     .tdp-title { font-size: 14.5px; }
@@ -10012,6 +9652,16 @@
       .stab-group { position: static; }
       .sub-tabs { overflow-x: auto; scrollbar-width: none; }
       .sub-tabs::-webkit-scrollbar { display: none; }
+      /* AC4/#2043: right-fade gradient cues that the tab strip can be scrolled */
+      .sub-tabs-row::after {
+        content: '';
+        position: absolute;
+        right: 0; top: 0; bottom: 0;
+        width: 48px;
+        background: linear-gradient(to right, transparent, var(--surface));
+        pointer-events: none;
+        z-index: 2;
+      }
       /* AC1–AC2/#1768: clamp page-level horizontal scrollWidth to the viewport */
       body { overflow-x: hidden; }
       /* AC4/#1768: subnav pill row wraps so it does not widen the page */
@@ -10027,6 +9677,180 @@
       /* AC7: inline confirm dialog stacks so both buttons fit without clipping */
       .deploy-card__confirm { flex-direction: column; }
       .deploy-card__confirm-msg { min-width: 0; }
+      /* AC2/#2043: Brain search input/button and Failures category select ≥44px touch target */
+      .brain-search-input, .brain-search-btn { min-height: 44px; }
+      .fbox-cat-select { min-height: 44px; }
+    }
+
+    /* ── Brain search tab (issue #2028) ── */
+    .brain-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+    }
+    .brain-title {
+      font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+    }
+    .brain-search-row {
+      display: flex; gap: 8px; margin-bottom: 24px;
+    }
+    .brain-search-input {
+      flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--surface); color: var(--text);
+      font-size: 16px; outline: none; /* ≥16px prevents iOS auto-zoom (#2043 AC3) */
+    }
+    .brain-search-input:focus { border-color: var(--accent); }
+    .brain-search-btn {
+      padding: 8px 16px; background: var(--accent); color: #fff;
+      border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 500;
+    }
+    .brain-search-btn:hover { opacity: 0.88; }
+    .brain-results { margin-bottom: 32px; }
+    .brain-hit {
+      padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 10px; background: var(--surface);
+    }
+    .brain-hit-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .brain-hit-path { font-size: 12px; color: var(--text-sub); word-break: break-all; }
+    .brain-hit-snippet { font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+    .brain-badge {
+      font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+    }
+    .brain-badge-decisions { background: #dbeafe; color: #1e40af; }
+    .brain-badge-bulk-create { background: #dcfce7; color: #166534; }
+    .brain-badge-retros { background: #fef9c3; color: #854d0e; }
+    .brain-badge-docs { background: #f3e8ff; color: #6b21a8; }
+    .brain-panel-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px;
+    }
+    .brain-panel {
+      border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+      background: var(--surface);
+    }
+    .brain-panel-title {
+      font-size: 14px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; gap: 6px;
+    }
+    .brain-panel-body { font-size: 13px; }
+    .brain-panel-body ul { margin: 0; padding-left: 18px; }
+    .brain-panel-body li { margin-bottom: 4px; }
+    .brain-panel-item { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .brain-panel-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .brain-panel-item-title { font-weight: 500; margin-bottom: 2px; }
+    .brain-panel-item-sub { color: var(--text-sub); font-size: 12px; }
+    .brain-panel-item-path { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; word-break: break-all; }
+    .brain-panel-item-line { color: var(--text); }
+    .brain-state {
+      display: flex; align-items: center; gap: 8px;
+      padding: 20px; color: var(--text-sub);
+    }
+    .brain-state-error { color: var(--red, #ef4444); }
+    .brain-spinner { animation: brain-spin 1s linear infinite; }
+    @keyframes brain-spin { to { transform: rotate(360deg); } }
+    .brain-empty { color: var(--text-sub); padding: 12px 0; }
+    /* Clickable brain items (issue #2040) */
+    .brain-clickable { cursor: pointer; }
+    .brain-hit.brain-clickable:hover { background: var(--surface-2, #f3f4f6); }
+    .brain-hit.brain-clickable:focus-visible,
+    .brain-panel-item.brain-clickable:focus-visible {
+      outline: 2px solid var(--accent, #6366f1);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    .brain-panel-item.brain-clickable:hover { background: var(--surface-2, #f3f4f6); border-radius: 4px; }
+    /* Doc viewer (issue #2040) */
+    .brain-doc-viewer { padding: 4px 0 16px; }
+    .brain-doc-toolbar {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 16px; padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brain-doc-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--text);
+      white-space: nowrap;
+    }
+    .brain-doc-back:hover { background: var(--surface-2); }
+    .brain-doc-back:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 2px; }
+    .brain-doc-path-label {
+      font-size: 12px; color: var(--text-muted); word-break: break-all; flex: 1;
+    }
+    .brain-doc-content { font-size: 13px; }
+    .brain-doc-pre {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: var(--mono); font-size: 12px;
+      background: var(--surface-2); padding: 12px; border-radius: 6px;
+    }
+    @media (max-width: 600px) {
+      .brain-panel-grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-color-scheme: dark) {
+      .brain-badge-decisions { background: #1e3a5f; color: #93c5fd; }
+      .brain-badge-bulk-create { background: #14532d; color: #86efac; }
+      .brain-badge-retros { background: #422006; color: #fde68a; }
+      .brain-badge-docs { background: #3b0764; color: #d8b4fe; }
+      .brain-hit.brain-clickable:hover { background: var(--surface-2, #1f2937); }
+      .brain-panel-item.brain-clickable:hover { background: var(--surface-2, #1f2937); }
+    }
+
+    /* ── Failures inbox tab (issue #2020) ── */
+    .fbox-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+    }
+    .fbox-title {
+      font-size: 18px; font-weight: 700; color: var(--text); margin: 0;
+    }
+    .fbox-controls { display: flex; align-items: center; gap: 8px; }
+    .fbox-cat-label { font-size: 13px; color: var(--text-sub); }
+    .fbox-cat-select {
+      font-size: 16px; padding: 4px 8px; /* ≥16px prevents iOS auto-zoom (#2043 AC3) */
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    /* Failures table horizontal-scroll wrapper (issue #2043 AC1) */
+    .fbox-table-wrap { overflow-x: auto; }
+    .fbox-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .fbox-table th {
+      text-align: left; padding: 8px 12px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .fbox-table td {
+      padding: 10px 12px; border-bottom: 1px solid var(--border-faint, var(--border));
+      color: var(--text); vertical-align: middle;
+    }
+    .fbox-table tr:last-child td { border-bottom: none; }
+    .fbox-table tr:hover td { background: var(--surface-hover); }
+    .fbox-issue { font-weight: 600; color: var(--accent); }
+    .fbox-cat {
+      font-size: 11px; font-weight: 600; padding: 2px 7px;
+      border-radius: 4px; background: var(--amber-bg, #fde68a);
+      color: var(--amber, #92400e);
+    }
+    .fbox-ts { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+    .fbox-log-link {
+      color: var(--accent); text-decoration: none; font-size: 12px;
+    }
+    .fbox-log-link:hover { text-decoration: underline; }
+    .fbox-state {
+      display: flex; align-items: center; gap: 10px;
+      padding: 32px 0; color: var(--text-muted); font-size: 14px;
+    }
+    .fbox-state-error { color: var(--red, #ef4444); }
+    .fbox-spinner { animation: fbox-spin 1s linear infinite; }
+    @keyframes fbox-spin { to { transform: rotate(360deg); } }
+    .fbox-empty {
+      text-align: center; padding: 40px 0;
+      color: var(--text-muted); font-size: 14px;
+    }
+    @media (max-width: 600px) {
+      .fbox-table th:nth-child(3),
+      .fbox-table td:nth-child(3),
+      .fbox-table th:nth-child(5),
+      .fbox-table td:nth-child(5) { display: none; }
     }
 
   </style>
@@ -10221,25 +10045,25 @@
                 aria-selected="false" tabindex="-1" onclick="switchTab('tickets')">
           <i class="ti ti-list"></i>Issues
         </button>
-        <!-- Analytics: promoted to top-level tab (issue #1856) -->
-        <button class="stab" role="tab" id="stab-metrics"
-                aria-selected="false" tabindex="-1" onclick="switchTab('metrics')">
-          <i class="ti ti-chart-bar"></i>Analytics
+        <!-- Failures inbox: top-level tab (issue #2020) -->
+        <button class="stab" role="tab" id="stab-failures"
+                aria-selected="false" tabindex="-1" onclick="switchTab('failures')">
+          <i class="ti ti-alert-circle"></i>Failures
         </button>
-        <!-- Manage: Logs + Deploy -->
+        <!-- Brain search tab (issue #2028) -->
+        <button class="stab" role="tab" id="stab-brain"
+                aria-selected="false" tabindex="-1" onclick="switchTab('brain')">
+          <i class="ti ti-brain"></i>Brain
+        </button>
+        <!-- Manage: Deploy + Bulk Create (Logs removed in #2025) -->
         <div class="stab-group" id="stab-group-manage">
           <button class="stab stab-trigger" type="button" id="stab-manage-trigger"
                   aria-haspopup="true" aria-expanded="false" tabindex="-1"
                   onclick="toggleStabDropdown('manage', event)">
             <i class="ti ti-tool"></i>Manage
-            <span id="logs-nav-badge" class="logs-nav-badge hidden" aria-label="unread error events"></span>
             <i class="ti ti-chevron-down stab-caret"></i>
           </button>
           <div class="stab-dropdown" role="menu">
-            <button class="stab" role="menuitem" id="stab-logs"
-                    aria-selected="false" onclick="switchTab('logs')">
-              <i class="ti ti-terminal-2"></i>Logs
-            </button>
             <button class="stab" role="menuitem" id="stab-deploy"
                     aria-selected="false" onclick="switchTab('deploy')">
               <i class="ti ti-rocket"></i>Deploy
@@ -10656,94 +10480,7 @@
         </div>
       </div>
 
-      <!-- Logs tab -->
-      <div class="tab-pane" id="pane-logs" role="tabpanel" aria-labelledby="stab-logs">
-        <div class="logs-pane">
-          <!-- Toolbar -->
-          <div class="logs-toolbar">
-            <div class="logs-toolbar-top">
-              <div class="logs-seg" role="tablist" aria-label="Logs views">
-                <button class="logs-seg-btn active" id="logs-view-activity" role="tab"
-                        aria-selected="true" onclick="logsSetView('activity')">
-                  <i class="ti ti-activity"></i> Activity
-                </button>
-                <button class="logs-seg-btn" id="logs-view-raw" role="tab"
-                        aria-selected="false" onclick="logsSetView('raw')">
-                  <i class="ti ti-terminal-2"></i> Raw
-                </button>
-              </div>
-              <button class="btn-sm btn-ghost" title="Refresh" onclick="logsRefresh()">
-                <i class="ti ti-refresh"></i>
-              </button>
-            </div>
-            <div class="logs-toolbar-filters" id="logs-toolbar-filters">
-              <div class="logs-search-wrap">
-                <i class="ti ti-filter logs-search-icon"></i>
-                <input type="text" class="logs-search" id="logs-search"
-                       placeholder="Filter by issue # or run…" autocomplete="off"
-                       oninput="logsOnSearch(this.value)">
-              </div>
-              <select class="logs-filter-select" id="logs-filter-sprint"
-                      aria-label="Filter by sprint" onchange="logsFilterSprintSelect(this)">
-                <option value="">All sprints</option>
-              </select>
-              <select class="logs-filter-select" id="logs-filter-agent"
-                      aria-label="Filter by agent" onchange="logsFilterAgentSelect(this)">
-                <option value="">All agents</option>
-                <option value="agent">agent</option>
-                <option value="coder">coder</option>
-                <option value="tester">tester</option>
-                <option value="ba">ba</option>
-                <option value="estimator">estimator</option>
-                <option value="documenter">documenter</option>
-                <option value="reviewer">reviewer</option>
-              </select>
-              <select class="logs-filter-select" id="logs-filter-source"
-                      aria-label="Filter by source" onchange="logsFilterSourceSelect(this)">
-                <option value="all">All sources</option>
-                <option value="sprint">Sprint</option>
-                <option value="dashboard">Dashboard</option>
-                <option value="github">GitHub</option>
-                <option value="agent">Agent</option>
-              </select>
-              <div class="logs-level-seg" id="logs-severity-seg" role="group" aria-label="Filter by severity">
-                <button type="button" class="active" data-level="all" aria-pressed="true"
-                        onclick="logsSetSeverityFilter('all', this)">All</button>
-                <button type="button" data-level="info" aria-pressed="false"
-                        onclick="logsSetSeverityFilter('info', this)">Info</button>
-                <button type="button" data-level="warn" aria-pressed="false"
-                        onclick="logsSetSeverityFilter('warn', this)">Warn</button>
-                <button type="button" data-level="error" aria-pressed="false"
-                        onclick="logsSetSeverityFilter('error', this)">Error</button>
-              </div>
-              <select class="logs-filter-select hidden" id="logs-filter-raw-level"
-                      aria-label="Filter by log level" onchange="logsFilterRawLevelSelect(this)">
-                <option value="">All levels</option>
-              </select>
-            </div>
-          </div>
-          <!-- Body -->
-          <div class="logs-body">
-            <div id="logs-raw" class="hidden">
-              <div class="logs-raw-stream" id="logs-raw-stream">
-                <div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint run to view raw output…</div>
-              </div>
-            </div>
-            <div id="logs-activity">
-              <div id="evl-stale-banner" class="hidden"></div>
-              <div id="evl-since-banner" class="hidden"></div>
-              <div class="evl-list" id="evl-list">
-                <div class="logs-skeleton" id="evl-skeleton">
-                  <div class="logs-skeleton-row"></div>
-                  <div class="logs-skeleton-row"></div>
-                  <div class="logs-skeleton-row"></div>
-                </div>
-                <div class="logs-empty hidden" id="evl-empty">No events</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Logs tab removed in #2025; its backend routes (/api/events, runs logs) are preserved -->
 
       <!-- Deploy tab (issue #726) -->
       <div class="tab-pane" id="pane-deploy" role="tabpanel" aria-labelledby="stab-deploy">
@@ -10999,344 +10736,7 @@
 
       </div><!-- /pane-bulk-create -->
 
-      <!-- Timeline tab (issue #431) -->
-      <div class="tab-pane" id="pane-timeline" role="tabpanel" aria-labelledby="stab-timeline">
-        <div id="gantt-wrap"></div>
-      </div>
-
-      <!-- Compare Sprints tab (issue #435) -->
-      <div class="tab-pane" id="pane-compare" role="tabpanel" aria-labelledby="stab-compare">
-        <div class="cmp-page-hdr">
-          <h2><i class="ti ti-git-compare" style="margin-right:8px;vertical-align:-2px;"></i>Compare Sprints</h2>
-          <p>Select two finished sprints to compare side-by-side.</p>
-        </div>
-        <div class="cmp-picker-row">
-          <span class="cmp-picker-label">Sprint A</span>
-          <select class="cmp-picker-select" id="cmp-select-a" onchange="cmpOnPickerChange()">
-            <option value="">— select sprint —</option>
-          </select>
-          <span class="cmp-picker-vs">vs</span>
-          <span class="cmp-picker-label">Sprint B</span>
-          <select class="cmp-picker-select" id="cmp-select-b" onchange="cmpOnPickerChange()">
-            <option value="">— select sprint —</option>
-          </select>
-        </div>
-        <div id="cmp-result"></div>
-      </div>
-
-      <!-- Sprint History tab — sprint summaries (moved off the Sprint Mgmt screen) -->
-      <!-- Analytics tab (mirrors analytics mock: Calibration + Metrics sub-tabs) -->
-      <div class="tab-pane" id="pane-metrics" role="tabpanel" aria-labelledby="stab-metrics">
-        <div class="anl-head">
-          <div class="metrics-page-hdr" style="margin-bottom:0">
-            <h2><i class="ti ti-chart-histogram" style="margin-right:8px;vertical-align:-2px;"></i>Analytics</h2>
-          </div>
-          <div class="anl-head-gap"></div>
-          <div class="anl-scope">
-            <span class="anl-scope-pill"><i class="ti ti-calendar" style="font-size:13px"></i>
-              <select id="scope-days" onchange="anlRefresh()">
-                <option value="all">All time</option>
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-              </select>
-            </span>
-          </div>
-        </div>
-
-        <!-- Sub-tab bar: Trends → Status → Metrics → Calibration -->
-        <div class="anl-tab-bar" role="tablist" aria-label="Analytics tabs">
-          <button class="anl-tab-btn active" id="anl-tab-metrics" role="tab"
-                  aria-selected="true" onclick="anlShowTab('metrics')">Metrics</button>
-          <button class="anl-tab-btn" id="anl-tab-calibration" role="tab"
-                  aria-selected="false" onclick="anlShowTab('calibration')">Calibration</button>
-          <button class="anl-tab-btn" id="anl-tab-trends" role="tab"
-                  aria-selected="false" onclick="anlShowTab('trends')">Trends</button>
-          <button class="anl-tab-btn" id="anl-tab-status" role="tab"
-                  aria-selected="false" onclick="anlShowTab('status')">Status</button>
-        </div>
-
-        <!-- Calibration panel -->
-        <div class="anl-panel" id="anl-panel-calibration" role="tabpanel" aria-labelledby="anl-tab-calibration">
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-target-arrow"></i>
-              <div>
-                <div class="anl-card-title">Estimated vs actual</div>
-                <div class="anl-card-sub">each dot is a ticket · diagonal = perfect estimate · above the line = took longer than estimated</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div class="anl-scatter-wrap">
-                <svg id="scatter-svg" viewBox="0 0 640 300" width="640" height="300"
-                     style="max-width:100%;height:auto" aria-label="Estimated vs actual scatter plot"></svg>
-                <div class="anl-scatter-legend" aria-label="Size color legend">
-                  <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-S-dot"></span> S</div>
-                  <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-M-dot"></span> M</div>
-                  <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-L-dot"></span> L</div>
-                  <div class="anl-legend-item"><span class="anl-legend-dot anl-sz-XL-dot"></span> XL</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-ruler-measure"></i>
-              <div>
-                <div class="anl-card-title">Calibration by size</div>
-                <div class="anl-card-sub">actual time grouped by estimated size · source of the Settings "suggested" column</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <table class="anl-cal-table" aria-label="Calibration by size">
-                <thead>
-                  <tr><th>Size</th><th>Configured</th><th>Tickets</th><th>Min</th><th>Avg</th><th>Max</th><th>Verdict</th></tr>
-                </thead>
-                <tbody id="cal-table-body"></tbody>
-              </table>
-              <div class="anl-cal-note">
-                <i class="ti ti-info-circle"></i>
-                "Apply" writes the avg as the project's configured estimate for that size — the manual version of the Settings auto-suggest.
-              </div>
-            </div>
-          </div>
-
-          <div class="anl-cal-empty" id="cal-empty" style="display:none" aria-live="polite">
-            <i class="ti ti-database-off"></i>
-            <p>No calibration data for this scope. Complete some tickets with size estimates to see estimates vs actuals.</p>
-          </div>
-        </div>
-
-        <!-- Metrics panel (delivery-health, #648) — default active sub-tab (issue #1856) -->
-        <div class="anl-panel show" id="anl-panel-metrics" role="tabpanel" aria-labelledby="anl-tab-metrics">
-          <div class="metric-grid" id="metric-grid">
-            <div class="metric-card" id="card-first-pass" role="region" aria-label="First-pass rate">
-              <div class="metric-label"><i class="ti ti-circle-check" style="font-size:13px"></i> First-pass rate</div>
-              <div class="metric-val"><span id="fpr-val">—</span><span class="unit">%</span></div>
-              <div class="metric-sub" id="fpr-sub"></div>
-              <div class="bar"><span id="fpr-bar" style="width:0%;background:var(--green)"></span></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-rework" role="region" aria-label="Rework rate">
-              <div class="metric-label"><i class="ti ti-refresh" style="font-size:13px"></i> Rework rate</div>
-              <div class="metric-val"><span id="rwr-val">—</span><span class="unit">%</span></div>
-              <div class="metric-sub" id="rwr-sub"></div>
-              <div class="bar"><span id="rwr-bar" style="width:0%;background:var(--amber)"></span></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-duration" role="region" aria-label="Average duration by agent">
-              <div class="metric-label"><i class="ti ti-clock" style="font-size:13px"></i> Avg duration by agent</div>
-              <div class="metric-val"><span id="dur-val">—</span></div>
-              <div class="breakdown" id="dur-breakdown"></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-throughput" role="region" aria-label="Throughput">
-              <div class="metric-label"><i class="ti ti-stack-2" style="font-size:13px"></i> Throughput</div>
-              <div class="metric-val"><span id="thr-val">—</span><span class="unit">tickets / sprint</span></div>
-              <div class="metric-sub" id="thr-sub"></div>
-              <div class="metric-empty">No data for this period</div>
-            </div>
-            <div class="metric-card" id="card-most-reworked" role="region" aria-label="Most reworked tickets">
-              <div class="metric-label"><i class="ti ti-repeat" style="font-size:13px"></i> Most reworked tickets</div>
-              <ol class="mrw-list" id="mrw-list" aria-label="Most reworked tickets ranked list"></ol>
-              <div class="metric-empty">No rework data for this period</div>
-            </div>
-          </div>
-          <div class="src-note" aria-label="Data source note">
-            sources: first-pass/rework from sprint state (tester_attempt_count) ·
-            durations from coder/tester timestamps ·
-            throughput from sprint state files
-          </div>
-        </div>
-
-        <!-- Status panel (consolidated from the standalone Status tab, #715) -->
-        <div class="anl-panel" id="anl-panel-status" role="tabpanel" aria-labelledby="anl-tab-status">
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-pulse"></i>
-              <div>
-                <div class="anl-card-title">Status</div>
-                <div class="anl-card-sub">live project health — active sprint, label counts, recent activity, and in-flight tickets</div>
-              </div>
-              <div class="anl-head-gap"></div>
-              <button class="status-refresh-btn" id="status-refresh-btn"
-                      onclick="statusRefresh()" aria-label="Refresh status data">
-                <i class="ti ti-refresh"></i>Refresh
-              </button>
-            </div>
-            <div class="anl-card-body">
-              <div class="status-grid">
-                <div class="status-card">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-rocket"></i>Active Sprint</span>
-                  </div>
-                  <div class="status-card-body" id="status-sprint-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-                <div class="status-card">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-cpu"></i>Tokens by Agent</span>
-                  </div>
-                  <div class="status-card-body" id="status-tokens-agent-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-                <div class="status-card status-card--wide">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-flame"></i>Top Tickets by Tokens</span>
-                  </div>
-                  <div class="status-card-body" id="status-tokens-ticket-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-                <div class="status-card">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-tag"></i>Label Breakdown</span>
-                  </div>
-                  <div class="status-card-body" id="status-labels-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-                <div class="status-card">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-activity"></i>Recent Activity</span>
-                  </div>
-                  <div class="status-card-body" id="status-activity-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-                <div class="status-card">
-                  <div class="status-card-hdr">
-                    <span class="status-card-title"><i class="ti ti-loader-2"></i>In-Flight Tickets</span>
-                  </div>
-                  <div class="status-card-body" id="status-inflight-body">
-                    <div style="color:var(--text-sub);font-size:13px;">Loading…</div>
-                  </div>
-                </div>
-              </div>
-              <div class="status-last-updated" id="status-last-updated" aria-live="polite"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Trends panel (sprint velocity / failure / duration charts, restored #715) -->
-        <div class="anl-panel" id="anl-panel-trends" role="tabpanel" aria-labelledby="anl-tab-trends">
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-trending-up"></i>
-              <div>
-                <div class="anl-card-title">Sprint Velocity</div>
-                <div class="anl-card-sub">tickets marked done per sprint</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-velocity-wrap"><canvas id="metrics-velocity-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-alert-triangle"></i>
-              <div>
-                <div class="anl-card-title">Failure Rate Trend</div>
-                <div class="anl-card-sub">share of tickets that failed, per sprint</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-failure-wrap"><canvas id="metrics-failure-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-clock"></i>
-              <div>
-                <div class="anl-card-title">Avg Dispatch Duration</div>
-                <div class="anl-card-sub">average minutes per ticket, by agent role</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-duration-wrap"><canvas id="metrics-duration-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-coins"></i>
-              <div>
-                <div class="anl-card-title">Tokens per Sprint</div>
-                <div class="anl-card-sub">total agent tokens consumed per sprint (agent_runs)</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-tokens-wrap"><canvas id="metrics-tokens-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-rosette-discount-check"></i>
-              <div>
-                <div class="anl-card-title">First-Pass Rate per Sprint</div>
-                <div class="anl-card-sub">share of tickets tester accepted on the first try</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-fpr-wrap"><canvas id="metrics-fpr-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-          <div class="anl-card">
-            <div class="anl-card-head">
-              <i class="ti ti-refresh-alert"></i>
-              <div>
-                <div class="anl-card-title">Rework Rate per Sprint</div>
-                <div class="anl-card-sub">share of tickets tester rejected at least once</div>
-              </div>
-            </div>
-            <div class="anl-card-body">
-              <div id="metrics-rpr-wrap"><canvas id="metrics-rpr-chart" style="width:100%;height:220px;"></canvas></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Status tab (issue #585) -->
-      <!-- Notes tab -->
-      <div class="tab-pane" id="pane-notes" role="tabpanel" aria-labelledby="stab-notes">
-        <div class="notes-hdr">
-          <div class="notes-hdr-left">
-            <h2><i class="ti ti-notes" style="margin-right:8px;vertical-align:-2px;"></i>Notes</h2>
-            <p>Persistent project notes — decisions, todos, and context that survives across sessions.</p>
-          </div>
-          <div class="notes-hdr-actions">
-            <button class="notes-refresh-btn" id="notes-refresh-btn"
-                    onclick="notesLoad()" aria-label="Reload notes from disk">
-              <i class="ti ti-refresh"></i>Reload
-            </button>
-            <button class="btn-primary notes-save-btn" id="notes-save-btn"
-                    onclick="notesSave()" aria-label="Save notes">
-              <i class="ti ti-device-floppy"></i>Save
-            </button>
-          </div>
-        </div>
-        <div id="notes-conflict-banner" class="notes-conflict-banner hidden" role="alert">
-          <i class="ti ti-alert-triangle"></i>
-          <span id="notes-conflict-msg">NOTES.md changed on disk since last load. Reload to see latest, or save to overwrite.</span>
-          <div class="notes-conflict-actions">
-            <button class="notes-conflict-btn" onclick="notesLoad()">Reload</button>
-            <button class="notes-conflict-btn notes-conflict-btn--danger" onclick="notesSaveForce()">Overwrite</button>
-          </div>
-        </div>
-        <div id="notes-status-bar" class="notes-status-bar" aria-live="polite"></div>
-        <div id="notes-editor-wrap" class="notes-editor-wrap">
-          <div id="notes-empty-state" class="notes-empty-state hidden">
-            <i class="ti ti-notes" style="font-size:32px;color:var(--text-sub);margin-bottom:8px;"></i>
-            <div>No notes yet. Start writing to create <code>NOTES.md</code> in the project root.</div>
-          </div>
-          <textarea id="notes-textarea" class="notes-textarea"
-                    placeholder="# Project Notes&#10;&#10;Write your notes in Markdown…"
-                    aria-label="Project notes editor" spellcheck="true"></textarea>
-        </div>
-      </div>
-
+      <!-- Analytics pane removed in #2025; backend /analytics/* routes preserved -->
       <!-- Global Settings page (issue #641) — sidebar nav, not a modal -->
       <div class="tab-pane" id="pane-global-settings" role="tabpanel" aria-label="Global settings">
         <div class="global-settings-wrap">
@@ -11852,6 +11252,72 @@
         </div>
       </div><!-- /pane-advisor -->
 
+      <!-- Failures inbox tab (issue #2020) -->
+      <div class="tab-pane" id="pane-failures" role="tabpanel" aria-labelledby="stab-failures">
+        <div class="fbox-header">
+          <h2 class="fbox-title"><i class="ti ti-alert-circle" style="margin-right:8px;vertical-align:-2px;"></i>Failures</h2>
+          <div class="fbox-controls">
+            <label class="fbox-cat-label" for="fbox-cat-select">Category</label>
+            <select id="fbox-cat-select" class="fbox-cat-select"
+                    aria-label="Filter by category"
+                    onchange="failuresCategoryChange(this.value)">
+              <option value="">All categories</option>
+              <!-- Outcome vocabulary (agent_runs / agents sources) -->
+              <option value="failed">failed</option>
+              <option value="timed_out">timed_out</option>
+              <!-- FailureCategory vocabulary (events source) -->
+              <option value="crash">crash</option>
+              <option value="gate_fail">gate_fail</option>
+              <option value="hang">hang</option>
+              <option value="tester_rejected">tester_rejected</option>
+              <option value="retry_exhausted">retry_exhausted</option>
+              <option value="coder_no_work">coder_no_work</option>
+              <option value="merge_conflict">merge_conflict</option>
+              <option value="lint_fail">lint_fail</option>
+              <option value="pytest_fail">pytest_fail</option>
+              <option value="rebase_conflict">rebase_conflict</option>
+              <option value="env_error">env_error</option>
+              <option value="design_docs_missing">design_docs_missing</option>
+              <option value="dispatch-blocked">dispatch-blocked</option>
+            </select>
+          </div>
+        </div>
+        <div id="fbox-root">
+          <div class="fbox-state"><i class="ti ti-loader fbox-spinner"></i>Loading failures…</div>
+        </div>
+      </div><!-- /pane-failures -->
+
+      <!-- Brain search tab (issue #2028) -->
+      <div class="tab-pane" id="pane-brain" role="tabpanel" aria-labelledby="stab-brain">
+        <div class="brain-header">
+          <h2 class="brain-title"><i class="ti ti-brain" style="margin-right:8px;vertical-align:-2px;"></i>Brain</h2>
+        </div>
+        <form class="brain-search-row" onsubmit="event.preventDefault(); brainSearch();">
+          <input type="search" id="brain-search-input" class="brain-search-input"
+                 placeholder="Search decisions, retros, docs…" aria-label="Brain search query">
+          <button type="submit" class="brain-search-btn">
+            <i class="ti ti-search"></i> Search
+          </button>
+        </form>
+        <div id="brain-results" class="brain-results"></div>
+        <div id="brain-root">
+          <div id="brain-panels">
+            <div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading panels…</div>
+          </div>
+        </div>
+        <!-- Doc viewer — shown when a result is activated (issue #2040) -->
+        <div id="brain-doc-viewer" class="brain-doc-viewer" style="display:none">
+          <div class="brain-doc-toolbar">
+            <button class="brain-doc-back" id="brain-doc-back" onclick="brainDocBack()"
+                    aria-label="Back to search results">
+              <i class="ti ti-arrow-left"></i> Back
+            </button>
+            <span class="brain-doc-path-label" id="brain-doc-path-label"></span>
+          </div>
+          <div id="brain-doc-content" class="brain-doc-content md-body"></div>
+        </div>
+      </div><!-- /pane-brain -->
+
     </div>
   </div>
 
@@ -12133,42 +11599,11 @@ function colorHex(color) {
 }
 
 // ── URL parsing ───────────────────────────────────────────────────────────────
-const PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
-
-function parseUrl() {
-  const m = window.location.pathname.match(PATH_RE);
-  // Deck/monitoring deep-link params (issue: deck jump keys). `view` selects the
-  // sub-view (board/running/history/summary) or activity/tickets; `filter`
-  // pre-filters the activity log (e.g. errors). Read here so a cold load of the
-  // URL lands on the right pane.
-  const _q = new URLSearchParams(window.location.search);
-  const view = (_q.get('view') || '').toLowerCase() || null;
-  const filter = (_q.get('filter') || '').toLowerCase() || null;
-  if (!m) return { slug: null, tab: 'sprint-mgmt', view, filter };
-  const slug = decodeURIComponent(m[1]);
-  const rawTab = m[2] || '';
-  const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')          ? 'tickets'
-            // 'sprint' deep-link alias (issue #798): the tab was renamed to
-            // "Sprint" while the pane id stays pane-sprint-mgmt for compatibility.
-            : (rawTab === 'sprint')           ? 'sprint-mgmt'
-            : (rawTab === 'logs')             ? 'logs'
-            : (rawTab === 'bulk-create')      ? 'bulk-create'
-            : (rawTab === 'timeline')         ? 'timeline'
-            : (rawTab === 'compare')          ? 'compare'
-            : (rawTab === 'est-vs-actual')    ? 'est-vs-actual'
-            : (rawTab === 'calibration')      ? 'calibration'
-            : (rawTab === 'status')           ? 'status'
-            // 'metrics' / 'analytics' resolve to the Analytics tab (issue #1856)
-            : (rawTab === 'metrics')          ? 'metrics'
-            : (rawTab === 'analytics')        ? 'metrics'
-            : (rawTab === 'notes')            ? 'notes'
-            : (rawTab === 'settings')         ? 'settings'
-            : (rawTab === 'global-settings')  ? 'global-settings'
-            : (hash === '#compare')           ? 'compare'
-            : 'sprint-mgmt';
-  return { slug, tab, view, filter };
-}
+// parseUrl() is provided by the bundle (static/src/shell/url-parser.js, issue #2038).
+// It is available as window.parseUrl by the time DOMContentLoaded fires (which
+// is after bundle.js executes). The tabs 'failures' and 'brain' are now correctly
+// mapped; the dead branches for 'logs', 'status', 'metrics', 'analytics' are
+// removed — those paths are redirected server-side before project.html is served.
 
 // Deck deep-link state, consumed once on the initial route so manual nav after
 // it behaves normally (issue: deck jump keys).
@@ -13889,12 +13324,6 @@ async function init() {
   }
   if (_activeTab === 'logs' && _logsState.viewMode === 'activity' && _evlState.events === null) {
     evlFetch();
-  }
-
-  // If compare tab loaded before _projectData was ready, re-init now with correct project
-  if (_activeTab === 'compare') {
-    _cmpInitialized = false;
-    compareInit();
   }
 
 }
@@ -28797,258 +28226,6 @@ async function evlCleanupAll() {
   _evlUpdateBanner();
 }
 
-// ── Compare Sprints tab (issue #435) ─────────────────────────────────────────
-
-let _cmpInitialized = false;
-let _cmpRuns = [];      // finished sprint summaries from /api/logs/runs
-let _cmpStateA = null;  // full state for sprint A
-let _cmpStateB = null;  // full state for sprint B
-let _cmpRunsWarnShown = false;
-
-async function compareInit() {
-  if (_cmpInitialized) {
-    // Re-entering tab — re-render in case project changed
-    _cmpRenderPickers();
-    return;
-  }
-  _cmpInitialized = true;
-  await _cmpLoadRuns();
-  _cmpRenderPickers();
-  // Check URL hash for pre-selected sprints (e.g. #compare?a=sprint-1&b=sprint-2)
-  const params = new URLSearchParams(window.location.hash.replace(/^#compare\??/, ''));
-  const a = params.get('a');
-  const b = params.get('b');
-  if (a && b) {
-    const selA = document.getElementById('cmp-select-a');
-    const selB = document.getElementById('cmp-select-b');
-    if (selA) selA.value = a;
-    if (selB) selB.value = b;
-    await _cmpLoadAndRender();
-  }
-}
-
-async function _cmpLoadRuns() {
-  _cmpRunsWarnShown = false;
-  try {
-    const project = _projectData ? _projectData.repo : _slug;
-    const params = project ? '?project=' + encodeURIComponent(project) + '&page_size=100' : '?page_size=100';
-    const res = await fetch('/api/logs/runs' + params);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    _cmpRuns = (data.items || []).sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
-  } catch (e) {
-    _cmpRuns = [];
-    _cmpRunsWarnShown = true;
-  }
-}
-
-function _cmpRenderPickers() {
-  const selA = document.getElementById('cmp-select-a');
-  const selB = document.getElementById('cmp-select-b');
-  if (!selA || !selB) return;
-
-  const makeOptions = (selected) => {
-    let html = '<option value="">— select sprint —</option>';
-    for (const run of _cmpRuns) {
-      const sel = run.sprint_label === selected ? ' selected' : '';
-      html += `<option value="${escHtml(run.sprint_label)}"${sel}>${escHtml(run.sprint_label)}</option>`;
-    }
-    return html;
-  };
-
-  const prevA = selA.value;
-  const prevB = selB.value;
-  selA.innerHTML = makeOptions(prevA);
-  selB.innerHTML = makeOptions(prevB);
-
-  if (_cmpRuns.length < 2) {
-    document.getElementById('cmp-result').innerHTML = _cmpEmptyState(
-      'Two finished sprints required',
-      'At least two completed sprints are needed to compare. Run more sprints and come back.'
-    );
-  }
-}
-
-async function cmpOnPickerChange() {
-  await _cmpLoadAndRender();
-}
-
-async function _cmpLoadAndRender() {
-  const selA = document.getElementById('cmp-select-a');
-  const selB = document.getElementById('cmp-select-b');
-  const labelA = selA ? selA.value : '';
-  const labelB = selB ? selB.value : '';
-  const result = document.getElementById('cmp-result');
-
-  if (!labelA || !labelB) {
-    result.innerHTML = '';
-    return;
-  }
-  if (labelA === labelB) {
-    result.innerHTML = `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>Select two different sprints to compare.</div>`;
-    return;
-  }
-
-  result.innerHTML = '<div class="placeholder-msg"><i class="ti ti-loader-2 cmp-spin"></i>Loading…</div>';
-
-  const project = _projectData ? _projectData.repo : _slug;
-  const qs = project ? '?project=' + encodeURIComponent(project) : '';
-  let warnMsg = '';
-
-  // Load state files for both sprints in parallel
-  const [resA, resB] = await Promise.all([
-    fetch(`/api/sprints/${encodeURIComponent(labelA)}/state-full${qs}`).catch(() => null),
-    fetch(`/api/sprints/${encodeURIComponent(labelB)}/state-full${qs}`).catch(() => null),
-  ]);
-
-  _cmpStateA = resA && resA.ok ? await resA.json().catch(() => null) : null;
-  _cmpStateB = resB && resB.ok ? await resB.json().catch(() => null) : null;
-
-  // Supplement with /api/logs/runs data if state-full unavailable
-  const runA = _cmpRuns.find(r => r.sprint_label === labelA) || null;
-  const runB = _cmpRuns.find(r => r.sprint_label === labelB) || null;
-
-  if (!_cmpStateA && !_cmpStateB) {
-    warnMsg = 'Sprint state files unavailable — showing partial data from run history only.';
-  } else if (!_cmpStateA || !_cmpStateB) {
-    const missing = !_cmpStateA ? labelA : labelB;
-    warnMsg = `State file for ${missing} unavailable — showing partial data.`;
-  }
-  if (_cmpRunsWarnShown) {
-    warnMsg = (warnMsg ? warnMsg + ' ' : '') + 'Agent dispatch data unavailable (could not reach /api/logs/runs).';
-  }
-
-  result.innerHTML = _cmpRenderPanel(labelA, labelB, _cmpStateA, _cmpStateB, runA, runB, warnMsg);
-}
-
-function _cmpRenderPanel(labelA, labelB, stateA, stateB, runA, runB, warnMsg) {
-  let html = '';
-  if (warnMsg) {
-    html += `<div class="cmp-warn-banner"><i class="ti ti-alert-triangle"></i>${escHtml(warnMsg)}</div>`;
-  }
-
-  html += '<div class="cmp-columns">';
-  html += _cmpColHtml(labelA, stateA, runA);
-  html += _cmpColHtml(labelB, stateB, runB);
-  html += '</div>';
-
-  html += '<p class="cmp-section-title"><i class="ti ti-list" style="margin-right:6px;"></i>Ticket diff</p>';
-  html += _cmpTicketTableHtml(labelA, labelB, stateA, stateB);
-
-  return html;
-}
-
-function _cmpColHtml(label, state, run) {
-  const issues   = state ? (state.issues || []) : [];
-  const shipped  = issues.filter(i => i.status === 'done').length;
-  const rejected = issues.filter(i => i.agent_status === 'failed' || i.failure_reason).length;
-  const skipped  = issues.filter(i => i.status === 'skipped' && i.agent_status !== 'failed').length;
-  const dispatches = state ? (state.dispatch_count || 0) : (run ? run.ticket_count : 0);
-
-  let duration = '—';
-  if (state && state.wall_clock_secs) {
-    duration = _cmpFmtDuration(state.wall_clock_secs);
-  } else if (run && run.start_time && run.end_time) {
-    const secs = (new Date(run.end_time) - new Date(run.start_time)) / 1000;
-    duration = _cmpFmtDuration(secs);
-  }
-
-  const outcome = state ? state.outcome : (run ? run.outcome : 'unknown');
-  const badge = _cmpBadgeHtml(outcome);
-
-  const ticketCount = issues.length || (run ? run.ticket_count : 0);
-
-  return `
-    <div class="cmp-col">
-      <div class="cmp-col-hdr">
-        <span class="cmp-col-label">${escHtml(label)}</span>
-        ${badge}
-      </div>
-      <div class="cmp-metrics">
-        <div class="cmp-metric"><div class="cmp-metric-val">${escHtml(String(duration))}</div><div class="cmp-metric-lbl">Duration</div></div>
-        <div class="cmp-metric"><div class="cmp-metric-val">${ticketCount}</div><div class="cmp-metric-lbl">Total tickets</div></div>
-        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#16a34a">${shipped}</div><div class="cmp-metric-lbl">Shipped</div></div>
-        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#dc2626">${rejected}</div><div class="cmp-metric-lbl">Rejected / failed</div></div>
-        <div class="cmp-metric"><div class="cmp-metric-val" style="color:#f59e0b">${skipped}</div><div class="cmp-metric-lbl">Skipped</div></div>
-        <div class="cmp-metric"><div class="cmp-metric-val">${dispatches}</div><div class="cmp-metric-lbl">Agent dispatches</div></div>
-      </div>
-    </div>`;
-}
-
-function _cmpBadgeHtml(outcome) {
-  const map = {
-    success: ['cmp-badge-success', 'ti-circle-check', 'Completed'],
-    partial:  ['cmp-badge-partial',  'ti-alert-triangle', 'Partial'],
-    failed:   ['cmp-badge-failed',   'ti-circle-x', 'Failed'],
-    unknown:  ['cmp-badge-unknown',  'ti-help-circle', 'Unknown'],
-  };
-  const [cls, icon, text] = map[outcome] || map.unknown;
-  return `<span class="cmp-badge ${cls}"><i class="ti ${icon}"></i>${text}</span>`;
-}
-
-function _cmpTicketTableHtml(labelA, labelB, stateA, stateB) {
-  const issuesA = stateA ? (stateA.issues || []) : [];
-  const issuesB = stateB ? (stateB.issues || []) : [];
-
-  if (!issuesA.length && !issuesB.length) {
-    return `<p style="color:var(--text-sub);font-size:13px;">No per-ticket data available.</p>`;
-  }
-
-  // Build union of all ticket numbers
-  const byNumA = Object.fromEntries(issuesA.map(i => [i.number, i]));
-  const byNumB = Object.fromEntries(issuesB.map(i => [i.number, i]));
-  const allNums = [...new Set([...Object.keys(byNumA), ...Object.keys(byNumB)])].sort((a, b) => Number(a) - Number(b));
-
-  let rows = '';
-  for (const num of allNums) {
-    const issA = byNumA[num];
-    const issB = byNumB[num];
-    const title = (issA || issB).title || '';
-    rows += `<tr>
-      <td><span class="cmp-ticket-num">#${escHtml(String(num))}</span></td>
-      <td>${escHtml(title)}</td>
-      <td>${_cmpTicketCell(issA)}</td>
-      <td>${_cmpTicketCell(issB)}</td>
-    </tr>`;
-  }
-
-  return `<div style="overflow-x:auto;">
-  <table class="cmp-ticket-table">
-    <thead><tr>
-      <th>#</th><th>Title</th>
-      <th>${escHtml(labelA)}</th>
-      <th>${escHtml(labelB)}</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
-}
-
-function _cmpTicketCell(issue) {
-  if (!issue) return '<span class="cmp-cell-absent">—</span>';
-  if (issue.status === 'done') return '<span class="cmp-cell-done">Shipped</span>';
-  if (issue.agent_status === 'failed' || issue.failure_reason) return '<span class="cmp-cell-failed">Failed</span>';
-  if (issue.status === 'skipped') return '<span class="cmp-cell-skipped">Skipped</span>';
-  return `<span style="color:var(--text-sub)">${escHtml(issue.status || 'pending')}</span>`;
-}
-
-function _cmpFmtDuration(secs) {
-  secs = Math.round(secs);
-  if (secs < 60) return secs + 's';
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  if (m < 60) return m + 'm ' + (s > 0 ? s + 's' : '');
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return h + 'h ' + (rm > 0 ? rm + 'm' : '');
-}
-
-function _cmpEmptyState(title, msg) {
-  return `<div class="cmp-empty-state">
-    <i class="ti ti-git-compare"></i>
-    <p><strong>${escHtml(title)}</strong><br>${escHtml(msg)}</p>
-  </div>`;
-}
-
 // ── AC Template Picker (issue #567) ───────────────────────────────────────
 
 const _UAT_TEMPLATE =
@@ -29985,1273 +29162,7 @@ document.addEventListener('keydown', function(e) {
   };
 }());
 
-// ── Timeline / Gantt tab (issue #431) ────────────────────────────────────────
-(function () {
-  let _ganttLoaded = false;
-  let _ganttData   = null;
-  const _tt        = document.createElement('div');
-  _tt.className    = 'gantt-tooltip';
-  document.body.appendChild(_tt);
-
-  function _fmtDate(iso) {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
-
-  function _outcomeLabel(state) {
-    if (state === 'running')    return 'Running';
-    if (state === 'has_rework') return 'Has Rework';
-    if (state === 'cancelled')  return 'Cancelled';
-    return 'Finished';
-  }
-
-  function _resolveState(label, baseState) {
-    // Enrich with outcome cache data if available (picks up has_rework from Sprint Mgmt)
-    const cached = _smgmtOutcomeCache[label];
-    if (cached && cached.state && cached.state !== 'running') return cached.state;
-    return baseState;
-  }
-
-  function _showTooltip(e, sprint) {
-    const state = _resolveState(sprint.label, sprint.state);
-    _tt.innerHTML = `
-      <div class="gantt-tooltip-name">${escHtml(sprint.display_name)}</div>
-      <div class="gantt-tooltip-row">
-        <span class="gantt-tooltip-key">Outcome</span>
-        <span class="gantt-tooltip-outcome gantt-tooltip-outcome--${escHtml(state)}">${escHtml(_outcomeLabel(state))}</span>
-      </div>
-      <div class="gantt-tooltip-row">
-        <span class="gantt-tooltip-key">Tickets</span>
-        <span>${sprint.ticket_count}</span>
-      </div>
-      <div class="gantt-tooltip-row">
-        <span class="gantt-tooltip-key">Start</span>
-        <span>${escHtml(_fmtDate(sprint.start_date))}</span>
-      </div>
-      <div class="gantt-tooltip-row">
-        <span class="gantt-tooltip-key">End</span>
-        <span>${escHtml(_fmtDate(sprint.end_date))}</span>
-      </div>`;
-    _tt.classList.add('visible');
-    _positionTooltip(e);
-  }
-
-  function _positionTooltip(e) {
-    const margin = 12;
-    const tw = _tt.offsetWidth  || 220;
-    const th = _tt.offsetHeight || 110;
-    let left = e.clientX + margin;
-    let top  = e.clientY + margin;
-    if (left + tw > window.innerWidth)  left = e.clientX - tw - margin;
-    if (top  + th > window.innerHeight) top  = e.clientY - th - margin;
-    _tt.style.left = left + 'px';
-    _tt.style.top  = top  + 'px';
-  }
-
-  function _hideTooltip() {
-    _tt.classList.remove('visible');
-  }
-
-  function _renderGantt(sprints) {
-    const wrap = document.getElementById('gantt-wrap');
-    if (!wrap) return;
-
-    if (!sprints || sprints.length === 0) {
-      wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-timeline-event"></i>No sprints to display</div>';
-      return;
-    }
-
-    // Compute time domain
-    const minTs = Math.min(...sprints.map(s => new Date(s.start_date).getTime()));
-    const maxTs = Math.max(...sprints.map(s => new Date(s.end_date).getTime()));
-    const span  = maxTs - minTs || 1;
-
-    const rows = sprints.map(sprint => {
-      const state    = _resolveState(sprint.label, sprint.state);
-      const startPct = ((new Date(sprint.start_date).getTime() - minTs) / span) * 100;
-      const widthPct = Math.max(
-        0.5,
-        ((new Date(sprint.end_date).getTime() - new Date(sprint.start_date).getTime()) / span) * 100
-      );
-
-      return `<div class="gantt-row">
-        <div class="gantt-label" title="${escHtml(sprint.display_name)}">${escHtml(sprint.display_name)}</div>
-        <div class="gantt-track">
-          <div class="gantt-bar gantt-bar--${escHtml(state)}"
-               style="left:${startPct.toFixed(2)}%;width:${widthPct.toFixed(2)}%"
-               data-label="${escHtml(sprint.label)}">
-            ${widthPct > 8 ? `<span class="gantt-bar-label">${escHtml(sprint.display_name)}</span>` : ''}
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-
-    const axisLeft  = _fmtDate(sprints[0].start_date);
-    const axisRight = _fmtDate(sprints[sprints.length - 1].end_date);
-
-    wrap.innerHTML = `
-      <div class="gantt-wrap">
-        <div class="gantt-axis">
-          <span style="flex:0 0 auto">${escHtml(axisLeft)}</span>
-          <span style="flex:1"></span>
-          <span style="flex:0 0 auto">${escHtml(axisRight)}</span>
-        </div>
-        <div class="gantt-scroller">
-          <div class="gantt-chart">${rows}</div>
-        </div>
-      </div>`;
-
-    // Tooltip event delegation
-    const chart = wrap.querySelector('.gantt-chart');
-    if (chart) {
-      chart.addEventListener('mouseover', function(e) {
-        const bar = e.target.closest('.gantt-bar');
-        if (!bar) return;
-        const label = bar.dataset.label;
-        const sprint = _ganttData && _ganttData.find(s => s.label === label);
-        if (sprint) _showTooltip(e, sprint);
-      });
-      chart.addEventListener('mousemove', function(e) {
-        if (_tt.classList.contains('visible')) _positionTooltip(e);
-      });
-      chart.addEventListener('mouseout', function(e) {
-        if (!e.target.closest('.gantt-bar')) _hideTooltip();
-        else if (e.relatedTarget && !e.relatedTarget.closest('.gantt-bar')) _hideTooltip();
-      });
-    }
-  }
-
-  window.ganttInit = async function() {
-    if (_ganttLoaded) {
-      // Re-render to pick up any newly cached outcome states
-      if (_ganttData) _renderGantt(_ganttData);
-      return;
-    }
-    const repo = _cachedFullRepo[_slug];
-    if (!repo) return;
-
-    const wrap = document.getElementById('gantt-wrap');
-    if (wrap) wrap.innerHTML = '<div class="gantt-empty"><i class="ti ti-loader" style="animation:bc-badge-spin .9s linear infinite;display:inline-block"></i>Loading timeline…</div>';
-
-    try {
-      const resp = await fetch('/api/sprints/timeline?project=' + encodeURIComponent(repo));
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const data = await resp.json();
-      _ganttLoaded = true;
-      _ganttData   = data.sprints || [];
-      _renderGantt(_ganttData);
-    } catch (err) {
-      if (wrap) wrap.innerHTML = '<div class="gantt-empty">Failed to load timeline.</div>';
-    }
-  };
-}());
-
-// ── Estimate vs Actual tab (issue #575) ───────────────────────────────────────
-(function () {
-  let _evaInitialized = false;
-  let _evaFinishedSprints = [];
-
-  window.evaInit = async function () {
-    if (_evaInitialized) { _evaRenderPicker(); return; }
-    _evaInitialized = true;
-    await _evaLoadSprints();
-    _evaRenderPicker();
-  };
-
-  async function _evaLoadSprints() {
-    try {
-      const params = _slug ? `?project=${encodeURIComponent(_slug)}` : '';
-      const resp = await fetch('/api/logs/runs' + params);
-      if (!resp.ok) throw new Error('fetch failed');
-      const data = await resp.json();
-      _evaFinishedSprints = (data.items || [])
-        .filter(r => r.sprint_label)
-        .sort((a, b) => a.sprint_label.localeCompare(b.sprint_label, undefined, { numeric: true }));
-    } catch (_) {
-      _evaFinishedSprints = [];
-    }
-  }
-
-  function _evaRenderPicker() {
-    const sel = document.getElementById('eva-select');
-    if (!sel) return;
-    const prev = sel.value;
-    sel.innerHTML = '<option value="">— select sprint —</option>';
-    for (const run of _evaFinishedSprints) {
-      const opt = document.createElement('option');
-      opt.value = run.sprint_label;
-      opt.textContent = run.sprint_label;
-      sel.appendChild(opt);
-    }
-    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-    if (_evaFinishedSprints.length === 0) {
-      document.getElementById('eva-result').innerHTML = _evaEmpty('No finished sprints', 'Complete a sprint to see estimate data.');
-    }
-  }
-
-  window.evaOnPickerChange = async function () {
-    const sel = document.getElementById('eva-select');
-    const label = sel ? sel.value : '';
-    const resultEl = document.getElementById('eva-result');
-    if (!label) { resultEl.innerHTML = ''; return; }
-    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
-    try {
-      const project = _slug || '';
-      const resp = await fetch(`/api/sprints/${encodeURIComponent(label)}/estimate-vs-actual?project=${encodeURIComponent(project)}`);
-      if (resp.status === 404) {
-        const err = await resp.json().catch(() => ({}));
-        resultEl.innerHTML = _evaEmpty('Not available', err.detail || 'Sprint is not finished or data is missing.');
-        return;
-      }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      resultEl.innerHTML = _evaRenderTable(data);
-    } catch (err) {
-      resultEl.innerHTML = _evaEmpty('Error', `Could not load data: ${escHtml(err.message)}`);
-    }
-  };
-
-  function _evaRenderTable(data) {
-    const tickets = data.tickets || [];
-    if (tickets.length === 0) {
-      return _evaEmpty('No tickets', 'This sprint has no ticket data recorded.');
-    }
-
-    const rows = tickets.map(t => {
-      const estSize = t.estimated_size ? `<span class="smgmt-ticket-size-pill">${escHtml(t.estimated_size)}</span>` : '<span style="color:var(--text-sub)">—</span>';
-      const estMin  = t.estimated_minutes != null ? `${t.estimated_minutes}m` : '—';
-      const actMin  = t.actual_elapsed_minutes != null ? `${t.actual_elapsed_minutes}m` : '—';
-      let deltaHtml = '—';
-      if (t.delta_minutes != null) {
-        const sign = t.delta_minutes > 0 ? '+' : '';
-        const color = t.delta_minutes > 5 ? 'var(--red)' : t.delta_minutes < -5 ? 'var(--green)' : 'var(--text)';
-        deltaHtml = `<span style="color:${color};font-weight:600">${sign}${t.delta_minutes}m</span>`;
-      }
-      const statusChip = `<span class="smgmt-outcome-chip ${escHtml(t.status || '')}" style="font-size:10px;padding:1px 6px">${escHtml(t.status || 'unknown')}</span>`;
-      return `<tr>
-        <td style="font-variant-numeric:tabular-nums;color:var(--text-sub)">#${t.ticket_id || '?'}</td>
-        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title || '')}</td>
-        <td style="text-align:center">${estSize}</td>
-        <td style="text-align:center">${escHtml(estMin)}</td>
-        <td style="text-align:center">${escHtml(actMin)}</td>
-        <td style="text-align:center">${deltaHtml}</td>
-        <td style="text-align:center">${statusChip}</td>
-      </tr>`;
-    }).join('');
-
-    return `
-      <table class="cmp-ticket-table" style="margin-top:20px">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Title</th>
-            <th style="text-align:center">Est size</th>
-            <th style="text-align:center">Est min</th>
-            <th style="text-align:center">Actual min</th>
-            <th style="text-align:center">Delta</th>
-            <th style="text-align:center">Status</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-  }
-
-  function _evaEmpty(title, msg) {
-    return `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
-      <div style="font-weight:600;font-size:14px;margin-bottom:6px">${escHtml(title)}</div>
-      <div style="font-size:13px">${escHtml(msg)}</div>
-    </div>`;
-  }
-}());
-
-// ── Calibration tab (issue #576) ─────────────────────────────────────────────
-(function () {
-  let _calibLoaded = false;
-
-  window.calibInit = async function () {
-    if (_calibLoaded) return;
-    _calibLoaded = true;
-    await _calibLoad();
-  };
-
-  async function _calibLoad() {
-    const resultEl = document.getElementById('calib-result');
-    if (!resultEl) return;
-    resultEl.innerHTML = '<div style="padding:24px;color:var(--text-sub);font-size:13px;">Loading…</div>';
-    try {
-      const project = _slug || '';
-      const resp = await fetch(`/api/calibration?project=${encodeURIComponent(project)}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      resultEl.innerHTML = _calibRender(data);
-    } catch (err) {
-      resultEl.innerHTML = `<div style="padding:40px 28px;text-align:center;color:var(--text-sub)">
-        <div style="font-weight:600;font-size:14px;margin-bottom:6px">Error</div>
-        <div style="font-size:13px">${escHtml(err.message)}</div>
-      </div>`;
-    }
-  }
-
-  function _calibRender(data) {
-    const buckets = data.buckets || {};
-    const sizes = ['S', 'M', 'L', 'XL'];
-    const canonicalLabel = { S: '5m canonical', M: '15m canonical', L: '30m canonical', XL: '60m canonical' };
-
-    const cards = sizes.map(size => {
-      const b = buckets[size] || {};
-      const avg = b.avg_minutes;
-      const count = b.count || 0;
-      const canonical = b.canonical_minutes;
-
-      let avgHtml;
-      if (avg == null) {
-        avgHtml = `<div class="calib-bucket-avg calib-no-data">No data yet</div>`;
-      } else {
-        const formatted = avg >= 60
-          ? `${(avg / 60).toFixed(1)}<span class="calib-bucket-unit">h</span>`
-          : `${avg}<span class="calib-bucket-unit">m</span>`;
-        avgHtml = `<div class="calib-bucket-avg">${formatted}</div>`;
-      }
-
-      let biasHtml = '';
-      if (avg != null && canonical != null) {
-        const delta = avg - canonical;
-        const pct = Math.round((delta / canonical) * 100);
-        const sign = delta > 0 ? '+' : '';
-        if (Math.abs(pct) <= 15) {
-          biasHtml = `<span class="calib-bias calib-bias-ok">≈ on target</span>`;
-        } else if (delta > 0) {
-          biasHtml = `<span class="calib-bias calib-bias-over">${sign}${pct}% over</span>`;
-        } else {
-          biasHtml = `<span class="calib-bias calib-bias-under">${sign}${pct}% under</span>`;
-        }
-      }
-
-      const countStr = count === 1 ? '1 ticket' : `${count} tickets`;
-
-      return `<div class="calib-bucket">
-        <div class="calib-bucket-size">${escHtml(size)}</div>
-        ${avgHtml}
-        ${biasHtml}
-        <div class="calib-bucket-canonical">${escHtml(canonicalLabel[size])}</div>
-        <div class="calib-bucket-count">${avg != null ? escHtml(countStr) : 'No completed tickets'}</div>
-      </div>`;
-    }).join('');
-
-    const hasAny = sizes.some(s => (buckets[s] || {}).count > 0);
-    const note = hasAny
-      ? `<p class="calib-section-note">Based on tickets with both a size estimate and recorded agent timestamps. Bias &gt;15% from canonical triggers a flag.</p>`
-      : `<p class="calib-section-note">No completed tickets with recorded times yet. Run a sprint to see calibration data.</p>`;
-
-    return `${note}<div class="calib-grid">${cards}</div>`;
-  }
-}());
-
-// ── Metrics tab (issue #476) ──────────────────────────────────────────────────
-(function () {
-  let _metricsLoaded = false;
-  let _metricsData = null;
-  // Tokens-per-sprint is sourced from agent_runs.total_tokens (issue #859),
-  // exposed by the cost endpoint's by_sprint aggregate — a different shape
-  // from /api/metrics/sprints, so it is held in its own series.
-  let _tokensData = null;
-  const _charts = {};
-
-  function _fmtTokens(n) {
-    n = n || 0;
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-    return String(Math.round(n));
-  }
-
-  function _loadChartJs(cb, fallback) {
-    if (window.Chart) { cb(); return; }
-    const cdns = [
-      'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
-      'https://unpkg.com/chart.js@4.4.7/dist/chart.umd.min.js',
-    ];
-    function tryLoad(idx) {
-      if (idx >= cdns.length) { fallback(); return; }
-      const s = document.createElement('script');
-      s.src = cdns[idx];
-      s.onload = cb;
-      s.onerror = function () { tryLoad(idx + 1); };
-      document.head.appendChild(s);
-    }
-    tryLoad(0);
-  }
-
-  function _tableVelocity(data) {
-    if (!data.length) { _showMsg('velocity', 'No data available'); return; }
-    const w = document.getElementById('metrics-velocity-wrap');
-    if (!w) return;
-    const rows = data.map(d =>
-      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + (d.ticket_outcomes_breakdown.done || 0) + '</td></tr>'
-    ).join('');
-    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tickets done</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }
-
-  function _tableFailure(data) {
-    if (!data.length) { _showMsg('failure', 'No data available'); return; }
-    const w = document.getElementById('metrics-failure-wrap');
-    if (!w) return;
-    const rows = data.map(d => {
-      const total = d.ticket_count || 0;
-      const failed = d.ticket_outcomes_breakdown.failed || 0;
-      const pct = total > 0 ? Math.round((failed / total) * 1000) / 10 : 0;
-      return '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + total + '</td><td>' + failed + '</td><td>' + pct + '%</td></tr>';
-    }).join('');
-    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Total</th><th>Failed</th><th>Failure rate</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }
-
-  function _tableDuration(data) {
-    if (!data.length) { _showMsg('duration', 'No data available'); return; }
-    const w = document.getElementById('metrics-duration-wrap');
-    if (!w) return;
-    const roles = ['coder', 'tester', 'reviewer', 'documenter'];
-    const roleLabels = ['Coder', 'Tester', 'Reviewer', 'Documenter'];
-    const rows = roles.map((role, i) => {
-      const active = data.filter(d => (d.agent_dispatch_counts[role] || 0) > 0);
-      if (!active.length) return '<tr><td>' + roleLabels[i] + '</td><td>—</td></tr>';
-      const sum = active.reduce((acc, d) => acc + d.duration_minutes / Math.max(1, d.ticket_count), 0);
-      const avg = Math.round((sum / active.length) * 10) / 10;
-      return '<tr><td>' + roleLabels[i] + '</td><td>' + avg + ' min/ticket</td></tr>';
-    }).join('');
-    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Role</th><th>Avg min/ticket</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }
-
-  function _tableTokens(data) {
-    data = data || [];
-    if (!data.length) { _showMsg('tokens', 'No data available'); return; }
-    const w = document.getElementById('metrics-tokens-wrap');
-    if (!w) return;
-    const rows = data.map(d =>
-      '<tr><td>' + escHtml(d.sprint_label) + '</td><td>' + _fmtTokens(d.total_tokens || 0) + '</td></tr>'
-    ).join('');
-    w.innerHTML = '<table class="metrics-fallback-table"><thead><tr><th>Sprint</th><th>Tokens</th></tr></thead><tbody>' + rows + '</tbody></table>';
-  }
-
-  function _tableFallback(data) {
-    _tableVelocity(data);
-    _tableFailure(data);
-    _tableDuration(data);
-  }
-
-  function _colors() {
-    const cs = getComputedStyle(document.documentElement);
-    const get = v => cs.getPropertyValue(v).trim();
-    return {
-      text: get('--text') || '#e2e8f0',
-      sub:  get('--text-sub') || '#94a3b8',
-      border: get('--border') || '#334155',
-      accent: get('--accent') || '#6366f1',
-      green: get('--green') || '#22c55e',
-      red: '#ef4444',
-      orange: '#f59e0b',
-      purple: '#8b5cf6',
-    };
-  }
-
-  function _showMsg(key, msg) {
-    const w = document.getElementById('metrics-' + key + '-wrap');
-    if (w) w.innerHTML = '<div class="metrics-empty">' + escHtml(msg) + '</div>';
-  }
-
-  function _resetCanvas(key) {
-    const w = document.getElementById('metrics-' + key + '-wrap');
-    if (w) w.innerHTML = '<canvas id="metrics-' + key + '-chart" style="width:100%;height:220px;"></canvas>';
-  }
-
-  function _chartOpts(yCallback) {
-    const c = _colors();
-    const tickStyle = { color: c.sub, font: { size: 11 } };
-    const gridStyle = { color: c.border };
-    return {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: tickStyle, grid: gridStyle },
-        y: { beginAtZero: true, ticks: Object.assign({}, tickStyle, yCallback ? { callback: yCallback } : {}), grid: gridStyle },
-      },
-    };
-  }
-
-  function _renderVelocity(data) {
-    if (!data.length) { _showMsg('velocity', 'No data available'); return; }
-    _resetCanvas('velocity');
-    const c = _colors();
-    if (_charts.velocity) _charts.velocity.destroy();
-    const opts = _chartOpts();
-    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + ' tickets done' } };
-    _charts.velocity = new Chart(
-      document.getElementById('metrics-velocity-chart'),
-      {
-        type: 'line',
-        data: {
-          labels: data.map(d => d.sprint_label),
-          datasets: [{ label: 'Tickets done', data: data.map(d => d.ticket_outcomes_breakdown.done || 0),
-            borderColor: c.accent, backgroundColor: c.accent + '33', fill: true, tension: 0.3, pointRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  function _renderFailure(data) {
-    if (!data.length) { _showMsg('failure', 'No data available'); return; }
-    _resetCanvas('failure');
-    const c = _colors();
-    if (_charts.failure) _charts.failure.destroy();
-    const pcts = data.map(d => {
-      const total = d.ticket_count || 0;
-      const failed = d.ticket_outcomes_breakdown.failed || 0;
-      return total > 0 ? Math.round((failed / total) * 1000) / 10 : 0;
-    });
-    const opts = _chartOpts(v => v + '%');
-    opts.scales.y.max = 100;
-    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + '%' } };
-    _charts.failure = new Chart(
-      document.getElementById('metrics-failure-chart'),
-      {
-        type: 'line',
-        data: {
-          labels: data.map(d => d.sprint_label),
-          datasets: [{ label: 'Failure rate', data: pcts,
-            borderColor: c.red, backgroundColor: c.red + '33', fill: true, tension: 0.3, pointRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  function _renderDuration(data) {
-    if (!data.length) { _showMsg('duration', 'No data available'); return; }
-    _resetCanvas('duration');
-    const c = _colors();
-    if (_charts.duration) _charts.duration.destroy();
-    const roles = ['coder', 'tester', 'reviewer', 'documenter'];
-    const roleLabels = ['Coder', 'Tester', 'Reviewer', 'Documenter'];
-    const bgColors = [c.accent + 'cc', c.green + 'cc', c.orange + 'cc', c.purple + 'cc'];
-    const vals = roles.map(role => {
-      const active = data.filter(d => (d.agent_dispatch_counts[role] || 0) > 0);
-      if (!active.length) return 0;
-      const sum = active.reduce((acc, d) => acc + d.duration_minutes / Math.max(1, d.ticket_count), 0);
-      return Math.round((sum / active.length) * 10) / 10;
-    });
-    const opts = _chartOpts();
-    opts.plugins.tooltip = { callbacks: { label: ctx => ctx.parsed.y + ' min/ticket' } };
-    _charts.duration = new Chart(
-      document.getElementById('metrics-duration-chart'),
-      {
-        type: 'bar',
-        data: {
-          labels: roleLabels,
-          datasets: [{ label: 'Avg min/ticket', data: vals, backgroundColor: bgColors, borderRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  function _renderTokens(data) {
-    data = data || [];
-    if (!data.length || !data.some(d => (d.total_tokens || 0) > 0)) {
-      _showMsg('tokens', 'No data available'); return;
-    }
-    _resetCanvas('tokens');
-    const c = _colors();
-    if (_charts.tokens) _charts.tokens.destroy();
-    const opts = _chartOpts(v => _fmtTokens(v));
-    opts.plugins.tooltip = { callbacks: { label: ctx => _fmtTokens(ctx.parsed.y) + ' tokens' } };
-    _charts.tokens = new Chart(
-      document.getElementById('metrics-tokens-chart'),
-      {
-        type: 'bar',
-        data: {
-          labels: data.map(d => d.sprint_label),
-          datasets: [{ label: 'Tokens', data: data.map(d => d.total_tokens || 0),
-            backgroundColor: c.purple + 'cc', borderRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  function _renderAll(data) {
-    _renderVelocity(data);
-    _renderFailure(data);
-    _renderDuration(data);
-  }
-
-  // Per-sprint first-pass rate line chart (issue #1848).
-  function _renderFpr(data) {
-    data = data || [];
-    if (!data.length) { _showMsg('fpr', 'No data available'); return; }
-    _resetCanvas('fpr');
-    const c = _colors();
-    if (_charts.fpr) _charts.fpr.destroy();
-    const opts = _chartOpts(v => Math.round(v * 100) + '%');
-    opts.scales.y.max = 1;
-    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
-    _charts.fpr = new Chart(
-      document.getElementById('metrics-fpr-chart'),
-      {
-        type: 'line',
-        data: {
-          labels: data.map(d => d.sprint_label),
-          datasets: [{ label: 'First-pass rate', data: data.map(d => d.first_pass_rate || 0),
-            borderColor: c.green, backgroundColor: c.green + '33', fill: true, tension: 0.3, pointRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  // Per-sprint rework rate line chart (issue #1848).
-  function _renderRpr(data) {
-    data = data || [];
-    if (!data.length) { _showMsg('rpr', 'No data available'); return; }
-    _resetCanvas('rpr');
-    const c = _colors();
-    if (_charts.rpr) _charts.rpr.destroy();
-    const opts = _chartOpts(v => Math.round(v * 100) + '%');
-    opts.scales.y.max = 1;
-    opts.plugins.tooltip = { callbacks: { label: ctx => Math.round(ctx.parsed.y * 100) + '%' } };
-    _charts.rpr = new Chart(
-      document.getElementById('metrics-rpr-chart'),
-      {
-        type: 'line',
-        data: {
-          labels: data.map(d => d.sprint_label),
-          datasets: [{ label: 'Rework rate', data: data.map(d => d.rework_rate || 0),
-            borderColor: c.orange, backgroundColor: c.orange + '33', fill: true, tension: 0.3, pointRadius: 4 }],
-        },
-        options: opts,
-      }
-    );
-  }
-
-  // Render the loaded series: velocity/failure/duration from /api/metrics/sprints,
-  // tokens-per-sprint from the agent_runs-backed cost endpoint (issue #859),
-  // first-pass/rework-per-sprint from delivery-health endpoint (issue #1848).
-  function _renderLoaded() {
-    _renderAll(_metricsData);
-    _renderTokens(_tokensData);
-    _renderFpr(_bySprintData);
-    _renderRpr(_bySprintData);
-  }
-  function _tableLoaded() { _tableFallback(_metricsData); _tableTokens(_tokensData); }
-
-  let _bySprintData = null;
-
-  // Trends sub-tab chart loader (#715). Exposed under anlTrendsInit because the
-  // Analytics IIFE overrides window.metricsInit to open the Calibration sub-tab.
-  window.anlTrendsInit = async function () {
-    if (_metricsLoaded && _metricsData !== null) {
-      _loadChartJs(_renderLoaded, _tableLoaded);
-      return;
-    }
-
-    ['velocity', 'failure', 'duration', 'tokens', 'fpr', 'rpr'].forEach(k => {
-      const w = document.getElementById('metrics-' + k + '-wrap');
-      if (w) w.innerHTML = '<div class="metrics-empty"><i class="ti ti-loader" style="display:inline-block;animation:bc-badge-spin .9s linear infinite;"></i> Loading…</div>';
-    });
-
-    try {
-      const res = await fetch('/api/metrics/sprints?project=' + encodeURIComponent(_slug));
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      _metricsData = await res.json();
-    } catch (e) {
-      _metricsData = [];
-      ['velocity', 'failure', 'duration'].forEach(k => _showMsg(k, 'Failed to load metrics'));
-    }
-
-    // Tokens-per-sprint is sourced from agent_runs.total_tokens via the cost
-    // endpoint's by_sprint aggregate (issue #859).
-    try {
-      const tRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/cost');
-      if (!tRes.ok) throw new Error('HTTP ' + tRes.status);
-      const cost = await tRes.json();
-      _tokensData = Array.isArray(cost.by_sprint) ? cost.by_sprint : [];
-    } catch (e) {
-      _tokensData = [];
-      _showMsg('tokens', 'Failed to load tokens');
-    }
-
-    // Per-sprint first-pass/rework series from delivery-health endpoint (issue #1848).
-    try {
-      const dhRes = await fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics');
-      if (!dhRes.ok) throw new Error('HTTP ' + dhRes.status);
-      const dh = await dhRes.json();
-      _bySprintData = Array.isArray(dh.by_sprint) ? dh.by_sprint : [];
-    } catch (e) {
-      _bySprintData = [];
-      _showMsg('fpr', 'Failed to load data');
-      _showMsg('rpr', 'Failed to load data');
-    }
-
-    _metricsLoaded = true;
-    _loadChartJs(_renderLoaded, _tableLoaded);
-  };
-}());
-
-// ── Analytics delivery-health cards (#648, ported from the retired analytics page) ──
-(function () {
-  function _anlSet(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
-  function _anlFmtMin(m) { m = m || 0; return m < 60 ? Math.round(m) + 'm' : (m / 60).toFixed(1) + 'h'; }
-  function _anlPct(r) { return Math.round((r || 0) * 100); }
-
-  function _anlClear() {
-    ['fpr-val','fpr-sub','rwr-val','rwr-sub','dur-val','dur-breakdown',
-     'thr-val','thr-sub'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.textContent = '—';
-    });
-    ['fpr-bar','rwr-bar'].forEach(id => { const el = document.getElementById(id); if (el) el.style.width = '0%'; });
-    const mrwEl = document.getElementById('mrw-list'); if (mrwEl) mrwEl.innerHTML = '';
-    document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.remove('is-empty'));
-  }
-
-  function _anlEmpty() {
-    document.querySelectorAll('#metric-grid .metric-card').forEach(c => c.classList.add('is-empty'));
-  }
-
-  function _anlRender(d) {
-    const fpr = d.first_pass_rate || {}, rwr = d.rework_rate || {}, dur = d.avg_duration || {};
-    const thr = d.throughput || {};
-    if ((fpr.total_completed || 0) <= 0) { _anlEmpty(); return; }
-
-    const fprPct = _anlPct(fpr.rate);
-    _anlSet('fpr-val', fprPct);
-    _anlSet('fpr-sub', (fpr.passed || 0) + ' of ' + (fpr.total_completed || 0) + ' tickets passed tester on the first try');
-    const fprBar = document.getElementById('fpr-bar'); if (fprBar) fprBar.style.width = fprPct + '%';
-
-    const rwrPct = _anlPct(rwr.rate);
-    _anlSet('rwr-val', rwrPct);
-    _anlSet('rwr-sub', (rwr.count || 0) + ' tickets tester-rejected at least once · ' + (rwr.rework_2plus || 0) + ' tickets needed 2+ rounds');
-    const rwrBar = document.getElementById('rwr-bar'); if (rwrBar) rwrBar.style.width = rwrPct + '%';
-
-    _anlSet('dur-val', _anlFmtMin(dur.coder_minutes || 0) + ' coder · ' + _anlFmtMin(dur.tester_minutes || 0) + ' tester');
-    const bySize = dur.coder_by_size || {};
-    const sizeParts = ['S','M','L','XL'].filter(s => bySize[s] !== undefined).map(s => '<span>' + s + ': ' + _anlFmtMin(bySize[s]) + '</span>');
-    const bkEl = document.getElementById('dur-breakdown'); if (bkEl) bkEl.innerHTML = sizeParts.length ? 'coder by size: ' + sizeParts.join(' · ') : '';
-
-    _anlSet('thr-val', (thr.avg_tickets_per_sprint || 0).toFixed(1));
-    _anlSet('thr-sub', _anlFmtMin(thr.avg_sprint_length_minutes || 0) + ' avg sprint length');
-
-    const mrwItems = Array.isArray(d.most_reworked) ? d.most_reworked : [];
-    const mrwEl = document.getElementById('mrw-list');
-    if (mrwEl) {
-      if (mrwItems.length === 0) {
-        mrwEl.innerHTML = '';
-        const card = document.getElementById('card-most-reworked');
-        if (card) card.classList.add('is-empty');
-      } else {
-        const repo = (_projectData && _projectData.repo) ? _projectData.repo : null;
-        mrwEl.innerHTML = mrwItems.map(function (e) {
-          const href = repo ? 'https://github.com/' + repo + '/issues/' + e.number : '#';
-          return '<li class="mrw-item"><a href="' + href + '" target="_blank" rel="noopener" class="mrw-link">#' + e.number + '</a><span class="mrw-count">' + e.rejections + ' rejection' + (e.rejections !== 1 ? 's' : '') + '</span></li>';
-        }).join('');
-      }
-    }
-  }
-
-  // Scope → query string (shared by metrics + calibration). Reads #scope-days.
-  function _anlScopeQS() {
-    const params = new URLSearchParams();
-    const days = document.getElementById('scope-days');
-    if (days && days.value && days.value !== 'all') {
-      const since = new Date();
-      since.setDate(since.getDate() - parseInt(days.value, 10));
-      params.set('since', since.toISOString().slice(0, 10));
-    }
-    const qs = params.toString();
-    return qs ? '?' + qs : '';
-  }
-
-  window.anlFetchDeliveryHealth = function () {
-    if (!_slug) return;
-    _anlClear();
-    // Reuse data already cached by the stat strip when no scope filter is active (AC4 issue #1849)
-    const qs = _anlScopeQS();
-    if (!qs && window._anlHealthData) { _anlRender(window._anlHealthData); return; }
-    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/metrics' + qs)
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function (d) { window._anlHealthData = d; _anlRender(d); })
-      .catch(err => { console.error('Analytics delivery-health fetch failed:', err); _anlEmpty(); });
-  };
-
-  // ── Calibration: scatter + by-size table ──
-  const _SZ_COLORS = { S: 'var(--green)', M: 'var(--blue)', L: 'var(--amber)', XL: 'var(--red)' };
-  const _L = 64, _R = 620, _T = 22, _B = 250;
-
-  /** Axis cap from max configured L/XL label (+20% buffer); grid split into 4 equal parts. */
-  function _anlScatterAxisMax(bySize) {
-    const bs = bySize || {};
-    const lCfg = bs.L?.configured_minutes ?? 30;
-    const xlCfg = bs.XL?.configured_minutes ?? 90;
-    return Math.ceil(Math.max(lCfg, xlCfg) * 1.2);
-  }
-
-  function _anlScatterTicks(axisMax) {
-    return [0, 1, 2, 3, 4].map(i => axisMax * i / 4);
-  }
-
-  function _anlScatter(points, bySize) {
-    const svg = document.getElementById('scatter-svg');
-    if (!svg) return;
-    const axisMax = _anlScatterAxisMax(bySize);
-    const ticks = _anlScatterTicks(axisMax);
-    const _xm = v => _L + (v / axisMax) * (_R - _L);
-    const _ym = v => _B - (v / axisMax) * (_B - _T);
-    let p = '';
-    ticks.forEach(v => {
-      const lbl = Math.round(v) + 'm';
-      p += '<line x1="' + _xm(v) + '" y1="' + _T + '" x2="' + _xm(v) + '" y2="' + _B + '" stroke="var(--border)" stroke-width="1"/>';
-      p += '<text x="' + _xm(v) + '" y="' + (_B + 15) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="middle">' + lbl + '</text>';
-      p += '<line x1="' + _L + '" y1="' + _ym(v) + '" x2="' + _R + '" y2="' + _ym(v) + '" stroke="var(--border)" stroke-width="1"/>';
-      p += '<text x="' + (_L - 8) + '" y="' + (_ym(v) + 3) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">' + lbl + '</text>';
-    });
-    p += '<line x1="' + _L + '" y1="' + _B + '" x2="' + _R + '" y2="' + _B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
-    p += '<line x1="' + _L + '" y1="' + _T + '" x2="' + _L + '" y2="' + _B + '" stroke="var(--text-sub)" stroke-width="1.5"/>';
-    p += '<line x1="' + _xm(0) + '" y1="' + _ym(0) + '" x2="' + _xm(axisMax) + '" y2="' + _ym(axisMax) + '" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="4 4"/>';
-    p += '<text x="' + (_xm(axisMax) - 6) + '" y="' + (_ym(axisMax) - 6) + '" font-size="10" fill="var(--text-sub)" font-family="monospace" text-anchor="end">est = actual</text>';
-    p += '<text x="' + ((_L + _R) / 2) + '" y="' + (_B + 32) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle">estimated (min)</text>';
-    p += '<text x="18" y="' + ((_T + _B) / 2) + '" font-size="10" fill="var(--text-muted)" font-family="monospace" text-anchor="middle" transform="rotate(-90 18 ' + ((_T + _B) / 2) + ')">actual (min)</text>';
-    (points || []).forEach(pt => {
-      const col = _SZ_COLORS[pt.estimated_size] || 'var(--text-muted)';
-      p += '<circle cx="' + _xm(pt.estimated_minutes) + '" cy="' + _ym(pt.actual_minutes) + '" r="5" fill="' + col + '" fill-opacity="0.78"/>';
-    });
-    svg.innerHTML = p;
-  }
-
-  function _anlCalTable(bySize) {
-    const tbody = document.getElementById('cal-table-body');
-    if (!tbody) return;
-    let html = '';
-    ['S', 'M', 'L', 'XL'].forEach(sz => {
-      const row = (bySize || {})[sz] || {};
-      const count = row.count || 0, avg = row.avg_minutes, min = row.min_minutes, max = row.max_minutes, cfg = row.configured_minutes;
-      const v = count > 0 ? _estVerdict(avg, cfg) : 'on-target';
-      const vCls = v === 'over' ? 'v-over' : v === 'under' ? 'v-under' : 'v-ok';
-      let applyBtn = '';
-      if (count > 0 && avg !== null && avg !== undefined && v !== 'on-target') {
-        applyBtn = ' <button class="btn-apply" onclick="anlApplyCalibration(\'' + sz + '\',' + avg + ')">apply ' + Math.round(avg) + 'm</button>';
-      }
-      const fmt = x => (x !== null && x !== undefined ? Math.round(x) + 'm' : '—');
-      html += '<tr><td><span class="sz-badge sz-' + sz + '">' + sz + '</span></td>'
-            + '<td>' + fmt(cfg) + '</td><td>' + count + '</td><td>' + fmt(min) + '</td>'
-            + '<td>' + fmt(avg) + '</td><td>' + fmt(max) + '</td>'
-            + '<td><span class="verdict ' + vCls + '">' + v + '</span>' + applyBtn + '</td></tr>';
-    });
-    tbody.innerHTML = html;
-  }
-
-  window.anlApplyCalibration = function (size, avgMin) {
-    const btn = document.querySelector('.btn-apply[onclick*="\'' + size + '\'"]');
-    if (btn) { btn.disabled = true; btn.textContent = 'saving…'; }
-    applyEstCalibration(size, avgMin)
-      .then(() => {
-        window.anlFetchCalibration();
-        if (typeof _psLoadEstSuggestions === 'function') _psLoadEstSuggestions();
-      })
-      .catch(err => {
-        console.error('Apply calibration failed:', err);
-        if (btn) { btn.disabled = false; btn.textContent = 'apply ' + Math.round(avgMin) + 'm'; }
-      });
-  };
-
-  window.anlFetchCalibration = function () {
-    if (!_slug) return;
-    fetch('/api/projects/' + encodeURIComponent(_slug) + '/analytics/calibration' + _anlScopeQS())
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(data => {
-        _anlScatter(data.points || [], data.by_size || {});
-        _anlCalTable(data.by_size || {});
-        const empty = document.getElementById('cal-empty');
-        if (empty) empty.style.display = (data.points || []).length > 0 ? 'none' : 'block';
-      })
-      .catch(err => console.error('Calibration fetch failed:', err));
-  };
-
-  // ── Sub-tab toggle + scope refresh + tab init ──
-  let _anlTrendsInited = false;
-  window.anlShowTab = function (name) {
-    ['calibration', 'metrics', 'status', 'trends'].forEach(n => {
-      const btn = document.getElementById('anl-tab-' + n);
-      const panel = document.getElementById('anl-panel-' + n);
-      const active = n === name;
-      if (btn) { btn.classList.toggle('active', active); btn.setAttribute('aria-selected', String(active)); }
-      if (panel) panel.classList.toggle('show', active);
-    });
-    if (name === 'metrics') {
-      window.anlFetchDeliveryHealth();
-    } else if (name === 'status') {
-      // Lazy-load on first open only; statusInit guards subsequent re-fetch.
-      if (typeof statusInit === 'function') statusInit();
-    } else if (name === 'trends') {
-      // Lazy-load the Chart.js trends on first open only.
-      if (!_anlTrendsInited && typeof window.anlTrendsInit === 'function') {
-        _anlTrendsInited = true;
-        window.anlTrendsInit();
-      }
-    } else {
-      window.anlFetchCalibration();
-    }
-  };
-
-  window.anlRefresh = function () {
-    // Re-fetch whichever sub-tab is showing (scope changed).
-    const metricsActive = document.getElementById('anl-panel-metrics');
-    if (metricsActive && metricsActive.classList.contains('show')) window.anlFetchDeliveryHealth();
-    else window.anlFetchCalibration();
-  };
-
-  // Override metricsInit: Analytics tab opens on Metrics (delivery-health cards) sub-tab (issue #1856).
-  window.metricsInit = function () {
-    window.anlShowTab('metrics');
-  };
-}());
-
-// ── Status tab (issue #585) ────────────────────────────────────────────────────
-let _statusLoaded = false;
-let _statusRefreshId = null;
-
-async function statusInit() {
-  if (_statusRefreshId !== null) return; // already running
-  if (_statusLoaded) {
-    _statusRefreshId = visibilityInterval(statusRefresh, 60000);
-    return;
-  }
-  _statusLoaded = true;
-  await statusRefresh();
-  _statusRefreshId = visibilityInterval(statusRefresh, 60000);
-}
-
-async function statusRefresh() {
-  const repo = _cachedFullRepo[_slug] || '';
-  const slug = _slug;
-  const btn = document.getElementById('status-refresh-btn');
-  if (btn) btn.classList.add('spinning');
-
-  let navData = null, issuesData = null, goalData = null, costData = null;
-  let navErr = false, issuesErr = false, costErr = false;
-
-  const fetches = [
-    snavNavStatusFetch('/api/sprint-nav-status' + (repo ? '?repo=' + encodeURIComponent(repo) : ''))
-      .then(d => { navData = d; })
-      .catch(() => { navErr = true; }),
-    fetch('/api/sprint-management/issues?repo=' + encodeURIComponent(repo))
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(d => { issuesData = d; })
-      .catch(() => { issuesErr = true; }),
-    fetch('/api/projects/' + encodeURIComponent(slug) + '/analytics/cost')
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(d => { costData = d; })
-      .catch(() => { costErr = true; }),
-  ];
-  await Promise.all(fetches);
-
-  if (!navErr && navData && navData.has_sprint) {
-    try {
-      const sprintLabel = 'sprint-' + navData.sprint;
-      const r = await fetch('/api/sprints/goal?project=' + encodeURIComponent(slug) + '&sprint=' + encodeURIComponent(sprintLabel));
-      if (r.ok) goalData = await r.json();
-    } catch (_) {}
-  }
-
-  const issues = issuesData ? (issuesData.issues || []) : null;
-  _statusRenderSprint(navData, goalData, navErr);
-  _statusRenderTokensByAgent(costData ? (costData.by_agent || []) : null, costErr);
-  _statusRenderTokensByTicket(costData ? (costData.by_ticket || []) : null, repo, costErr);
-  _statusRenderLabels(issues, issuesErr);
-  _statusRenderActivity(issues, issuesErr);
-  _statusRenderInflight(issues, issuesErr);
-
-  const ts = document.getElementById('status-last-updated');
-  if (ts) ts.textContent = 'Last updated ' + new Date().toLocaleTimeString();
-  if (btn) btn.classList.remove('spinning');
-}
-
-function _statusRenderSprint(navData, goalData, err) {
-  const el = document.getElementById('status-sprint-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load sprint data.'); return; }
-  if (!navData || !navData.has_sprint) {
-    el.innerHTML = '<span class="status-sprint-none">No active sprint.</span>';
-    return;
-  }
-  const running = navData.state !== 'finished';
-  const stateClass = running ? 'status-sprint-state--running' : '';
-  const stateLabel = running ? 'Running' : 'Finished';
-  const goal = (goalData && goalData.goal)
-    ? escHtml(goalData.goal)
-    : '<span style="color:var(--text-sub);font-style:italic;">No goal set.</span>';
-  el.innerHTML = `
-    <div class="status-sprint-name">Sprint ${navData.sprint}
-      <span class="status-sprint-state ${stateClass}">${stateLabel}</span>
-    </div>
-    <div class="status-sprint-goal">${goal}</div>`;
-}
-
-function _statusRenderTokensByAgent(rows, err) {
-  const el = document.getElementById('status-tokens-agent-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
-  if (!rows || rows.length === 0) {
-    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
-    return;
-  }
-  let html = '<table class="status-tokens-table"><thead><tr><th>Agent</th><th>Tokens</th></tr></thead><tbody>';
-  for (const row of rows) {
-    const agent = escHtml(row.agent || '—');
-    const tokens = Number(row.total_tokens || 0).toLocaleString();
-    html += `<tr><td>${agent}</td><td class="status-tokens-num">${tokens}</td></tr>`;
-  }
-  html += '</tbody></table>';
-  el.innerHTML = html;
-}
-
-function _statusRenderTokensByTicket(rows, repo, err) {
-  const el = document.getElementById('status-tokens-ticket-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load token data.'); return; }
-  if (!rows || rows.length === 0) {
-    el.innerHTML = '<span class="status-none-msg">No token data yet.</span>';
-    return;
-  }
-  const baseUrl = repo ? 'https://github.com/' + repo + '/issues/' : '#';
-  let html = '<table class="status-tokens-table"><thead><tr><th>Issue</th><th>Tokens</th></tr></thead><tbody>';
-  for (const row of rows) {
-    const num = row.issue_number;
-    const tokens = Number(row.total_tokens || 0).toLocaleString();
-    const href = escHtml(baseUrl + num);
-    html += `<tr>
-      <td><a class="status-tokens-link" href="${href}" target="_blank" rel="noopener noreferrer">#${num}</a></td>
-      <td class="status-tokens-num">${tokens}</td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  el.innerHTML = html;
-}
-
-const _STATUS_COL_COLORS = {
-  'backlog':     { dot: 'var(--text-sub)',  bar: 'var(--text-sub)' },
-  'in-progress': { dot: 'var(--amber)',     bar: 'var(--amber)' },
-  'sit':         { dot: 'var(--blue)',      bar: 'var(--blue)' },
-  'uat':         { dot: 'var(--purple)',    bar: 'var(--purple)' },
-  'done':        { dot: 'var(--green)',     bar: 'var(--green)' },
-};
-const _STATUS_COL_LABELS = {
-  'backlog': 'Backlog', 'in-progress': 'In Progress',
-  'sit': 'SIT', 'uat': 'UAT', 'done': 'Done',
-};
-
-function _statusRenderLabels(issues, err) {
-  const el = document.getElementById('status-labels-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load label data.'); return; }
-  if (!issues) { el.innerHTML = '<span class="status-none-msg">No data.</span>'; return; }
-
-  const counts = { backlog: 0, 'in-progress': 0, sit: 0, uat: 0, done: 0 };
-  for (const iss of issues) {
-    const s = iss.status || 'backlog';
-    if (s in counts) counts[s]++;
-  }
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    el.innerHTML = '<span class="status-none-msg">No open issues.</span>';
-    return;
-  }
-  const colOrder = ['backlog', 'in-progress', 'sit', 'uat', 'done'];
-  let html = '<div class="status-label-list">';
-  for (const col of colOrder) {
-    const count = counts[col];
-    const pct = Math.max(count > 0 ? Math.round((count / total) * 100) : 0, count > 0 ? 2 : 0);
-    const cc = _STATUS_COL_COLORS[col];
-    html += `<div class="status-label-row">
-      <div class="status-label-left">
-        <span class="status-col-dot" style="background:${cc.dot};"></span>
-        <span class="status-col-label">${_STATUS_COL_LABELS[col]}</span>
-      </div>
-      <div class="status-label-bar-wrap">
-        <div class="status-label-bar" style="width:${pct}%;background:${cc.bar};"></div>
-      </div>
-      <span class="status-label-count">${count}</span>
-    </div>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function _statusRenderActivity(issues, err) {
-  const el = document.getElementById('status-activity-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load recent activity.'); return; }
-  if (!issues || issues.length === 0) {
-    el.innerHTML = '<span class="status-none-msg">No recent activity.</span>';
-    return;
-  }
-  const sorted = [...issues].sort((a, b) => b.number - a.number).slice(0, 10);
-  let html = '<div class="status-activity-list">';
-  for (const iss of sorted) {
-    const status = iss.status || 'backlog';
-    const isNew = status === 'backlog';
-    const iconClass = isNew ? 'status-activity-icon-open' : 'status-activity-icon-update';
-    const iconName  = isNew ? 'ti-circle-plus' : 'ti-refresh';
-    html += `<div class="status-activity-row">
-      <span class="status-activity-icon ${iconClass}"><i class="ti ${iconName}"></i></span>
-      <div class="status-activity-main">
-        <div class="status-activity-title">${escHtml(iss.title || '')}</div>
-        <div class="status-activity-meta">${escHtml(_STATUS_COL_LABELS[status] || status)}</div>
-      </div>
-      <span class="status-activity-num">#${iss.number}</span>
-    </div>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function _statusRenderInflight(issues, err) {
-  const el = document.getElementById('status-inflight-body');
-  if (!el) return;
-  if (err) { el.innerHTML = _statusErrHtml('Failed to load in-flight tickets.'); return; }
-  if (!issues) { el.innerHTML = '<span class="status-none-msg">No data.</span>'; return; }
-  const inflight = issues.filter(i => i.status === 'in-progress');
-  if (inflight.length === 0) {
-    el.innerHTML = '<span class="status-none-msg">No tickets currently in progress.</span>';
-    return;
-  }
-  let html = '<div class="status-inflight-list">';
-  for (const iss of inflight) {
-    const url = escHtml(iss.url || '#');
-    html += `<a class="status-inflight-row" href="${url}" target="_blank" rel="noopener noreferrer">
-      <span class="status-inflight-num">#${iss.number}</span>
-      <span class="status-inflight-title">${escHtml(iss.title || '')}</span>
-      <i class="ti ti-external-link status-inflight-arrow"></i>
-    </a>`;
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function _statusErrHtml(msg) {
-  return `<div class="status-inline-error" role="alert"><i class="ti ti-alert-circle"></i>${escHtml(msg)}</div>`;
-}
-
-// ── Notes tab ────────────────────────────────────────────────────────────────
-let _notesLoaded = false;
-let _notesMtime = null;
-let _notesPendingConflict = false;
-
-async function notesInit() {
-  if (_notesLoaded) return;
-  _notesLoaded = true;
-  await notesLoad();
-}
-
-async function notesLoad() {
-  const repo = _cachedFullRepo[_slug] || '';
-  const refreshBtn = document.getElementById('notes-refresh-btn');
-  if (refreshBtn) refreshBtn.classList.add('spinning');
-  _notesSetStatus('');
-  _notesHideConflict();
-  _notesPendingConflict = false;
-
-  try {
-    const r = await fetch('/api/projects/notes?repo=' + encodeURIComponent(repo));
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    const textarea = document.getElementById('notes-textarea');
-    const emptyState = document.getElementById('notes-empty-state');
-    _notesMtime = data.mtime;
-    if (!data.exists || data.content === '') {
-      if (textarea) textarea.classList.add('hidden');
-      if (emptyState) emptyState.classList.remove('hidden');
-      if (textarea) textarea.value = '';
-    } else {
-      if (emptyState) emptyState.classList.add('hidden');
-      if (textarea) {
-        textarea.classList.remove('hidden');
-        textarea.value = data.content;
-      }
-    }
-  } catch (e) {
-    _notesSetStatus('Failed to load notes: ' + e.message, 'err');
-  } finally {
-    if (refreshBtn) refreshBtn.classList.remove('spinning');
-  }
-}
-
-async function notesSave() {
-  if (_notesPendingConflict) return;
-  const repo = _cachedFullRepo[_slug] || '';
-  const textarea = document.getElementById('notes-textarea');
-  const emptyState = document.getElementById('notes-empty-state');
-  const content = textarea ? textarea.value : '';
-
-  const saveBtn = document.getElementById('notes-save-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
-
-  try {
-    const r = await fetch('/api/projects/notes?repo=' + encodeURIComponent(repo), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, expected_mtime: _notesMtime }),
-    });
-    if (r.status === 409) {
-      const data = await r.json().catch(() => ({}));
-      _notesPendingConflict = true;
-      const msg = (typeof data.detail === 'object' && data.detail !== null && data.detail.message)
-        ? data.detail.message
-        : 'Conflict detected.';
-      _notesShowConflict(msg);
-      _notesSetStatus('');
-      return;
-    }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    _notesMtime = data.mtime;
-    if (content && emptyState) emptyState.classList.add('hidden');
-    if (content && textarea) textarea.classList.remove('hidden');
-    _notesSetStatus('Saved.', 'ok');
-    setTimeout(() => _notesSetStatus(''), 3000);
-  } catch (e) {
-    _notesSetStatus('Save failed: ' + e.message, 'err');
-  } finally {
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.innerHTML = '<i class="ti ti-device-floppy"></i>Save';
-    }
-  }
-}
-
-async function notesSaveForce() {
-  _notesMtime = null;
-  _notesPendingConflict = false;
-  _notesHideConflict();
-  await notesSave();
-}
-
-function _notesSetStatus(msg, cls) {
-  const bar = document.getElementById('notes-status-bar');
-  if (!bar) return;
-  bar.textContent = msg;
-  bar.className = 'notes-status-bar' + (cls ? ' ' + cls : '');
-}
-
-function _notesShowConflict(msg) {
-  const banner = document.getElementById('notes-conflict-banner');
-  const msgEl = document.getElementById('notes-conflict-msg');
-  if (msgEl) msgEl.textContent = msg;
-  if (banner) banner.classList.remove('hidden');
-}
-
-function _notesHideConflict() {
-  const banner = document.getElementById('notes-conflict-banner');
-  if (banner) banner.classList.add('hidden');
-}
+// ── Analytics IIFE removed in #2025 (anlShowTab/anlFetchCalibration/metricsInit deleted) ──
 
 // ── Project Settings tab (issue #642) ─────────────────────────────────────────
 

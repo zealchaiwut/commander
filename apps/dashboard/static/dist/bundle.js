@@ -730,30 +730,23 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["logs", "deploy", "bulk-create"],
+    manage: ["deploy", "bulk-create"],
     planning: [
-      "timeline",
-      "compare",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor"
     ]
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "metrics", "manage", "planning", "settings"].map((t) => {
+      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "planning", "settings"].map((t) => {
         const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
         return [t, ownsTab ? 0 : -1];
       })
     );
   }
   function switchTab(tab, pushHistory) {
-    let _statusDeepLink = false;
-    if (tab === "status") {
-      tab = "metrics";
-      _statusDeepLink = true;
+    if (tab === "metrics" || tab === "logs" || tab === "status") {
+      tab = "failures";
     }
     if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {
       if (_smgmtLivePollId !== null) {
@@ -763,15 +756,6 @@
       if (_smgmtLogPollId !== null) {
         clearInterval(_smgmtLogPollId);
         _smgmtLogPollId = null;
-      }
-    }
-    if (_activeTab === "logs" && tab !== "logs") {
-      logsDestroy();
-    }
-    if (_activeTab === "metrics" && tab !== "metrics") {
-      if (_statusRefreshId !== null) {
-        clearInterval(_statusRefreshId);
-        _statusRefreshId = null;
       }
     }
     if (_activeTab === "deploy" && tab !== "deploy") {
@@ -789,7 +773,8 @@
     const _topLevelTabs = [
       "sprint-mgmt",
       "tickets",
-      "metrics",
+      "failures",
+      "brain",
       "manage",
       "planning",
       "settings"
@@ -797,17 +782,12 @@
     [
       "sprint-mgmt",
       "tickets",
-      "logs",
       "deploy",
       "bulk-create",
-      "timeline",
-      "compare",
-      "metrics",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor",
+      "failures",
+      "brain",
       "settings"
     ].forEach((t) => {
       const btn = document.getElementById("stab-" + t);
@@ -826,7 +806,7 @@
       btn.tabIndex = _rovingMap[t];
     });
     closeAllStabDropdowns();
-    ["analytics", "more", "planning", "manage"].forEach((groupName) => {
+    ["planning", "manage"].forEach((groupName) => {
       const group = document.getElementById("stab-group-" + groupName);
       if (!group)
         return;
@@ -837,17 +817,12 @@
     [
       "sprint-mgmt",
       "tickets",
-      "logs",
       "deploy",
       "bulk-create",
-      "timeline",
-      "compare",
-      "metrics",
-      "est-vs-actual",
-      "calibration",
-      "notes",
       "roadmap",
       "advisor",
+      "failures",
+      "brain",
       "settings",
       "global-settings"
     ].forEach((t) => {
@@ -881,30 +856,16 @@
       _bcInitTab();
       _lpRenderBc();
     }
-    if (tab === "logs")
-      logsInit();
     if (tab === "deploy")
       deployTabInit();
-    if (tab === "timeline")
-      ganttInit();
-    if (tab === "compare")
-      compareInit();
-    if (tab === "metrics") {
-      metricsInit();
-      if (_statusDeepLink && typeof window.anlShowTab === "function") {
-        window.anlShowTab("status");
-      }
-    }
-    if (tab === "est-vs-actual")
-      evaInit();
-    if (tab === "calibration")
-      calibInit();
-    if (tab === "notes")
-      notesInit();
     if (tab === "roadmap")
       roadmapInit();
     if (tab === "advisor")
       advInit();
+    if (tab === "failures")
+      failuresInit();
+    if (tab === "brain")
+      brainInit();
     if (tab === "settings")
       projSettingsInit();
     if (tab === "global-settings") {
@@ -956,10 +917,10 @@
       const enabledTabs = [
         "sprint-mgmt",
         "tickets",
+        "failures",
+        "brain",
         "manage",
-        "logs",
         "deploy",
-        "metrics",
         "planning",
         "roadmap",
         "advisor",
@@ -1054,6 +1015,25 @@
       if (group)
         group.style.display = "none";
     }
+  }
+
+  // apps/dashboard/static/src/shell/url-parser.js
+  var _PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
+  function _parseUrlImpl(pathname, search = "") {
+    const m = pathname.match(_PATH_RE);
+    const _q = new URLSearchParams(search);
+    const view = (_q.get("view") || "").toLowerCase() || null;
+    const filter = (_q.get("filter") || "").toLowerCase() || null;
+    if (!m)
+      return { slug: null, tab: "sprint-mgmt", view, filter };
+    const slug = decodeURIComponent(m[1]);
+    const rawTab = m[2] || "";
+    const tab = rawTab === "tickets" ? "tickets" : rawTab === "sprint" ? "sprint-mgmt" : rawTab === "bulk-create" ? "bulk-create" : rawTab === "failures" ? "failures" : rawTab === "brain" ? "brain" : rawTab === "settings" ? "settings" : rawTab === "global-settings" ? "global-settings" : "sprint-mgmt";
+    return { slug, tab, view, filter };
+  }
+  function parseUrl2() {
+    const loc = window.location;
+    return _parseUrlImpl(loc.pathname, loc.search);
   }
 
   // apps/dashboard/static/src/shell/visibility.js
@@ -8904,6 +8884,290 @@ Proceed anyway?`)) {
     };
   }
 
+  // apps/dashboard/static/src/failures/failures.js
+  async function fetchFailures(project, category) {
+    let url = "/api/failures?project=" + encodeURIComponent(project);
+    if (category)
+      url += "&category=" + encodeURIComponent(category);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  function _escHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _fmtTs(ts) {
+    if (!ts)
+      return "";
+    try {
+      const d = new Date(ts);
+      return d.toLocaleString(void 0, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch (_) {
+      return String(ts);
+    }
+  }
+  function _renderRows(rows) {
+    if (!rows || rows.length === 0) {
+      return '<tr><td colspan="7" class="fbox-empty">No failures</td></tr>';
+    }
+    return rows.map(function(r) {
+      const issueLink = r.issue_number ? '<span class="fbox-issue">#' + _escHtml(r.issue_number) + "</span>" : "<span>\u2014</span>";
+      const sprint = r.sprint_label ? _escHtml(r.sprint_label) : "\u2014";
+      const agent = r.agent ? _escHtml(r.agent) : "\u2014";
+      const category = r.category ? _escHtml(r.category) : "\u2014";
+      const reason = r.reason ? '<span title="' + _escHtml(r.reason) + '">' + _escHtml(r.reason.length > 60 ? r.reason.slice(0, 60) + "\u2026" : r.reason) + "</span>" : "\u2014";
+      const ts = _fmtTs(r.ts);
+      const logCell = r.log_url ? '<a class="fbox-log-link" href="' + _escHtml(r.log_url) + '" target="_blank" rel="noopener">View log</a>' : "\u2014";
+      return "<tr><td>" + issueLink + "</td><td>" + sprint + "</td><td>" + agent + '</td><td><span class="fbox-cat">' + category + "</span></td><td>" + reason + '</td><td class="fbox-ts">' + ts + "</td><td>" + logCell + "</td></tr>";
+    }).join("");
+  }
+  function _setLoading(el, msg) {
+    el.innerHTML = '<div class="fbox-state"><i class="ti ti-loader fbox-spinner"></i>' + _escHtml(msg) + "</div>";
+  }
+  function _setError(el, msg) {
+    el.innerHTML = '<div class="fbox-state fbox-state-error"><i class="ti ti-alert-circle"></i>' + _escHtml(msg) + "</div>";
+  }
+  var _currentCategory = "";
+  function _getProject() {
+    return typeof _projectData !== "undefined" && _projectData ? _projectData.repo || "" : "";
+  }
+  function failuresInit2() {
+    const root2 = document.getElementById("fbox-root");
+    if (!root2)
+      return;
+    const project = _getProject();
+    if (!project) {
+      _setError(root2, "No project selected.");
+      return;
+    }
+    _setLoading(root2, "Loading failures\u2026");
+    const cat = _currentCategory;
+    fetchFailures(project, cat).then(function(rows) {
+      root2.innerHTML = '<div class="fbox-table-wrap"><table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table></div>";
+    }).catch(function(err) {
+      _setError(root2, "Failed to load failures");
+    });
+  }
+  function failuresCategoryChange(value) {
+    _currentCategory = value || "";
+    failuresInit2();
+  }
+
+  // apps/dashboard/static/src/reasoning.js
+  async function fetchRunReasoning(runId) {
+    const resp = await fetch("/api/runs/" + encodeURIComponent(runId) + "/reasoning");
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+
+  // apps/dashboard/static/src/home/live-refresh.js
+  var REPORT_REFRESH_INTERVAL_MS = 2e4;
+  function startDevReportAutoRefresh({
+    fetchFn,
+    interval = REPORT_REFRESH_INTERVAL_MS,
+    onUpdate
+  } = {}) {
+    const tick = async () => {
+      try {
+        await fetchFn();
+        if (typeof onUpdate === "function") {
+          onUpdate((/* @__PURE__ */ new Date()).toISOString());
+        }
+      } catch (_) {
+      }
+    };
+    const handle = visibilityInterval(tick, interval);
+    return () => clearInterval(handle);
+  }
+
+  // apps/dashboard/static/src/brain/brain.js
+  async function fetchBrainSearch(q, project) {
+    let url = "/api/brain/search?q=" + encodeURIComponent(q);
+    if (project)
+      url += "&project=" + encodeURIComponent(project);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  async function fetchBrainPanels(project) {
+    let url = "/api/brain/panels";
+    if (project)
+      url += "?project=" + encodeURIComponent(project);
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  async function fetchBrainDoc(slug, path) {
+    const url = "/api/projects/" + encodeURIComponent(slug) + "/docs/" + path;
+    const resp = await fetch(url);
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+  function _esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _sourceLabel(source) {
+    const map = {
+      decisions: "Decision",
+      "bulk-create": "Bulk create",
+      retros: "Retro",
+      docs: "Docs"
+    };
+    return map[source] || source;
+  }
+  function _sourceClass(source) {
+    return "brain-badge brain-badge-" + source;
+  }
+  function _renderHits(hits) {
+    if (!hits || hits.length === 0) {
+      return '<div class="brain-empty">No results found.</div>';
+    }
+    return hits.map(function(h) {
+      const badge = '<span class="' + _sourceClass(h.source) + '">' + _esc(_sourceLabel(h.source)) + "</span>";
+      const path = _esc(h.path || "");
+      const snippet = _esc(h.snippet || "");
+      return '<div class="brain-hit brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-hit-header">' + badge + '<span class="brain-hit-path">' + path + '</span></div><div class="brain-hit-snippet">' + snippet + "</div></div>";
+    }).join("");
+  }
+  function _renderRecentDecisions(items) {
+    if (!items || items.length === 0) {
+      return "<p>No decisions found.</p>";
+    }
+    return items.map(function(d) {
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div>" + (d.decision ? '<div class="brain-panel-item-sub">' + _esc(d.decision) + "</div>" : "") + "</div>";
+    }).join("");
+  }
+  function _renderOpenDecisions(items) {
+    if (!items || items.length === 0) {
+      return "<p>No open decision items found.</p>";
+    }
+    return items.map(function(d) {
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-path">' + path + '</div><div class="brain-panel-item-line">' + _esc(d.line) + "</div></div>";
+    }).join("");
+  }
+  function _renderLastLearnings(items) {
+    if (!items || items.length === 0) {
+      return "<p>No learnings recorded.</p>";
+    }
+    return "<ul>" + items.map(function(l) {
+      return "<li>" + _esc(l) + "</li>";
+    }).join("") + "</ul>";
+  }
+  function _renderBacklogRationale(items) {
+    if (!items || items.length === 0) {
+      return "<p>No ADR entries found.</p>";
+    }
+    return items.map(function(d) {
+      const path = _esc(d.path || "");
+      return '<div class="brain-panel-item brain-clickable" tabindex="0" role="button" aria-label="Open ' + path + '" data-doc-path="' + path + '"><div class="brain-panel-item-title">' + _esc(d.title || d.path) + "</div></div>";
+    }).join("");
+  }
+  var _panelsLoaded = false;
+  var _delegationSetup = false;
+  function _getProject2() {
+    return typeof _projectData !== "undefined" && _projectData ? _projectData.repo || null : null;
+  }
+  function _getSlug() {
+    const repo = _getProject2();
+    return repo ? repo.split("/").pop() : null;
+  }
+  function openBrainDoc(path) {
+    const viewerEl = document.getElementById("brain-doc-viewer");
+    const contentEl = document.getElementById("brain-doc-content");
+    const pathLabelEl = document.getElementById("brain-doc-path-label");
+    const resultsEl = document.getElementById("brain-results");
+    const rootEl = document.getElementById("brain-root");
+    if (!viewerEl || !contentEl)
+      return;
+    if (resultsEl)
+      resultsEl.style.display = "none";
+    if (rootEl)
+      rootEl.style.display = "none";
+    viewerEl.style.display = "";
+    if (pathLabelEl)
+      pathLabelEl.textContent = path;
+    contentEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading\u2026</div>';
+    const slug = _getSlug();
+    if (!slug) {
+      contentEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>No project selected.</div>';
+      return;
+    }
+    fetchBrainDoc(slug, path).then(function(data) {
+      const content = data.content || "";
+      const rendered = typeof _mdToHtml === "function" ? '<div class="md-body">' + _mdToHtml(content) + "</div>" : '<pre class="brain-doc-pre">' + _esc(content) + "</pre>";
+      contentEl.innerHTML = rendered;
+    }).catch(function() {
+      contentEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Failed to load document.</div>';
+    });
+  }
+  function _handleDocActivation(e) {
+    if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ")
+      return;
+    const item = e.target && typeof e.target.closest === "function" ? e.target.closest("[data-doc-path]") : null;
+    if (!item)
+      return;
+    if (e.type === "keydown")
+      e.preventDefault();
+    openBrainDoc(item.getAttribute("data-doc-path"));
+  }
+  function _setupDocDelegation(container) {
+    if (!container)
+      return;
+    container.addEventListener("click", _handleDocActivation);
+    container.addEventListener("keydown", _handleDocActivation);
+  }
+  function brainSearch() {
+    const inputEl = document.getElementById("brain-search-input");
+    const resultsEl = document.getElementById("brain-results");
+    if (!inputEl || !resultsEl)
+      return;
+    const q = (inputEl.value || "").trim();
+    if (!q) {
+      resultsEl.innerHTML = "";
+      return;
+    }
+    resultsEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Searching\u2026</div>';
+    fetchBrainSearch(q, _getProject2()).then(function(hits) {
+      resultsEl.innerHTML = _renderHits(hits);
+    }).catch(function() {
+      resultsEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Search failed.</div>';
+    });
+  }
+  function brainInit2() {
+    const root2 = document.getElementById("brain-root");
+    if (!root2)
+      return;
+    if (_panelsLoaded)
+      return;
+    _panelsLoaded = true;
+    if (!_delegationSetup) {
+      _delegationSetup = true;
+      _setupDocDelegation(document.getElementById("brain-results"));
+      _setupDocDelegation(document.getElementById("brain-panels"));
+    }
+    const panelsEl = document.getElementById("brain-panels");
+    if (!panelsEl)
+      return;
+    panelsEl.innerHTML = '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading panels\u2026</div>';
+    fetchBrainPanels(_getProject2()).then(function(data) {
+      panelsEl.innerHTML = '<div class="brain-panel-grid"><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-book"></i> Recent Decisions</h3><div class="brain-panel-body">' + _renderRecentDecisions(data.recent_decisions) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-arrow-right"></i> Open \u27F6 DECISION Items</h3><div class="brain-panel-body">' + _renderOpenDecisions(data.open_decisions) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-bulb"></i> Last Sprint Learnings</h3><div class="brain-panel-body">' + _renderLastLearnings(data.last_learnings) + '</div></section><section class="brain-panel"><h3 class="brain-panel-title"><i class="ti ti-list-check"></i> Backlog with Rationale</h3><div class="brain-panel-body">' + _renderBacklogRationale(data.backlog_rationale) + "</div></section></div>";
+    }).catch(function() {
+      panelsEl.innerHTML = '<div class="brain-state brain-state-error"><i class="ti ti-alert-circle"></i>Failed to load panels.</div>';
+    });
+  }
+
   // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
@@ -8925,6 +9189,7 @@ Proceed anyway?`)) {
   root.switchTab = switchTab;
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
+  root.parseUrl = parseUrl2;
   root.loadCommanderFeatures = loadCommanderFeatures;
   root.visibilityInterval = visibilityInterval;
   root.snavNavStatusFetch = snavNavStatusFetch;
@@ -8932,6 +9197,7 @@ Proceed anyway?`)) {
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+  globalThis.parseUrl = parseUrl2;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.visibilityInterval = visibilityInterval;
   globalThis.snavNavStatusFetch = snavNavStatusFetch;
@@ -8991,5 +9257,25 @@ Proceed anyway?`)) {
   globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
   globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
   globalThis.logsToolbarVisibility = logsToolbarVisibility;
+  root.fetchFailures = fetchFailures;
+  root.failuresInit = failuresInit2;
+  root.failuresCategoryChange = failuresCategoryChange;
+  globalThis.fetchFailures = fetchFailures;
+  globalThis.failuresInit = failuresInit2;
+  globalThis.failuresCategoryChange = failuresCategoryChange;
+  root.fetchRunReasoning = fetchRunReasoning;
+  globalThis.fetchRunReasoning = fetchRunReasoning;
+  root.startDevReportAutoRefresh = startDevReportAutoRefresh;
+  root.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+  globalThis.startDevReportAutoRefresh = startDevReportAutoRefresh;
+  globalThis.REPORT_REFRESH_INTERVAL_MS = REPORT_REFRESH_INTERVAL_MS;
+  root.fetchBrainSearch = fetchBrainSearch;
+  root.fetchBrainPanels = fetchBrainPanels;
+  root.brainInit = brainInit2;
+  root.brainSearch = brainSearch;
+  globalThis.fetchBrainSearch = fetchBrainSearch;
+  globalThis.fetchBrainPanels = fetchBrainPanels;
+  globalThis.brainInit = brainInit2;
+  globalThis.brainSearch = brainSearch;
 })();
 //# sourceMappingURL=bundle.js.map

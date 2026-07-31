@@ -16,8 +16,12 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 # Must run at conftest import time — before test modules import server/db.
+# Use = (not setdefault) so this FORCES the test DB even when DB_PATH is already
+# exported in the shell (e.g. from sourcing apps/dashboard/.env, which carries
+# the relative value DB_PATH=./commander.db that would resolve to the production
+# file depending on CWD).  setdefault is a no-op when the var is already set.
 _TEST_DB = Path(os.environ.get("COMMANDER_TEST_DB", "/tmp/commander-pytest.db"))
-os.environ.setdefault("DB_PATH", str(_TEST_DB))
+os.environ["DB_PATH"] = str(_TEST_DB)
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
 # Feature flags default off in config.py; tests opt back in to sign-off/planning/advisor/brief.
 os.environ.setdefault("COMMANDER_DISABLE_SIGNOFF", "0")
@@ -172,3 +176,38 @@ def _isolate_settings_repo(tmp_path, monkeypatch):
     sys.modules["services.sprint_manager.settings_repo"] = settings_repo
     store = tmp_path / "settings_store.json"
     monkeypatch.setattr(settings_repo, "_fallback_store_path", lambda: store)
+
+
+# ── Session-scoped in-repo DB guard (AC6, issue #2047) ────────────────────────
+
+@pytest.fixture(scope="session", autouse=True)
+def _assert_db_not_in_repo() -> None:
+    """Fail the entire test run immediately if DB_PATH resolves inside the repo.
+
+    This is the belt-and-braces guard that makes a future regression impossible
+    to miss: if any code path sets DB_PATH to a repo-internal file, this fixture
+    aborts the session before a single test runs so no production database can
+    be silently corrupted.
+    """
+    _repo_root = Path(__file__).parent.parent.resolve()
+    _db_path_str = os.environ.get("DB_PATH", "")
+    if _db_path_str:
+        _db_path = Path(_db_path_str)
+        if _db_path.is_absolute():
+            try:
+                _db_path.relative_to(_repo_root)
+                _in_repo = True
+            except ValueError:
+                _in_repo = False
+            if _in_repo:
+                pytest.exit(
+                    f"\nSAFETY ABORT: DB_PATH is inside the repo working tree!\n"
+                    f"  DB_PATH    = {_db_path}\n"
+                    f"  Repo root  = {_repo_root}\n"
+                    "Tests must never write to a database inside the repo — that "
+                    "risks corrupting the production database.  Ensure conftest.py "
+                    "forces DB_PATH (os.environ[\"DB_PATH\"] = ...) to a path "
+                    "outside the repo before any test module is imported.",
+                    returncode=1,
+                )
+    yield

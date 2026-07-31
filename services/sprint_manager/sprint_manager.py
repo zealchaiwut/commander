@@ -822,7 +822,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = (
     else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
 )
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
+_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 
@@ -940,6 +940,13 @@ from services.sprint_manager.alerts import (  # noqa: E402
     AlertMode,
     dispatch_alerts,
     HangDetector,  # noqa: F401 — re-exported; tests patch sm.HangDetector
+)
+
+# ── dead-letter escalation (issue #2033) ──────────────────────────────────────
+
+from services.sprint_manager.dead_letter_escalation import (  # noqa: E402
+    check_dead_letter_escalation,
+    get_escalation_threshold,
 )
 
 # ── subprocess helpers ────────────────────────────────────────────────────────
@@ -2629,7 +2636,15 @@ def _is_dispatchable(labels: set[str]) -> bool:
     Re-run sub-sprints often carry SIT / in-progress / needs-rework from a prior
     attempt; treating only pure backlog tickets as dispatchable caused instant
     no-op runs (``No backlog issues found``) on labels like sprint-68.3.
+
+    'blocked' is always non-dispatchable regardless of other labels (issue #2033).
+    A ticket carrying 'blocked' has been routed to the manual queue — it must not
+    re-enter auto-dispatch until the operator resets the label to 'backlog'.
+    This guard must come before _classify / _REWORK_LABELS checks so that
+    'blocked' + 'needs-rework' (or any other combination) is also excluded.
     """
+    if "blocked" in labels:
+        return False
     cls = _classify(labels)
     if cls in ("backlog", "sit", "in-progress"):
         return True
@@ -2840,6 +2855,11 @@ class _SprintPreflightResult:
     start_time: float
     early_exit: bool = False
     rerun_dispatch_error: bool = False
+    # When early_exit is True and the cause is a preflight check (not just
+    # "no tickets"), this carries a machine-readable reason token so main()
+    # can persist the correct end_reason and print the right operator message.
+    # Values: "auth-preflight-failed" | "ica-preflight-failed" | None
+    early_exit_reason: Optional[str] = None
 
 
 def _read_active_llm_provider() -> str:
@@ -2942,6 +2962,9 @@ def run_sprint_preflight(
                 project=eff_repo or "",
                 start_timestamp=_utcnow(),
             )
+            # Transient attribute read by main() to write the correct end_reason
+            # (issue #2045). Not serialized by SprintState.to_dict().
+            _blocked_state._preflight_exit_reason = "ica-preflight-failed"
             return _SprintPreflightResult(
                 state=_blocked_state, state_path=state_path, summary=summary,
                 sprint_num=sprint_num, sprint_branch=sprint_branch,
@@ -2950,6 +2973,51 @@ def run_sprint_preflight(
                 eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
                 dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
                 start_time=time.monotonic(), early_exit=True,
+                early_exit_reason="ica-preflight-failed",
+            )
+
+    # ── Auth/OAuth preflight (issue #2029) ────────────────────────────────────
+    # For non-ICA providers, probe the coder CLI before loading any tickets.
+    # An expired OAuth session causes every ticket to CRASH with the same error
+    # ("OAuth session expired"); detecting it here lets us fail fast and emit a
+    # single alert instead of dispatching every ticket into the same wall.
+    if _sprint_llm_provider != "ica":
+        _auth_backend = cfg.coder_backend if cfg is not None else "claude-code"
+        _auth_err = _doctor_probe_auth(backend=_auth_backend)
+        if _auth_err:
+            _auth_msg = f"[auth-preflight] auth check failed — {_auth_err}"
+            sys.stdout.write(_auth_msg + "\n")
+            dispatch_alerts(
+                alert_modes,
+                title="sprint-blocked: auth/OAuth preflight failed",
+                body=(
+                    f"Sprint {label} blocked before dispatching any tickets.\n\n"
+                    f"Auth probe error: {_auth_err}\n\n"
+                    f"Fix: re-authenticate (e.g. `claude login`) then retry the sprint."
+                ),
+                category="auth-preflight-failed",
+                cfg=cfg,
+                repo=eff_repo,
+                sprint_label=label,
+            )
+            _auth_blocked_state = SprintState(
+                sprint_label=label,
+                sprint_number=sprint_num,
+                project=eff_repo or "",
+                start_timestamp=_utcnow(),
+            )
+            # Transient attribute read by main() to write the correct end_reason
+            # (issue #2045). Not serialized by SprintState.to_dict().
+            _auth_blocked_state._preflight_exit_reason = "auth-preflight-failed"
+            return _SprintPreflightResult(
+                state=_auth_blocked_state, state_path=state_path, summary=summary,
+                sprint_num=sprint_num, sprint_branch=sprint_branch,
+                target_branch=target_branch, eff_repo=eff_repo, api_url=api_url,
+                run_id=_run_id, rerun_decisions={},
+                eff_sprints_dir=cfg.sprints_dir if cfg is not None else SPRINTS_DIR,
+                dispatch_levels=[], level_nums_by_idx=[], pipeline_on=False,
+                start_time=time.monotonic(), early_exit=True,
+                early_exit_reason="auth-preflight-failed",
             )
 
     # Build rerun decisions map (issue → action) when running from a rerun manifest
@@ -4341,6 +4409,20 @@ def run_sprint_loop(
                     "attempts": issue_state.fix_attempts,
                     "last_error": issue_state.last_error,
                 })
+            # Dead-letter escalation: check cross-run count; fire LOUD alert +
+            # flag as blocked when threshold is reached (issue #2033).
+            _dl_threshold = get_escalation_threshold(cfg)
+            check_dead_letter_escalation(
+                ticket_id=num,
+                title=issue_state.title,
+                last_error=issue_state.last_error,
+                sprints_dir=_eff_sprints_dir,
+                threshold=_dl_threshold,
+                alert_modes=alert_modes,
+                cfg=cfg,
+                repo=eff_repo,
+                sprint_label=label,
+            )
             _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)
@@ -4471,6 +4553,9 @@ def run_sprint(
                 ended_at=_ended_at, end_reason="rerun-dispatch-error",
             )
             raise SystemExit(1)
+        # pf.state._preflight_exit_reason is already set inside
+        # run_sprint_preflight() for auth/ICA failures (issue #2045).
+        # main() reads it to choose the right end_reason and operator message.
         return pf.summary, pf.state
 
     state              = pf.state
@@ -4921,6 +5006,9 @@ def main() -> None:
     summary_path: Optional[Path] = None
     sprint_branch: str = f"sprint/{args.label}"
     effective_target: str = args.target_branch or sprint_branch
+    # issue #2030: track whether run_sprint() crashed so we can write terminal
+    # state even when the exception is not re-raised.
+    _run_crashed: bool = False
 
     try:
         summary, state = run_sprint(
@@ -4994,8 +5082,10 @@ def main() -> None:
             )
         raise
     except Exception as _crash_exc:
-        # Crash catch-all (logging only): turn a silent sprint death into a
-        # logged stack trace, then re-raise so behavior is unchanged.
+        # Crash catch-all (issue #2030): emit sprint_crashed — the diagnostic
+        # signal MUST be preserved — then fall through to terminal-state write
+        # and downstream steps.  Do NOT re-raise: a re-raise skips the terminal
+        # state write and leaves the sprint stuck "running" forever.
         structured_log.error(
             "sprint_crashed",
             f"sprint {args.label} crashed: {_crash_exc}",
@@ -5004,21 +5094,35 @@ def main() -> None:
             error=str(_crash_exc),
             traceback=traceback.format_exc(),
         )
-        raise
+        _run_crashed = True
+        # fall through — terminal-state write and downstream steps execute below
 
     # Clean exit: write the unified-lifecycle terminal state at the source
     # (sprint-lifecycle.md): ready_to_merge when every ticket passed,
     # needs_rework on any recorded failure — no more inference downstream.
     if not args.dry_run:
         _ended_at = datetime.now(timezone.utc).isoformat()
-        if not state or not state.issues:
-            # No dispatchable tickets → the run did no work (nothing was queued).
-            # main() set the sprint to 'running' before the run, so reset it back
-            # to a fresh, runnable DRAFT — drop the lifecycle row and set plan
-            # state to draft — instead of marking needs_rework, which implies
-            # failed work and offers a pointless "Re-run → N.1". The operator just
-            # fixes the ticket labels and Runs the same sprint again. (Mirrors the
-            # manual recovery for a no-dispatch misfire, e.g. sprint-95.)
+        if _run_crashed:
+            # Hard crash (issue #2030): sprint aborted mid-run → always needs_rework.
+            # sprint_crashed event already emitted above; write terminal state so the
+            # sprint is never left stuck "running".
+            _plan_json_set_state_sm(
+                args.label, "needs_rework", cfg=cfg,
+                ended_at=_ended_at, end_reason="hard-crash",
+            )
+            _sprint_db_set_state_sm(
+                args.label, "needs_rework", project=eff_repo or "",
+                ended_at=_ended_at, end_reason="hard-crash",
+            )
+        elif not state or not state.issues:
+            # No work was done (nothing dispatched). Reset to a runnable DRAFT
+            # instead of needs_rework, which implies failed work. The operator
+            # fixes whatever blocked the run and tries again.
+            # Two sub-cases:
+            #   (a) Auth or ICA preflight failed — write a specific end_reason
+            #       so the operator sees the real diagnosis, not "check labels".
+            #   (b) Genuinely no dispatchable tickets — existing behaviour.
+            _preflight_reason = getattr(state, "_preflight_exit_reason", None) if state else None
             try:
                 import db  # apps/dashboard on sys.path (line 142)
                 db.transition_sprint_state(
@@ -5027,14 +5131,36 @@ def main() -> None:
                 )
             except Exception:
                 pass
-            _plan_json_set_state_sm(
-                args.label, "draft", cfg=cfg,
-                end_reason="no-dispatchable-tickets",
-            )
-            sys.stdout.write(str(
-                "No dispatchable tickets — sprint left as a runnable draft "
-                "(not marked needs_rework). Check ticket labels and Run again."
-            ) + "\n")
+            if _preflight_reason == "auth-preflight-failed":
+                # issue #2045 (AC-1): auth/OAuth preflight blocked the sprint.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="auth-preflight-failed",
+                )
+                sys.stdout.write(str(
+                    "Sprint blocked — auth/OAuth preflight failed. "
+                    "Re-authenticate (e.g. `claude login`) and retry the sprint."
+                ) + "\n")
+            elif _preflight_reason == "ica-preflight-failed":
+                # issue #2045 (AC-2): ICA preflight blocked the sprint.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="ica-preflight-failed",
+                )
+                sys.stdout.write(str(
+                    "Sprint blocked — ICA readiness check failed. "
+                    "Check ICA configuration and retry the sprint."
+                ) + "\n")
+            else:
+                # Genuinely no dispatchable tickets — original behaviour.
+                _plan_json_set_state_sm(
+                    args.label, "draft", cfg=cfg,
+                    end_reason="no-dispatchable-tickets",
+                )
+                sys.stdout.write(str(
+                    "No dispatchable tickets — sprint left as a runnable draft "
+                    "(not marked needs_rework). Check ticket labels and Run again."
+                ) + "\n")
         else:
             # A sprint is a clean (ready_to_merge) finish only when every ticket
             # landed. Besides an explicit agent failure, a ticket left SKIPPED by a
@@ -5071,7 +5197,7 @@ def main() -> None:
     _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)
 
     # Dispatch documenter after sprint summary, before sprint PR (issue #165)
-    if not args.skip_documenter and not args.dry_run and state.issues:
+    if not args.skip_documenter and not args.dry_run and state is not None and state.issues:
         doc_cwd = str(cfg.worktree_tester) if cfg else None
         try:
             r_head = subprocess.run(
@@ -5108,7 +5234,10 @@ def main() -> None:
                 outcome=state.documenter_status or "succeeded",
             )
         except RuntimeError as e_doc:
-            # AC6: documenter errors must fail the pipeline loudly, not silently skip
+            # AC6: documenter errors must fail the pipeline loudly, not silently skip.
+            # issue #2030: do NOT re-raise — sprint PR / reviewer / reconcile must
+            # still run.  Overwrite terminal state to needs_rework so the dashboard
+            # reflects the documenter failure even when all tickets merged cleanly.
             _db_agent_finish_sm(
                 0, state.sprint_label, "documenter",
                 duration_seconds=time.monotonic() - _doc_t0, outcome="failed",
@@ -5116,7 +5245,16 @@ def main() -> None:
             structured_log.error("documenter_failed", f"documenter failed: {e_doc}", exc=str(e_doc))
             sys.stdout.write(str(f"\n[ERROR] Documenter failed: {e_doc}") + "\n")
             sys.stdout.flush()
-            raise
+            _doc_ended_at = datetime.now(timezone.utc).isoformat()
+            _plan_json_set_state_sm(
+                args.label, "needs_rework", cfg=cfg,
+                ended_at=_doc_ended_at, end_reason="documenter-crash",
+            )
+            _sprint_db_set_state_sm(
+                args.label, "needs_rework", project=eff_repo or "",
+                ended_at=_doc_ended_at, end_reason="documenter-crash",
+            )
+            # fall through — sprint PR / reviewer / reconcile execute below
 
         # Persist documenter outcome into the state JSON
         if state_path_doc.exists():
@@ -5133,7 +5271,7 @@ def main() -> None:
     # Parked/deprecated (issue #1687) — default-off pending platform stability;
     # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
     _brief_disabled = os.environ.get("COMMANDER_DISABLE_BRIEF", "1").strip().lower() not in ("0", "false", "no")
-    if not args.dry_run and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
+    if not args.dry_run and state is not None and state.issues and _BRIEF_GENERATOR_AVAILABLE and not _brief_disabled:
         _brief_git_root = cfg.worktree_tester if cfg else Path.cwd()
         _brief_state_path = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
         _brief_summary_issue_num: Optional[int] = None
@@ -5158,7 +5296,7 @@ def main() -> None:
             sys.stdout.write(str(f"  [brief_generator] WARNING: brief generation failed: {e_brief}") + "\n")
 
     # Generate code-state snapshot after documenter/brief (issue #1862) — non-fatal.
-    if not args.dry_run and state.issues and _CODE_STATE_AVAILABLE:
+    if not args.dry_run and state is not None and state.issues and _CODE_STATE_AVAILABLE:
         _cs_cwd = Path(cfg.worktree_tester) if cfg else Path.cwd()
         try:
             _generate_code_state_snapshot(
@@ -5175,7 +5313,8 @@ def main() -> None:
     # develop is reached only at Merge Sprint — no auto-merge here.
     sprint_pr_url: Optional[str] = None
     if (
-        state.issues
+        state is not None
+        and state.issues
         and not args.dry_run
         and args.target_branch != "develop"
         and _is_child_sprint_label(args.label)
@@ -5191,7 +5330,7 @@ def main() -> None:
         )
 
     # Dispatch reviewer after sprint PR creation (issue #159)
-    if not args.skip_reviewer and not args.dry_run and state.issues:
+    if not args.skip_reviewer and not args.dry_run and state is not None and state.issues:
         rev_cwd = str(cfg.worktree_coder) if cfg else None
         try:
             r_head = subprocess.run(
@@ -5322,18 +5461,26 @@ def main() -> None:
         )
 
     sys.stdout.write(str("\n=== Sprint Summary ===") + "\n")
-    sys.stdout.write(str(f"Processed: {', '.join(summary.processed) or 'none'}") + "\n")
-    sys.stdout.write(str(f"Merged:    {', '.join(summary.merged) or 'none'}") + "\n")
-    if summary.gate_failures:
-        sys.stdout.write(str("Gate failures:") + "\n")
-        for line in summary.gate_failures:
-            sys.stdout.write(str(f"  {line}") + "\n")
-    if summary.skipped:
-        sys.stdout.write(str(f"Skipped:   {', '.join(summary.skipped)}") + "\n")
+    if summary is not None:
+        sys.stdout.write(str(f"Processed: {', '.join(summary.processed) or 'none'}") + "\n")
+        sys.stdout.write(str(f"Merged:    {', '.join(summary.merged) or 'none'}") + "\n")
+        if summary.gate_failures:
+            sys.stdout.write(str("Gate failures:") + "\n")
+            for line in summary.gate_failures:
+                sys.stdout.write(str(f"  {line}") + "\n")
+        if summary.skipped:
+            sys.stdout.write(str(f"Skipped:   {', '.join(summary.skipped)}") + "\n")
+    if _run_crashed:
+        sys.stdout.write(str(
+            f"[sprint_crashed] Sprint {args.label} aborted by hard crash — "
+            "marked needs_rework (sprint_crashed event emitted)."
+        ) + "\n")
     if summary_path:
         sys.stdout.write(str(f"Summary:   {summary_path}") + "\n")
     if sprint_pr_url:
         sys.stdout.write(str(f"Sprint PR: {sprint_pr_url}") + "\n")
+    if _run_crashed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

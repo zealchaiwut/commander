@@ -25,6 +25,10 @@ from services.logging import log as structured_log  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # noqa: E402
 from services.sprint_manager.alerts import dispatch_alerts  # noqa: E402
 from services.sprint_manager.paths import _state_path, _summary_path  # noqa: E402
+from services.sprint_manager.retro import (  # noqa: E402
+    derive_key_learnings,
+    write_retro_to_docs,
+)
 from services.sprint_manager.state import SprintState  # noqa: E402
 from services.sprint_manager.timekeeping import (  # noqa: E402
     SPRINTS_DIR,
@@ -606,11 +610,17 @@ def generate_sprint_summary(
         lines.append("No issues carried over.")
     lines.append("")
 
-    # -- Key Learnings --
+    # -- Key Learnings (AC-1 issue #2026) --
+    # Derive from real sprint data; never use the static LEARNINGS_STUB in the
+    # auto-generated summary.  commander_dir is the parent of sprints_dir.
+    _commander_dir: Optional[Path] = (
+        sprints_dir.parent if sprints_dir is not None else None
+    )
+    _learnings_text = derive_key_learnings(state, commander_dir=_commander_dir)
     lines += [
         "## Key Learnings",
         "",
-        LEARNINGS_STUB,
+        _learnings_text,
         "",
     ]
 
@@ -936,6 +946,28 @@ def write_sprint_summary(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     sys.stdout.write(str(f"  Sprint summary written to {path}") + "\n")
+
+    # AC-2 (issue #2026): write distilled retro to docs/changelog/uat/ so it is
+    # committed and feeds the planning loop.  Best-effort — failure does not
+    # abort the sprint summary.
+    _repo_root_candidate = eff_sprints_dir.parent.parent if eff_sprints_dir is not None else None
+    if _repo_root_candidate is not None:
+        _docs_uat = _repo_root_candidate / "docs" / "changelog" / "uat"
+        _cmd_dir = eff_sprints_dir.parent
+        try:
+            _retro_path = write_retro_to_docs(
+                state,
+                docs_uat_dir=_docs_uat,
+                commander_dir=_cmd_dir,
+            )
+            sys.stdout.write(str(f"  Distilled retro written to {_retro_path}") + "\n")
+        except Exception as _retro_exc:
+            structured_log.warn(
+                "retro_write_failed",
+                f"write_retro_to_docs raised: {_retro_exc}",
+                exc=str(_retro_exc),
+                sprint_label=state.sprint_label,
+            )
 
     # Dispatch via all configured alert channels (issue #24)
     if alert_modes:

@@ -126,6 +126,7 @@ test("AC3: advisor active → planning trigger gets 0, others get -1", () => {
 
 // ── AC4: never zero tabIndex=0 elements ─────────────────────────────────────
 
+// Dead/orphaned views removed in issue #2024: timeline, compare, est-vs-actual, calibration, notes
 const ALL_TABS = [
   "sprint-mgmt",
   "tickets",
@@ -134,11 +135,6 @@ const ALL_TABS = [
   "deploy",
   "metrics",
   "bulk-create",
-  "timeline",
-  "compare",
-  "est-vs-actual",
-  "calibration",
-  "notes",
   "roadmap",
   "advisor",
 ];

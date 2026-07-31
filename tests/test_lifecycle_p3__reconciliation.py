@@ -19,7 +19,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_REPO_ROOT / "services" / "sprint_manager"))
 sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-os.environ.setdefault("DB_PATH", str(_REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 
 import db as _db_module  # noqa: E402
 

@@ -28,7 +28,7 @@ if str(REPO_ROOT / "services" / "sprint_manager") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "services" / "sprint_manager"))
 
 import os
-os.environ.setdefault("DB_PATH", str(REPO_ROOT / "commander.db"))
+os.environ.setdefault("DB_PATH", "/tmp/commander-pytest.db")
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
 
 from fastapi import APIRouter  # noqa: E402

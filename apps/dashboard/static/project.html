@@ -9733,6 +9733,40 @@
     .brain-spinner { animation: brain-spin 1s linear infinite; }
     @keyframes brain-spin { to { transform: rotate(360deg); } }
     .brain-empty { color: var(--text-sub); padding: 12px 0; }
+    /* Clickable brain items (issue #2040) */
+    .brain-clickable { cursor: pointer; }
+    .brain-hit.brain-clickable:hover { background: var(--surface-2, #f3f4f6); }
+    .brain-hit.brain-clickable:focus-visible,
+    .brain-panel-item.brain-clickable:focus-visible {
+      outline: 2px solid var(--accent, #6366f1);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    .brain-panel-item.brain-clickable:hover { background: var(--surface-2, #f3f4f6); border-radius: 4px; }
+    /* Doc viewer (issue #2040) */
+    .brain-doc-viewer { padding: 4px 0 16px; }
+    .brain-doc-toolbar {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 16px; padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brain-doc-back {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--text);
+      white-space: nowrap;
+    }
+    .brain-doc-back:hover { background: var(--surface-2); }
+    .brain-doc-back:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 2px; }
+    .brain-doc-path-label {
+      font-size: 12px; color: var(--text-muted); word-break: break-all; flex: 1;
+    }
+    .brain-doc-content { font-size: 13px; }
+    .brain-doc-pre {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: var(--mono); font-size: 12px;
+      background: var(--surface-2); padding: 12px; border-radius: 6px;
+    }
     @media (max-width: 600px) {
       .brain-panel-grid { grid-template-columns: 1fr; }
     }
@@ -9741,6 +9775,8 @@
       .brain-badge-bulk-create { background: #14532d; color: #86efac; }
       .brain-badge-retros { background: #422006; color: #fde68a; }
       .brain-badge-docs { background: #3b0764; color: #d8b4fe; }
+      .brain-hit.brain-clickable:hover { background: var(--surface-2, #1f2937); }
+      .brain-panel-item.brain-clickable:hover { background: var(--surface-2, #1f2937); }
     }
 
     /* ── Failures inbox tab (issue #2020) ── */
@@ -11253,6 +11289,17 @@
           <div id="brain-panels">
             <div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading panels…</div>
           </div>
+        </div>
+        <!-- Doc viewer — shown when a result is activated (issue #2040) -->
+        <div id="brain-doc-viewer" class="brain-doc-viewer" style="display:none">
+          <div class="brain-doc-toolbar">
+            <button class="brain-doc-back" id="brain-doc-back" onclick="brainDocBack()"
+                    aria-label="Back to search results">
+              <i class="ti ti-arrow-left"></i> Back
+            </button>
+            <span class="brain-doc-path-label" id="brain-doc-path-label"></span>
+          </div>
+          <div id="brain-doc-content" class="brain-doc-content md-body"></div>
         </div>
       </div><!-- /pane-brain -->
 

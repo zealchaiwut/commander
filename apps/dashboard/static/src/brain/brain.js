@@ -1,19 +1,27 @@
 /* Brain tab — FTS5 search over docs + panel data (issue #2028).
+ * Clickable items open the referenced document in-pane (issue #2040).
  *
  * Fetches GET /api/brain/search?q=<query> and renders keyword-search hits.
  * On tab init, loads panel data from GET /api/brain/panels for the four
  * pre-built panels: recent decisions, open DECISION items, last sprint's
  * learnings, backlog-with-rationale.
  *
+ * Each hit / panel item is keyboard-accessible and opens the referenced
+ * document via GET /api/projects/{slug}/docs/{path} (docs.py → docs_service).
+ *
  * Exported pure functions (importable by the Node --test fetch-spy tester):
- *   fetchBrainSearch(q)   — network boundary for search
- *   fetchBrainPanels()    — network boundary for panels
+ *   fetchBrainSearch(q, project)  — network boundary for search
+ *   fetchBrainPanels(project)     — network boundary for panels
+ *   fetchBrainDoc(slug, path)     — network boundary for doc retrieval (issue #2040)
+ *   openBrainDoc(path)            — activate a result and open the doc viewer
+ *   brainDocBack()                — return to search/panels from doc viewer
  *
  * AC4 compliance: exported functions are the sole network boundaries; callers
- * (brainInit, brainSearch) pass only primitives so tests can intercept fetch.
+ * (brainInit, brainSearch, openBrainDoc) pass only primitives so tests can
+ * intercept fetch.
  */
 
-/* global _projectData */
+/* global _projectData, _mdToHtml */
 
 // ── Pure network helpers (exported for tester) ────────────────────────────────
 
@@ -41,6 +49,22 @@ export async function fetchBrainSearch(q, project) {
 export async function fetchBrainPanels(project) {
   let url = "/api/brain/panels";
   if (project) url += "?project=" + encodeURIComponent(project);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  return resp.json();
+}
+
+/**
+ * Fetch a doc file from the project docs endpoint (issue #2040).
+ * Goes through GET /api/projects/{slug}/docs/{path} → docs.py → docs_service.get_doc()
+ * which applies path-containment security checks.
+ *
+ * @param {string} slug - project slug (last segment of owner/repo)
+ * @param {string} path - relative doc path, e.g. "docs/decisions/2026-07-01-1-foo.md"
+ * @returns {Promise<{path: string, content: string}>}
+ */
+export async function fetchBrainDoc(slug, path) {
+  const url = "/api/projects/" + encodeURIComponent(slug) + "/docs/" + path;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error("HTTP " + resp.status);
   return resp.json();
@@ -87,7 +111,9 @@ function _renderHits(hits) {
       const path = _esc(h.path || "");
       const snippet = _esc(h.snippet || "");
       return (
-        '<div class="brain-hit">' +
+        '<div class="brain-hit brain-clickable" tabindex="0" role="button"' +
+        ' aria-label="Open ' + path + '"' +
+        ' data-doc-path="' + path + '">' +
         '<div class="brain-hit-header">' +
         badge +
         '<span class="brain-hit-path">' +
@@ -111,8 +137,11 @@ function _renderRecentDecisions(items) {
   }
   return items
     .map(function (d) {
+      const path = _esc(d.path || "");
       return (
-        '<div class="brain-panel-item">' +
+        '<div class="brain-panel-item brain-clickable" tabindex="0" role="button"' +
+        ' aria-label="Open ' + path + '"' +
+        ' data-doc-path="' + path + '">' +
         '<div class="brain-panel-item-title">' +
         _esc(d.title || d.path) +
         "</div>" +
@@ -131,10 +160,13 @@ function _renderOpenDecisions(items) {
   }
   return items
     .map(function (d) {
+      const path = _esc(d.path || "");
       return (
-        '<div class="brain-panel-item">' +
+        '<div class="brain-panel-item brain-clickable" tabindex="0" role="button"' +
+        ' aria-label="Open ' + path + '"' +
+        ' data-doc-path="' + path + '">' +
         '<div class="brain-panel-item-path">' +
-        _esc(d.path) +
+        path +
         "</div>" +
         '<div class="brain-panel-item-line">' +
         _esc(d.line) +
@@ -149,6 +181,7 @@ function _renderLastLearnings(items) {
   if (!items || items.length === 0) {
     return "<p>No learnings recorded.</p>";
   }
+  // Learnings are plain strings without a doc path — not clickable.
   return (
     "<ul>" +
     items.map(function (l) {
@@ -164,8 +197,11 @@ function _renderBacklogRationale(items) {
   }
   return items
     .map(function (d) {
+      const path = _esc(d.path || "");
       return (
-        '<div class="brain-panel-item">' +
+        '<div class="brain-panel-item brain-clickable" tabindex="0" role="button"' +
+        ' aria-label="Open ' + path + '"' +
+        ' data-doc-path="' + path + '">' +
         '<div class="brain-panel-item-title">' +
         _esc(d.title || d.path) +
         "</div>" +
@@ -178,11 +214,111 @@ function _renderBacklogRationale(items) {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let _panelsLoaded = false;
+let _delegationSetup = false;
 
 function _getProject() {
   return typeof _projectData !== "undefined" && _projectData
     ? _projectData.repo || null
     : null;
+}
+
+function _getSlug() {
+  const repo = _getProject();
+  return repo ? repo.split("/").pop() : null;
+}
+
+// ── Doc viewer ────────────────────────────────────────────────────────────────
+
+/**
+ * Open the in-pane doc viewer for the given path.
+ * Hides search results and panels; shows the doc viewer with the fetched content.
+ * Exported so project.html can call it and tests can stub it.
+ *
+ * @param {string} path - relative doc path from the hit's data-doc-path attribute
+ */
+export function openBrainDoc(path) {
+  const viewerEl = document.getElementById("brain-doc-viewer");
+  const contentEl = document.getElementById("brain-doc-content");
+  const pathLabelEl = document.getElementById("brain-doc-path-label");
+  const resultsEl = document.getElementById("brain-results");
+  const rootEl = document.getElementById("brain-root");
+
+  if (!viewerEl || !contentEl) return;
+
+  // Hide search and panels; reveal viewer
+  if (resultsEl) resultsEl.style.display = "none";
+  if (rootEl) rootEl.style.display = "none";
+  viewerEl.style.display = "";
+
+  if (pathLabelEl) pathLabelEl.textContent = path;
+
+  contentEl.innerHTML =
+    '<div class="brain-state"><i class="ti ti-loader brain-spinner"></i>Loading…</div>';
+
+  const slug = _getSlug();
+  if (!slug) {
+    contentEl.innerHTML =
+      '<div class="brain-state brain-state-error">' +
+      '<i class="ti ti-alert-circle"></i>No project selected.</div>';
+    return;
+  }
+
+  fetchBrainDoc(slug, path)
+    .then(function (data) {
+      const content = data.content || "";
+      // Reuse the project.html _mdToHtml renderer if available; otherwise
+      // fall back to a plain <pre> so content is always readable.
+      const rendered =
+        typeof _mdToHtml === "function"
+          ? '<div class="md-body">' + _mdToHtml(content) + "</div>"
+          : '<pre class="brain-doc-pre">' + _esc(content) + "</pre>";
+      contentEl.innerHTML = rendered;
+    })
+    .catch(function () {
+      contentEl.innerHTML =
+        '<div class="brain-state brain-state-error">' +
+        '<i class="ti ti-alert-circle"></i>Failed to load document.</div>';
+    });
+}
+
+/**
+ * Return to the search/panels view from the doc viewer.
+ * Called by the Back button in the doc viewer toolbar.
+ */
+export function brainDocBack() {
+  const viewerEl = document.getElementById("brain-doc-viewer");
+  const resultsEl = document.getElementById("brain-results");
+  const rootEl = document.getElementById("brain-root");
+  if (viewerEl) viewerEl.style.display = "none";
+  if (resultsEl) resultsEl.style.display = "";
+  if (rootEl) rootEl.style.display = "";
+}
+
+// ── Event delegation ──────────────────────────────────────────────────────────
+
+/**
+ * Handle a click or keyboard activation on a [data-doc-path] element.
+ * Uses event delegation so new innerHTML-rendered items are caught automatically.
+ */
+function _handleDocActivation(e) {
+  if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+  const item =
+    e.target && typeof e.target.closest === "function"
+      ? e.target.closest("[data-doc-path]")
+      : null;
+  if (!item) return;
+  if (e.type === "keydown") e.preventDefault(); // prevent page scroll on Space
+  openBrainDoc(item.getAttribute("data-doc-path"));
+}
+
+/**
+ * Wire click + keydown delegation once on a stable container.
+ * Called for both #brain-results and #brain-panels so new items are caught.
+ */
+function _setupDocDelegation(container) {
+  if (!container) return;
+  container.addEventListener("click", _handleDocActivation);
+  container.addEventListener("keydown", _handleDocActivation);
 }
 
 // ── Search handler ────────────────────────────────────────────────────────────
@@ -228,6 +364,13 @@ export function brainInit() {
   // Only load panels once; search results are driven by the search box
   if (_panelsLoaded) return;
   _panelsLoaded = true;
+
+  // Wire event delegation once for both stable containers (issue #2040).
+  if (!_delegationSetup) {
+    _delegationSetup = true;
+    _setupDocDelegation(document.getElementById("brain-results"));
+    _setupDocDelegation(document.getElementById("brain-panels"));
+  }
 
   const panelsEl = document.getElementById("brain-panels");
   if (!panelsEl) return;

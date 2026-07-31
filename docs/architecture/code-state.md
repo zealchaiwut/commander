@@ -17,9 +17,22 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 
 ## Recent Deltas (sprint-99)
 
-Files changed: **1**
+Files changed: **1635**
 
-- `docs/` — 1 file(s)
+- `tests/` — 897 file(s)
+- `apps/` — 276 file(s)
+- `.claude/` — 100 file(s)
+- `.github/` — 88 file(s)
+- `docs/` — 87 file(s)
+- `scripts/` — 71 file(s)
+- `services/` — 63 file(s)
+- `(root)/` — 22 file(s)
+- `alembic/` — 13 file(s)
+- `references/` — 9 file(s)
+- `.commander/` — 4 file(s)
+- `hooks/` — 3 file(s)
+- `.agents/` — 1 file(s)
+- `.cursor/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
@@ -49,5 +62,5 @@ Files changed: **1**
 ## Generated
 
 Sprint: `sprint-99`  
-Timestamp: `2026-07-31T03:49:35Z`  
+Timestamp: `2026-07-31T03:49:40Z`  
 _Generated deterministically — no LLM required._

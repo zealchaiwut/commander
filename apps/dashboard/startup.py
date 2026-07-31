@@ -3287,10 +3287,16 @@ def _rerun_policy(labels: set[str]) -> tuple[str, list[str]]:
     """Return (action, labels_to_strip) for a sprint ticket based on its current labels.
 
     action:
-        'skip'             — UAT / UAT-approved; leave ticket and labels untouched
+        'skip'             — UAT / UAT-approved / blocked; leave ticket untouched
         'dispatch_tester'  — SIT ticket; send to tester directly; SIT label preserved
         'dispatch_coder'   — all other states; send to coder; strip appropriate labels
+
+    'blocked' tickets are skipped even when they also carry needs-rework or SIT:
+    the operator must manually reset the label before the ticket re-enters auto-rerun
+    (issue #2033, AC-2).
     """
+    if "blocked" in labels:
+        return "skip", []
     if labels & {"UAT", "UAT-approved"}:
         return "skip", []
     if "SIT" in labels:

@@ -942,6 +942,12 @@ from services.sprint_manager.alerts import (  # noqa: E402
     HangDetector,  # noqa: F401 — re-exported; tests patch sm.HangDetector
 )
 
+# ── dead-letter escalation (issue #2033) ──────────────────────────────────────
+
+from services.sprint_manager.dead_letter_escalation import (  # noqa: E402
+    check_dead_letter_escalation,
+)
+
 # ── subprocess helpers ────────────────────────────────────────────────────────
 
 def _run(*cmd, cwd: Optional[Path] = None, check: bool = True) -> str:
@@ -2629,7 +2635,15 @@ def _is_dispatchable(labels: set[str]) -> bool:
     Re-run sub-sprints often carry SIT / in-progress / needs-rework from a prior
     attempt; treating only pure backlog tickets as dispatchable caused instant
     no-op runs (``No backlog issues found``) on labels like sprint-68.3.
+
+    'blocked' is always non-dispatchable regardless of other labels (issue #2033).
+    A ticket carrying 'blocked' has been routed to the manual queue — it must not
+    re-enter auto-dispatch until the operator resets the label to 'backlog'.
+    This guard must come before _classify / _REWORK_LABELS checks so that
+    'blocked' + 'needs-rework' (or any other combination) is also excluded.
     """
+    if "blocked" in labels:
+        return False
     cls = _classify(labels)
     if cls in ("backlog", "sit", "in-progress"):
         return True
@@ -4381,6 +4395,20 @@ def run_sprint_loop(
                     "attempts": issue_state.fix_attempts,
                     "last_error": issue_state.last_error,
                 })
+            # Dead-letter escalation: check cross-run count; fire LOUD alert +
+            # flag as blocked when threshold is reached (issue #2033).
+            _dl_threshold = int(getattr(cfg, "dead_letter_escalation_threshold", 2))
+            check_dead_letter_escalation(
+                ticket_id=num,
+                title=issue_state.title,
+                last_error=issue_state.last_error,
+                sprints_dir=_eff_sprints_dir,
+                threshold=_dl_threshold,
+                alert_modes=alert_modes,
+                cfg=cfg,
+                repo=eff_repo,
+                sprint_label=label,
+            )
             _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)

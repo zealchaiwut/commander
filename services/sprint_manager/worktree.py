@@ -444,7 +444,19 @@ def _worktree_hygiene(
         if feature_branch is not None:
             sys.stdout.write(str(f"  [hygiene] Rebasing {feature_branch} onto origin/{merge_target}") + "\n")
             sys.stdout.flush()
-            _try("git", "checkout", feature_branch, cwd=worktree)
+            # Reset local branch to origin to drop stale commits from prior
+            # failed attempts. We already fetched in step 1, so origin/... is
+            # current. If origin doesn't have the branch yet, fall back to the
+            # local copy (shouldn't happen — coder always pushes before tester).
+            ok_remote, _, _ = _try(
+                "git", "rev-parse", "--verify",
+                f"refs/remotes/origin/{feature_branch}", cwd=worktree,
+            )
+            if ok_remote:
+                _try("git", "checkout", "-B", feature_branch,
+                     f"origin/{feature_branch}", cwd=worktree)
+            else:
+                _try("git", "checkout", feature_branch, cwd=worktree)
             ok, _, rebase_err = _try(
                 "git", "rebase", f"origin/{merge_target}", cwd=worktree,
             )

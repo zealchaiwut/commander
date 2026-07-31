@@ -11211,11 +11211,23 @@
                     aria-label="Filter by category"
                     onchange="failuresCategoryChange(this.value)">
               <option value="">All categories</option>
-              <option value="timed_out">timed_out</option>
+              <!-- Outcome vocabulary (agent_runs / agents sources) -->
               <option value="failed">failed</option>
-              <option value="gate_failed">gate_failed</option>
+              <option value="timed_out">timed_out</option>
+              <!-- FailureCategory vocabulary (events source) -->
+              <option value="crash">crash</option>
+              <option value="gate_fail">gate_fail</option>
+              <option value="hang">hang</option>
+              <option value="tester_rejected">tester_rejected</option>
+              <option value="retry_exhausted">retry_exhausted</option>
+              <option value="coder_no_work">coder_no_work</option>
+              <option value="merge_conflict">merge_conflict</option>
+              <option value="lint_fail">lint_fail</option>
+              <option value="pytest_fail">pytest_fail</option>
+              <option value="rebase_conflict">rebase_conflict</option>
+              <option value="env_error">env_error</option>
               <option value="design_docs_missing">design_docs_missing</option>
-              <option value="no_tests">no_tests</option>
+              <option value="dispatch-blocked">dispatch-blocked</option>
             </select>
           </div>
         </div>

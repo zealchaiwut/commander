@@ -26,6 +26,7 @@ import db as _db  # noqa: E402
 # ── Vocabulary normalisation ──────────────────────────────────────────────────
 
 _OUTCOME_NORM: dict[str, str] = {
+    # Outcome vocabulary (agent_runs / agents sources)
     "fail": "failed",
     "failed": "failed",
     "success": "succeeded",
@@ -34,6 +35,12 @@ _OUTCOME_NORM: dict[str, str] = {
     "passed": "passed",
     "timed_out": "timed_out",
     "timeout": "timed_out",
+    # FailureCategory vocabulary (events source) — normalise the
+    # gate_fail / gate_failed variant pair so both spellings match.
+    # All other FailureCategory values are already lowercase canonical
+    # and pass through .lower() unchanged.
+    "gate_fail": "gate_fail",
+    "gate_failed": "gate_fail",
 }
 
 
@@ -155,7 +162,7 @@ def _rows_from_events(
 
 # ── Source: agent_runs.outcome in {failed, fail, timed_out} ─────────────────
 
-_FAILED_OUTCOMES = ("failed", "fail", "timed_out")
+_FAILED_OUTCOMES = ("failed", "fail", "timed_out", "timeout")
 
 
 def _rows_from_agent_runs(

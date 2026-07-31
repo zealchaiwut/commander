@@ -38,6 +38,7 @@ import {
   closeAllStabDropdowns,
 } from "./shell/tabs.js";
 import { loadCommanderFeatures } from "./shell/features.js";
+import { parseUrl } from "./shell/url-parser.js";
 import {
   visibilityInterval,
   installVisibilityGuard,
@@ -97,6 +98,7 @@ injectProgressActivityCss();
 root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
+root.parseUrl = parseUrl;
 root.loadCommanderFeatures = loadCommanderFeatures;
 root.visibilityInterval = visibilityInterval;
 root.snavNavStatusFetch = snavNavStatusFetch;
@@ -104,6 +106,7 @@ root.snavNavStatusCacheClear = snavNavStatusCacheClear;
 globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+globalThis.parseUrl = parseUrl;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.visibilityInterval = visibilityInterval;
 globalThis.snavNavStatusFetch = snavNavStatusFetch;

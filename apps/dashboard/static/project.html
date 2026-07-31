@@ -11537,36 +11537,11 @@ function colorHex(color) {
 }
 
 // ── URL parsing ───────────────────────────────────────────────────────────────
-const PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
-
-function parseUrl() {
-  const m = window.location.pathname.match(PATH_RE);
-  // Deck/monitoring deep-link params (issue: deck jump keys). `view` selects the
-  // sub-view (board/running/history/summary) or activity/tickets; `filter`
-  // pre-filters the activity log (e.g. errors). Read here so a cold load of the
-  // URL lands on the right pane.
-  const _q = new URLSearchParams(window.location.search);
-  const view = (_q.get('view') || '').toLowerCase() || null;
-  const filter = (_q.get('filter') || '').toLowerCase() || null;
-  if (!m) return { slug: null, tab: 'sprint-mgmt', view, filter };
-  const slug = decodeURIComponent(m[1]);
-  const rawTab = m[2] || '';
-  const hash = window.location.hash;
-  const tab = (rawTab === 'tickets')          ? 'tickets'
-            // 'sprint' deep-link alias (issue #798): the tab was renamed to
-            // "Sprint" while the pane id stays pane-sprint-mgmt for compatibility.
-            : (rawTab === 'sprint')           ? 'sprint-mgmt'
-            : (rawTab === 'logs')             ? 'logs'
-            : (rawTab === 'bulk-create')      ? 'bulk-create'
-            : (rawTab === 'status')           ? 'status'
-            // 'metrics' / 'analytics' resolve to the Analytics tab (issue #1856)
-            : (rawTab === 'metrics')          ? 'metrics'
-            : (rawTab === 'analytics')        ? 'metrics'
-            : (rawTab === 'settings')         ? 'settings'
-            : (rawTab === 'global-settings')  ? 'global-settings'
-            : 'sprint-mgmt';
-  return { slug, tab, view, filter };
-}
+// parseUrl() is provided by the bundle (static/src/shell/url-parser.js, issue #2038).
+// It is available as window.parseUrl by the time DOMContentLoaded fires (which
+// is after bundle.js executes). The tabs 'failures' and 'brain' are now correctly
+// mapped; the dead branches for 'logs', 'status', 'metrics', 'analytics' are
+// removed — those paths are redirected server-side before project.html is served.
 
 // Deck deep-link state, consumed once on the initial route so manual nav after
 // it behaves normally (issue: deck jump keys).

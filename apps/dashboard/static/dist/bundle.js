@@ -1017,6 +1017,25 @@
     }
   }
 
+  // apps/dashboard/static/src/shell/url-parser.js
+  var _PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
+  function _parseUrlImpl(pathname, search = "") {
+    const m = pathname.match(_PATH_RE);
+    const _q = new URLSearchParams(search);
+    const view = (_q.get("view") || "").toLowerCase() || null;
+    const filter = (_q.get("filter") || "").toLowerCase() || null;
+    if (!m)
+      return { slug: null, tab: "sprint-mgmt", view, filter };
+    const slug = decodeURIComponent(m[1]);
+    const rawTab = m[2] || "";
+    const tab = rawTab === "tickets" ? "tickets" : rawTab === "sprint" ? "sprint-mgmt" : rawTab === "bulk-create" ? "bulk-create" : rawTab === "failures" ? "failures" : rawTab === "brain" ? "brain" : rawTab === "settings" ? "settings" : rawTab === "global-settings" ? "global-settings" : "sprint-mgmt";
+    return { slug, tab, view, filter };
+  }
+  function parseUrl2() {
+    const loc = window.location;
+    return _parseUrlImpl(loc.pathname, loc.search);
+  }
+
   // apps/dashboard/static/src/shell/visibility.js
   var _viHandles = /* @__PURE__ */ new Map();
   var _viIdSeq = 1e6;
@@ -9105,6 +9124,7 @@ Proceed anyway?`)) {
   root.switchTab = switchTab;
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
+  root.parseUrl = parseUrl2;
   root.loadCommanderFeatures = loadCommanderFeatures;
   root.visibilityInterval = visibilityInterval;
   root.snavNavStatusFetch = snavNavStatusFetch;
@@ -9112,6 +9132,7 @@ Proceed anyway?`)) {
   globalThis.switchTab = switchTab;
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
+  globalThis.parseUrl = parseUrl2;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.visibilityInterval = visibilityInterval;
   globalThis.snavNavStatusFetch = snavNavStatusFetch;

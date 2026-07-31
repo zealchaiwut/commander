@@ -354,14 +354,25 @@ class WorktreePool:
         successfully. Any failed step emits a warning and returns False so the
         caller can keep the broken/half-built path out of the free pool
         (issue #1435).
+
+        Self-heal (issue #2032): the remove is unconditional — NOT gated on
+        wt_path.exists() — because git keeps a registration entry in
+        .git/worktrees/<name> even after the directory is deleted externally.
+        Without clearing that entry first, `git worktree add` fails with
+        "already registered".  Errors from remove/prune are benign (the path
+        may not be registered at all) and are intentionally ignored.
         """
+        # Always attempt removal first — clears git's stale worktree
+        # registration even when the directory is already gone.
+        _run(
+            ["git", "worktree", "remove", "--force", str(wt_path)],
+            cwd=self.repo_root,
+        )
         if wt_path.exists():
-            _run(
-                ["git", "worktree", "remove", "--force", str(wt_path)],
-                cwd=self.repo_root,
-            )
-            if wt_path.exists():
-                shutil.rmtree(wt_path, ignore_errors=True)
+            shutil.rmtree(wt_path, ignore_errors=True)
+        # Belt-and-suspenders: prune drops any remaining stale metadata for
+        # directories that no longer exist (e.g. never-removed entry).
+        _run(["git", "worktree", "prune"], cwd=self.repo_root)
 
         ok, _, err = _run(
             ["git", "worktree", "add", str(wt_path), self.base_branch],

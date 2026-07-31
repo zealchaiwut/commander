@@ -218,14 +218,21 @@ def list_runs() -> list[dict]:
 
 
 def get_log_path_from_db(sprint: str, issue: int, agent: str) -> Optional[str]:
-    """Return the log_path stored in agent_runs for this sprint/issue/agent combo."""
+    """Return the log_path stored in agent_runs for this sprint/issue/agent combo.
+
+    ``agent`` is normalised to lowercase before the SQL match because
+    ``events.detail`` records role names as UPPERCASE (e.g. ``CODER``) while
+    ``agent_runs.agent`` is always lowercase.  Normalising at this lookup
+    boundary fixes all callers regardless of how the URL was constructed.
+    (issue #2039)
+    """
     with _db.get_conn() as conn:
         _db._create_agent_runs_table(conn)
         row = conn.execute(
             "SELECT log_path FROM agent_runs "
             "WHERE sprint_label = ? AND issue_number = ? AND agent = ? "
             "ORDER BY id DESC LIMIT 1",
-            (sprint, issue, agent),
+            (sprint, issue, agent.lower()),
         ).fetchone()
     if row is None:
         return None

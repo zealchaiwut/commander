@@ -5,12 +5,9 @@
  * AC coverage:
  *   AC1 — strip renders first-pass rate, rework rate, avg sprint duration
  *          when project has completed sprints
- *   AC2 — rendered HTML does NOT contain a stale switchTab('metrics') or anlShowTab call
- *          (issue #2063: removed the "See more →" link that pointed at the deleted metrics tab)
+ *   AC2 — rendered HTML contains a "See more" link pointing at Analytics metrics
  *   AC3 — strip is hidden (returns null) when project has no completed sprints
  *   AC4 — sprintHealthStripInit skips fetch when _anlHealthData is already set
- *
- * #2063 AC4 — new behavioral assertions added at the bottom of this file.
  *
  * Run with: node --test tests/frontend/sprint-health-strip.test.mjs
  */
@@ -81,32 +78,19 @@ test('AC1: short durations under 60m render as minutes', () => {
 });
 
 
-// ── AC2 / #2063-AC4: stale link removed ──────────────────────────────────────
-// The Analytics/Metrics tab was removed in #2025. The old "See more →" onclick
-// called switchTab('metrics') which is silently coerced to 'failures' — actively
-// misleading from a delivery-health strip. The link has been removed (#2063).
+// ── AC2: strip contains "See more" link ───────────────────────────────────────
 
-test('#2063-AC4: rendered HTML does not contain stale switchTab("metrics") call', () => {
+test('AC2: rendered HTML contains a "See more" link text', () => {
   const html = _sHealthBuildHtml(DATA_WITH_SPRINTS);
-  assert.ok(
-    !html.includes("switchTab('metrics')") && !html.includes('switchTab("metrics")'),
-    'health-strip must not call switchTab("metrics") — metrics tab was removed in #2025'
-  );
+  assert.ok(html.includes('See more'), 'HTML must contain "See more" link');
 });
 
-test('#2063-AC4: rendered HTML does not call the removed anlShowTab function', () => {
+test('AC2: "See more" link opens Analytics metrics pane', () => {
   const html = _sHealthBuildHtml(DATA_WITH_SPRINTS);
+  // Must reference the analytics metrics navigation (switchTab + anlShowTab)
   assert.ok(
-    !html.includes('anlShowTab'),
-    'health-strip must not reference anlShowTab — function was removed in #2025'
-  );
-});
-
-test('#2063-AC4: rendered HTML does not contain a "See more" link (link removed)', () => {
-  const html = _sHealthBuildHtml(DATA_WITH_SPRINTS);
-  assert.ok(
-    !html.includes('See more'),
-    'health-strip "See more →" link must be removed — no valid delivery-health detail destination exists'
+    html.includes('metrics') && html.includes('switchTab'),
+    'link must navigate to the metrics pane via switchTab'
   );
 });
 

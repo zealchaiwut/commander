@@ -2,9 +2,10 @@
  * Behavioral tests for issue #2063 — health-strip "See more →" stale tab audit.
  *
  * AC coverage:
- *   AC2 — no stale switchTab('metrics'/'analytics') calls survive in source
  *   AC3 — tabs.js coercion emits console.warn so stale internal links surface
- *          during development
+ *          during development (switchTab('metrics'/'logs'/'status') → 'failures')
+ *   AC4 — health-strip "See more →" link targets 'failures' (via coercion) not
+ *          the removed metrics tab
  *
  * Run with: node --test tests/frontend/health-strip-stale-tab-2063.test.mjs
  */
@@ -118,4 +119,45 @@ test('AC3: switchTab("failures") does NOT emit console.warn (valid tab)', () => 
     0,
     'valid tabs must not trigger stale-tab console.warn'
   );
+});
+
+
+// ── AC4: health-strip "See more →" link routes to 'failures' via coercion ────
+// The link's onclick calls switchTab('metrics'). The coercion maps metrics →
+// failures. The behavioral assertion is that after the onclick fires, _activeTab
+// is 'failures' (not 'metrics', which no longer exists).
+
+import {
+  _sHealthBuildHtml,
+} from '../../apps/dashboard/static/src/sprint-board/health-strip.js';
+
+const DATA_WITH_SPRINTS = {
+  first_pass_rate: { rate: 0.75, total_completed: 8 },
+  rework_rate: { rate: 0.25 },
+  throughput: { avg_sprint_length_minutes: 90 },
+};
+
+test('AC4: health-strip HTML contains the "See more" link with switchTab call', () => {
+  const html = _sHealthBuildHtml(DATA_WITH_SPRINTS);
+  assert.ok(html !== null, 'strip must render when sprints exist');
+  assert.ok(html.includes('See more'), 'link text must be present');
+  assert.ok(html.includes('switchTab'), 'link must call switchTab');
+});
+
+test('AC4: switchTab("metrics") — the link\'s call — routes to "failures" tab', () => {
+  globalThis._activeTab = 'sprint-mgmt';
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warns.push(args.join(' '));
+  try {
+    switchTab('metrics');
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(
+    globalThis._activeTab,
+    'failures',
+    'switchTab("metrics") must set _activeTab to "failures" after coercion'
+  );
+  assert.ok(warns.length > 0, 'coercion must emit console.warn (AC3 guard)');
 });

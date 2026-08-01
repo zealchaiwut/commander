@@ -1,4 +1,4 @@
-# Code State — sprint-1010.1
+# Code State — sprint-1011
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,43 +15,42 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1010.1)
+## Recent Deltas (sprint-1011)
 
-Files changed: **45**
+Files changed: **19**
 
-- `tests/` — 23 file(s)
-- `apps/` — 15 file(s)
-- `docs/` — 4 file(s)
-- `(root)/` — 2 file(s)
+- `apps/` — 9 file(s)
+- `tests/` — 8 file(s)
+- `scripts/` — 1 file(s)
 - `services/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 529 |
+| `apps/dashboard/static/project.html` | 530 |
 | `apps/dashboard/server.py` | 397 |
 | `services/sprint_manager/sprint_manager.py` | 281 |
-| `apps/dashboard/static/dist/bundle.js.map` | 204 |
-| `apps/dashboard/static/dist/bundle.js` | 194 |
+| `apps/dashboard/static/dist/bundle.js.map` | 206 |
+| `apps/dashboard/static/dist/bundle.js` | 196 |
 | `CHANGELOG.md` | 112 |
 | `apps/dashboard/static/app.js` | 106 |
-| `apps/dashboard/static/src/sprint-board/board-render.js` | 90 |
+| `apps/dashboard/static/src/sprint-board/board-render.js` | 91 |
 | `apps/dashboard/static/index.html` | 75 |
 | `apps/dashboard/db.py` | 70 |
 | `apps/dashboard/routers/__init__.py` | 51 |
 | `README.md` | 51 |
-| `apps/dashboard/static/src/sprint-board/history.js` | 47 |
+| `apps/dashboard/static/src/sprint-board/history.js` | 48 |
 | `SCHEMA.md` | 45 |
-| `apps/dashboard/startup.py` | 41 |
+| `apps/dashboard/startup.py` | 42 |
+| `apps/dashboard/static/src/sprint-board/index.js` | 40 |
 | `apps/dashboard/github_client.py` | 40 |
-| `apps/dashboard/static/src/sprint-board/index.js` | 39 |
 | `apps/dashboard/routers/sprint_history_service.py` | 38 |
 | `services/sprint_manager/estimate_issue.py` | 37 |
 | `apps/dashboard/static/home.html` | 33 |
 
 ## Generated
 
-Sprint: `sprint-1010.1`  
-Timestamp: `2026-08-01T16:57:01Z`  
+Sprint: `sprint-1011`  
+Timestamp: `2026-08-01T19:14:45Z`  
 _Generated deterministically — no LLM required._

@@ -207,7 +207,6 @@ class TestAC3ZeroSlotsFailFast:
         We verify the fast-path is needed by confirming the baseline
         WorktreePool.acquire() raises TimeoutError on 0 slots.
         """
-        from services.sprint_manager.worktree_pool import WorktreePool
         pool = _make_pool(tmp_path, slots=1)
         with patch("subprocess.run", side_effect=_fail):
             pool.create()

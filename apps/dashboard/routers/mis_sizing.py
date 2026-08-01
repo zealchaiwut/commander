@@ -39,7 +39,7 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 _PROJECTS_BASE = Path.home() / "dev"
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 

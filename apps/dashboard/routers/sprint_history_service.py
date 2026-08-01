@@ -691,7 +691,7 @@ def _record_from_files(label: str, sprints_dirs: Path | list[Path]) -> dict:
 # Real sprint labels only — sprint-N or sprint-N.M[.K…]. Keeps sibling
 # artifacts (sprint-1-estimate.json, sprint-1-preflight-<date>.json, plan
 # files, test debris) from surfacing as zombie History rows.
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")

@@ -146,7 +146,7 @@ fi
 - `UAT_BASE_URL` — the URL all HTTP tests must hit
 
 **Where tests live:** test files are written into `$MAIN_REPO/tests/` for Commander
-(or `$MAIN_REPO/dashboard/tests/` for generic template repos). They are
+(or `$MAIN_REPO/apps/dashboard/tests/` for generic template repos). They are
 version-controlled in the dev branch. They simply *point at* `$UAT_BASE_URL`
 instead of `localhost:8000`.
 
@@ -269,7 +269,7 @@ mode (`verify issue <N>`), the main agent runs this directly — after Step 0.
 ### Step 1 — Fetch the ticket
 
 ```bash
-REPO=$(cd "$MAIN_REPO/dashboard" && python3 -c "import github_client; print(github_client.repo())")
+REPO=$(cd "$MAIN_REPO/apps/dashboard" && python3 -c "import github_client; print(github_client.repo())")
 gh api "repos/${REPO}/issues/<N>"
 ```
 
@@ -292,7 +292,7 @@ Test file name: `tests/test_{slug}__{N}.py`
 
 ### Step 3 — Read the relevant code
 
-Use `codedb_search` and `codedb_tree` to find the code that implements (or will implement) the feature. Read the relevant source files in `$MAIN_REPO/dashboard/` to understand:
+Use `codedb_search` and `codedb_tree` to find the code that implements (or will implement) the feature. Read the relevant source files in `$MAIN_REPO/apps/dashboard/` to understand:
 - Which endpoints are involved
 - What data shapes are used
 - What success/failure responses look like
@@ -300,7 +300,7 @@ Use `codedb_search` and `codedb_tree` to find the code that implements (or will 
 ### Step 4 — Write the test file
 
 Create `$MAIN_REPO/tests/test_{slug}__{N}.py` (Commander) or
-`$MAIN_REPO/dashboard/tests/test_{slug}__{N}.py` (generic template).
+`$MAIN_REPO/apps/dashboard/tests/test_{slug}__{N}.py` (generic template).
 
 **Naming convention:** one test function per AC criterion.
 Function name: `test_{slug}__{criterion_slug}` (double underscore)
@@ -357,7 +357,7 @@ Rules:
 **MANDATORY: You must run `pytest` and confirm a green exit code (0) before calling `finish_feature.py`. Do not skip this step or assume tests pass. If pytest is not executed and confirmed green, you must not merge the branch under any circumstances.**
 
 ```bash
-cd "$MAIN_REPO/dashboard" && source venv/bin/activate && \
+cd "$MAIN_REPO/apps/dashboard" && source venv/bin/activate && \
   UAT_BASE_URL="$UAT_BASE_URL" UAT_PORT="$UAT_PORT" \
   pytest tests/test_{slug}__{N}.py -v --tb=short 2>&1
 PYTEST_EXIT_CODE=$?
@@ -549,7 +549,7 @@ Rules for the report format (the dashboard parses these):
 ### Step 9 — Post the report
 
 ```bash
-python3 "$MAIN_REPO/dashboard/scripts/post_test_report.py" \
+python3 "$MAIN_REPO/scripts/post_test_report.py" \
   --issue <N> \
   --report-file /tmp/test_report_{N}.md
 ```

@@ -19,7 +19,11 @@ _DOCS_SUBDIR = "docs"
 
 
 def resolve_clone_root(slug: str) -> Path:
-    """Resolve a project slug to the primary clone root on disk.
+    """Resolve a project slug or ``owner/repo`` to the primary clone root on disk.
+
+    Accepts both ``owner/repo`` (canonical, per project_resolver contract) and
+    bare slug (backwards compat).  Normalises centrally before lookup so callers
+    never need to strip the owner prefix themselves.
 
     Raises HTTPException(404) if the slug does not match any tracked project.
     Supports nested layout (~/dev/<slug>/main/), the prd/uat sub-clone layout
@@ -28,6 +32,8 @@ def resolve_clone_root(slug: str) -> Path:
     a bare container directory (e.g. PRD's ~/dev/commander holding prd/, uat/,
     coder/) would otherwise serve an orphaned stale docs/ tree.
     """
+    # Normalise owner/repo → bare slug (issue #2064 — accept canonical format).
+    slug = slug.strip().split("/")[-1] if "/" in slug else slug.strip()
     import projects as _projects  # noqa: PLC0415 — lazy to avoid circular imports
     projs = _projects.load_projects()
     proj = next(

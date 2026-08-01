@@ -41,7 +41,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db  # noqa: E402
 import projects as projects_module  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 router = APIRouter(tags=["projects"])
 
@@ -50,14 +50,6 @@ def _server():
     """Deferred import of the monolith — safe at request time, avoids circular import."""
     import server  # noqa: PLC0415
     return server
-
-
-# ── helpers mirrored locally (avoids circular import) ────────────────────────
-
-def _project_root_path(repo: str) -> Path:
-    """Return the project root directory for a given repo (owner/repo)."""
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root: Path) -> Path:

@@ -38,17 +38,13 @@ except ImportError:
     _MIS_SIZING_AVAILABLE = False
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-_PROJECTS_BASE = Path.home() / "dev"
 from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 
 # ── Local helpers (mirrors server.py equivalents) ─────────────────────────────
-
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root: Path) -> Path:

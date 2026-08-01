@@ -44,6 +44,8 @@ def _uat_server_reachable() -> bool:
 _LIVE_SERVER_TEST_MODULES = frozenset({
     "test_projbyslug_population__1978",
     "test_bulk_move_new_sprint_clear_selection__1760",
+    "test_create_ticket_json__2070",
+    "test_dev_report_api__1960",
 })
 
 # Unconditional pytest.skip() meta-tests — dead noise that never asserts anything.

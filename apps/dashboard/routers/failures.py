@@ -17,16 +17,17 @@ Query params:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Query
 
 from .failures_service import get_failures
+from .hermes_models import FailureRow
 
 router = APIRouter(prefix="/api", tags=["failures"])
 
 
-@router.get("/failures")
+@router.get("/failures", response_model=list[FailureRow])
 def list_failures(
     project: Optional[str] = Query(default=None, description="Filter by project (owner/repo or slug)"),
     since: Optional[str] = Query(
@@ -34,7 +35,7 @@ def list_failures(
         description="Earliest timestamp — ISO-8601 string or lookback window (e.g. '24h', '7d', '2w')",
     ),
     category: Optional[str] = Query(default=None, description="Filter by normalized failure category"),
-) -> Any:
+) -> list[FailureRow]:
     """Return all recent failures unified across events, agent_runs, and agents.
 
     Normalizes outcome/category vocabulary (e.g. 'fail' → 'failed') and

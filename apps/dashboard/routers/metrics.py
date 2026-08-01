@@ -23,19 +23,13 @@ from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
-_PROJECTS_BASE = Path.home() / "dev"
-
 router = APIRouter()
 
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 def _server():
     import server
     return server
-
-
-def _project_root_path(repo):
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root):

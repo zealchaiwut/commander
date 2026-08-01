@@ -2265,13 +2265,14 @@ _PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
 
 def _project_root_path(repo: str) -> Path:
-    """Return the project root directory for a given repo (owner/repo).
+    """Return the project root directory for a given repo (``owner/repo`` or slug).
 
-    Supports both nested layout (~/dev/<slug>/) and flat layout
-    (~/dev/<slug>/ as the main clone). Uses ~/dev as base.
+    Delegates to project_resolver.resolve_project_path so the canonical
+    ``owner/repo`` contract is enforced centrally (issue #2064).  Raises
+    HTTPException(404) for unknown projects; never falls back to a default.
     """
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
+    from project_resolver import resolve_project_path as _rpp  # noqa: PLC0415
+    return _rpp(repo)
 
 
 def _coder_clone_path(project_root: Path) -> Path:

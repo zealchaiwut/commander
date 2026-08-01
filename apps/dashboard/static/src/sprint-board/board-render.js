@@ -493,6 +493,38 @@ export function _smgmtShouldCollapseToLineage(
   return _smgmtCompareSprintLabels(label, latest) < 0;
 }
 
+/**
+ * Pure helper for the "Clean up empty sprints" bulk action (issue #457).
+ *
+ * Computes the leading consecutive run of plain sprint-N labels with 0 tickets.
+ * Sub-sprint labels (sprint-N.M) are intentionally excluded — those zombie
+ * cards are handled per-card via the Delete button (approach b, issue #2061).
+ * Returns [] when no active sprint exists so nothing is eligible for cleanup
+ * (issue #658).
+ *
+ * @param {string[]} orderedLabels - sprint labels in display order
+ * @param {Array<{sprint_label: string|null}>} issues - open issue list
+ * @returns {string[]} leading empty plain-sprint labels eligible for deletion
+ */
+export function _smgmtComputeLeadingEmpty(orderedLabels, issues) {
+  const labeled = new Set((issues || []).map((i) => i.sprint_label).filter(Boolean));
+  // Mark a base number active when any sprint-N or sprint-N.M has tickets.
+  const activeBases = new Set();
+  for (const lbl of labeled) {
+    const m = /^sprint-(\d+)/.exec(lbl);
+    if (m) activeBases.add(parseInt(m[1], 10));
+  }
+  const leadingEmpty = [];
+  let foundActive = false;
+  for (const lbl of orderedLabels) {
+    if (!/^sprint-\d+$/.test(lbl)) continue; // sub-sprint zombies handled per-card (approach b, #2061)
+    const base = parseInt(lbl.replace('sprint-', ''), 10);
+    if (activeBases.has(base)) { foundActive = true; break; }
+    leadingEmpty.push(lbl);
+  }
+  return foundActive ? leadingEmpty : [];
+}
+
 export function _smgmtRender(data) {
   const listEl = document.getElementById("smgmt-sprint-list");
   if (!listEl) return;

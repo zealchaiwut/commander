@@ -762,7 +762,11 @@ routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
 
 ---
 
-## Milestones, Roadmap & Advisor
+## Milestones
+
+> The Roadmap and Advisor features were removed in Sprint 1010.1 (#2075) — those
+> endpoints (`/api/roadmap/*`, `/api/projects/{project}/advisor/*`,
+> `/api/advisor/tick`) no longer exist.
 
 | Method | Path | Description |
 |---|---|---|
@@ -773,19 +777,6 @@ routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
 | `DELETE` | `/api/projects/{slug}/milestones/{number}` | Delete a milestone |
 | `GET` | `/api/projects/{slug}/issues` | Issues from the local mirror, with milestone field |
 | `GET` | `/api/home/milestone` | Active-milestone progress indicator payload (home cards / project header) |
-| `GET` | `/api/roadmap` | Roadmap tab: milestone cards with ticket progress |
-| `POST` | `/api/roadmap/milestones` | Create a milestone from the Roadmap tab |
-| `PATCH` | `/api/roadmap/milestones/{number}` | Edit a milestone from the Roadmap tab |
-| `POST` | `/api/roadmap/milestones/{number}/close` | Close a milestone |
-| `POST` | `/api/roadmap/milestones/{number}/reopen` | Reopen a milestone |
-| `PUT` | `/api/roadmap/settings` | Persist Roadmap view settings (active milestone, card order) |
-| `GET` | `/api/projects/{project}/advisor/suggestions` | Current draft advisor suggestions |
-| `POST` | `/api/projects/{project}/advisor/run` | Trigger an on-demand advisor run |
-| `GET` | `/api/projects/{project}/advisor/look-ahead` | Advisor look-ahead preview |
-| `POST` | `/api/advisor/tick` | Daily advisor schedule tick (`202`) |
-| `POST` | `/api/projects/{project}/advisor/suggestions/{suggestion_id}/dismiss` | Dismiss a suggestion card |
-| `POST` | `/api/projects/{project}/advisor/suggestions/{suggestion_id}/accept` | Accept a suggestion card |
-| `GET` | `/api/projects/{project}/advisor/dismissed` | List dismissed suggestions |
 
 ---
 

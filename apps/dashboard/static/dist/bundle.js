@@ -6843,6 +6843,33 @@ Resolve manually and re-run Bulk complete.`,
       _blUpdateActions();
     }
   }
+  var _BACKLOG_CHIP_LIMIT = 3;
+  var _BACKLOG_CHIP_KEEP_RE = /^(uat|sit|in-progress|needs-rework|blocked|sprint-.+)$/i;
+  function _smgmtBacklogLabelChipsHtml(labels) {
+    if (!labels || !labels.length)
+      return "";
+    const kept = labels.map((l) => typeof l === "string" ? l : l.name || "").filter((n) => _BACKLOG_CHIP_KEEP_RE.test(n));
+    if (!kept.length)
+      return "";
+    const visible = kept.slice(0, _BACKLOG_CHIP_LIMIT);
+    const overflow = kept.length - visible.length;
+    const chips = visible.map((name) => {
+      const lc = name.toLowerCase();
+      let mod = "";
+      if (lc === "uat")
+        mod = "smgmt-bl-label-chip--uat";
+      else if (lc === "sit" || lc === "in-progress")
+        mod = "smgmt-bl-label-chip--active";
+      else if (lc === "needs-rework" || lc === "blocked")
+        mod = "smgmt-bl-label-chip--alert";
+      const cls = mod ? `smgmt-bl-label-chip ${mod}` : "smgmt-bl-label-chip";
+      return `<span class="${cls}">${escHtml(name)}</span>`;
+    });
+    if (overflow > 0) {
+      chips.push(`<span class="smgmt-bl-label-chip smgmt-bl-label-chip--overflow">+${overflow}</span>`);
+    }
+    return `<span class="smgmt-bl-label-chips">${chips.join("")}</span>`;
+  }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -6851,6 +6878,7 @@ Resolve manually and re-run Bulk complete.`,
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const sizePillHtml = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
     const estHtml = _smgmtTicketEstHtml(ticket);
+    const labelChipsHtml = _smgmtBacklogLabelChipsHtml(ticket.labels);
     const draftLabel = _smgmtOrderedLabels ? _smgmtOrderedLabels.find((l) => {
       if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
         return false;
@@ -6876,7 +6904,7 @@ Resolve manually and re-run Bulk complete.`,
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${estHtml}
+      ${schedDepHtml}${sizePillHtml}${estHtml}${labelChipsHtml}
       ${addToSprintBtn}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"

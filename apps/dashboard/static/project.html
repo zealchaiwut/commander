@@ -5442,6 +5442,20 @@
     .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
     .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
     .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Backlog row label chips (issue #2060) */
+    .smgmt-bl-label-chips { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+    .smgmt-bl-label-chip {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+      white-space: nowrap;
+    }
+    .smgmt-bl-label-chip--uat    { background: var(--green-bg); color: var(--green); }
+    .smgmt-bl-label-chip--active { background: var(--blue-bg);  color: var(--blue); }
+    .smgmt-bl-label-chip--alert  { background: var(--red-bg);   color: var(--red); }
+    .smgmt-bl-label-chip--overflow { background: transparent; color: var(--text-muted); }
     /* Definition of Ready per-ticket badge (issue #1487) */
     .smgmt-dor-badge {
       display: inline-flex; align-items: center; gap: 3px;

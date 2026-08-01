@@ -26,7 +26,7 @@ import {
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
-  _histBulkSignOff,
+  _histBulkSignOff, _histIsLoading,
 } from './history.js';
 
 import {
@@ -238,6 +238,7 @@ globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
 globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;
+globalThis._histIsLoading = _histIsLoading;
 
 // Delivery-health stat strip (issue #1849)
 globalThis._sHealthBuildHtml = _sHealthBuildHtml;

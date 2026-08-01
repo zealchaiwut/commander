@@ -1854,7 +1854,22 @@
     .hist-ledger-empty {
       padding: 28px 18px; text-align: center;
       color: var(--text-sub); font-size: 12.5px; font-style: italic;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
     }
+    .hist-ledger-empty .ti { font-size: 20px; }
+    .hist-ledger-error {
+      padding: 28px 18px; text-align: center;
+      color: var(--text-sub); font-size: 12.5px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .hist-ledger-error .ti-alert-circle { color: var(--amber, #f59e0b); font-size: 20px; }
+    .hist-ledger-retry {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 5px 12px;
+      color: var(--text); font-size: 12px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .hist-ledger-retry:hover { border-color: var(--blue); color: var(--blue); }
     .hist-ledger-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 14px; }
     .hist-skeleton-card {
       height: 52px; border-radius: 10px;
@@ -13531,8 +13546,13 @@ function _smgmtUpdateSubnav() {
     // failure to investigate). Completed/deleted/running carry no action, so a
     // history of all-completed sprints shows no badge at all.
     const n = _histNeedsActionCount();
-    badge.textContent = String(n);
-    badge.hidden = n === 0;
+    // AC2 (#2062): while the ledger fetch is pending, avoid zeroing the badge
+    // from stale/cleared data — keep the previous count visible.
+    const loading = typeof globalThis._histIsLoading === 'function' && globalThis._histIsLoading();
+    if (!loading || n > 0) {
+      badge.textContent = String(n);
+      badge.hidden = n === 0;
+    }
   }
 }
 

@@ -171,6 +171,7 @@ class CreateTicketBody(BaseModel):
     project: str = ""
     sprint_label: str = ""
     extra_labels: list[str] = []
+    milestone: str = ""
 
 
 class BulkSkipBody(BaseModel):
@@ -327,18 +328,50 @@ async def create_ticket_draft(
 
 @router.post("/api/tickets/create", status_code=201, response_model=TicketCreateResponse)
 async def create_ticket_from_draft(
+    request: Request,
     background_tasks: BackgroundTasks,
-    draft_id: str = Form(default=""),
-    title: str = Form(default=""),
-    body: str = Form(default=""),
-    project: str = Form(default=""),
-    sprint_label: str = Form(default=""),
-    extra_labels: list[str] = Form(default=[]),
-    milestone: str = Form(default=""),
-    files: list[UploadFile] = File(default=[]),
 ):
+    """Create a ticket from a draft.
+
+    Accepts either application/json or multipart/form-data (for file uploads).
+    JSON path uses CreateTicketBody; multipart path supports UploadFile attachments.
+    Both paths share the same business logic and response_model.
+    """
+    content_type = request.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        # JSON path — typed Pydantic model, no file uploads
+        try:
+            raw = await request.json()
+        except Exception:
+            raise HTTPException(400, detail="Invalid JSON body")
+        try:
+            payload = CreateTicketBody.model_validate(raw)
+        except Exception as exc:
+            raise HTTPException(422, detail=str(exc))
+        draft_id = payload.draft_id
+        title = payload.title.strip()
+        body = payload.body
+        project = payload.project
+        sprint_label = payload.sprint_label
+        extra_labels = payload.extra_labels
+        milestone = payload.milestone
+        files: list[UploadFile] = []
+    else:
+        # Form path — multipart/form-data or application/x-www-form-urlencoded
+        form = await request.form()
+        draft_id = (form.get("draft_id") or "")
+        title = (form.get("title") or "").strip()
+        body = (form.get("body") or "")
+        project = (form.get("project") or "")
+        sprint_label = (form.get("sprint_label") or "")
+        extra_labels = [
+            v for v in form.getlist("extra_labels") if isinstance(v, str)
+        ]
+        milestone = (form.get("milestone") or "")
+        files = [v for v in form.getlist("files") if hasattr(v, "filename")]
+
     srv = _server()
-    title = title.strip()
     if not title:
         raise HTTPException(400, detail="Title is required")
 

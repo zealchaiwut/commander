@@ -177,6 +177,67 @@ def _isolate_settings_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_repo, "_fallback_store_path", lambda: store)
 
 
+# ── GitHub production-write guard (AC3, issue #2074) ─────────────────────────
+
+_PROD_REPO = "zealchaiwut/commander"
+# Include trailing slash so "commander-issue-test" is never matched.
+_PROD_REPO_URL_FRAGMENT = f"api.github.com/repos/{_PROD_REPO}/"
+
+
+def _make_gh_write_guard(original_fn, method_name: str):
+    """Return a wrapper that aborts if a GitHub write targets the production repo.
+
+    Mirrors the git_no_mutation fixture pattern: any test that makes an httpx
+    POST/PATCH/DELETE to api.github.com/repos/zealchaiwut/commander receives an
+    AssertionError immediately with enough context to locate the offending call.
+
+    Test-level mock.patch() calls to httpx override this wrapper for their duration
+    (as expected — mocked tests don't reach real GitHub at all).
+    """
+    def _guarded(*args, **kwargs):
+        url = str(args[0]) if args else str(kwargs.get("url", ""))
+        if _PROD_REPO_URL_FRAGMENT in url:
+            raise AssertionError(
+                f"\nSAFETY ABORT: test attempted GitHub {method_name} to the production repo!\n"
+                f"  URL:  {url}\n"
+                f"  Repo: {_PROD_REPO}\n"
+                "Tests must never write to zealchaiwut/commander.  Use "
+                "GITHUB_ISSUE_TEST_REPO for any GitHub write operations in tests "
+                "(see issue #2074)."
+            )
+        return original_fn(*args, **kwargs)
+    return _guarded
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _gh_no_prod_write_guard():
+    """Block httpx write calls to the production GitHub repo for the entire session.
+
+    Wraps httpx.post / httpx.patch / httpx.delete at session startup.  Any call
+    whose URL contains api.github.com/repos/zealchaiwut/commander raises
+    AssertionError with a clear message, so regressions are impossible to miss.
+
+    Individual test mocks (patch.object(github_milestones.httpx, "post", …)) are
+    applied *on top of* this wrapper and override it for the test's lifetime —
+    properly mocked tests are not affected.
+    """
+    import httpx as _httpx
+    import unittest.mock as _mock
+
+    _p1 = _mock.patch.object(_httpx, "post",   _make_gh_write_guard(_httpx.post,   "POST"))
+    _p2 = _mock.patch.object(_httpx, "patch",  _make_gh_write_guard(_httpx.patch,  "PATCH"))
+    _p3 = _mock.patch.object(_httpx, "delete", _make_gh_write_guard(_httpx.delete, "DELETE"))
+    _p1.start()
+    _p2.start()
+    _p3.start()
+    try:
+        yield
+    finally:
+        _p3.stop()
+        _p2.stop()
+        _p1.stop()
+
+
 # ── Session-scoped in-repo DB guard (AC6, issue #2047) ────────────────────────
 
 @pytest.fixture(scope="session", autouse=True)

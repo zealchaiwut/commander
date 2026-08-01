@@ -17,7 +17,6 @@ through a deferred import at request time (the same pattern as
 """
 from __future__ import annotations
 
-import re
 import sys as _sys
 import uuid
 from datetime import datetime, timezone
@@ -30,7 +29,7 @@ _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 

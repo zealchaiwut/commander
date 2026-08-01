@@ -61,7 +61,7 @@ def _sub_index(label: str) -> tuple[int, float]:
 
 def _labels_of(raw: str | None) -> list[str]:
     try:
-        return [l.get("name") for l in json.loads(raw or "[]") if isinstance(l, dict) and l.get("name")]
+        return [lbl.get("name") for lbl in json.loads(raw or "[]") if isinstance(lbl, dict) and lbl.get("name")]
     except (json.JSONDecodeError, TypeError):
         return []
 

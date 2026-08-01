@@ -6,7 +6,6 @@ data for the running-sprint pane. All segment times come from DB agent_runs
 """
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
-import re
 import sys
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -17,7 +16,7 @@ from . import timeline_service  # noqa: E402
 
 router = APIRouter(tags=["sprints"])
 
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -27,7 +26,7 @@ from . import sprint_finish as _fs
 
 router = APIRouter(tags=["finish-progress"])
 
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 

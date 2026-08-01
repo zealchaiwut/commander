@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import logging
-import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -20,7 +19,7 @@ import github_client  # noqa: E402
 import projects as projects_module  # noqa: E402
 
 logger = logging.getLogger(__name__)
-from sprint_label_re import SPRINT_LABEL_RE
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 

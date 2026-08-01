@@ -102,7 +102,7 @@ Scripts for onboarding new projects and provisioning machines and services.
 Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 
 - `doctor.py` — validate host readiness for a Commander sprint; `[--json]`
-- `resync_issues_mirror.py` [DB] — force full GitHub → SQLite issues-mirror resync; (reads DB_PATH env, restarts required after)
+- `resync_issues_mirror.py` [DB] — force full GitHub → SQLite issues-mirror resync; `[--yes|--force] [--repo OWNER/REPO]`; without --yes prints a dry-run summary and exits 1
 - `backfill_agent_runs_project.py` [DB] — attribute empty agent_runs.project rows; `(--dry-run|--apply) [--db PATH]`
 - `backfill_sprint_project.py` [DB] — attribute empty sprints.project rows; `(--dry-run|--apply) [--db PATH]`
 - `audit_sprint_collisions.py` — read-only audit for sprint label collisions across projects; `[--db PATH] [--runtime-dir PATH]`

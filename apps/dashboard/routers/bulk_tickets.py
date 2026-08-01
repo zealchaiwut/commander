@@ -33,6 +33,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+from .hermes_models import TicketDraftResponse, TicketCreateResponse
 from starlette.responses import StreamingResponse
 
 from .board_cache import invalidate_board  # noqa: E402
@@ -222,7 +223,7 @@ class SizeRemedyImagesBody(BaseModel):
 
 # ── POST /api/tickets/draft ───────────────────────────────────────────────────
 
-@router.post("/api/tickets/draft")
+@router.post("/api/tickets/draft", response_model=TicketDraftResponse)
 async def create_ticket_draft(
     description: str = Form(default=""),
     project: str = Form(default=""),
@@ -324,7 +325,7 @@ async def create_ticket_draft(
 
 # ── POST /api/tickets/create ──────────────────────────────────────────────────
 
-@router.post("/api/tickets/create", status_code=201)
+@router.post("/api/tickets/create", status_code=201, response_model=TicketCreateResponse)
 async def create_ticket_from_draft(
     background_tasks: BackgroundTasks,
     draft_id: str = Form(default=""),

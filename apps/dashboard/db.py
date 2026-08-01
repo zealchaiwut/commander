@@ -118,12 +118,37 @@ def _startup_integrity_check() -> None:
     )
 
 
+def utc_now() -> str:
+    """Return the current UTC instant as YYYY-MM-DDTHH:MM:SSZ (no microseconds)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_utc_ts(s: str) -> datetime:
+    """Parse any of the three legacy timestamp shapes plus the new Z form.
+
+    Handles:
+      - "2026-01-01T12:00:00Z"          (new canonical)
+      - "2026-01-01T12:00:00"           (legacy, no offset)
+      - "2026-01-01T12:00:00.123456"    (legacy isoformat with microseconds)
+      - "2026-01-01T12:00:00+00:00"     (explicit UTC offset)
+    Returns a timezone-aware datetime in UTC.
+    """
+    normalized = s.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        raise ValueError(f"Cannot parse timestamp: {s!r}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _bkk_midnight_utc() -> str:
     """Return the ISO-8601 UTC timestamp of midnight Asia/Bangkok today."""
     now_bkk  = datetime.now(_BKK_OFFSET)
     midnight  = now_bkk.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_mid   = midnight.astimezone(timezone.utc)
-    return utc_mid.strftime("%Y-%m-%dT%H:%M:%S")
+    return utc_mid.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def check_db_integrity(db_path: Path) -> str:
@@ -1882,7 +1907,7 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return utc_now()
 
 
 def record_sprint_start(
@@ -2326,7 +2351,7 @@ def get_sync_updated_at(key: str) -> str | None:
 
 def set_sync_etag(key: str, etag: str) -> None:
     """Store the ETag for *key* (used as If-None-Match on the next poll)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         _create_sync_state_table(conn)
         conn.execute(
@@ -2365,7 +2390,7 @@ def is_bootstrap_complete() -> bool:
 
 def mark_bootstrap_complete() -> None:
     """Write the bootstrap schema-marker row on a successful full sync (issue #760)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         _create_sync_state_table(conn)
         conn.execute(
@@ -2391,7 +2416,7 @@ def record_ticket_status(
     don't need to have run init_db() first.
     """
     if ts is None:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        ts = utc_now()
     with get_conn() as conn:
         _create_ticket_status_table(conn)
         conn.execute(
@@ -2405,7 +2430,7 @@ def record_ticket_status(
 def upsert_agent(session_id: str, working_dir: str, status: str,
                  last_tool: str | None = None, name: str | None = None):
     name = name or Path(working_dir).name or working_dir
-    now = datetime.utcnow().isoformat()
+    now = utc_now()
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO agents (session_id, name, working_dir, status, last_tool, last_seen, created_at)
@@ -2423,7 +2448,7 @@ def timeout_idle_agents(threshold_seconds: int) -> int:
 
     Returns the count of agents updated.
     """
-    cutoff = (datetime.utcnow() - timedelta(seconds=threshold_seconds)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=threshold_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE agents SET status='timed_out' WHERE status='working' AND last_seen < ?",
@@ -2434,7 +2459,7 @@ def timeout_idle_agents(threshold_seconds: int) -> int:
 
 
 def add_event(session_id: str, event_type: str, data: dict):
-    now = datetime.utcnow().isoformat()
+    now = utc_now()
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO session_events (session_id, event_type, data, created_at) VALUES (?, ?, ?, ?)",
@@ -2453,7 +2478,7 @@ def record_event(
     action_id: str | None = None,
 ) -> None:
     """Insert one structured log event into the events table."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO events
@@ -2525,7 +2550,7 @@ def get_project_events(
 
 
 def get_agents() -> list[dict]:
-    cutoff = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     with get_conn() as conn:
         conn.execute(
             "UPDATE agents SET status = 'archived' WHERE status = 'done' AND last_seen < ?",
@@ -2568,7 +2593,7 @@ def record_token_usage(
     cache_write_tokens: int = 0,
     ccproxy_profile: str | None = None,
 ) -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO token_usage
@@ -2861,7 +2886,7 @@ def upsert_docs_warning(
     trigger_url: str | None = None,
 ) -> int:
     """Insert or re-open a docs freshness warning. Returns the row id."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         # Check if an active (non-cleared) warning already exists for this repo+doc.
         existing = conn.execute(
@@ -2887,7 +2912,7 @@ def upsert_docs_warning(
 
 def clear_docs_warning(repo: str, doc_path: str) -> int:
     """Clear all active warnings for repo+doc_path. Returns count cleared."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE docs_freshness_warnings SET is_cleared=1, cleared_at=? WHERE repo=? AND doc_path=? AND is_cleared=0",
@@ -2899,7 +2924,7 @@ def clear_docs_warning(repo: str, doc_path: str) -> int:
 
 def clear_docs_warning_by_id(warning_id: int) -> bool:
     """Clear a single warning by id. Returns True if found."""
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    now = utc_now()
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE docs_freshness_warnings SET is_cleared=1, cleared_at=? WHERE id=? AND is_cleared=0",

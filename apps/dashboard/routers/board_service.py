@@ -62,7 +62,28 @@ def _run_stats_service():
 _PROJECTS_BASE = Path.home() / "dev"
 
 _SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)?$")
+_SPRINT_PREFIX_RE = re.compile(r"^sprint-")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
+
+# Actionable error text used whenever a non-conforming sprint label is rejected.
+# Exported so sprint_labels.py and sprint_run.py can reference it without duplicating
+# the exact wording (the "invisible on the board" consequence is the key signal).
+SPRINT_LABEL_FORMAT_ERROR = (
+    r"sprint label must match `^sprint-\d+(\.\d+)?$`"
+    " — free-text labels are not visible on the board"
+)
+
+
+def find_nonconforming_sprint_labels(sprint_label_strings: list[str]) -> list[str]:
+    """Return labels starting with 'sprint-' that fail the canonical regex.
+
+    Used at startup to surface pre-existing sprint labels that are invisible on
+    the board (e.g. sprint-viz9001).  Pure function — safe to call in tests.
+    """
+    return [
+        lbl for lbl in sprint_label_strings
+        if _SPRINT_PREFIX_RE.match(lbl) and not _SPRINT_LABEL_RE.match(lbl)
+    ]
 
 # States that indicate a sprint has had at least one run attempt.
 _RUN_INDICATOR_STATES = frozenset({

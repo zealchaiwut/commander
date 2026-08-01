@@ -25,6 +25,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db  # noqa: E402
 import github_client  # noqa: E402
 from .board_cache import invalidate_board  # noqa: E402
+from .board_service import SPRINT_LABEL_FORMAT_ERROR  # noqa: E402
 
 router = APIRouter()
 
@@ -107,7 +108,7 @@ async def batch_sprint_labels(body: BatchLabelsBody):
         elif _SPRINT_LABEL_RE.match(raw):
             label_to_assign = raw
         else:
-            errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+            errors.append(f"#{change.issue_num}: {raw!r} — {SPRINT_LABEL_FORMAT_ERROR}")
             failed += 1
             continue
 

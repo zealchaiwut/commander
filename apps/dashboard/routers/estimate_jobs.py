@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -50,7 +49,9 @@ _ESTIMATE_CONCURRENCY = 1
 _estimate_semaphore = threading.Semaphore(_ESTIMATE_CONCURRENCY)
 
 _PROJECTS_BASE = Path.home() / "dev"
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 
 def _project_root_path(repo: str) -> Path:

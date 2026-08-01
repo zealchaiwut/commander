@@ -1,4 +1,4 @@
-# Code State — sprint-1008
+# Code State — sprint-1008.1
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,13 +15,16 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1008)
+## Recent Deltas (sprint-1008.1)
 
-Files changed: **19**
+Files changed: **43**
 
-- `apps/` — 11 file(s)
-- `tests/` — 7 file(s)
+- `apps/` — 28 file(s)
+- `tests/` — 10 file(s)
+- `scripts/` — 2 file(s)
 - `(root)/` — 1 file(s)
+- `docs/` — 1 file(s)
+- `services/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
@@ -29,10 +32,10 @@ Files changed: **19**
 |------|---------|
 | `apps/dashboard/static/project.html` | 528 |
 | `apps/dashboard/server.py` | 396 |
-| `services/sprint_manager/sprint_manager.py` | 280 |
-| `apps/dashboard/static/dist/bundle.js.map` | 199 |
-| `apps/dashboard/static/dist/bundle.js` | 189 |
-| `CHANGELOG.md` | 107 |
+| `services/sprint_manager/sprint_manager.py` | 281 |
+| `apps/dashboard/static/dist/bundle.js.map` | 201 |
+| `apps/dashboard/static/dist/bundle.js` | 191 |
+| `CHANGELOG.md` | 108 |
 | `apps/dashboard/static/app.js` | 106 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 90 |
 | `apps/dashboard/static/index.html` | 75 |
@@ -41,15 +44,15 @@ Files changed: **19**
 | `apps/dashboard/routers/__init__.py` | 50 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 47 |
 | `SCHEMA.md` | 41 |
+| `apps/dashboard/startup.py` | 40 |
 | `apps/dashboard/github_client.py` | 40 |
 | `apps/dashboard/static/src/sprint-board/index.js` | 39 |
-| `apps/dashboard/startup.py` | 39 |
+| `apps/dashboard/routers/sprint_history_service.py` | 38 |
 | `services/sprint_manager/estimate_issue.py` | 37 |
-| `apps/dashboard/routers/sprint_history_service.py` | 36 |
 | `apps/dashboard/static/home.html` | 32 |
 
 ## Generated
 
-Sprint: `sprint-1008`  
-Timestamp: `2026-08-01T06:46:11Z`  
+Sprint: `sprint-1008.1`  
+Timestamp: `2026-08-01T07:32:36Z`  
 _Generated deterministically — no LLM required._

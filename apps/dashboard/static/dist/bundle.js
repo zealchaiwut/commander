@@ -8352,10 +8352,16 @@ Proceed anyway?`)) {
   function _escHtml(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
+  function _normalizeTs(ts) {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(ts)) {
+      return ts + "Z";
+    }
+    return ts;
+  }
   function _fmtTs(ts) {
     if (!ts) return "";
     try {
-      const d = new Date(ts);
+      const d = new Date(_normalizeTs(ts));
       return d.toLocaleString(void 0, {
         month: "short",
         day: "numeric",
@@ -8403,7 +8409,7 @@ Proceed anyway?`)) {
     const cat = _currentCategory;
     fetchFailures(project, cat).then(function(rows) {
       root2.innerHTML = '<div class="fbox-table-wrap"><table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table></div>";
-    }).catch(function(err) {
+    }).catch(function(_err) {
       _setError(root2, "Failed to load failures");
     });
   }

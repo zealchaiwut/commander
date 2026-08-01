@@ -652,6 +652,32 @@
         min-width: 0;
       }
 
+      /* ── fetch-error dismissible banner (issue #2071) ── */
+      .dr-fetch-error {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin-bottom: 12px;
+        background: var(--red-bg);
+        border: 1px solid var(--red);
+        border-radius: 6px;
+        font-size: 13px;
+        color: var(--red);
+      }
+      .dr-fetch-error button {
+        margin-left: auto;
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: inherit;
+        font-size: 16px;
+        line-height: 1;
+        padding: 0 4px;
+        opacity: 0.7;
+      }
+      .dr-fetch-error button:hover { opacity: 1; }
+
       /* ── reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
         .pbstatus.run .d,
@@ -773,6 +799,7 @@
 
       let _curDate = null;
       let _projBySlug = {};
+      let _reportEverLoaded = false;
 
       // ── live auto-refresh (issue #2023) ──────────────────────────────────────
       var REPORT_REFRESH_INTERVAL_MS = 20000; // 20 s
@@ -923,23 +950,49 @@
           const q = date ? "?date=" + encodeURIComponent(date) : "";
           const resp = await fetch("/api/dev-report" + q);
           if (resp.status === 404) {
-            root.innerHTML = _renderEmpty();
-            return;
+            if (!_reportEverLoaded) root.innerHTML = _renderEmpty();
+            else _showFetchError(root, "No report for this date.");
+            return null;
           }
           if (!resp.ok) {
-            root.innerHTML =
+            if (!_reportEverLoaded) root.innerHTML =
               '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-            return;
+            else _showFetchError(root, "Could not load dev report.");
+            return null;
           }
           report = await resp.json();
         } catch (_) {
-          root.innerHTML =
+          if (!_reportEverLoaded) root.innerHTML =
             '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-          return;
+          else _showFetchError(root, "Could not load dev report.");
+          return null;
         }
 
+        _reportEverLoaded = true;
+        _dismissFetchError(root);
         _projBySlug = _buildProjBySlug(report.projects);
         root.innerHTML = _renderReport(report);
+        return report.generated_at || null;
+      }
+
+      // ── fetch-error banner helpers (issue #2071) ───────────────────────────────
+      function _showFetchError(root, msg) {
+        if (!root) return;
+        if (document.getElementById("dr-fetch-error")) return;
+        var banner = document.createElement("div");
+        banner.id = "dr-fetch-error";
+        banner.className = "dr-fetch-error";
+        banner.innerHTML =
+          '<span><i class="ti ti-wifi-off"></i> ' + esc(msg) + "</span>" +
+          '<button onclick="var e=document.getElementById(\'dr-fetch-error\');if(e)e.remove();" ' +
+          'aria-label="Dismiss">×</button>';
+        root.insertBefore(banner, root.firstChild);
+      }
+
+      function _dismissFetchError(root) {
+        if (!root) return;
+        var e = document.getElementById("dr-fetch-error");
+        if (e) e.remove();
       }
 
       // ── empty state ────────────────────────────────────────────────────────────
@@ -1300,15 +1353,17 @@
         return true;
       }
 
-      // ── live-refresh badge helper (issue #2023) ───────────────────────────────
-      function _updateLiveBadge() {
+      // ── live-refresh badge helper (issue #2023, updated #2071) ─────────────────
+      // Shows "generated · HH:MM" from the report's generated_at timestamp so the
+      // badge reflects data freshness, not poll time. Noop when no timestamp given.
+      function _updateLiveBadge(generatedAtIso) {
         var el = document.getElementById("dr-live-ts");
-        if (!el) return;
-        var t = new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        el.textContent = "live \xB7 " + t; // "live · HH:MM"
+        if (!el || !generatedAtIso) return;
+        try {
+          var dt = new Date(generatedAtIso);
+          var t = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          el.textContent = "generated \xB7 " + t;
+        } catch (_) {}
       }
 
       // Start visibility-aware auto-refresh after the initial report loads.
@@ -1318,8 +1373,8 @@
       init()
         .then(function () {
           visibilityInterval(async function _devReportTick() {
-            await loadReport(_curDate);
-            _updateLiveBadge();
+            var generatedAt = await loadReport(_curDate);
+            if (generatedAt) _updateLiveBadge(generatedAt);
           }, REPORT_REFRESH_INTERVAL_MS);
         })
         .catch(function () {});

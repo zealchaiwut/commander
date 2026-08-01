@@ -2473,6 +2473,40 @@ export function _smgmtRenderBacklog(tickets) {
   }
 }
 
+const _BACKLOG_CHIP_LIMIT = 3;
+const _BACKLOG_CHIP_KEEP_RE = /^(uat|sit|in-progress|needs-rework|blocked|sprint-.+)$/i;
+
+/**
+ * Render compact label chips for a backlog row (issue #2060).
+ * Only meaningful stage/sprint labels are shown; uncapped lists get a "+N" overflow chip.
+ */
+export function _smgmtBacklogLabelChipsHtml(labels) {
+  if (!labels || !labels.length) return "";
+  const kept = labels
+    .map((l) => (typeof l === "string" ? l : l.name || ""))
+    .filter((n) => _BACKLOG_CHIP_KEEP_RE.test(n));
+  if (!kept.length) return "";
+
+  const visible = kept.slice(0, _BACKLOG_CHIP_LIMIT);
+  const overflow = kept.length - visible.length;
+
+  const chips = visible.map((name) => {
+    const lc = name.toLowerCase();
+    let mod = "";
+    if (lc === "uat") mod = "smgmt-bl-label-chip--uat";
+    else if (lc === "sit" || lc === "in-progress") mod = "smgmt-bl-label-chip--active";
+    else if (lc === "needs-rework" || lc === "blocked") mod = "smgmt-bl-label-chip--alert";
+    const cls = mod ? `smgmt-bl-label-chip ${mod}` : "smgmt-bl-label-chip";
+    return `<span class="${cls}">${escHtml(name)}</span>`;
+  });
+
+  if (overflow > 0) {
+    chips.push(`<span class="smgmt-bl-label-chip smgmt-bl-label-chip--overflow">+${overflow}</span>`);
+  }
+
+  return `<span class="smgmt-bl-label-chips">${chips.join("")}</span>`;
+}
+
 export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
   const hasEstimate = _smgmtTicketHasEstimate(ticket);
   const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -2483,6 +2517,7 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : "";
   const estHtml = _smgmtTicketEstHtml(ticket);
+  const labelChipsHtml = _smgmtBacklogLabelChipsHtml(ticket.labels);
 
   // Determine if there's a current draft sprint to offer "Add to sprint" affordance
   const draftLabel = _smgmtOrderedLabels
@@ -2521,7 +2556,7 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${estHtml}
+      ${schedDepHtml}${sizePillHtml}${estHtml}${labelChipsHtml}
       ${addToSprintBtn}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"

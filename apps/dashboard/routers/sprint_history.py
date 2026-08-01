@@ -132,9 +132,11 @@ _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 def get_sprint_reconcile_preview(label: str, project: str):
     """Dry-run: return GitHub-vs-DB diff + post-sprint checks for one sprint. No writes."""
     from fastapi import HTTPException  # noqa: PLC0415
+    from project_resolver import resolve_project_path as _resolve_project  # noqa: PLC0415
 
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
+    _resolve_project(project)  # raises HTTPException(404) if project is unknown (issue #2069)
     return sprint_reconcile_service.reconcile_preview(label, project)
 
 
@@ -147,11 +149,13 @@ class ReconcileSprintBody(BaseModel):
 async def post_sprint_reconcile(label: str, body: ReconcileSprintBody):
     """Apply reconcile for one sprint: correct DB lifecycle + local state from GitHub truth."""
     from fastapi import HTTPException  # noqa: PLC0415
+    from project_resolver import resolve_project_path as _resolve_project  # noqa: PLC0415
 
     if not _SPRINT_LABEL_RE.match(label):
         raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
     if not body.confirmed:
         raise HTTPException(400, detail="Request must have confirmed=true")
+    _resolve_project(body.project)  # raises HTTPException(404) if project is unknown (issue #2069)
     result = sprint_reconcile_service.reconcile_apply(label, body.project)
     if result.get("updated"):
         try:

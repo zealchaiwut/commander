@@ -118,7 +118,8 @@ class TestAC1PoolBoundToTargetBranch:
             pool.create()
 
         assert any(b == "develop" for b in worktree_add_branches), (
-            f"git worktree add did not use 'develop' — got branches: {worktree_add_branches}"
+            f"git worktree add did not use 'develop' — "
+            f"got branches: {worktree_add_branches}"
         )
 
 

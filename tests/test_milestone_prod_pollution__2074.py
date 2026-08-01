@@ -41,13 +41,6 @@ class TestAC1_IdentifyTestsCreatingMilestones:
                 if file_path and "test_" in file_path:
                     test_files.add(file_path)
 
-        # Verify we found at least the known milestone test files
-        known_files = {
-            "tests/test_milestone_support__877.py",
-            "tests/test_milestone_progress_display__880.py",
-            "tests/test_milestone_selector_and_display__879.py",
-        }
-
         found_files = {f.replace("/Users/zeal-server/dev/commander/tester/", "") for f in test_files}
 
         # AC-1: These tests exist and create milestones
@@ -167,7 +160,7 @@ class TestAC4_CleanupTestFixtureMilestones:
                     import json
                     m = json.loads(line)
                     milestones.append(m)
-                except:
+                except Exception:
                     pass
 
         pytest.skip(

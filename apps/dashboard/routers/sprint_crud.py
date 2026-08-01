@@ -32,8 +32,6 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 import db          # noqa: E402
 import github_client  # noqa: E402
 from .board_cache import invalidate_board  # noqa: E402
-from services.sprint_manager.sprint_creation import SprintCreationError  # noqa: E402
-
 router = APIRouter(tags=["sprint_crud"])
 
 

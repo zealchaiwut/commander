@@ -148,9 +148,7 @@ def _resolve_with_seed_fallback(slug: str) -> str:
     raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
 
 
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 
 def _main_clone_path(project_root: Path) -> Path:

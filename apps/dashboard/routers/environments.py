@@ -42,12 +42,10 @@ from services.sprint_manager.deploy_config_schema import (  # noqa: E402
 import services.sprint_manager.settings_repo as _settings_repo  # noqa: E402
 
 
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
+
+
 # ── Local helpers ─────────────────────────────────────────────────────────────
-
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
-
 
 def _commander_dir(project_root: Path) -> Path:
     return project_root / ".commander"

@@ -22,7 +22,7 @@ import db  # noqa: E402
 import github_client  # noqa: E402
 from services.logging import log as _slog  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 router = APIRouter()
 
@@ -30,11 +30,6 @@ router = APIRouter()
 def _server():
     import server
     return server
-
-
-def _project_root_path(repo):
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root):

@@ -29,7 +29,7 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 
 import projects as _projects_module  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 # ── Optional prune_test_files module ─────────────────────────────────────────
 try:
@@ -58,12 +58,6 @@ def _resolve_project_slug(slug: str) -> str:
     if matched is None:
         raise HTTPException(status_code=404, detail=f"Project {slug!r} not found")
     return matched["repo"]
-
-
-def _project_root_path(repo: str) -> Path:
-    """Return the project root directory for a given repo (owner/repo)."""
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _maintenance_repo_root(project: str) -> Path:

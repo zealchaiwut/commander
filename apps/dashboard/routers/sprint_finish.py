@@ -268,13 +268,20 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
     ticket_rows = srv._bulk_complete_ticket_rows(sprint_issues)
 
     # Per-member status for the modal's chain view: which steps are already done
-    # (merged ✓ / completed ✓) vs pending ○. merged = branch is NOT a pending
-    # merge step; completed = lifecycle DB says so.
+    # (merged ✓ / completed ✓) vs pending ○.
+    # AC3 (issue #2086): "branch not in pending_heads" alone is not sufficient —
+    # a deleted-without-merging branch also has no unmerged commits and would
+    # be reported as merged=True.  Distinguish the cases explicitly.
     pending_heads = {s.get("head") for s in merge_steps}
     members = []
     for lbl in complete_order:
         is_base = lbl == base_label
-        parent = "develop" if is_base else srv._sprint_merge_parent_label(project_root, lbl)
+        if is_base:
+            parent = "develop"
+            parent_branch = "develop"
+        else:
+            parent = srv._sprint_merge_parent_label(project_root, lbl)
+            parent_branch = srv._sprint_branch_name(parent)
         branch = srv._sprint_branch_name(lbl)
         completed = False
         try:
@@ -282,11 +289,22 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
             completed = bool(row) and srv.db.canonical_lifecycle(row.get("state") or "") == "completed"
         except Exception:
             pass
+
+        if branch in pending_heads:
+            merged = False
+        elif srv._gh_branch_exists(repo, branch):
+            # Branch still exists and has no unmerged commits → properly merged
+            merged = True
+        else:
+            # Branch absent: check for a merged PR so we distinguish
+            # "properly merged and pruned" from "deleted without merging".
+            merged = srv._has_merged_pr(repo, branch, parent_branch)
+
         members.append({
             "label": lbl,
             "parent": parent,
             "is_base": is_base,
-            "merged": branch not in pending_heads,
+            "merged": merged,
             "completed": completed,
         })
 
@@ -413,6 +431,22 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
 
     # 1. Merge sprint branches for this label only
     merge_errors, merge_pr_number = srv._merge_sprint_branches_for_label(repo, label)
+
+    # AC1/AC2 (issue #2086): abort before closing issues or marking completed when
+    # the merge step failed or was a silent no-op.  Never close unfinished work.
+    if merge_errors:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "merge_failed",
+                "message": (
+                    "Sprint merge step failed — issues NOT closed and sprint NOT marked "
+                    "completed. Resolve the merge failure and retry."
+                ),
+                "merge_errors": merge_errors,
+            },
+        )
+
     errors.extend(merge_errors)
 
     # Legacy: merge a specific open PR if the client still sends one (child end-of-run PR)

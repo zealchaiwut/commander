@@ -1,15 +1,12 @@
 """Finish-sprint progress streaming router (issue #929).
 
-Endpoints:
-  POST /api/projects/{owner}/{repo}/sprints/{label}/finish-bg
-       Start a background finish-sprint task; returns { started, job_key }.
-       If a job is already running for the same sprint, returns it without
-       starting a duplicate.
+Canonical flat routes (issue #2065):
+  POST /api/sprints/{sprint_label}/finish-bg?project=
+  GET  /api/sprints/{sprint_label}/finish-stream?project=
 
+Deprecated nested aliases (kept for backward compatibility):
+  POST /api/projects/{owner}/{repo}/sprints/{label}/finish-bg
   GET  /api/projects/{owner}/{repo}/sprints/{label}/finish-stream
-       SSE stream of ProgressActivity snapshots for the active finish job.
-       Sends the current snapshot immediately on connect (reconnect support — AC6).
-       Closing the connection does NOT cancel the background task (AC5).
 """
 from __future__ import annotations
 
@@ -43,7 +40,11 @@ class FinishBgBody(BaseModel):
     confirm_rework: bool = False
 
 
-@router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-bg")
+@router.post(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/finish-bg",
+    deprecated=True,
+    description="Deprecated: use POST /api/sprints/{sprint_label}/finish-bg?project= instead (issue #2065).",
+)
 async def start_finish_sprint_bg(
     owner: str,
     repo_name: str,
@@ -107,7 +108,11 @@ async def start_finish_sprint_bg(
     return {"started": True, "job_key": key}
 
 
-@router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-stream")
+@router.get(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/finish-stream",
+    deprecated=True,
+    description="Deprecated: use GET /api/sprints/{sprint_label}/finish-stream?project= instead (issue #2065).",
+)
 async def finish_sprint_stream(owner: str, repo_name: str, label: str):
     """SSE stream of ProgressActivity snapshots for the finish-sprint job.
 
@@ -138,3 +143,35 @@ async def finish_sprint_stream(owner: str, repo_name: str, label: str):
             _svc.unsubscribe(key, q)
 
     return EventSourceResponse(event_generator())
+
+
+# ── Canonical flat routes (issue #2065) ──────────────────────────────────────
+# project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
+
+def _split_project(project: str) -> tuple[str, str]:
+    """Split 'owner/repo' into (owner, repo_name) for job_key compatibility."""
+    if "/" in project:
+        owner, repo_name = project.split("/", 1)
+        return owner, repo_name
+    return project, project
+
+
+@router.post("/api/sprints/{sprint_label}/finish-bg")
+async def start_finish_sprint_bg_flat(
+    sprint_label: str,
+    project: str,
+    body: FinishBgBody,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    """Canonical: POST /api/sprints/{sprint_label}/finish-bg?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return await start_finish_sprint_bg(owner, repo_name, sprint_label, body, background_tasks)
+
+
+@router.get("/api/sprints/{sprint_label}/finish-stream")
+async def finish_sprint_stream_flat(sprint_label: str, project: str):
+    """Canonical: GET /api/sprints/{sprint_label}/finish-stream?project=owner/repo"""
+    if not _SPRINT_LABEL_RE.match(sprint_label):
+        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+    owner, repo_name = _split_project(project)
+    return await finish_sprint_stream(owner, repo_name, sprint_label)

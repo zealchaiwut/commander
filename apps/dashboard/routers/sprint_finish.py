@@ -1,12 +1,20 @@
 """Sprint finish route handlers extracted from server.py (issues #1260, #1261).
 
-GET/read-only preview routes:
-  GET /api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview
-  GET /api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete-preview
+Canonical flat routes (issue #2065):
+  GET  /api/sprints/{sprint_label}/finish-preview?project=
+  GET  /api/sprints/{sprint_label}/bulk-complete-preview?project=
+  POST /api/sprints/{sprint_label}/finish?project=
+  POST /api/sprints/{sprint_label}/bulk-complete?project=
+  POST /api/sprints/{sprint_label}/complete-step?project=
+  GET  /api/sprints/{sprint_label}/conflict-status?project=
 
-POST/write mutation routes (extracted in issue #1261):
+Deprecated nested aliases (kept for backward compatibility):
+  GET  /api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview
+  GET  /api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete-preview
   POST /api/projects/{owner}/{repo_name}/sprints/{label}/finish
   POST /api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete
+  POST /api/projects/{owner}/{repo_name}/sprints/{label}/complete-step
+  GET  /api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status
 
 Shared server.py helpers are accessed via the deferred ``_server()`` import
 to keep the circular-import guard intact.
@@ -40,6 +48,17 @@ def _server():
     """Deferred import of the monolith — safe at request time, avoids circular import."""
     import server  # noqa: PLC0415
     return server
+
+
+def _split_project(project: str) -> tuple[str, str]:
+    """Split 'owner/repo' into (owner, repo_name) for the deprecated nested handlers.
+
+    Canonical routes expect project= in 'owner/repo' format (issue #2064 contract).
+    """
+    if "/" in project:
+        owner, repo_name = project.split("/", 1)
+        return owner, repo_name
+    return project, project
 
 
 def _finish_rework_tickets(srv, sprint_issues: list[dict]) -> list[dict]:
@@ -85,7 +104,11 @@ def _finish_sprint_issues(srv, repo: str, label: str) -> list[dict]:
     return sprint_issues
 
 
-@router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview")
+@router.get(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/finish-preview",
+    deprecated=True,
+    description="Deprecated: use GET /api/sprints/{sprint_label}/finish-preview?project= instead (issue #2065).",
+)
 def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     """Return preview data for the Merge Sprint dialog.
 
@@ -203,7 +226,11 @@ def get_sprint_finish_preview(owner: str, repo_name: str, label: str):
     }
 
 
-@router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete-preview")
+@router.get(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete-preview",
+    deprecated=True,
+    description="Deprecated: use GET /api/sprints/{sprint_label}/bulk-complete-preview?project= instead (issue #2065).",
+)
 def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
     """Preview tickets to close and member sprints to mark completed."""
     srv = _server()
@@ -321,7 +348,11 @@ class BulkCompleteSprintBody(BaseModel):
 
 # ── POST /finish ──────────────────────────────────────────────────────────────
 
-@router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/finish")
+@router.post(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/finish",
+    deprecated=True,
+    description="Deprecated: use POST /api/sprints/{sprint_label}/finish?project= instead (issue #2065).",
+)
 async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSprintBody):
     """Merge Sprint: merge sprint branch(es), close issues, keep labels.
 
@@ -473,7 +504,11 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
 
 # ── POST /bulk-complete ───────────────────────────────────────────────────────
 
-@router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete")
+@router.post(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/bulk-complete",
+    deprecated=True,
+    description="Deprecated: use POST /api/sprints/{sprint_label}/bulk-complete?project= instead (issue #2065).",
+)
 async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: BulkCompleteSprintBody):
     """Close UAT + summary issues across a lineage and mark every member completed.
 
@@ -667,7 +702,11 @@ def _cascade_complete_lineage(
     return cascaded, errors
 
 
-@router.post("/api/projects/{owner}/{repo_name}/sprints/{label}/complete-step")
+@router.post(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/complete-step",
+    deprecated=True,
+    description="Deprecated: use POST /api/sprints/{sprint_label}/complete-step?project= instead (issue #2065).",
+)
 def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteStepBody):
     """Complete ONE lineage step and finalise that sprint.
 
@@ -852,7 +891,11 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     }
 
 
-@router.get("/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status")
+@router.get(
+    "/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status",
+    deprecated=True,
+    description="Deprecated: use GET /api/sprints/{sprint_label}/conflict-status?project= instead (issue #2065).",
+)
 def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
     """Return the merge-conflict-blocked state for a sprint (issue #1898).
 
@@ -881,3 +924,50 @@ def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
             "at": blocked_info.get("at"),
         }
     return {"label": label, "blocked": False}
+
+
+# ── Canonical flat routes (issue #2065) ──────────────────────────────────────
+# These are the primary addresses. The nested /api/projects/…/sprints/… paths
+# above are kept as deprecated aliases so existing callers continue to work.
+# project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
+
+@router.get("/api/sprints/{sprint_label}/finish-preview")
+def get_sprint_finish_preview_flat(sprint_label: str, project: str):
+    """Canonical: GET /api/sprints/{sprint_label}/finish-preview?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return get_sprint_finish_preview(owner, repo_name, sprint_label)
+
+
+@router.get("/api/sprints/{sprint_label}/bulk-complete-preview")
+def get_sprint_bulk_complete_preview_flat(sprint_label: str, project: str):
+    """Canonical: GET /api/sprints/{sprint_label}/bulk-complete-preview?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return get_sprint_bulk_complete_preview(owner, repo_name, sprint_label)
+
+
+@router.post("/api/sprints/{sprint_label}/finish")
+async def finish_sprint_flat(sprint_label: str, project: str, body: FinishSprintBody):
+    """Canonical: POST /api/sprints/{sprint_label}/finish?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return await finish_sprint(owner, repo_name, sprint_label, body)
+
+
+@router.post("/api/sprints/{sprint_label}/bulk-complete")
+async def bulk_complete_sprint_flat(sprint_label: str, project: str, body: BulkCompleteSprintBody):
+    """Canonical: POST /api/sprints/{sprint_label}/bulk-complete?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return await bulk_complete_sprint(owner, repo_name, sprint_label, body)
+
+
+@router.post("/api/sprints/{sprint_label}/complete-step")
+def complete_sprint_step_flat(sprint_label: str, project: str, body: CompleteStepBody):
+    """Canonical: POST /api/sprints/{sprint_label}/complete-step?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return complete_sprint_step(owner, repo_name, sprint_label, body)
+
+
+@router.get("/api/sprints/{sprint_label}/conflict-status")
+def get_sprint_conflict_status_flat(sprint_label: str, project: str):
+    """Canonical: GET /api/sprints/{sprint_label}/conflict-status?project=owner/repo"""
+    owner, repo_name = _split_project(project)
+    return get_sprint_conflict_status(owner, repo_name, sprint_label)

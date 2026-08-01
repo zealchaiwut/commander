@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 
 def _safe_tail(path: Path, tail_lines: int) -> str:
@@ -48,8 +47,8 @@ def read_log(
     kind: str,
     project_root: Path,
     *,
-    label: Optional[str] = None,
-    issue_num: Optional[int] = None,
+    label: str | None = None,
+    issue_num: int | None = None,
     tail_lines: int = 200,
 ) -> dict:
     """Resolve the correct log file and return its tail.
@@ -105,7 +104,7 @@ def read_log(
 def _read_dispatch_log(
     *,
     project_root: Path,
-    label: Optional[str],
+    label: str | None,
     tail_lines: int,
     log_dir: Path,
 ) -> dict:
@@ -148,8 +147,8 @@ def _read_dispatch_log(
 def _read_issue_log(
     *,
     project_root: Path,
-    label: Optional[str],
-    issue_num: Optional[int],
+    label: str | None,
+    issue_num: int | None,
     tail_lines: int,
     default_log_dir: Path,
 ) -> dict:
@@ -161,7 +160,7 @@ def _read_issue_log(
     candidates_checked: list[str] = []
 
     # Attempt to read logs_dir from sprint.yaml
-    cfg_logs_dir: Optional[Path] = None
+    cfg_logs_dir: Path | None = None
     try:
         import yaml as _yaml  # type: ignore[import]
         yaml_path = project_root / ".commander" / "sprint.yaml"
@@ -174,7 +173,7 @@ def _read_issue_log(
     except Exception:
         pass
 
-    log_path: Optional[Path] = None
+    log_path: Path | None = None
     filename = f"sprint-issue-{issue_num}.log"
 
     for candidate_dir in filter(None, [cfg_logs_dir, default_log_dir]):

@@ -31,6 +31,7 @@ from .board_cache import invalidate_board
 from . import brief_invalidation
 from . import sprint_webhook_service
 from .board_service import SPRINT_LABEL_FORMAT_ERROR
+from .hermes_models import SprintRunResponse
 
 router = APIRouter(tags=["sprint_run"])
 
@@ -354,7 +355,7 @@ def _build_run_argv_extras(body: "SprintMgmtRunBody", base_argv: list[str]) -> l
     return argv
 
 
-@router.post("/api/sprints/run", status_code=202)
+@router.post("/api/sprints/run", status_code=202, response_model=SprintRunResponse)
 def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     """Spawn sprint_manager.py for the given project + sprint.
 

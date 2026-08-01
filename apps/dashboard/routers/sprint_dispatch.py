@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from .hermes_models import BoardResponse
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -644,7 +645,7 @@ def get_sprint_management_issues(repo: str):
 
 # ── Board aggregate endpoint (issue #1636) ────────────────────────────────────
 
-@router.get("/api/board")
+@router.get("/api/board", response_model=BoardResponse)
 def get_board(project: str):
     """Server-computed board aggregate — single-pass, mirror + SQLite only.
 

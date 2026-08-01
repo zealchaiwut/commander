@@ -11,11 +11,12 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from . import dev_report_service as _svc
+from .hermes_models import DevReportResponse
 
 router = APIRouter(tags=["dev-report"])
 
 
-@router.get("/api/dev-report")
+@router.get("/api/dev-report", response_model=DevReportResponse)
 def get_dev_report(
     date: Optional[str] = None,
     force: bool = False,

@@ -176,7 +176,7 @@ export function failuresInit() {
         "</tbody>" +
         "</table></div>";
     })
-    .catch(function (err) {
+    .catch(function (_err) {
       _setError(root, "Failed to load failures");
     });
 }

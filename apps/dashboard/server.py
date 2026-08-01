@@ -106,6 +106,7 @@ from startup import (  # noqa: E402
     _sweep_orphan_db_running_rows,
     _sweep_orphan_pid_files,
     _validate_github_repos,
+    _warn_nonconforming_sprint_labels,
 )
 
 # Override the logger so log messages show "server" instead of "startup".
@@ -159,6 +160,7 @@ async def lifespan(app: FastAPI):
     _sweep_orphan_pid_files()
     _sweep_orphan_db_running_rows()
     _restore_sprint_statuses_on_startup()
+    _warn_nonconforming_sprint_labels()
     await _mark_inflight_jobs_failed()
     if _BACKUP_AVAILABLE:
         try:

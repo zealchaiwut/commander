@@ -743,6 +743,52 @@ def _validate_github_repos() -> None:
         )
 
 
+def _warn_nonconforming_sprint_labels() -> None:
+    """Print a warning for any sprint-* labels that fail the canonical regex.
+
+    Uses the issues mirror (zero GitHub quota). Best-effort — never blocks startup.
+    Any issues labelled sprint-viz9001, sprint-viz9002, etc. are invisible on
+    the board; this surfaces them so the operator knows they exist (AC3 #2058).
+    """
+    try:
+        from routers.board_service import find_nonconforming_sprint_labels  # noqa: PLC0415
+    except ImportError:
+        return
+    try:
+        projs = projects_module.load_projects()
+    except Exception:
+        return
+    warned = 0
+    for proj in projs:
+        repo = proj.get("repo", "")
+        if not repo:
+            continue
+        try:
+            mirror = github_client._mirror_labels(repo)
+            if not mirror:
+                continue
+            sprint_like = [
+                lbl["name"] for lbl in mirror
+                if isinstance(lbl, dict) and lbl.get("name", "").startswith("sprint-")
+            ]
+            bad = find_nonconforming_sprint_labels(sprint_like)
+            for lbl in bad:
+                print(
+                    f"[startup-warn] {repo}: sprint label {lbl!r} does not match "
+                    r"^sprint-\d+(\.\d+)?$ — issues with this label are invisible on the board",
+                    flush=True,
+                )
+                warned += 1
+        except Exception:
+            pass
+    if warned:
+        print(
+            f"[startup-warn] {warned} non-conforming sprint label(s) found"
+            " — issues with these labels are invisible on the board",
+            flush=True,
+        )
+
+
 def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
     """Reconcile DB rows stuck at state='running' with no live local sprint.
 

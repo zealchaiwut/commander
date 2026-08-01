@@ -30,6 +30,7 @@ from .sprint_run_service import SprintMgmtRunBody, SprintRerunV2Body
 from .board_cache import invalidate_board
 from . import brief_invalidation
 from . import sprint_webhook_service
+from .board_service import SPRINT_LABEL_FORMAT_ERROR
 
 router = APIRouter(tags=["sprint_run"])
 
@@ -385,7 +386,7 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
             sprint_label=body.sprint_label,
             error="invalid sprint label",
         )
-        raise HTTPException(400, detail=f"Invalid sprint label: {body.sprint_label!r}")
+        raise HTTPException(400, detail=f"{body.sprint_label!r} — {SPRINT_LABEL_FORMAT_ERROR}")
     # mode validation (issue #1946): return 400 immediately for unknown values.
     _VALID_RUN_MODES: frozenset[str] = frozenset({"overnight"})
     if body.mode is not None and body.mode not in _VALID_RUN_MODES:

@@ -40,15 +40,12 @@ from services.sprint_manager.settings_schema import APP_CONFIG_KEY  # noqa: E402
 _HOME_NAMESPACE = "home"
 _HOME_CACHE_TTL = 30.0  # seconds
 
-_PROJECTS_BASE = Path.home() / "dev"
 _SPRINTS_DIR = _DASHBOARD_ROOT / "sprints"
+
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
-
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root: Path) -> Path:

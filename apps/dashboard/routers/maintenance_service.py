@@ -28,7 +28,6 @@ from services.sprint_manager.settings_schema import (  # noqa: E402
 import calibration_cache_service as _ccs  # noqa: E402
 
 _SIZES = ("S", "M", "L", "XL")
-_PROJECTS_BASE = Path.home() / "dev"
 _CALIBRATION_SIZE_SETTING_KEYS = {
     "S": "estimation_s_minutes",
     "M": "estimation_m_minutes",
@@ -54,9 +53,7 @@ def _resolve_project_slug(slug: str) -> str:
     return matched["repo"]
 
 
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 
 def _get_configured_minutes(repo: str) -> dict[str, int]:

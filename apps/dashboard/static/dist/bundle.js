@@ -704,6 +704,7 @@
   }
   function switchTab(tab, pushHistory) {
     if (tab === "metrics" || tab === "logs" || tab === "status") {
+      console.warn('[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"');
       tab = "failures";
     }
     if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {

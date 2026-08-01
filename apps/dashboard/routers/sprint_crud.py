@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -386,9 +385,9 @@ def delete_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     if srv._is_sprint_running(srv._project_root_path(project), sprint_label):
-        return JSONResponse(
+        raise HTTPException(
             status_code=409,
-            content={"error": "Sprint is currently running.", "suggestion": "Cancel the sprint first, then delete."},
+            detail="Sprint is currently running. Cancel the sprint first, then delete.",
         )
 
     project_root = srv._project_root_path(project)

@@ -783,7 +783,8 @@ At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`serv
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. |
+| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. Canonical flat route (issue #2065). |
+| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | **Deprecated** nested alias of the flat route above (issue #2065); still works, flagged `deprecated: true` in the OpenAPI schema. |
 
 Response:
 

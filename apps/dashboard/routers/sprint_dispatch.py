@@ -56,7 +56,9 @@ def _sprint_json_read(path):
 
 # ── Constants (mirrored from server.py) ──────────────────────────────────────
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -64,7 +66,7 @@ SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manag
 SPRINT_LOG_PATH = _DASHBOARD_ROOT / "sprints" / "sprint_run.log"
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 # ── Dashboard event helpers ───────────────────────────────────────────────────

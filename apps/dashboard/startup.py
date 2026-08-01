@@ -35,6 +35,7 @@ import time  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 
 def _auto_install_deps() -> None:
@@ -2074,7 +2075,7 @@ class BatchLabelsBody(BaseModel):
 
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -2121,7 +2122,7 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 def _dashboard_actor() -> str:

@@ -54,7 +54,9 @@ def _sprint_json_read(path):
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 _SIZE_LABELS = {"size-S", "size-M", "size-L", "size-XL"}
 _SIZE_LETTER_BY_LABEL = {"size-S": "S", "size-M": "M", "size-L": "L", "size-XL": "XL"}

@@ -14,13 +14,9 @@ read_log(kind, project_root, label=None, issue_num=None, tail_lines=200)
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
-# Sprint label whitelist — same regex used by the endpoint validators.
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+$")
 
 
 def _safe_tail(path: Path, tail_lines: int) -> str:

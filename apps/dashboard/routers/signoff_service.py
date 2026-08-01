@@ -30,7 +30,9 @@ _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 
 def _server():

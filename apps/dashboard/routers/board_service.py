@@ -61,7 +61,9 @@ def _run_stats_service():
 
 _PROJECTS_BASE = Path.home() / "dev"
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SPRINT_PREFIX_RE = re.compile(r"^sprint-")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 

@@ -30,8 +30,10 @@ from .board_cache import invalidate_board  # noqa: E402
 
 router = APIRouter()
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 def _server():

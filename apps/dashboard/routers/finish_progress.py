@@ -27,7 +27,9 @@ from . import sprint_finish as _fs
 
 router = APIRouter(tags=["finish-progress"])
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 
 class FinishBgBody(BaseModel):

@@ -23,9 +23,8 @@ from pathlib import Path
 _TEST_DB = Path(os.environ.get("COMMANDER_TEST_DB", "/tmp/commander-pytest.db"))
 os.environ["DB_PATH"] = str(_TEST_DB)
 os.environ.setdefault("COMMANDER_DISABLE_NEON", "1")
-# Feature flags default off in config.py; tests opt back in to sign-off/planning/advisor/brief.
+# Feature flags default off in config.py; tests opt back in to sign-off/planning/brief.
 os.environ.setdefault("COMMANDER_DISABLE_SIGNOFF", "0")
-os.environ.setdefault("COMMANDER_DISABLE_ADVISOR", "0")
 os.environ.setdefault("COMMANDER_DISABLE_PLANNING", "0")
 os.environ.setdefault("COMMANDER_DISABLE_SPRINT_GOAL_REQUIRED", "0")
 os.environ.setdefault("COMMANDER_DISABLE_BRIEF", "0")

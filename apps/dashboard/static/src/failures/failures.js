@@ -39,10 +39,27 @@ function _escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Normalize a stored ISO timestamp to one that JS will parse as UTC.
+ * Bare ISO strings (no offset) are stored as UTC but parsed as local
+ * time by new Date() per the ES spec — appending Z fixes the misparse.
+ * Already-normalized strings (Z or +HH:MM) are returned unchanged.
+ *
+ * @param {string} ts
+ * @returns {string}
+ */
+export function _normalizeTs(ts) {
+  // Match YYYY-MM-DDTHH:MM:SS with optional microseconds and no trailing offset
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(ts)) {
+    return ts + "Z";
+  }
+  return ts;
+}
+
 function _fmtTs(ts) {
   if (!ts) return "";
   try {
-    const d = new Date(ts);
+    const d = new Date(_normalizeTs(ts));
     return d.toLocaleString(undefined, {
       month: "short",
       day: "numeric",

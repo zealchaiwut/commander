@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -131,7 +130,6 @@ def test_ac2_is_commit_merged_into_branch_exists():
 
 def test_ac2_merge_sprint_branches_for_label_verifies_after_merge():
     """AC2: _merge_sprint_branches_for_label must call the post-merge verification helper."""
-    import startup
     src = Path(DASHBOARD_DIR / "startup.py").read_text(encoding="utf-8")
     # The function body should reference the post-merge check
     fn_start = src.find("def _merge_sprint_branches_for_label(")

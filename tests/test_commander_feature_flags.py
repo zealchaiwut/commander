@@ -19,9 +19,9 @@ def test_global_settings_exposes_disable_fields(client_ctx):
     client, *_ = client_ctx
     data = client.get("/api/settings").json()
     assert data["disable_sprint_signoff"] is True
-    assert data["disable_advisor"] is True
     assert data["disable_sprint_planning"] is True
     assert data["disable_sprint_goal_required"] is True
+    assert "disable_advisor" not in data
 
 
 def test_put_global_settings_persists_feature_flags(client_ctx):
@@ -30,7 +30,6 @@ def test_put_global_settings_persists_feature_flags(client_ctx):
         "/api/settings",
         json={
             "disable_sprint_signoff": False,
-            "disable_advisor": False,
             "disable_sprint_planning": False,
             "disable_sprint_goal_required": False,
         },
@@ -38,7 +37,6 @@ def test_put_global_settings_persists_feature_flags(client_ctx):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["disable_sprint_signoff"] is False
-    assert data["disable_advisor"] is False
 
 
 def test_commander_features_reads_global_settings(settings_store, monkeypatch):
@@ -68,6 +66,5 @@ def test_environment_endpoint_includes_features(client_ctx):
     client, *_ = client_ctx
     data = client.get("/api/environment").json()
     assert "features" in data
-    assert set(data["features"]) >= {
-        "signoff", "advisor", "planning", "goal_required",
-    }
+    assert set(data["features"]) >= {"signoff", "planning", "goal_required"}
+    assert "advisor" not in data["features"]

@@ -1,6 +1,6 @@
 /* Commander feature flags — loaded from /api/environment (config.py). */
 
-/** @type {{ signoff?: boolean, advisor?: boolean, planning?: boolean } | null} */
+/** @type {{ signoff?: boolean, planning?: boolean } | null} */
 let _features = null;
 
 export function commanderFeatures() {
@@ -9,10 +9,6 @@ export function commanderFeatures() {
 
 export function signoffEnabled() {
   return commanderFeatures().signoff === true;
-}
-
-export function advisorEnabled() {
-  return commanderFeatures().advisor === true;
 }
 
 export function planningEnabled() {
@@ -27,7 +23,7 @@ export async function loadCommanderFeatures() {
     const data = await res.json();
     _features = data.features || {};
   } catch {
-    _features = { signoff: false, advisor: false, planning: false };
+    _features = { signoff: false, planning: false };
   }
   const root = typeof window !== "undefined" ? window : globalThis;
   root._commanderFeatures = _features;
@@ -42,20 +38,10 @@ function _hide(el) {
 }
 
 export function applyFeatureFlags() {
-  if (!advisorEnabled()) {
-    _hide(document.getElementById("stab-advisor"));
-    _hide(document.getElementById("pane-advisor"));
-  }
   if (!planningEnabled()) {
     _hide(document.getElementById("smgmt-plan-next-btn"));
-    _hide(document.getElementById("hnav-milestone"));
   }
   if (!signoffEnabled()) {
     _hide(document.getElementById("snav-signoff"));
-  }
-  // Hide Planning nav when both advisor and plan-next are off (Roadmap stays via Manage if needed).
-  if (!advisorEnabled() && !planningEnabled()) {
-    const group = document.getElementById("stab-group-planning");
-    if (group) group.style.display = "none";
   }
 }

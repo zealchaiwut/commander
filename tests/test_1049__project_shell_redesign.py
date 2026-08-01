@@ -246,7 +246,6 @@ class TestTabSwitchingIntact:
         "logs",
         "deploy",
         "metrics",
-        "roadmap",
     ])
     def test_switchtab_call_present(self, tab: str):
         """switchTab() invocation for each tab must still be in the file."""
@@ -277,10 +276,6 @@ class TestShellScopeOnly:
     def test_deploy_tab_pane_present(self):
         """Deploy tab pane must still be present."""
         assert "pane-deploy" in HTML or "stab-deploy" in HTML
-
-    def test_roadmap_tab_pane_present(self):
-        """Roadmap tab pane must still be present."""
-        assert "pane-roadmap" in HTML or "stab-roadmap" in HTML
 
     def test_switchTab_function_defined(self):
         """switchTab function definition must still exist."""

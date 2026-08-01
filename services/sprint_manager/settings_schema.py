@@ -65,7 +65,6 @@ KNOWN_FIELDS: dict[str, dict[str, Any]] = {
     # Optional product surfaces — disabled by default; overridable via Global Settings
     # or COMMANDER_DISABLE_* env vars (env wins when set).
     "disable_sprint_signoff": {"secret": False, "default": True},
-    "disable_advisor": {"secret": False, "default": True},
     "disable_sprint_planning": {"secret": False, "default": True},
     "disable_sprint_goal_required": {"secret": False, "default": True},
     # Token cost price map: {"model-name": {"in": price_per_1m, "out": price_per_1m}}

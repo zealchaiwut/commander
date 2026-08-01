@@ -2426,6 +2426,25 @@ def _pool_release(slot: Optional[Path]) -> None:
         _ACTIVE_WORKTREE_POOL.release(slot)
 
 
+def _assert_pool_has_slots(pool: "_WorktreePool", requested_slots: int) -> None:
+    """Fail fast if the pool created 0 usable slots (issue #2081 AC3).
+
+    A pool with 0 slots means git worktree add failed for every slot — most
+    likely because base_branch does not exist in the repo.  Without this check
+    the first acquire() call blocks for ACQUIRE_TIMEOUT_SECONDS (1800s) before
+    raising a misleading TimeoutError about a 'prior release() failure'.
+    Raising here immediately gives a clear, actionable error message.
+    """
+    with pool._lock:
+        created = len(pool._free)
+    if created == 0:
+        raise RuntimeError(
+            f"[worktree-pool] 0/{requested_slots} slots created for branch"
+            f" {pool.base_branch!r} — aborting sprint setup. Verify that the"
+            f" branch exists and is reachable from the coder worktree."
+        )
+
+
 # _apply_token_ceiling moved to state.py (issue #1948) so pipeline.py can import
 # it without circular dependency. Re-imported above from state.py.
 
@@ -3330,14 +3349,21 @@ def run_sprint_preflight(
         _pool = _WorktreePool(
             pool_dir=_pool_dir,
             repo_root=_pool_repo_root,
-            base_branch=sprint_branch,
+            # issue #2081 AC1: bind to target_branch (the branch that actually
+            # exists), not sprint_branch (which is skipped when target_branch
+            # is explicitly set, e.g. mode=overnight → --target-branch develop).
+            base_branch=target_branch,
             slots=_pool_slots,
             requirements_file=Path(_pool_req) if _pool_req else None,
         )
-        _pool.create()
+        _pool_created = _pool.create()
         _ACTIVE_WORKTREE_POOL = _pool
+        # issue #2081 AC3: fail fast when no slots were created rather than
+        # blocking for 1800s inside the first acquire() call.
+        _assert_pool_has_slots(_pool, _pool_slots)
+        # issue #2081 AC2: log the actual created count, not the configured count.
         sys.stdout.write(str(
-            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f"  [worktree-pool] {_pool_created} slot(s) ready"
             f" (max_coder_slots={_pool_slots})\n"
         ))
 

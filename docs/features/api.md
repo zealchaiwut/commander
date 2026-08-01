@@ -249,11 +249,13 @@ Serves a structured view of each project's current status and pending work.
 
 **Response: `404 Not Found`**
 
-Returned when no projects are configured in `apps/dashboard/projects.json`.
+Returned when no dev-report artifact exists for the requested date and `force`
+is not set. The body uses the standard `{"detail": …}` shape — matching the rest
+of the API — rather than a bespoke `{"error": …}` key (issue #2068).
 
 ```json
 {
-  "detail": "No report yet — runs nightly at 05:45"
+  "detail": "No dev report artifact found for 2026-07-17"
 }
 ```
 

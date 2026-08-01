@@ -136,6 +136,8 @@ Index: `ix_project_todos_project_position` on `(project, position)`.
 
 SQLite is the **authoritative, only live** store. As of sprint 57 it also holds the dashboard read model (`issues` mirror), ticket write-through state (`ticket_status`), and durable sprint lifecycle state (`sprints` + `sprint_ticket_order`). On first run from an empty DB the dashboard bootstraps a full GitHub sync to populate these tables (issue #760).
 
+> **Timestamp format (issue #2067).** New timestamp writes across these tables emit the canonical `YYYY-MM-DDTHH:MM:SSZ` form (explicit UTC `Z` marker, no microseconds, string-sortable) via the shared `db.utc_now()` helper. Historical rows were **not** rewritten, so text timestamp columns may still hold any of three legacy shapes (`…T…:…:…` with no marker, `…T…:…:….ffffff` isoformat, or `…Z`); read them through `db.parse_utc_ts()`, which tolerates all four. Consumers reading these columns directly should treat any offset-less value as UTC.
+
 | Table | Description |
 |---|---|
 | `agents` | Active/recent Claude Code agent sessions |

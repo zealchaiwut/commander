@@ -6,7 +6,6 @@ POST /api/sprints/batch-labels — batch-move tickets to their target sprint lab
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,11 +24,14 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 import db  # noqa: E402
 import github_client  # noqa: E402
 from .board_cache import invalidate_board  # noqa: E402
+from .board_service import SPRINT_LABEL_FORMAT_ERROR  # noqa: E402
 
 router = APIRouter()
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 def _server():
@@ -107,7 +109,7 @@ async def batch_sprint_labels(body: BatchLabelsBody):
         elif _SPRINT_LABEL_RE.match(raw):
             label_to_assign = raw
         else:
-            errors.append(f"#{change.issue_num}: invalid sprint_label {raw!r}")
+            errors.append(f"#{change.issue_num}: {raw!r} — {SPRINT_LABEL_FORMAT_ERROR}")
             failed += 1
             continue
 

@@ -35,6 +35,7 @@ import time  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 
 def _auto_install_deps() -> None:
@@ -739,6 +740,52 @@ def _validate_github_repos() -> None:
         print(
             f"GITHUB_ISSUE_TEST_REPO '{test_repo}' is set but does not exist or is "
             f"inaccessible — tester issue/label tests will be skipped.",
+            flush=True,
+        )
+
+
+def _warn_nonconforming_sprint_labels() -> None:
+    """Print a warning for any sprint-* labels that fail the canonical regex.
+
+    Uses the issues mirror (zero GitHub quota). Best-effort — never blocks startup.
+    Any issues labelled sprint-viz9001, sprint-viz9002, etc. are invisible on
+    the board; this surfaces them so the operator knows they exist (AC3 #2058).
+    """
+    try:
+        from routers.board_service import find_nonconforming_sprint_labels  # noqa: PLC0415
+    except ImportError:
+        return
+    try:
+        projs = projects_module.load_projects()
+    except Exception:
+        return
+    warned = 0
+    for proj in projs:
+        repo = proj.get("repo", "")
+        if not repo:
+            continue
+        try:
+            mirror = github_client._mirror_labels(repo)
+            if not mirror:
+                continue
+            sprint_like = [
+                lbl["name"] for lbl in mirror
+                if isinstance(lbl, dict) and lbl.get("name", "").startswith("sprint-")
+            ]
+            bad = find_nonconforming_sprint_labels(sprint_like)
+            for lbl in bad:
+                print(
+                    f"[startup-warn] {repo}: sprint label {lbl!r} does not match "
+                    r"^sprint-\d+(\.\d+)?$ — issues with this label are invisible on the board",
+                    flush=True,
+                )
+                warned += 1
+        except Exception:
+            pass
+    if warned:
+        print(
+            f"[startup-warn] {warned} non-conforming sprint label(s) found"
+            " — issues with these labels are invisible on the board",
             flush=True,
         )
 
@@ -2028,7 +2075,7 @@ class BatchLabelsBody(BaseModel):
 
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -2075,7 +2122,7 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 def _dashboard_actor() -> str:

@@ -181,6 +181,7 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
@@ -822,7 +823,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = (
     else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
 )
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 

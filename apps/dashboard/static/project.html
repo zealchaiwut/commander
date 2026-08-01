@@ -1854,7 +1854,22 @@
     .hist-ledger-empty {
       padding: 28px 18px; text-align: center;
       color: var(--text-sub); font-size: 12.5px; font-style: italic;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
     }
+    .hist-ledger-empty .ti { font-size: 20px; }
+    .hist-ledger-error {
+      padding: 28px 18px; text-align: center;
+      color: var(--text-sub); font-size: 12.5px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .hist-ledger-error .ti-alert-circle { color: var(--amber, #f59e0b); font-size: 20px; }
+    .hist-ledger-retry {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 5px 12px;
+      color: var(--text); font-size: 12px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .hist-ledger-retry:hover { border-color: var(--blue); color: var(--blue); }
     .hist-ledger-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 14px; }
     .hist-skeleton-card {
       height: 52px; border-radius: 10px;
@@ -2983,6 +2998,13 @@
     }
     .smgmt-finish-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .smgmt-finish-btn.hidden { display: none; }
+    /* Stale zombie notice: post-run sprint with 0 tickets (issue #2061) */
+    .smgmt-stale-no-tickets-notice {
+      font-size: 11px; color: var(--text-muted); display: inline-flex;
+      align-items: center; gap: 4px; padding: 4px 6px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+    }
+    .smgmt-stale-no-tickets-notice i { color: var(--amber, #b45309); font-size: 12px; }
     /* Quiet secondary link for Merge Sprint when Re-run is the primary action */
     .sc-merge-link {
       background: none; color: var(--text-muted); border: none;
@@ -5442,6 +5464,20 @@
     .smgmt-ticket[data-size="M"]  .smgmt-ticket-size-pill { background: var(--blue-bg);  color: var(--blue); }
     .smgmt-ticket[data-size="L"]  .smgmt-ticket-size-pill { background: var(--amber-bg); color: var(--amber); }
     .smgmt-ticket[data-size="XL"] .smgmt-ticket-size-pill { background: var(--red-bg);   color: var(--red); }
+    /* Backlog row label chips (issue #2060) */
+    .smgmt-bl-label-chips { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+    .smgmt-bl-label-chip {
+      flex-shrink: 0;
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; font-weight: 700;
+      font-family: var(--mono);
+      background: var(--surface-2); color: var(--text-sub);
+      white-space: nowrap;
+    }
+    .smgmt-bl-label-chip--uat    { background: var(--green-bg); color: var(--green); }
+    .smgmt-bl-label-chip--active { background: var(--blue-bg);  color: var(--blue); }
+    .smgmt-bl-label-chip--alert  { background: var(--red-bg);   color: var(--red); }
+    .smgmt-bl-label-chip--overflow { background: transparent; color: var(--text-muted); }
     /* Definition of Ready per-ticket badge (issue #1487) */
     .smgmt-dor-badge {
       display: inline-flex; align-items: center; gap: 3px;
@@ -13510,8 +13546,13 @@ function _smgmtUpdateSubnav() {
     // failure to investigate). Completed/deleted/running carry no action, so a
     // history of all-completed sprints shows no badge at all.
     const n = _histNeedsActionCount();
-    badge.textContent = String(n);
-    badge.hidden = n === 0;
+    // AC2 (#2062): while the ledger fetch is pending, avoid zeroing the badge
+    // from stale/cleared data — keep the previous count visible.
+    const loading = typeof globalThis._histIsLoading === 'function' && globalThis._histIsLoading();
+    if (!loading || n > 0) {
+      badge.textContent = String(n);
+      badge.hidden = n === 0;
+    }
   }
 }
 

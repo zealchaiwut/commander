@@ -42,7 +42,9 @@ export function computeRovingTabindex(tab, onGlobalSettings) {
 
 export function switchTab(tab, pushHistory) {
   // Removed tabs (#2025): redirect to failures instead of blank pane.
+  // console.warn makes stale internal callers visible in development (#2063).
   if (tab === "metrics" || tab === "logs" || tab === "status") {
+    console.warn('[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"');
     tab = "failures";
   }
 

@@ -7,7 +7,7 @@
           loadSprintMgmt, loadTickets, _smgmtArInit, _smgmtArStartTicker,
           _smgmtLivePollId, _smgmtLogPollId, deployTabDestroy,
           deployTabInit,
-          roadmapInit, advInit, projSettingsInit, settingsInitValues, settingsPopulateRepos,
+          projSettingsInit, settingsInitValues, settingsPopulateRepos,
           globalSettingsLoad, _bcInitTab, _lpRenderBc, _deepLinkSprintSubView,
           _applyDeepLinkSubView, _smgmtSavedSubView, _smgmtShowSubView, _histLoadLedger,
           _globalSettingsLinkActive, _evlState, parseUrl, _arTickerId, _arInterval,
@@ -18,10 +18,6 @@
 // state being set first (fixes issue #1175).
 const _GROUP_CHILDREN = {
   manage: ["deploy", "bulk-create"],
-  planning: [
-    "roadmap",
-    "advisor",
-  ],
 };
 
 /**
@@ -31,7 +27,7 @@ const _GROUP_CHILDREN = {
  */
 export function computeRovingTabindex(tab, onGlobalSettings) {
   return Object.fromEntries(
-    ["sprint-mgmt", "tickets", "failures", "brain", "manage", "planning", "settings"].map((t) => {
+    ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map((t) => {
       const ownsTab =
         !onGlobalSettings &&
         (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
@@ -78,7 +74,6 @@ export function switchTab(tab, pushHistory) {
     "failures",
     "brain",
     "manage",
-    "planning",
     "settings",
   ];
   [
@@ -86,8 +81,6 @@ export function switchTab(tab, pushHistory) {
     "tickets",
     "deploy",
     "bulk-create",
-    "roadmap",
-    "advisor",
     "failures",
     "brain",
     "settings",
@@ -103,18 +96,13 @@ export function switchTab(tab, pushHistory) {
   // result is correct regardless of when .active classes are applied (issue #1175).
   const _rovingMap = computeRovingTabindex(tab, onGlobalSettings);
   _topLevelTabs.forEach((t) => {
-    const suffix =
-      t === "manage"
-        ? "manage-trigger"
-        : t === "planning"
-          ? "planning-trigger"
-          : t;
+    const suffix = t === "manage" ? "manage-trigger" : t;
     const btn = document.getElementById("stab-" + suffix);
     if (!btn) return;
     btn.tabIndex = _rovingMap[t];
   });
   closeAllStabDropdowns();
-  ["planning", "manage"].forEach((groupName) => {
+  ["manage"].forEach((groupName) => {
     const group = document.getElementById("stab-group-" + groupName);
     if (!group) return;
     const trigger = group.querySelector(".stab-trigger");
@@ -127,8 +115,6 @@ export function switchTab(tab, pushHistory) {
     "tickets",
     "deploy",
     "bulk-create",
-    "roadmap",
-    "advisor",
     "failures",
     "brain",
     "settings",
@@ -166,8 +152,6 @@ export function switchTab(tab, pushHistory) {
     _lpRenderBc();
   }
   if (tab === "deploy") deployTabInit();
-  if (tab === "roadmap") roadmapInit();
-  if (tab === "advisor") advInit();
   if (tab === "failures") failuresInit();
   if (tab === "brain") brainInit();
   if (tab === "settings") projSettingsInit();
@@ -237,9 +221,6 @@ if (_subTabsEl) {
       "brain",
       "manage",
       "deploy",
-      "planning",
-      "roadmap",
-      "advisor",
       "settings",
     ];
     const focused = document.activeElement;

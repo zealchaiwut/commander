@@ -204,7 +204,6 @@ from routers import (  # noqa: E402
     changelog_router,
     estimate_jobs_router,
     activity_router,
-    advisor_router,
     analytics_router,
     backup_router,
     bulk_tickets_router,
@@ -234,7 +233,6 @@ from routers import (  # noqa: E402
     pages_router,
     project_branches_router,
     projects_router,
-    roadmap_router,
     runs_router,
     settings_router,
     settings_sync_router,
@@ -252,7 +250,6 @@ from routers import (  # noqa: E402
     sprint_summaries_router,
     sprints_router,
     status_router,
-    suggestions_router,
     system_misc_router,
     system_router,
     tickets_router,
@@ -265,8 +262,6 @@ from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_m
 app.include_router(api_volume_router)
 app.include_router(pages_router)
 app.include_router(activity_router)
-app.include_router(advisor_router)
-app.include_router(suggestions_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(calibration_router)
@@ -286,7 +281,6 @@ app.include_router(mis_sizing_router)
 app.include_router(xl_suggestions_router)
 app.include_router(sprint_collisions_router)
 app.include_router(projects_router)
-app.include_router(roadmap_router)
 app.include_router(runs_router)
 # scheduler_router is mounted via routers/sprints.py (rides the already-mounted
 # sprints router by design); this app-level include was a duplicate — removed.

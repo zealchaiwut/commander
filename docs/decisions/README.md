@@ -24,3 +24,6 @@ The template is in `TEMPLATE.md`.
 - [2026-07-02-11-reconcile-ttl-and-cursor](2026-07-02-11-reconcile-ttl-and-cursor.md) — Q11: reconcile TTL-on-success and cursor the 40-row sweep window
 - [2026-07-02-12-delete-lineage-fully-in-develop](2026-07-02-12-delete-lineage-fully-in-develop.md) — Q12: delete `_lineage_fully_in_develop` (no production caller)
 - [2026-07-02-13-neon-export-only-docstrings](2026-07-02-13-neon-export-only-docstrings.md) — Q13: bless Neon sprint_repo as export-only; add import-guard test
+
+## 2026-08-01
+- [2026-08-01-1-delete-roadmap-and-advisor](2026-08-01-1-delete-roadmap-and-advisor.md) — delete-roadmap-and-advisor

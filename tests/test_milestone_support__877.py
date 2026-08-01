@@ -30,8 +30,22 @@ def client():
         yield c
 
 
-# Test against the Commander project (always available in UAT)
-TEST_REPO_SLUG = "commander"
+# Write tests target the throwaway repo from GITHUB_ISSUE_TEST_REPO (issue #2074).
+# Read-only smoke tests fall back to the production project slug ('commander') —
+# they are safe because they never mutate remote state.
+_WRITE_REPO = os.environ.get("GITHUB_ISSUE_TEST_REPO", "")
+_WRITE_REPO_SLUG = _WRITE_REPO.split("/")[-1] if _WRITE_REPO else ""
+TEST_REPO_SLUG = _WRITE_REPO_SLUG or "commander"
+
+
+@pytest.fixture
+def _require_write_repo():
+    """Skip any write test when GITHUB_ISSUE_TEST_REPO is not configured."""
+    if not _WRITE_REPO_SLUG:
+        pytest.skip(
+            "GITHUB_ISSUE_TEST_REPO is not set — write tests skipped.  "
+            "Point it at a throwaway repo (e.g. owner/sandbox) to enable."
+        )
 
 
 # ── AC-1: GET /projects/:repo/milestones fallback + list ──────────────────────
@@ -63,7 +77,7 @@ def test_877__list_milestones_state_filter(client):
 
 # ── AC-2: POST /projects/:repo/milestones create milestone ────────────────────
 
-def test_877__create_milestone_with_all_fields(client):
+def test_877__create_milestone_with_all_fields(client, _require_write_repo):
     """AC-2: POST /projects/:repo/milestones creates a milestone on GitHub.
     Returns 201 with milestone object containing number, title."""
     payload = {
@@ -84,7 +98,7 @@ def test_877__create_milestone_with_all_fields(client):
     assert milestone["number"] > 0
 
 
-def test_877__create_milestone_title_only(client):
+def test_877__create_milestone_title_only(client, _require_write_repo):
     """AC-2 variant: POST with only title (description and due_on optional)."""
     payload = {"title": "Minimal Milestone"}
     r = client.post(f"/api/projects/{TEST_REPO_SLUG}/milestones", json=payload)
@@ -95,7 +109,7 @@ def test_877__create_milestone_title_only(client):
     assert isinstance(milestone["number"], int)
 
 
-def test_877__create_milestone_missing_title(client):
+def test_877__create_milestone_missing_title(client, _require_write_repo):
     """AC-2 variant: POST without title should return 400 or 422 (validation error)."""
     payload = {"description": "No title provided"}
     r = client.post(f"/api/projects/{TEST_REPO_SLUG}/milestones", json=payload)
@@ -105,7 +119,7 @@ def test_877__create_milestone_missing_title(client):
 
 # ── AC-3: PATCH /projects/:repo/milestones/:number edit ──────────────────────
 
-def test_877__update_milestone_title_and_description(client):
+def test_877__update_milestone_title_and_description(client, _require_write_repo):
     """AC-3: PATCH /projects/:repo/milestones/:number edits title, description."""
     create_payload = {
         "title": "Original Title",
@@ -131,7 +145,7 @@ def test_877__update_milestone_title_and_description(client):
     assert updated["number"] == milestone_number
 
 
-def test_877__update_milestone_description_only(client):
+def test_877__update_milestone_description_only(client, _require_write_repo):
     """AC-3 variant: PATCH only description field."""
     create_payload = {
         "title": "Milestone for Description Update",
@@ -153,7 +167,7 @@ def test_877__update_milestone_description_only(client):
 
 # ── AC-4: DELETE /projects/:repo/milestones/:number close milestone ───────────
 
-def test_877__close_milestone_via_delete(client):
+def test_877__close_milestone_via_delete(client, _require_write_repo):
     """AC-4: DELETE /projects/:repo/milestones/:number closes a milestone."""
     create_payload = {"title": "Milestone to Close"}
     cr = client.post(f"/api/projects/{TEST_REPO_SLUG}/milestones", json=create_payload)
@@ -168,7 +182,7 @@ def test_877__close_milestone_via_delete(client):
     assert closed["number"] == milestone_number
 
 
-def test_877__close_milestone_via_patch_state(client):
+def test_877__close_milestone_via_patch_state(client, _require_write_repo):
     """AC-4 variant: PATCH state=closed also closes a milestone."""
     create_payload = {"title": "Milestone to Close via PATCH"}
     cr = client.post(f"/api/projects/{TEST_REPO_SLUG}/milestones", json=create_payload)
@@ -239,7 +253,7 @@ def test_877__milestones_endpoint_returns_in_reasonable_time(client):
 
 # ── AC-8: write operations reflect on GitHub in same request ──────────────────
 
-def test_877__created_milestone_persists_across_requests(client):
+def test_877__created_milestone_persists_across_requests(client, _require_write_repo):
     """AC-8: Milestone created via POST is immediately readable via GET."""
     create_payload = {
         "title": "Persistence Test Milestone"
@@ -258,7 +272,7 @@ def test_877__created_milestone_persists_across_requests(client):
     assert found["title"] == created_title
 
 
-def test_877__updated_milestone_persists(client):
+def test_877__updated_milestone_persists(client, _require_write_repo):
     """AC-8: Milestone edited via PATCH is immediately readable with new values."""
     create_payload = {"title": "Before Update"}
     cr = client.post(f"/api/projects/{TEST_REPO_SLUG}/milestones", json=create_payload)
@@ -283,7 +297,7 @@ def test_877__updated_milestone_persists(client):
 
 # ── AC-9: milestone visible in GitHub UI (implicitly verified by AC-2, AC-3, AC-4) ──
 
-def test_877__created_milestone_has_valid_github_url(client):
+def test_877__created_milestone_has_valid_github_url(client, _require_write_repo):
     """AC-9: Milestone object contains html_url pointing to correct GitHub repo."""
     payload = {
         "title": "URL Verification Milestone"
@@ -306,7 +320,7 @@ def test_877__invalid_project_slug_returns_404(client):
     assert r.status_code == 404
 
 
-def test_877__milestone_round_trip_all_fields(client):
+def test_877__milestone_round_trip_all_fields(client, _require_write_repo):
     """Full round-trip: create with all fields, read back, verify all fields."""
     payload = {
         "title": "Full Round Trip",

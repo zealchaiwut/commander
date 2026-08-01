@@ -2983,6 +2983,13 @@
     }
     .smgmt-finish-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .smgmt-finish-btn.hidden { display: none; }
+    /* Stale zombie notice: post-run sprint with 0 tickets (issue #2061) */
+    .smgmt-stale-no-tickets-notice {
+      font-size: 11px; color: var(--text-muted); display: inline-flex;
+      align-items: center; gap: 4px; padding: 4px 6px; border-radius: 4px;
+      background: var(--surface-2); border: 1px solid var(--border);
+    }
+    .smgmt-stale-no-tickets-notice i { color: var(--amber, #b45309); font-size: 12px; }
     /* Quiet secondary link for Merge Sprint when Re-run is the primary action */
     .sc-merge-link {
       background: none; color: var(--text-muted); border: none;

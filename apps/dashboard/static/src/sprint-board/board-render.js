@@ -103,6 +103,10 @@ export function _smgmtAggToRenderData(agg) {
     ["lineage", sections.lineage || []],
   ];
 
+  // Sections where a 0-ticket card is a zombie — action row is suppressed
+  const _postRunSections = new Set(["needs_rework", "ready_to_merge"]);
+  const staleNoTicketLabels = new Set();
+
   for (const [sectionName, cards] of sectionEntries) {
     for (const card of cards) {
       const label = card.label;
@@ -111,6 +115,11 @@ export function _smgmtAggToRenderData(agg) {
       sprintLabels.add(label);
       aggregateBuckets[label] = sectionName;
       sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+
+      // Propagate server stale_no_tickets flag; only valid for post-run sections
+      if (card.stale_no_tickets && _postRunSections.has(sectionName)) {
+        staleNoTicketLabels.add(label);
+      }
 
       // Tickets with sprint_label set (only for the card's own label)
       for (const t of card.tickets || []) {
@@ -173,6 +182,7 @@ export function _smgmtAggToRenderData(agg) {
     sprint_has_run,
     sprint_signoff: {},
     _aggregateBuckets: aggregateBuckets,
+    _staleNoTicketLabels: staleNoTicketLabels,
   };
 }
 
@@ -1752,6 +1762,18 @@ export function _smgmtCardHtml(
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>`
     : "";
 
+  // Zombie card: post-run sprint with 0 tickets — suppress Re-run / Reconcile / Merge Sprint
+  const isStaleNoTickets =
+    !isRunning &&
+    !!(
+      _smgmtData &&
+      _smgmtData._staleNoTicketLabels instanceof Set &&
+      _smgmtData._staleNoTicketLabels.has(label)
+    );
+  const staleNoticeHtml = isStaleNoTickets
+    ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale — no tickets</span>`
+    : "";
+
   return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -1780,21 +1802,17 @@ export function _smgmtCardHtml(
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
           ${dagOrderBtn}
-          ${actionBtn}
+          ${isStaleNoTickets ? staleNoticeHtml : `${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
-          ${
-            isRunning
-              ? ""
-              : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
+          ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
                   title="Reconcile this sprint's DB state against GitHub truth"
                   onclick="event.stopPropagation();smgmtReconcileSprint('${escHtml(label)}')">
-            <i class="ti ti-refresh"></i> Reconcile</button>`
-          }
+            <i class="ti ti-refresh"></i> Reconcile</button>`}
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>`}
         </div>
       </div>
       ${(function () {

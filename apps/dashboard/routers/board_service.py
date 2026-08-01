@@ -767,6 +767,9 @@ def assemble_board(project: str) -> dict[str, Any]:
                 continue
 
             card = _build_sprint_card(label, project, sprint_issues, est_dir, lc)
+            # Post-run sprint with 0 tickets is a zombie — frontend suppresses action row
+            if lc not in ("running", "draft") and not sprint_issues:
+                card["stale_no_tickets"] = True
             bucket = _card_bucket(lc, _has_run(label))
             sections[bucket].append(card)
 

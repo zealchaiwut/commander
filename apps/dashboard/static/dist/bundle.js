@@ -3302,7 +3302,7 @@ Replace the existing draft (${data.existing_label})?`
     opts = opts || {};
     const background = opts.background === true;
     if (!repo) {
-      if (!background) _histShowLedgerSkeleton();
+      if (!background) _histRenderLedger([]);
       return;
     }
     const el = document.getElementById("hist-ledger");

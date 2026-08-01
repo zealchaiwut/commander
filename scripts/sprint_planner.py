@@ -24,12 +24,12 @@ REPO_ROOT = SCRIPTS_DIR.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SPRINT_MANAGER_DIR = REPO_ROOT / "services" / "sprint_manager"
 
-sys.path.insert(0, str(DASHBOARD_DIR))
 sys.path.insert(0, str(SPRINT_MANAGER_DIR))
-from dotenv import load_dotenv
+sys.path.insert(0, str(DASHBOARD_DIR))
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
-import github_client
-from sizing import SIZE_TO_MINUTES
+import github_client  # noqa: E402
+from sizing import SIZE_TO_MINUTES  # noqa: E402
 
 # Retro helpers (issue #2026 AC-3) — surfaces last N committed retros at plan
 # time so past outcomes feed future planning.  Import lazily if unavailable.
@@ -412,7 +412,7 @@ def main() -> None:
             ia = next((i for i, iss in enumerate(selected) if iss["number"] == a), None)
             ib = next((i for i, iss in enumerate(selected) if iss["number"] == b), None)
             if ia is None or ib is None:
-                sys.stdout.write(str(f"  One or both issues not found in plan.") + "\n")
+                sys.stdout.write(str("  One or both issues not found in plan.") + "\n")
             else:
                 selected[ia], selected[ib] = selected[ib], selected[ia]
                 sys.stdout.write(str(f"  Swapped #{a} and #{b}.") + "\n")

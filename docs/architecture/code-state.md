@@ -1,4 +1,4 @@
-# Code State — sprint-1006.1
+# Code State — sprint-1007.2
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,45 +15,43 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1006.1)
+## Recent Deltas (sprint-1007.2)
 
-Files changed: **202**
+Files changed: **15**
 
-- `tests/` — 145 file(s)
-- `apps/` — 28 file(s)
-- `docs/` — 16 file(s)
-- `services/` — 8 file(s)
-- `(root)/` — 2 file(s)
-- `scripts/` — 2 file(s)
-- `.claude/` — 1 file(s)
+- `tests/` — 7 file(s)
+- `.claude/` — 3 file(s)
+- `scripts/` — 3 file(s)
+- `(root)/` — 1 file(s)
+- `docs/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 517 |
-| `apps/dashboard/server.py` | 393 |
-| `services/sprint_manager/sprint_manager.py` | 273 |
-| `apps/dashboard/static/dist/bundle.js.map` | 186 |
-| `apps/dashboard/static/dist/bundle.js` | 176 |
+| `apps/dashboard/static/project.html` | 525 |
+| `apps/dashboard/server.py` | 395 |
+| `services/sprint_manager/sprint_manager.py` | 280 |
+| `apps/dashboard/static/dist/bundle.js.map` | 195 |
+| `apps/dashboard/static/dist/bundle.js` | 185 |
+| `CHANGELOG.md` | 106 |
 | `apps/dashboard/static/app.js` | 106 |
-| `CHANGELOG.md` | 105 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 88 |
 | `apps/dashboard/static/index.html` | 75 |
-| `apps/dashboard/db.py` | 66 |
+| `apps/dashboard/db.py` | 69 |
 | `README.md` | 51 |
-| `apps/dashboard/routers/__init__.py` | 48 |
+| `apps/dashboard/routers/__init__.py` | 50 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 46 |
 | `SCHEMA.md` | 41 |
 | `apps/dashboard/github_client.py` | 40 |
+| `apps/dashboard/startup.py` | 38 |
 | `apps/dashboard/static/src/sprint-board/index.js` | 38 |
 | `services/sprint_manager/estimate_issue.py` | 37 |
-| `apps/dashboard/startup.py` | 36 |
 | `apps/dashboard/routers/sprint_history_service.py` | 36 |
-| `apps/dashboard/static/home.html` | 31 |
+| `apps/dashboard/static/home.html` | 32 |
 
 ## Generated
 
-Sprint: `sprint-1006.1`  
-Timestamp: `2026-07-31T18:49:06Z`  
+Sprint: `sprint-1007.2`  
+Timestamp: `2026-08-01T02:28:03Z`  
 _Generated deterministically — no LLM required._

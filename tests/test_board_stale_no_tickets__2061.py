@@ -14,7 +14,6 @@ import importlib
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 # ── Path setup ────────────────────────────────────────────────────────────────
@@ -37,7 +36,7 @@ def _issue(number: int, title: str, labels: list[str]) -> dict:
         "title": title,
         "state": "open",
         "body": "## Acceptance Criteria\n- [ ] AC",
-        "labels": [{"name": l} for l in labels],
+        "labels": [{"name": lbl} for lbl in labels],
         "html_url": f"https://github.com/owner/repo/issues/{number}",
     }
 

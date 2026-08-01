@@ -5138,6 +5138,8 @@ Resolve manually and re-run Bulk complete.`,
       ["draft", sections.draft || []],
       ["lineage", sections.lineage || []]
     ];
+    const _postRunSections = /* @__PURE__ */ new Set(["needs_rework", "ready_to_merge"]);
+    const staleNoTicketLabels = /* @__PURE__ */ new Set();
     for (const [sectionName, cards] of sectionEntries) {
       for (const card of cards) {
         const label = card.label;
@@ -5146,6 +5148,9 @@ Resolve manually and re-run Bulk complete.`,
         sprintLabels.add(label);
         aggregateBuckets[label] = sectionName;
         sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+        if (card.stale_no_tickets && _postRunSections.has(sectionName)) {
+          staleNoTicketLabels.add(label);
+        }
         for (const t of card.tickets || []) {
           issues.push({ ...t, sprint_label: label });
         }
@@ -5197,7 +5202,8 @@ Resolve manually and re-run Bulk complete.`,
       sprint_plan_states: {},
       sprint_has_run,
       sprint_signoff: {},
-      _aggregateBuckets: aggregateBuckets
+      _aggregateBuckets: aggregateBuckets,
+      _staleNoTicketLabels: staleNoTicketLabels
     };
   }
   function _smgmtSignoffState(label) {
@@ -6308,6 +6314,8 @@ Resolve manually and re-run Bulk complete.`,
                title="${escHtml(dagOrderBtnTitle)}"
                onclick="smgmtApplyDagOrder('${escHtml(label)}')">
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
+    const isStaleNoTickets = !isRunning && !!(_smgmtData && _smgmtData._staleNoTicketLabels instanceof Set && _smgmtData._staleNoTicketLabels.has(label));
+    const staleNoticeHtml = isStaleNoTickets ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale \u2014 no tickets</span>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -6336,7 +6344,7 @@ Resolve manually and re-run Bulk complete.`,
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
           ${dagOrderBtn}
-          ${actionBtn}
+          ${isStaleNoTickets ? staleNoticeHtml : `${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
           ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
@@ -6346,7 +6354,7 @@ Resolve manually and re-run Bulk complete.`,
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>`}
         </div>
       </div>
       ${function() {

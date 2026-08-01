@@ -36,6 +36,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+_SCRIPTS_DIR = Path(__file__).parent
+_REPO_ROOT_RL = _SCRIPTS_DIR.parent
+_DASHBOARD_DIR_RL = _REPO_ROOT_RL / "apps" / "dashboard"
+if str(_DASHBOARD_DIR_RL) not in sys.path:
+    sys.path.insert(0, str(_DASHBOARD_DIR_RL))
+
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 _log = logging.getLogger(__name__)
 
@@ -53,7 +61,7 @@ def _sub_index(label: str) -> tuple[int, float]:
 
 def _labels_of(raw: str | None) -> list[str]:
     try:
-        return [l.get("name") for l in json.loads(raw or "[]") if isinstance(l, dict) and l.get("name")]
+        return [lbl.get("name") for lbl in json.loads(raw or "[]") if isinstance(lbl, dict) and lbl.get("name")]
     except (json.JSONDecodeError, TypeError):
         return []
 
@@ -80,7 +88,7 @@ def _merged_branches(repo: str) -> set[str]:
 
 def _discover(conn, repo: str, base: str | None) -> dict[str, list[str]]:
     """Map base label → sorted lineage members, from mirror labels + sprints rows."""
-    member_re = re.compile(r"^sprint-\d+(?:\.\d+)?$")
+    member_re = SPRINT_LABEL_RE
     found: set[str] = set()
     for row in conn.execute("SELECT labels FROM issues WHERE repo = ?", (repo,)):
         for n in _labels_of(row["labels"]):
@@ -115,7 +123,7 @@ def _summary_labels(conn, repo: str) -> set[str]:
         m = _SUMMARY_RE.search(title)
         if "sprint-summary" in names or m:
             for n in names:
-                if re.match(r"^sprint-\d+(?:\.\d+)?$", n):
+                if SPRINT_LABEL_RE.match(n):
                     out.add(n)
             if m:
                 out.add(f"sprint-{m.group(1)}")

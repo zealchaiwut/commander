@@ -30,6 +30,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client  # noqa: E402
 from sizing import SIZE_TO_MINUTES  # noqa: E402
+from sprint_label_re import SPRINT_BASE_LABEL_RE  # noqa: E402
 
 # Retro helpers (issue #2026 AC-3) — surfaces last N committed retros at plan
 # time so past outcomes feed future planning.  Import lazily if unavailable.
@@ -442,12 +443,10 @@ def main() -> None:
         except Exception as e:
             sys.stdout.write(str(f"Warning: could not ensure label: {e}") + "\n")
 
-    sprint_re_any = re.compile(r"^sprint-\d+$")
-
     for issue in selected:
         num = issue["number"]
         current_labels = {lbl["name"] for lbl in issue.get("labels", [])}
-        other_sprint_labels = [lbl for lbl in current_labels if sprint_re_any.match(lbl) and lbl != f"sprint-{sprint_num}"]
+        other_sprint_labels = [lbl for lbl in current_labels if SPRINT_BASE_LABEL_RE.match(lbl) and lbl != f"sprint-{sprint_num}"]
         target_label = f"sprint-{sprint_num}"
 
         try:

@@ -123,9 +123,9 @@ def get_sprint_history(
 # its DB lifecycle + local state. Writes never touch GitHub. Lives on the History
 # router (already mounted) per COMMANDER_GATE_MONOLITH.
 
-import re as _re  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
-_SPRINT_LABEL_RE = _re.compile(r"^sprint-\d+(\.\d+)*$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 
 @router.get("/api/sprints/{label}/reconcile-preview")

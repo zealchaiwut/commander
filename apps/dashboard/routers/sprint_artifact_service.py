@@ -10,7 +10,9 @@ import json
 import re
 from pathlib import Path
 
-_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+from sprint_label_re import SPRINT_LABEL_RE
+
+_LABEL_RE = SPRINT_LABEL_RE
 
 _MERGED_STATUSES = {"done", "shipped", "merged", "passed", "complete", "completed", "uat"}
 _CLOSED_STATUSES = {"skipped", "failed", "cancelled", "closed", "rejected", "blocked"}

@@ -1147,11 +1147,34 @@ def _get_coder_blocked_patterns() -> list[str]:
 
 
 def _get_coder_test_allowlist() -> list[str]:
-    """Return allowlisted paths from CODER_TEST_PATH_ALLOWLIST (comma-separated)."""
+    """Return allowlisted paths from CODER_TEST_PATH_ALLOWLIST (comma-separated).
+
+    Merges os.environ with the .env file value read at call time so that
+    allowlist additions take effect without requiring a dashboard restart.
+    load_dotenv(override=False) cannot update an already-set env var on a
+    long-lived process; reading the file directly closes that gap (issue #2141).
+    """
+    paths: set[str] = set()
+
     env = os.environ.get("CODER_TEST_PATH_ALLOWLIST", "").strip()
-    if not env:
-        return []
-    return [p.strip() for p in env.split(",") if p.strip()]
+    if env:
+        paths.update(p.strip() for p in env.split(",") if p.strip())
+
+    # Also read the .env file directly so that additions to the allowlist
+    # are picked up by already-running processes and fresh subprocesses alike.
+    try:
+        _env_file = Path(__file__).parent.parent.parent / "apps" / "dashboard" / ".env"
+        if _env_file.exists():
+            for _line in _env_file.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if _line.startswith("CODER_TEST_PATH_ALLOWLIST="):
+                    _val = _line.split("=", 1)[1].strip().strip('"').strip("'")
+                    paths.update(p.strip() for p in _val.split(",") if p.strip())
+                    break
+    except Exception:
+        pass
+
+    return list(paths)
 
 
 def _gate_coder_no_test_edits(

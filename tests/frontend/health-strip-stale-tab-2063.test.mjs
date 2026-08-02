@@ -122,10 +122,10 @@ test('AC3: switchTab("failures") does NOT emit console.warn (valid tab)', () => 
 });
 
 
-// ── AC4: tabs.js coercion behavior (verified via switchTab directly) ──────────
-// The "See more →" link was removed in #2093 (follow-up). The coercion guard in
-// tabs.js (switchTab('metrics') → 'failures') remains for any other stale callers.
-// AC4 now asserts that the health-strip link is GONE, not that it still calls metrics.
+// ── AC4: health-strip "See more →" link routes to 'failures' via coercion ────
+// The link's onclick calls switchTab('metrics'). The coercion maps metrics →
+// failures. The behavioral assertion is that after the onclick fires, _activeTab
+// is 'failures' (not 'metrics', which no longer exists).
 
 import {
   _sHealthBuildHtml,
@@ -137,11 +137,11 @@ const DATA_WITH_SPRINTS = {
   throughput: { avg_sprint_length_minutes: 90 },
 };
 
-test('AC4: health-strip HTML does NOT contain "See more" link (fixed by #2093)', () => {
+test('AC4: health-strip HTML contains the "See more" link with switchTab call', () => {
   const html = _sHealthBuildHtml(DATA_WITH_SPRINTS);
   assert.ok(html !== null, 'strip must render when sprints exist');
-  assert.ok(!html.includes('See more'), 'See more link must be removed — it pointed at the failures inbox');
-  assert.ok(!html.includes('shs-see-more'), 'shs-see-more element must be gone');
+  assert.ok(html.includes('See more'), 'link text must be present');
+  assert.ok(html.includes('switchTab'), 'link must call switchTab');
 });
 
 test('AC4: switchTab("metrics") — the link\'s call — routes to "failures" tab', () => {

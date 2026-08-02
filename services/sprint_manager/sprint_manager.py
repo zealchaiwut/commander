@@ -2121,22 +2121,75 @@ def handle_post_tester(
 # ── agent dispatch helpers ────────────────────────────────────────────────────
 # _build_failure_suffix imported from services.sprint_manager.failures (issue #1279).
 
-# ── gate scope contamination detection (issue #2142) ─────────────────────────
+# ── gate scope contamination detection (issue #2142, #2148) ──────────────────
+
+def _path_in_diff(candidate: str, diff_files: "frozenset[str]") -> bool:
+    """Return True if candidate path matches any file in the diff set.
+
+    Handles mismatched prefix lengths — e.g. ``advisor.py`` matches
+    ``services/sprint_manager/advisor.py`` in diff_files and vice-versa.
+    """
+    cand = candidate.removeprefix("./")
+    for df in diff_files:
+        if cand == df:
+            return True
+        if cand.endswith("/" + df):
+            return True
+        if df.endswith("/" + cand):
+            return True
+    return False
+
+
+def _feature_branch_diff_files(worktree_root: Path) -> "frozenset[str]":
+    """Return files changed on the current feature branch vs its merge-base.
+
+    Tries common base-branch names in order; returns an empty frozenset if
+    git is unavailable or no base can be found (safe: callers treat empty as
+    "can't determine").
+    """
+    for base in ("origin/develop", "develop", "origin/master", "master"):
+        try:
+            mb = subprocess.run(
+                ["git", "-C", str(worktree_root), "merge-base", "HEAD", base],
+                capture_output=True, text=True, timeout=5,
+            )
+            if mb.returncode != 0:
+                continue
+            merge_base = mb.stdout.strip()
+            diff = subprocess.run(
+                ["git", "-C", str(worktree_root), "diff", "--name-only", merge_base, "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if diff.returncode == 0:
+                return frozenset(p.strip() for p in diff.stdout.splitlines() if p.strip())
+        except Exception:
+            continue
+    return frozenset()
+
 
 def _gate_failure_scope_contaminated(
     issue_num: int,
     repo_root: Optional[Path] = None,
+    diff_files: "Optional[frozenset[str]]" = None,
 ) -> bool:
     """Return True if the latest gate failure sidecar is caused by cross-ticket
-    file scope leakage — i.e. it only references test files that belong to OTHER
-    tickets, not the current one.
+    file scope leakage — i.e. it only references files belonging to OTHER tickets.
+
+    Two detection modes (issue #2148 extends the original #2142 AC4):
+
+    1. **Test files** — ``tests/...__<M>.py`` filename patterns.  If ALL M
+       differ from ``issue_num`` the failure is foreign-ticket leakage.
+
+    2. **Source files** — any other ``.py`` path found in the failure detail,
+       cross-referenced against ``diff_files`` (the set of files the current
+       ticket's feature branch actually changed).  If ``diff_files`` is non-empty
+       and a source file is NOT in it the file is treated as foreign.  When
+       ``diff_files`` is ``None`` or empty the source-file check is skipped and
+       the function falls back to test-file-only detection.
 
     Reads ``.commander/runtime/last-failure-<N>.json`` written by
-    ``_revert_to_sit_aggregate`` and scans for ``tests/...__<M>.py`` filename
-    patterns.  If ALL discovered ticket numbers M differ from ``issue_num`` (and
-    at least one such file exists), the failure is attributable to an earlier
-    ticket's files leaking into this ticket's gate scope — skip the dead-letter
-    counter for it (issue #2142 AC4).
+    ``_revert_to_sit_aggregate``.  Returns False (not contaminated) on any I/O
+    or parse error so the dead-letter counter is never skipped by accident.
     """
     import re as _re  # noqa: PLC0415
     effective_root = repo_root or REPO_ROOT
@@ -2144,14 +2197,43 @@ def _gate_failure_scope_contaminated(
     try:
         data = json.loads(sc_path.read_text(encoding="utf-8"))
         detail = data.get("detail", "")
-    except (OSError, json.JSONDecodeError, Exception):
+    except (OSError, json.JSONDecodeError, ValueError):
         return False
 
-    foreign = set(_re.findall(r'tests/[^\s/]+__(\d+)\.py', detail))
-    if not foreign:
+    # ── 1. Test files: extract ticket numbers from tests/__<N>.py pattern ─────
+    test_ticket_nums = set(_re.findall(r'tests/[^\s/]+__(\d+)\.py', detail))
+    own_in_tests = str(issue_num) in test_ticket_nums
+
+    # ── 2. Source files: non-test .py paths, checked against diff_files ───────
+    # Only active when diff_files is a non-empty frozenset (caller computed it).
+    can_check_sources = bool(diff_files)
+    source_paths: "set[str]" = set()
+    own_in_sources = False
+    if can_check_sources:
+        all_py = set(_re.findall(r'[^\s"\'()]+\.py', detail))
+        # Exclude paths already covered by the test-file regex above
+        _test_pat = _re.compile(r'tests/[^\s/]+__\d+\.py$')
+        source_paths = {p for p in all_py if not _test_pat.search(p)}
+        if source_paths:
+            own_in_sources = any(
+                _path_in_diff(p, diff_files)  # type: ignore[arg-type]
+                for p in source_paths
+            )
+
+    # ── Decision ──────────────────────────────────────────────────────────────
+    has_test_refs = bool(test_ticket_nums)
+    has_source_refs = bool(source_paths)  # only non-empty when can_check_sources
+
+    if not has_test_refs and not has_source_refs:
+        # Nothing detectable → not contaminated (safe default)
         return False
-    # Contaminated only when ALL referenced ticket numbers are foreign
-    return str(issue_num) not in foreign
+
+    if own_in_tests or own_in_sources:
+        # At least one file belongs to this ticket → not contaminated
+        return False
+
+    # All detected file references are attributable to foreign tickets
+    return True
 
 
 # ── unified failure-recording chokepoint ─────────────────────────────────────
@@ -4466,7 +4548,15 @@ def run_sprint_loop(
             # gate scope (cross-ticket file scope contamination).  The three-dot
             # diff fix prevents this going forward; this guard protects against
             # any residual case where the sidecar only references foreign tickets.
-            _scope_contaminated = _gate_failure_scope_contaminated(num, repo_root=REPO_ROOT)
+            # issue #2148: also check non-test source files via the feature-branch
+            # diff so advisor*.py / roadmap*.py style leakage is caught too.
+            _diff_files = (
+                _feature_branch_diff_files(cfg.worktree_coder)
+                if cfg is not None else frozenset()
+            )
+            _scope_contaminated = _gate_failure_scope_contaminated(
+                num, repo_root=REPO_ROOT, diff_files=_diff_files,
+            )
             if _scope_contaminated:
                 try:
                     structured_log.warn(

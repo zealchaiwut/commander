@@ -209,33 +209,114 @@ def _make_gh_write_guard(original_fn, method_name: str):
     return _guarded
 
 
+def _make_client_send_guard(original_fn):
+    """Return a wrapper for httpx.Client.send that blocks writes to the production repo.
+
+    Covers code paths that construct an httpx.Client instance and call client.post(),
+    client.patch(), etc. — these bypass the module-level httpx.post/patch/delete guards
+    wrapped by _make_gh_write_guard (issue #2141).
+    """
+    _WRITE_METHODS = frozenset({"POST", "PATCH", "DELETE", "PUT"})
+
+    def _guarded(self, request, **kwargs):
+        if request.method in _WRITE_METHODS:
+            url = str(request.url)
+            if _PROD_REPO_URL_FRAGMENT in url:
+                raise AssertionError(
+                    f"\nSAFETY ABORT: test attempted GitHub {request.method} to the "
+                    f"production repo via httpx.Client!\n"
+                    f"  URL:  {url}\n"
+                    f"  Repo: {_PROD_REPO}\n"
+                    "Tests must never write to zealchaiwut/commander.  Use "
+                    "GITHUB_ISSUE_TEST_REPO for any GitHub write operations in tests "
+                    "(see issue #2074/#2141)."
+                )
+        return original_fn(self, request, **kwargs)
+    return _guarded
+
+
+_GH_SUBPROCESS_WRITE_METHODS = frozenset({"POST", "PATCH", "DELETE", "PUT"})
+
+
+def _is_gh_api_prod_write(args) -> bool:
+    """Return True if args is a gh api call with a write method targeting the prod repo.
+
+    Detects both -X POST and --method POST flag forms. Only matches gh api subcommand
+    calls — gh issue/pr/label etc. are not checked (issue #2141).
+    """
+    if not isinstance(args, (list, tuple)) or len(args) < 3:
+        return False
+    if args[0] != "gh" or args[1] != "api":
+        return False
+    args_list = list(args)
+    method = None
+    for i, arg in enumerate(args_list):
+        if arg in ("-X", "--method") and i + 1 < len(args_list):
+            method = args_list[i + 1].upper()
+            break
+    if method not in _GH_SUBPROCESS_WRITE_METHODS:
+        return False
+    # Match both /repos/owner/repo/ (absolute) and repos/owner/repo/ (relative),
+    # including full URLs. Trailing slash prevents matching commander-test as commander.
+    _prod_path = f"repos/{_PROD_REPO}/"
+    for arg in args_list[2:]:
+        if not arg.startswith("-") and _prod_path in arg:
+            return True
+    return False
+
+
+def _make_gh_subprocess_guard(original_fn):
+    """Return a wrapper for subprocess.run/Popen that blocks gh api prod writes.
+
+    Any call matching _is_gh_api_prod_write raises AssertionError before spawning
+    a process, so no GitHub API quota is consumed and no production mutation occurs
+    (issue #2141).
+    """
+    def _guarded(args, **kwargs):
+        if _is_gh_api_prod_write(args):
+            raise AssertionError(
+                f"\nSAFETY ABORT: test attempted gh api write to the production repo!\n"
+                f"  Command: {list(args)!r}\n"
+                f"  Repo: {_PROD_REPO}\n"
+                "Tests must never write to zealchaiwut/commander via gh api subprocess.  "
+                "Use GITHUB_ISSUE_TEST_REPO for any GitHub write operations in tests "
+                "(see issue #2074/#2141)."
+            )
+        return original_fn(args, **kwargs)
+    return _guarded
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _gh_no_prod_write_guard():
-    """Block httpx write calls to the production GitHub repo for the entire session.
+    """Block httpx and subprocess write calls to the production GitHub repo for the session.
 
-    Wraps httpx.post / httpx.patch / httpx.delete at session startup.  Any call
-    whose URL contains api.github.com/repos/zealchaiwut/commander raises
-    AssertionError with a clear message, so regressions are impossible to miss.
+    Wraps at session startup:
+      - httpx.post / httpx.patch / httpx.delete  (module-level functions)
+      - httpx.Client.send                         (covers client instance writes)
+      - subprocess.run / subprocess.Popen         (covers gh api write subprocesses)
+
+    Any call whose URL/command targets api.github.com/repos/zealchaiwut/commander raises
+    AssertionError immediately with enough context to locate the offending call.
 
     Individual test mocks (patch.object(github_milestones.httpx, "post", …)) are
     applied *on top of* this wrapper and override it for the test's lifetime —
     properly mocked tests are not affected.
     """
     import httpx as _httpx
+    import subprocess as _subprocess
     import unittest.mock as _mock
 
     _p1 = _mock.patch.object(_httpx, "post",   _make_gh_write_guard(_httpx.post,   "POST"))
     _p2 = _mock.patch.object(_httpx, "patch",  _make_gh_write_guard(_httpx.patch,  "PATCH"))
     _p3 = _mock.patch.object(_httpx, "delete", _make_gh_write_guard(_httpx.delete, "DELETE"))
-    _p1.start()
-    _p2.start()
-    _p3.start()
+    _p4 = _mock.patch.object(_httpx.Client, "send", _make_client_send_guard(_httpx.Client.send))
+    _p5 = _mock.patch.object(_subprocess, "run",   _make_gh_subprocess_guard(_subprocess.run))
+    _p6 = _mock.patch.object(_subprocess, "Popen", _make_gh_subprocess_guard(_subprocess.Popen))
+    _p1.start(); _p2.start(); _p3.start(); _p4.start(); _p5.start(); _p6.start()
     try:
         yield
     finally:
-        _p3.stop()
-        _p2.stop()
-        _p1.stop()
+        _p6.stop(); _p5.stop(); _p4.stop(); _p3.stop(); _p2.stop(); _p1.stop()
 
 
 # ── Session-scoped in-repo DB guard (AC6, issue #2047) ────────────────────────

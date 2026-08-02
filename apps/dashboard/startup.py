@@ -5261,6 +5261,12 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
                 )
             elif step.get("base") == "develop" and pr_num:
                 develop_pr = pr_num
+            if head_sha is None:
+                logger.warning(
+                    "[merge-verify] could not verify merge reachability for %s → %s"
+                    " — tip SHA unavailable",
+                    step["head"], step["base"],
+                )
     return errors, develop_pr
 
 

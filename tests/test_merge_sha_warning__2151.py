@@ -10,9 +10,8 @@ AC (issue #2151):
 from __future__ import annotations
 
 import sys
-import logging
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"

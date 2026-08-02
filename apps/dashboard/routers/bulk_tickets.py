@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from .hermes_models import TicketDraftResponse, TicketCreateResponse
 from starlette.responses import StreamingResponse
 
@@ -347,8 +347,12 @@ async def create_ticket_from_draft(
             raise HTTPException(400, detail="Invalid JSON body")
         try:
             payload = CreateTicketBody.model_validate(raw)
-        except Exception as exc:
-            raise HTTPException(422, detail=str(exc))
+        except ValidationError as exc:
+            parts = "; ".join(
+                f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}"
+                for e in exc.errors()
+            )
+            raise HTTPException(422, detail=f"Invalid ticket body: {parts}")
         draft_id = payload.draft_id
         title = payload.title.strip()
         body = payload.body

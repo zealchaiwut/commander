@@ -18,6 +18,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from project_resolver import split_project
+
 from . import finish_progress_service as _svc
 from . import sprint_finish as _fs
 
@@ -148,14 +150,6 @@ async def finish_sprint_stream(owner: str, repo_name: str, label: str):
 # ── Canonical flat routes (issue #2065) ──────────────────────────────────────
 # project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
 
-def _split_project(project: str) -> tuple[str, str]:
-    """Split 'owner/repo' into (owner, repo_name) for job_key compatibility."""
-    if "/" in project:
-        owner, repo_name = project.split("/", 1)
-        return owner, repo_name
-    return project, project
-
-
 @router.post("/api/sprints/{sprint_label}/finish-bg")
 async def start_finish_sprint_bg_flat(
     sprint_label: str,
@@ -164,7 +158,7 @@ async def start_finish_sprint_bg_flat(
     background_tasks: BackgroundTasks,
 ) -> dict:
     """Canonical: POST /api/sprints/{sprint_label}/finish-bg?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return await start_finish_sprint_bg(owner, repo_name, sprint_label, body, background_tasks)
 
 
@@ -173,5 +167,5 @@ async def finish_sprint_stream_flat(sprint_label: str, project: str):
     """Canonical: GET /api/sprints/{sprint_label}/finish-stream?project=owner/repo"""
     if not _SPRINT_LABEL_RE.match(sprint_label):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return await finish_sprint_stream(owner, repo_name, sprint_label)

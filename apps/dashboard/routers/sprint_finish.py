@@ -39,6 +39,8 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 
 router = APIRouter(tags=["sprint_finish"])
 
+from project_resolver import split_project  # noqa: E402
+
 from .board_cache import invalidate_board  # noqa: E402
 
 _NON_WORK_LABELS_FINISH = {"sprint-summary", "docs", "documentation"}
@@ -48,17 +50,6 @@ def _server():
     """Deferred import of the monolith — safe at request time, avoids circular import."""
     import server  # noqa: PLC0415
     return server
-
-
-def _split_project(project: str) -> tuple[str, str]:
-    """Split 'owner/repo' into (owner, repo_name) for the deprecated nested handlers.
-
-    Canonical routes expect project= in 'owner/repo' format (issue #2064 contract).
-    """
-    if "/" in project:
-        owner, repo_name = project.split("/", 1)
-        return owner, repo_name
-    return project, project
 
 
 def _finish_rework_tickets(srv, sprint_issues: list[dict]) -> list[dict]:
@@ -968,40 +959,40 @@ def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
 @router.get("/api/sprints/{sprint_label}/finish-preview")
 def get_sprint_finish_preview_flat(sprint_label: str, project: str):
     """Canonical: GET /api/sprints/{sprint_label}/finish-preview?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return get_sprint_finish_preview(owner, repo_name, sprint_label)
 
 
 @router.get("/api/sprints/{sprint_label}/bulk-complete-preview")
 def get_sprint_bulk_complete_preview_flat(sprint_label: str, project: str):
     """Canonical: GET /api/sprints/{sprint_label}/bulk-complete-preview?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return get_sprint_bulk_complete_preview(owner, repo_name, sprint_label)
 
 
 @router.post("/api/sprints/{sprint_label}/finish")
 async def finish_sprint_flat(sprint_label: str, project: str, body: FinishSprintBody):
     """Canonical: POST /api/sprints/{sprint_label}/finish?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return await finish_sprint(owner, repo_name, sprint_label, body)
 
 
 @router.post("/api/sprints/{sprint_label}/bulk-complete")
 async def bulk_complete_sprint_flat(sprint_label: str, project: str, body: BulkCompleteSprintBody):
     """Canonical: POST /api/sprints/{sprint_label}/bulk-complete?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return await bulk_complete_sprint(owner, repo_name, sprint_label, body)
 
 
 @router.post("/api/sprints/{sprint_label}/complete-step")
 def complete_sprint_step_flat(sprint_label: str, project: str, body: CompleteStepBody):
     """Canonical: POST /api/sprints/{sprint_label}/complete-step?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return complete_sprint_step(owner, repo_name, sprint_label, body)
 
 
 @router.get("/api/sprints/{sprint_label}/conflict-status")
 def get_sprint_conflict_status_flat(sprint_label: str, project: str):
     """Canonical: GET /api/sprints/{sprint_label}/conflict-status?project=owner/repo"""
-    owner, repo_name = _split_project(project)
+    owner, repo_name = split_project(project)
     return get_sprint_conflict_status(owner, repo_name, sprint_label)

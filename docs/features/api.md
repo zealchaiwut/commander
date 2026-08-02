@@ -579,10 +579,10 @@ canonical, bare slug accepted).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/sprints/{sprint_label}/finish-preview?project=` | Preview what "finish sprint" would do |
-| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize) |
+| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize). Returns `409 {code: "merge_failed", message, merge_errors}` and closes **nothing** when the branch merge fails or is a silent no-op — issues are never closed and the sprint is never marked completed unless the merge actually landed (issue #2086) |
 | `POST` | `/api/sprints/{sprint_label}/finish-bg?project=` | Start finish-sprint as a background job; returns `{started, job_key}` |
 | `GET` | `/api/sprints/{sprint_label}/finish-stream?project=` | SSE stream of finish-sprint progress; resends current snapshot on reconnect |
-| `GET` | `/api/sprints/{sprint_label}/bulk-complete-preview?project=` | Dry-run preview of bulk-complete |
+| `GET` | `/api/sprints/{sprint_label}/bulk-complete-preview?project=` | Dry-run preview of bulk-complete. Each `members[].merged` flag now distinguishes a properly-merged-then-pruned branch from one deleted without merging: a branch absent from GitHub is reported `merged` only when a merged PR into its parent branch exists (issue #2086) |
 | `POST` | `/api/sprints/{sprint_label}/bulk-complete?project=` | Bulk-complete all eligible tickets in a sprint |
 | `POST` | `/api/sprints/{sprint_label}/complete-step?project=` | Complete a single step of the finish flow |
 | `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Merge-conflict status for a sprint's branches |
@@ -595,6 +595,12 @@ work and are flagged `deprecated: true` in the OpenAPI schema. Prefer the flat
 routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
 `finish-stream`, `bulk-complete-preview`, `bulk-complete`, `complete-step`,
 `conflict-status`.
+
+All flat finish/complete routes resolve `project=` through the central
+`project_resolver.split_project` helper, so a bare slug (e.g. `commander`) is
+accepted as well as canonical `owner/repo` and is looked up in the tracked
+project list — no more invalid `<slug>/<slug>` repo path (issues #2135, #2136).
+An unknown `project=` raises `404`.
 | `POST` | `/api/sprints/{label}/clear-stale-labels` | Remove stale sprint status labels flagged by post-sprint reconciliation |
 | `GET` | `/api/sprints/history` | List completed sprint summaries (local, GitHub-free ledger feed) |
 | `GET` | `/api/sprints/{label}/run-stats` | Per-run stats for a finished sprint |
@@ -678,7 +684,7 @@ routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/tickets/draft` | Generate a draft ticket via the BA agent (accepts file attachments) |
-| `POST` | `/api/tickets/create` | Create a GitHub issue from a drafted ticket body. Accepts **either** `application/json` (typed `CreateTicketBody`: `draft_id, title, body, project, sprint_label, extra_labels, milestone`) **or** `multipart/form-data` (same fields plus `files[]` attachments) — dispatched on `Content-Type` (issue #2070). Returns `201 {number, url}` |
+| `POST` | `/api/tickets/create` | Create a GitHub issue from a drafted ticket body. Accepts **either** `application/json` (typed `CreateTicketBody`: `draft_id, title, body, project, sprint_label, extra_labels, milestone`) **or** `multipart/form-data` (same fields plus `files[]` attachments) — dispatched on `Content-Type` (issue #2070). Returns `201 {number, url}`. A malformed JSON body returns `422 {detail: "Invalid ticket body: <field>: <message>; …"}` — clean, field-scoped validation messages rather than the raw pydantic `ValidationError` repr (issue #2119) |
 | `POST` | `/api/tickets/{issue_id}/approve` | Approve a ticket (UAT action) |
 | `POST` | `/api/tickets/bulk` | Start a bulk ticket-creation job (`202`) |
 | `GET` | `/api/tickets/bulk/{job_id}` | Poll a bulk job's state |

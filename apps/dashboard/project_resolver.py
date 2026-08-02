@@ -29,6 +29,13 @@ resolve_project_repo(project: str) -> str
     string from the tracked project list (issue #2136).
     Raises HTTPException(400) for empty input.
     Raises HTTPException(404) for unknown projects.
+
+split_project(project: str) -> tuple[str, str]
+    Accept ``owner/repo`` or bare slug and return ``(owner, repo_name)``.
+    Thin wrapper over ``resolve_project_repo`` shared by router modules
+    (issue #2135 — eliminates the duplicated ``_split_project`` helper).
+    Raises HTTPException(400) for empty input.
+    Raises HTTPException(404) for unknown projects.
 """
 from __future__ import annotations
 
@@ -107,3 +114,18 @@ def resolve_project_repo(project: str) -> str:
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
     return matched["repo"]
+
+
+def split_project(project: str) -> tuple[str, str]:
+    """Resolve *project* (``owner/repo`` or bare slug) to ``(owner, repo_name)``.
+
+    Shared helper for router modules — eliminates the duplicated
+    ``_split_project`` one-liner (issue #2135).
+
+    Raises:
+        HTTPException(400): if *project* is empty or blank.
+        HTTPException(404): if *project* does not match any tracked project.
+    """
+    canonical = resolve_project_repo(project)
+    owner, repo_name = canonical.split("/", 1)
+    return owner, repo_name

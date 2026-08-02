@@ -51,14 +51,16 @@ def _server():
 
 
 def _split_project(project: str) -> tuple[str, str]:
-    """Split 'owner/repo' into (owner, repo_name) for the deprecated nested handlers.
+    """Resolve project= (owner/repo or bare slug) to (owner, repo_name).
 
-    Canonical routes expect project= in 'owner/repo' format (issue #2064 contract).
+    Bare slugs are looked up via resolve_project_repo so they yield the real
+    owner/repo instead of the broken slug/slug fallback (issue #2136).
+    Raises HTTPException(404) for unknown projects.
     """
-    if "/" in project:
-        owner, repo_name = project.split("/", 1)
-        return owner, repo_name
-    return project, project
+    from project_resolver import resolve_project_repo  # noqa: PLC0415
+    canonical = resolve_project_repo(project)
+    owner, repo_name = canonical.split("/", 1)
+    return owner, repo_name
 
 
 def _finish_rework_tickets(srv, sprint_issues: list[dict]) -> list[dict]:

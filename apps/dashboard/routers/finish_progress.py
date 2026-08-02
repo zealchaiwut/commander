@@ -149,11 +149,16 @@ async def finish_sprint_stream(owner: str, repo_name: str, label: str):
 # project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
 
 def _split_project(project: str) -> tuple[str, str]:
-    """Split 'owner/repo' into (owner, repo_name) for job_key compatibility."""
-    if "/" in project:
-        owner, repo_name = project.split("/", 1)
-        return owner, repo_name
-    return project, project
+    """Resolve project= (owner/repo or bare slug) to (owner, repo_name).
+
+    Bare slugs are looked up via resolve_project_repo so they yield the real
+    owner/repo instead of the broken slug/slug fallback (issue #2136).
+    Raises HTTPException(404) for unknown projects.
+    """
+    from project_resolver import resolve_project_repo  # noqa: PLC0415
+    canonical = resolve_project_repo(project)
+    owner, repo_name = canonical.split("/", 1)
+    return owner, repo_name
 
 
 @router.post("/api/sprints/{sprint_label}/finish-bg")

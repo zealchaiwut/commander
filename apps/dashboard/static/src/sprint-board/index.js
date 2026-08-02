@@ -79,6 +79,8 @@ import {
   smgmtAddToDraft,
   // SSE board_invalidated handler (issue #1785)
   _boardSseOnInvalidated, _boardSseOnVisible,
+  // Clean-up-empty pure helper (issue #2089)
+  _smgmtComputeLeadingEmpty,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -244,3 +246,6 @@ globalThis._histIsLoading = _histIsLoading;
 globalThis._sHealthBuildHtml = _sHealthBuildHtml;
 globalThis._sHealthStripRender = _sHealthStripRender;
 globalThis.sprintHealthStripInit = sprintHealthStripInit;
+
+// Clean-up-empty pure helper (issue #2089)
+globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;

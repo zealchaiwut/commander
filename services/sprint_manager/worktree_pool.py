@@ -179,8 +179,12 @@ class WorktreePool:
                 f"  [worktree-pool] WARNING: venv symlink failed for {wt_path}: {e}\n"
             )
 
-    def create(self) -> None:
-        """Create all K worktrees, each symlinked to the persistent shared venv."""
+    def create(self) -> int:
+        """Create all K worktrees, each symlinked to the persistent shared venv.
+
+        Returns the number of slots actually created so callers can log an
+        accurate count and detect the 0-slot fast-fail case (issue #2081).
+        """
         self.pool_dir.mkdir(parents=True, exist_ok=True)
         # Build the shared venv once (slow only the first time / on requirements change).
         self._ensure_shared_venv()
@@ -198,6 +202,7 @@ class WorktreePool:
         sys.stdout.write(
             f"  [worktree-pool] Pool ready: {len(created)} slot(s) under {self.pool_dir}\n"
         )
+        return len(created)
 
     def teardown(self) -> None:
         """Remove all worktrees (free and in-use) and clean the pool dir."""

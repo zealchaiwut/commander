@@ -751,7 +751,12 @@ def assemble_board(project: str) -> dict[str, Any]:
             sprint_issues = issues_by_sprint.get(latest, [])
             card = _build_sprint_card(latest, project, sprint_issues, est_dir, lc)
             card["chain"] = members_sorted
-            sections["lineage"].append(card)
+            # A currently-running rerun chain is operator-visible in the Running tab;
+            # only route to lineage when the active member is not executing.
+            if lc == "running":
+                sections["running"].append(card)
+            else:
+                sections["lineage"].append(card)
 
         else:
             # Singleton sprint → bucket by lifecycle state

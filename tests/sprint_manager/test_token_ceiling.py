@@ -301,6 +301,7 @@ def _run_loop(sm, pf, token_ceiling: int) -> None:
         gate_design=True,
         gate_frontend_lint=True,
         gate_monolith=True,
+        gate_coder_no_test_edits=True,
         gate_scope="changed",
         alert_modes=[],
         cfg=None,

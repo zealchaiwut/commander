@@ -1,5 +1,5 @@
 (() => {
-  // static/src/activity-grouping.js
+  // apps/dashboard/static/src/activity-grouping.js
   var _SPRINT_TYPE_PREFIX = "sprint_";
   function _evlGetSprintLabel(ev) {
     if (ev.sprint_label)
@@ -79,7 +79,7 @@
     return order.map((k) => map[k]);
   }
 
-  // static/src/logpanel.js
+  // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
     "tester",
@@ -117,7 +117,7 @@
     });
   }
 
-  // static/src/progress-activity.js
+  // apps/dashboard/static/src/progress-activity.js
   function _e(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
@@ -573,7 +573,7 @@
     document.head.appendChild(style);
   }
 
-  // static/src/progress-host.js
+  // apps/dashboard/static/src/progress-host.js
   var BOARD_OVERLAY_PA_ID = "board-overlay-pa";
   var _payloadById = /* @__PURE__ */ new Map();
   var _MAX_LOG_LINES = 200;
@@ -728,7 +728,7 @@
     _payloadById.delete(paId);
   }
 
-  // static/src/shell/tabs.js
+  // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
     manage: ["deploy", "bulk-create"]
   };
@@ -948,7 +948,7 @@
     switchTab(effTab, false);
   });
 
-  // static/src/shell/features.js
+  // apps/dashboard/static/src/shell/features.js
   var _features = null;
   function commanderFeatures() {
     return _features || {};
@@ -989,7 +989,7 @@
     }
   }
 
-  // static/src/shell/url-parser.js
+  // apps/dashboard/static/src/shell/url-parser.js
   var _PATH_RE = /^\/project\/([^/]+)\/?([^/]*)?$/;
   function _parseUrlImpl(pathname, search = "") {
     const m = pathname.match(_PATH_RE);
@@ -1008,7 +1008,7 @@
     return _parseUrlImpl(loc.pathname, loc.search);
   }
 
-  // static/src/shell/visibility.js
+  // apps/dashboard/static/src/shell/visibility.js
   var _viHandles = /* @__PURE__ */ new Map();
   var _viIdSeq = 1e6;
   function visibilityInterval(fn, delay) {
@@ -1058,7 +1058,7 @@
     };
   }
 
-  // static/src/shell/snav-cache.js
+  // apps/dashboard/static/src/shell/snav-cache.js
   var _snavNavStatusCache = {};
   var _SNAV_NAV_STATUS_TTL = 15e3;
   async function snavNavStatusFetch(url) {
@@ -1083,7 +1083,7 @@
     }
   }
 
-  // static/src/api.js
+  // apps/dashboard/static/src/api.js
   var _envPromise = null;
   var _versionPromise = null;
   var _settingsPromise = null;
@@ -1126,7 +1126,7 @@
     _settingsPromise = null;
   }
 
-  // static/src/device-login.js
+  // apps/dashboard/static/src/device-login.js
   var GH_AUTH_POLL_INTERVAL_MS = 2e3;
   var _timer = null;
   function startGhAuthPoll(pollFn) {
@@ -1144,7 +1144,7 @@
     }
   }
 
-  // static/src/settings/cleanup.js
+  // apps/dashboard/static/src/settings/cleanup.js
   var CLN_PA_ID = "ps-cln-pa";
   var _psCleanupConfirmFn = null;
   var _psCleanupBusy = false;
@@ -1593,7 +1593,7 @@
   function _psCleanupPaneConfirm() {
   }
 
-  // static/src/sprint-board/state.js
+  // apps/dashboard/static/src/sprint-board/state.js
   globalThis._rrLabel ??= null;
   globalThis._rrVersionedLabel ??= null;
   globalThis._fsLabel ??= null;
@@ -1617,7 +1617,7 @@
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
 
-  // static/src/sprint-board/health-strip.js
+  // apps/dashboard/static/src/sprint-board/health-strip.js
   function _fmtPct(rate) {
     return Math.round((rate || 0) * 100) + "%";
   }
@@ -1634,7 +1634,7 @@
     const fprPct = _fmtPct(fpr.rate);
     const rwrPct = _fmtPct(rwr.rate);
     const durStr = _fmtDur(thr.avg_sprint_length_minutes);
-    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + `</span><span class="shs-label">avg sprint</span></span><a class="shs-see-more" href="#" onclick="switchTab('metrics');if(typeof anlShowTab==='function')anlShowTab('metrics');return false;">See more \u2192</a>`;
+    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + '</span><span class="shs-label">avg sprint</span></span>';
   }
   function _sHealthStripRender(data) {
     const el = document.getElementById("sprint-health-strip");
@@ -1674,7 +1674,7 @@
       window._anlHealthPromise = p;
   }
 
-  // static/src/sprint-board/plan-next.js
+  // apps/dashboard/static/src/sprint-board/plan-next.js
   async function _planNextRequest(repo, replace) {
     let res;
     try {
@@ -1778,7 +1778,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/scheduled-run.js
+  // apps/dashboard/static/src/sprint-board/scheduled-run.js
   var _schedMap = {};
   function _smgmtSchedToggleHtml2(label) {
     const on = !!_schedMap[label];
@@ -1836,7 +1836,7 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // static/src/sprint-board/history.js
+  // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set([
     "ready_to_merge",
     "needs_rework",
@@ -3559,7 +3559,7 @@ Replace the existing draft (${data.existing_label})?`
     const background = opts.background === true;
     if (!repo) {
       if (!background)
-        _histShowLedgerSkeleton();
+        _histRenderLedger([]);
       return;
     }
     const el = document.getElementById("hist-ledger");
@@ -3799,7 +3799,7 @@ ${listing}`
     }
   }
 
-  // static/src/sprint-board/rerun-modal.js
+  // apps/dashboard/static/src/sprint-board/rerun-modal.js
   function _rrShowPreviewLoading(current) {
     const loading = document.getElementById("rr-loading");
     if (!loading)
@@ -4027,7 +4027,7 @@ ${listing}`
     }
   }
 
-  // static/src/sprint-board/finish-modal.js
+  // apps/dashboard/static/src/sprint-board/finish-modal.js
   function _fsOpen() {
     _setBodyInert(["fs-backdrop", "fs-modal"]);
     document.getElementById("fs-backdrop").classList.remove("hidden");
@@ -4493,7 +4493,7 @@ ${listing}`
     }
   }
 
-  // static/src/sprint-board/bulk-complete-modal.js
+  // apps/dashboard/static/src/sprint-board/bulk-complete-modal.js
   function _bcShowPreviewLoading(current) {
     const loading = document.getElementById("bc-loading");
     if (!loading)
@@ -4907,7 +4907,7 @@ Resolve manually and re-run Bulk complete.`,
     }
   }
 
-  // static/src/sprint-board/reconcile-modal.js
+  // apps/dashboard/static/src/sprint-board/reconcile-modal.js
   var _recLabel = null;
   function _recEsc(s) {
     return typeof escHtml === "function" ? escHtml(String(s ?? "")) : String(s ?? "");
@@ -5085,7 +5085,7 @@ Resolve manually and re-run Bulk complete.`,
     }
   }
 
-  // static/src/sprint-board/board-render.js
+  // apps/dashboard/static/src/sprint-board/board-render.js
   var _smgmtResolvedAncestors = /* @__PURE__ */ new Set();
   var _smgmtAggregateCards = null;
   function _smgmtBuildAggCards(agg) {
@@ -5411,6 +5411,28 @@ Resolve manually and re-run Bulk complete.`,
     if (!latest || label === latest)
       return false;
     return _smgmtCompareSprintLabels(label, latest) < 0;
+  }
+  function _smgmtComputeLeadingEmpty(orderedLabels, issues) {
+    const labeled = new Set((issues || []).map((i) => i.sprint_label).filter(Boolean));
+    const activeBases = /* @__PURE__ */ new Set();
+    for (const lbl of labeled) {
+      const m = /^sprint-(\d+)/.exec(lbl);
+      if (m)
+        activeBases.add(parseInt(m[1], 10));
+    }
+    const leadingEmpty = [];
+    let foundActive = false;
+    for (const lbl of orderedLabels) {
+      if (!/^sprint-\d+$/.test(lbl))
+        continue;
+      const base = parseInt(lbl.replace("sprint-", ""), 10);
+      if (activeBases.has(base)) {
+        foundActive = true;
+        break;
+      }
+      leadingEmpty.push(lbl);
+    }
+    return foundActive ? leadingEmpty : [];
   }
   function _smgmtRender(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
@@ -7303,7 +7325,7 @@ Resolve manually and re-run Bulk complete.`,
     _boardSseTimer = setTimeout(_boardSseFireRefetch, 2e3);
   }
 
-  // static/src/sprint-board/run-controls.js
+  // apps/dashboard/static/src/sprint-board/run-controls.js
   var PF_STEPS = [
     { key: "ac", label: "Acceptance criteria", autoFixable: true },
     { key: "estimates", label: "Estimate coverage", autoFixable: true },
@@ -8529,7 +8551,7 @@ Proceed anyway?`)) {
     await _ksFinish(label);
   }
 
-  // static/src/sprint-board/board-overlay.js
+  // apps/dashboard/static/src/sprint-board/board-overlay.js
   var _smgmtBoardOverlayHasProgress = false;
   function _smgmtBoardLock2(message, opts) {
     _smgmtMoveLock = true;
@@ -8720,7 +8742,7 @@ Proceed anyway?`)) {
     _smgmtBoardFinish2({ ok: false, message, onDone });
   }
 
-  // static/src/sprint-board/index.js
+  // apps/dashboard/static/src/sprint-board/index.js
   globalThis._rrOpen = _rrOpen;
   globalThis._rrClose = _rrClose;
   globalThis._rrCatClass = _rrCatClass;
@@ -8857,8 +8879,9 @@ Proceed anyway?`)) {
   globalThis._sHealthBuildHtml = _sHealthBuildHtml;
   globalThis._sHealthStripRender = _sHealthStripRender;
   globalThis.sprintHealthStripInit = sprintHealthStripInit2;
+  globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
 
-  // static/src/logs-error-badge.js
+  // apps/dashboard/static/src/logs-error-badge.js
   function logsErrorBadgeKey(slug) {
     return "commander_logs_last_visit_" + slug;
   }
@@ -8898,7 +8921,7 @@ Proceed anyway?`)) {
     return base + "?limit=200";
   }
 
-  // static/src/logs-view-controls.js
+  // apps/dashboard/static/src/logs-view-controls.js
   function shouldAutoLoadRaw(viewMode, rawLines, runCount) {
     return viewMode === "raw" && rawLines === null && runCount > 0;
   }
@@ -8920,7 +8943,7 @@ Proceed anyway?`)) {
     };
   }
 
-  // static/src/failures/failures.js
+  // apps/dashboard/static/src/failures/failures.js
   async function fetchFailures(project, category) {
     let url = "/api/failures?project=" + encodeURIComponent(project);
     if (category)
@@ -9001,7 +9024,7 @@ Proceed anyway?`)) {
     failuresInit2();
   }
 
-  // static/src/reasoning.js
+  // apps/dashboard/static/src/reasoning.js
   async function fetchRunReasoning(runId) {
     const resp = await fetch("/api/runs/" + encodeURIComponent(runId) + "/reasoning");
     if (!resp.ok)
@@ -9009,7 +9032,7 @@ Proceed anyway?`)) {
     return resp.json();
   }
 
-  // static/src/home/live-refresh.js
+  // apps/dashboard/static/src/home/live-refresh.js
   var REPORT_REFRESH_INTERVAL_MS = 2e4;
   function startDevReportAutoRefresh({
     fetchFn,
@@ -9029,7 +9052,7 @@ Proceed anyway?`)) {
     return () => clearInterval(handle);
   }
 
-  // static/src/brain/brain.js
+  // apps/dashboard/static/src/brain/brain.js
   async function fetchBrainSearch(q, project) {
     let url = "/api/brain/search?q=" + encodeURIComponent(q);
     if (project)
@@ -9210,7 +9233,7 @@ Proceed anyway?`)) {
     });
   }
 
-  // static/src/index.js
+  // apps/dashboard/static/src/index.js
   var root = typeof window !== "undefined" ? window : globalThis;
   root.colorizeLogLine = colorizeLogLine2;
   root.escapeLogHtml = escapeLogHtml;

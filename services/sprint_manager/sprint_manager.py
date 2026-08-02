@@ -2121,6 +2121,39 @@ def handle_post_tester(
 # ── agent dispatch helpers ────────────────────────────────────────────────────
 # _build_failure_suffix imported from services.sprint_manager.failures (issue #1279).
 
+# ── gate scope contamination detection (issue #2142) ─────────────────────────
+
+def _gate_failure_scope_contaminated(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+) -> bool:
+    """Return True if the latest gate failure sidecar is caused by cross-ticket
+    file scope leakage — i.e. it only references test files that belong to OTHER
+    tickets, not the current one.
+
+    Reads ``.commander/runtime/last-failure-<N>.json`` written by
+    ``_revert_to_sit_aggregate`` and scans for ``tests/...__<M>.py`` filename
+    patterns.  If ALL discovered ticket numbers M differ from ``issue_num`` (and
+    at least one such file exists), the failure is attributable to an earlier
+    ticket's files leaking into this ticket's gate scope — skip the dead-letter
+    counter for it (issue #2142 AC4).
+    """
+    import re as _re  # noqa: PLC0415
+    effective_root = repo_root or REPO_ROOT
+    sc_path = effective_root / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+    try:
+        data = json.loads(sc_path.read_text(encoding="utf-8"))
+        detail = data.get("detail", "")
+    except (OSError, json.JSONDecodeError, Exception):
+        return False
+
+    foreign = set(_re.findall(r'tests/[^\s/]+__(\d+)\.py', detail))
+    if not foreign:
+        return False
+    # Contaminated only when ALL referenced ticket numbers are foreign
+    return str(issue_num) not in foreign
+
+
 # ── unified failure-recording chokepoint ─────────────────────────────────────
 
 def _build_crash_detail(log_path: Path, exit_code: Optional[int] = None,
@@ -2391,6 +2424,25 @@ def _pool_release(slot: Optional[Path]) -> None:
     """Return a pool slot acquired by _pool_acquire (issue #1411)."""
     if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
         _ACTIVE_WORKTREE_POOL.release(slot)
+
+
+def _assert_pool_has_slots(pool: "_WorktreePool", requested_slots: int) -> None:
+    """Fail fast if the pool created 0 usable slots (issue #2081 AC3).
+
+    A pool with 0 slots means git worktree add failed for every slot — most
+    likely because base_branch does not exist in the repo.  Without this check
+    the first acquire() call blocks for ACQUIRE_TIMEOUT_SECONDS (1800s) before
+    raising a misleading TimeoutError about a 'prior release() failure'.
+    Raising here immediately gives a clear, actionable error message.
+    """
+    with pool._lock:
+        created = len(pool._free)
+    if created == 0:
+        raise RuntimeError(
+            f"[worktree-pool] 0/{requested_slots} slots created for branch"
+            f" {pool.base_branch!r} — aborting sprint setup. Verify that the"
+            f" branch exists and is reachable from the coder worktree."
+        )
 
 
 # _apply_token_ceiling moved to state.py (issue #1948) so pipeline.py can import
@@ -3297,14 +3349,21 @@ def run_sprint_preflight(
         _pool = _WorktreePool(
             pool_dir=_pool_dir,
             repo_root=_pool_repo_root,
-            base_branch=sprint_branch,
+            # issue #2081 AC1: bind to target_branch (the branch that actually
+            # exists), not sprint_branch (which is skipped when target_branch
+            # is explicitly set, e.g. mode=overnight → --target-branch develop).
+            base_branch=target_branch,
             slots=_pool_slots,
             requirements_file=Path(_pool_req) if _pool_req else None,
         )
-        _pool.create()
+        _pool_created = _pool.create()
         _ACTIVE_WORKTREE_POOL = _pool
+        # issue #2081 AC3: fail fast when no slots were created rather than
+        # blocking for 1800s inside the first acquire() call.
+        _assert_pool_has_slots(_pool, _pool_slots)
+        # issue #2081 AC2: log the actual created count, not the configured count.
         sys.stdout.write(str(
-            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f"  [worktree-pool] {_pool_created} slot(s) ready"
             f" (max_coder_slots={_pool_slots})\n"
         ))
 
@@ -4402,28 +4461,49 @@ def run_sprint_loop(
             # failure recorded during the fix loop (issue #701).
             _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-            # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
-            if not any(d.get("ticket_id") == num for d in state.dead_letter):
-                state.dead_letter.append({
-                    "ticket_id": num,
-                    "title": issue_state.title,
-                    "attempts": issue_state.fix_attempts,
-                    "last_error": issue_state.last_error,
-                })
-            # Dead-letter escalation: check cross-run count; fire LOUD alert +
-            # flag as blocked when threshold is reached (issue #2033).
-            _dl_threshold = get_escalation_threshold(cfg)
-            check_dead_letter_escalation(
-                ticket_id=num,
-                title=issue_state.title,
-                last_error=issue_state.last_error,
-                sprints_dir=_eff_sprints_dir,
-                threshold=_dl_threshold,
-                alert_modes=alert_modes,
-                cfg=cfg,
-                repo=eff_repo,
-                sprint_label=label,
-            )
+            # AC4 (issue #2142): skip dead-letter increment when gate failure is
+            # attributable to an earlier ticket's files leaking into this ticket's
+            # gate scope (cross-ticket file scope contamination).  The three-dot
+            # diff fix prevents this going forward; this guard protects against
+            # any residual case where the sidecar only references foreign tickets.
+            _scope_contaminated = _gate_failure_scope_contaminated(num, repo_root=REPO_ROOT)
+            if _scope_contaminated:
+                try:
+                    structured_log.warn(
+                        "dead_letter_scope_contamination",
+                        f"#{num} gate failure appears caused by another ticket's files "
+                        f"— skipping dead-letter increment (issue #2142)",
+                        issue_num=num,
+                    )
+                except Exception:
+                    pass
+                sys.stdout.write(str(
+                    f"  [dead-letter] #{num} failure looks like scope contamination "
+                    f"(foreign ticket files only) — skipping dead-letter count\n"
+                ))
+            else:
+                # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
+                if not any(d.get("ticket_id") == num for d in state.dead_letter):
+                    state.dead_letter.append({
+                        "ticket_id": num,
+                        "title": issue_state.title,
+                        "attempts": issue_state.fix_attempts,
+                        "last_error": issue_state.last_error,
+                    })
+                # Dead-letter escalation: check cross-run count; fire LOUD alert +
+                # flag as blocked when threshold is reached (issue #2033).
+                _dl_threshold = get_escalation_threshold(cfg)
+                check_dead_letter_escalation(
+                    ticket_id=num,
+                    title=issue_state.title,
+                    last_error=issue_state.last_error,
+                    sprints_dir=_eff_sprints_dir,
+                    threshold=_dl_threshold,
+                    alert_modes=alert_modes,
+                    cfg=cfg,
+                    repo=eff_repo,
+                    sprint_label=label,
+                )
             _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)

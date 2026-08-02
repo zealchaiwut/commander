@@ -34,7 +34,7 @@ def test_bare_slug_project_resolves_on_finish_preview(client):
 def test_bare_slug_project_resolves_on_bulk_complete_preview(client):
     """AC: Bare-slug project= on bulk-complete-preview resolves correctly to owner/repo"""
     r = client.get("/api/sprints/sprint-1011.1/bulk-complete-preview?project=commander")
-    assert r.status_code != 404, f"Bare slug 'commander' should resolve on bulk-complete-preview, but got 404"
+    assert r.status_code != 404, "Bare slug 'commander' should resolve on bulk-complete-preview, but got 404"
 
 
 def test_bare_slug_project_resolves_on_finish_bg(client):
@@ -44,7 +44,7 @@ def test_bare_slug_project_resolves_on_finish_bg(client):
         json={"confirmed": False, "move_non_uat_to": "", "selected_tickets": []}
     )
     # 400 is expected (confirmed=False), 404 would indicate resolution failed
-    assert r.status_code != 404, f"Bare slug 'commander' should resolve on finish-bg, but got 404"
+    assert r.status_code != 404, "Bare slug 'commander' should resolve on finish-bg, but got 404"
 
 
 def test_bare_slug_project_raises_404_for_unknown_project(client):

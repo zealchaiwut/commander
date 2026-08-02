@@ -13043,7 +13043,7 @@ async function init() {
   _slug = slug;
   if (typeof _histResetLedgerCache === 'function') _histResetLedgerCache();
   _activeTab = tab;
-  // Feature flags (sign-off, advisor, plan-next) — hide disabled surfaces before first paint.
+  // Feature flags (sign-off, plan-next) — hide disabled surfaces before first paint.
   if (typeof loadCommanderFeatures === 'function') {
     await loadCommanderFeatures();
   }

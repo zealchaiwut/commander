@@ -312,11 +312,21 @@ def _gh_no_prod_write_guard():
     _p4 = _mock.patch.object(_httpx.Client, "send", _make_client_send_guard(_httpx.Client.send))
     _p5 = _mock.patch.object(_subprocess, "run",   _make_gh_subprocess_guard(_subprocess.run))
     _p6 = _mock.patch.object(_subprocess, "Popen", _make_gh_subprocess_guard(_subprocess.Popen))
-    _p1.start(); _p2.start(); _p3.start(); _p4.start(); _p5.start(); _p6.start()
+    _p1.start()
+    _p2.start()
+    _p3.start()
+    _p4.start()
+    _p5.start()
+    _p6.start()
     try:
         yield
     finally:
-        _p6.stop(); _p5.stop(); _p4.stop(); _p3.stop(); _p2.stop(); _p1.stop()
+        _p6.stop()
+        _p5.stop()
+        _p4.stop()
+        _p3.stop()
+        _p2.stop()
+        _p1.stop()
 
 
 # ── Session-scoped in-repo DB guard (AC6, issue #2047) ────────────────────────

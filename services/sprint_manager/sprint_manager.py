@@ -2144,7 +2144,7 @@ def _gate_failure_scope_contaminated(
     try:
         data = json.loads(sc_path.read_text(encoding="utf-8"))
         detail = data.get("detail", "")
-    except (OSError, json.JSONDecodeError, Exception):
+    except (OSError, json.JSONDecodeError, ValueError):
         return False
 
     foreign = set(_re.findall(r'tests/[^\s/]+__(\d+)\.py', detail))

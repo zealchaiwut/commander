@@ -45,6 +45,8 @@ async def approve_ticket(issue_id: int, repo: Optional[str], request_id):
             issue_id=issue_id, error=str(e),
         )
         raise srv._gh_error(e)
+    from .board_cache import invalidate_board  # noqa: PLC0415
+    invalidate_board(srv.github_client.get_repo_for_operation(repo))
     await srv.broadcast(
         {"type": "update", "event": {"event_type": "ticket_approved", "issue": issue_id}}
     )

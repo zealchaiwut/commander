@@ -941,11 +941,53 @@ def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None
 
 # ── write operations ──────────────────────────────────────────────────────────
 
+def _state_machine():
+    """Lazy import of state_machine — avoids circular imports at module load."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sm_dir = str(_Path(__file__).parent.parent.parent / "services" / "sprint_manager")
+    if _sm_dir not in _sys.path:
+        _sys.path.insert(0, _sm_dir)
+    import state_machine as _sm  # noqa: PLC0415
+    return _sm
+
+
+def _fetch_current_labels(issue_id: int, r: str) -> frozenset:
+    """Fetch current labels from GitHub via _run (interceptable by tests)."""
+    try:
+        raw = _run("api", f"repos/{r}/issues/{issue_id}")
+        data = json.loads(raw)
+        return frozenset(lbl["name"] for lbl in data.get("labels", []))
+    except Exception:
+        return frozenset()
+
+
 def approve_issue(issue_id: int, repo_name: str | None = None):
+    sm = _state_machine()
     r = _r(repo_name)
-    _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "UAT-approved", "--remove-label", "UAT")
-    _run("issue", "close", str(issue_id), "--repo", r)
+
+    current = _fetch_current_labels(issue_id, r)
+    desired = sm.STATE_LABELS[sm.TicketState.UAT_APPROVED]  # frozenset({"UAT-approved"})
+    current_status = sm.STATUS_LABELS & current
+    to_remove = current_status - desired
+    to_add = desired - current_status
+
+    sm.assert_run_mutable(to_add, to_remove)
+
+    if to_add or to_remove:
+        cmd = ["issue", "edit", str(issue_id), "--repo", r]
+        for lbl in sorted(to_add):
+            cmd += ["--add-label", lbl]
+        for lbl in sorted(to_remove):
+            cmd += ["--remove-label", lbl]
+        _run(*cmd)
+
+    _run("issue", "close", str(issue_id), "--repo", r, "--reason", "completed")
+
+    sm._write_ticket_status(issue_id, sm.TicketState.UAT_APPROVED.name, "uat-approve", None)
+    sm._invalidate_mirror_issue(r, issue_id)
+    sm._log_transition(issue_id, current_status, desired, "uat-approve", None)
+
     invalidate(f"issues:{r}:")
     invalidate(f"latest_sprint:{r}")
     invalidate(f"recent_closed:{r}")
@@ -953,12 +995,34 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 
 
 def reject_issue(issue_id: int, reason: str, repo_name: str | None = None):
+    sm = _state_machine()
     r = _r(repo_name)
-    _run("issue", "edit", str(issue_id), "--repo", r,
-         "--add-label", "needs-rework",
-         "--remove-label", "UAT")
+
+    current = _fetch_current_labels(issue_id, r)
+    desired = sm.STATE_LABELS[sm.TicketState.NEEDS_REWORK]  # frozenset({"needs-rework"})
+    current_status = sm.STATUS_LABELS & current
+    to_remove = current_status - desired
+    to_add = desired - current_status
+
+    sm.assert_run_mutable(to_add, to_remove)
+
+    _run("issue", "reopen", str(issue_id), "--repo", r)
+
+    if to_add or to_remove:
+        cmd = ["issue", "edit", str(issue_id), "--repo", r]
+        for lbl in sorted(to_add):
+            cmd += ["--add-label", lbl]
+        for lbl in sorted(to_remove):
+            cmd += ["--remove-label", lbl]
+        _run(*cmd)
+
     _run("issue", "comment", str(issue_id), "--repo", r,
          "--body", f"❌ **Rejected:** {reason}")
+
+    sm._write_ticket_status(issue_id, sm.TicketState.NEEDS_REWORK.name, "uat-reject", reason)
+    sm._invalidate_mirror_issue(r, issue_id)
+    sm._log_transition(issue_id, current_status, desired, "uat-reject", reason)
+
     invalidate(f"issues:{r}:")
     invalidate(f"recent_closed:{r}")
     invalidate(f"open_issues:{r}")

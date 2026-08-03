@@ -31,19 +31,21 @@ class TicketState(enum.Enum):
     NEEDS_REWORK = "NEEDS_REWORK"  # sent back for rework
     BLOCKED = "BLOCKED"            # blocked — cannot proceed until resolved (label: blocked)
     DONE = "DONE"                  # pseudo-state: closed/approved
+    UAT_APPROVED = "UAT_APPROVED"  # approved from UAT (label: UAT-approved; issue closed)
 
 
 _PSEUDO_STATES: frozenset[TicketState] = frozenset({TicketState.BACKLOG, TicketState.DONE})
 
 STATE_LABELS: dict[TicketState, frozenset[str]] = {
-    TicketState.BACKLOG:      frozenset(),
-    TicketState.QUEUED:       frozenset({"backlog"}),
-    TicketState.IN_PROGRESS:  frozenset({"in-progress"}),
-    TicketState.SIT:          frozenset({"SIT"}),
-    TicketState.UAT:          frozenset({"UAT"}),
-    TicketState.NEEDS_REWORK: frozenset({"needs-rework"}),
-    TicketState.BLOCKED:      frozenset({"blocked"}),
-    TicketState.DONE:         frozenset(),
+    TicketState.BACKLOG:       frozenset(),
+    TicketState.QUEUED:        frozenset({"backlog"}),
+    TicketState.IN_PROGRESS:   frozenset({"in-progress"}),
+    TicketState.SIT:           frozenset({"SIT"}),
+    TicketState.UAT:           frozenset({"UAT"}),
+    TicketState.NEEDS_REWORK:  frozenset({"needs-rework"}),
+    TicketState.BLOCKED:       frozenset({"blocked"}),
+    TicketState.DONE:          frozenset(),
+    TicketState.UAT_APPROVED:  frozenset({"UAT-approved"}),
 }
 
 STATUS_LABELS: frozenset[str] = frozenset().union(*STATE_LABELS.values())

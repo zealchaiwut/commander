@@ -26098,7 +26098,7 @@ function _snavRenderPill() {
     const total = storeWins
       ? store.total
       : (d.total || 0);
-    const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} done</span>` : '';
+    const doneHtml = (store && store.done > 0) ? ` · <span class="snav-uat">${store.done} settled</span>` : '';
     const uatHtml  = (!store && (d.uat || 0) > 0) ? ` · <span class="snav-uat">${d.uat} UAT</span>` : '';
     const reworkHtml = rework > 0 ? ` · <span class="snav-rework">${rework} ↩</span>` : '';
     // In pipeline mode the pill names every active agent (coder + tester) rather

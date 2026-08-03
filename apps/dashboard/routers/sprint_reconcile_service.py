@@ -353,21 +353,13 @@ def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
 
     merged = [by_id[k] for k in sorted(by_id)]
 
-    # Recompute denormalized counts from the merged list
-    settled_done = sum(
-        1 for i in merged
-        if (i.get("state") or "").lower() == "merged"
-        or (i.get("agent_status") or "").lower() in ("completed", "done")
-    )
-    failure_count = sum(
-        1 for i in merged
-        if (i.get("agent_status") or "").lower() == "failed"
-        or bool(i.get("failure_reason"))
-    )
-    uat_count = sum(
-        1 for i in merged
-        if (i.get("status") or "").lower() == "uat"
-    )
+    # Recompute denormalized counts using the canonical formula from
+    # sprint_artifact_service so reconcile and materialize always agree.
+    from .sprint_artifact_service import _compute_summary_counts  # noqa: PLC0415
+    _counts = _compute_summary_counts(merged)
+    settled_done = _counts["summary_settled_done"]
+    uat_count = _counts["summary_uat_count"]
+    failure_count = _counts["summary_failure_count"]
 
     new_json = _json.dumps(merged)
     _db().update_sprint_run_counts(

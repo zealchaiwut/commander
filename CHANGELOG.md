@@ -1,5 +1,14 @@
 # Changelog
 
+## Sprint 1015
+
+Reliability, lineage-correctness, and docs-accuracy fixes. **DB authoritative for sprint lineage (#2048):** `_sprint_merge_parent_label` in `startup.py` now resolves a child sprint's immediate merge parent from the `sprints.immediate_parent` DB column first (ADR-4), falling back to plan.json then the base label with a loud warning; a one-time `_backfill_immediate_parent_labels` heal in `db.py` copies `plan.json.parent` into any child row left NULL, so git merge topology no longer silently rides plan.json. **Periodic DB corruption detection (#2037):** a new `_periodic_db_integrity_loop` runs `PRAGMA quick_check` every 30 minutes (`db.check_db_quick` / `db.alert_if_corrupt`), logging CRITICAL and broadcasting a `db_corruption_alert` event so corruption is caught mid-run instead of sitting undetected until the next restart. **Missing advertised endpoint (#2051):** `GET /api/debug/token-usage/by-agent-model` (advertised in CLAUDE.md but returning 404) is now wired up via `routers/token_usage_debug.py`; also backfilled CHANGELOG/todo for manual sprints viz9001/9002, refreshed `frontend-map.md` + `2.3a`, clarified deliberated-vs-auto-adopted ADRs in `decisions/README.md`, and added `scripts/run_post_sprint.py`. **Stale test fixed (#2035):** `test_1411__worktree_pool.py` rewritten for the shared-venv pool design (was asserting a per-slot venv).
+
+- [#2035](https://github.com/zealchaiwut/commander/issues/2035) Fix stale test_1411__worktree_pool.py — shared-venv pool design — 2026-08-03
+- [#2037](https://github.com/zealchaiwut/commander/issues/2037) Periodic PRAGMA quick_check to detect DB corruption mid-run — 2026-08-03
+- [#2048](https://github.com/zealchaiwut/commander/issues/2048) Make DB authoritative for sprint immediate_parent lineage — 2026-08-03
+- [#2051](https://github.com/zealchaiwut/commander/issues/2051) Expose GET /api/debug/token-usage/by-agent-model + docs backfill — 2026-08-03
+
 ## Sprint viz9002 _(manual sprint — backfilled 2026-08-03; documenter did not run)_
 
 ADR capture, Brain search tab, sprint-runner hardening, and three reliability fixes.

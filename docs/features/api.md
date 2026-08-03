@@ -832,6 +832,7 @@ Niche, operator-facing routes — summarized rather than exhaustively described.
 | `GET` | `/api/estimator/health` | Estimator subsystem health check |
 | `GET` | `/api/debug/sprint-collisions` | Sprint-collision audit manifest |
 | `GET` | `/api/debug/api-volume` | API call-volume and cache-hit observability |
+| `GET` | `/api/debug/token-usage/by-agent-model` | Token spend grouped by `agent_role` + `model_name`; optional `?window_start=` ISO-8601 UTC lower bound |
 | `GET` | `/diagnostics` | Low-level server diagnostics page |
 
 ---

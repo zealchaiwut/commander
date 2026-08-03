@@ -245,6 +245,17 @@ def _run_local_backup_in_thread() -> None:
             try:
                 dest = backup_db_local(db_path, backup_dir)
                 _logger.info("local backup written: %s", dest)
+                # Drive WAL checkpointing so the WAL file does not grow
+                # unboundedly; pairs naturally with the backup tick (issue #2013).
+                try:
+                    import db as _db_mod  # noqa: PLC0415 — lazy, same as start_local_backup_scheduler
+                    busy, log, checkpointed = _db_mod.run_wal_checkpoint(db_path)
+                    _logger.debug(
+                        "WAL checkpoint after backup: busy=%d log=%d checkpointed=%d",
+                        busy, log, checkpointed,
+                    )
+                except Exception:
+                    _logger.warning("WAL checkpoint failed (non-fatal)", exc_info=True)
             except RuntimeError as exc:
                 # backup_db_local raises RuntimeError for validated refusals
                 # (corrupt source, 0-byte result, failed copy verify).  The

@@ -2184,6 +2184,42 @@ def _feature_branch_diff_files(worktree_root: Path) -> "frozenset[str]":
     return frozenset()
 
 
+def _capture_feature_branch_data(
+    issue_state: "IssueState",
+    feature_branch: str,
+    target_branch: str,
+    cwd: Path,
+    _try_fn=None,
+) -> None:
+    """Populate feature_commits and tester_test_files on issue_state from git (issue #1952).
+
+    Captures:
+    - feature_commits: SHAs of commits on the feature branch not yet in target_branch.
+    - tester_test_files: test files (tests/ prefix) changed on the feature branch.
+
+    Fails silently on any git error so a missing binary or stale worktree never
+    halts the sprint.
+    """
+    _fn = _try_fn or _try
+    remote_branch = feature_branch if feature_branch.startswith("origin/") else f"origin/{feature_branch}"
+    remote_target = target_branch if target_branch.startswith("origin/") else f"origin/{target_branch}"
+
+    ok_log, log_out, _ = _fn(
+        "git", "log", "--format=%H", remote_branch, f"--not", remote_target,
+        cwd=cwd,
+    )
+    if ok_log and log_out.strip():
+        issue_state.feature_commits = [s.strip() for s in log_out.splitlines() if s.strip()]
+
+    ok_diff, diff_out, _ = _fn(
+        "git", "diff", "--name-only", remote_target, remote_branch,
+        cwd=cwd,
+    )
+    if ok_diff and diff_out.strip():
+        all_files = [f.strip() for f in diff_out.splitlines() if f.strip()]
+        issue_state.tester_test_files = sorted(f for f in all_files if f.startswith("tests/"))
+
+
 def _gate_failure_scope_contaminated(
     issue_num: int,
     repo_root: Optional[Path] = None,
@@ -4240,6 +4276,18 @@ def run_sprint_loop(
                     project=eff_repo or label,
                     action_id=_run_id,
                 )
+                # Capture feature branch commits and test files for the report (issue #1952).
+                if _coder_live_branch:
+                    _cap_cwd = cfg.worktree_coder if cfg is not None else REPO_ROOT
+                    try:
+                        _capture_feature_branch_data(
+                            issue_state=issue_state,
+                            feature_branch=_coder_live_branch,
+                            target_branch=target_branch,
+                            cwd=_cap_cwd,
+                        )
+                    except Exception:
+                        pass
                 state.save(state_path)
                 _post_sprint_status(state, api_url=api_url)
 

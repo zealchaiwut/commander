@@ -28,11 +28,11 @@ Files changed: **10**
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 532 |
+| `apps/dashboard/static/project.html` | 534 |
 | `apps/dashboard/server.py` | 397 |
-| `services/sprint_manager/sprint_manager.py` | 286 |
-| `apps/dashboard/static/dist/bundle.js.map` | 208 |
-| `apps/dashboard/static/dist/bundle.js` | 198 |
+| `services/sprint_manager/sprint_manager.py` | 287 |
+| `apps/dashboard/static/dist/bundle.js.map` | 209 |
+| `apps/dashboard/static/dist/bundle.js` | 199 |
 | `CHANGELOG.md` | 117 |
 | `apps/dashboard/static/app.js` | 106 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 91 |

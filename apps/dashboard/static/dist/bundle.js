@@ -734,15 +734,19 @@
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map((t) => {
-        const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
-        return [t, ownsTab ? 0 : -1];
-      })
+      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map(
+        (t) => {
+          const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
+          return [t, ownsTab ? 0 : -1];
+        }
+      )
     );
   }
   function switchTab(tab, pushHistory) {
     if (tab === "metrics" || tab === "logs" || tab === "status") {
-      console.warn('[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"');
+      console.warn(
+        '[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"'
+      );
       tab = "failures";
     }
     if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {
@@ -826,8 +830,7 @@
     if (pushHistory !== false) {
       window.history.pushState({ slug: _slug, tab }, "", newUrl);
     }
-    if (tab === "tickets" && !_ticketsLoaded) {
-      _ticketsLoaded = true;
+    if (tab === "tickets") {
       loadTickets();
     }
     if (tab === "sprint-mgmt") {
@@ -939,7 +942,6 @@
       return;
     if (effSlug !== _slug) {
       _ticketsRepo = null;
-      _ticketsLoaded = false;
     }
     _slug = effSlug;
     _deepLinkView = view;

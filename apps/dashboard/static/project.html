@@ -2236,6 +2236,7 @@
       .hist-badge { flex-shrink: 1; flex-grow: 0; }
     }
     @media (max-width: 600px) {
+      .fbox-table th:nth-child(2), .fbox-table td:nth-child(2), .fbox-table th:nth-child(6), .fbox-table td:nth-child(6) { display: none; }
       .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-card-head {
@@ -9716,10 +9717,11 @@
       color: var(--text-muted); font-size: 14px;
     }
     @media (max-width: 600px) {
-      .fbox-table th:nth-child(3),
-      .fbox-table td:nth-child(3),
-      .fbox-table th:nth-child(5),
-      .fbox-table td:nth-child(5) { display: none; }
+      /* Hide Sprint (col 2) and Time (col 6) — keep Agent (col 3) and Reason (col 5) visible (issue #2073) */
+      .fbox-table th:nth-child(2),
+      .fbox-table td:nth-child(2),
+      .fbox-table th:nth-child(6),
+      .fbox-table td:nth-child(6) { display: none; }
     }
 
   </style>
@@ -11459,7 +11461,6 @@ let _slug        = null;   // current project slug
 let _activeTab   = 'sprint-mgmt';
 let _homeData    = null;   // cached /api/home response
 let _projectData = null;   // full project config from /api/home
-let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
@@ -12336,13 +12337,13 @@ async function loadTickets() {
       });
       if (proj) repo = proj.repo;
     } catch (err) {
-      container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+      container.innerHTML = '<div class="loading-msg">Failed to load project info. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
       return;
     }
   }
 
   if (!repo) {
-    container.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    container.innerHTML = '<div class="loading-msg">Project not found. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
     return;
   }
 
@@ -12356,7 +12357,7 @@ async function loadTickets() {
     renderTickets(data, repo);
     _ticketsLoadEstimates(data.tickets || [], repo).catch(() => {});
   } catch (err) {
-    container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
+    container.innerHTML = '<div class="loading-msg">Failed to load tickets. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
   }
 }
 

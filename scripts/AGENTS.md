@@ -106,6 +106,7 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 - `backfill_agent_runs_project.py` [DB] — attribute empty agent_runs.project rows; `(--dry-run|--apply) [--db PATH]`
 - `backfill_sprint_project.py` [DB] — attribute empty sprints.project rows; `(--dry-run|--apply) [--db PATH]`
 - `audit_sprint_collisions.py` — read-only audit for sprint label collisions across projects; `[--db PATH] [--runtime-dir PATH]`
+- `audit_sprint_terminal_state_drift.py` [DB] — one-time audit (and optional repair) for terminal state drift: stored state vs what `_any_failed` would derive from issues_json; `[--db PATH] [--project OWNER/REPO] [--apply]`
 - `repair_sprint_collisions.py` [DB] — surgical DB repair for cross-project sprint label collision; `(--dry-run|--apply)`
 - `repair_sprint_inbox_from_github.py` [DB] — fix stale sprint lifecycle rows vs GitHub truth; `--project PROJECT (--dry-run|--apply) [--limit N]`
 - `repair_sprint_lineage.py` [DB] — rebuild sprint lineage DB rows from GitHub truth; `(--dry-run|--apply) --project PROJECT [--db PATH]`

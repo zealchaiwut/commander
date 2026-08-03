@@ -416,6 +416,9 @@ def delete_sprint(sprint_label: str, project: str):
     (commander / "sprints" / f"{sprint_label}-state.json").unlink(missing_ok=True)
     (commander / "sprints" / f"{sprint_label}-goal.txt").unlink(missing_ok=True)
 
+    # Remove the live sprints table row so reconcile-preview reports exists=false (issue #2076).
+    db.transition_sprint_state(sprint_label, "deleted", actor="dashboard", project=project)
+
     for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
         github_client.invalidate(_ck)
 

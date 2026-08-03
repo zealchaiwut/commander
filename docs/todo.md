@@ -154,6 +154,7 @@ intentionally **not fixed yet** — think about A + B before touching them.
 <!-- AUTO:milestones START -->
 <!-- The documentor manages everything between these markers. Do not edit by hand. -->
 
-_No milestones recorded yet. The first entry appears after the next sprint finishes._
+- **sprint-viz9001** (2026-07-31) — Failures inbox, agent narrative persistence, reasoning view, dev-report landing, removal of dead Logs/Analytics tabs (#2019–#2025) — _manual sprint; backfilled 2026-08-03_
+- **sprint-viz9002** (2026-08-03) — Brain search tab (FTS5), ADR series + /decide command, OAuth preflight, non-fatal finalization, worktree-pool self-heal, auto-escalate dead-letter (#2026–#2033) — _manual sprint; backfilled 2026-08-03_
 
 <!-- AUTO:milestones END -->

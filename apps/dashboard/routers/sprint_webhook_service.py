@@ -268,7 +268,7 @@ def build_commander_report(
     issues = state_data.get("issues") or []
     completed_list: list = []
     needs_review_list: list = []
-    dead_letter_list: list = []
+    _status_dead_letter_list: list = []
     n_completed = n_failed = n_skipped = 0
 
     for iss in issues:
@@ -288,7 +288,7 @@ def build_commander_report(
             })
         elif status in ("failed", "error"):
             n_failed += 1
-            dead_letter_list.append({
+            _status_dead_letter_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
                 "attempts": int(iss.get("tester_attempt_count") or 1),
@@ -304,6 +304,15 @@ def build_commander_report(
                 "tests": list(iss.get("tester_test_files") or []),
             })
         # pending / queued / other statuses are not yet attempted — excluded from counts
+
+    # Use persisted dead_letter registry (#1942) as source of truth when available;
+    # fall back to status-derived reconstruction only when the field is absent or empty.
+    _persisted_dead_letter = state_data.get("dead_letter")
+    dead_letter_list: list = (
+        list(_persisted_dead_letter)
+        if _persisted_dead_letter
+        else _status_dead_letter_list
+    )
 
     n_attempted = n_completed + n_failed + n_skipped + len(needs_review_list)
 

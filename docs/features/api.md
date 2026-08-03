@@ -379,7 +379,7 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/agent-guide` | Canonical agent operate guide as `{content, version}`; `version` is a 16-hex SHA-256 fingerprint |
-| `GET` | `/api/projects/{slug}/docs` | List allowed `.md` files in the project's clone root as `[{path, size, mtime}]` |
+| `GET` | `/api/projects/{slug}/docs` | List allowed `.md` files in the project's clone root as `[{path, size, mtime}]`. Nested layout resolves the clone root in `uat`→`main`→`prd` order, preferring the develop-tracking `uat` clone so docs reflect the most current (unmerged) state (issue #2052) |
 | `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one doc's content as `{path, content}` |
 | `GET` | `/api/projects/{slug}/changelog` | Changelog entries from `docs/changelog/{uat,prd}/`, newest-first; filter with `?env=uat|prd&limit=N` |
 | `GET` | `/api/projects/{slug}/docs/scaffold/check` | Check for missing standard docs files |

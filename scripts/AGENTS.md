@@ -53,6 +53,7 @@ review, health gating, and promotion.
 - `finish_feature.py` [GH] — merge feature branch to target branch after tests pass; `--issue N [--repo owner/repo] [--target-branch BRANCH]` (Tester-only)
 - `sprint_estimator.py` — estimate effort/risk for all backlog tickets in a sprint (Sonnet); `<sprint-label> [--repo owner/repo] [--config PATH]`
 - `sprint_review.py` — generate sprint review summary (Haiku); `--sprint-label LABEL [--repo owner/repo]`
+- `run_post_sprint.py` — run post-sprint write-back steps (documenter, review) for a manually-driven sprint; `--sprint-label LABEL [--repo owner/repo] [--dry-run] [--skip-documenter] [--skip-review]`
 - `sprint_planner.py` [GH] — conversational CLI to plan the next sprint; (interactive, auto-detects sprint number)
 - `sprint_init.py` — bootstrap a project for sprint_manager (.commander/sprint.yaml); `--repo owner/repo --repo-root PATH --coder-worktree PATH --tester-worktree PATH`
 - `run_suite_health_gate.py` — run full pytest suite health gate for a sprint; `--sprint-label LABEL [--sprints-dir PATH] [--timeout SECONDS]`

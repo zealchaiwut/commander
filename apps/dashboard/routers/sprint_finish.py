@@ -234,6 +234,12 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 
+    if len(all_labels) <= 1:
+        raise HTTPException(
+            400,
+            detail="No child sprints found — bulk complete requires a parent sprint with at least one child sprint",
+        )
+
     unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label, project=repo)
     children_all_completed = not unsettled_children
     if not children_all_completed:

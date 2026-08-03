@@ -11459,7 +11459,6 @@ let _slug        = null;   // current project slug
 let _activeTab   = 'sprint-mgmt';
 let _homeData    = null;   // cached /api/home response
 let _projectData = null;   // full project config from /api/home
-let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
@@ -12336,13 +12335,13 @@ async function loadTickets() {
       });
       if (proj) repo = proj.repo;
     } catch (err) {
-      container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+      container.innerHTML = '<div class="loading-msg">Failed to load project info. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
       return;
     }
   }
 
   if (!repo) {
-    container.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    container.innerHTML = '<div class="loading-msg">Project not found. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
     return;
   }
 
@@ -12356,7 +12355,7 @@ async function loadTickets() {
     renderTickets(data, repo);
     _ticketsLoadEstimates(data.tickets || [], repo).catch(() => {});
   } catch (err) {
-    container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
+    container.innerHTML = '<div class="loading-msg">Failed to load tickets. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
   }
 }
 

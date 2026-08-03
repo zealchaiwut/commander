@@ -34,6 +34,7 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 import db  # noqa: E402
 import github_client  # noqa: E402
 import projects as projects_module  # noqa: E402
+from sprint_label_re import SPRINT_BASE_LABEL_RE  # noqa: E402
 
 router = APIRouter(tags=["sprint_summaries"])
 
@@ -205,14 +206,13 @@ def get_home():
 
     planned_count = 0
     planned_tickets = 0
-    _sprint_re = re.compile(r"^sprint-\d+$")
     for repo, issues in all_open_by_repo.items():
         running_lbls = running_labels_by_repo.get(repo, set())
         label_ticket_counts: dict[str, int] = {}
         for issue in issues:
             for lbl in issue.get("labels", []):
                 lname = lbl["name"]
-                if _sprint_re.match(lname) and lname not in running_lbls:
+                if SPRINT_BASE_LABEL_RE.match(lname) and lname not in running_lbls:
                     label_ticket_counts[lname] = label_ticket_counts.get(lname, 0) + 1
         planned_count += len(label_ticket_counts)
         planned_tickets += sum(label_ticket_counts.values())

@@ -58,9 +58,10 @@ _ISSUES: list[dict] = [
     _issue(30, "Rework ticket", ["sprint-3", "needs-rework"]),
     # Ready-to-merge sprint (sprint-4)
     _issue(40, "Merge ticket", ["sprint-4", "UAT"]),
-    # Rerun chain — base sprint (sprint-5) + child (sprint-5.1)
+    # Rerun chain — base sprint (sprint-5) + child (sprint-5.1); both finished,
+    # so the chain collapses into lineage (non-running chain — tests AC12 intent)
     _issue(50, "Base sprint ticket", ["sprint-5", "needs-rework"]),
-    _issue(51, "Child sprint ticket", ["sprint-5.1", "in-progress"]),
+    _issue(51, "Child sprint ticket", ["sprint-5.1", "needs-rework"]),
     # Backlog (no sprint label)
     _issue(60, "Unassigned ticket", ["enhancement"]),
     _issue(61, "Another backlog ticket", ["size-M"]),
@@ -73,7 +74,7 @@ _LIFECYCLE_ROWS: list[dict] = [
     {"label": "sprint-3", "project": _PROJECT, "state": "needs_rework", "parent_label": None, "run_ingested_at": "2026-01-01"},
     {"label": "sprint-4", "project": _PROJECT, "state": "ready_to_merge", "parent_label": None, "run_ingested_at": "2026-01-01"},
     {"label": "sprint-5", "project": _PROJECT, "state": "needs_rework", "parent_label": None, "run_ingested_at": "2026-01-01"},
-    {"label": "sprint-5.1", "project": _PROJECT, "state": "running", "parent_label": "sprint-5", "run_ingested_at": None},
+    {"label": "sprint-5.1", "project": _PROJECT, "state": "needs_rework", "parent_label": "sprint-5", "run_ingested_at": "2026-01-01"},
 ]
 
 
@@ -120,7 +121,7 @@ _LIFECYCLE: dict[str, str] = {
     "sprint-3": "needs_rework",
     "sprint-4": "ready_to_merge",
     "sprint-5": "needs_rework",
-    "sprint-5.1": "running",
+    "sprint-5.1": "needs_rework",
 }
 
 

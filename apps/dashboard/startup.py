@@ -35,6 +35,7 @@ import time  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 
 def _auto_install_deps() -> None:
@@ -743,6 +744,52 @@ def _validate_github_repos() -> None:
         )
 
 
+def _warn_nonconforming_sprint_labels() -> None:
+    """Print a warning for any sprint-* labels that fail the canonical regex.
+
+    Uses the issues mirror (zero GitHub quota). Best-effort — never blocks startup.
+    Any issues labelled sprint-viz9001, sprint-viz9002, etc. are invisible on
+    the board; this surfaces them so the operator knows they exist (AC3 #2058).
+    """
+    try:
+        from routers.board_service import find_nonconforming_sprint_labels  # noqa: PLC0415
+    except ImportError:
+        return
+    try:
+        projs = projects_module.load_projects()
+    except Exception:
+        return
+    warned = 0
+    for proj in projs:
+        repo = proj.get("repo", "")
+        if not repo:
+            continue
+        try:
+            mirror = github_client._mirror_labels(repo)
+            if not mirror:
+                continue
+            sprint_like = [
+                lbl["name"] for lbl in mirror
+                if isinstance(lbl, dict) and lbl.get("name", "").startswith("sprint-")
+            ]
+            bad = find_nonconforming_sprint_labels(sprint_like)
+            for lbl in bad:
+                print(
+                    f"[startup-warn] {repo}: sprint label {lbl!r} does not match "
+                    r"^sprint-\d+(\.\d+)?$ — issues with this label are invisible on the board",
+                    flush=True,
+                )
+                warned += 1
+        except Exception:
+            pass
+    if warned:
+        print(
+            f"[startup-warn] {warned} non-conforming sprint label(s) found"
+            " — issues with these labels are invisible on the board",
+            flush=True,
+        )
+
+
 def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
     """Reconcile DB rows stuck at state='running' with no live local sprint.
 
@@ -1236,22 +1283,6 @@ def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
             msg += " It refills hourly; retry shortly."
         return HTTPException(status_code=429, detail=msg)
     return HTTPException(status_code=502, detail=detail)
-
-
-def _settled_done_from_columns(total: int, columns: dict) -> int:
-    """Canonical GitHub-derived "done" = settled work past SIT
-    (uat + done + needs-rework) = total minus the not-yet-settled columns
-    (backlog + in-progress + sit).
-
-    Single source of the GitHub-side count: mirrors the frontend
-    ``_snavSettledDone()`` and the live tier's ``done+skipped+failed`` so the nav
-    pill, sidebar badge, and board running badge can never disagree. The old
-    ``done + uat`` formula undercounted needs-rework tickets; ``total - backlog``
-    (frontend) overcounted by treating in-progress + SIT as done.
-    """
-    columns = columns or {}
-    return max(0, (total or 0) - (columns.get("backlog") or 0)
-               - (columns.get("in-progress") or 0) - (columns.get("sit") or 0))
 
 
 def _sprint_progress_file_path(project: str) -> Optional[Path]:
@@ -2028,7 +2059,7 @@ class BatchLabelsBody(BaseModel):
 
 
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -2075,7 +2106,7 @@ SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
 # sprint_manager validates the value — no validation added here.
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 def _dashboard_actor() -> str:
@@ -2218,13 +2249,14 @@ _PROJECTS_FILE: Path = projects_module.PROJECTS_FILE
 
 
 def _project_root_path(repo: str) -> Path:
-    """Return the project root directory for a given repo (owner/repo).
+    """Return the project root directory for a given repo (``owner/repo`` or slug).
 
-    Supports both nested layout (~/dev/<slug>/) and flat layout
-    (~/dev/<slug>/ as the main clone). Uses ~/dev as base.
+    Delegates to project_resolver.resolve_project_path so the canonical
+    ``owner/repo`` contract is enforced centrally (issue #2064).  Raises
+    HTTPException(404) for unknown projects; never falls back to a default.
     """
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
+    from project_resolver import resolve_project_path as _rpp  # noqa: PLC0415
+    return _rpp(repo)
 
 
 def _coder_clone_path(project_root: Path) -> Path:
@@ -4712,7 +4744,7 @@ def _sprint_set_conflict_blocked(project_root: Path, sprint_label: str, files: l
     existing = _read_plan_json(project_root, sprint_label) or {}
     existing["conflict_blocked"] = {
         "files": files,
-        "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "at": datetime.now(timezone.utc).isoformat(),
     }
     _write_plan_json(project_root, sprint_label, existing)
 
@@ -5125,16 +5157,78 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     return _merge_steps_for_sprint_chain(project_root, repo, base_label)
 
 
+def _get_branch_tip_sha(repo: str, branch: str) -> str | None:
+    """Return the current tip commit SHA of branch, or None if absent."""
+    try:
+        from urllib.parse import quote as _quote
+        ref = _quote(branch, safe="")
+        res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches/{ref}", "--jq", ".commit.sha"],
+            capture_output=True, text=True, timeout=15,
+        )
+        sha = res.stdout.strip()
+        if res.returncode == 0 and sha:
+            return sha
+    except Exception:
+        pass
+    return None
+
+
+def _is_commit_merged_into_branch(repo: str, sha: str, base_branch: str) -> bool:
+    """True if sha is reachable from base_branch (sha was merged into base).
+
+    Uses GitHub compare API: compare/{base}...{sha} with ahead_by == 0
+    means sha has no commits that base doesn't have → sha is an ancestor of base.
+    """
+    try:
+        from urllib.parse import quote as _quote
+        ref = _quote(f"{base_branch}...{sha}", safe="")
+        res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/compare/{ref}", "--jq", ".ahead_by"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if res.returncode != 0:
+            return False
+        return int((res.stdout or "0").strip() or "0") == 0
+    except Exception:
+        return False
+
+
+def _has_merged_pr(repo: str, head: str, base: str) -> bool:
+    """True if a merged PR from head → base exists on GitHub.
+
+    Used by bulk-complete-preview to distinguish a properly-merged-then-deleted
+    branch from a branch that was deleted without merging (issue #2086).
+    """
+    try:
+        pr_res = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", head, "--base", base,
+             "--state", "merged", "--json", "number", "--limit", "1"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if pr_res.returncode == 0 and pr_res.stdout.strip():
+            prs = json.loads(pr_res.stdout)
+            return bool(prs)
+    except Exception:
+        pass
+    return False
+
+
 def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], int | None]:
     """Execute merge steps for Merge Sprint on the requested label.
 
     Returns (errors, develop_pr_number) where develop_pr_number is parsed from
     the sprint branch → develop merge PR (for History / outcome links).
+
+    AC2 (issue #2086): captures the head tip SHA before each merge and verifies
+    it is reachable from the target branch after the merge succeeds, catching
+    silent no-ops where the branch was absent without actually having been merged.
     """
     errors: list[str] = []
     develop_pr: int | None = None
     project_root = _project_root_path(repo)
     for step in _finish_merge_steps(project_root, repo, label):
+        head_sha = _get_branch_tip_sha(repo, step["head"])
         ok, detail, pr_num = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
@@ -5142,8 +5236,21 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
-        elif step.get("base") == "develop" and pr_num:
-            develop_pr = pr_num
+        else:
+            # AC2: verify the tip actually landed in the target after the merge.
+            if head_sha and not _is_commit_merged_into_branch(repo, head_sha, step["base"]):
+                errors.append(
+                    f"{step['head']} → {step['base']}: merge reported success but "
+                    f"tip {head_sha[:8]} is not reachable from {step['base']} — silent no-op"
+                )
+            elif step.get("base") == "develop" and pr_num:
+                develop_pr = pr_num
+            if head_sha is None:
+                logger.warning(
+                    "[merge-verify] could not verify merge reachability for %s → %s"
+                    " — tip SHA unavailable",
+                    step["head"], step["base"],
+                )
     return errors, develop_pr
 
 

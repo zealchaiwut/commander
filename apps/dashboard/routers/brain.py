@@ -28,17 +28,19 @@ _REPO_ROOT = Path(__file__).parents[3]   # repo root
 
 
 def _resolve_docs_root(project: str | None) -> Path:
-    """Return the docs root for a given project slug, or the default repo root."""
-    if project:
-        try:
-            from . import docs_service  # noqa: PLC0415
-            return docs_service.resolve_clone_root(project)
-        except HTTPException:
-            pass
-        except Exception:
-            pass
-    # Default: use the Commander repo the server is running from
-    return _REPO_ROOT
+    """Return the docs root for a given project, or the default repo root when absent.
+
+    When *project* is None the server's own docs are used (intentional default).
+    When *project* is provided, it is resolved via docs_service.resolve_clone_root
+    which accepts both ``owner/repo`` and bare slug.  An unknown project raises
+    HTTPException(404) — resolution failure NEVER falls back to a default project
+    (issue #2052 / #2064).
+    """
+    if project is None:
+        # No project specified → serve the Commander repo the server runs from.
+        return _REPO_ROOT
+    from . import docs_service  # noqa: PLC0415
+    return docs_service.resolve_clone_root(project)
 
 
 @router.get("/api/brain/search")

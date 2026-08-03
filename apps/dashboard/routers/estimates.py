@@ -20,19 +20,13 @@ import db  # noqa: E402
 import github_client  # noqa: E402
 from sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
-
 router = APIRouter()
 
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 def _server():
     import server
     return server
-
-
-def _project_root_path(repo):
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root):
@@ -54,7 +48,9 @@ def _sprint_json_read(path):
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 
 _SIZE_LABELS = {"size-S", "size-M", "size-L", "size-XL"}
 _SIZE_LETTER_BY_LABEL = {"size-S": "S", "size-M": "M", "size-L": "L", "size-XL": "XL"}

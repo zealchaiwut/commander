@@ -42,6 +42,7 @@ from sizing import (  # noqa: E402
     letter_from_minutes as _letter_from_minutes,
     minutes_from_letter as _minutes_from_letter,
 )
+from .hermes_models import SprintLiveResponse  # noqa: E402
 
 router = APIRouter(tags=["sprint_live"])
 
@@ -420,7 +421,7 @@ def get_issue_log(sprint_label: str, project: str, issue_num: int, tail_lines: i
     return read_log("issue", project_root, label=sprint_label, issue_num=issue_num, tail_lines=tail_lines)
 
 
-@router.get("/api/sprints/{sprint_label}/live")
+@router.get("/api/sprints/{sprint_label}/live", response_model=SprintLiveResponse)
 def get_sprint_live_snapshot(sprint_label: str, project: str):
     """Return a JSON snapshot of the live running sprint.
 

@@ -84,6 +84,30 @@ tracked "done" stage before the human sign-off, so any "X/Y done" count or
 completion percentage should use `done + uat` as the numerator (surface UAT
 separately as the awaiting-sign-off count). Applied in the sprint nav pill.
 
+## project= Query Parameter Contract (issue #2064)
+
+The canonical format for the `project=` query parameter across **all** Commander
+API endpoints is **`owner/repo`** (e.g. `zealchaiwut/commander`).  This is what
+`/api/home` publishes in the `repo` field and is the form the frontend uses.
+
+For backwards compatibility, the bare **slug** form (e.g. `commander`) is also
+accepted.  Normalisation happens **centrally** in
+`apps/dashboard/project_resolver.resolve_project_path` — never per-endpoint.
+
+**Rules for implementors:**
+- Use `from project_resolver import resolve_project_path as _project_root_path`
+  in new router modules — never copy-paste the slug-extraction one-liner.
+- Resolution failure MUST raise `HTTPException(404)` — never fall back to a
+  default project or Commander's own data.
+- `project=` absent (i.e. `None`) may be intentional (e.g. brain endpoints
+  default to server-local docs when `project=` is not provided) — handle `None`
+  before calling `resolve_project_path`.
+
+**Do not:**
+- Add a new per-module `_project_root_path` helper — use `project_resolver`.
+- Swallow a `404` from `resolve_project_path` / `resolve_clone_root` with a
+  bare `except` that falls back to another project's data.
+
 ## Code Conventions
 
 - Test files in `tests/` named `test_<feature>__<criterion>.py`

@@ -61,8 +61,31 @@ def _run_stats_service():
 
 _PROJECTS_BASE = Path.home() / "dev"
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
+_SPRINT_PREFIX_RE = re.compile(r"^sprint-")
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
+
+# Actionable error text used whenever a non-conforming sprint label is rejected.
+# Exported so sprint_labels.py and sprint_run.py can reference it without duplicating
+# the exact wording (the "invisible on the board" consequence is the key signal).
+SPRINT_LABEL_FORMAT_ERROR = (
+    r"sprint label must match `^sprint-\d+(\.\d+)?$`"
+    " — free-text labels are not visible on the board"
+)
+
+
+def find_nonconforming_sprint_labels(sprint_label_strings: list[str]) -> list[str]:
+    """Return labels starting with 'sprint-' that fail the canonical regex.
+
+    Used at startup to surface pre-existing sprint labels that are invisible on
+    the board (e.g. sprint-viz9001).  Pure function — safe to call in tests.
+    """
+    return [
+        lbl for lbl in sprint_label_strings
+        if _SPRINT_PREFIX_RE.match(lbl) and not _SPRINT_LABEL_RE.match(lbl)
+    ]
 
 # States that indicate a sprint has had at least one run attempt.
 _RUN_INDICATOR_STATES = frozenset({
@@ -728,7 +751,12 @@ def assemble_board(project: str) -> dict[str, Any]:
             sprint_issues = issues_by_sprint.get(latest, [])
             card = _build_sprint_card(latest, project, sprint_issues, est_dir, lc)
             card["chain"] = members_sorted
-            sections["lineage"].append(card)
+            # A currently-running rerun chain is operator-visible in the Running tab;
+            # only route to lineage when the active member is not executing.
+            if lc == "running":
+                sections["running"].append(card)
+            else:
+                sections["lineage"].append(card)
 
         else:
             # Singleton sprint → bucket by lifecycle state
@@ -746,6 +774,9 @@ def assemble_board(project: str) -> dict[str, Any]:
                 continue
 
             card = _build_sprint_card(label, project, sprint_issues, est_dir, lc)
+            # Post-run sprint with 0 tickets is a zombie — frontend suppresses action row
+            if lc not in ("running", "draft") and not sprint_issues:
+                card["stale_no_tickets"] = True
             bucket = _card_bucket(lc, _has_run(label))
             sections[bucket].append(card)
 

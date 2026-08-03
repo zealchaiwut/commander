@@ -11,31 +11,33 @@ Also covers the two companion fixes shipped together:
   - lint gate auto-fix-and-commit (stop lint churn burning coder fix-rounds)
 """
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_PROJECT_HTML = _REPO / "apps" / "dashboard" / "static" / "project.html"
-_SERVER = _REPO / "apps" / "dashboard" / "server.py"
+_DASHBOARD = _REPO / "apps" / "dashboard"
+_PROJECT_HTML = _DASHBOARD / "static" / "project.html"
+_SERVER = _DASHBOARD / "server.py"
 _SPRINT_MGR = _REPO / "services" / "sprint_manager" / "sprint_manager.py"
+
+for _p in (str(_DASHBOARD), str(_REPO)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from routers.sprint_nav import _settled_done_from_columns as _settled_fn  # noqa: E402
 
 
 # ── Backend canonical formula (pure unit test) ──────────────────────────────
 
 def _settled():
-    """Compile just `_settled_done_from_columns` from server.py source.
+    """Return the live ``_settled_done_from_columns`` from routers.sprint_nav.
 
-    The function is pure (uses only ``max`` + dict.get), so we exec it in
-    isolation rather than importing the whole server module — that pulls FastAPI
-    routers with optional deps (sse_starlette) not always present in a bare venv.
+    Direct import rather than exec/compile so a rename or move causes an
+    ImportError here instead of a silent divergence (issue #2049, AC3 / #1746).
     """
-    src = _SERVER.read_text(encoding="utf-8")
-    start = src.index("def _settled_done_from_columns(")
-    nxt = src.index("\ndef ", start + 1)
-    ns: dict = {}
-    exec(compile(src[start:nxt], "<settled>", "exec"), ns)  # noqa: S102
-    return ns["_settled_done_from_columns"]
+    return _settled_fn
 
 
 @pytest.mark.parametrize("total,columns,expected", [

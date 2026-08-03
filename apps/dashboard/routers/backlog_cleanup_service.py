@@ -11,8 +11,9 @@ import re
 from typing import Any
 
 import github_client as gc
+from sprint_label_re import SPRINT_LABEL_RE
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(?:\.\d+)*$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _FOLLOW_UP_TITLE_RE = re.compile(r"^\[follow-up\]", re.I)
 _SEVERITY_RE = re.compile(r"##\s*Severity\s*\n\s*(nit|suggestion)\b", re.I)
 _TEST_TITLE_EXACT = frozenset({

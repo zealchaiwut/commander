@@ -64,6 +64,20 @@ export function _histResetLedgerCache() {
   _histLedgerCacheAt = 0;
   _histLedgerInflight = null;
 }
+
+export function _histIsLoading() {
+  return !!_histLedgerInflight;
+}
+
+function _histErrorHtml() {
+  return `<div class="hist-ledger-error" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    <span>Could not load sprint history.</span>
+    <button class="hist-ledger-retry" onclick="_histForceRefresh()">
+      <i class="ti ti-refresh"></i> Retry
+    </button>
+  </div>`;
+}
 let _histRenderRaf = 0;
 
 // Stale-branch scan (issue #808): label -> { sprint, count, branches[],
@@ -2454,14 +2468,20 @@ export function _histRenderLedger(sprints) {
     const emptyMsg = _histShowClosed
       ? "No sprint history yet — finished and deleted sprints appear here."
       : "Inbox clear — no sprints need action. Toggle Show completed for the archive.";
-    el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
+    el.innerHTML = `<div class="hist-ledger-empty" role="status">
+      <i class="ti ti-inbox-off" aria-hidden="true"></i>
+      <span>${emptyMsg}</span>
+    </div>`;
     return;
   }
   let groups = _histGroupSprints(sprints);
   if (!_histShowClosed) {
     groups = groups.filter(_histGroupHasActionable);
     if (!groups.length) {
-      el.innerHTML = `<div class="hist-ledger-empty">Inbox clear — no sprints need action. Toggle Show completed for the archive.</div>`;
+      el.innerHTML = `<div class="hist-ledger-empty" role="status">
+        <i class="ti ti-inbox-off" aria-hidden="true"></i>
+        <span>Inbox clear — no sprints need action. Toggle Show completed for the archive.</span>
+      </div>`;
       return;
     }
   }
@@ -2501,10 +2521,13 @@ export function _histPrefetchLedger(repo) {
 
 export async function _histLoadLedger(repo, opts) {
   opts = opts || {};
-  if (!repo) return;
+  const background = opts.background === true;
+  if (!repo) {
+    if (!background) _histRenderLedger([]);
+    return;
+  }
   const el = document.getElementById("hist-ledger");
   const force = opts.force === true;
-  const background = opts.background === true;
   const hasCache =
     repo === _histLedgerCacheRepo && (_histLedgerData || []).length > 0;
   const fresh =
@@ -2522,6 +2545,10 @@ export async function _histLoadLedger(repo, opts) {
   }
 
   if (_histLedgerInflight) {
+    if (!background) {
+      if (!hasCache) _histShowLedgerSkeleton();
+      else _histRenderLedger(_histLedgerData);
+    }
     await _histLedgerInflight;
     if (!background && (_histLedgerData || []).length) {
       _histRenderLedger(_histLedgerData);
@@ -2561,7 +2588,7 @@ export async function _histLoadLedger(repo, opts) {
       }
       if (!resp.ok) {
         if (!hasCache && el && !background) {
-          el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+          el.innerHTML = _histErrorHtml();
         }
         return;
       }
@@ -2582,7 +2609,7 @@ export async function _histLoadLedger(repo, opts) {
       }
     } catch (_) {
       if (!hasCache && el && !background) {
-        el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+        el.innerHTML = _histErrorHtml();
       }
     } finally {
       if (_histLedgerInflight === loadPromise) _histLedgerInflight = null;

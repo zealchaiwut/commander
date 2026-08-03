@@ -7,15 +7,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 
 from . import dev_report_service as _svc
+from .hermes_models import DevReportResponse
 
 router = APIRouter(tags=["dev-report"])
 
 
-@router.get("/api/dev-report")
+@router.get("/api/dev-report", response_model=DevReportResponse)
 def get_dev_report(
     date: Optional[str] = None,
     force: bool = False,
@@ -24,7 +24,7 @@ def get_dev_report(
 
     - ``date`` (YYYY-MM-DD): defaults to Bangkok today when omitted.
     - ``force=1``: regenerate inline, persist, then return.
-    - No artifact + no force → 404 with {\"error\": \"...\"}.
+    - No artifact + no force → 404 with {\"detail\": \"...\"}.
     """
     d = date or _svc._bkk_today()
 
@@ -34,8 +34,5 @@ def get_dev_report(
 
     stored = _svc.get_dev_report_artifact(d)
     if stored is None or stored["payload"] is None:
-        return JSONResponse(
-            status_code=404,
-            content={"error": f"No dev report artifact found for {d}"},
-        )
+        raise HTTPException(status_code=404, detail=f"No dev report artifact found for {d}")
     return stored["payload"]

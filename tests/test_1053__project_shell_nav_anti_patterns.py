@@ -260,20 +260,21 @@ class TestFocusOrderAndKeyboardAccess:
         )
 
     def test_settings_tab_last_in_dom_order(self):
-        """Settings tab must come after the Manage and Planning groups."""
+        """Settings tab must come after the Manage group."""
         pos_settings = HTML.find('id="stab-settings"')
-        pos_planning = HTML.find('id="stab-planning-trigger"')
-        assert pos_settings != -1 and pos_planning != -1
-        assert pos_planning < pos_settings, (
-            "Settings tab must come after Planning group in DOM focus order"
+        pos_manage = HTML.find('id="stab-manage-trigger"')
+        assert pos_settings != -1 and pos_manage != -1, (
+            "stab-settings and stab-manage-trigger elements must be present"
+        )
+        assert pos_manage < pos_settings, (
+            "Settings tab must come after Manage group in DOM focus order"
         )
 
     def test_dropdown_triggers_have_aria_haspopup(self):
-        """Manage and Planning dropdown triggers must declare aria-haspopup."""
+        """Manage dropdown trigger must declare aria-haspopup."""
         assert 'id="stab-manage-trigger"' in HTML
-        # Both trigger buttons should have aria-haspopup
         triggers = re.findall(
-            r'<button[^>]+id="stab-(?:manage|planning)-trigger"[^>]*>', HTML
+            r'<button[^>]+id="stab-manage-trigger"[^>]*>', HTML
         )
         for tag in triggers:
             assert "aria-haspopup" in tag, (
@@ -281,11 +282,11 @@ class TestFocusOrderAndKeyboardAccess:
             )
 
     def test_dropdown_triggers_have_aria_expanded(self):
-        """Manage and Planning dropdown triggers must declare aria-expanded."""
+        """Manage dropdown trigger must declare aria-expanded."""
         triggers = re.findall(
-            r'<button[^>]+id="stab-(?:manage|planning)-trigger"[^>]*>', HTML
+            r'<button[^>]+id="stab-manage-trigger"[^>]*>', HTML
         )
-        assert triggers, "No Manage/Planning trigger buttons found"
+        assert triggers, "No Manage trigger buttons found"
         for tag in triggers:
             assert "aria-expanded" in tag, (
                 f"Dropdown trigger must have aria-expanded: {tag}"
@@ -309,15 +310,14 @@ class TestFocusOrderAndKeyboardAccess:
             )
 
     def test_all_tab_elements_are_buttons(self):
-        """The known top-level tab buttons (Sprint, Issues, Settings, Manage,
-        Planning triggers) must all be <button> elements — automatically focusable
+        """The known top-level tab buttons (Sprint, Issues, Settings, Manage)
+        must all be <button> elements — automatically focusable
         and keyboard-activatable."""
         known_tab_ids = [
             "stab-sprint-mgmt",
             "stab-tickets",
             "stab-settings",
             "stab-manage-trigger",
-            "stab-planning-trigger",
         ]
         for tid in known_tab_ids:
             # Find the opening tag for this element
@@ -447,28 +447,6 @@ class TestShellAlignment:
             f".stab-dropdown .stab border-radius must use var(--radius-*); found: {val!r}"
         )
 
-    def test_hnav_milestone_gap_uses_token(self):
-        """Active-milestone indicator gap must use var(--space-*) not 8px."""
-        rule = _first_rule_body(STYLE, r"\.hnav-milestone")
-        assert rule, ".hnav-milestone not found"
-        gap_m = re.search(r"\bgap\s*:\s*([^;]+)", rule)
-        assert gap_m, "No gap in .hnav-milestone"
-        val = gap_m.group(1).strip()
-        assert "var(--" in val, (
-            f".hnav-milestone gap must use a CSS token; found: {val!r}"
-        )
-
-    def test_hnav_milestone_border_radius_uses_token(self):
-        """Active-milestone indicator border-radius must use var(--radius-*)."""
-        rule = _first_rule_body(STYLE, r"\.hnav-milestone")
-        assert rule
-        br = re.search(r"\bborder-radius\s*:\s*([^;]+)", rule)
-        assert br, "No border-radius in .hnav-milestone"
-        val = br.group(1).strip()
-        assert "var(--radius-" in val, (
-            f".hnav-milestone border-radius must use var(--radius-*); found: {val!r}"
-        )
-
 
 # ── AC7 — No new magic CSS in shell ──────────────────────────────────────────
 
@@ -536,28 +514,6 @@ class TestNoNewMagicCSS:
             f".stab-trigger .stab-caret font-size must use var(--font-size-*); found: {val!r}"
         )
 
-    def test_hnav_ms_count_font_size_uses_token(self):
-        """Milestone count text font-size must use var(--font-size-*) not 11px."""
-        rule = _first_rule_body(STYLE, r"\.hnav-ms-count")
-        assert rule, ".hnav-ms-count not found"
-        fs = re.search(r"\bfont-size\s*:\s*([^;]+)", rule)
-        assert fs, "No font-size in .hnav-ms-count"
-        val = fs.group(1).strip()
-        assert "var(--font-size-" in val, (
-            f".hnav-ms-count font-size must use var(--font-size-*); found: {val!r}"
-        )
-
-    def test_hnav_milestone_font_size_uses_token(self):
-        """Milestone indicator base font-size must use var(--font-size-*) not 12px."""
-        rule = _first_rule_body(STYLE, r"\.hnav-milestone")
-        assert rule
-        fs = re.search(r"\bfont-size\s*:\s*([^;]+)", rule)
-        assert fs, "No font-size in .hnav-milestone"
-        val = fs.group(1).strip()
-        assert "var(--font-size-" in val, (
-            f".hnav-milestone font-size must use var(--font-size-*); found: {val!r}"
-        )
-
 
 # ── AC8 — All tabs functional ─────────────────────────────────────────────────
 
@@ -570,7 +526,6 @@ class TestTabsFunctional:
         "logs",
         "deploy",
         "metrics",
-        "roadmap",
     ])
     def test_switchtab_call_present(self, tab: str):
         """switchTab() call for each tab must still be in the HTML."""
@@ -648,9 +603,6 @@ class TestTabBodyUnchanged:
 
     def test_deploy_pane_present(self):
         assert 'id="pane-deploy"' in HTML
-
-    def test_roadmap_pane_present(self):
-        assert 'id="pane-roadmap"' in HTML or "stab-roadmap" in HTML
 
     def test_switch_tab_function_defined(self):
         assert "function switchTab" in HTML or "switchTab" in HTML

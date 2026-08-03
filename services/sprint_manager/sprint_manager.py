@@ -181,6 +181,7 @@ sys.path.insert(0, str(DASHBOARD_DIR))
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(DASHBOARD_DIR / ".env")
 import github_client  # noqa: E402
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
 
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
@@ -822,7 +823,7 @@ RUN_MUTABLE_LABELS: frozenset[str] = (
     else frozenset({"in-progress", "SIT", "UAT", "needs-rework", "blocked"})
 )
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)?\s+Executive Summary$")
 
 
@@ -2120,6 +2121,138 @@ def handle_post_tester(
 # ── agent dispatch helpers ────────────────────────────────────────────────────
 # _build_failure_suffix imported from services.sprint_manager.failures (issue #1279).
 
+# ── gate scope contamination detection (issue #2142, #2148) ──────────────────
+
+def _path_in_diff(candidate: str, diff_files: "frozenset[str]") -> bool:
+    """Return True if candidate path matches any file in the diff set.
+
+    Handles mismatched prefix lengths — e.g. ``advisor.py`` matches
+    ``services/sprint_manager/advisor.py`` in diff_files and vice-versa.
+    """
+    cand = candidate.removeprefix("./")
+    for df in diff_files:
+        if cand == df:
+            return True
+        if cand.endswith("/" + df):
+            return True
+        if df.endswith("/" + cand):
+            return True
+    return False
+
+
+def _feature_branch_diff_files(worktree_root: Path) -> "frozenset[str]":
+    """Return files changed on the current feature branch vs its merge-base.
+
+    Tries common base-branch names in order; returns an empty frozenset if
+    git is unavailable or no base can be found (safe: callers treat empty as
+    "can't determine").
+
+    In sprint mode (COMMANDER_MERGE_TARGET set to a non-develop branch), the
+    sprint branch is prepended to the candidate list so the merge-base resolves
+    against the sprint branch rather than develop. Without this, sibling sprint
+    tickets' files would pollute the "own diff" set (#2072 / #2155 scenario).
+    """
+    merge_target = os.environ.get("COMMANDER_MERGE_TARGET", "")
+    if merge_target and merge_target != "develop":
+        base_candidates: tuple[str, ...] = (
+            f"origin/{merge_target}",
+            merge_target,
+            "origin/develop",
+            "develop",
+            "origin/master",
+            "master",
+        )
+    else:
+        base_candidates = ("origin/develop", "develop", "origin/master", "master")
+    for base in base_candidates:
+        try:
+            mb = subprocess.run(
+                ["git", "-C", str(worktree_root), "merge-base", "HEAD", base],
+                capture_output=True, text=True, timeout=5,
+            )
+            if mb.returncode != 0:
+                continue
+            merge_base = mb.stdout.strip()
+            diff = subprocess.run(
+                ["git", "-C", str(worktree_root), "diff", "--name-only", merge_base, "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if diff.returncode == 0:
+                return frozenset(p.strip() for p in diff.stdout.splitlines() if p.strip())
+        except Exception:
+            continue
+    return frozenset()
+
+
+def _gate_failure_scope_contaminated(
+    issue_num: int,
+    repo_root: Optional[Path] = None,
+    diff_files: "Optional[frozenset[str]]" = None,
+) -> bool:
+    """Return True if the latest gate failure sidecar is caused by cross-ticket
+    file scope leakage — i.e. it only references files belonging to OTHER tickets.
+
+    Two detection modes (issue #2148 extends the original #2142 AC4):
+
+    1. **Test files** — ``tests/...__<M>.py`` filename patterns.  If ALL M
+       differ from ``issue_num`` the failure is foreign-ticket leakage.
+
+    2. **Source files** — any other ``.py`` path found in the failure detail,
+       cross-referenced against ``diff_files`` (the set of files the current
+       ticket's feature branch actually changed).  If ``diff_files`` is non-empty
+       and a source file is NOT in it the file is treated as foreign.  When
+       ``diff_files`` is ``None`` or empty the source-file check is skipped and
+       the function falls back to test-file-only detection.
+
+    Reads ``.commander/runtime/last-failure-<N>.json`` written by
+    ``_revert_to_sit_aggregate``.  Returns False (not contaminated) on any I/O
+    or parse error so the dead-letter counter is never skipped by accident.
+    """
+    import re as _re  # noqa: PLC0415
+    effective_root = repo_root or REPO_ROOT
+    sc_path = effective_root / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+    try:
+        data = json.loads(sc_path.read_text(encoding="utf-8"))
+        detail = data.get("detail", "")
+    except (OSError, json.JSONDecodeError, ValueError):
+        return False
+
+    # ── 1. Test files: extract ticket numbers from tests/__<N>.py pattern ─────
+    test_ticket_nums = set(_re.findall(r'tests/[^\s/]+__(\d+)\.py', detail))
+    own_in_tests = str(issue_num) in test_ticket_nums
+
+    # ── 2. Source files: non-test .py paths, checked against diff_files ───────
+    # Only active when diff_files is a non-empty frozenset (caller computed it).
+    can_check_sources = bool(diff_files)
+    source_paths: "set[str]" = set()
+    own_in_sources = False
+    if can_check_sources:
+        all_py = set(_re.findall(r'[^\s"\'()]+\.py', detail))
+        # Exclude paths already covered by the test-file regex above
+        _test_pat = _re.compile(r'tests/[^\s/]+__\d+\.py$')
+        source_paths = {p for p in all_py if not _test_pat.search(p)}
+        if source_paths:
+            own_in_sources = any(
+                _path_in_diff(p, diff_files)  # type: ignore[arg-type]
+                for p in source_paths
+            )
+
+    # ── Decision ──────────────────────────────────────────────────────────────
+    has_test_refs = bool(test_ticket_nums)
+    has_source_refs = bool(source_paths)  # only non-empty when can_check_sources
+
+    if not has_test_refs and not has_source_refs:
+        # Nothing detectable → not contaminated (safe default)
+        return False
+
+    if own_in_tests or own_in_sources:
+        # At least one file belongs to this ticket → not contaminated
+        return False
+
+    # All detected file references are attributable to foreign tickets
+    return True
+
+
 # ── unified failure-recording chokepoint ─────────────────────────────────────
 
 def _build_crash_detail(log_path: Path, exit_code: Optional[int] = None,
@@ -2390,6 +2523,25 @@ def _pool_release(slot: Optional[Path]) -> None:
     """Return a pool slot acquired by _pool_acquire (issue #1411)."""
     if slot is not None and _ACTIVE_WORKTREE_POOL is not None:
         _ACTIVE_WORKTREE_POOL.release(slot)
+
+
+def _assert_pool_has_slots(pool: "_WorktreePool", requested_slots: int) -> None:
+    """Fail fast if the pool created 0 usable slots (issue #2081 AC3).
+
+    A pool with 0 slots means git worktree add failed for every slot — most
+    likely because base_branch does not exist in the repo.  Without this check
+    the first acquire() call blocks for ACQUIRE_TIMEOUT_SECONDS (1800s) before
+    raising a misleading TimeoutError about a 'prior release() failure'.
+    Raising here immediately gives a clear, actionable error message.
+    """
+    with pool._lock:
+        created = len(pool._free)
+    if created == 0:
+        raise RuntimeError(
+            f"[worktree-pool] 0/{requested_slots} slots created for branch"
+            f" {pool.base_branch!r} — aborting sprint setup. Verify that the"
+            f" branch exists and is reachable from the coder worktree."
+        )
 
 
 # _apply_token_ceiling moved to state.py (issue #1948) so pipeline.py can import
@@ -3296,14 +3448,21 @@ def run_sprint_preflight(
         _pool = _WorktreePool(
             pool_dir=_pool_dir,
             repo_root=_pool_repo_root,
-            base_branch=sprint_branch,
+            # issue #2081 AC1: bind to target_branch (the branch that actually
+            # exists), not sprint_branch (which is skipped when target_branch
+            # is explicitly set, e.g. mode=overnight → --target-branch develop).
+            base_branch=target_branch,
             slots=_pool_slots,
             requirements_file=Path(_pool_req) if _pool_req else None,
         )
-        _pool.create()
+        _pool_created = _pool.create()
         _ACTIVE_WORKTREE_POOL = _pool
+        # issue #2081 AC3: fail fast when no slots were created rather than
+        # blocking for 1800s inside the first acquire() call.
+        _assert_pool_has_slots(_pool, _pool_slots)
+        # issue #2081 AC2: log the actual created count, not the configured count.
         sys.stdout.write(str(
-            f"  [worktree-pool] {_pool_slots} slot(s) ready"
+            f"  [worktree-pool] {_pool_created} slot(s) ready"
             f" (max_coder_slots={_pool_slots})\n"
         ))
 
@@ -4401,28 +4560,57 @@ def run_sprint_loop(
             # failure recorded during the fix loop (issue #701).
             _publish_gate_failure_analyses(num, repo_name=eff_repo, cfg=cfg)
             _neon_ticket_status(label, num, "failed", _eff_sprints_dir)
-            # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
-            if not any(d.get("ticket_id") == num for d in state.dead_letter):
-                state.dead_letter.append({
-                    "ticket_id": num,
-                    "title": issue_state.title,
-                    "attempts": issue_state.fix_attempts,
-                    "last_error": issue_state.last_error,
-                })
-            # Dead-letter escalation: check cross-run count; fire LOUD alert +
-            # flag as blocked when threshold is reached (issue #2033).
-            _dl_threshold = get_escalation_threshold(cfg)
-            check_dead_letter_escalation(
-                ticket_id=num,
-                title=issue_state.title,
-                last_error=issue_state.last_error,
-                sprints_dir=_eff_sprints_dir,
-                threshold=_dl_threshold,
-                alert_modes=alert_modes,
-                cfg=cfg,
-                repo=eff_repo,
-                sprint_label=label,
+            # AC4 (issue #2142): skip dead-letter increment when gate failure is
+            # attributable to an earlier ticket's files leaking into this ticket's
+            # gate scope (cross-ticket file scope contamination).  The three-dot
+            # diff fix prevents this going forward; this guard protects against
+            # any residual case where the sidecar only references foreign tickets.
+            # issue #2148: also check non-test source files via the feature-branch
+            # diff so advisor*.py / roadmap*.py style leakage is caught too.
+            _diff_files = (
+                _feature_branch_diff_files(cfg.worktree_coder)
+                if cfg is not None else frozenset()
             )
+            _scope_contaminated = _gate_failure_scope_contaminated(
+                num, repo_root=REPO_ROOT, diff_files=_diff_files,
+            )
+            if _scope_contaminated:
+                try:
+                    structured_log.warn(
+                        "dead_letter_scope_contamination",
+                        f"#{num} gate failure appears caused by another ticket's files "
+                        f"— skipping dead-letter increment (issue #2142)",
+                        issue_num=num,
+                    )
+                except Exception:
+                    pass
+                sys.stdout.write(str(
+                    f"  [dead-letter] #{num} failure looks like scope contamination "
+                    f"(foreign ticket files only) — skipping dead-letter count\n"
+                ))
+            else:
+                # Dead-letter registry: append entry for this ticket if not already present (issue #1942).
+                if not any(d.get("ticket_id") == num for d in state.dead_letter):
+                    state.dead_letter.append({
+                        "ticket_id": num,
+                        "title": issue_state.title,
+                        "attempts": issue_state.fix_attempts,
+                        "last_error": issue_state.last_error,
+                    })
+                # Dead-letter escalation: check cross-run count; fire LOUD alert +
+                # flag as blocked when threshold is reached (issue #2033).
+                _dl_threshold = get_escalation_threshold(cfg)
+                check_dead_letter_escalation(
+                    ticket_id=num,
+                    title=issue_state.title,
+                    last_error=issue_state.last_error,
+                    sprints_dir=_eff_sprints_dir,
+                    threshold=_dl_threshold,
+                    alert_modes=alert_modes,
+                    cfg=cfg,
+                    repo=eff_repo,
+                    sprint_label=label,
+                )
             _ceiling_stop = _apply_token_ceiling(state, token_ceiling)  # issue #1943
             state.save(state_path)
             _post_sprint_status(state, api_url=api_url, project=eff_repo)

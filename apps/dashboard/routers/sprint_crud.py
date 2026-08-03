@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -33,8 +32,6 @@ if str(_DASHBOARD_ROOT) not in sys.path:
 import db          # noqa: E402
 import github_client  # noqa: E402
 from .board_cache import invalidate_board  # noqa: E402
-from services.sprint_manager.sprint_creation import SprintCreationError  # noqa: E402
-
 router = APIRouter(tags=["sprint_crud"])
 
 
@@ -386,9 +383,9 @@ def delete_sprint(sprint_label: str, project: str):
         raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
 
     if srv._is_sprint_running(srv._project_root_path(project), sprint_label):
-        return JSONResponse(
+        raise HTTPException(
             status_code=409,
-            content={"error": "Sprint is currently running.", "suggestion": "Cancel the sprint first, then delete."},
+            detail="Sprint is currently running. Cancel the sprint first, then delete.",
         )
 
     project_root = srv._project_root_path(project)
@@ -418,6 +415,9 @@ def delete_sprint(sprint_label: str, project: str):
 
     (commander / "sprints" / f"{sprint_label}-state.json").unlink(missing_ok=True)
     (commander / "sprints" / f"{sprint_label}-goal.txt").unlink(missing_ok=True)
+
+    # Remove the live sprints table row so reconcile-preview reports exists=false (issue #2076).
+    db.transition_sprint_state(sprint_label, "deleted", actor="dashboard", project=project)
 
     for _ck in ("open_issues_body:", "open_issues:", "issues:", "sprints:"):
         github_client.invalidate(_ck)

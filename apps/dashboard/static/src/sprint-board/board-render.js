@@ -103,6 +103,10 @@ export function _smgmtAggToRenderData(agg) {
     ["lineage", sections.lineage || []],
   ];
 
+  // Sections where a 0-ticket card is a zombie — action row is suppressed
+  const _postRunSections = new Set(["needs_rework", "ready_to_merge"]);
+  const staleNoTicketLabels = new Set();
+
   for (const [sectionName, cards] of sectionEntries) {
     for (const card of cards) {
       const label = card.label;
@@ -111,6 +115,11 @@ export function _smgmtAggToRenderData(agg) {
       sprintLabels.add(label);
       aggregateBuckets[label] = sectionName;
       sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+
+      // Propagate server stale_no_tickets flag; only valid for post-run sections
+      if (card.stale_no_tickets && _postRunSections.has(sectionName)) {
+        staleNoTicketLabels.add(label);
+      }
 
       // Tickets with sprint_label set (only for the card's own label)
       for (const t of card.tickets || []) {
@@ -173,6 +182,7 @@ export function _smgmtAggToRenderData(agg) {
     sprint_has_run,
     sprint_signoff: {},
     _aggregateBuckets: aggregateBuckets,
+    _staleNoTicketLabels: staleNoTicketLabels,
   };
 }
 
@@ -481,6 +491,38 @@ export function _smgmtShouldCollapseToLineage(
   const latest = _smgmtLatestLineageLabel(base, parents, rerunInto, order);
   if (!latest || label === latest) return false;
   return _smgmtCompareSprintLabels(label, latest) < 0;
+}
+
+/**
+ * Pure helper for the "Clean up empty sprints" bulk action (issue #457).
+ *
+ * Computes the leading consecutive run of plain sprint-N labels with 0 tickets.
+ * Sub-sprint labels (sprint-N.M) are intentionally excluded — those zombie
+ * cards are handled per-card via the Delete button (approach b, issue #2061).
+ * Returns [] when no active sprint exists so nothing is eligible for cleanup
+ * (issue #658).
+ *
+ * @param {string[]} orderedLabels - sprint labels in display order
+ * @param {Array<{sprint_label: string|null}>} issues - open issue list
+ * @returns {string[]} leading empty plain-sprint labels eligible for deletion
+ */
+export function _smgmtComputeLeadingEmpty(orderedLabels, issues) {
+  const labeled = new Set((issues || []).map((i) => i.sprint_label).filter(Boolean));
+  // Mark a base number active when any sprint-N or sprint-N.M has tickets.
+  const activeBases = new Set();
+  for (const lbl of labeled) {
+    const m = /^sprint-(\d+)/.exec(lbl);
+    if (m) activeBases.add(parseInt(m[1], 10));
+  }
+  const leadingEmpty = [];
+  let foundActive = false;
+  for (const lbl of orderedLabels) {
+    if (!/^sprint-\d+$/.test(lbl)) continue; // sub-sprint zombies handled per-card (approach b, #2061)
+    const base = parseInt(lbl.replace('sprint-', ''), 10);
+    if (activeBases.has(base)) { foundActive = true; break; }
+    leadingEmpty.push(lbl);
+  }
+  return foundActive ? leadingEmpty : [];
 }
 
 export function _smgmtRender(data) {
@@ -1752,6 +1794,18 @@ export function _smgmtCardHtml(
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>`
     : "";
 
+  // Zombie card: post-run sprint with 0 tickets — suppress Re-run / Reconcile / Merge Sprint
+  const isStaleNoTickets =
+    !isRunning &&
+    !!(
+      _smgmtData &&
+      _smgmtData._staleNoTicketLabels instanceof Set &&
+      _smgmtData._staleNoTicketLabels.has(label)
+    );
+  const staleNoticeHtml = isStaleNoTickets
+    ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale — no tickets</span>`
+    : "";
+
   return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -1780,21 +1834,17 @@ export function _smgmtCardHtml(
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
           ${dagOrderBtn}
-          ${actionBtn}
+          ${isStaleNoTickets ? staleNoticeHtml : `${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
-          ${
-            isRunning
-              ? ""
-              : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
+          ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
                   title="Reconcile this sprint's DB state against GitHub truth"
                   onclick="event.stopPropagation();smgmtReconcileSprint('${escHtml(label)}')">
-            <i class="ti ti-refresh"></i> Reconcile</button>`
-          }
+            <i class="ti ti-refresh"></i> Reconcile</button>`}
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>`}
         </div>
       </div>
       ${(function () {
@@ -2473,6 +2523,40 @@ export function _smgmtRenderBacklog(tickets) {
   }
 }
 
+const _BACKLOG_CHIP_LIMIT = 3;
+const _BACKLOG_CHIP_KEEP_RE = /^(uat|sit|in-progress|needs-rework|blocked|sprint-.+)$/i;
+
+/**
+ * Render compact label chips for a backlog row (issue #2060).
+ * Only meaningful stage/sprint labels are shown; uncapped lists get a "+N" overflow chip.
+ */
+export function _smgmtBacklogLabelChipsHtml(labels) {
+  if (!labels || !labels.length) return "";
+  const kept = labels
+    .map((l) => (typeof l === "string" ? l : l.name || ""))
+    .filter((n) => _BACKLOG_CHIP_KEEP_RE.test(n));
+  if (!kept.length) return "";
+
+  const visible = kept.slice(0, _BACKLOG_CHIP_LIMIT);
+  const overflow = kept.length - visible.length;
+
+  const chips = visible.map((name) => {
+    const lc = name.toLowerCase();
+    let mod = "";
+    if (lc === "uat") mod = "smgmt-bl-label-chip--uat";
+    else if (lc === "sit" || lc === "in-progress") mod = "smgmt-bl-label-chip--active";
+    else if (lc === "needs-rework" || lc === "blocked") mod = "smgmt-bl-label-chip--alert";
+    const cls = mod ? `smgmt-bl-label-chip ${mod}` : "smgmt-bl-label-chip";
+    return `<span class="${cls}">${escHtml(name)}</span>`;
+  });
+
+  if (overflow > 0) {
+    chips.push(`<span class="smgmt-bl-label-chip smgmt-bl-label-chip--overflow">+${overflow}</span>`);
+  }
+
+  return `<span class="smgmt-bl-label-chips">${chips.join("")}</span>`;
+}
+
 export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
   const hasEstimate = _smgmtTicketHasEstimate(ticket);
   const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -2483,6 +2567,7 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>`
     : "";
   const estHtml = _smgmtTicketEstHtml(ticket);
+  const labelChipsHtml = _smgmtBacklogLabelChipsHtml(ticket.labels);
 
   // Determine if there's a current draft sprint to offer "Add to sprint" affordance
   const draftLabel = _smgmtOrderedLabels
@@ -2521,7 +2606,7 @@ export function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${estHtml}
+      ${schedDepHtml}${sizePillHtml}${estHtml}${labelChipsHtml}
       ${addToSprintBtn}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"

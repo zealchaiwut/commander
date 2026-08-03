@@ -31,7 +31,8 @@ from calibration_cache_service import (  # noqa: E402
 )
 from settings_schema import build_effective_response  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
+
 _SIZES = ("S", "M", "L", "XL")
 
 # ── Helpers mirrored from server.py (avoids circular import) ─────────────────
@@ -50,11 +51,6 @@ def _resolve_project_slug(slug: str) -> str:
     if matched is None:
         raise HTTPException(status_code=404, detail=f"Project '{slug}' not found")
     return matched["repo"]
-
-
-def _project_root_path(repo: str) -> Path:
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root: Path) -> Path:

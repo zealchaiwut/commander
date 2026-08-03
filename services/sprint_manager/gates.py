@@ -154,15 +154,20 @@ _DESIGN_FE_EXTENSIONS = (".html", ".css", ".jsx", ".tsx")
 def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
     """Return .py files added/modified in HEAD relative to base_branch.
 
-    Uses git diff <base_branch> --name-only --diff-filter=ACM to find files
-    that were Added, Copied, or Modified relative to base_branch.
+    Uses git diff <base_branch>...HEAD --name-only --diff-filter=ACM (three-dot
+    range) so the scope is the current feature branch's own changes only —
+    not the cumulative diff against the current sprint-branch tip.  The three-dot
+    syntax computes merge-base(base_branch, HEAD) first, then diffs from that
+    common ancestor to HEAD, which isolates only the feature branch's additions
+    and modifications regardless of what other tickets have merged since it
+    branched (issue #2142).
     Returns a list of relative paths (e.g. ['server.py', 'tests/test_foo.py']).
     """
     _f = _lookup_in_sm("_changed_py_files", _changed_py_files)
     if _f is not None:
         return _f(base_branch, cwd)
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        "git", "diff", f"{base_branch}...HEAD", "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
@@ -173,7 +178,9 @@ def _changed_py_files(base_branch: str, cwd: Path) -> list[str]:
 def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
     """Return JS/TS files added/modified in HEAD relative to base_branch.
 
-    Excludes generated build artifacts (dist/ dirs and .map files) that
+    Uses three-dot range (base_branch...HEAD) so only this feature branch's
+    own changes are included — prior merged tickets' files are excluded (issue
+    #2142). Excludes generated build artifacts (dist/ dirs and .map files) that
     should never be linted — ESLint treats explicitly-passed ignored files
     as warnings under --max-warnings=0.
     """
@@ -181,7 +188,7 @@ def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
     if _f is not None:
         return _f(base_branch, cwd)
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        "git", "diff", f"{base_branch}...HEAD", "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
@@ -196,14 +203,15 @@ def _changed_js_ts_files(base_branch: str, cwd: Path) -> list[str]:
 def _changed_frontend_files(base_branch: str, cwd: Path) -> list[str]:
     """Return frontend files added/modified in HEAD relative to base_branch.
 
-    Scoped to the extensions the impeccable design gate analyses
-    (.html/.css/.jsx/.tsx). Returns repo-root-relative paths.
+    Uses three-dot range (base_branch...HEAD) to scope to the feature branch's
+    own changes only (issue #2142). Scoped to the extensions the impeccable
+    design gate analyses (.html/.css/.jsx/.tsx). Returns repo-root-relative paths.
     """
     _f = _lookup_in_sm("_changed_frontend_files", _changed_frontend_files)
     if _f is not None:
         return _f(base_branch, cwd)
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=ACM",
+        "git", "diff", f"{base_branch}...HEAD", "--name-only", "--diff-filter=ACM",
         cwd=cwd,
     )
     if rc != 0:
@@ -365,7 +373,14 @@ def _lint_autofix_commit(
         branch = br_out.strip()
         if rc_br != 0 or not branch or branch in ("HEAD", base_branch, "master", "develop"):
             return  # detached / on a protected branch — never auto-commit here
-        _run_timed("git", "add", "-A", cwd=git_root)
+        # Stage only tracked files modified by the fixers (not untracked files).
+        # git diff --name-only lists working-tree changes vs index for tracked files only;
+        # untracked files never appear, so stray files cannot be swept in.
+        rc_df, df_out, _ = _run_timed("git", "diff", "--name-only", cwd=git_root)
+        tracked_modified = [f.strip() for f in df_out.splitlines() if f.strip()]
+        if not tracked_modified:
+            return  # fixers made no tracked-file changes — nothing to commit
+        _run_timed("git", "add", "--", *tracked_modified, cwd=git_root)
         rc_ci, _, _ = _run_timed(
             "git", "commit", "-m", f"style: auto-fix lint (issue #{issue_num})",
             cwd=git_root)
@@ -1132,11 +1147,34 @@ def _get_coder_blocked_patterns() -> list[str]:
 
 
 def _get_coder_test_allowlist() -> list[str]:
-    """Return allowlisted paths from CODER_TEST_PATH_ALLOWLIST (comma-separated)."""
+    """Return allowlisted paths from CODER_TEST_PATH_ALLOWLIST (comma-separated).
+
+    Merges os.environ with the .env file value read at call time so that
+    allowlist additions take effect without requiring a dashboard restart.
+    load_dotenv(override=False) cannot update an already-set env var on a
+    long-lived process; reading the file directly closes that gap (issue #2141).
+    """
+    paths: set[str] = set()
+
     env = os.environ.get("CODER_TEST_PATH_ALLOWLIST", "").strip()
-    if not env:
-        return []
-    return [p.strip() for p in env.split(",") if p.strip()]
+    if env:
+        paths.update(p.strip() for p in env.split(",") if p.strip())
+
+    # Also read the .env file directly so that additions to the allowlist
+    # are picked up by already-running processes and fresh subprocesses alike.
+    try:
+        _env_file = Path(__file__).parent.parent.parent / "apps" / "dashboard" / ".env"
+        if _env_file.exists():
+            for _line in _env_file.read_text(encoding="utf-8").splitlines():
+                _line = _line.strip()
+                if _line.startswith("CODER_TEST_PATH_ALLOWLIST="):
+                    _val = _line.split("=", 1)[1].strip().strip('"').strip("'")
+                    paths.update(p.strip() for p in _val.split(",") if p.strip())
+                    break
+    except Exception:
+        pass
+
+    return list(paths)
 
 
 def _gate_coder_no_test_edits(
@@ -1170,12 +1208,16 @@ def _gate_coder_no_test_edits(
     if allowlist is None:
         allowlist = _get_coder_test_allowlist()
 
+    # Three-dot range (base_branch...HEAD) scopes to this feature branch's own
+    # changes only.  Without it, files deleted-from-HEAD that were added by an
+    # earlier ticket in the same sprint run show up as Deleted (D) matches — a
+    # false positive that causes spurious dead-letter escalation (issue #2142).
     rc, out, _ = _run_timed(
-        "git", "diff", base_branch, "--name-only", "--diff-filter=CMD",
+        "git", "diff", f"{base_branch}...HEAD", "--name-only", "--diff-filter=CMD",
         cwd=worktester_root,
     )
     rc_r, out_r, _ = _run_timed(
-        "git", "diff", base_branch, "--name-status", "--diff-filter=R",
+        "git", "diff", f"{base_branch}...HEAD", "--name-status", "--diff-filter=R",
         cwd=worktester_root,
     )
 

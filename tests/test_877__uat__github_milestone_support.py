@@ -107,9 +107,10 @@ def test_877__endpoints_exist_and_respond(client):
     r = client.get("/api/projects/commander/issues")
     assert r.status_code != 404, "GET /api/projects/{slug}/issues route not found"
 
-    # POST create (will fail auth if repo/project not found, but route should exist)
-    r = client.post("/api/projects/commander/milestones",
-                    json={"title": "test"})
+    # POST create — send an empty body so validation rejects it (422) without
+    # creating any remote state.  All we need is status != 404 to confirm the
+    # route is registered.  (issue #2074: never send a valid title here)
+    r = client.post("/api/projects/commander/milestones", json={})
     assert r.status_code != 404, "POST /api/projects/{slug}/milestones route not found"
 
     # PATCH update (will fail project lookup or GitHub error, but route should exist)

@@ -730,22 +730,23 @@
 
   // apps/dashboard/static/src/shell/tabs.js
   var _GROUP_CHILDREN = {
-    manage: ["deploy", "bulk-create"],
-    planning: [
-      "roadmap",
-      "advisor"
-    ]
+    manage: ["deploy", "bulk-create"]
   };
   function computeRovingTabindex(tab, onGlobalSettings) {
     return Object.fromEntries(
-      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "planning", "settings"].map((t) => {
-        const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
-        return [t, ownsTab ? 0 : -1];
-      })
+      ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map(
+        (t) => {
+          const ownsTab = !onGlobalSettings && (t === tab || _GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab));
+          return [t, ownsTab ? 0 : -1];
+        }
+      )
     );
   }
   function switchTab(tab, pushHistory) {
     if (tab === "metrics" || tab === "logs" || tab === "status") {
+      console.warn(
+        '[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"'
+      );
       tab = "failures";
     }
     if (_activeTab === "sprint-mgmt" && tab !== "sprint-mgmt") {
@@ -776,7 +777,6 @@
       "failures",
       "brain",
       "manage",
-      "planning",
       "settings"
     ];
     [
@@ -784,8 +784,6 @@
       "tickets",
       "deploy",
       "bulk-create",
-      "roadmap",
-      "advisor",
       "failures",
       "brain",
       "settings"
@@ -799,14 +797,14 @@
     });
     const _rovingMap = computeRovingTabindex(tab, onGlobalSettings);
     _topLevelTabs.forEach((t) => {
-      const suffix = t === "manage" ? "manage-trigger" : t === "planning" ? "planning-trigger" : t;
+      const suffix = t === "manage" ? "manage-trigger" : t;
       const btn = document.getElementById("stab-" + suffix);
       if (!btn)
         return;
       btn.tabIndex = _rovingMap[t];
     });
     closeAllStabDropdowns();
-    ["planning", "manage"].forEach((groupName) => {
+    ["manage"].forEach((groupName) => {
       const group = document.getElementById("stab-group-" + groupName);
       if (!group)
         return;
@@ -819,8 +817,6 @@
       "tickets",
       "deploy",
       "bulk-create",
-      "roadmap",
-      "advisor",
       "failures",
       "brain",
       "settings",
@@ -834,8 +830,7 @@
     if (pushHistory !== false) {
       window.history.pushState({ slug: _slug, tab }, "", newUrl);
     }
-    if (tab === "tickets" && !_ticketsLoaded) {
-      _ticketsLoaded = true;
+    if (tab === "tickets") {
       loadTickets();
     }
     if (tab === "sprint-mgmt") {
@@ -858,10 +853,6 @@
     }
     if (tab === "deploy")
       deployTabInit();
-    if (tab === "roadmap")
-      roadmapInit();
-    if (tab === "advisor")
-      advInit();
     if (tab === "failures")
       failuresInit();
     if (tab === "brain")
@@ -921,9 +912,6 @@
         "brain",
         "manage",
         "deploy",
-        "planning",
-        "roadmap",
-        "advisor",
         "settings"
       ];
       const focused = document.activeElement;
@@ -954,7 +942,6 @@
       return;
     if (effSlug !== _slug) {
       _ticketsRepo = null;
-      _ticketsLoaded = false;
     }
     _slug = effSlug;
     _deepLinkView = view;
@@ -971,9 +958,6 @@
   function signoffEnabled() {
     return commanderFeatures().signoff === true;
   }
-  function advisorEnabled() {
-    return commanderFeatures().advisor === true;
-  }
   function planningEnabled() {
     return commanderFeatures().planning === true;
   }
@@ -985,7 +969,7 @@
       const data = await res.json();
       _features = data.features || {};
     } catch {
-      _features = { signoff: false, advisor: false, planning: false };
+      _features = { signoff: false, planning: false };
     }
     const root2 = typeof window !== "undefined" ? window : globalThis;
     root2._commanderFeatures = _features;
@@ -999,21 +983,11 @@
     el.setAttribute("aria-hidden", "true");
   }
   function applyFeatureFlags() {
-    if (!advisorEnabled()) {
-      _hide(document.getElementById("stab-advisor"));
-      _hide(document.getElementById("pane-advisor"));
-    }
     if (!planningEnabled()) {
       _hide(document.getElementById("smgmt-plan-next-btn"));
-      _hide(document.getElementById("hnav-milestone"));
     }
     if (!signoffEnabled()) {
       _hide(document.getElementById("snav-signoff"));
-    }
-    if (!advisorEnabled() && !planningEnabled()) {
-      const group = document.getElementById("stab-group-planning");
-      if (group)
-        group.style.display = "none";
     }
   }
 
@@ -1662,7 +1636,7 @@
     const fprPct = _fmtPct(fpr.rate);
     const rwrPct = _fmtPct(rwr.rate);
     const durStr = _fmtDur(thr.avg_sprint_length_minutes);
-    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + `</span><span class="shs-label">avg sprint</span></span><a class="shs-see-more" href="#" onclick="switchTab('metrics');if(typeof anlShowTab==='function')anlShowTab('metrics');return false;">See more \u2192</a>`;
+    return '<span class="shs-stat"><span class="shs-val">' + fprPct + '</span><span class="shs-label">first-pass</span></span><span class="shs-stat"><span class="shs-val">' + rwrPct + '</span><span class="shs-label">rework</span></span><span class="shs-stat"><span class="shs-val">' + durStr + '</span><span class="shs-label">avg sprint</span></span>';
   }
   function _sHealthStripRender(data) {
     const el = document.getElementById("sprint-health-strip");
@@ -1895,6 +1869,18 @@ Replace the existing draft (${data.existing_label})?`
     _histLedgerCacheRepo = "";
     _histLedgerCacheAt = 0;
     _histLedgerInflight = null;
+  }
+  function _histIsLoading() {
+    return !!_histLedgerInflight;
+  }
+  function _histErrorHtml() {
+    return `<div class="hist-ledger-error" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    <span>Could not load sprint history.</span>
+    <button class="hist-ledger-retry" onclick="_histForceRefresh()">
+      <i class="ti ti-refresh"></i> Retry
+    </button>
+  </div>`;
   }
   var _histRenderRaf = 0;
   var _histStaleBySprint = {};
@@ -3526,14 +3512,20 @@ Replace the existing draft (${data.existing_label})?`
       return;
     if (!sprints || !sprints.length) {
       const emptyMsg = _histShowClosed ? "No sprint history yet \u2014 finished and deleted sprints appear here." : "Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.";
-      el.innerHTML = `<div class="hist-ledger-empty">${emptyMsg}</div>`;
+      el.innerHTML = `<div class="hist-ledger-empty" role="status">
+      <i class="ti ti-inbox-off" aria-hidden="true"></i>
+      <span>${emptyMsg}</span>
+    </div>`;
       return;
     }
     let groups = _histGroupSprints(sprints);
     if (!_histShowClosed) {
       groups = groups.filter(_histGroupHasActionable);
       if (!groups.length) {
-        el.innerHTML = `<div class="hist-ledger-empty">Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.</div>`;
+        el.innerHTML = `<div class="hist-ledger-empty" role="status">
+        <i class="ti ti-inbox-off" aria-hidden="true"></i>
+        <span>Inbox clear \u2014 no sprints need action. Toggle Show completed for the archive.</span>
+      </div>`;
         return;
       }
     }
@@ -3566,11 +3558,14 @@ Replace the existing draft (${data.existing_label})?`
   }
   async function _histLoadLedger2(repo, opts) {
     opts = opts || {};
-    if (!repo)
+    const background = opts.background === true;
+    if (!repo) {
+      if (!background)
+        _histRenderLedger([]);
       return;
+    }
     const el = document.getElementById("hist-ledger");
     const force = opts.force === true;
-    const background = opts.background === true;
     const hasCache = repo === _histLedgerCacheRepo && (_histLedgerData || []).length > 0;
     const fresh = !force && hasCache && Date.now() - _histLedgerCacheAt < _HIST_LEDGER_TTL_MS;
     if (fresh) {
@@ -3580,6 +3575,12 @@ Replace the existing draft (${data.existing_label})?`
       return;
     }
     if (_histLedgerInflight) {
+      if (!background) {
+        if (!hasCache)
+          _histShowLedgerSkeleton();
+        else
+          _histRenderLedger(_histLedgerData);
+      }
       await _histLedgerInflight;
       if (!background && (_histLedgerData || []).length) {
         _histRenderLedger(_histLedgerData);
@@ -3614,7 +3615,7 @@ Replace the existing draft (${data.existing_label})?`
         }
         if (!resp.ok) {
           if (!hasCache && el && !background) {
-            el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+            el.innerHTML = _histErrorHtml();
           }
           return;
         }
@@ -3632,7 +3633,7 @@ Replace the existing draft (${data.existing_label})?`
         }
       } catch (_) {
         if (!hasCache && el && !background) {
-          el.innerHTML = `<div class="hist-ledger-empty">Could not load sprint history.</div>`;
+          el.innerHTML = _histErrorHtml();
         }
       } finally {
         if (_histLedgerInflight === loadPromise)
@@ -5138,6 +5139,8 @@ Resolve manually and re-run Bulk complete.`,
       ["draft", sections.draft || []],
       ["lineage", sections.lineage || []]
     ];
+    const _postRunSections = /* @__PURE__ */ new Set(["needs_rework", "ready_to_merge"]);
+    const staleNoTicketLabels = /* @__PURE__ */ new Set();
     for (const [sectionName, cards] of sectionEntries) {
       for (const card of cards) {
         const label = card.label;
@@ -5146,6 +5149,9 @@ Resolve manually and re-run Bulk complete.`,
         sprintLabels.add(label);
         aggregateBuckets[label] = sectionName;
         sprint_has_run[label] = _ranStates.has(card.lifecycle_state);
+        if (card.stale_no_tickets && _postRunSections.has(sectionName)) {
+          staleNoTicketLabels.add(label);
+        }
         for (const t of card.tickets || []) {
           issues.push({ ...t, sprint_label: label });
         }
@@ -5197,7 +5203,8 @@ Resolve manually and re-run Bulk complete.`,
       sprint_plan_states: {},
       sprint_has_run,
       sprint_signoff: {},
-      _aggregateBuckets: aggregateBuckets
+      _aggregateBuckets: aggregateBuckets,
+      _staleNoTicketLabels: staleNoTicketLabels
     };
   }
   function _smgmtSignoffState(label) {
@@ -5406,6 +5413,28 @@ Resolve manually and re-run Bulk complete.`,
     if (!latest || label === latest)
       return false;
     return _smgmtCompareSprintLabels(label, latest) < 0;
+  }
+  function _smgmtComputeLeadingEmpty(orderedLabels, issues) {
+    const labeled = new Set((issues || []).map((i) => i.sprint_label).filter(Boolean));
+    const activeBases = /* @__PURE__ */ new Set();
+    for (const lbl of labeled) {
+      const m = /^sprint-(\d+)/.exec(lbl);
+      if (m)
+        activeBases.add(parseInt(m[1], 10));
+    }
+    const leadingEmpty = [];
+    let foundActive = false;
+    for (const lbl of orderedLabels) {
+      if (!/^sprint-\d+$/.test(lbl))
+        continue;
+      const base = parseInt(lbl.replace("sprint-", ""), 10);
+      if (activeBases.has(base)) {
+        foundActive = true;
+        break;
+      }
+      leadingEmpty.push(lbl);
+    }
+    return foundActive ? leadingEmpty : [];
   }
   function _smgmtRender(data) {
     const listEl = document.getElementById("smgmt-sprint-list");
@@ -6308,6 +6337,8 @@ Resolve manually and re-run Bulk complete.`,
                title="${escHtml(dagOrderBtnTitle)}"
                onclick="smgmtApplyDagOrder('${escHtml(label)}')">
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
+    const isStaleNoTickets = !isRunning && !!(_smgmtData && _smgmtData._staleNoTicketLabels instanceof Set && _smgmtData._staleNoTicketLabels.has(label));
+    const staleNoticeHtml = isStaleNoTickets ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale \u2014 no tickets</span>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -6336,7 +6367,7 @@ Resolve manually and re-run Bulk complete.`,
                   onclick="smgmtDeleteSprint('${escHtml(label)}')">
             <i class="ti ti-trash"></i></button>
           ${dagOrderBtn}
-          ${actionBtn}
+          ${isStaleNoTickets ? staleNoticeHtml : `${actionBtn}
           ${blockedHint}
           ${isRunning ? runningElapsed : ""}
           ${isRunning ? "" : `<button class="smgmt-reconcile-btn sc-merge-link" type="button"
@@ -6346,7 +6377,7 @@ Resolve manually and re-run Bulk complete.`,
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">
-            <i class="ti ti-flag-check"></i> Merge Sprint</button>
+            <i class="ti ti-flag-check"></i> Merge Sprint</button>`}
         </div>
       </div>
       ${function() {
@@ -6843,6 +6874,33 @@ Resolve manually and re-run Bulk complete.`,
       _blUpdateActions();
     }
   }
+  var _BACKLOG_CHIP_LIMIT = 3;
+  var _BACKLOG_CHIP_KEEP_RE = /^(uat|sit|in-progress|needs-rework|blocked|sprint-.+)$/i;
+  function _smgmtBacklogLabelChipsHtml(labels) {
+    if (!labels || !labels.length)
+      return "";
+    const kept = labels.map((l) => typeof l === "string" ? l : l.name || "").filter((n) => _BACKLOG_CHIP_KEEP_RE.test(n));
+    if (!kept.length)
+      return "";
+    const visible = kept.slice(0, _BACKLOG_CHIP_LIMIT);
+    const overflow = kept.length - visible.length;
+    const chips = visible.map((name) => {
+      const lc = name.toLowerCase();
+      let mod = "";
+      if (lc === "uat")
+        mod = "smgmt-bl-label-chip--uat";
+      else if (lc === "sit" || lc === "in-progress")
+        mod = "smgmt-bl-label-chip--active";
+      else if (lc === "needs-rework" || lc === "blocked")
+        mod = "smgmt-bl-label-chip--alert";
+      const cls = mod ? `smgmt-bl-label-chip ${mod}` : "smgmt-bl-label-chip";
+      return `<span class="${cls}">${escHtml(name)}</span>`;
+    });
+    if (overflow > 0) {
+      chips.push(`<span class="smgmt-bl-label-chip smgmt-bl-label-chip--overflow">+${overflow}</span>`);
+    }
+    return `<span class="smgmt-bl-label-chips">${chips.join("")}</span>`;
+  }
   function _smgmtBacklogTicketHtml(ticket, _sprintNums) {
     const hasEstimate = _smgmtTicketHasEstimate(ticket);
     const backlogLabelNames = (ticket.labels || []).map((l) => l.name).join(",");
@@ -6851,6 +6909,7 @@ Resolve manually and re-run Bulk complete.`,
     const sizeAttr = sizeValue ? ` data-size="${escHtml(sizeValue)}"` : "";
     const sizePillHtml = sizeValue ? `<span class="smgmt-ticket-size-pill">${escHtml(sizeValue)}</span>` : "";
     const estHtml = _smgmtTicketEstHtml(ticket);
+    const labelChipsHtml = _smgmtBacklogLabelChipsHtml(ticket.labels);
     const draftLabel = _smgmtOrderedLabels ? _smgmtOrderedLabels.find((l) => {
       if (_smgmtResolvedAncestors.has(l) || _smgmtRunningLabels.has(l))
         return false;
@@ -6876,7 +6935,7 @@ Resolve manually and re-run Bulk complete.`,
       <a class="smgmt-ticket-num" href="${escHtml(ticket.url || "#")}" target="_blank"
          rel="noopener" onclick="event.stopPropagation()">#${ticket.number}</a>
       <span class="smgmt-ticket-title" title="${escHtml(ticket.title)}">${escHtml(ticket.title)}</span>
-      ${schedDepHtml}${sizePillHtml}${estHtml}
+      ${schedDepHtml}${sizePillHtml}${estHtml}${labelChipsHtml}
       ${addToSprintBtn}
       <button class="smgmt-row-menu-btn" tabindex="0" title="Ticket actions" aria-haspopup="true" aria-expanded="false"
               onclick="event.stopPropagation();_smgmtRowMenuOpen(event, ${ticket.number}, null, ${hasEstimate})"
@@ -8818,9 +8877,11 @@ Proceed anyway?`)) {
   globalThis._histSetTtlMin = _histSetTtlMin;
   globalThis._histBulkSignOff = _histBulkSignOff;
   globalThis._histClearStaleLabels = _histClearStaleLabels;
+  globalThis._histIsLoading = _histIsLoading;
   globalThis._sHealthBuildHtml = _sHealthBuildHtml;
   globalThis._sHealthStripRender = _sHealthStripRender;
   globalThis.sprintHealthStripInit = sprintHealthStripInit2;
+  globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
 
   // apps/dashboard/static/src/logs-error-badge.js
   function logsErrorBadgeKey(slug) {
@@ -8897,11 +8958,17 @@ Proceed anyway?`)) {
   function _escHtml(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
+  function _normalizeTs(ts) {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(ts)) {
+      return ts + "Z";
+    }
+    return ts;
+  }
   function _fmtTs(ts) {
     if (!ts)
       return "";
     try {
-      const d = new Date(ts);
+      const d = new Date(_normalizeTs(ts));
       return d.toLocaleString(void 0, {
         month: "short",
         day: "numeric",
@@ -8950,7 +9017,7 @@ Proceed anyway?`)) {
     const cat = _currentCategory;
     fetchFailures(project, cat).then(function(rows) {
       root2.innerHTML = '<div class="fbox-table-wrap"><table class="fbox-table"><thead><tr><th>Issue</th><th>Sprint</th><th>Agent</th><th>Category</th><th>Reason</th><th>Time</th><th>Log</th></tr></thead><tbody id="fbox-tbody">' + _renderRows(rows) + "</tbody></table></div>";
-    }).catch(function(err) {
+    }).catch(function(_err) {
       _setError(root2, "Failed to load failures");
     });
   }

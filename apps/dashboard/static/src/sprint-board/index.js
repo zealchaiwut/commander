@@ -26,7 +26,7 @@ import {
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
   _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
-  _histBulkSignOff,
+  _histBulkSignOff, _histIsLoading,
 } from './history.js';
 
 import {
@@ -79,6 +79,8 @@ import {
   smgmtAddToDraft,
   // SSE board_invalidated handler (issue #1785)
   _boardSseOnInvalidated, _boardSseOnVisible,
+  // Clean-up-empty pure helper (issue #2089)
+  _smgmtComputeLeadingEmpty,
 } from './board-render.js';
 
 // Re-run modal (issue #512)
@@ -238,8 +240,12 @@ globalThis._histForceRefresh = _histForceRefresh;
 globalThis._histSetTtlMin = _histSetTtlMin;
 globalThis._histBulkSignOff = _histBulkSignOff;
 globalThis._histClearStaleLabels = _histClearStaleLabels;
+globalThis._histIsLoading = _histIsLoading;
 
 // Delivery-health stat strip (issue #1849)
 globalThis._sHealthBuildHtml = _sHealthBuildHtml;
 globalThis._sHealthStripRender = _sHealthStripRender;
 globalThis.sprintHealthStripInit = sprintHealthStripInit;
+
+// Clean-up-empty pure helper (issue #2089)
+globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;

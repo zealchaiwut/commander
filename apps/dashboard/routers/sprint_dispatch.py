@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from .hermes_models import BoardResponse
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -22,7 +23,7 @@ import db  # noqa: E402
 import github_client  # noqa: E402
 from services.logging import log as _slog  # noqa: E402
 
-_PROJECTS_BASE = Path.home() / "dev"
+from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
 router = APIRouter()
 
@@ -30,11 +31,6 @@ router = APIRouter()
 def _server():
     import server
     return server
-
-
-def _project_root_path(repo):
-    slug = repo.split("/")[-1] if "/" in repo else repo
-    return _PROJECTS_BASE / slug
 
 
 def _commander_dir(project_root):
@@ -56,7 +52,9 @@ def _sprint_json_read(path):
 
 # ── Constants (mirrored from server.py) ──────────────────────────────────────
 
-_SPRINT_LABEL_RE = re.compile(r"^sprint-\d+(\.\d+)?$")
+from sprint_label_re import SPRINT_LABEL_RE  # noqa: E402
+
+_SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
@@ -64,7 +62,7 @@ SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manag
 SPRINT_LOG_PATH = _DASHBOARD_ROOT / "sprints" / "sprint_run.log"
 _ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
-_SPRINT_LABEL_RE_ALL = re.compile(r"^sprint-\d+(\.\d+)?$")
+_SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
 
 # ── Dashboard event helpers ───────────────────────────────────────────────────
@@ -647,7 +645,7 @@ def get_sprint_management_issues(repo: str):
 
 # ── Board aggregate endpoint (issue #1636) ────────────────────────────────────
 
-@router.get("/api/board")
+@router.get("/api/board", response_model=BoardResponse)
 def get_board(project: str):
     """Server-computed board aggregate — single-pass, mirror + SQLite only.
 

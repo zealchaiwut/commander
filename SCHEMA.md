@@ -136,6 +136,8 @@ Index: `ix_project_todos_project_position` on `(project, position)`.
 
 SQLite is the **authoritative, only live** store. As of sprint 57 it also holds the dashboard read model (`issues` mirror), ticket write-through state (`ticket_status`), and durable sprint lifecycle state (`sprints` + `sprint_ticket_order`). On first run from an empty DB the dashboard bootstraps a full GitHub sync to populate these tables (issue #760).
 
+> **Timestamp format (issue #2067).** New timestamp writes across these tables emit the canonical `YYYY-MM-DDTHH:MM:SSZ` form (explicit UTC `Z` marker, no microseconds, string-sortable) via the shared `db.utc_now()` helper. Historical rows were **not** rewritten, so text timestamp columns may still hold any of three legacy shapes (`…T…:…:…` with no marker, `…T…:…:….ffffff` isoformat, or `…Z`); read them through `db.parse_utc_ts()`, which tolerates all four. Consumers reading these columns directly should treat any offset-less value as UTC.
+
 | Table | Description |
 |---|---|
 | `agents` | Active/recent Claude Code agent sessions |
@@ -149,8 +151,8 @@ SQLite is the **authoritative, only live** store. As of sprint 57 it also holds 
 | `sprint_ticket_order` | Ticket execution order per sprint (`label`, `issue`, `position`) (issue #757) |
 | `agent_runs` | One row per dispatched agent (coder, tester, …) with its own start/finish timestamps and wall-clock duration per issue (issue #764) |
 | `sprint_history` | Append-only ledger of terminal sprint events (notably deletions) for the History feed; snapshots the ticket list before label-strip so deleted sprints stay visible (issue #805) |
-| `advisor_suggestions` | Current draft suggestions from the most recent advisor run per project; replaced wholesale on each run (issue #881) |
-| `advisor_look_ahead` | Ordered look-ahead entries (2–5 sprints) from the most recent advisor run per project; replaced wholesale on each run (issue #883) |
+| `advisor_suggestions` | Orphaned since Sprint 1010.1 (#2075) — Advisor feature deleted; table still created but unused (issue #881) |
+| `advisor_look_ahead` | Orphaned since Sprint 1010.1 (#2075) — Advisor feature deleted; table still created but unused (issue #883) |
 
 ### ticket_status (issue #755)
 
@@ -292,6 +294,11 @@ Index: `(created_at DESC)`.
 
 ### advisor_suggestions (issue #881)
 
+> **Orphaned as of Sprint 1010.1 (#2075).** The Advisor feature and all its
+> endpoints were deleted. This table is still created by `db.py` but nothing
+> reads or writes it; it is retained here for historical reference pending a
+> cleanup migration.
+
 Current draft suggestions from the most recent daily advisor run per project.
 Replaced wholesale on every new run — no suggestion history beyond the current
 set. Created by `_create_advisor_suggestions_table` in `apps/dashboard/db.py`.
@@ -309,9 +316,14 @@ set. Created by `_create_advisor_suggestions_table` in `apps/dashboard/db.py`.
 
 Index: `ix_advisor_suggestions_project` on `(project)`.
 
-Endpoints: `GET /api/projects/{project}/advisor/suggestions`, `POST /api/projects/{project}/advisor/run`, `POST /api/advisor/tick`.
+Endpoints: removed in Sprint 1010.1 (#2075) — previously
+`GET /api/projects/{project}/advisor/suggestions`, `POST /api/projects/{project}/advisor/run`, `POST /api/advisor/tick`.
 
 ### advisor_look_ahead (issue #883)
+
+> **Orphaned as of Sprint 1010.1 (#2075).** The Advisor feature and its endpoint
+> were deleted; this table is still created by `db.py` but is no longer read or
+> written, pending a cleanup migration.
 
 Ordered 2-to-5-sprint look-ahead entries from the most recent advisor run per project.
 Replaced wholesale on every new run. Created by `_create_advisor_look_ahead_table`
@@ -328,7 +340,7 @@ in `apps/dashboard/db.py`.
 
 Index: `ix_advisor_look_ahead_project` on `(project)`.
 
-Endpoint: `GET /api/projects/{project}/advisor/look-ahead`.
+Endpoint: removed in Sprint 1010.1 (#2075) — previously `GET /api/projects/{project}/advisor/look-ahead`.
 
 
 ## API Endpoints
@@ -783,7 +795,8 @@ At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`serv
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. |
+| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. Canonical flat route (issue #2065). |
+| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | **Deprecated** nested alias of the flat route above (issue #2065); still works, flagged `deprecated: true` in the OpenAPI schema. |
 
 Response:
 

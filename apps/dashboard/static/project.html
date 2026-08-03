@@ -2236,6 +2236,7 @@
       .hist-badge { flex-shrink: 1; flex-grow: 0; }
     }
     @media (max-width: 600px) {
+      .fbox-table th:nth-child(2), .fbox-table td:nth-child(2), .fbox-table th:nth-child(6), .fbox-table td:nth-child(6) { display: none; }
       .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-card-head {
@@ -9716,10 +9717,11 @@
       color: var(--text-muted); font-size: 14px;
     }
     @media (max-width: 600px) {
-      .fbox-table th:nth-child(3),
-      .fbox-table td:nth-child(3),
-      .fbox-table th:nth-child(5),
-      .fbox-table td:nth-child(5) { display: none; }
+      /* Hide Sprint (col 2) and Time (col 6) — keep Agent (col 3) and Reason (col 5) visible (issue #2073) */
+      .fbox-table th:nth-child(2),
+      .fbox-table td:nth-child(2),
+      .fbox-table th:nth-child(6),
+      .fbox-table td:nth-child(6) { display: none; }
     }
 
   </style>

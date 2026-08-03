@@ -1,6 +1,10 @@
 """Tests for the warm git worktree pool (issue #1411).
 
 Each test function maps to one acceptance criterion.
+
+Rewritten in issue #2035 to match the shared-venv-cache design: the pool builds
+ONE persistent venv under venv-cache/ (keyed by requirements hash) and symlinks
+each slot to it, instead of creating a separate venv per slot.
 """
 from __future__ import annotations
 
@@ -43,6 +47,20 @@ def _fail(*_args, **_kwargs):
     m.stdout = ""
     m.stderr = "error"
     return m
+
+
+def _stamp_slots(pool):
+    """Create slot dirs + .git files on disk so _slot_healthy() returns True.
+
+    acquire() added a health-check guard (issue #2032) that requires each slot
+    directory to exist with a .git file before dispatch. Since subprocess is
+    mocked in tests the real `git worktree add` never runs, so we stamp the
+    minimal on-disk structure here instead.
+    """
+    for i in range(pool.slots):
+        slot = pool.pool_dir / f"slot-{i}"
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / ".git").write_text("gitdir: ../../.git/worktrees/slot-0\n")
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +118,18 @@ class TestAC1WorktreesCreated:
 
 
 # ---------------------------------------------------------------------------
-# AC2 — Each worktree gets its own fresh venv; never copied or shared
+# AC2 — One shared venv built once under venv-cache/ and reused across slots
 # ---------------------------------------------------------------------------
 
 class TestAC2FreshVenvPerWorktree:
-    """AC2: Each worktree receives its own fresh virtualenv via python -m venv
-    followed by pip install; venvs are never copied or shared.
+    """AC2: One persistent shared venv is created once under venv-cache/ and
+    reused across all slots via a symlink.  The old per-slot venv design (one
+    `python -m venv` + `pip install` per slot) was replaced with a shared cache
+    to eliminate the 2-3 min latency on every sprint run (issue #2035 rewrite).
     """
 
-    def test_venv_create_called_per_slot(self, tmp_path):
+    def test_shared_venv_created_once(self, tmp_path):
+        """Shared venv is built once regardless of slot count."""
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success) as mock_run:
             pool.create()
@@ -116,9 +137,12 @@ class TestAC2FreshVenvPerWorktree:
             c for c in mock_run.call_args_list
             if c.args and "-m" in c.args[0] and "venv" in c.args[0]
         ]
-        assert len(venv_calls) == 2
+        assert len(venv_calls) == 1, (
+            f"Expected exactly 1 shared-venv creation call, got {len(venv_calls)}"
+        )
 
-    def test_venv_paths_are_distinct(self, tmp_path):
+    def test_shared_venv_path_is_outside_pool_dir(self, tmp_path):
+        """Shared venv lives under venv-cache/, not inside individual slot dirs."""
         pool = _make_pool(tmp_path, slots=3)
         venv_paths = []
         def _capture(*args, **kwargs):
@@ -132,9 +156,13 @@ class TestAC2FreshVenvPerWorktree:
             return m
         with patch("subprocess.run", side_effect=_capture):
             pool.create()
-        assert len(set(venv_paths)) == 3, "All venv paths must be unique"
+        assert len(venv_paths) == 1, "One shared venv, not per-slot"
+        assert str(pool._venv_cache) in venv_paths[0], (
+            "Shared venv path must be under venv-cache/, not inside a slot dir"
+        )
 
-    def test_pip_install_called_when_requirements_present(self, tmp_path):
+    def test_pip_install_called_once_for_shared_venv(self, tmp_path):
+        """pip install runs once for the shared venv, not once per slot."""
         req = tmp_path / "requirements.txt"
         req.write_text("fastapi\n")
         pool = _make_pool(tmp_path, slots=2, requirements=req)
@@ -144,7 +172,9 @@ class TestAC2FreshVenvPerWorktree:
             c for c in mock_run.call_args_list
             if c.args and "pip" in str(c.args[0]) and "install" in c.args[0]
         ]
-        assert len(pip_calls) == 2
+        assert len(pip_calls) == 1, (
+            "pip install must run once for the shared venv, not once per slot"
+        )
 
     def test_pip_install_not_called_without_requirements(self, tmp_path):
         pool = _make_pool(tmp_path, slots=2, requirements=None)
@@ -157,7 +187,7 @@ class TestAC2FreshVenvPerWorktree:
         assert len(pip_calls) == 0
 
     def test_pip_install_uses_venv_pip_not_system(self, tmp_path):
-        """pip install must use the venv's pip binary, not system pip."""
+        """pip install must use the shared venv's pip binary, not system pip."""
         req = tmp_path / "requirements.txt"
         req.write_text("fastapi\n")
         pool = _make_pool(tmp_path, slots=1, requirements=req)
@@ -174,8 +204,8 @@ class TestAC2FreshVenvPerWorktree:
         with patch("subprocess.run", side_effect=_capture):
             pool.create()
         assert pip_cmds, "pip install was not called"
-        # pip binary must be inside a venv dir, not the system python
-        assert "venv" in str(pip_cmds[0][0]), "pip must come from the slot's venv"
+        # pip binary must be inside the shared venv dir under venv-cache/
+        assert "venv" in str(pip_cmds[0][0]), "pip must come from the shared venv"
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +221,7 @@ class TestAC3ExclusiveAssignment:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
 
         acquired = []
         lock = threading.Lock()
@@ -216,6 +247,7 @@ class TestAC3ExclusiveAssignment:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt = pool.acquire()
         assert wt not in pool._free
         assert wt in pool._in_use
@@ -225,6 +257,7 @@ class TestAC3ExclusiveAssignment:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt1 = pool.acquire()
         wt2 = pool.acquire()
         assert wt1 != wt2
@@ -246,6 +279,7 @@ class TestAC4WorktreeReset:
         pool = _make_pool(tmp_path, slots=1, base_branch="sprint/test")
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt = pool.acquire()
         with patch("subprocess.run", side_effect=_success) as mock_run:
             pool.release(wt)
@@ -260,6 +294,7 @@ class TestAC4WorktreeReset:
         pool = _make_pool(tmp_path, slots=1, base_branch="sprint/test")
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt = pool.acquire()
         with patch("subprocess.run", side_effect=_success) as mock_run:
             pool.release(wt)
@@ -274,6 +309,7 @@ class TestAC4WorktreeReset:
         pool = _make_pool(tmp_path, slots=1)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt = pool.acquire()
         assert wt not in pool._free
         with patch("subprocess.run", side_effect=_success):
@@ -286,6 +322,7 @@ class TestAC4WorktreeReset:
         pool = _make_pool(tmp_path, slots=1, base_branch="sprint/test")
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt = pool.acquire()
         call_order = []
         def _record(*args, **kwargs):
@@ -356,6 +393,7 @@ class TestAC5TeardownRemovesAll:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         _wt = pool.acquire()  # move one to in-use
         with patch("subprocess.run", side_effect=_success) as mock_run:
             pool.teardown()
@@ -465,6 +503,7 @@ class TestAC7WaitWhenFull:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
 
         wt1 = pool.acquire()
         wt2 = pool.acquire()
@@ -497,6 +536,7 @@ class TestAC7WaitWhenFull:
         pool = _make_pool(tmp_path, slots=1)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         start = time.monotonic()
         wt = pool.acquire()
         elapsed = time.monotonic() - start
@@ -518,6 +558,7 @@ class TestAC8Isolation:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt_a = pool.acquire()
         wt_b = pool.acquire()
         assert wt_a != wt_b, "Two coders received the same worktree path"
@@ -530,6 +571,7 @@ class TestAC8Isolation:
         pool = _make_pool(tmp_path, slots=2)
         with patch("subprocess.run", side_effect=_success):
             pool.create()
+        _stamp_slots(pool)
         wt_a = pool.acquire()
         wt_b = pool.acquire()
         # wt_a must not be an ancestor of wt_b and vice-versa
@@ -572,17 +614,23 @@ class TestAC1HardCap:
 # ---------------------------------------------------------------------------
 
 class TestMaxCoderSlotsConfig:
-    """max_coder_slots is a SprintConfig field with default 2, clamped to 4."""
+    """max_coder_slots is a SprintConfig field (Optional[int], default None)."""
 
     def test_sprint_config_has_max_coder_slots(self):
         from services.sprint_manager.config import SprintConfig
         cfg = SprintConfig()
         assert hasattr(cfg, "max_coder_slots")
 
-    def test_sprint_config_max_coder_slots_default_two(self):
+    def test_sprint_config_max_coder_slots_defaults_none(self):
+        """SprintConfig.max_coder_slots is Optional[int] with Python default None.
+
+        None means "not set in sprint.yaml" — sprint_manager falls back to 1
+        (or DEFAULT_SLOTS when the pool is constructed directly).  The
+        documentation default of 2 lives in settings_schema.KNOWN_FIELDS.
+        """
         from services.sprint_manager.config import SprintConfig
         cfg = SprintConfig()
-        assert cfg.max_coder_slots == 2
+        assert cfg.max_coder_slots is None
 
     def test_max_coder_slots_in_settings_schema(self):
         from services.sprint_manager.settings_schema import KNOWN_FIELDS

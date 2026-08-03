@@ -2146,8 +2146,25 @@ def _feature_branch_diff_files(worktree_root: Path) -> "frozenset[str]":
     Tries common base-branch names in order; returns an empty frozenset if
     git is unavailable or no base can be found (safe: callers treat empty as
     "can't determine").
+
+    In sprint mode (COMMANDER_MERGE_TARGET set to a non-develop branch), the
+    sprint branch is prepended to the candidate list so the merge-base resolves
+    against the sprint branch rather than develop. Without this, sibling sprint
+    tickets' files would pollute the "own diff" set (#2072 / #2155 scenario).
     """
-    for base in ("origin/develop", "develop", "origin/master", "master"):
+    merge_target = os.environ.get("COMMANDER_MERGE_TARGET", "")
+    if merge_target and merge_target != "develop":
+        base_candidates: tuple[str, ...] = (
+            f"origin/{merge_target}",
+            merge_target,
+            "origin/develop",
+            "develop",
+            "origin/master",
+            "master",
+        )
+    else:
+        base_candidates = ("origin/develop", "develop", "origin/master", "master")
+    for base in base_candidates:
         try:
             mb = subprocess.run(
                 ["git", "-C", str(worktree_root), "merge-base", "HEAD", base],

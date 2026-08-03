@@ -1101,6 +1101,7 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
     _backfill_child_parent_labels(conn)
+    _backfill_immediate_parent_labels(conn)
     _backfill_sprint_project(conn)
     conn.execute(
         """
@@ -1177,6 +1178,109 @@ def _backfill_child_parent_labels(conn: sqlite3.Connection) -> None:
            AND label GLOB 'sprint-[0-9]*.[0-9]*'
         """
     )
+
+
+def _backfill_immediate_parent_labels(
+    conn: sqlite3.Connection,
+    *,
+    projects_file: "Path | None" = None,
+    projects_base: "Path | None" = None,
+    _sprints_dir_override: "Path | None" = None,
+) -> None:
+    """One-time heal: set immediate_parent for child sprints left NULL (issue #2048).
+
+    For each child sprint row with NULL immediate_parent, find its plan.json and
+    copy the ``parent`` field.  Idempotent: only touches NULL rows.
+
+    AC5 topology-change report: logs the count of affected rows before writing,
+    so operators know how many sprints had their merge topology fixed.
+    """
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sprints'"
+    ).fetchone()
+    if row is None:
+        return
+
+    null_rows = conn.execute(
+        """
+        SELECT label, project FROM sprints
+         WHERE immediate_parent IS NULL
+           AND label GLOB 'sprint-[0-9]*.[0-9]*'
+        """
+    ).fetchall()
+
+    if not null_rows:
+        return
+
+    # AC5: report count before writing so operators see the topology-change scope.
+    logging.info(
+        "backfill_immediate_parent: %d child sprint row(s) have NULL immediate_parent "
+        "(merge topology may be incorrect — applying plan.json backfill, issue #2048)",
+        len(null_rows),
+    )
+
+    # Build set of known plan.json directories to search.
+    sprints_dirs: list[Path] = []
+    if _sprints_dir_override is not None:
+        sprints_dirs.append(_sprints_dir_override)
+    else:
+        if projects_base is None:
+            projects_base = Path.home() / "dev"
+        if projects_file is None:
+            projects_file = Path(__file__).parent / "projects.json"
+        try:
+            if projects_file.exists():
+                for p in json.loads(projects_file.read_text()):
+                    repo = p.get("repo", "")
+                    slug = repo.split("/")[-1] if "/" in repo else repo
+                    if slug:
+                        sprints_dirs.append(projects_base / slug / ".commander" / "sprints")
+        except Exception:
+            pass
+
+    updated = 0
+    for label, project in null_rows:
+        parent_val: str | None = None
+
+        # Search project-specific dir first (derived from the stored project value).
+        dirs_to_try = list(sprints_dirs)
+        if project and _sprints_dir_override is None:
+            slug = project.split("/")[-1] if "/" in project else project
+            if projects_base is not None:
+                proj_dir = projects_base / slug / ".commander" / "sprints"
+                dirs_to_try.insert(0, proj_dir)
+
+        for sd in dirs_to_try:
+            plan_path = sd / f"{label}-plan.json"
+            if plan_path.exists():
+                try:
+                    raw = json.loads(plan_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        parent_val = (raw.get("parent") or "").strip() or None
+                except Exception:
+                    pass
+                break
+
+        if parent_val:
+            conn.execute(
+                "UPDATE sprints SET immediate_parent = ? "
+                " WHERE label = ? AND immediate_parent IS NULL",
+                (parent_val, label),
+            )
+            updated += 1
+        else:
+            logging.warning(
+                "backfill_immediate_parent: label=%r project=%r — "
+                "no plan.json parent found; immediate_parent left NULL "
+                "(merge topology falls back to base sprint, issue #2048)",
+                label, project,
+            )
+
+    if updated:
+        logging.info(
+            "backfill_immediate_parent: updated %d/%d rows with immediate_parent from plan.json",
+            updated, len(null_rows),
+        )
 
 
 def _backfill_sprint_project(

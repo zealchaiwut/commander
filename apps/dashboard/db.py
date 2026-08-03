@@ -167,6 +167,45 @@ def check_db_integrity(db_path: Path) -> str:
         conn.close()
 
 
+def check_db_quick(db_path: Path) -> str:
+    """Run PRAGMA quick_check on db_path (faster than integrity_check; no sort-order check).
+
+    Called by the periodic integrity loop (issue #2037 AC5) so corruption detected
+    while the process is running is cheaper to check than the full integrity_check.
+    Returns 'ok' or an error string.
+    """
+    if not db_path.exists():
+        return f"error: file not found: {db_path}"
+    if db_path.stat().st_size == 0:
+        return "error: database file is empty"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("PRAGMA quick_check").fetchone()
+        return row[0] if row else "error: no result from quick_check"
+    except sqlite3.DatabaseError as exc:
+        return f"error: {exc}"
+    finally:
+        conn.close()
+
+
+def alert_if_corrupt(db_path: "Path | None" = None) -> str:
+    """Run quick_check and log CRITICAL if corrupt; return the status string.
+
+    Separated from the async periodic loop so it can be tested synchronously
+    without async infrastructure (issue #2037 AC5).
+    """
+    path = db_path if db_path is not None else DB_PATH
+    status = check_db_quick(path)
+    if status != "ok":
+        _log.critical(
+            "DB CORRUPTION DETECTED by periodic quick_check: %s — "
+            "service is still running but writes may be unreliable; "
+            "restart required to trigger full startup integrity check",
+            status,
+        )
+    return status
+
+
 def run_wal_checkpoint(db_path: "Path | None" = None) -> tuple:
     """Run PRAGMA wal_checkpoint(PASSIVE) and return (busy, log, checkpointed)."""
     path = db_path if db_path is not None else DB_PATH

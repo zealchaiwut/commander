@@ -419,7 +419,7 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | `GET` | `/api/sprints` | List all sprint labels in the repo |
 | `POST` | `/api/sprints/create` | Create a new sprint label |
 | `POST` | `/api/sprints/{sprint_label}/rename` | Rename a sprint label |
-| `DELETE` | `/api/sprints/{sprint_label}` | Remove a sprint label and unlabel its tickets |
+| `DELETE` | `/api/sprints/{sprint_label}` | Remove a sprint label and unlabel its tickets. Also transitions the live `sprints` table row to `deleted` so a later `reconcile-preview` reports `exists=false` instead of surfacing an empty draft row (issue #2076) |
 | `POST` | `/api/sprints/delete-empty` | Delete empty sprint labels (explicit list) |
 | `POST` | `/api/sprints/cleanup-empty` | Delete leading consecutive empty sprint labels |
 | `POST` | `/api/sprints/{sprint_label}/tickets/reorder` | Reorder tickets within a sprint |

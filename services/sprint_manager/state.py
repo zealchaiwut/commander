@@ -51,6 +51,9 @@ class IssueState:
     # Dead-letter registry fields (issue #1942)
     fix_attempts:         int            = 0
     last_error:           Optional[str]  = None
+    # Commit SHAs and test files captured after coder_done (issue #1952)
+    feature_commits:      list           = field(default_factory=list)
+    tester_test_files:    list           = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -78,6 +81,8 @@ class IssueState:
             "coder_provider":     self.coder_provider,
             "fix_attempts":       self.fix_attempts,
             "last_error":         self.last_error,
+            "feature_commits":    self.feature_commits,
+            "tester_test_files":  self.tester_test_files,
         }
 
     @staticmethod
@@ -108,6 +113,8 @@ class IssueState:
         iss.coder_provider = d.get("coder_provider")
         iss.fix_attempts = int(d.get("fix_attempts", 0))
         iss.last_error = d.get("last_error")
+        iss.feature_commits = list(d.get("feature_commits") or [])
+        iss.tester_test_files = list(d.get("tester_test_files") or [])
         return iss
 
     def set_agent_status(self, status: str) -> None:

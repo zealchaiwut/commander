@@ -281,8 +281,8 @@ def build_commander_report(
             completed_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
-                "commits": [],
-                "tests": [],
+                "commits": list(iss.get("feature_commits") or []),
+                "tests": list(iss.get("tester_test_files") or []),
                 "merged_to": f"sprint/{sprint_label}",
                 "pr_url": str(iss.get("pr_url") or ""),
             })
@@ -300,8 +300,8 @@ def build_commander_report(
             needs_review_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
-                "commits": [],
-                "tests": [],
+                "commits": list(iss.get("feature_commits") or []),
+                "tests": list(iss.get("tester_test_files") or []),
             })
         # pending / queued / other statuses are not yet attempted — excluded from counts
 

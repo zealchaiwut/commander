@@ -73,6 +73,29 @@ def _find_best_backup(backup_dir: Path) -> "Path | None":
     return None
 
 
+def _build_restore_hint() -> str:
+    """Build the operator restore hint string from the current local backup dir."""
+    backup_dir = _LOCAL_BACKUP_DIR
+    if backup_dir is not None and backup_dir.is_dir():
+        best = _find_best_backup(backup_dir)
+        if best is not None:
+            return (
+                f"\n  Most recent verified backup: {best}"
+                f"\n  Restore: cp {best} {DB_PATH}"
+                f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
+            )
+        all_baks = list(backup_dir.glob("*.bak"))
+        if all_baks:
+            return (
+                f"\n  WARNING: No verified non-empty backup found in {backup_dir}."
+                f"\n  {len(all_baks)} backup file(s) exist but all are empty or"
+                f" failed integrity_check — do NOT restore from them."
+                f"\n  Check off-site backups or attempt: sqlite3 commander.db .recover"
+            )
+        return f"\n  Local backup dir is empty: {backup_dir}"
+    return f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."
+
+
 def _startup_integrity_check() -> None:
     """Run integrity_check at startup; raise RuntimeError with restore hint if corrupt.
 
@@ -85,36 +108,37 @@ def _startup_integrity_check() -> None:
     status = check_db_integrity(DB_PATH)
     if status == "ok":
         return
-    restore_hint = ""
-    backup_dir = _LOCAL_BACKUP_DIR
-    if backup_dir is not None and backup_dir.is_dir():
-        best = _find_best_backup(backup_dir)
-        if best is not None:
-            restore_hint = (
-                f"\n  Most recent verified backup: {best}"
-                f"\n  Restore: cp {best} {DB_PATH}"
-                f"\n  Verify:  sqlite3 {DB_PATH} 'PRAGMA integrity_check'"
-            )
-        else:
-            # Check whether backups exist but are all invalid
-            all_baks = list(backup_dir.glob("*.bak"))
-            if all_baks:
-                restore_hint = (
-                    f"\n  WARNING: No verified non-empty backup found in {backup_dir}."
-                    f"\n  {len(all_baks)} backup file(s) exist but all are empty or"
-                    f" failed integrity_check — do NOT restore from them."
-                    f"\n  Check off-site backups or attempt: sqlite3 commander.db .recover"
-                )
-            else:
-                restore_hint = f"\n  Local backup dir is empty: {backup_dir}"
-    else:
-        restore_hint = (
-            f"\n  Check {DB_PATH.parent / '.commander' / 'db-backups'} for local backups."
-        )
+    restore_hint = _build_restore_hint()
     _log.critical("FATAL: commander.db corrupt at startup: %s%s", status, restore_hint)
     raise RuntimeError(
         f"commander.db is corrupt (PRAGMA integrity_check: {status})."
         f" The database cannot be used.{restore_hint}"
+    )
+
+
+_DISK_IO_STR = "disk i/o error"
+
+
+def handle_runtime_disk_io_error(exc: Exception) -> None:
+    """Run integrity_check when a sqlite3.OperationalError('disk I/O error') is caught.
+
+    Called from the mirror-sync loop when a disk-level error surfaces at runtime
+    (issue #2012). Runs PRAGMA integrity_check, logs CRITICAL with the restore hint,
+    then raises RuntimeError to abort the caller instead of retrying indefinitely.
+
+    No-op for any exception that is not a disk I/O OperationalError so existing
+    broad except-and-continue handlers can call this unconditionally.
+    """
+    if not (isinstance(exc, sqlite3.OperationalError)
+            and _DISK_IO_STR in str(exc).lower()):
+        return
+    status = check_db_integrity(DB_PATH)
+    restore_hint = _build_restore_hint()
+    _log.critical(
+        "FATAL: runtime disk I/O error — integrity: %s%s", status, restore_hint
+    )
+    raise RuntimeError(
+        f"commander.db disk I/O error at runtime (integrity: {status}).{restore_hint}"
     )
 
 

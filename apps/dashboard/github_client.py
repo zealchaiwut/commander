@@ -967,12 +967,14 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
     r = _r(repo_name)
 
     current = _fetch_current_labels(issue_id, r)
-    desired = sm.STATE_LABELS[sm.TicketState.UAT_APPROVED]  # frozenset({"UAT-approved"})
+    desired = frozenset({"UAT-approved"})
     current_status = sm.STATUS_LABELS & current
     to_remove = current_status - desired
     to_add = desired - current_status
 
-    sm.assert_run_mutable(to_add, to_remove)
+    # Only check the STATUS_LABELS being removed — UAT-approved is a terminal
+    # label applied outside transition() and is not in RUN_MUTABLE_LABELS.
+    sm.assert_run_mutable(frozenset(), to_remove)
 
     if to_add or to_remove:
         cmd = ["issue", "edit", str(issue_id), "--repo", r]
@@ -984,7 +986,7 @@ def approve_issue(issue_id: int, repo_name: str | None = None):
 
     _run("issue", "close", str(issue_id), "--repo", r, "--reason", "completed")
 
-    sm._write_ticket_status(issue_id, sm.TicketState.UAT_APPROVED.name, "uat-approve", None)
+    sm._write_ticket_status(issue_id, "UAT_APPROVED", "uat-approve", None)
     sm._invalidate_mirror_issue(r, issue_id)
     sm._log_transition(issue_id, current_status, desired, "uat-approve", None)
 

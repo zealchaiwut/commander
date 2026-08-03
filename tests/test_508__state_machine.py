@@ -69,7 +69,7 @@ def _edit_fail(msg: str = "API error") -> MagicMock:
 class TestConstants:
     def test_ticket_state_has_all_members(self):
         names = {s.name for s in TicketState}
-        assert names == {"BACKLOG", "QUEUED", "IN_PROGRESS", "SIT", "UAT", "NEEDS_REWORK", "BLOCKED", "DONE", "UAT_APPROVED"}
+        assert names == {"BACKLOG", "QUEUED", "IN_PROGRESS", "SIT", "UAT", "NEEDS_REWORK", "BLOCKED", "DONE"}
 
     def test_pseudo_states_have_empty_labels(self):
         assert STATE_LABELS[TicketState.BACKLOG] == frozenset()

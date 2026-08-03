@@ -260,6 +260,7 @@ from routers import (  # noqa: E402
     dev_report_router,
     failures_router,
     brain_router,
+    token_usage_debug_router,
     pages_router,
     project_branches_router,
     projects_router,
@@ -290,6 +291,7 @@ from routers.logs_service import broadcast, _subscribers  # noqa: E402
 from routers.milestones_service import resolve_bulk_milestone as _resolve_bulk_milestone  # noqa: E402
 
 app.include_router(api_volume_router)
+app.include_router(token_usage_debug_router)
 app.include_router(pages_router)
 app.include_router(activity_router)
 app.include_router(analytics_router)

@@ -6,38 +6,23 @@ AC3: Normal-state outputs are unchanged.
 AC4: Unit test covers the contradictory state and asserts both functions return
      the same settled-done value.
 """
+import sys
 from pathlib import Path
 
 import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
-_SERVICE = _REPO / "apps" / "dashboard" / "routers" / "sprint_artifact_service.py"
-_SPRINT_NAV = _REPO / "apps" / "dashboard" / "routers" / "sprint_nav.py"
+_DASHBOARD = _REPO / "apps" / "dashboard"
+_SERVICE = _DASHBOARD / "routers" / "sprint_artifact_service.py"
 
+for _p in (str(_DASHBOARD), str(_REPO)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-def _load_compute_summary_counts():
-    """Import _compute_summary_counts without loading the full router module."""
-    src = _SERVICE.read_text(encoding="utf-8")
-    start = src.index("def _compute_summary_counts(")
-    # find the next top-level def/class to slice just this function
-    nxt = src.index("\ndef ", start + 1)
-    ns: dict = {}
-    exec(compile(src[start:nxt], "<compute_summary_counts>", "exec"), ns)  # noqa: S102
-    return ns["_compute_summary_counts"]
-
-
-def _load_settled_done_from_columns():
-    """Import _settled_done_from_columns without loading the full sprint_nav module."""
-    src = _SPRINT_NAV.read_text(encoding="utf-8")
-    start = src.index("def _settled_done_from_columns(")
-    nxt = src.index("\ndef ", start + 1)
-    ns: dict = {}
-    exec(compile(src[start:nxt], "<settled_done>", "exec"), ns)  # noqa: S102
-    return ns["_settled_done_from_columns"]
-
-
-_compute = _load_compute_summary_counts()
-_canonical = _load_settled_done_from_columns()
+# Direct imports so a rename/move breaks immediately instead of silently
+# diverging (issue #2049, AC3 / #1746).
+from routers.sprint_artifact_service import _compute_summary_counts as _compute  # noqa: E402
+from routers.sprint_nav import _settled_done_from_columns as _canonical  # noqa: E402
 
 
 # ── AC1 / AC4: contradictory state ──────────────────────────────────────────

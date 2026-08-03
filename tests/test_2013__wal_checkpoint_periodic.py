@@ -1,9 +1,9 @@
-"""Tests for issue #2013: run_wal_checkpoint() wired into the hourly backup tick.
+"""Tests for issue #2013: run_wal_checkpoint() in the hourly backup tick.
 
 Behavioral assertions:
   AC1  After a successful backup, the hourly tick calls run_wal_checkpoint()
-       so WAL checkpointing is actively driven rather than relying on SQLite's
-       auto-checkpoint alone.
+       so WAL checkpointing is actively driven rather than relying on
+       SQLite's auto-checkpoint alone.
   AC2  A checkpoint failure (any exception) is non-fatal — the backup tick
        completes without propagating the error.
 """
@@ -13,7 +13,7 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -48,7 +48,7 @@ class TestWalCheckpointWiredIntoBackupTick:
     """AC1: run_wal_checkpoint() is called on each successful backup tick."""
 
     def test_backup_tick_calls_run_wal_checkpoint(self, tmp_path, monkeypatch):
-        """Successful backup tick invokes run_wal_checkpoint() with the DB path."""
+        """Successful backup tick invokes run_wal_checkpoint() with DB path."""
         db_path = tmp_path / "dashboard.db"
         _make_wal_db(db_path)
         monkeypatch.setenv("DB_PATH", str(db_path))
@@ -59,10 +59,14 @@ class TestWalCheckpointWiredIntoBackupTick:
             checkpoint_calls.append(path)
             return (0, 0, 0)
 
-        with patch.object(db_mod, "run_wal_checkpoint", side_effect=capture_checkpoint):
+        with patch.object(
+            db_mod, "run_wal_checkpoint", side_effect=capture_checkpoint
+        ):
             backup_mod._run_local_backup_in_thread()
 
-        assert checkpoint_calls, "run_wal_checkpoint() was not called after backup"
+        assert checkpoint_calls, (
+            "run_wal_checkpoint() was not called after backup"
+        )
         assert checkpoint_calls[0] == db_path, (
             f"expected checkpoint on {db_path}, got {checkpoint_calls[0]}"
         )
@@ -70,7 +74,7 @@ class TestWalCheckpointWiredIntoBackupTick:
     def test_backup_tick_does_not_checkpoint_when_backup_fails(
         self, tmp_path, monkeypatch
     ):
-        """If the backup itself is refused (corrupt source), checkpoint is not called."""
+        """Backup refused (corrupt source): checkpoint must not be called."""
         db_path = tmp_path / "corrupt.db"
         # Write a corrupt file so backup_db_local raises RuntimeError
         db_path.write_bytes(b"SQLite format 3\x00" + b"\x00" * 80)
@@ -82,19 +86,23 @@ class TestWalCheckpointWiredIntoBackupTick:
             checkpoint_calls.append(path)
             return (0, 0, 0)
 
-        with patch.object(db_mod, "run_wal_checkpoint", side_effect=capture_checkpoint):
+        with patch.object(
+            db_mod, "run_wal_checkpoint", side_effect=capture_checkpoint
+        ):
             backup_mod._run_local_backup_in_thread()  # must not raise
 
         assert not checkpoint_calls, (
-            "run_wal_checkpoint() should not be called when the backup was refused"
+            "run_wal_checkpoint() should not be called when backup was refused"
         )
 
 
 class TestWalCheckpointFailureIsNonFatal:
     """AC2: A checkpoint exception does not crash the backup tick."""
 
-    def test_checkpoint_exception_does_not_propagate(self, tmp_path, monkeypatch):
-        """If run_wal_checkpoint() raises, _run_local_backup_in_thread() still completes."""
+    def test_checkpoint_exception_does_not_propagate(
+        self, tmp_path, monkeypatch
+    ):
+        """Checkpoint raises: _run_local_backup_in_thread() still completes."""
         db_path = tmp_path / "dashboard.db"
         _make_wal_db(db_path)
         monkeypatch.setenv("DB_PATH", str(db_path))
@@ -102,6 +110,8 @@ class TestWalCheckpointFailureIsNonFatal:
         def exploding_checkpoint(path=None):
             raise RuntimeError("simulated checkpoint I/O error")
 
-        with patch.object(db_mod, "run_wal_checkpoint", side_effect=exploding_checkpoint):
+        with patch.object(
+            db_mod, "run_wal_checkpoint", side_effect=exploding_checkpoint
+        ):
             # Must complete without raising
             backup_mod._run_local_backup_in_thread()

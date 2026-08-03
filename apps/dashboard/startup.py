@@ -5173,16 +5173,78 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     return _merge_steps_for_sprint_chain(project_root, repo, base_label)
 
 
+def _get_branch_tip_sha(repo: str, branch: str) -> str | None:
+    """Return the current tip commit SHA of branch, or None if absent."""
+    try:
+        from urllib.parse import quote as _quote
+        ref = _quote(branch, safe="")
+        res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches/{ref}", "--jq", ".commit.sha"],
+            capture_output=True, text=True, timeout=15,
+        )
+        sha = res.stdout.strip()
+        if res.returncode == 0 and sha:
+            return sha
+    except Exception:
+        pass
+    return None
+
+
+def _is_commit_merged_into_branch(repo: str, sha: str, base_branch: str) -> bool:
+    """True if sha is reachable from base_branch (sha was merged into base).
+
+    Uses GitHub compare API: compare/{base}...{sha} with ahead_by == 0
+    means sha has no commits that base doesn't have → sha is an ancestor of base.
+    """
+    try:
+        from urllib.parse import quote as _quote
+        ref = _quote(f"{base_branch}...{sha}", safe="")
+        res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/compare/{ref}", "--jq", ".ahead_by"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if res.returncode != 0:
+            return False
+        return int((res.stdout or "0").strip() or "0") == 0
+    except Exception:
+        return False
+
+
+def _has_merged_pr(repo: str, head: str, base: str) -> bool:
+    """True if a merged PR from head → base exists on GitHub.
+
+    Used by bulk-complete-preview to distinguish a properly-merged-then-deleted
+    branch from a branch that was deleted without merging (issue #2086).
+    """
+    try:
+        pr_res = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--head", head, "--base", base,
+             "--state", "merged", "--json", "number", "--limit", "1"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if pr_res.returncode == 0 and pr_res.stdout.strip():
+            prs = json.loads(pr_res.stdout)
+            return bool(prs)
+    except Exception:
+        pass
+    return False
+
+
 def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], int | None]:
     """Execute merge steps for Merge Sprint on the requested label.
 
     Returns (errors, develop_pr_number) where develop_pr_number is parsed from
     the sprint branch → develop merge PR (for History / outcome links).
+
+    AC2 (issue #2086): captures the head tip SHA before each merge and verifies
+    it is reachable from the target branch after the merge succeeds, catching
+    silent no-ops where the branch was absent without actually having been merged.
     """
     errors: list[str] = []
     develop_pr: int | None = None
     project_root = _project_root_path(repo)
     for step in _finish_merge_steps(project_root, repo, label):
+        head_sha = _get_branch_tip_sha(repo, step["head"])
         ok, detail, pr_num = _gh_merge_branch_via_pr(
             repo, step["head"], step["base"],
             title=step["title"],
@@ -5190,8 +5252,21 @@ def _merge_sprint_branches_for_label(repo: str, label: str) -> tuple[list[str], 
         )
         if not ok:
             errors.append(f"{step['head']} → {step['base']}: {detail}")
-        elif step.get("base") == "develop" and pr_num:
-            develop_pr = pr_num
+        else:
+            # AC2: verify the tip actually landed in the target after the merge.
+            if head_sha and not _is_commit_merged_into_branch(repo, head_sha, step["base"]):
+                errors.append(
+                    f"{step['head']} → {step['base']}: merge reported success but "
+                    f"tip {head_sha[:8]} is not reachable from {step['base']} — silent no-op"
+                )
+            elif step.get("base") == "develop" and pr_num:
+                develop_pr = pr_num
+            if head_sha is None:
+                logger.warning(
+                    "[merge-verify] could not verify merge reachability for %s → %s"
+                    " — tip SHA unavailable",
+                    step["head"], step["base"],
+                )
     return errors, develop_pr
 
 

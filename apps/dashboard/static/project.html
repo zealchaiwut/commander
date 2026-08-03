@@ -11461,7 +11461,6 @@ let _slug        = null;   // current project slug
 let _activeTab   = 'sprint-mgmt';
 let _homeData    = null;   // cached /api/home response
 let _projectData = null;   // full project config from /api/home
-let _ticketsLoaded    = false;
 let _sprintMgmtLoaded = false;
 let _smgmtData           = null;
 let _smgmtLastSelectedNum = null;  // anchor for shift+click range selection
@@ -12338,13 +12337,13 @@ async function loadTickets() {
       });
       if (proj) repo = proj.repo;
     } catch (err) {
-      container.innerHTML = '<div class="loading-msg">Failed to load project info.</div>';
+      container.innerHTML = '<div class="loading-msg">Failed to load project info. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
       return;
     }
   }
 
   if (!repo) {
-    container.innerHTML = '<div class="loading-msg">Project not found.</div>';
+    container.innerHTML = '<div class="loading-msg">Project not found. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
     return;
   }
 
@@ -12358,7 +12357,7 @@ async function loadTickets() {
     renderTickets(data, repo);
     _ticketsLoadEstimates(data.tickets || [], repo).catch(() => {});
   } catch (err) {
-    container.innerHTML = '<div class="loading-msg">Failed to load tickets.</div>';
+    container.innerHTML = '<div class="loading-msg">Failed to load tickets. <button class="tkt-retry-btn" onclick="loadTickets()">Retry</button></div>';
   }
 }
 
@@ -13045,7 +13044,7 @@ async function init() {
   _slug = slug;
   if (typeof _histResetLedgerCache === 'function') _histResetLedgerCache();
   _activeTab = tab;
-  // Feature flags (sign-off, advisor, plan-next) — hide disabled surfaces before first paint.
+  // Feature flags (sign-off, plan-next) — hide disabled surfaces before first paint.
   if (typeof loadCommanderFeatures === 'function') {
     await loadCommanderFeatures();
   }
@@ -20512,24 +20511,9 @@ function _smgmtUpdateCleanupBtn(data) {
   const orderedLabels = order.length > 0
     ? order.filter(l => /^sprint-\d+(\.\d+)?$/.test(l))
     : [...sprints].sort((a, b) => a - b).map(n => `sprint-${n}`);
-  const labeled = new Set(issues.map(i => i.sprint_label).filter(Boolean));
-  // Mark base sprint active if any sub-label sprint-N.X has tickets
-  const activeBases = new Set();
-  for (const lbl of labeled) {
-    const m = /^sprint-(\d+)/.exec(lbl);
-    if (m) activeBases.add(parseInt(m[1], 10));
-  }
-  // Collect only leading consecutive plain sprint-N labels with 0 tickets (issue #658)
-  const leadingEmpty = [];
-  let foundActive = false;
-  for (const lbl of orderedLabels) {
-    if (!/^sprint-\d+$/.test(lbl)) continue;
-    const base = parseInt(lbl.replace('sprint-', ''), 10);
-    if (activeBases.has(base)) { foundActive = true; break; }
-    leadingEmpty.push(lbl);
-  }
-  // AC3: if no active sprint found, nothing is eligible for cleanup
-  _smgmtEmptyLabels = foundActive ? leadingEmpty : [];
+  // Pure filter logic extracted to board-render.js for testability (issue #2089).
+  // Sub-sprint (sprint-N.M) zombies are handled per-card via Delete (approach b, #2061).
+  _smgmtEmptyLabels = _smgmtComputeLeadingEmpty(orderedLabels, issues);
   const btn = document.getElementById('smgmt-cleanup-empty-btn');
   if (btn) btn.style.display = _smgmtEmptyLabels.length > 0 ? '' : 'none';
 }

@@ -144,7 +144,7 @@ def main() -> int:
         print(f"  → {repo} …", end=" ", flush=True)
         try:
             result = full_sync_issues_mirror(repo)
-            rows = result.get("total", 0) or 0
+            rows = result.get("synced", 0) or 0
             total_rows += rows
             rate_note = " (rate-limited — re-run after reset)" if result.get("rate_limited") else ""
             print(f"done ({rows} rows{rate_note})")

@@ -30,10 +30,7 @@ export function _sHealthBuildHtml(data) {
     '<span class="shs-stat"><span class="shs-val">' + rwrPct + '</span>' +
       '<span class="shs-label">rework</span></span>' +
     '<span class="shs-stat"><span class="shs-val">' + durStr + '</span>' +
-      '<span class="shs-label">avg sprint</span></span>' +
-    '<a class="shs-see-more" href="#" ' +
-      'onclick="switchTab(\'metrics\');if(typeof anlShowTab===\'function\')anlShowTab(\'metrics\');return false;">' +
-      'See more →</a>'
+      '<span class="shs-label">avg sprint</span></span>'
   );
 }
 

@@ -2523,7 +2523,7 @@ export async function _histLoadLedger(repo, opts) {
   opts = opts || {};
   const background = opts.background === true;
   if (!repo) {
-    if (!background) _histShowLedgerSkeleton();
+    if (!background) _histRenderLedger([]);
     return;
   }
   const el = document.getElementById("hist-ledger");

@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Optional

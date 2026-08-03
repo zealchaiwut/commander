@@ -1285,22 +1285,6 @@ def _gh_error(e: subprocess.CalledProcessError) -> HTTPException:
     return HTTPException(status_code=502, detail=detail)
 
 
-def _settled_done_from_columns(total: int, columns: dict) -> int:
-    """Canonical GitHub-derived "done" = settled work past SIT
-    (uat + done + needs-rework) = total minus the not-yet-settled columns
-    (backlog + in-progress + sit).
-
-    Single source of the GitHub-side count: mirrors the frontend
-    ``_snavSettledDone()`` and the live tier's ``done+skipped+failed`` so the nav
-    pill, sidebar badge, and board running badge can never disagree. The old
-    ``done + uat`` formula undercounted needs-rework tickets; ``total - backlog``
-    (frontend) overcounted by treating in-progress + SIT as done.
-    """
-    columns = columns or {}
-    return max(0, (total or 0) - (columns.get("backlog") or 0)
-               - (columns.get("in-progress") or 0) - (columns.get("sit") or 0))
-
-
 def _sprint_progress_file_path(project: str) -> Optional[Path]:
     """Return the path to the persisted sprint-progress JSON file for a project."""
     if not project:

@@ -3,7 +3,7 @@
  * switchTab, dropdown helpers, keyboard nav, and popstate deep-link handler.
  * Cross-module globals live on window from project.html inline scripts.
  */
-/* global _slug, _activeTab, _cachedFullRepo, _ticketsLoaded, _sprintMgmtLoaded,
+/* global _slug, _activeTab, _cachedFullRepo, _sprintMgmtLoaded,
           loadSprintMgmt, loadTickets, _smgmtArInit, _smgmtArStartTicker,
           _smgmtLivePollId, _smgmtLogPollId, deployTabDestroy,
           deployTabInit,
@@ -27,12 +27,15 @@ const _GROUP_CHILDREN = {
  */
 export function computeRovingTabindex(tab, onGlobalSettings) {
   return Object.fromEntries(
-    ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map((t) => {
-      const ownsTab =
-        !onGlobalSettings &&
-        (t === tab || (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
-      return [t, ownsTab ? 0 : -1];
-    }),
+    ["sprint-mgmt", "tickets", "failures", "brain", "manage", "settings"].map(
+      (t) => {
+        const ownsTab =
+          !onGlobalSettings &&
+          (t === tab ||
+            (_GROUP_CHILDREN[t] && _GROUP_CHILDREN[t].includes(tab)));
+        return [t, ownsTab ? 0 : -1];
+      },
+    ),
   );
 }
 
@@ -40,7 +43,11 @@ export function switchTab(tab, pushHistory) {
   // Removed tabs (#2025): redirect to failures instead of blank pane.
   // console.warn makes stale internal callers visible in development (#2063).
   if (tab === "metrics" || tab === "logs" || tab === "status") {
-    console.warn('[tabs] switchTab("' + tab + '"): tab removed in #2025, redirecting to "failures"');
+    console.warn(
+      '[tabs] switchTab("' +
+        tab +
+        '"): tab removed in #2025, redirecting to "failures"',
+    );
     tab = "failures";
   }
 
@@ -129,8 +136,7 @@ export function switchTab(tab, pushHistory) {
     window.history.pushState({ slug: _slug, tab }, "", newUrl);
   }
 
-  if (tab === "tickets" && !_ticketsLoaded) {
-    _ticketsLoaded = true;
+  if (tab === "tickets") {
     loadTickets();
   }
 
@@ -195,18 +201,16 @@ export function toggleStabDropdown(name, e) {
 }
 
 export function closeAllStabDropdowns() {
-  document
-    .querySelectorAll(".stab-group.open")
-    .forEach((g) => {
-      g.classList.remove("open");
-      // Reset any inline position styles set by the mobile fixed-position fix.
-      const dropdown = g.querySelector(".stab-dropdown");
-      if (dropdown) {
-        dropdown.style.removeProperty("position");
-        dropdown.style.removeProperty("top");
-        dropdown.style.removeProperty("left");
-      }
-    });
+  document.querySelectorAll(".stab-group.open").forEach((g) => {
+    g.classList.remove("open");
+    // Reset any inline position styles set by the mobile fixed-position fix.
+    const dropdown = g.querySelector(".stab-dropdown");
+    if (dropdown) {
+      dropdown.style.removeProperty("position");
+      dropdown.style.removeProperty("top");
+      dropdown.style.removeProperty("left");
+    }
+  });
 }
 
 document.addEventListener("click", closeAllStabDropdowns);
@@ -251,7 +255,6 @@ window.addEventListener("popstate", function (e) {
   if (!effSlug) return;
   if (effSlug !== _slug) {
     _ticketsRepo = null;
-    _ticketsLoaded = false;
   }
   _slug = effSlug;
   _deepLinkView = view;

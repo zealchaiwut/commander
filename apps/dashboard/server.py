@@ -139,6 +139,34 @@ async def _timeout_loop() -> None:
             pass
 
 
+_DB_QUICK_CHECK_INTERVAL = 1800  # 30 minutes
+
+
+async def _periodic_db_integrity_loop() -> None:
+    """Background task: run PRAGMA quick_check every 30 min; log CRITICAL and broadcast on corruption.
+
+    AC5 of issue #2037: corruption sat undetected for ~3 hours because the running
+    process masked it and only startup re-ran the check.  This loop catches it while
+    the server is live so operators are alerted within one check interval.
+    """
+    await asyncio.sleep(120)  # startup already ran _startup_integrity_check; wait before first check
+    while True:
+        try:
+            status = db.alert_if_corrupt()
+            if status != "ok":
+                try:
+                    from routers.logs_service import broadcast as _bc  # noqa: PLC0415
+                    await _bc({
+                        "type": "update",
+                        "event": {"event_type": "db_corruption_alert", "status": status},
+                    })
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("[db-integrity] periodic quick_check error: %s", exc)
+        await asyncio.sleep(_DB_QUICK_CHECK_INTERVAL)
+
+
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -172,6 +200,7 @@ async def lifespan(app: FastAPI):
     task2 = asyncio.create_task(_timeout_loop())
     task3 = asyncio.create_task(_periodic_orphan_sweep_loop())
     task4 = asyncio.create_task(_status_md_sync_loop())
+    task6 = asyncio.create_task(_periodic_db_integrity_loop())
     _bootstrap_repos = _mirror_sync_repos()
     await asyncio.to_thread(github_events_sync.bootstrap_full_sync, _bootstrap_repos)
     task5 = asyncio.create_task(github_events_sync.run_issues_sync_loop(_bootstrap_repos))
@@ -181,7 +210,8 @@ async def lifespan(app: FastAPI):
     task3.cancel()
     task4.cancel()
     task5.cancel()
-    for t in (task1, task2, task3, task4, task5):
+    task6.cancel()
+    for t in (task1, task2, task3, task4, task5, task6):
         try:
             await t
         except asyncio.CancelledError:

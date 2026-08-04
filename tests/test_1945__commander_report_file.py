@@ -368,6 +368,10 @@ class TestWebhookFilePayloadIdentical:
     """AC4: build_webhook_payload and build_commander_report return identical structure."""
 
     def test_webhook_payload_matches_commander_report(self, tmp_path):
+        # AC4: build_webhook_payload delegates to build_commander_report — same structure,
+        # same keys, same values for every field except run_id (which is a fresh UUID per
+        # call, by design — issue #1955).  Structural identity means no field drift; it does
+        # not mean two separate calls produce the same run_id.
         from routers.sprint_webhook_service import (
             build_commander_report,
             build_webhook_payload,
@@ -387,9 +391,16 @@ class TestWebhookFilePayloadIdentical:
         )
         file_payload = build_commander_report(**kwargs)
         webhook_payload = build_webhook_payload(**kwargs)
-        assert file_payload == webhook_payload, (
-            "Webhook and file payloads must be structurally identical (shared builder)"
+        # run_id is intentionally excluded: each call generates a fresh UUID (issue #1955).
+        file_without_run_id = {k: v for k, v in file_payload.items() if k != "run_id"}
+        webhook_without_run_id = {k: v for k, v in webhook_payload.items() if k != "run_id"}
+        assert file_without_run_id == webhook_without_run_id, (
+            "Webhook and file payloads must be structurally identical (shared builder) "
+            "on all fields except run_id"
         )
+        import uuid as _uuid
+        _uuid.UUID(file_payload["run_id"])    # raises if not a valid UUID
+        _uuid.UUID(webhook_payload["run_id"])
 
     def test_both_payloads_have_same_top_level_keys(self, tmp_path):
         from routers.sprint_webhook_service import (

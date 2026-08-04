@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -330,7 +331,7 @@ def build_commander_report(
     ]
 
     return {
-        "run_id": confirmed_at,
+        "run_id": str(uuid.uuid4()),
         "triggered_by": _triggered_by,
         "trigger": {
             "by": _triggered_by or "sprint_manager",
@@ -481,7 +482,7 @@ def _monitor_worker(
     except Exception as exc:
         logger.warning("sprint webhook: failed to build payload for %s: %s", sprint_label, exc)
         payload = {
-            "run_id": started_at or sprint_label,
+            "run_id": str(uuid.uuid4()),
             "trigger": {"by": "sprint_manager", "confirmed_at": started_at or "", "mode": "auto"},
             "branch": f"sprint/{sprint_label}",
             "summary": {"attempted": 0, "completed": 0, "failed": 0, "skipped": 0},

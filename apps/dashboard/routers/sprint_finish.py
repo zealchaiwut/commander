@@ -796,7 +796,20 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     # the lineage to find the next surviving ancestor branch and retarget there.
     if not is_base and srv._gh_branch_exists(repo, head) and not srv._gh_branch_exists(repo, base):
         _current = parent_label
+        _visited: set[str] = set()
+        _MAX_LINEAGE_DEPTH = 50
         while True:
+            if _current in _visited or len(_visited) >= _MAX_LINEAGE_DEPTH:
+                raise HTTPException(
+                    409,
+                    detail=(
+                        f"Sprint lineage is self-referential or too deep (depth {len(_visited)}, "
+                        f"stopped at {_current!r}). The ancestry chain from {parent_label!r} "
+                        "did not converge to a base sprint within the allowed depth. "
+                        "Inspect and repair the sprint lineage manually."
+                    ),
+                )
+            _visited.add(_current)
             if not srv._is_child_sprint_label(_current):
                 # _current is the base sprint label — check its branch
                 _base_sprint_br = srv._sprint_branch_name(_current)

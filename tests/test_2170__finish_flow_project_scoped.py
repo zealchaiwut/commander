@@ -18,16 +18,14 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 def _finish_client() -> TestClient:
@@ -211,7 +209,7 @@ class TestCompleteStepProjectScoped:
             patch("routers.sprint_finish._server", return_value=mock_srv),
             patch("routers.sprint_finish.invalidate_board"),
         ):
-            r = client.post(
+            client.post(
                 "/api/projects/owner/myrepo/sprints/sprint-5.1/complete-step",
                 json={"confirmed": True},
             )

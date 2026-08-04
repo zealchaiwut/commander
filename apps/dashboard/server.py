@@ -152,7 +152,7 @@ async def _periodic_db_integrity_loop() -> None:
     await asyncio.sleep(120)  # startup already ran _startup_integrity_check; wait before first check
     while True:
         try:
-            status = db.alert_if_corrupt()
+            status = await asyncio.to_thread(db.alert_if_corrupt)
             if status != "ok":
                 try:
                     from routers.logs_service import broadcast as _bc  # noqa: PLC0415
